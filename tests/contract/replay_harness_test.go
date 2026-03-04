@@ -136,10 +136,8 @@ func parseSSEEvents(t *testing.T, raw []byte) []sseEvent {
 			currentName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 		case strings.HasPrefix(line, "data:"):
 			data := strings.TrimPrefix(line, "data:")
-			if strings.HasPrefix(data, " ") {
-				// Per SSE format, a single optional space may follow the colon.
-				data = data[1:]
-			}
+			// Per SSE format, a single optional space may follow the colon.
+			data = strings.TrimPrefix(data, " ")
 			dataLines = append(dataLines, data)
 		}
 	}

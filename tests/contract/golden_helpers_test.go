@@ -161,7 +161,7 @@ func isBase62String(s string) bool {
 
 func isCrockfordBase32String(s string) bool {
 	for _, r := range s {
-		if !((r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z')) {
+		if (r < '0' || r > '9') && (r < 'A' || r > 'Z') {
 			return false
 		}
 		switch r {

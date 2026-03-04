@@ -6,7 +6,6 @@
 package contract
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,21 +15,6 @@ import (
 
 // testdataDir is the path to the testdata directory.
 const testdataDir = "testdata"
-
-// loadGoldenFile reads a golden file from testdata and unmarshals it.
-func loadGoldenFile[T any](t *testing.T, path string) T {
-	t.Helper()
-
-	fullPath := filepath.Join(testdataDir, path)
-	data, err := os.ReadFile(fullPath)
-	require.NoError(t, err, "failed to read golden file %s", fullPath)
-
-	var result T
-	err = json.Unmarshal(data, &result)
-	require.NoError(t, err, "failed to unmarshal golden file %s", fullPath)
-
-	return result
-}
 
 // loadGoldenFileRaw reads a golden file from testdata as raw bytes.
 func loadGoldenFileRaw(t *testing.T, path string) []byte {
