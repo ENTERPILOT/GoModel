@@ -28,16 +28,14 @@ func TestLocalCache(t *testing.T) {
 
 		// Set data
 		data := &ModelCache{
-			Version:   1,
 			UpdatedAt: time.Now().UTC(),
-			Models: []CachedModel{
-				{
-					ModelID:      "test-model",
-					Provider:     "openai",
+			Providers: map[string]CachedProvider{
+				"openai": {
 					ProviderType: "openai",
-					Object:       "model",
 					OwnedBy:      "openai",
-					Created:      1234567890,
+					Models: []CachedModel{
+						{ID: "test-model", Created: 1234567890},
+					},
 				},
 			},
 		}
@@ -55,14 +53,12 @@ func TestLocalCache(t *testing.T) {
 		if result == nil {
 			t.Fatal("expected result, got nil")
 		}
-		if result.Version != 1 {
-			t.Errorf("expected version 1, got %d", result.Version)
+		p, ok := result.Providers["openai"]
+		if !ok || len(p.Models) != 1 {
+			t.Fatalf("expected 1 model in openai provider, got %v", result.Providers)
 		}
-		if len(result.Models) != 1 {
-			t.Errorf("expected 1 model, got %d", len(result.Models))
-		}
-		if result.Models[0].ModelID != "test-model" {
-			t.Errorf("expected test-model in cache, got %q", result.Models[0].ModelID)
+		if p.Models[0].ID != "test-model" {
+			t.Errorf("expected test-model in cache, got %q", p.Models[0].ID)
 		}
 	})
 
@@ -74,8 +70,7 @@ func TestLocalCache(t *testing.T) {
 		ctx := context.Background()
 
 		data := &ModelCache{
-			Version: 1,
-			Models:  []CachedModel{},
+			Providers: map[string]CachedProvider{},
 		}
 
 		err := cache.Set(ctx, data)
@@ -103,7 +98,7 @@ func TestLocalCache(t *testing.T) {
 		}
 
 		// Set should be a no-op
-		data := &ModelCache{Version: 1}
+		data := &ModelCache{}
 		err = cache.Set(ctx, data)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -140,24 +135,21 @@ func TestLocalCache(t *testing.T) {
 func TestModelCacheSerialization(t *testing.T) {
 	t.Run("JSONRoundTrip", func(t *testing.T) {
 		original := &ModelCache{
-			Version:   1,
 			UpdatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
-			Models: []CachedModel{
-				{
-					ModelID:      "gpt-4",
-					Provider:     "openai-main",
+			Providers: map[string]CachedProvider{
+				"openai-main": {
 					ProviderType: "openai",
-					Object:       "model",
 					OwnedBy:      "openai",
-					Created:      1234567890,
+					Models: []CachedModel{
+						{ID: "gpt-4", Created: 1234567890},
+					},
 				},
-				{
-					ModelID:      "claude-3",
-					Provider:     "anthropic-main",
+				"anthropic-main": {
 					ProviderType: "anthropic",
-					Object:       "model",
 					OwnedBy:      "anthropic",
-					Created:      1234567891,
+					Models: []CachedModel{
+						{ID: "claude-3", Created: 1234567891},
+					},
 				},
 			},
 		}
@@ -172,20 +164,22 @@ func TestModelCacheSerialization(t *testing.T) {
 			t.Fatalf("failed to unmarshal: %v", err)
 		}
 
-		if restored.Version != original.Version {
-			t.Errorf("version mismatch: got %d, want %d", restored.Version, original.Version)
+		if len(restored.Providers) != len(original.Providers) {
+			t.Fatalf("provider count mismatch: got %d, want %d", len(restored.Providers), len(original.Providers))
 		}
-		if len(restored.Models) != len(original.Models) {
-			t.Errorf("model count mismatch: got %d, want %d", len(restored.Models), len(original.Models))
+		openai, ok := restored.Providers["openai-main"]
+		if !ok || len(openai.Models) == 0 {
+			t.Fatalf("expected openai-main provider with models, got %v", restored.Providers)
 		}
-		if restored.Models[0].ModelID != original.Models[0].ModelID {
-			t.Errorf("first model ID mismatch: got %q, want %q", restored.Models[0].ModelID, original.Models[0].ModelID)
+		if openai.Models[0].ID != "gpt-4" {
+			t.Errorf("openai model ID mismatch: got %q, want %q", openai.Models[0].ID, "gpt-4")
 		}
-		if restored.Models[0].Provider != original.Models[0].Provider {
-			t.Errorf("first provider mismatch: got %q, want %q", restored.Models[0].Provider, original.Models[0].Provider)
+		if openai.ProviderType != "openai" {
+			t.Errorf("openai provider type mismatch: got %q, want %q", openai.ProviderType, "openai")
 		}
-		if restored.Models[1].ProviderType != original.Models[1].ProviderType {
-			t.Errorf("second provider type mismatch: got %q, want %q", restored.Models[1].ProviderType, original.Models[1].ProviderType)
+		anthropic := restored.Providers["anthropic-main"]
+		if anthropic.ProviderType != "anthropic" {
+			t.Errorf("anthropic provider type mismatch: got %q, want %q", anthropic.ProviderType, "anthropic")
 		}
 	})
 }

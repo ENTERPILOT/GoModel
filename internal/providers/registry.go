@@ -16,8 +16,6 @@ import (
 	"gomodel/internal/modeldata"
 )
 
-const modelCacheVersion = 2
-
 // ModelInfo holds information about a model and its provider
 type ModelInfo struct {
 	Model    core.Model
@@ -241,14 +239,6 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 		return 0, nil // No cache yet, not an error
 	}
 
-	if modelCache.Version != modelCacheVersion {
-		slog.Warn("ignoring cached models due to cache version mismatch",
-			"cache_version", modelCache.Version,
-			"expected_version", modelCacheVersion,
-		)
-		return 0, nil
-	}
-
 	// Build lookup maps from configured providers.
 	r.mu.RLock()
 	nameToProvider := make(map[string]core.Provider, len(r.providerNames))
@@ -257,31 +247,32 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	}
 	r.mu.RUnlock()
 
-	// Populate model maps from cache rows. Unqualified lookups keep "first provider wins".
-	newModels := make(map[string]*ModelInfo, len(modelCache.Models))
+	// Populate model maps from grouped cache structure. Unqualified lookups keep "first provider wins".
+	newModels := make(map[string]*ModelInfo)
 	newModelsByProvider := make(map[string]map[string]*ModelInfo)
-	for _, cached := range modelCache.Models {
-		provider, ok := nameToProvider[cached.Provider]
+	for providerName, cachedProvider := range modelCache.Providers {
+		provider, ok := nameToProvider[providerName]
 		if !ok {
-			// Provider not configured, skip this model
+			// Provider not configured, skip all its models
 			continue
 		}
-		info := &ModelInfo{
-			Model: core.Model{
-				ID:      cached.ModelID,
-				Object:  cached.Object,
-				OwnedBy: cached.OwnedBy,
-				Created: cached.Created,
-			},
-			Provider: provider,
+		providerModels := make(map[string]*ModelInfo, len(cachedProvider.Models))
+		for _, cached := range cachedProvider.Models {
+			info := &ModelInfo{
+				Model: core.Model{
+					ID:      cached.ID,
+					Object:  "model",
+					OwnedBy: cachedProvider.OwnedBy,
+					Created: cached.Created,
+				},
+				Provider: provider,
+			}
+			providerModels[cached.ID] = info
+			if _, exists := newModels[cached.ID]; !exists {
+				newModels[cached.ID] = info
+			}
 		}
-		if _, ok := newModelsByProvider[cached.Provider]; !ok {
-			newModelsByProvider[cached.Provider] = make(map[string]*ModelInfo)
-		}
-		newModelsByProvider[cached.Provider][cached.ModelID] = info
-		if _, exists := newModels[cached.ModelID]; !exists {
-			newModels[cached.ModelID] = info
-		}
+		newModelsByProvider[providerName] = providerModels
 	}
 
 	// Load model list data from cache if available
@@ -341,50 +332,58 @@ func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 		return nil
 	}
 
-	// Build cache structure as a slice of provider/model rows.
+	// Build grouped cache structure: one entry per provider with its models.
 	modelCache := &cache.ModelCache{
-		Version:       modelCacheVersion,
 		UpdatedAt:     time.Now().UTC(),
-		Models:        make([]cache.CachedModel, 0),
+		Providers:     make(map[string]cache.CachedProvider, len(modelsByProvider)),
 		ModelListData: modelListRaw,
 	}
 
-	providerNames := make([]string, 0, len(modelsByProvider))
-	for providerName := range modelsByProvider {
-		providerNames = append(providerNames, providerName)
-	}
-	sort.Strings(providerNames)
+	var totalModels int
+	for providerName, models := range modelsByProvider {
+		// Determine provider type and owned_by from any model in this provider group.
+		var pType, ownedBy string
+		for _, info := range models {
+			t, ok := providerTypes[info.Provider]
+			if !ok {
+				continue
+			}
+			pType = t
+			ownedBy = info.Model.OwnedBy
+			break
+		}
+		if pType == "" {
+			// No known provider type for this provider, skip entirely.
+			continue
+		}
 
-	for _, providerName := range providerNames {
-		modelIDs := make([]string, 0, len(modelsByProvider[providerName]))
-		for modelID := range modelsByProvider[providerName] {
+		modelIDs := make([]string, 0, len(models))
+		for modelID := range models {
 			modelIDs = append(modelIDs, modelID)
 		}
 		sort.Strings(modelIDs)
 
+		cachedModels := make([]cache.CachedModel, 0, len(modelIDs))
 		for _, modelID := range modelIDs {
-			info := modelsByProvider[providerName][modelID]
-			pType, ok := providerTypes[info.Provider]
-			if !ok {
-				// Skip models without a known provider type.
-				continue
-			}
-			modelCache.Models = append(modelCache.Models, cache.CachedModel{
-				ModelID:      modelID,
-				Provider:     providerName,
-				ProviderType: pType,
-				Object:       info.Model.Object,
-				OwnedBy:      info.Model.OwnedBy,
-				Created:      info.Model.Created,
+			info := models[modelID]
+			cachedModels = append(cachedModels, cache.CachedModel{
+				ID:      modelID,
+				Created: info.Model.Created,
 			})
 		}
+		modelCache.Providers[providerName] = cache.CachedProvider{
+			ProviderType: pType,
+			OwnedBy:      ownedBy,
+			Models:       cachedModels,
+		}
+		totalModels += len(cachedModels)
 	}
 
 	if err := cacheBackend.Set(ctx, modelCache); err != nil {
 		return fmt.Errorf("failed to save cache: %w", err)
 	}
 
-	slog.Debug("saved models to cache", "models", len(modelCache.Models))
+	slog.Debug("saved models to cache", "models", totalModels)
 	return nil
 }
 
@@ -438,10 +437,10 @@ func (r *ModelRegistry) GetProvider(model string) core.Provider {
 				return info.Provider
 			}
 		}
-		return nil
+		// Fall through: the slash may be part of the model ID (e.g. "meta-llama/Meta-Llama-3-70B")
 	}
 
-	if info, ok := r.models[modelID]; ok {
+	if info, ok := r.models[model]; ok {
 		return info.Provider
 	}
 	return nil
@@ -455,12 +454,14 @@ func (r *ModelRegistry) GetModel(model string) *ModelInfo {
 	providerName, modelID := splitModelSelector(model)
 	if providerName != "" {
 		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			return providerModels[modelID]
+			if info, exists := providerModels[modelID]; exists {
+				return info
+			}
 		}
-		return nil
+		// Fall through: the slash may be part of the model ID
 	}
 
-	if info, ok := r.models[modelID]; ok {
+	if info, ok := r.models[model]; ok {
 		return info
 	}
 	return nil
@@ -473,15 +474,15 @@ func (r *ModelRegistry) Supports(model string) bool {
 
 	providerName, modelID := splitModelSelector(model)
 	if providerName != "" {
-		providerModels, ok := r.modelsByProvider[providerName]
-		if !ok {
-			return false
+		if providerModels, ok := r.modelsByProvider[providerName]; ok {
+			if _, exists := providerModels[modelID]; exists {
+				return true
+			}
 		}
-		_, ok = providerModels[modelID]
-		return ok
+		// Fall through: the slash may be part of the model ID
 	}
 
-	_, ok := r.models[modelID]
+	_, ok := r.models[model]
 	return ok
 }
 
@@ -533,14 +534,12 @@ func (r *ModelRegistry) GetProviderType(model string) string {
 				return r.providerTypes[info.Provider]
 			}
 		}
-		return ""
+		// Fall through: the slash may be part of the model ID
 	}
 
-	info, ok := r.models[modelID]
-	if ok {
+	if info, ok := r.models[model]; ok {
 		return r.providerTypes[info.Provider]
 	}
-
 	return ""
 }
 

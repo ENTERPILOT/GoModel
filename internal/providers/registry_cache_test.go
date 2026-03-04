@@ -62,11 +62,12 @@ func TestCacheFile(t *testing.T) {
 			t.Fatalf("failed to unmarshal cache: %v", err)
 		}
 
-		if modelCache.Version != modelCacheVersion {
-			t.Errorf("expected version %d, got %d", modelCacheVersion, modelCache.Version)
+		p, ok := modelCache.Providers["openai"]
+		if !ok {
+			t.Fatal("expected openai provider in cache")
 		}
-		if len(modelCache.Models) != 2 {
-			t.Errorf("expected 2 models, got %d", len(modelCache.Models))
+		if len(p.Models) != 2 {
+			t.Errorf("expected 2 models, got %d", len(p.Models))
 		}
 	})
 
@@ -76,24 +77,21 @@ func TestCacheFile(t *testing.T) {
 
 		// Create a cache file
 		modelCache := cache.ModelCache{
-			Version:   modelCacheVersion,
 			UpdatedAt: time.Now().UTC(),
-			Models: []cache.CachedModel{
-				{
-					ModelID:      "gpt-4o",
-					Provider:     "openai-main",
+			Providers: map[string]cache.CachedProvider{
+				"openai-main": {
 					ProviderType: "openai",
-					Object:       "model",
 					OwnedBy:      "openai",
-					Created:      1234567890,
+					Models: []cache.CachedModel{
+						{ID: "gpt-4o", Created: 1234567890},
+					},
 				},
-				{
-					ModelID:      "claude-3-5-sonnet",
-					Provider:     "anthropic-main",
+				"anthropic-main": {
 					ProviderType: "anthropic",
-					Object:       "model",
 					OwnedBy:      "anthropic",
-					Created:      1234567891,
+					Models: []cache.CachedModel{
+						{ID: "claude-3-5-sonnet", Created: 1234567891},
+					},
 				},
 			},
 		}
@@ -153,22 +151,21 @@ func TestCacheFile(t *testing.T) {
 		cacheFile := filepath.Join(tmpDir, "models.json")
 
 		modelCache := cache.ModelCache{
-			Version:   modelCacheVersion,
 			UpdatedAt: time.Now().UTC(),
-			Models: []cache.CachedModel{
-				{
-					ModelID:      "gpt-4o",
-					Provider:     "openai-east",
+			Providers: map[string]cache.CachedProvider{
+				"openai-east": {
 					ProviderType: "openai",
-					Object:       "model",
 					OwnedBy:      "openai",
+					Models: []cache.CachedModel{
+						{ID: "gpt-4o"},
+					},
 				},
-				{
-					ModelID:      "gpt-4o",
-					Provider:     "openai-west",
+				"openai-west": {
 					ProviderType: "openai",
-					Object:       "model",
 					OwnedBy:      "openai",
+					Models: []cache.CachedModel{
+						{ID: "gpt-4o"},
+					},
 				},
 			},
 		}
@@ -200,6 +197,10 @@ func TestCacheFile(t *testing.T) {
 		if provider := registry.GetProvider("openai-west/gpt-4o"); provider != west {
 			t.Fatal("expected openai-west/gpt-4o to map to openai-west provider")
 		}
+		// Unqualified lookup should resolve to one of the two providers (map iteration order is nondeterministic)
+		if provider := registry.GetProvider("gpt-4o"); provider != east && provider != west {
+			t.Fatal("expected unqualified gpt-4o to map to either openai-east or openai-west provider")
+		}
 	})
 
 	t.Run("LoadFromCacheSkipsUnconfiguredProviders", func(t *testing.T) {
@@ -208,22 +209,21 @@ func TestCacheFile(t *testing.T) {
 
 		// Create cache with models from multiple providers
 		modelCache := cache.ModelCache{
-			Version:   modelCacheVersion,
 			UpdatedAt: time.Now().UTC(),
-			Models: []cache.CachedModel{
-				{
-					ModelID:      "gpt-4o",
-					Provider:     "openai-main",
+			Providers: map[string]cache.CachedProvider{
+				"openai-main": {
 					ProviderType: "openai",
-					Object:       "model",
 					OwnedBy:      "openai",
+					Models: []cache.CachedModel{
+						{ID: "gpt-4o"},
+					},
 				},
-				{
-					ModelID:      "claude-3",
-					Provider:     "anthropic-main",
-					ProviderType: "anthropic", // This provider won't be configured
-					Object:       "model",
+				"anthropic-main": {
+					ProviderType: "anthropic",
 					OwnedBy:      "anthropic",
+					Models: []cache.CachedModel{
+						{ID: "claude-3"},
+					},
 				},
 			},
 		}
@@ -330,15 +330,14 @@ func TestInitializeAsync(t *testing.T) {
 
 		// Create a cache file
 		modelCache := cache.ModelCache{
-			Version:   modelCacheVersion,
 			UpdatedAt: time.Now().UTC(),
-			Models: []cache.CachedModel{
-				{
-					ModelID:      "cached-model",
-					Provider:     "test",
+			Providers: map[string]cache.CachedProvider{
+				"test": {
 					ProviderType: "test",
-					Object:       "model",
 					OwnedBy:      "test",
+					Models: []cache.CachedModel{
+						{ID: "cached-model"},
+					},
 				},
 			},
 		}
@@ -445,11 +444,15 @@ func TestInitializeAsync(t *testing.T) {
 		var modelCache cache.ModelCache
 		_ = json.Unmarshal(data, &modelCache)
 
-		if len(modelCache.Models) != 1 {
-			t.Fatalf("expected 1 model in cache, got %d", len(modelCache.Models))
+		p, ok := modelCache.Providers["test"]
+		if !ok {
+			t.Fatal("expected test provider in cache")
 		}
-		if modelCache.Models[0].ModelID != "new-model" {
-			t.Errorf("expected new-model in cache, got %v", modelCache.Models)
+		if len(p.Models) != 1 {
+			t.Fatalf("expected 1 model in cache, got %d", len(p.Models))
+		}
+		if p.Models[0].ID != "new-model" {
+			t.Errorf("expected new-model in cache, got %v", p.Models)
 		}
 	})
 }
@@ -489,15 +492,14 @@ func TestIsInitialized(t *testing.T) {
 
 		// Create a cache file
 		modelCache := cache.ModelCache{
-			Version:   modelCacheVersion,
 			UpdatedAt: time.Now().UTC(),
-			Models: []cache.CachedModel{
-				{
-					ModelID:      "cached-model",
-					Provider:     "test",
+			Providers: map[string]cache.CachedProvider{
+				"test": {
 					ProviderType: "test",
-					Object:       "model",
 					OwnedBy:      "test",
+					Models: []cache.CachedModel{
+						{ID: "cached-model"},
+					},
 				},
 			},
 		}
