@@ -9,23 +9,27 @@ import (
 )
 
 // ModelCache represents the cached model data structure.
-// This is the data that gets stored and retrieved from the cache.
+// Models are grouped by provider to avoid repeating shared fields (provider_type, owned_by)
+// on every model entry.
 type ModelCache struct {
-	UpdatedAt     time.Time              `json:"updated_at"`
-	Models        []CachedModel          `json:"models"`
+	UpdatedAt     time.Time                `json:"updated_at"`
+	Providers     map[string]CachedProvider `json:"providers"`
 	// ModelListData holds the raw JSON model registry bytes for cache persistence,
 	// allowing the registry to restore its full model list without re-fetching.
 	ModelListData json.RawMessage `json:"model_list_data,omitempty"`
 }
 
-// CachedModel represents a single cached model entry.
+// CachedProvider holds shared fields for all models from a single provider.
+type CachedProvider struct {
+	ProviderType string        `json:"provider_type"`
+	OwnedBy      string        `json:"owned_by"`
+	Models       []CachedModel `json:"models"`
+}
+
+// CachedModel represents a single cached model entry within a provider group.
 type CachedModel struct {
-	ModelID      string `json:"model_id"`
-	Provider     string `json:"provider"`
-	ProviderType string `json:"provider_type"`
-	Object       string `json:"object"`
-	OwnedBy      string `json:"owned_by"`
-	Created      int64  `json:"created"`
+	ID      string `json:"id"`
+	Created int64  `json:"created"`
 }
 
 // Cache defines the interface for model cache storage.
