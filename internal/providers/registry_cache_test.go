@@ -62,9 +62,6 @@ func TestCacheFile(t *testing.T) {
 			t.Fatalf("failed to unmarshal cache: %v", err)
 		}
 
-		if modelCache.Version != modelCacheVersion {
-			t.Errorf("expected version %d, got %d", modelCacheVersion, modelCache.Version)
-		}
 		if len(modelCache.Models) != 2 {
 			t.Errorf("expected 2 models, got %d", len(modelCache.Models))
 		}
@@ -76,7 +73,6 @@ func TestCacheFile(t *testing.T) {
 
 		// Create a cache file
 		modelCache := cache.ModelCache{
-			Version:   modelCacheVersion,
 			UpdatedAt: time.Now().UTC(),
 			Models: []cache.CachedModel{
 				{
@@ -153,7 +149,6 @@ func TestCacheFile(t *testing.T) {
 		cacheFile := filepath.Join(tmpDir, "models.json")
 
 		modelCache := cache.ModelCache{
-			Version:   modelCacheVersion,
 			UpdatedAt: time.Now().UTC(),
 			Models: []cache.CachedModel{
 				{
@@ -208,7 +203,6 @@ func TestCacheFile(t *testing.T) {
 
 		// Create cache with models from multiple providers
 		modelCache := cache.ModelCache{
-			Version:   modelCacheVersion,
 			UpdatedAt: time.Now().UTC(),
 			Models: []cache.CachedModel{
 				{
@@ -330,7 +324,6 @@ func TestInitializeAsync(t *testing.T) {
 
 		// Create a cache file
 		modelCache := cache.ModelCache{
-			Version:   modelCacheVersion,
 			UpdatedAt: time.Now().UTC(),
 			Models: []cache.CachedModel{
 				{
@@ -489,7 +482,6 @@ func TestIsInitialized(t *testing.T) {
 
 		// Create a cache file
 		modelCache := cache.ModelCache{
-			Version:   modelCacheVersion,
 			UpdatedAt: time.Now().UTC(),
 			Models: []cache.CachedModel{
 				{

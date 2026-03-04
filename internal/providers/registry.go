@@ -16,8 +16,6 @@ import (
 	"gomodel/internal/modeldata"
 )
 
-const modelCacheVersion = 2
-
 // ModelInfo holds information about a model and its provider
 type ModelInfo struct {
 	Model    core.Model
@@ -241,14 +239,6 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 		return 0, nil // No cache yet, not an error
 	}
 
-	if modelCache.Version != modelCacheVersion {
-		slog.Warn("ignoring cached models due to cache version mismatch",
-			"cache_version", modelCache.Version,
-			"expected_version", modelCacheVersion,
-		)
-		return 0, nil
-	}
-
 	// Build lookup maps from configured providers.
 	r.mu.RLock()
 	nameToProvider := make(map[string]core.Provider, len(r.providerNames))
@@ -343,7 +333,6 @@ func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 
 	// Build cache structure as a slice of provider/model rows.
 	modelCache := &cache.ModelCache{
-		Version:       modelCacheVersion,
 		UpdatedAt:     time.Now().UTC(),
 		Models:        make([]cache.CachedModel, 0),
 		ModelListData: modelListRaw,

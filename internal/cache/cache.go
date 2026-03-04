@@ -11,7 +11,6 @@ import (
 // ModelCache represents the cached model data structure.
 // This is the data that gets stored and retrieved from the cache.
 type ModelCache struct {
-	Version       int                    `json:"version"`
 	UpdatedAt     time.Time              `json:"updated_at"`
 	Models        []CachedModel          `json:"models"`
 	// ModelListData holds the raw JSON model registry bytes for cache persistence,

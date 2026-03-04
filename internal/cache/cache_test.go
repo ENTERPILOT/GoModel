@@ -28,7 +28,6 @@ func TestLocalCache(t *testing.T) {
 
 		// Set data
 		data := &ModelCache{
-			Version:   1,
 			UpdatedAt: time.Now().UTC(),
 			Models: []CachedModel{
 				{
@@ -55,9 +54,6 @@ func TestLocalCache(t *testing.T) {
 		if result == nil {
 			t.Fatal("expected result, got nil")
 		}
-		if result.Version != 1 {
-			t.Errorf("expected version 1, got %d", result.Version)
-		}
 		if len(result.Models) != 1 {
 			t.Errorf("expected 1 model, got %d", len(result.Models))
 		}
@@ -74,8 +70,7 @@ func TestLocalCache(t *testing.T) {
 		ctx := context.Background()
 
 		data := &ModelCache{
-			Version: 1,
-			Models:  []CachedModel{},
+			Models: []CachedModel{},
 		}
 
 		err := cache.Set(ctx, data)
@@ -103,7 +98,7 @@ func TestLocalCache(t *testing.T) {
 		}
 
 		// Set should be a no-op
-		data := &ModelCache{Version: 1}
+		data := &ModelCache{}
 		err = cache.Set(ctx, data)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -140,7 +135,6 @@ func TestLocalCache(t *testing.T) {
 func TestModelCacheSerialization(t *testing.T) {
 	t.Run("JSONRoundTrip", func(t *testing.T) {
 		original := &ModelCache{
-			Version:   1,
 			UpdatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 			Models: []CachedModel{
 				{
@@ -172,9 +166,6 @@ func TestModelCacheSerialization(t *testing.T) {
 			t.Fatalf("failed to unmarshal: %v", err)
 		}
 
-		if restored.Version != original.Version {
-			t.Errorf("version mismatch: got %d, want %d", restored.Version, original.Version)
-		}
 		if len(restored.Models) != len(original.Models) {
 			t.Errorf("model count mismatch: got %d, want %d", len(restored.Models), len(original.Models))
 		}
