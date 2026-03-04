@@ -111,6 +111,29 @@ func (h *Handler) handleStreamingResponse(c echo.Context, model, provider string
 	return nil
 }
 
+func (h *Handler) logUsage(model, providerType string, extractFn func(*core.ModelPricing) *usage.UsageEntry) {
+	if h.usageLogger == nil || !h.usageLogger.Config().Enabled {
+		return
+	}
+	var pricing *core.ModelPricing
+	if h.pricingResolver != nil {
+		pricing = h.pricingResolver.ResolvePricing(model, providerType)
+	}
+	if entry := extractFn(pricing); entry != nil {
+		h.usageLogger.Write(entry)
+	}
+}
+
+func resolveModelSelector(model, provider *string) error {
+	selector, err := core.ParseModelSelector(*model, *provider)
+	if err != nil {
+		return core.NewInvalidRequestError(err.Error(), err)
+	}
+	*model = selector.Model
+	*provider = selector.Provider
+	return nil
+}
+
 // ChatCompletion handles POST /v1/chat/completions
 //
 // @Summary      Create a chat completion
@@ -131,12 +154,9 @@ func (h *Handler) ChatCompletion(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	selector, err := core.ParseModelSelector(req.Model, req.Provider)
-	if err != nil {
-		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	if err := resolveModelSelector(&req.Model, &req.Provider); err != nil {
+		return handleError(c, err)
 	}
-	req.Model = selector.Model
-	req.Provider = selector.Provider
 
 	ctx, providerType := ModelCtx(c)
 	requestID := c.Request().Header.Get("X-Request-ID")
@@ -159,16 +179,9 @@ func (h *Handler) ChatCompletion(c echo.Context) error {
 		return handleError(c, err)
 	}
 
-	if h.usageLogger != nil && h.usageLogger.Config().Enabled {
-		var pricing *core.ModelPricing
-		if h.pricingResolver != nil {
-			pricing = h.pricingResolver.ResolvePricing(resp.Model, providerType)
-		}
-		usageEntry := usage.ExtractFromChatResponse(resp, requestID, providerType, "/v1/chat/completions", pricing)
-		if usageEntry != nil {
-			h.usageLogger.Write(usageEntry)
-		}
-	}
+	h.logUsage(resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
+		return usage.ExtractFromChatResponse(resp, requestID, providerType, "/v1/chat/completions", pricing)
+	})
 
 	return c.JSON(http.StatusOK, resp)
 }
@@ -245,6 +258,55 @@ func resolveProviderHint(c echo.Context) string {
 		return provider
 	}
 	return strings.TrimSpace(c.FormValue("provider"))
+}
+
+func (h *Handler) fileByID(
+	c echo.Context,
+	callFn func(core.NativeFileRoutableProvider, string, string) (any, error),
+	respondFn func(echo.Context, any) error,
+) error {
+	nativeRouter, err := h.nativeFileRouter()
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return handleError(c, core.NewInvalidRequestError("file id is required", nil))
+	}
+
+	if providerType := resolveProviderHint(c); providerType != "" {
+		auditlog.EnrichEntry(c, "file", providerType)
+		result, err := callFn(nativeRouter, providerType, id)
+		if err != nil {
+			return handleError(c, err)
+		}
+		return respondFn(c, result)
+	}
+
+	providers, err := h.fileProviderTypes(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+	auditlog.EnrichEntry(c, "file", "")
+
+	var firstErr error
+	for _, candidate := range providers {
+		result, err := callFn(nativeRouter, candidate, id)
+		if err == nil {
+			return respondFn(c, result)
+		}
+		if isNotFoundGatewayError(err) || isUnsupportedNativeFilesError(err) {
+			continue
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr != nil {
+		return handleError(c, firstErr)
+	}
+	return handleError(c, core.NewNotFoundError("file not found: "+id))
 }
 
 func isNotFoundGatewayError(err error) bool {
@@ -479,48 +541,14 @@ func (h *Handler) ListFiles(c echo.Context) error {
 // @Failure      502       {object}  core.GatewayError
 // @Router       /v1/files/{id} [get]
 func (h *Handler) GetFile(c echo.Context) error {
-	nativeRouter, err := h.nativeFileRouter()
-	if err != nil {
-		return handleError(c, err)
-	}
-
-	id := strings.TrimSpace(c.Param("id"))
-	if id == "" {
-		return handleError(c, core.NewInvalidRequestError("file id is required", nil))
-	}
-	if providerType := strings.TrimSpace(c.QueryParam("provider")); providerType != "" {
-		auditlog.EnrichEntry(c, "file", providerType)
-		resp, err := nativeRouter.GetFile(c.Request().Context(), providerType, id)
-		if err != nil {
-			return handleError(c, err)
-		}
-		return c.JSON(http.StatusOK, resp)
-	}
-
-	providers, err := h.fileProviderTypes(c)
-	if err != nil {
-		return handleError(c, err)
-	}
-	auditlog.EnrichEntry(c, "file", "")
-
-	var firstErr error
-	for _, candidate := range providers {
-		resp, err := nativeRouter.GetFile(c.Request().Context(), candidate, id)
-		if err == nil {
-			return c.JSON(http.StatusOK, resp)
-		}
-		if isNotFoundGatewayError(err) || isUnsupportedNativeFilesError(err) {
-			continue
-		}
-		if firstErr == nil {
-			firstErr = err
-		}
-		continue
-	}
-	if firstErr != nil {
-		return handleError(c, firstErr)
-	}
-	return handleError(c, core.NewNotFoundError("file not found: "+id))
+	return h.fileByID(c,
+		func(r core.NativeFileRoutableProvider, provider, id string) (any, error) {
+			return r.GetFile(c.Request().Context(), provider, id)
+		},
+		func(c echo.Context, result any) error {
+			return c.JSON(http.StatusOK, result)
+		},
+	)
 }
 
 // DeleteFile handles DELETE /v1/files/{id}.
@@ -538,48 +566,14 @@ func (h *Handler) GetFile(c echo.Context) error {
 // @Failure      502       {object}  core.GatewayError
 // @Router       /v1/files/{id} [delete]
 func (h *Handler) DeleteFile(c echo.Context) error {
-	nativeRouter, err := h.nativeFileRouter()
-	if err != nil {
-		return handleError(c, err)
-	}
-
-	id := strings.TrimSpace(c.Param("id"))
-	if id == "" {
-		return handleError(c, core.NewInvalidRequestError("file id is required", nil))
-	}
-	if providerType := strings.TrimSpace(c.QueryParam("provider")); providerType != "" {
-		auditlog.EnrichEntry(c, "file", providerType)
-		resp, err := nativeRouter.DeleteFile(c.Request().Context(), providerType, id)
-		if err != nil {
-			return handleError(c, err)
-		}
-		return c.JSON(http.StatusOK, resp)
-	}
-
-	providers, err := h.fileProviderTypes(c)
-	if err != nil {
-		return handleError(c, err)
-	}
-	auditlog.EnrichEntry(c, "file", "")
-
-	var firstErr error
-	for _, candidate := range providers {
-		resp, err := nativeRouter.DeleteFile(c.Request().Context(), candidate, id)
-		if err == nil {
-			return c.JSON(http.StatusOK, resp)
-		}
-		if isNotFoundGatewayError(err) || isUnsupportedNativeFilesError(err) {
-			continue
-		}
-		if firstErr == nil {
-			firstErr = err
-		}
-		continue
-	}
-	if firstErr != nil {
-		return handleError(c, firstErr)
-	}
-	return handleError(c, core.NewNotFoundError("file not found: "+id))
+	return h.fileByID(c,
+		func(r core.NativeFileRoutableProvider, provider, id string) (any, error) {
+			return r.DeleteFile(c.Request().Context(), provider, id)
+		},
+		func(c echo.Context, result any) error {
+			return c.JSON(http.StatusOK, result)
+		},
+	)
 }
 
 // GetFileContent handles GET /v1/files/{id}/content.
@@ -597,56 +591,19 @@ func (h *Handler) DeleteFile(c echo.Context) error {
 // @Failure      502       {object}  core.GatewayError
 // @Router       /v1/files/{id}/content [get]
 func (h *Handler) GetFileContent(c echo.Context) error {
-	nativeRouter, err := h.nativeFileRouter()
-	if err != nil {
-		return handleError(c, err)
-	}
-
-	id := strings.TrimSpace(c.Param("id"))
-	if id == "" {
-		return handleError(c, core.NewInvalidRequestError("file id is required", nil))
-	}
-	if providerType := strings.TrimSpace(c.QueryParam("provider")); providerType != "" {
-		auditlog.EnrichEntry(c, "file", providerType)
-		resp, err := nativeRouter.GetFileContent(c.Request().Context(), providerType, id)
-		if err != nil {
-			return handleError(c, err)
-		}
-		contentType := strings.TrimSpace(resp.ContentType)
-		if contentType == "" {
-			contentType = "application/octet-stream"
-		}
-		return c.Blob(http.StatusOK, contentType, resp.Data)
-	}
-
-	providers, err := h.fileProviderTypes(c)
-	if err != nil {
-		return handleError(c, err)
-	}
-	auditlog.EnrichEntry(c, "file", "")
-
-	var firstErr error
-	for _, candidate := range providers {
-		resp, err := nativeRouter.GetFileContent(c.Request().Context(), candidate, id)
-		if err == nil {
+	return h.fileByID(c,
+		func(r core.NativeFileRoutableProvider, provider, id string) (any, error) {
+			return r.GetFileContent(c.Request().Context(), provider, id)
+		},
+		func(c echo.Context, result any) error {
+			resp := result.(*core.FileContentResponse)
 			contentType := strings.TrimSpace(resp.ContentType)
 			if contentType == "" {
 				contentType = "application/octet-stream"
 			}
 			return c.Blob(http.StatusOK, contentType, resp.Data)
-		}
-		if isNotFoundGatewayError(err) || isUnsupportedNativeFilesError(err) {
-			continue
-		}
-		if firstErr == nil {
-			firstErr = err
-		}
-		continue
-	}
-	if firstErr != nil {
-		return handleError(c, firstErr)
-	}
-	return handleError(c, core.NewNotFoundError("file not found: "+id))
+		},
+	)
 }
 
 // Responses handles POST /v1/responses
@@ -668,12 +625,9 @@ func (h *Handler) Responses(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	selector, err := core.ParseModelSelector(req.Model, req.Provider)
-	if err != nil {
-		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	if err := resolveModelSelector(&req.Model, &req.Provider); err != nil {
+		return handleError(c, err)
 	}
-	req.Model = selector.Model
-	req.Provider = selector.Provider
 
 	ctx, providerType := ModelCtx(c)
 	requestID := c.Request().Header.Get("X-Request-ID")
@@ -689,16 +643,9 @@ func (h *Handler) Responses(c echo.Context) error {
 		return handleError(c, err)
 	}
 
-	if h.usageLogger != nil && h.usageLogger.Config().Enabled {
-		var pricing *core.ModelPricing
-		if h.pricingResolver != nil {
-			pricing = h.pricingResolver.ResolvePricing(resp.Model, providerType)
-		}
-		usageEntry := usage.ExtractFromResponsesResponse(resp, requestID, providerType, "/v1/responses", pricing)
-		if usageEntry != nil {
-			h.usageLogger.Write(usageEntry)
-		}
-	}
+	h.logUsage(resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
+		return usage.ExtractFromResponsesResponse(resp, requestID, providerType, "/v1/responses", pricing)
+	})
 
 	return c.JSON(http.StatusOK, resp)
 }
@@ -722,12 +669,9 @@ func (h *Handler) Embeddings(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	selector, err := core.ParseModelSelector(req.Model, req.Provider)
-	if err != nil {
-		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	if err := resolveModelSelector(&req.Model, &req.Provider); err != nil {
+		return handleError(c, err)
 	}
-	req.Model = selector.Model
-	req.Provider = selector.Provider
 
 	ctx, providerType := ModelCtx(c)
 	requestID := c.Request().Header.Get("X-Request-ID")
@@ -737,16 +681,9 @@ func (h *Handler) Embeddings(c echo.Context) error {
 		return handleError(c, err)
 	}
 
-	if h.usageLogger != nil && h.usageLogger.Config().Enabled {
-		var pricing *core.ModelPricing
-		if h.pricingResolver != nil {
-			pricing = h.pricingResolver.ResolvePricing(resp.Model, providerType)
-		}
-		usageEntry := usage.ExtractFromEmbeddingResponse(resp, requestID, providerType, "/v1/embeddings", pricing)
-		if usageEntry != nil {
-			h.usageLogger.Write(usageEntry)
-		}
-	}
+	h.logUsage(resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
+		return usage.ExtractFromEmbeddingResponse(resp, requestID, providerType, "/v1/embeddings", pricing)
+	})
 
 	return c.JSON(http.StatusOK, resp)
 }
@@ -935,6 +872,18 @@ func extractBatchItemModel(endpoint, method string, body json.RawMessage) (strin
 	}
 }
 
+func (h *Handler) loadBatch(c echo.Context, id string) (*core.BatchResponse, error) {
+	resp, err := h.batchStore.Get(c.Request().Context(), id)
+	if err != nil {
+		if errors.Is(err, batchstore.ErrNotFound) {
+			return nil, core.NewNotFoundError("batch not found: " + id)
+		}
+		return nil, core.NewProviderError("batch_store", http.StatusInternalServerError, "failed to load batch", err)
+	}
+	auditlog.EnrichEntry(c, "batch", resp.Provider)
+	return resp, nil
+}
+
 // GetBatch handles GET /v1/batches/{id}.
 //
 // @Summary      Get a batch
@@ -955,14 +904,10 @@ func (h *Handler) GetBatch(c echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("batch id is required", nil))
 	}
 
-	resp, err := h.batchStore.Get(c.Request().Context(), id)
+	resp, err := h.loadBatch(c, id)
 	if err != nil {
-		if errors.Is(err, batchstore.ErrNotFound) {
-			return handleError(c, core.NewNotFoundError("batch not found: "+id))
-		}
-		return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "failed to load batch", err))
+		return handleError(c, err)
 	}
-	auditlog.EnrichEntry(c, "batch", resp.Provider)
 
 	nativeRouter, ok := h.provider.(core.NativeBatchRoutableProvider)
 	if !ok {
@@ -1075,14 +1020,10 @@ func (h *Handler) CancelBatch(c echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("batch id is required", nil))
 	}
 
-	resp, err := h.batchStore.Get(c.Request().Context(), id)
+	resp, err := h.loadBatch(c, id)
 	if err != nil {
-		if errors.Is(err, batchstore.ErrNotFound) {
-			return handleError(c, core.NewNotFoundError("batch not found: "+id))
-		}
-		return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "failed to load batch", err))
+		return handleError(c, err)
 	}
-	auditlog.EnrichEntry(c, "batch", resp.Provider)
 
 	nativeRouter, ok := h.provider.(core.NativeBatchRoutableProvider)
 	if !ok || resp.Provider == "" || resp.ProviderBatchID == "" {
@@ -1128,14 +1069,10 @@ func (h *Handler) BatchResults(c echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("batch id is required", nil))
 	}
 
-	stored, err := h.batchStore.Get(c.Request().Context(), id)
+	stored, err := h.loadBatch(c, id)
 	if err != nil {
-		if errors.Is(err, batchstore.ErrNotFound) {
-			return handleError(c, core.NewNotFoundError("batch not found: "+id))
-		}
-		return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "failed to load batch results", err))
+		return handleError(c, err)
 	}
-	auditlog.EnrichEntry(c, "batch", stored.Provider)
 
 	nativeRouter, ok := h.provider.(core.NativeBatchRoutableProvider)
 	if !ok || stored.Provider == "" || stored.ProviderBatchID == "" {

@@ -40,6 +40,23 @@ func (r *Router) checkReady() error {
 	return nil
 }
 
+// resolveProvider validates readiness, parses the model selector, and finds the target provider.
+func (r *Router) resolveProvider(model, provider string) (core.Provider, core.ModelSelector, error) {
+	if err := r.checkReady(); err != nil {
+		return nil, core.ModelSelector{}, err
+	}
+	selector, err := core.ParseModelSelector(model, provider)
+	if err != nil {
+		return nil, core.ModelSelector{}, core.NewInvalidRequestError(err.Error(), err)
+	}
+	lookupModel := selector.QualifiedModel()
+	p := r.lookup.GetProvider(lookupModel)
+	if p == nil {
+		return nil, core.ModelSelector{}, fmt.Errorf("no provider found for model: %s", lookupModel)
+	}
+	return p, selector, nil
+}
+
 // Supports returns true if any provider supports the given model.
 // Returns false if the lookup has no models loaded.
 func (r *Router) Supports(model string) bool {
@@ -52,24 +69,16 @@ func (r *Router) Supports(model string) bool {
 // ChatCompletion routes the request to the appropriate provider.
 // Returns ErrRegistryNotInitialized if the lookup has no models loaded.
 func (r *Router) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	selector, err := core.ParseModelSelector(req.Model, req.Provider)
+	provider, selector, err := r.resolveProvider(req.Model, req.Provider)
 	if err != nil {
-		return nil, core.NewInvalidRequestError(err.Error(), err)
-	}
-	lookupModel := selector.QualifiedModel()
-	provider := r.lookup.GetProvider(lookupModel)
-	if provider == nil {
-		return nil, fmt.Errorf("no provider found for model: %s", lookupModel)
+		return nil, err
 	}
 	forwardReq := *req
 	forwardReq.Model = selector.Model
 	forwardReq.Provider = ""
 	resp, err := provider.ChatCompletion(ctx, &forwardReq)
 	if err == nil && resp != nil {
-		resp.Provider = r.GetProviderType(lookupModel)
+		resp.Provider = r.GetProviderType(selector.QualifiedModel())
 	}
 	return resp, err
 }
@@ -77,17 +86,9 @@ func (r *Router) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*co
 // StreamChatCompletion routes the streaming request to the appropriate provider.
 // Returns ErrRegistryNotInitialized if the lookup has no models loaded.
 func (r *Router) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	selector, err := core.ParseModelSelector(req.Model, req.Provider)
+	provider, selector, err := r.resolveProvider(req.Model, req.Provider)
 	if err != nil {
-		return nil, core.NewInvalidRequestError(err.Error(), err)
-	}
-	lookupModel := selector.QualifiedModel()
-	provider := r.lookup.GetProvider(lookupModel)
-	if provider == nil {
-		return nil, fmt.Errorf("no provider found for model: %s", lookupModel)
+		return nil, err
 	}
 	forwardReq := *req
 	forwardReq.Model = selector.Model
@@ -111,24 +112,16 @@ func (r *Router) ListModels(_ context.Context) (*core.ModelsResponse, error) {
 // Responses routes the Responses API request to the appropriate provider.
 // Returns ErrRegistryNotInitialized if the lookup has no models loaded.
 func (r *Router) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	selector, err := core.ParseModelSelector(req.Model, req.Provider)
+	provider, selector, err := r.resolveProvider(req.Model, req.Provider)
 	if err != nil {
-		return nil, core.NewInvalidRequestError(err.Error(), err)
-	}
-	lookupModel := selector.QualifiedModel()
-	provider := r.lookup.GetProvider(lookupModel)
-	if provider == nil {
-		return nil, fmt.Errorf("no provider found for model: %s", lookupModel)
+		return nil, err
 	}
 	forwardReq := *req
 	forwardReq.Model = selector.Model
 	forwardReq.Provider = ""
 	resp, err := provider.Responses(ctx, &forwardReq)
 	if err == nil && resp != nil {
-		resp.Provider = r.GetProviderType(lookupModel)
+		resp.Provider = r.GetProviderType(selector.QualifiedModel())
 	}
 	return resp, err
 }
@@ -136,17 +129,9 @@ func (r *Router) Responses(ctx context.Context, req *core.ResponsesRequest) (*co
 // StreamResponses routes the streaming Responses API request to the appropriate provider.
 // Returns ErrRegistryNotInitialized if the lookup has no models loaded.
 func (r *Router) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	selector, err := core.ParseModelSelector(req.Model, req.Provider)
+	provider, selector, err := r.resolveProvider(req.Model, req.Provider)
 	if err != nil {
-		return nil, core.NewInvalidRequestError(err.Error(), err)
-	}
-	lookupModel := selector.QualifiedModel()
-	provider := r.lookup.GetProvider(lookupModel)
-	if provider == nil {
-		return nil, fmt.Errorf("no provider found for model: %s", lookupModel)
+		return nil, err
 	}
 	forwardReq := *req
 	forwardReq.Model = selector.Model
@@ -156,24 +141,16 @@ func (r *Router) StreamResponses(ctx context.Context, req *core.ResponsesRequest
 
 // Embeddings routes the embeddings request to the appropriate provider.
 func (r *Router) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	selector, err := core.ParseModelSelector(req.Model, req.Provider)
+	provider, selector, err := r.resolveProvider(req.Model, req.Provider)
 	if err != nil {
-		return nil, core.NewInvalidRequestError(err.Error(), err)
-	}
-	lookupModel := selector.QualifiedModel()
-	provider := r.lookup.GetProvider(lookupModel)
-	if provider == nil {
-		return nil, fmt.Errorf("no provider found for model: %s", lookupModel)
+		return nil, err
 	}
 	forwardReq := *req
 	forwardReq.Model = selector.Model
 	forwardReq.Provider = ""
 	resp, err := provider.Embeddings(ctx, &forwardReq)
 	if err == nil && resp != nil {
-		resp.Provider = r.GetProviderType(lookupModel)
+		resp.Provider = r.GetProviderType(selector.QualifiedModel())
 	}
 	return resp, err
 }
