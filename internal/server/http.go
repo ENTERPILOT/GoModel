@@ -17,6 +17,7 @@ import (
 	"gomodel/internal/auditlog"
 	batchstore "gomodel/internal/batch"
 	"gomodel/internal/core"
+	"gomodel/internal/responsecache"
 	"gomodel/internal/usage"
 
 	echoswagger "github.com/swaggo/echo-swagger"
@@ -24,8 +25,9 @@ import (
 
 // Server wraps the Echo server
 type Server struct {
-	echo    *echo.Echo
-	handler *Handler
+	echo                    *echo.Echo
+	handler                 *Handler
+	responseCacheMiddleware *responsecache.ResponseCacheMiddleware
 }
 
 // Config holds server configuration options
@@ -44,6 +46,7 @@ type Config struct {
 	AdminHandler             *admin.Handler           // Admin API handler (nil if disabled)
 	DashboardHandler         *dashboard.Handler       // Dashboard UI handler (nil if disabled)
 	SwaggerEnabled           bool                     // Whether to expose the Swagger UI at /swagger/index.html
+	ResponseCacheMiddleware  *responsecache.ResponseCacheMiddleware
 }
 
 // New creates a new HTTP server
@@ -165,6 +168,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Model validation (skips non-model paths via IsModelInteractionPath)
 	e.Use(ModelValidation(provider))
 
+	if cfg != nil && cfg.ResponseCacheMiddleware != nil {
+		e.Use(cfg.ResponseCacheMiddleware.Middleware())
+	}
+
 	// Public routes
 	e.GET("/health", handler.Health)
 	if cfg != nil && cfg.SwaggerEnabled {
@@ -210,9 +217,14 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.GET("/admin/static/*", cfg.DashboardHandler.Static)
 	}
 
+	var rcm *responsecache.ResponseCacheMiddleware
+	if cfg != nil {
+		rcm = cfg.ResponseCacheMiddleware
+	}
 	return &Server{
-		echo:    e,
-		handler: handler,
+		echo:                    e,
+		handler:                 handler,
+		responseCacheMiddleware: rcm,
 	}
 }
 
@@ -221,8 +233,11 @@ func (s *Server) Start(addr string) error {
 	return s.echo.Start(addr)
 }
 
-// Shutdown gracefully shuts down the HTTP server.
+// Shutdown gracefully shuts down the HTTP server and releases resources.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.responseCacheMiddleware != nil {
+		_ = s.responseCacheMiddleware.Close()
+	}
 	return s.echo.Shutdown(ctx)
 }
 

@@ -251,41 +251,63 @@ type MongoDBStorageConfig struct {
 	Database string `yaml:"database" env:"MONGODB_DATABASE"`
 }
 
-// CacheConfig holds cache configuration for model storage
+// CacheConfig holds model and response cache configuration.
 type CacheConfig struct {
-	// Type specifies the cache backend: "local" (default) or "redis"
-	Type string `yaml:"type" env:"CACHE_TYPE"`
+	Model    ModelCacheConfig    `yaml:"model"`
+	Response ResponseCacheConfig `yaml:"response"`
+}
 
-	// CacheDir is the directory for local cache files (default: ".cache")
+// ModelCacheConfig holds cache configuration for model registry.
+// Exactly one of Local or Redis must be non-nil.
+type ModelCacheConfig struct {
+	RefreshInterval int                 `yaml:"refresh_interval" env:"CACHE_REFRESH_INTERVAL"`
+	ModelList       ModelListConfig     `yaml:"model_list"`
+	Local           *LocalCacheConfig   `yaml:"local"`
+	Redis           *RedisCacheConfig   `yaml:"redis"`
+}
+
+// LocalCacheConfig holds local file cache configuration.
+type LocalCacheConfig struct {
 	CacheDir string `yaml:"cache_dir" env:"GOMODEL_CACHE_DIR"`
+}
 
-	// RefreshInterval is how often to refresh the model registry in seconds.
-	// Default: 3600 (1 hour)
-	RefreshInterval int `yaml:"refresh_interval" env:"CACHE_REFRESH_INTERVAL"`
+// RedisCacheConfig holds Redis connection configuration. Shared by model and response cache.
+type RedisCacheConfig struct {
+	URL string `yaml:"url" env:"REDIS_URL"`
+	Key string `yaml:"key" env:"REDIS_KEY"`
+	TTL int    `yaml:"ttl" env:"REDIS_TTL"`
+}
 
-	// Redis configuration (only used when Type is "redis")
-	Redis RedisConfig `yaml:"redis"`
+// ResponseCacheConfig holds configuration for response cache middleware.
+type ResponseCacheConfig struct {
+	Simple SimpleCacheConfig `yaml:"simple"`
+}
 
-	// ModelList configuration for the external model metadata registry
-	ModelList ModelListConfig `yaml:"model_list"`
+// SimpleCacheConfig holds configuration for exact-match response caching.
+type SimpleCacheConfig struct {
+	Redis *RedisCacheConfig `yaml:"redis"`
 }
 
 // ModelListConfig holds configuration for fetching the external model metadata registry.
 type ModelListConfig struct {
-	// URL is the HTTP(S) URL to fetch models.json from (empty = disabled)
 	URL string `yaml:"url" env:"MODEL_LIST_URL"`
 }
 
-// RedisConfig holds Redis-specific configuration
-type RedisConfig struct {
-	// URL is the Redis connection URL (e.g., "redis://localhost:6379")
-	URL string `yaml:"url" env:"REDIS_URL"`
+func ValidateCacheConfig(c *CacheConfig) error {
+	m := &c.Model
+	hasLocal := m.Local != nil
+	hasRedis := m.Redis != nil
 
-	// Key is the Redis key for storing the model cache (default: "gomodel:models")
-	Key string `yaml:"key" env:"REDIS_KEY"`
-
-	// TTL is the time-to-live for cached data in seconds (default: 86400 = 24 hours)
-	TTL int `yaml:"ttl" env:"REDIS_TTL"`
+	if hasLocal && hasRedis {
+		return fmt.Errorf("cache.model: cannot have both local and redis configured; choose one")
+	}
+	if !hasLocal && !hasRedis {
+		return fmt.Errorf("cache.model: must have either local or redis configured")
+	}
+	if hasRedis && m.Redis.URL == "" {
+		return fmt.Errorf("cache.model.redis: URL is required when using redis")
+	}
+	return nil
 }
 
 // ServerConfig holds HTTP server configuration
@@ -356,16 +378,15 @@ func buildDefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{Port: "8080", SwaggerEnabled: true},
 		Cache: CacheConfig{
-			Type:            "local",
-			CacheDir:        ".cache",
-			RefreshInterval: 3600,
-			Redis: RedisConfig{
-				Key: "gomodel:models",
-				TTL: 86400,
+			Model: ModelCacheConfig{
+				RefreshInterval: 3600,
+				ModelList: ModelListConfig{
+					URL: "https://raw.githubusercontent.com/ENTERPILOT/ai-model-list/refs/heads/main/models.json",
+				},
+				Local: &LocalCacheConfig{CacheDir: ".cache"},
+				Redis: nil,
 			},
-			ModelList: ModelListConfig{
-				URL: "https://raw.githubusercontent.com/ENTERPILOT/ai-model-list/refs/heads/main/models.json",
-			},
+			Response: ResponseCacheConfig{},
 		},
 		Storage: StorageConfig{
 			Type: "sqlite",
@@ -437,6 +458,10 @@ func Load() (*LoadResult, error) {
 		}
 	}
 
+	if err := ValidateCacheConfig(&cfg.Cache); err != nil {
+		return nil, err
+	}
+
 	return &LoadResult{
 		Config:       cfg,
 		RawProviders: rawProviders,
@@ -505,6 +530,12 @@ func applyEnvOverridesValue(v reflect.Value) error {
 		}
 		if field.Type.Kind() == reflect.Struct {
 			if err := applyEnvOverridesValue(fieldVal); err != nil {
+				return err
+			}
+			continue
+		}
+		if field.Type.Kind() == reflect.Ptr && !fieldVal.IsNil() {
+			if err := applyEnvOverridesValue(fieldVal.Elem()); err != nil {
 				return err
 			}
 			continue

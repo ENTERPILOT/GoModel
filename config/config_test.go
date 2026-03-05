@@ -27,7 +27,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"PORT", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT",
-		"CACHE_TYPE", "GOMODEL_CACHE_DIR",
+		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL",
 		"REDIS_URL", "REDIS_KEY", "REDIS_TTL",
 		"STORAGE_TYPE", "SQLITE_PATH", "POSTGRES_URL", "POSTGRES_MAX_CONNS",
 		"MONGODB_URL", "MONGODB_DATABASE",
@@ -67,20 +67,14 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Server.Port != "8080" {
 		t.Errorf("expected Server.Port=8080, got %s", cfg.Server.Port)
 	}
-	if cfg.Cache.Type != "local" {
-		t.Errorf("expected Cache.Type=local, got %s", cfg.Cache.Type)
+	if cfg.Cache.Model.Local == nil {
+		t.Error("expected Cache.Model.Local to be set")
 	}
-	if cfg.Cache.CacheDir != ".cache" {
-		t.Errorf("expected Cache.CacheDir=.cache, got %s", cfg.Cache.CacheDir)
+	if cfg.Cache.Model.Local.CacheDir != ".cache" {
+		t.Errorf("expected Cache.Model.Local.CacheDir=.cache, got %s", cfg.Cache.Model.Local.CacheDir)
 	}
-	if cfg.Cache.RefreshInterval != 3600 {
-		t.Errorf("expected Cache.RefreshInterval=3600, got %d", cfg.Cache.RefreshInterval)
-	}
-	if cfg.Cache.Redis.Key != "gomodel:models" {
-		t.Errorf("expected Cache.Redis.Key=gomodel:models, got %s", cfg.Cache.Redis.Key)
-	}
-	if cfg.Cache.Redis.TTL != 86400 {
-		t.Errorf("expected Cache.Redis.TTL=86400, got %d", cfg.Cache.Redis.TTL)
+	if cfg.Cache.Model.RefreshInterval != 3600 {
+		t.Errorf("expected Cache.Model.RefreshInterval=3600, got %d", cfg.Cache.Model.RefreshInterval)
 	}
 	if cfg.Storage.Type != "sqlite" {
 		t.Errorf("expected Storage.Type=sqlite, got %s", cfg.Storage.Type)
@@ -183,11 +177,12 @@ func TestLoad_YAMLOverridesDefaults(t *testing.T) {
 server:
   port: "3000"
 cache:
-  type: "redis"
-  redis:
-    url: "redis://myhost:6379"
-    key: "custom:key"
-    ttl: 3600
+  model:
+    local: null
+    redis:
+      url: "redis://myhost:6379"
+      key: "custom:key"
+      ttl: 3600
 logging:
   enabled: true
   log_bodies: false
@@ -206,17 +201,17 @@ logging:
 		if cfg.Server.Port != "3000" {
 			t.Errorf("expected port 3000, got %s", cfg.Server.Port)
 		}
-		if cfg.Cache.Type != "redis" {
-			t.Errorf("expected cache type redis, got %s", cfg.Cache.Type)
+		if cfg.Cache.Model.Redis == nil {
+			t.Fatal("expected Cache.Model.Redis to be set")
 		}
-		if cfg.Cache.Redis.URL != "redis://myhost:6379" {
-			t.Errorf("expected redis URL redis://myhost:6379, got %s", cfg.Cache.Redis.URL)
+		if cfg.Cache.Model.Redis.URL != "redis://myhost:6379" {
+			t.Errorf("expected redis URL redis://myhost:6379, got %s", cfg.Cache.Model.Redis.URL)
 		}
-		if cfg.Cache.Redis.Key != "custom:key" {
-			t.Errorf("expected redis key custom:key, got %s", cfg.Cache.Redis.Key)
+		if cfg.Cache.Model.Redis.Key != "custom:key" {
+			t.Errorf("expected redis key custom:key, got %s", cfg.Cache.Model.Redis.Key)
 		}
-		if cfg.Cache.Redis.TTL != 3600 {
-			t.Errorf("expected redis TTL 3600, got %d", cfg.Cache.Redis.TTL)
+		if cfg.Cache.Model.Redis.TTL != 3600 {
+			t.Errorf("expected redis TTL 3600, got %d", cfg.Cache.Model.Redis.TTL)
 		}
 		if !cfg.Logging.Enabled {
 			t.Error("expected Logging.Enabled=true from YAML")
@@ -244,7 +239,10 @@ func TestLoad_EnvOverridesYAML(t *testing.T) {
 server:
   port: "3000"
 cache:
-  type: "redis"
+  model:
+    local: null
+    redis:
+      url: "redis://myhost:6379"
 logging:
   enabled: true
 `
@@ -253,7 +251,7 @@ logging:
 		}
 
 		t.Setenv("PORT", "9090")
-		t.Setenv("CACHE_TYPE", "local")
+		t.Setenv("CACHE_REFRESH_INTERVAL", "1800")
 		t.Setenv("LOGGING_ENABLED", "false")
 
 		result, err := Load()
@@ -265,8 +263,8 @@ logging:
 		if cfg.Server.Port != "9090" {
 			t.Errorf("expected port 9090 (env override), got %s", cfg.Server.Port)
 		}
-		if cfg.Cache.Type != "local" {
-			t.Errorf("expected cache type local (env override), got %s", cfg.Cache.Type)
+		if cfg.Cache.Model.RefreshInterval != 1800 {
+			t.Errorf("expected Cache.Model.RefreshInterval=1800 (env override), got %d", cfg.Cache.Model.RefreshInterval)
 		}
 		if cfg.Logging.Enabled {
 			t.Error("expected Logging.Enabled=false (env override)")
@@ -427,8 +425,8 @@ func TestLoad_CacheDir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.Cache.CacheDir != ".cache" {
-			t.Errorf("expected Cache.CacheDir=.cache, got %s", result.Config.Cache.CacheDir)
+		if result.Config.Cache.Model.Local == nil || result.Config.Cache.Model.Local.CacheDir != ".cache" {
+			t.Errorf("expected Cache.Model.Local.CacheDir=.cache, got %v", result.Config.Cache.Model.Local)
 		}
 	})
 
@@ -439,8 +437,8 @@ func TestLoad_CacheDir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.Cache.CacheDir != "/tmp/gomodel-cache" {
-			t.Errorf("expected Cache.CacheDir=/tmp/gomodel-cache, got %s", result.Config.Cache.CacheDir)
+		if result.Config.Cache.Model.Local == nil || result.Config.Cache.Model.Local.CacheDir != "/tmp/gomodel-cache" {
+			t.Errorf("expected Cache.Model.Local.CacheDir=/tmp/gomodel-cache, got %v", result.Config.Cache.Model.Local)
 		}
 	})
 }
