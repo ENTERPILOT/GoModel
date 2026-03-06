@@ -2544,6 +2544,11 @@
         "sequence_number": 195,
         "type": "response.completed"
       }
+    },
+    {
+      "Done": true,
+      "Name": "",
+      "Payload": null
     }
   ],
   "text": "Hello, World!"

@@ -21,7 +21,7 @@
             },
             {
                 "group": "About",
-                "pages": ["about/values", "about/technical-philosophy", "about/benchmarks"]
+                "pages": ["about/who-we-are", "about/values", "about/technical-philosophy", "about/benchmarks"]
             }
         ]
     }

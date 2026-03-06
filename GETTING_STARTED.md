@@ -646,7 +646,7 @@ console.log(embedding.data[0].embedding.slice(0, 5)); // first 5 dimensions
 
 1. **Model routing**: The gateway automatically routes requests to the correct provider based on the model name — no configuration needed. Just use any model name from the list above.
 2. **API compatibility**: The gateway exposes an OpenAI-compatible API. Existing OpenAI client libraries work unchanged for all providers.
-3. **Streaming**: All providers support streaming. The gateway normalises provider-specific formats to OpenAI's SSE format.
+3. **Streaming**: All providers support streaming. SSE chunks are flushed incrementally, and streaming responses terminate with `data: [DONE]`.
 4. **System messages**: Anthropic's system message format is handled automatically. Gemini uses Google's OpenAI-compatible endpoint, which also handles system messages natively.
 5. **Max tokens**: Anthropic requires `max_tokens` to be set. If not provided, the gateway defaults to 4096. OpenAI and Gemini treat it as optional.
 6. **Responses API**: The `/v1/responses` endpoint provides a unified interface across all providers. Providers that do not natively support the Responses API convert requests internally.
