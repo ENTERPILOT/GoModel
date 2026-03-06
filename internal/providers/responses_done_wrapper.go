@@ -9,6 +9,8 @@ var responsesDoneMarker = []byte("data: [DONE]\n\n")
 
 var responsesDoneLine = []byte("data: [DONE]")
 
+var responsesDataPrefix = []byte("data: ")
+
 var responsesCompletionPatterns = [][]byte{
 	[]byte(`"type":"response.completed"`),
 	[]byte(`"type":"response.done"`),
@@ -23,18 +25,22 @@ func EnsureResponsesDone(stream io.ReadCloser) io.ReadCloser {
 	}
 
 	return &responsesDoneWrapper{
-		ReadCloser: stream,
-		tail:       make([]byte, 0, responsesDoneTrackOverlap()),
+		ReadCloser:                 stream,
+		atEventBoundary:            true,
+		currentLineAtEventBoundary: true,
 	}
 }
 
 type responsesDoneWrapper struct {
 	io.ReadCloser
-	tail         []byte
-	pending      []byte
-	sawDone      bool
-	sawCompleted bool
-	emitted      bool
+	lineBuf                    []byte
+	pending                    []byte
+	sawDone                    bool
+	eventCompletedCandidate    bool
+	completedEventReadyForDone bool
+	atEventBoundary            bool
+	currentLineAtEventBoundary bool
+	emitted                    bool
 }
 
 func (w *responsesDoneWrapper) Read(p []byte) (int, error) {
@@ -53,7 +59,7 @@ func (w *responsesDoneWrapper) Read(p []byte) (int, error) {
 
 	n, err := w.ReadCloser.Read(p)
 	if n > 0 {
-		w.trackDone(p[:n])
+		w.trackStream(p[:n])
 	}
 
 	if err == io.EOF {
@@ -64,7 +70,8 @@ func (w *responsesDoneWrapper) Read(p []byte) (int, error) {
 			return 0, io.EOF
 		}
 
-		if !w.sawCompleted {
+		missingSuffix := w.synthesizeDoneSuffix()
+		if len(missingSuffix) == 0 {
 			if n > 0 {
 				return n, nil
 			}
@@ -72,13 +79,13 @@ func (w *responsesDoneWrapper) Read(p []byte) (int, error) {
 		}
 
 		if n > 0 {
-			w.pending = append(w.pending[:0], responsesDoneMarker...)
+			w.pending = append(w.pending[:0], missingSuffix...)
 			return n, nil
 		}
 
-		n = copy(p, responsesDoneMarker)
-		if n < len(responsesDoneMarker) {
-			w.pending = append(w.pending[:0], responsesDoneMarker[n:]...)
+		n = copy(p, missingSuffix)
+		if n < len(missingSuffix) {
+			w.pending = append(w.pending[:0], missingSuffix[n:]...)
 			return n, nil
 		}
 
@@ -89,38 +96,90 @@ func (w *responsesDoneWrapper) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (w *responsesDoneWrapper) trackDone(data []byte) {
-	if w.sawDone && w.sawCompleted {
+func (w *responsesDoneWrapper) trackStream(data []byte) {
+	start := 0
+	for i, b := range data {
+		if b != '\n' {
+			continue
+		}
+
+		w.lineBuf = append(w.lineBuf, data[start:i]...)
+		w.processLine(w.lineBuf)
+		w.lineBuf = w.lineBuf[:0]
+		start = i + 1
+		w.currentLineAtEventBoundary = w.atEventBoundary
+	}
+
+	if start < len(data) {
+		w.lineBuf = append(w.lineBuf, data[start:]...)
+	}
+}
+
+func (w *responsesDoneWrapper) processLine(line []byte) {
+	line = bytes.TrimSuffix(line, []byte("\r"))
+	if len(line) == 0 {
+		if w.eventCompletedCandidate {
+			w.completedEventReadyForDone = true
+		}
+		w.eventCompletedCandidate = false
+		w.atEventBoundary = true
 		return
 	}
 
-	combined := append(append([]byte(nil), w.tail...), data...)
-	if !w.sawDone && bytes.Contains(combined, responsesDoneLine) {
+	if w.completedEventReadyForDone && (!w.currentLineAtEventBoundary || !bytes.Equal(line, responsesDoneLine)) {
+		w.completedEventReadyForDone = false
+	}
+
+	if w.currentLineAtEventBoundary && bytes.Equal(line, responsesDoneLine) {
 		w.sawDone = true
 	}
-	if !w.sawCompleted {
+
+	if bytes.HasPrefix(line, responsesDataPrefix) {
+		payload := line[len(responsesDataPrefix):]
 		for _, pattern := range responsesCompletionPatterns {
-			if bytes.Contains(combined, pattern) {
-				w.sawCompleted = true
+			if bytes.Contains(payload, pattern) {
+				w.eventCompletedCandidate = true
 				break
 			}
 		}
 	}
 
-	overlap := responsesDoneTrackOverlap()
-	if len(combined) > overlap {
-		combined = combined[len(combined)-overlap:]
-	}
-
-	w.tail = append(w.tail[:0], combined...)
+	w.atEventBoundary = false
 }
 
-func responsesDoneTrackOverlap() int {
-	overlap := len(responsesDoneLine) - 1
-	for _, pattern := range responsesCompletionPatterns {
-		if n := len(pattern) - 1; n > overlap {
-			overlap = n
-		}
+func (w *responsesDoneWrapper) synthesizeDoneSuffix() []byte {
+	if w.sawDone {
+		return nil
 	}
-	return overlap
+
+	if w.eventCompletedCandidate && len(w.lineBuf) == 0 {
+		return append([]byte{'\n'}, responsesDoneMarker...)
+	}
+
+	if !w.completedEventReadyForDone {
+		return nil
+	}
+
+	if len(w.lineBuf) == 0 {
+		if w.atEventBoundary {
+			return append([]byte(nil), responsesDoneMarker...)
+		}
+		return nil
+	}
+
+	if !w.currentLineAtEventBoundary || !isDoneLinePrefix(w.lineBuf) {
+		return nil
+	}
+
+	suffix := append([]byte(nil), responsesDoneLine[len(w.lineBuf):]...)
+	suffix = append(suffix, '\n', '\n')
+	return suffix
+}
+
+func isDoneLinePrefix(line []byte) bool {
+	if len(line) > len(responsesDoneLine) {
+		return false
+	}
+
+	return bytes.Equal(line, responsesDoneLine[:len(line)])
 }

@@ -107,11 +107,13 @@ func (h *Handler) handleStreamingResponse(c echo.Context, model, provider string
 	}
 
 	c.Response().WriteHeader(http.StatusOK)
-	flushStream(c.Response().Writer, wrappedStream)
+	if err := flushStream(c.Response().Writer, wrappedStream); err != nil {
+		recordStreamingError(streamEntry, model, provider, c.Request().URL.Path, requestID, err)
+	}
 	return nil
 }
 
-func flushStream(w io.Writer, stream io.Reader) {
+func flushStream(w io.Writer, stream io.Reader) error {
 	flusher, canFlush := w.(http.Flusher)
 	if canFlush {
 		flusher.Flush()
@@ -122,16 +124,37 @@ func flushStream(w io.Writer, stream io.Reader) {
 		n, err := stream.Read(buf)
 		if n > 0 {
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return
+				return writeErr
 			}
 			if canFlush {
 				flusher.Flush()
 			}
 		}
 		if err != nil {
-			return
+			if err == io.EOF {
+				return nil
+			}
+			return err
 		}
 	}
+}
+
+func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, err error) {
+	if streamEntry != nil {
+		streamEntry.ErrorType = "stream_error"
+		if streamEntry.Data == nil {
+			streamEntry.Data = &auditlog.LogData{}
+		}
+		streamEntry.Data.ErrorMessage = err.Error()
+	}
+
+	slog.Warn("stream terminated abnormally",
+		"error", err,
+		"model", model,
+		"provider", provider,
+		"path", path,
+		"request_id", requestID,
+	)
 }
 
 func (h *Handler) logUsage(model, providerType string, extractFn func(*core.ModelPricing) *usage.UsageEntry) {

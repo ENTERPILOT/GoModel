@@ -127,7 +127,11 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	return &resp, nil
 }
 
-// StreamResponses returns a raw response body for streaming Responses API (caller must close)
+// StreamResponses returns a normalized streaming Responses API body.
+// The returned io.ReadCloser is wrapped by providers.EnsureResponsesDone, so
+// callers must not assume it contains verbatim upstream bytes; the wrapper may
+// synthesize a terminal `data: [DONE]` marker on completed streams. Callers
+// remain responsible for closing the returned stream.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
 	stream, err := p.client.DoStream(ctx, llmclient.Request{
 		Method:   http.MethodPost,
