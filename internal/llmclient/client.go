@@ -238,12 +238,16 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 		}
 	}
 
-	// Check circuit breaker
-	if c.circuitBreaker != nil && !c.circuitBreaker.Allow() {
-		err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable,
-			"circuit breaker is open - provider temporarily unavailable", nil)
-		callEndHook(http.StatusServiceUnavailable, err)
-		return nil, err
+	halfOpenProbe := false
+	if c.circuitBreaker != nil {
+		allowed, probe := c.circuitBreaker.acquire()
+		if !allowed {
+			err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable,
+				"circuit breaker is open - provider temporarily unavailable", nil)
+			callEndHook(http.StatusServiceUnavailable, err)
+			return nil, err
+		}
+		halfOpenProbe = probe
 	}
 
 	var lastErr error
@@ -273,6 +277,10 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 			if c.circuitBreaker != nil {
 				c.circuitBreaker.RecordFailure()
 			}
+			if halfOpenProbe {
+				callEndHook(lastStatusCode, lastErr)
+				return nil, lastErr
+			}
 			continue
 		}
 
@@ -283,6 +291,10 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 			}
 			lastErr = core.ParseProviderError(c.config.ProviderName, resp.StatusCode, resp.Body, nil)
 			lastStatusCode = resp.StatusCode
+			if halfOpenProbe {
+				callEndHook(lastStatusCode, lastErr)
+				return nil, lastErr
+			}
 			continue
 		}
 
@@ -622,16 +634,15 @@ func newCircuitBreaker(failureThreshold, successThreshold int, timeout time.Dura
 	}
 }
 
-// Allow checks if a request should be allowed through the circuit breaker.
-// In half-open state, only one request is allowed through at a time to prevent
-// thundering herd when the circuit first transitions from open to half-open.
-func (cb *circuitBreaker) Allow() bool {
+// acquire checks if a request should be allowed through the circuit breaker.
+// The second return value reports whether the caller is the single half-open probe.
+func (cb *circuitBreaker) acquire() (bool, bool) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
 	switch cb.state {
 	case circuitClosed:
-		return true
+		return true, false
 	case circuitOpen:
 		// Check if timeout has passed
 		if time.Since(cb.lastFailure) > cb.timeout {
@@ -639,7 +650,7 @@ func (cb *circuitBreaker) Allow() bool {
 			cb.successes = 0
 			cb.halfOpenAllowed = true // Allow the first probe request
 		} else {
-			return false
+			return false, false
 		}
 		// Fall through to half-open handling
 		fallthrough
@@ -648,11 +659,17 @@ func (cb *circuitBreaker) Allow() bool {
 		// This prevents thundering herd when transitioning from open
 		if cb.halfOpenAllowed {
 			cb.halfOpenAllowed = false
-			return true
+			return true, true
 		}
-		return false
+		return false, false
 	}
-	return true
+	return true, false
+}
+
+// Allow reports whether any request may proceed.
+func (cb *circuitBreaker) Allow() bool {
+	allowed, _ := cb.acquire()
+	return allowed
 }
 
 // RecordSuccess records a successful request
