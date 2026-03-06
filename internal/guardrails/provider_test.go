@@ -232,7 +232,7 @@ func TestGuardedProvider_ChatCompletion_AppliesGuardrailsToTextOnlyContentArray(
 	}
 }
 
-func TestGuardedProvider_ChatCompletion_PreservesNonTextMultimodalRequests(t *testing.T) {
+func TestGuardedProvider_ChatCompletion_PreservesNonTextMultimodalContentWhileApplyingSystemGuardrails(t *testing.T) {
 	inner := &mockRoutableProvider{}
 	pipeline := NewPipeline()
 
@@ -262,12 +262,15 @@ func TestGuardedProvider_ChatCompletion_PreservesNonTextMultimodalRequests(t *te
 	if inner.chatReq == nil {
 		t.Fatal("inner provider was not called")
 	}
-	if len(inner.chatReq.Messages) != 1 {
-		t.Fatalf("expected unmodified multimodal request, got %d messages", len(inner.chatReq.Messages))
+	if len(inner.chatReq.Messages) != 2 {
+		t.Fatalf("expected guarded multimodal request with injected system message, got %d messages", len(inner.chatReq.Messages))
 	}
-	parts, ok := inner.chatReq.Messages[0].Content.([]core.ContentPart)
+	if inner.chatReq.Messages[0].Role != "system" || inner.chatReq.Messages[0].Content != "guardrail system" {
+		t.Fatalf("expected injected system message, got %+v", inner.chatReq.Messages[0])
+	}
+	parts, ok := inner.chatReq.Messages[1].Content.([]core.ContentPart)
 	if !ok || len(parts) != 2 || parts[1].Type != "image_url" {
-		t.Fatalf("expected preserved multimodal content, got %#v", inner.chatReq.Messages[0].Content)
+		t.Fatalf("expected preserved multimodal content, got %#v", inner.chatReq.Messages[1].Content)
 	}
 }
 
@@ -648,6 +651,40 @@ func TestGuardedProvider_GuardrailError_BlocksRequest(t *testing.T) {
 	}
 
 	// Inner provider should not have been called
+	if inner.chatReq != nil {
+		t.Error("inner provider should not have been called when guardrail blocks")
+	}
+}
+
+func TestGuardedProvider_GuardrailError_BlocksMultimodalRequest(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	pipeline.Add(&mockGuardrail{
+		name: "blocker",
+		processFn: func(_ context.Context, _ []Message) ([]Message, error) {
+			return nil, core.NewInvalidRequestError("guardrail violation", nil)
+		},
+	}, 0)
+
+	guarded := NewGuardedProvider(inner, pipeline)
+
+	req := &core.ChatRequest{
+		Model: "gpt-4",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{Type: "text", Text: "hello"},
+					{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
+				},
+			},
+		},
+	}
+
+	_, err := guarded.ChatCompletion(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error from guardrail")
+	}
 	if inner.chatReq != nil {
 		t.Error("inner provider should not have been called when guardrail blocks")
 	}

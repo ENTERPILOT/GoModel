@@ -22,7 +22,7 @@ func TestMessageUnmarshalJSON_StringContent(t *testing.T) {
 
 func TestMessageUnmarshalJSON_MultimodalContent(t *testing.T) {
 	var msg Message
-	err := json.Unmarshal([]byte(`{"role":"user","content":[{"type":"text","text":"Describe this image"},{"type":"image_url","image_url":{"url":"https://example.com/image.png","detail":"high"}}]}`), &msg)
+	err := json.Unmarshal([]byte(`{"role":"user","content":[{"type":"text","text":"Describe this image"},{"type":"image_url","image_url":{"url":"https://example.com/image.png","detail":"high","media_type":"image/png"}}]}`), &msg)
 	if err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
@@ -39,6 +39,9 @@ func TestMessageUnmarshalJSON_MultimodalContent(t *testing.T) {
 	}
 	if parts[1].Type != "image_url" || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "https://example.com/image.png" {
 		t.Fatalf("unexpected second part: %+v", parts[1])
+	}
+	if parts[1].ImageURL.MediaType != "image/png" {
+		t.Fatalf("second part media type = %q, want image/png", parts[1].ImageURL.MediaType)
 	}
 }
 
@@ -70,5 +73,28 @@ func TestMessageMarshalJSON_RejectsUnsupportedContentType(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "must be a string or array of content parts") {
 		t.Fatalf("error = %v, want content validation error", err)
+	}
+}
+
+func TestMessageMarshalJSON_PreservesNullContentForToolCalls(t *testing.T) {
+	body, err := json.Marshal(Message{
+		Role:    "assistant",
+		Content: nil,
+		ToolCalls: []ToolCall{
+			{
+				ID:   "call_123",
+				Type: "function",
+				Function: FunctionCall{
+					Name:      "lookup",
+					Arguments: "{}",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(body), `"content":null`) {
+		t.Fatalf("expected content:null, got %s", string(body))
 	}
 }

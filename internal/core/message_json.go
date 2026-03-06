@@ -26,9 +26,19 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 
 // MarshalJSON ensures only supported chat request message content shapes are emitted.
 func (m Message) MarshalJSON() ([]byte, error) {
-	content, err := NormalizeMessageContent(m.Content)
-	if err != nil {
-		return nil, err
+	var (
+		content any
+		err     error
+	)
+
+	// OpenAI-compatible tool-call assistant messages use `content: null`.
+	if len(m.ToolCalls) > 0 && m.Content == nil {
+		content = nil
+	} else {
+		content, err = NormalizeMessageContent(m.Content)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return json.Marshal(struct {

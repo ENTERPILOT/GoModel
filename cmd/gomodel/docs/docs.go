@@ -1856,6 +1856,23 @@ const docTemplate = `{
                 }
             }
         },
+        "core.ContentPart": {
+            "type": "object",
+            "properties": {
+                "image_url": {
+                    "$ref": "#/definitions/core.ImageURLContent"
+                },
+                "input_audio": {
+                    "$ref": "#/definitions/core.InputAudioContent"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "core.EmbeddingData": {
             "type": "object",
             "properties": {
@@ -2031,11 +2048,41 @@ const docTemplate = `{
                 }
             }
         },
+        "core.ImageURLContent": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "media_type": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "core.InputAudioContent": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "string"
+                }
+            }
+        },
         "core.Message": {
             "type": "object",
             "properties": {
                 "content": {
-                    "description": "Content accepts either a plain string or an array of ContentPart values.\nThis preserves OpenAI-compatible multimodal chat payloads."
+                    "description": "ContentSchema documents that ` + "`" + `content` + "`" + ` accepts either a plain string\nor an array of ContentPart values.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ContentPart"
+                    },
+                    "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"
                 },
                 "role": {
                     "type": "string"

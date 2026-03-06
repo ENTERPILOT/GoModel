@@ -289,15 +289,13 @@ func (g *GuardedProvider) GetFileContent(ctx context.Context, providerType, id s
 
 // processChat runs the pipeline for a ChatRequest via the message adapter.
 func (g *GuardedProvider) processChat(ctx context.Context, req *core.ChatRequest) (*core.ChatRequest, error) {
-	if chatHasNonTextContent(req) {
-		// Guardrails operate on text-only DTOs today. Preserve requests that
-		// include image/audio parts until the pipeline can safely rewrite them.
-		return req, nil
-	}
 	msgs := chatToMessages(req)
 	modified, err := g.pipeline.Process(ctx, msgs)
 	if err != nil {
 		return nil, err
+	}
+	if chatHasNonTextContent(req) {
+		return applySystemMessagesToMultimodalChat(req, modified), nil
 	}
 	return applyMessagesToChat(req, modified), nil
 }
@@ -329,6 +327,42 @@ func applyMessagesToChat(req *core.ChatRequest, msgs []Message) *core.ChatReques
 	for i, m := range msgs {
 		coreMessages[i] = core.Message{Role: m.Role, Content: m.Content}
 	}
+	result := *req
+	result.Messages = coreMessages
+	return &result
+}
+
+// applySystemMessagesToMultimodalChat applies only system-message updates from
+// guardrails while preserving original multimodal user/assistant content.
+func applySystemMessagesToMultimodalChat(req *core.ChatRequest, msgs []Message) *core.ChatRequest {
+	nonSystemOriginal := make([]core.Message, 0, len(req.Messages))
+	for _, original := range req.Messages {
+		if original.Role != "system" {
+			nonSystemOriginal = append(nonSystemOriginal, original)
+		}
+	}
+
+	coreMessages := make([]core.Message, 0, len(msgs))
+	nextNonSystem := 0
+	for _, modified := range msgs {
+		if modified.Role == "system" {
+			coreMessages = append(coreMessages, core.Message{Role: "system", Content: modified.Content})
+			continue
+		}
+		if nextNonSystem >= len(nonSystemOriginal) {
+			continue
+		}
+		coreMessages = append(coreMessages, nonSystemOriginal[nextNonSystem])
+		nextNonSystem++
+	}
+
+	// Preserve any trailing original non-system messages if a guardrail returned
+	// fewer user/assistant messages than provided.
+	for nextNonSystem < len(nonSystemOriginal) {
+		coreMessages = append(coreMessages, nonSystemOriginal[nextNonSystem])
+		nextNonSystem++
+	}
+
 	result := *req
 	result.Messages = coreMessages
 	return &result

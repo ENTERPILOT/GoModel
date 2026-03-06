@@ -1957,6 +1957,158 @@ func TestConvertToAnthropicRequest_RejectsInputAudio(t *testing.T) {
 	}
 }
 
+func TestConvertToAnthropicRequest_MultimodalRemoteImageContent(t *testing.T) {
+	req := &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{
+						Type: "image_url",
+						ImageURL: &core.ImageURLContent{
+							URL:       "https://example.com/image.png",
+							MediaType: "image/png",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := convertToAnthropicRequest(req)
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+	if len(result.Messages) != 1 {
+		t.Fatalf("len(Messages) = %d, want 1", len(result.Messages))
+	}
+
+	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
+	if !ok {
+		t.Fatalf("message content type = %T, want []anthropicContentBlock", result.Messages[0].Content)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	if blocks[0].Type != "image" || blocks[0].Source == nil {
+		t.Fatalf("unexpected image block: %+v", blocks[0])
+	}
+	if blocks[0].Source.Type != "url" || blocks[0].Source.Data != "https://example.com/image.png" || blocks[0].Source.MediaType != "image/png" {
+		t.Fatalf("unexpected image source: %+v", blocks[0].Source)
+	}
+}
+
+func TestConvertToAnthropicRequest_RejectsRemoteImageWithoutMediaType(t *testing.T) {
+	req := &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{
+						Type: "image_url",
+						ImageURL: &core.ImageURLContent{
+							URL: "https://example.com/image.png",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := convertToAnthropicRequest(req)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "media_type") {
+		t.Fatalf("expected media_type error, got %v", err)
+	}
+}
+
+func TestConvertToAnthropicRequest_RejectsUnsupportedImageMediaType(t *testing.T) {
+	req := &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{
+						Type: "image_url",
+						ImageURL: &core.ImageURLContent{
+							URL:       "https://example.com/image.svg",
+							MediaType: "image/svg+xml",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := convertToAnthropicRequest(req)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("expected unsupported media_type error, got %v", err)
+	}
+}
+
+func TestConvertResponsesRequestToAnthropic_RejectsInvalidInputItems(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []interface{}
+	}{
+		{
+			name: "non-object item",
+			input: []interface{}{
+				"bad-item",
+			},
+		},
+		{
+			name: "missing role",
+			input: []interface{}{
+				map[string]interface{}{
+					"content": []interface{}{
+						map[string]interface{}{
+							"type": "input_text",
+							"text": "hello",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "invalid content",
+			input: []interface{}{
+				map[string]interface{}{
+					"role": "user",
+					"content": []interface{}{
+						map[string]interface{}{
+							"type": "unknown",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+				Model: "claude-sonnet-4-5-20250929",
+				Input: tt.input,
+			})
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "invalid responses input item") {
+				t.Fatalf("expected invalid responses input item error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestEmbeddings_ReturnsUnsupportedError(t *testing.T) {
 	p := &Provider{}
 	_, err := p.Embeddings(context.Background(), &core.EmbeddingRequest{

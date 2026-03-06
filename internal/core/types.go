@@ -50,8 +50,12 @@ type Message struct {
 	Role string `json:"role"`
 	// Content accepts either a plain string or an array of ContentPart values.
 	// This preserves OpenAI-compatible multimodal chat payloads.
-	Content   any        `json:"content"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	Content any `json:"content"`
+	//nolint:govet // Intentional duplicate json tag for Swagger docs: content is string OR []ContentPart.
+	// ContentSchema documents that `content` accepts either a plain string
+	// or an array of ContentPart values.
+	ContentSchema []ContentPart `json:"content,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"`
+	ToolCalls     []ToolCall    `json:"tool_calls,omitempty"`
 }
 
 // ToolCall represents a single tool invocation emitted by a model.

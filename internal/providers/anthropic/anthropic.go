@@ -34,6 +34,13 @@ const (
 	anthropicAPIVersion = "2023-06-01"
 )
 
+var allowedAnthropicImageMediaTypes = map[string]struct{}{
+	"image/jpeg": {},
+	"image/png":  {},
+	"image/gif":  {},
+	"image/webp": {},
+}
+
 // Provider implements the core.Provider interface for Anthropic
 type Provider struct {
 	client *llmclient.Client
@@ -721,24 +728,30 @@ func convertResponsesRequestToAnthropic(req *core.ResponsesRequest) (*anthropicR
 			Content: input,
 		})
 	case []interface{}:
-		for _, item := range input {
-			if msgMap, ok := item.(map[string]interface{}); ok {
-				role, _ := msgMap["role"].(string)
-				content, ok := providers.ConvertResponsesContentToChatContent(msgMap["content"])
-				if role == "" || !ok {
-					continue
-				}
-				anthropicContent, err := convertMessageContentToAnthropic(content)
-				if err != nil {
-					return nil, err
-				}
-				if role != "" {
-					anthropicReq.Messages = append(anthropicReq.Messages, anthropicMessage{
-						Role:    role,
-						Content: anthropicContent,
-					})
-				}
+		for i, item := range input {
+			msgMap, ok := item.(map[string]interface{})
+			if !ok {
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: expected object", i), nil)
 			}
+
+			role, _ := msgMap["role"].(string)
+			if strings.TrimSpace(role) == "" {
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", i), nil)
+			}
+
+			content, ok := providers.ConvertResponsesContentToChatContent(msgMap["content"])
+			if !ok {
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: unsupported content", i), nil)
+			}
+
+			anthropicContent, err := convertMessageContentToAnthropic(content)
+			if err != nil {
+				return nil, err
+			}
+			anthropicReq.Messages = append(anthropicReq.Messages, anthropicMessage{
+				Role:    role,
+				Content: anthropicContent,
+			})
 		}
 	}
 
@@ -787,7 +800,7 @@ func convertMessageContentToAnthropic(content any) (any, error) {
 			if part.ImageURL == nil || part.ImageURL.URL == "" {
 				return nil, core.NewInvalidRequestError("anthropic image content requires image_url.url", nil)
 			}
-			source, err := anthropicImageSource(part.ImageURL.URL)
+			source, err := anthropicImageSource(part.ImageURL.URL, part.ImageURL.MediaType)
 			if err != nil {
 				return nil, err
 			}
@@ -807,36 +820,64 @@ func convertMessageContentToAnthropic(content any) (any, error) {
 	return blocks, nil
 }
 
-func anthropicImageSource(raw string) (*anthropicContentSource, error) {
-	if !strings.HasPrefix(raw, "data:") {
-		return nil, core.NewInvalidRequestError("anthropic chat only supports image data URLs in content parts", nil)
+func anthropicImageSource(raw, mediaTypeHint string) (*anthropicContentSource, error) {
+	if strings.HasPrefix(raw, "data:") {
+		comma := strings.IndexByte(raw, ',')
+		if comma < 0 {
+			return nil, core.NewInvalidRequestError("invalid anthropic image data URL", nil)
+		}
+
+		meta := raw[len("data:"):comma]
+		if !strings.Contains(meta, ";base64") {
+			return nil, core.NewInvalidRequestError("anthropic image data URL must be base64-encoded", nil)
+		}
+
+		mediaType := strings.TrimSuffix(meta, ";base64")
+		if mediaType == "" {
+			mediaType = strings.TrimSpace(mediaTypeHint)
+		}
+		if mediaType == "" {
+			return nil, core.NewInvalidRequestError("anthropic image data URL is missing a media type", nil)
+		}
+		if !isAllowedAnthropicImageMediaType(mediaType) {
+			return nil, core.NewInvalidRequestError("anthropic image media type is not supported: "+mediaType, nil)
+		}
+
+		data := raw[comma+1:]
+		if data == "" {
+			return nil, core.NewInvalidRequestError("anthropic image data URL is missing image data", nil)
+		}
+
+		return &anthropicContentSource{
+			Type:      "base64",
+			MediaType: mediaType,
+			Data:      data,
+		}, nil
 	}
 
-	comma := strings.IndexByte(raw, ',')
-	if comma < 0 {
-		return nil, core.NewInvalidRequestError("invalid anthropic image data URL", nil)
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return nil, core.NewInvalidRequestError("anthropic chat image_url must be a data: URL or http/https URL", nil)
 	}
 
-	meta := raw[len("data:"):comma]
-	if !strings.Contains(meta, ";base64") {
-		return nil, core.NewInvalidRequestError("anthropic image data URL must be base64-encoded", nil)
-	}
-
-	mediaType := strings.TrimSuffix(meta, ";base64")
+	mediaType := strings.TrimSpace(mediaTypeHint)
 	if mediaType == "" {
-		return nil, core.NewInvalidRequestError("anthropic image data URL is missing a media type", nil)
+		return nil, core.NewInvalidRequestError("anthropic remote image URLs require image_url.media_type", nil)
 	}
-
-	data := raw[comma+1:]
-	if data == "" {
-		return nil, core.NewInvalidRequestError("anthropic image data URL is missing image data", nil)
+	if !isAllowedAnthropicImageMediaType(mediaType) {
+		return nil, core.NewInvalidRequestError("anthropic image media type is not supported: "+mediaType, nil)
 	}
 
 	return &anthropicContentSource{
-		Type:      "base64",
+		Type:      "url",
 		MediaType: mediaType,
-		Data:      data,
+		Data:      raw,
 	}, nil
+}
+
+func isAllowedAnthropicImageMediaType(mediaType string) bool {
+	_, ok := allowedAnthropicImageMediaTypes[strings.ToLower(strings.TrimSpace(mediaType))]
+	return ok
 }
 
 // extractTextContent returns the text from the last "text" content block.

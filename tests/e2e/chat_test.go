@@ -69,6 +69,8 @@ func TestChatCompletion(t *testing.T) {
 	})
 
 	t.Run("multimodal content array", func(t *testing.T) {
+		mockServer.ResetRequests()
+
 		payload := core.ChatRequest{
 			Model: "gpt-4",
 			Messages: []core.Message{
@@ -95,6 +97,21 @@ func TestChatCompletion(t *testing.T) {
 		var chatResp core.ChatResponse
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&chatResp))
 		assert.Contains(t, chatResp.Choices[0].Message.Content, "What is in this image?")
+
+		recorded := mockServer.Requests()
+		require.Len(t, recorded, 1)
+		require.Equal(t, "/chat/completions", recorded[0].Path)
+
+		var upstreamReq core.ChatRequest
+		require.NoError(t, json.Unmarshal(recorded[0].Body, &upstreamReq))
+		require.Len(t, upstreamReq.Messages, 1)
+
+		parts, ok := upstreamReq.Messages[0].Content.([]core.ContentPart)
+		require.True(t, ok, "expected upstream content to preserve multimodal array")
+		require.Len(t, parts, 2)
+		require.Equal(t, "image_url", parts[1].Type)
+		require.NotNil(t, parts[1].ImageURL)
+		assert.Equal(t, "https://example.com/image.png", parts[1].ImageURL.URL)
 	})
 }
 

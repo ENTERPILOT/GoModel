@@ -414,6 +414,30 @@ func (m *MockLLMServer) URL() string {
 	return m.server.URL
 }
 
+// Requests returns a copy of recorded upstream requests.
+func (m *MockLLMServer) Requests() []RecordedRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	out := make([]RecordedRequest, len(m.requests))
+	for i, req := range m.requests {
+		out[i] = RecordedRequest{
+			Method:  req.Method,
+			Path:    req.Path,
+			Headers: req.Headers.Clone(),
+			Body:    append([]byte(nil), req.Body...),
+		}
+	}
+	return out
+}
+
+// ResetRequests clears recorded upstream requests.
+func (m *MockLLMServer) ResetRequests() {
+	m.mu.Lock()
+	m.requests = m.requests[:0]
+	m.mu.Unlock()
+}
+
 // Close shuts down the mock server.
 func (m *MockLLMServer) Close() {
 	m.server.Close()

@@ -17,8 +17,9 @@ type ContentPart struct {
 
 // ImageURLContent contains an image reference for image_url parts.
 type ImageURLContent struct {
-	URL    string `json:"url"`
-	Detail string `json:"detail,omitempty"`
+	URL       string `json:"url"`
+	Detail    string `json:"detail,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
 }
 
 // InputAudioContent contains inline audio payload metadata.
@@ -231,8 +232,9 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 		return ContentPart{
 			Type: "image_url",
 			ImageURL: &ImageURLContent{
-				URL:    part.ImageURL.URL,
-				Detail: part.ImageURL.Detail,
+				URL:       part.ImageURL.URL,
+				Detail:    part.ImageURL.Detail,
+				MediaType: part.ImageURL.MediaType,
 			},
 		}, nil
 	case "input_audio":
@@ -279,8 +281,9 @@ func normalizeContentPartMap(partMap map[string]interface{}) (ContentPart, error
 		return ContentPart{
 			Type: "image_url",
 			ImageURL: &ImageURLContent{
-				URL:    imageURL.URL,
-				Detail: imageURL.Detail,
+				URL:       imageURL.URL,
+				Detail:    imageURL.Detail,
+				MediaType: imageURL.MediaType,
 			},
 		}, nil
 	case "input_audio":
@@ -362,8 +365,9 @@ func parseImageURLValue(value any) (*ImageURLContent, bool) {
 			return nil, false
 		}
 		return &ImageURLContent{
-			URL:    v["url"],
-			Detail: v["detail"],
+			URL:       v["url"],
+			Detail:    v["detail"],
+			MediaType: v["media_type"],
 		}, true
 	case map[string]interface{}:
 		url, _ := v["url"].(string)
@@ -371,9 +375,11 @@ func parseImageURLValue(value any) (*ImageURLContent, bool) {
 			return nil, false
 		}
 		detail, _ := v["detail"].(string)
+		mediaType, _ := v["media_type"].(string)
 		return &ImageURLContent{
-			URL:    url,
-			Detail: detail,
+			URL:       url,
+			Detail:    detail,
+			MediaType: mediaType,
 		}, true
 	default:
 		return nil, false

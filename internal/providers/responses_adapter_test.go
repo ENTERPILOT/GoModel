@@ -304,6 +304,25 @@ func TestConvertResponsesContentToChatContent(t *testing.T) {
 			ok:    false,
 		},
 		{
+			name: "array with unknown part type",
+			input: []interface{}{
+				map[string]interface{}{
+					"type": "unknown_part",
+				},
+			},
+			ok: false,
+		},
+		{
+			name: "array with malformed image part",
+			input: []interface{}{
+				map[string]interface{}{
+					"type":      "input_image",
+					"image_url": map[string]interface{}{},
+				},
+			},
+			ok: false,
+		},
+		{
 			name: "array with multimodal parts",
 			input: []interface{}{
 				map[string]interface{}{
