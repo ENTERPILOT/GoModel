@@ -14,9 +14,27 @@ pricing.
 
 ## Enterpilot
 
-[Enterpilot](https://enterpilot.io) is a commercial product that uses GOModel at
-its core. It adds enterprise features — team management, advanced analytics,
-compliance tooling — on top of the open-source gateway.
+[Enterpilot](https://enterpilot.io) is a commercial AI access and traffic
+management platform for teams — think [Dust.tt](https://dust.tt) but with full
+control over routing, budgets, and data privacy.
+
+GOModel powers the gateway layer inside Enterpilot, but Enterpilot is a much
+broader product:
+
+- **Chat interface** — a provider-independent chat UI where teams can talk to
+  GPT, Claude, Gemini, and other models without needing personal accounts.
+  Conversation history is stored on your own infrastructure.
+- **API interface** — a single API endpoint that routes to any supported model,
+  with per-user and per-team budget controls.
+- **Security and data protection** — PII anonymization, data redaction, and
+  locally-run guard models to prevent sensitive data from leaving your network.
+- **Cost management** — hard traffic limits, per-team budgets, and easy
+  model-switching as cheaper alternatives become available.
+- **Observability** — full visibility into requests, prompts, and responses,
+  with integrations for Datadog and Prometheus.
+- **Deployment flexibility** — SaaS, on-premises, or bring-your-own-cloud.
+
+Upcoming integrations include Slack, Microsoft Teams, and SSO support.
 
 Revenue from Enterpilot is what funds continued development of GOModel. This is a
 deliberate choice: the gateway stays open, the business builds on top.
