@@ -1,7 +1,7 @@
 {
   "choices": [
     {
-      "finish_reason": "end_turn",
+      "finish_reason": "stop",
       "index": 0,
       "message": {
         "content": "To solve for x in the equation x + 5 = 12, I need to isolate x.\n\nI'll subtract 5 from both sides:\nx + 5 = 12\nx + 5 - 5 = 12 - 5\nx = 7\n\nLet me verify: 7 + 5 = 12 ✓\n\nTherefore, x = 7.",

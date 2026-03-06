@@ -77,6 +77,9 @@ func TestChatCompletion(t *testing.T) {
 				if resp.Choices[0].Message.Content != "Hello! How can I help you today?" {
 					t.Errorf("Message content = %q, want %q", resp.Choices[0].Message.Content, "Hello! How can I help you today?")
 				}
+				if resp.Choices[0].FinishReason != "stop" {
+					t.Errorf("FinishReason = %q, want %q", resp.Choices[0].FinishReason, "stop")
+				}
 				if resp.Usage.PromptTokens != 10 {
 					t.Errorf("PromptTokens = %d, want 10", resp.Usage.PromptTokens)
 				}
@@ -230,6 +233,23 @@ data: {"type":"message_stop"}
 				if !strings.Contains(responseStr, "[DONE]") {
 					t.Error("response should end with [DONE]")
 				}
+
+				chunks := parseChatCompletionChunks(t, respBody)
+				if len(chunks) == 0 {
+					t.Fatal("expected chat completion chunks")
+				}
+
+				choices, ok := chunks[len(chunks)-1]["choices"].([]interface{})
+				if !ok || len(choices) != 1 {
+					t.Fatalf("expected 1 choice in final chunk, got %#v", chunks[len(chunks)-1]["choices"])
+				}
+				choice, ok := choices[0].(map[string]interface{})
+				if !ok {
+					t.Fatalf("expected map choice, got %#v", choices[0])
+				}
+				if choice["finish_reason"] != "stop" {
+					t.Errorf("final finish_reason = %#v, want %q", choice["finish_reason"], "stop")
+				}
 			},
 		},
 		{
@@ -301,6 +321,178 @@ data: {"type":"message_stop"}
 				}
 			}
 		})
+	}
+}
+
+func TestStreamChatCompletion_WithToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_123","name":"get_weather","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"location\":\"Par"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"is\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":2}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "What's the weather in Paris?"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	respBody, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+	_ = body.Close()
+
+	chunks := parseChatCompletionChunks(t, respBody)
+	if len(chunks) != 4 {
+		t.Fatalf("len(chunks) = %d, want 4", len(chunks))
+	}
+
+	firstChoices, ok := chunks[0]["choices"].([]interface{})
+	if !ok || len(firstChoices) != 1 {
+		t.Fatalf("expected 1 choice in first chunk, got %#v", chunks[0]["choices"])
+	}
+	firstChoice := firstChoices[0].(map[string]interface{})
+	firstDelta := firstChoice["delta"].(map[string]interface{})
+	firstToolCalls := firstDelta["tool_calls"].([]interface{})
+	firstToolCall := firstToolCalls[0].(map[string]interface{})
+	firstFunction := firstToolCall["function"].(map[string]interface{})
+
+	if firstToolCall["id"] != "toolu_123" {
+		t.Errorf("tool call id = %#v, want %q", firstToolCall["id"], "toolu_123")
+	}
+	if firstToolCall["index"] != float64(0) {
+		t.Errorf("tool call index = %#v, want 0", firstToolCall["index"])
+	}
+	if firstFunction["name"] != "get_weather" {
+		t.Errorf("tool call name = %#v, want %q", firstFunction["name"], "get_weather")
+	}
+	if firstFunction["arguments"] != "" {
+		t.Errorf("initial tool call arguments = %#v, want empty string", firstFunction["arguments"])
+	}
+
+	secondChoices := chunks[1]["choices"].([]interface{})
+	secondChoice := secondChoices[0].(map[string]interface{})
+	secondDelta := secondChoice["delta"].(map[string]interface{})
+	secondToolCall := secondDelta["tool_calls"].([]interface{})[0].(map[string]interface{})
+	secondFunction := secondToolCall["function"].(map[string]interface{})
+	if secondFunction["arguments"] != "{\"location\":\"Par" {
+		t.Errorf("first arguments delta = %#v, want %q", secondFunction["arguments"], "{\"location\":\"Par")
+	}
+
+	thirdChoices := chunks[2]["choices"].([]interface{})
+	thirdChoice := thirdChoices[0].(map[string]interface{})
+	thirdDelta := thirdChoice["delta"].(map[string]interface{})
+	thirdToolCall := thirdDelta["tool_calls"].([]interface{})[0].(map[string]interface{})
+	thirdFunction := thirdToolCall["function"].(map[string]interface{})
+	if thirdFunction["arguments"] != "is\"}" {
+		t.Errorf("second arguments delta = %#v, want %q", thirdFunction["arguments"], "is\"}")
+	}
+
+	finalChoices := chunks[3]["choices"].([]interface{})
+	finalChoice := finalChoices[0].(map[string]interface{})
+	if finalChoice["finish_reason"] != "tool_calls" {
+		t.Errorf("final finish_reason = %#v, want %q", finalChoice["finish_reason"], "tool_calls")
+	}
+}
+
+func TestStreamChatCompletion_WithToolCallsEmptyInput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_abc","name":"ping","input":{}}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "call ping"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	respBody, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+	_ = body.Close()
+
+	chunks := parseChatCompletionChunks(t, respBody)
+	if len(chunks) != 3 {
+		t.Fatalf("len(chunks) = %d, want 3", len(chunks))
+	}
+
+	startChoices := chunks[0]["choices"].([]interface{})
+	startChoice := startChoices[0].(map[string]interface{})
+	startDelta := startChoice["delta"].(map[string]interface{})
+	startToolCall := startDelta["tool_calls"].([]interface{})[0].(map[string]interface{})
+	startFunction := startToolCall["function"].(map[string]interface{})
+	if startFunction["name"] != "ping" {
+		t.Errorf("tool call name = %#v, want %q", startFunction["name"], "ping")
+	}
+	if startFunction["arguments"] != "" {
+		t.Errorf("initial tool arguments = %#v, want empty string", startFunction["arguments"])
+	}
+
+	stopChoices := chunks[1]["choices"].([]interface{})
+	stopChoice := stopChoices[0].(map[string]interface{})
+	stopDelta := stopChoice["delta"].(map[string]interface{})
+	stopToolCall := stopDelta["tool_calls"].([]interface{})[0].(map[string]interface{})
+	stopFunction := stopToolCall["function"].(map[string]interface{})
+	if stopFunction["arguments"] != "{}" {
+		t.Errorf("final tool arguments delta = %#v, want %q", stopFunction["arguments"], "{}")
+	}
+
+	finalChoices := chunks[2]["choices"].([]interface{})
+	finalChoice := finalChoices[0].(map[string]interface{})
+	if finalChoice["finish_reason"] != "tool_calls" {
+		t.Errorf("final finish_reason = %#v, want %q", finalChoice["finish_reason"], "tool_calls")
 	}
 }
 
@@ -601,8 +793,8 @@ func TestConvertFromAnthropicResponse(t *testing.T) {
 	if result.Choices[0].Message.Role != "assistant" {
 		t.Errorf("Message role = %q, want %q", result.Choices[0].Message.Role, "assistant")
 	}
-	if result.Choices[0].FinishReason != "end_turn" {
-		t.Errorf("FinishReason = %q, want %q", result.Choices[0].FinishReason, "end_turn")
+	if result.Choices[0].FinishReason != "stop" {
+		t.Errorf("FinishReason = %q, want %q", result.Choices[0].FinishReason, "stop")
 	}
 	if result.Usage.PromptTokens != 10 {
 		t.Errorf("PromptTokens = %d, want 10", result.Usage.PromptTokens)
@@ -612,6 +804,71 @@ func TestConvertFromAnthropicResponse(t *testing.T) {
 	}
 	if result.Usage.TotalTokens != 30 {
 		t.Errorf("TotalTokens = %d, want 30", result.Usage.TotalTokens)
+	}
+}
+
+func TestConvertFromAnthropicResponse_WithToolCalls(t *testing.T) {
+	resp := &anthropicResponse{
+		ID:    "msg_tool",
+		Type:  "message",
+		Role:  "assistant",
+		Model: "claude-sonnet-4-5-20250929",
+		Content: []anthropicContent{
+			{Type: "text", Text: "I'll check that for you."},
+			{
+				Type:  "tool_use",
+				ID:    "toolu_123",
+				Name:  "get_weather",
+				Input: json.RawMessage(`{"location":"Paris"}`),
+			},
+		},
+		StopReason: "tool_use",
+		Usage: anthropicUsage{
+			InputTokens:  10,
+			OutputTokens: 20,
+		},
+	}
+
+	result := convertFromAnthropicResponse(resp)
+
+	if len(result.Choices) != 1 {
+		t.Fatalf("len(Choices) = %d, want 1", len(result.Choices))
+	}
+	if result.Choices[0].FinishReason != "tool_calls" {
+		t.Errorf("FinishReason = %q, want %q", result.Choices[0].FinishReason, "tool_calls")
+	}
+	if len(result.Choices[0].Message.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(result.Choices[0].Message.ToolCalls))
+	}
+	if result.Choices[0].Message.ToolCalls[0].Function.Name != "get_weather" {
+		t.Errorf("Function.Name = %q, want %q", result.Choices[0].Message.ToolCalls[0].Function.Name, "get_weather")
+	}
+	if result.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"location":"Paris"}` {
+		t.Errorf("Function.Arguments = %q, want %q", result.Choices[0].Message.ToolCalls[0].Function.Arguments, `{"location":"Paris"}`)
+	}
+}
+
+func TestMapAnthropicStopReasonToOpenAI(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		output string
+	}{
+		{name: "empty defaults to stop", input: "", output: "stop"},
+		{name: "end turn maps to stop", input: "end_turn", output: "stop"},
+		{name: "stop sequence maps to stop", input: "stop_sequence", output: "stop"},
+		{name: "tool use maps to tool calls", input: "tool_use", output: "tool_calls"},
+		{name: "max tokens maps to length", input: "max_tokens", output: "length"},
+		{name: "context window maps to length", input: "model_context_window_exceeded", output: "length"},
+		{name: "unknown reason passes through", input: "pause_turn", output: "pause_turn"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mapAnthropicStopReasonToOpenAI(tt.input); got != tt.output {
+				t.Errorf("mapAnthropicStopReasonToOpenAI(%q) = %q, want %q", tt.input, got, tt.output)
+			}
+		})
 	}
 }
 
@@ -836,6 +1093,31 @@ func TestExtractTextContent(t *testing.T) {
 			}
 		})
 	}
+}
+
+func parseChatCompletionChunks(t *testing.T, raw []byte) []map[string]interface{} {
+	t.Helper()
+
+	lines := strings.Split(string(raw), "\n")
+	chunks := make([]map[string]interface{}, 0)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		payload := strings.TrimPrefix(line, "data: ")
+		if payload == "[DONE]" {
+			continue
+		}
+
+		var chunk map[string]interface{}
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			t.Fatalf("failed to decode chat chunk %q: %v", payload, err)
+		}
+		chunks = append(chunks, chunk)
+	}
+	return chunks
 }
 
 func TestResponses(t *testing.T) {
@@ -1472,18 +1754,18 @@ func TestConvertAnthropicResponseToResponses_WithThinkingBlocks(t *testing.T) {
 
 func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 	tests := []struct {
-		name                string
-		model               string
-		reasoning           *core.Reasoning
-		maxTokens           *int
-		setTemperature      bool
-		setTemperatureOne   bool
-		expectedThinkType   string
-		expectedBudget      int
-		expectedEffort      string
-		expectedMaxTokens   int
-		expectNilTemp       bool
-		expectedTemp        *float64
+		name              string
+		model             string
+		reasoning         *core.Reasoning
+		maxTokens         *int
+		setTemperature    bool
+		setTemperatureOne bool
+		expectedThinkType string
+		expectedBudget    int
+		expectedEffort    string
+		expectedMaxTokens int
+		expectNilTemp     bool
+		expectedTemp      *float64
 	}{
 		{
 			name:              "reasoning nil - no thinking",
@@ -1561,16 +1843,16 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			expectNilTemp:     true,
 		},
 		{
-			name:                "legacy model - preserves temperature=1.0 with reasoning",
-			model:               "claude-3-5-sonnet-20241022",
-			reasoning:           &core.Reasoning{Effort: "medium"},
-			maxTokens:           intPtr(15000),
-			setTemperatureOne:   true,
-			expectedThinkType:   "enabled",
-			expectedBudget:      10000,
-			expectedMaxTokens:   15000,
-			expectNilTemp:       false,
-			expectedTemp:        float64Ptr(1.0),
+			name:              "legacy model - preserves temperature=1.0 with reasoning",
+			model:             "claude-3-5-sonnet-20241022",
+			reasoning:         &core.Reasoning{Effort: "medium"},
+			maxTokens:         intPtr(15000),
+			setTemperatureOne: true,
+			expectedThinkType: "enabled",
+			expectedBudget:    10000,
+			expectedMaxTokens: 15000,
+			expectNilTemp:     false,
+			expectedTemp:      float64Ptr(1.0),
 		},
 		{
 			name:              "4.6 model - adaptive thinking with high effort",

@@ -1,7 +1,7 @@
 {
   "choices": [
     {
-      "finish_reason": "tool_use",
+      "finish_reason": "tool_calls",
       "index": 0,
       "message": {
         "content": "I'll check the current weather in Paris for you.",

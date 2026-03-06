@@ -20,7 +20,7 @@
       "choices": [
         {
           "delta": {},
-          "finish_reason": "end_turn",
+          "finish_reason": "stop",
           "index": 0
         }
       ],

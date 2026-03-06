@@ -32,7 +32,7 @@ func TestAnthropicReplayChatCompletion(t *testing.T) {
 	}{
 		{name: "basic", fixturePath: "anthropic/messages.json"},
 		{name: "with-params", fixturePath: "anthropic/messages_with_params.json"},
-		{name: "with-tools", fixturePath: "anthropic/messages_with_tools.json", finishReason: "tool_use"},
+		{name: "with-tools", fixturePath: "anthropic/messages_with_tools.json", finishReason: "tool_calls"},
 		{name: "extended-thinking", fixturePath: "anthropic/messages_extended_thinking.json"},
 		{name: "multi-turn", fixturePath: "anthropic/messages_multi_turn.json"},
 		{name: "multimodal", fixturePath: "anthropic/messages_multimodal.json"},

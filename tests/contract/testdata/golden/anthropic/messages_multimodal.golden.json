@@ -1,7 +1,7 @@
 {
   "choices": [
     {
-      "finish_reason": "end_turn",
+      "finish_reason": "stop",
       "index": 0,
       "message": {
         "content": "In this Google logo, I can see four main colors:\n\n1. **Blue** - used for the \"G\", \"g\", and \"l\"\n2. **Red** - used for the first \"o\" and \"e\"\n3. **Yellow** - used for the second \"o\"\n4. **Green** - used for the \"l\"\n\nThese are Google's signature brand colors that they use consistently across their logo and branding materials.",
