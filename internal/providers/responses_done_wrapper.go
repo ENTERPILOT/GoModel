@@ -135,12 +135,8 @@ func (w *responsesDoneWrapper) processLine(line []byte) {
 	}
 
 	if bytes.HasPrefix(line, responsesDataPrefix) {
-		payload := line[len(responsesDataPrefix):]
-		for _, pattern := range responsesCompletionPatterns {
-			if bytes.Contains(payload, pattern) {
-				w.eventCompletedCandidate = true
-				break
-			}
+		if isCompletedDataLine(line) {
+			w.eventCompletedCandidate = true
 		}
 	}
 
@@ -154,6 +150,10 @@ func (w *responsesDoneWrapper) synthesizeDoneSuffix() []byte {
 
 	if w.eventCompletedCandidate && len(w.lineBuf) == 0 {
 		return append([]byte{'\n'}, responsesDoneMarker...)
+	}
+
+	if isCompletedDataLine(w.lineBuf) {
+		return append([]byte("\n\n"), responsesDoneMarker...)
 	}
 
 	if !w.completedEventReadyForDone {
@@ -182,4 +182,20 @@ func isDoneLinePrefix(line []byte) bool {
 	}
 
 	return bytes.Equal(line, responsesDoneLine[:len(line)])
+}
+
+func isCompletedDataLine(line []byte) bool {
+	line = bytes.TrimSuffix(line, []byte("\r"))
+	if !bytes.HasPrefix(line, responsesDataPrefix) {
+		return false
+	}
+
+	payload := line[len(responsesDataPrefix):]
+	for _, pattern := range responsesCompletionPatterns {
+		if bytes.Contains(payload, pattern) {
+			return true
+		}
+	}
+
+	return false
 }

@@ -57,6 +57,21 @@ func TestEnsureResponsesDone_InsertsEventSeparatorBeforeDoneMarker(t *testing.T)
 	}
 }
 
+func TestEnsureResponsesDone_HandlesCompletedDataLineAtEOFWithoutTrailingNewline(t *testing.T) {
+	stream := io.NopCloser(strings.NewReader("event: response.completed\ndata: {\"type\":\"response.completed\"}"))
+
+	data, err := io.ReadAll(EnsureResponsesDone(stream))
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+
+	got := string(data)
+	want := "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n"
+	if got != want {
+		t.Fatalf("expected EOF-terminated completed line to still get a done marker, got %q", got)
+	}
+}
+
 func TestEnsureResponsesDone_PreservesExistingDoneMarker(t *testing.T) {
 	stream := io.NopCloser(strings.NewReader("event: response.completed\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n"))
 
