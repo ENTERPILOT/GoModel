@@ -395,7 +395,7 @@ data: {"type":"message_stop"}
 		}
 		function, _ := toolCall["function"].(map[string]interface{})
 
-		if toolCall["id"] == "toolu_123" && function["name"] == "lookup_weather" && function["arguments"] == "" {
+		if toolCall["id"] == "toolu_123" && function["name"] == "lookup_weather" && function["arguments"] == "{}" {
 			foundToolStart = true
 		}
 		if function["arguments"] == "{\"city\":\"War" || function["arguments"] == "saw\"}" {
@@ -1678,7 +1678,7 @@ data: {"type":"message_stop"}
 			}
 		case "response.output_item.added":
 			item, _ := event.Payload["item"].(map[string]interface{})
-			if item["type"] == "function_call" && item["call_id"] == "toolu_123" && item["name"] == "lookup_weather" && event.Payload["output_index"] == float64(1) {
+			if item["type"] == "function_call" && item["call_id"] == "toolu_123" && item["name"] == "lookup_weather" && item["arguments"] == "{}" && event.Payload["output_index"] == float64(1) {
 				foundAdded = true
 			}
 		case "response.function_call_arguments.delta":
@@ -1711,6 +1711,81 @@ data: {"type":"message_stop"}
 	}
 	if !foundItemDone {
 		t.Fatal("expected response.output_item.done for function_call")
+	}
+}
+
+func TestStreamResponses_WithEmptyToolArguments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_123","name":"lookup_weather","input":{}}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":10,"output_tokens":4}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "What's the weather?",
+		Tools: []map[string]any{
+			{
+				"type": "function",
+				"function": map[string]any{
+					"name": "lookup_weather",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	events := parseTestSSEEvents(t, string(raw))
+	foundAdded := false
+	foundDone := false
+
+	for _, event := range events {
+		if event.Done {
+			continue
+		}
+		switch event.Name {
+		case "response.output_item.added":
+			item, _ := event.Payload["item"].(map[string]interface{})
+			if item["type"] == "function_call" && item["arguments"] == "{}" {
+				foundAdded = true
+			}
+		case "response.function_call_arguments.done":
+			if event.Payload["arguments"] == "{}" {
+				foundDone = true
+			}
+		}
+	}
+
+	if !foundAdded {
+		t.Fatal("expected response.output_item.added with {} arguments")
+	}
+	if !foundDone {
+		t.Fatal("expected response.function_call_arguments.done with {} arguments")
 	}
 }
 

@@ -79,6 +79,53 @@ data: [DONE]
 	}
 }
 
+func TestOpenAIResponsesStreamConverter_WithTextBeforeToolCall(t *testing.T) {
+	mockStream := `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"test-model","choices":[{"index":0,"delta":{"content":"I'll check that for you."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_123","type":"function","function":{"name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+
+	reader := io.NopCloser(strings.NewReader(mockStream))
+	converter := NewOpenAIResponsesStreamConverter(reader, "test-model", "groq")
+
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("failed to read from converter: %v", err)
+	}
+
+	events := parseResponsesConverterTestEvents(t, string(raw))
+	foundTextDelta := false
+	foundToolAddedAtIndexOne := false
+
+	for _, event := range events {
+		if event.Done {
+			continue
+		}
+		switch event.Name {
+		case "response.output_text.delta":
+			if event.Payload["delta"] == "I'll check that for you." {
+				foundTextDelta = true
+			}
+		case "response.output_item.added":
+			item, _ := event.Payload["item"].(map[string]interface{})
+			if item["type"] == "function_call" && item["call_id"] == "call_123" && event.Payload["output_index"] == float64(1) {
+				foundToolAddedAtIndexOne = true
+			}
+		}
+	}
+
+	if !foundTextDelta {
+		t.Fatal("expected response.output_text.delta for assistant preamble")
+	}
+	if !foundToolAddedAtIndexOne {
+		t.Fatal("expected function_call output_index to be 1 after assistant text")
+	}
+}
+
 func parseResponsesConverterTestEvents(t *testing.T, raw string) []testSSEEvent {
 	t.Helper()
 

@@ -659,10 +659,11 @@ type streamConverter struct {
 }
 
 type streamToolCallState struct {
-	ID        string
-	Name      string
-	Arguments strings.Builder
-	Index     int
+	ID                string
+	Name              string
+	Arguments         strings.Builder
+	Index             int
+	PlaceholderObject bool
 }
 
 func newStreamConverter(body io.ReadCloser, model string) *streamConverter {
@@ -751,7 +752,7 @@ func extractInitialToolArguments(input json.RawMessage) string {
 	}
 
 	trimmed := strings.TrimSpace(string(input))
-	if trimmed == "" || trimmed == "{}" || trimmed == "null" {
+	if trimmed == "" || trimmed == "null" {
 		return ""
 	}
 
@@ -831,6 +832,7 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 			sc.nextToolCallIndex++
 
 			initialArguments := extractInitialToolArguments(event.ContentBlock.Input)
+			state.PlaceholderObject = initialArguments == "{}"
 			if initialArguments != "" {
 				_, _ = state.Arguments.WriteString(initialArguments)
 			}
@@ -871,6 +873,10 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 			state := sc.toolCalls[event.Index]
 			if state == nil {
 				return ""
+			}
+			if state.PlaceholderObject {
+				state.Arguments = strings.Builder{}
+				state.PlaceholderObject = false
 			}
 			_, _ = state.Arguments.WriteString(event.Delta.PartialJSON)
 			return sc.formatChatChunk(map[string]any{
@@ -1521,12 +1527,13 @@ type responsesStreamConverter struct {
 }
 
 type responsesToolCallState struct {
-	ID          string
-	CallID      string
-	Name        string
-	OutputIndex int
-	Arguments   strings.Builder
-	Completed   bool
+	ID                string
+	CallID            string
+	Name              string
+	OutputIndex       int
+	Arguments         strings.Builder
+	Completed         bool
+	PlaceholderObject bool
 }
 
 func newResponsesStreamConverter(body io.ReadCloser, model string) *responsesStreamConverter {
@@ -1669,6 +1676,7 @@ func (sc *responsesStreamConverter) newResponsesToolCallState(contentBlock *anth
 	sc.nextOutputIndex++
 
 	initialArguments := extractInitialToolArguments(contentBlock.Input)
+	state.PlaceholderObject = initialArguments == "{}"
 	if initialArguments != "" {
 		_, _ = state.Arguments.WriteString(initialArguments)
 	}
@@ -1749,6 +1757,10 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 			state := sc.toolCalls[event.Index]
 			if state == nil {
 				return ""
+			}
+			if state.PlaceholderObject {
+				state.Arguments = strings.Builder{}
+				state.PlaceholderObject = false
 			}
 			_, _ = state.Arguments.WriteString(event.Delta.PartialJSON)
 			return sc.writeResponsesEvent("response.function_call_arguments.delta", map[string]any{

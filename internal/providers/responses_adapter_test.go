@@ -228,6 +228,56 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 			},
 		},
 		{
+			name: "array input merges assistant message and function call items",
+			input: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: []interface{}{
+					map[string]interface{}{
+						"type":   "message",
+						"role":   "assistant",
+						"status": "completed",
+						"content": []map[string]interface{}{
+							{
+								"type": "output_text",
+								"text": "I'll check that for you.",
+							},
+						},
+					},
+					map[string]interface{}{
+						"type":      "function_call",
+						"call_id":   "call_123",
+						"name":      "lookup_weather",
+						"arguments": `{"city":"Warsaw"}`,
+					},
+					map[string]interface{}{
+						"type":    "function_call_output",
+						"call_id": "call_123",
+						"output":  map[string]interface{}{"temperature_c": 21},
+					},
+				},
+			},
+			checkFn: func(t *testing.T, req *core.ChatRequest) {
+				if len(req.Messages) != 2 {
+					t.Fatalf("len(Messages) = %d, want 2", len(req.Messages))
+				}
+				if req.Messages[0].Role != "assistant" {
+					t.Fatalf("Messages[0].Role = %q, want assistant", req.Messages[0].Role)
+				}
+				if req.Messages[0].Content != "I'll check that for you." {
+					t.Fatalf("Messages[0].Content = %q, want assistant preamble", req.Messages[0].Content)
+				}
+				if len(req.Messages[0].ToolCalls) != 1 {
+					t.Fatalf("len(Messages[0].ToolCalls) = %d, want 1", len(req.Messages[0].ToolCalls))
+				}
+				if req.Messages[0].ToolCalls[0].ID != "call_123" {
+					t.Fatalf("Messages[0].ToolCalls[0].ID = %q, want call_123", req.Messages[0].ToolCalls[0].ID)
+				}
+				if req.Messages[1].Role != "tool" || req.Messages[1].ToolCallID != "call_123" {
+					t.Fatalf("Messages[1] = %+v, want tool result for call_123", req.Messages[1])
+				}
+			},
+		},
+		{
 			name: "array input with []map[string]any",
 			input: &core.ResponsesRequest{
 				Model: "test-model",

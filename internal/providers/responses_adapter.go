@@ -77,11 +77,45 @@ func ConvertResponsesInputToMessages(input interface{}) []core.Message {
 
 func convertResponsesInputItems(items []interface{}) []core.Message {
 	messages := make([]core.Message, 0, len(items))
+	var pendingAssistant *core.Message
+
+	flushPendingAssistant := func() {
+		if pendingAssistant == nil {
+			return
+		}
+		messages = append(messages, *pendingAssistant)
+		pendingAssistant = nil
+	}
+
 	for _, item := range items {
 		if msg, ok := convertResponsesInputItem(item); ok {
+			if msg.Role == "assistant" {
+				if pendingAssistant == nil {
+					assistant := core.Message{
+						Role:       "assistant",
+						Content:    msg.Content,
+						ToolCallID: msg.ToolCallID,
+					}
+					if len(msg.ToolCalls) > 0 {
+						assistant.ToolCalls = append([]core.ToolCall(nil), msg.ToolCalls...)
+					}
+					pendingAssistant = &assistant
+				} else {
+					if msg.Content != "" {
+						pendingAssistant.Content += msg.Content
+					}
+					if len(msg.ToolCalls) > 0 {
+						pendingAssistant.ToolCalls = append(pendingAssistant.ToolCalls, msg.ToolCalls...)
+					}
+				}
+				continue
+			}
+
+			flushPendingAssistant()
 			messages = append(messages, msg)
 		}
 	}
+	flushPendingAssistant()
 	return messages
 }
 
@@ -180,6 +214,14 @@ func ExtractContentFromInput(content interface{}) string {
 		for _, part := range c {
 			if part.Text != "" {
 				texts = append(texts, part.Text)
+			}
+		}
+		return strings.Join(texts, " ")
+	case []map[string]any:
+		var texts []string
+		for _, part := range c {
+			if text, ok := part["text"].(string); ok {
+				texts = append(texts, text)
 			}
 		}
 		return strings.Join(texts, " ")

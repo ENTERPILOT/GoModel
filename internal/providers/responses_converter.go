@@ -16,17 +16,18 @@ import (
 // and converts it to Responses API format.
 // Used by providers that have OpenAI-compatible streaming (Groq, Gemini, etc.)
 type OpenAIResponsesStreamConverter struct {
-	reader      io.ReadCloser
-	model       string
-	provider    string
-	responseID  string
-	toolCalls   map[int]*openAIResponsesToolCallState
-	buffer      []byte
-	lineBuffer  []byte
-	closed      bool
-	sentCreate  bool
-	sentDone    bool
-	cachedUsage map[string]interface{} // Stores usage from final chunk for inclusion in response.completed
+	reader                  io.ReadCloser
+	model                   string
+	provider                string
+	responseID              string
+	toolCalls               map[int]*openAIResponsesToolCallState
+	buffer                  []byte
+	lineBuffer              []byte
+	closed                  bool
+	sentCreate              bool
+	sentDone                bool
+	assistantOutputReserved bool
+	cachedUsage             map[string]interface{} // Stores usage from final chunk for inclusion in response.completed
 }
 
 type openAIResponsesToolCallState struct {
@@ -87,10 +88,26 @@ func (sc *OpenAIResponsesStreamConverter) renderToolCallItem(state *openAIRespon
 func (sc *OpenAIResponsesStreamConverter) ensureToolCallState(index int) *openAIResponsesToolCallState {
 	state := sc.toolCalls[index]
 	if state == nil {
-		state = &openAIResponsesToolCallState{OutputIndex: index}
+		outputIndex := index
+		if sc.assistantOutputReserved {
+			outputIndex++
+		}
+		state = &openAIResponsesToolCallState{OutputIndex: outputIndex}
 		sc.toolCalls[index] = state
 	}
 	return state
+}
+
+func (sc *OpenAIResponsesStreamConverter) reserveAssistantOutput() {
+	if sc.assistantOutputReserved {
+		return
+	}
+	sc.assistantOutputReserved = true
+	for _, state := range sc.toolCalls {
+		if state != nil && !state.Started {
+			state.OutputIndex++
+		}
+	}
 }
 
 func (sc *OpenAIResponsesStreamConverter) startToolCall(state *openAIResponsesToolCallState) string {
@@ -284,10 +301,8 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 				if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
 					if choice, ok := choices[0].(map[string]interface{}); ok {
 						if delta, ok := choice["delta"].(map[string]interface{}); ok {
-							if toolCalls, ok := delta["tool_calls"].([]interface{}); ok && len(toolCalls) > 0 {
-								sc.buffer = append(sc.buffer, []byte(sc.handleToolCallDeltas(toolCalls))...)
-							}
 							if content, ok := delta["content"].(string); ok && content != "" {
+								sc.reserveAssistantOutput()
 								deltaEvent := map[string]interface{}{
 									"type":  "response.output_text.delta",
 									"delta": content,
@@ -298,6 +313,9 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 									continue
 								}
 								sc.buffer = append(sc.buffer, []byte(fmt.Sprintf("event: response.output_text.delta\ndata: %s\n\n", jsonData))...)
+							}
+							if toolCalls, ok := delta["tool_calls"].([]interface{}); ok && len(toolCalls) > 0 {
+								sc.buffer = append(sc.buffer, []byte(sc.handleToolCallDeltas(toolCalls))...)
 							}
 						}
 						if finishReason, _ := choice["finish_reason"].(string); finishReason == "tool_calls" {
