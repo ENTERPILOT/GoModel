@@ -319,6 +319,11 @@
         "sequence_number": 11,
         "type": "response.completed"
       }
+    },
+    {
+      "Done": true,
+      "Name": "",
+      "Payload": null
     }
   ],
   "text": "Hello, World!"
