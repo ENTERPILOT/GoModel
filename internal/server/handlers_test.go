@@ -55,8 +55,10 @@ type delayedChunkReadCloser struct {
 }
 
 type delayedChunk struct {
-	data  []byte
-	delay time.Duration
+	data    []byte
+	delay   time.Duration
+	started chan<- struct{}
+	release <-chan struct{}
 }
 
 func (r *delayedChunkReadCloser) Read(p []byte) (int, error) {
@@ -66,8 +68,15 @@ func (r *delayedChunkReadCloser) Read(p []byte) (int, error) {
 
 	chunk := r.chunks[r.index]
 	r.index++
+	if chunk.started != nil {
+		close(chunk.started)
+		r.chunks[r.index-1].started = nil
+	}
 	if chunk.delay > 0 {
 		time.Sleep(chunk.delay)
+	}
+	if chunk.release != nil {
+		<-chunk.release
 	}
 
 	return copy(p, chunk.data), nil
@@ -632,7 +641,8 @@ func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 }
 
 func TestChatCompletionStreaming_FlushesBeforeNextChunkArrives(t *testing.T) {
-	const secondChunkDelay = 250 * time.Millisecond
+	secondChunkStarted := make(chan struct{})
+	releaseSecondChunk := make(chan struct{})
 
 	provider := &streamingProviderWithCustomReader{
 		mockProvider: mockProvider{
@@ -641,7 +651,11 @@ func TestChatCompletionStreaming_FlushesBeforeNextChunkArrives(t *testing.T) {
 		reader: &delayedChunkReadCloser{
 			chunks: []delayedChunk{
 				{data: []byte("data: {\"id\":\"1\"}\n\n")},
-				{data: []byte("data: [DONE]\n\n"), delay: secondChunkDelay},
+				{
+					data:    []byte("data: [DONE]\n\n"),
+					started: secondChunkStarted,
+					release: releaseSecondChunk,
+				},
 			},
 		},
 	}
@@ -666,19 +680,45 @@ func TestChatCompletionStreaming_FlushesBeforeNextChunkArrives(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	start := time.Now()
-	buf := make([]byte, 64)
-	n, err := resp.Body.Read(buf)
-	if err != nil {
-		t.Fatalf("read first chunk: %v", err)
-	}
-	elapsed := time.Since(start)
+	readResult := make(chan struct {
+		n   int
+		err error
+		buf []byte
+	}, 1)
+	go func() {
+		buf := make([]byte, 64)
+		n, err := resp.Body.Read(buf)
+		readResult <- struct {
+			n   int
+			err error
+			buf []byte
+		}{n: n, err: err, buf: buf}
+	}()
 
-	if elapsed >= secondChunkDelay/2 {
-		t.Fatalf("first chunk arrived too late: got %v, want < %v", elapsed, secondChunkDelay/2)
+	select {
+	case <-secondChunkStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for server to start reading the delayed second chunk")
 	}
 
-	firstChunk := string(buf[:n])
+	var result struct {
+		n   int
+		err error
+		buf []byte
+	}
+	select {
+	case result = <-readResult:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first chunk to reach the client before releasing the second chunk")
+	}
+
+	close(releaseSecondChunk)
+
+	if result.err != nil {
+		t.Fatalf("read first chunk: %v", result.err)
+	}
+
+	firstChunk := string(result.buf[:result.n])
 	if !strings.Contains(firstChunk, `"id":"1"`) {
 		t.Fatalf("expected first streamed chunk before delayed tail, got %q", firstChunk)
 	}
