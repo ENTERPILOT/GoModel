@@ -10,12 +10,82 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
 	"gomodel/internal/core"
 	"gomodel/internal/usage"
 )
+
+type chunkedReadCloser struct {
+	chunks [][]byte
+	index  int
+}
+
+func (r *chunkedReadCloser) Read(p []byte) (int, error) {
+	if r.index >= len(r.chunks) {
+		return 0, io.EOF
+	}
+
+	n := copy(p, r.chunks[r.index])
+	r.index++
+	return n, nil
+}
+
+func (r *chunkedReadCloser) Close() error {
+	return nil
+}
+
+type flushCountingRecorder struct {
+	*httptest.ResponseRecorder
+	flushes int
+}
+
+func (r *flushCountingRecorder) Flush() {
+	r.flushes++
+	r.ResponseRecorder.Flush()
+}
+
+type delayedChunkReadCloser struct {
+	chunks []delayedChunk
+	index  int
+}
+
+type delayedChunk struct {
+	data  []byte
+	delay time.Duration
+}
+
+func (r *delayedChunkReadCloser) Read(p []byte) (int, error) {
+	if r.index >= len(r.chunks) {
+		return 0, io.EOF
+	}
+
+	chunk := r.chunks[r.index]
+	r.index++
+	if chunk.delay > 0 {
+		time.Sleep(chunk.delay)
+	}
+
+	return copy(p, chunk.data), nil
+}
+
+func (r *delayedChunkReadCloser) Close() error {
+	return nil
+}
+
+type streamingProviderWithCustomReader struct {
+	mockProvider
+	reader io.ReadCloser
+}
+
+func (p *streamingProviderWithCustomReader) StreamChatCompletion(_ context.Context, _ *core.ChatRequest) (io.ReadCloser, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.reader, nil
+}
 
 // mockProvider implements core.RoutableProvider for testing
 type mockProvider struct {
@@ -405,6 +475,95 @@ data: [DONE]
 	}
 	if !strings.Contains(body, "[DONE]") {
 		t.Errorf("response should contain [DONE], got: %s", body)
+	}
+}
+
+func TestHandleStreamingResponse_FlushesEachChunk(t *testing.T) {
+	e := echo.New()
+	handler := NewHandler(&mockProvider{}, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	rec := &flushCountingRecorder{ResponseRecorder: httptest.NewRecorder()}
+	c := e.NewContext(req, rec)
+
+	stream := &chunkedReadCloser{
+		chunks: [][]byte{
+			[]byte("data: {\"id\":\"1\"}\n\n"),
+			[]byte("data: {\"id\":\"2\"}\n\n"),
+			[]byte("data: [DONE]\n\n"),
+		},
+	}
+
+	err := handler.handleStreamingResponse(c, "gpt-4o-mini", "openai", func() (io.ReadCloser, error) {
+		return stream, nil
+	})
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	if rec.flushes != 4 {
+		t.Fatalf("expected 4 flushes (headers + 3 chunks), got %d", rec.flushes)
+	}
+
+	if got := rec.Body.String(); got != "data: {\"id\":\"1\"}\n\ndata: {\"id\":\"2\"}\n\ndata: [DONE]\n\n" {
+		t.Fatalf("unexpected body %q", got)
+	}
+}
+
+func TestChatCompletionStreaming_FlushesBeforeNextChunkArrives(t *testing.T) {
+	const secondChunkDelay = 250 * time.Millisecond
+
+	provider := &streamingProviderWithCustomReader{
+		mockProvider: mockProvider{
+			supportedModels: []string{"gpt-4o-mini"},
+		},
+		reader: &delayedChunkReadCloser{
+			chunks: []delayedChunk{
+				{data: []byte("data: {\"id\":\"1\"}\n\n")},
+				{data: []byte("data: [DONE]\n\n"), delay: secondChunkDelay},
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+	e.POST("/v1/chat/completions", handler.ChatCompletion)
+
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	reqBody := `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	start := time.Now()
+	buf := make([]byte, 64)
+	n, err := resp.Body.Read(buf)
+	if err != nil {
+		t.Fatalf("read first chunk: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	if elapsed >= secondChunkDelay/2 {
+		t.Fatalf("first chunk arrived too late: got %v, want < %v", elapsed, secondChunkDelay/2)
+	}
+
+	firstChunk := string(buf[:n])
+	if !strings.Contains(firstChunk, `"id":"1"`) {
+		t.Fatalf("expected first streamed chunk before delayed tail, got %q", firstChunk)
 	}
 }
 

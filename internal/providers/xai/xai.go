@@ -129,11 +129,16 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 
 // StreamResponses returns a raw response body for streaming Responses API (caller must close)
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	return p.client.DoStream(ctx, llmclient.Request{
+	stream, err := p.client.DoStream(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/responses",
 		Body:     req.WithStreaming(),
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	return providers.EnsureResponsesDone(stream), nil
 }
 
 // Embeddings sends an embeddings request to xAI
