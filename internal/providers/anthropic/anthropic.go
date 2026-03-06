@@ -566,6 +566,9 @@ func (sc *streamConverter) Close() error {
 }
 
 func (sc *streamConverter) mapStreamStopReason(reason string) string {
+	// Preserve raw "tool_use" when we never emitted tool_calls deltas.
+	// This avoids signaling OpenAI-style "tool_calls" in malformed/partial
+	// streams where no callable payload reached the client.
 	if reason == "tool_use" && !sc.emittedToolCalls {
 		return reason
 	}
