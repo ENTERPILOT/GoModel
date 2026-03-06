@@ -8,10 +8,6 @@
     "navigation": {
         "pages": [
             {
-                "group": "About",
-                "pages": ["about/values", "about/technical-philosophy", "about/benchmarks"]
-            },
-            {
                 "group": "Getting Started",
                 "pages": ["getting-started/quickstart"]
             },
@@ -22,6 +18,10 @@
             {
                 "group": "Advanced",
                 "pages": ["advanced/configuration", "advanced/guardrails", "advanced/admin-endpoints"]
+            },
+            {
+                "group": "About",
+                "pages": ["about/values", "about/technical-philosophy", "about/benchmarks"]
             }
         ]
     }
