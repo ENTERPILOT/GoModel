@@ -4,18 +4,146 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
+	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 	"gomodel/internal/usage"
 )
+
+type chunkedReadCloser struct {
+	chunks [][]byte
+	index  int
+}
+
+func (r *chunkedReadCloser) Read(p []byte) (int, error) {
+	if r.index >= len(r.chunks) {
+		return 0, io.EOF
+	}
+
+	n := copy(p, r.chunks[r.index])
+	r.index++
+	return n, nil
+}
+
+func (r *chunkedReadCloser) Close() error {
+	return nil
+}
+
+type flushCountingRecorder struct {
+	*httptest.ResponseRecorder
+	flushes int
+}
+
+func (r *flushCountingRecorder) Flush() {
+	r.flushes++
+	r.ResponseRecorder.Flush()
+}
+
+type delayedChunkReadCloser struct {
+	chunks []delayedChunk
+	index  int
+}
+
+type delayedChunk struct {
+	data    []byte
+	delay   time.Duration
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (r *delayedChunkReadCloser) Read(p []byte) (int, error) {
+	if r.index >= len(r.chunks) {
+		return 0, io.EOF
+	}
+
+	chunk := r.chunks[r.index]
+	r.index++
+	if chunk.started != nil {
+		close(chunk.started)
+		r.chunks[r.index-1].started = nil
+	}
+	if chunk.delay > 0 {
+		time.Sleep(chunk.delay)
+	}
+	if chunk.release != nil {
+		<-chunk.release
+	}
+
+	return copy(p, chunk.data), nil
+}
+
+func (r *delayedChunkReadCloser) Close() error {
+	return nil
+}
+
+type streamingProviderWithCustomReader struct {
+	mockProvider
+	reader io.ReadCloser
+}
+
+func (p *streamingProviderWithCustomReader) StreamChatCompletion(_ context.Context, _ *core.ChatRequest) (io.ReadCloser, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.reader, nil
+}
+
+type erroringReadCloser struct {
+	data []byte
+	err  error
+	read bool
+}
+
+func (r *erroringReadCloser) Read(p []byte) (int, error) {
+	if r.read {
+		return 0, r.err
+	}
+	r.read = true
+	n := copy(p, r.data)
+	if r.err != nil {
+		return n, r.err
+	}
+	return n, io.EOF
+}
+
+func (r *erroringReadCloser) Close() error {
+	return nil
+}
+
+type capturingAuditLogger struct {
+	config  auditlog.Config
+	entries []*auditlog.LogEntry
+}
+
+func (l *capturingAuditLogger) Write(entry *auditlog.LogEntry) {
+	l.entries = append(l.entries, entry)
+}
+
+func (l *capturingAuditLogger) Config() auditlog.Config {
+	return l.config
+}
+
+func (l *capturingAuditLogger) Close() error {
+	return nil
+}
+
+type erroringWriter struct {
+	err error
+}
+
+func (w *erroringWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
 
 // mockProvider implements core.RoutableProvider for testing
 type mockProvider struct {
@@ -460,6 +588,194 @@ data: [DONE]
 	}
 	if !strings.Contains(body, "[DONE]") {
 		t.Errorf("response should contain [DONE], got: %s", body)
+	}
+}
+
+func TestHandleStreamingResponse_FlushesEachChunk(t *testing.T) {
+	e := echo.New()
+	handler := NewHandler(&mockProvider{}, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	rec := &flushCountingRecorder{ResponseRecorder: httptest.NewRecorder()}
+	c := e.NewContext(req, rec)
+
+	stream := &chunkedReadCloser{
+		chunks: [][]byte{
+			[]byte("data: {\"id\":\"1\"}\n\n"),
+			[]byte("data: {\"id\":\"2\"}\n\n"),
+			[]byte("data: [DONE]\n\n"),
+		},
+	}
+
+	err := handler.handleStreamingResponse(c, "gpt-4o-mini", "openai", func() (io.ReadCloser, error) {
+		return stream, nil
+	})
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	if rec.flushes != 4 {
+		t.Fatalf("expected 4 flushes (headers + 3 chunks), got %d", rec.flushes)
+	}
+
+	if got := rec.Body.String(); got != "data: {\"id\":\"1\"}\n\ndata: {\"id\":\"2\"}\n\ndata: [DONE]\n\n" {
+		t.Fatalf("unexpected body %q", got)
+	}
+}
+
+func TestFlushStream_ReturnsReadError(t *testing.T) {
+	expectedErr := errors.New("stream read failed")
+	stream := &erroringReadCloser{
+		data: []byte("data: {\"id\":\"1\"}\n\n"),
+		err:  expectedErr,
+	}
+
+	err := flushStream(io.Discard, stream)
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected read error %v, got %v", expectedErr, err)
+	}
+}
+
+func TestFlushStream_ReturnsWriteError(t *testing.T) {
+	expectedErr := errors.New("client write failed")
+	stream := io.NopCloser(strings.NewReader("data: {\"id\":\"1\"}\n\n"))
+
+	err := flushStream(&erroringWriter{err: expectedErr}, stream)
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected write error %v, got %v", expectedErr, err)
+	}
+}
+
+func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
+	expectedErr := errors.New("upstream stream failed")
+	logger := &capturingAuditLogger{
+		config: auditlog.Config{Enabled: true},
+	}
+
+	e := echo.New()
+	handler := NewHandler(&mockProvider{}, logger, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("X-Request-ID", "req-stream-1")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{
+		ID:        "entry-1",
+		Timestamp: time.Now(),
+		RequestID: "req-stream-1",
+		Method:    http.MethodPost,
+		Path:      "/v1/chat/completions",
+		Data:      &auditlog.LogData{},
+	})
+
+	err := handler.handleStreamingResponse(c, "gpt-4o-mini", "openai", func() (io.ReadCloser, error) {
+		return &erroringReadCloser{
+			data: []byte("data: {\"id\":\"1\"}\n\n"),
+			err:  expectedErr,
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	if len(logger.entries) != 1 {
+		t.Fatalf("expected 1 audit log entry, got %d", len(logger.entries))
+	}
+
+	entry := logger.entries[0]
+	if entry.ErrorType != "stream_error" {
+		t.Fatalf("expected stream_error, got %q", entry.ErrorType)
+	}
+	if entry.Data == nil || entry.Data.ErrorMessage != expectedErr.Error() {
+		t.Fatalf("expected error message %q, got %+v", expectedErr.Error(), entry.Data)
+	}
+}
+
+func TestChatCompletionStreaming_FlushesBeforeNextChunkArrives(t *testing.T) {
+	secondChunkStarted := make(chan struct{})
+	releaseSecondChunk := make(chan struct{})
+
+	provider := &streamingProviderWithCustomReader{
+		mockProvider: mockProvider{
+			supportedModels: []string{"gpt-4o-mini"},
+		},
+		reader: &delayedChunkReadCloser{
+			chunks: []delayedChunk{
+				{data: []byte("data: {\"id\":\"1\"}\n\n")},
+				{
+					data:    []byte("data: [DONE]\n\n"),
+					started: secondChunkStarted,
+					release: releaseSecondChunk,
+				},
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+	e.POST("/v1/chat/completions", handler.ChatCompletion)
+
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	reqBody := `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	readResult := make(chan struct {
+		n   int
+		err error
+		buf []byte
+	}, 1)
+	go func() {
+		buf := make([]byte, 64)
+		n, err := resp.Body.Read(buf)
+		readResult <- struct {
+			n   int
+			err error
+			buf []byte
+		}{n: n, err: err, buf: buf}
+	}()
+
+	select {
+	case <-secondChunkStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for server to start reading the delayed second chunk")
+	}
+
+	var result struct {
+		n   int
+		err error
+		buf []byte
+	}
+	select {
+	case result = <-readResult:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first chunk to reach the client before releasing the second chunk")
+	}
+
+	close(releaseSecondChunk)
+
+	if result.err != nil {
+		t.Fatalf("read first chunk: %v", result.err)
+	}
+
+	firstChunk := string(result.buf[:result.n])
+	if !strings.Contains(firstChunk, `"id":"1"`) {
+		t.Fatalf("expected first streamed chunk before delayed tail, got %q", firstChunk)
 	}
 }
 

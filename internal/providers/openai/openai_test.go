@@ -711,8 +711,6 @@ data: {"type":"response.output_text.delta","delta":"!"}
 
 event: response.completed
 data: {"type":"response.completed","response":{"id":"resp_123","object":"response","status":"completed","model":"gpt-4o"}}
-
-data: [DONE]
 `,
 			expectedError: false,
 			checkStream: func(t *testing.T, body io.ReadCloser) {

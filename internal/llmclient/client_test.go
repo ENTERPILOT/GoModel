@@ -218,6 +218,53 @@ func TestClient_Do_Retries(t *testing.T) {
 	}
 }
 
+func TestClient_Do_RetriesContinueAfterCircuitTrips(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := atomic.AddInt32(&attempts, 1)
+		if count < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"message":"temporary failure"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer server.Close()
+
+	config := DefaultConfig("test", server.URL)
+	config.Retry.MaxRetries = 2
+	config.Retry.InitialBackoff = 10 * time.Millisecond
+	config.Retry.MaxBackoff = 10 * time.Millisecond
+	config.Retry.BackoffFactor = 1
+	config.Retry.JitterFactor = 0
+	config.CircuitBreaker = goconfig.CircuitBreakerConfig{
+		FailureThreshold: 1,
+		SuccessThreshold: 1,
+		Timeout:          time.Minute,
+	}
+	client := New(config, nil)
+
+	var result struct {
+		Success bool `json:"success"`
+	}
+	err := client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, &result)
+
+	if err != nil {
+		t.Fatalf("expected retries to continue after circuit trips, got: %v", err)
+	}
+	if !result.Success {
+		t.Fatal("expected success response after retries")
+	}
+	if got := atomic.LoadInt32(&attempts); got != 3 {
+		t.Fatalf("expected request to use full retry budget after circuit trips, got %d attempts", got)
+	}
+}
+
 func TestClient_Do_RetriesExhausted(t *testing.T) {
 	var attempts int32
 
@@ -668,6 +715,82 @@ func TestCircuitBreaker_HalfOpenPreventsThunderingHerd(t *testing.T) {
 	// Most requests should be rejected by the circuit breaker
 	if rejections == 0 && successes == 10 {
 		t.Log("Warning: all requests succeeded, circuit breaker may not have been in half-open state")
+	}
+}
+
+func TestCircuitBreaker_HalfOpenProbeDoesNotRetry(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"temporary failure"}}`))
+	}))
+	defer server.Close()
+
+	config := DefaultConfig("test", server.URL)
+	config.Retry.MaxRetries = 2
+	config.Retry.InitialBackoff = 30 * time.Millisecond
+	config.Retry.MaxBackoff = 30 * time.Millisecond
+	config.Retry.BackoffFactor = 1
+	config.Retry.JitterFactor = 0
+	config.CircuitBreaker = goconfig.CircuitBreakerConfig{
+		FailureThreshold: 1,
+		SuccessThreshold: 1,
+		Timeout:          20 * time.Millisecond,
+	}
+	client := New(config, nil)
+
+	client.circuitBreaker.mu.Lock()
+	client.circuitBreaker.state = circuitOpen
+	client.circuitBreaker.failures = client.circuitBreaker.failureThreshold
+	client.circuitBreaker.successes = 0
+	client.circuitBreaker.lastFailure = time.Now().Add(-client.circuitBreaker.timeout - time.Millisecond)
+	client.circuitBreaker.halfOpenAllowed = true
+	client.circuitBreaker.mu.Unlock()
+
+	err := client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected provider error from half-open probe")
+	}
+
+	gatewayErr, ok := err.(*core.GatewayError)
+	if !ok {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, gatewayErr.StatusCode)
+	}
+	if strings.Contains(gatewayErr.Message, "circuit breaker is open") {
+		t.Fatalf("expected original upstream error, got circuit breaker error: %s", gatewayErr.Message)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("expected exactly 1 upstream attempt in half-open state, got %d", got)
+	}
+	if state := client.circuitBreaker.State(); state != "open" {
+		t.Fatalf("expected circuit to reopen after failed half-open probe, got %q", state)
+	}
+
+	err = client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected circuit breaker rejection after failed half-open probe")
+	}
+
+	gatewayErr, ok = err.(*core.GatewayError)
+	if !ok {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if !strings.Contains(gatewayErr.Message, "circuit breaker is open") {
+		t.Fatalf("expected circuit breaker error after failed half-open probe, got %s", gatewayErr.Message)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("expected follow-up request to be blocked without another upstream attempt, got %d attempts", got)
 	}
 }
 
