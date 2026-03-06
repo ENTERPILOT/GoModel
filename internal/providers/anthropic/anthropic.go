@@ -199,6 +199,7 @@ type anthropicContentSource struct {
 	Type      string `json:"type"`
 	MediaType string `json:"media_type,omitempty"`
 	Data      string `json:"data,omitempty"`
+	URL       string `json:"url,omitempty"`
 }
 
 // anthropicResponse represents the Anthropic API response format
@@ -722,6 +723,8 @@ func convertResponsesRequestToAnthropic(req *core.ResponsesRequest) (*anthropicR
 
 	// Convert input to messages
 	switch input := req.Input.(type) {
+	case nil:
+		return nil, core.NewInvalidRequestError("invalid responses input: unsupported type", nil)
 	case string:
 		anthropicReq.Messages = append(anthropicReq.Messages, anthropicMessage{
 			Role:    "user",
@@ -753,6 +756,8 @@ func convertResponsesRequestToAnthropic(req *core.ResponsesRequest) (*anthropicR
 				Content: anthropicContent,
 			})
 		}
+	default:
+		return nil, core.NewInvalidRequestError("invalid responses input: unsupported type", nil)
 	}
 
 	return anthropicReq, nil
@@ -860,18 +865,9 @@ func anthropicImageSource(raw, mediaTypeHint string) (*anthropicContentSource, e
 		return nil, core.NewInvalidRequestError("anthropic chat image_url must be a data: URL or http/https URL", nil)
 	}
 
-	mediaType := strings.TrimSpace(mediaTypeHint)
-	if mediaType == "" {
-		return nil, core.NewInvalidRequestError("anthropic remote image URLs require image_url.media_type", nil)
-	}
-	if !isAllowedAnthropicImageMediaType(mediaType) {
-		return nil, core.NewInvalidRequestError("anthropic image media type is not supported: "+mediaType, nil)
-	}
-
 	return &anthropicContentSource{
-		Type:      "url",
-		MediaType: mediaType,
-		Data:      raw,
+		Type: "url",
+		URL:  raw,
 	}, nil
 }
 

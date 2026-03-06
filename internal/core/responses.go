@@ -3,9 +3,11 @@ package core
 // ResponsesRequest represents the request body for the Responses API.
 // This is the OpenAI-compatible /v1/responses endpoint.
 type ResponsesRequest struct {
-	Model           string            `json:"model"`
-	Provider        string            `json:"provider,omitempty"`
-	Input           interface{}       `json:"input" swaggertype:"string" example:"Tell me a joke"` // string or []ResponsesInputItem — see docs for array form
+	Model    string      `json:"model"`
+	Provider string      `json:"provider,omitempty"`
+	Input    interface{} `json:"input"` // string or []ResponsesInputItem — see docs for array form
+	//nolint:govet // Intentional duplicate json tag for Swagger docs: input is string OR []ContentPart.
+	InputSchema     []ContentPart     `json:"input,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"`
 	Instructions    string            `json:"instructions,omitempty"`
 	Tools           []map[string]any  `json:"tools,omitempty"`
 	Temperature     *float64          `json:"temperature,omitempty"`

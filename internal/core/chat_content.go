@@ -33,7 +33,7 @@ type InputAudioContent struct {
 func UnmarshalMessageContent(data []byte) (any, error) {
 	trimmed := bytes.TrimSpace(data)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		return "", nil
+		return nil, nil
 	}
 
 	switch trimmed[0] {

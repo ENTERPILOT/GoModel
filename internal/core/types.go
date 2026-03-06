@@ -45,12 +45,15 @@ func (r *ChatRequest) WithStreaming() *ChatRequest {
 	}
 }
 
-// Message represents a single message in the chat
+// MessageContent stores message content as either text or structured parts.
+type MessageContent any
+
+// Message represents a single message in the chat.
 type Message struct {
 	Role string `json:"role"`
 	// Content accepts either a plain string or an array of ContentPart values.
 	// This preserves OpenAI-compatible multimodal chat payloads.
-	Content any `json:"content"`
+	Content MessageContent `json:"content"`
 	//nolint:govet // Intentional duplicate json tag for Swagger docs: content is string OR []ContentPart.
 	// ContentSchema documents that `content` accepts either a plain string
 	// or an array of ContentPart values.
@@ -91,9 +94,9 @@ type Choice struct {
 
 // ResponseMessage represents a single assistant message in a chat response.
 type ResponseMessage struct {
-	Role      string     `json:"role"`
-	Content   string     `json:"content"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	Role      string         `json:"role"`
+	Content   MessageContent `json:"content"`
+	ToolCalls []ToolCall     `json:"tool_calls,omitempty"`
 }
 
 // PromptTokensDetails holds extended input token breakdown (OpenAI/xAI).

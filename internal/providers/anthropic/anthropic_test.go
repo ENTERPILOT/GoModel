@@ -1994,12 +1994,15 @@ func TestConvertToAnthropicRequest_MultimodalRemoteImageContent(t *testing.T) {
 	if blocks[0].Type != "image" || blocks[0].Source == nil {
 		t.Fatalf("unexpected image block: %+v", blocks[0])
 	}
-	if blocks[0].Source.Type != "url" || blocks[0].Source.Data != "https://example.com/image.png" || blocks[0].Source.MediaType != "image/png" {
+	if blocks[0].Source.Type != "url" || blocks[0].Source.URL != "https://example.com/image.png" {
 		t.Fatalf("unexpected image source: %+v", blocks[0].Source)
+	}
+	if blocks[0].Source.Data != "" || blocks[0].Source.MediaType != "" {
+		t.Fatalf("expected url source without data/media_type, got %+v", blocks[0].Source)
 	}
 }
 
-func TestConvertToAnthropicRequest_RejectsRemoteImageWithoutMediaType(t *testing.T) {
+func TestConvertToAnthropicRequest_AllowsRemoteImageWithoutMediaType(t *testing.T) {
 	req := &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
 		Messages: []core.Message{
@@ -2017,16 +2020,23 @@ func TestConvertToAnthropicRequest_RejectsRemoteImageWithoutMediaType(t *testing
 		},
 	}
 
-	_, err := convertToAnthropicRequest(req)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	result, err := convertToAnthropicRequest(req)
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "media_type") {
-		t.Fatalf("expected media_type error, got %v", err)
+	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
+	if !ok || len(blocks) != 1 || blocks[0].Source == nil {
+		t.Fatalf("unexpected image block: %#v", result.Messages[0].Content)
+	}
+	if blocks[0].Source.Type != "url" || blocks[0].Source.URL != "https://example.com/image.png" {
+		t.Fatalf("unexpected image source: %+v", blocks[0].Source)
+	}
+	if blocks[0].Source.MediaType != "" {
+		t.Fatalf("expected media_type to be omitted for url source, got %+v", blocks[0].Source)
 	}
 }
 
-func TestConvertToAnthropicRequest_RejectsUnsupportedImageMediaType(t *testing.T) {
+func TestConvertToAnthropicRequest_IgnoresRemoteImageMediaTypeHint(t *testing.T) {
 	req := &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
 		Messages: []core.Message{
@@ -2045,12 +2055,19 @@ func TestConvertToAnthropicRequest_RejectsUnsupportedImageMediaType(t *testing.T
 		},
 	}
 
-	_, err := convertToAnthropicRequest(req)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	result, err := convertToAnthropicRequest(req)
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "not supported") {
-		t.Fatalf("expected unsupported media_type error, got %v", err)
+	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
+	if !ok || len(blocks) != 1 || blocks[0].Source == nil {
+		t.Fatalf("unexpected image block: %#v", result.Messages[0].Content)
+	}
+	if blocks[0].Source.Type != "url" || blocks[0].Source.URL != "https://example.com/image.svg" {
+		t.Fatalf("unexpected image source: %+v", blocks[0].Source)
+	}
+	if blocks[0].Source.MediaType != "" {
+		t.Fatalf("expected media_type to be omitted for url source, got %+v", blocks[0].Source)
 	}
 }
 
@@ -2106,6 +2123,19 @@ func TestConvertResponsesRequestToAnthropic_RejectsInvalidInputItems(t *testing.
 				t.Fatalf("expected invalid responses input item error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestConvertResponsesRequestToAnthropic_RejectsUnsupportedInputType(t *testing.T) {
+	_, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: 123,
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid responses input: unsupported type") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

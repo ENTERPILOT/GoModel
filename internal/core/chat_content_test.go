@@ -45,6 +45,16 @@ func TestMessageUnmarshalJSON_MultimodalContent(t *testing.T) {
 	}
 }
 
+func TestMessageUnmarshalJSON_NullContentPreservedAsNil(t *testing.T) {
+	var msg Message
+	if err := json.Unmarshal([]byte(`{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]}`), &msg); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if msg.Content != nil {
+		t.Fatalf("Content = %#v, want nil", msg.Content)
+	}
+}
+
 func TestMessageUnmarshalJSON_RejectsUnsupportedContentTypes(t *testing.T) {
 	tests := []string{
 		`{"role":"user","content":123}`,
@@ -96,5 +106,38 @@ func TestMessageMarshalJSON_PreservesNullContentForToolCalls(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"content":null`) {
 		t.Fatalf("expected content:null, got %s", string(body))
+	}
+}
+
+func TestResponseMessageMarshalJSON_PreservesNullContentForToolCalls(t *testing.T) {
+	body, err := json.Marshal(ResponseMessage{
+		Role:    "assistant",
+		Content: nil,
+		ToolCalls: []ToolCall{
+			{
+				ID:   "call_123",
+				Type: "function",
+				Function: FunctionCall{
+					Name:      "lookup",
+					Arguments: "{}",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(body), `"content":null`) {
+		t.Fatalf("expected content:null, got %s", string(body))
+	}
+}
+
+func TestResponseMessageUnmarshalJSON_PreservesNullContentForToolCalls(t *testing.T) {
+	var msg ResponseMessage
+	if err := json.Unmarshal([]byte(`{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]}`), &msg); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if msg.Content != nil {
+		t.Fatalf("Content = %#v, want nil", msg.Content)
 	}
 }

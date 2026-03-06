@@ -12,9 +12,10 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 	maxTokens := 1024
 
 	tests := []struct {
-		name    string
-		input   *core.ResponsesRequest
-		checkFn func(*testing.T, *core.ChatRequest)
+		name      string
+		input     *core.ResponsesRequest
+		expectErr bool
+		checkFn   func(*testing.T, *core.ChatRequest)
 	}{
 		{
 			name: "string input",
@@ -158,11 +159,51 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "array input with malformed item fails",
+			input: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: []interface{}{"bad-item"},
+			},
+			expectErr: true,
+		},
+		{
+			name: "array input with malformed content fails",
+			input: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: []interface{}{
+					map[string]interface{}{
+						"role": "user",
+						"content": []interface{}{
+							map[string]interface{}{"type": "unknown"},
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "unsupported input type fails",
+			input: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: 123,
+			},
+			expectErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ConvertResponsesRequestToChat(tt.input)
+			result, err := ConvertResponsesRequestToChat(tt.input)
+			if tt.expectErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			tt.checkFn(t, result)
 		})
 	}

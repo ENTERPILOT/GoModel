@@ -332,8 +332,9 @@ func applyMessagesToChat(req *core.ChatRequest, msgs []Message) *core.ChatReques
 	return &result
 }
 
-// applySystemMessagesToMultimodalChat applies only system-message updates from
-// guardrails while preserving original multimodal user/assistant content.
+// applySystemMessagesToMultimodalChat applies system-message updates and preserves
+// original content only for messages that contain non-text multimodal parts.
+// Text-only messages keep guardrail-rewritten text.
 func applySystemMessagesToMultimodalChat(req *core.ChatRequest, msgs []Message) *core.ChatRequest {
 	nonSystemOriginal := make([]core.Message, 0, len(req.Messages))
 	for _, original := range req.Messages {
@@ -352,7 +353,12 @@ func applySystemMessagesToMultimodalChat(req *core.ChatRequest, msgs []Message) 
 		if nextNonSystem >= len(nonSystemOriginal) {
 			continue
 		}
-		coreMessages = append(coreMessages, nonSystemOriginal[nextNonSystem])
+		original := nonSystemOriginal[nextNonSystem]
+		if core.HasNonTextContent(original.Content) {
+			coreMessages = append(coreMessages, original)
+		} else {
+			coreMessages = append(coreMessages, core.Message{Role: modified.Role, Content: modified.Content})
+		}
 		nextNonSystem++
 	}
 

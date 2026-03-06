@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 
@@ -19,7 +20,7 @@ type ChatProvider interface {
 }
 
 // ConvertResponsesRequestToChat converts a ResponsesRequest to a ChatRequest.
-func ConvertResponsesRequestToChat(req *core.ResponsesRequest) *core.ChatRequest {
+func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatRequest, error) {
 	chatReq := &core.ChatRequest{
 		Model:       req.Model,
 		Provider:    req.Provider,
@@ -48,21 +49,33 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) *core.ChatRequest
 			Content: input,
 		})
 	case []interface{}:
-		for _, item := range input {
-			if msgMap, ok := item.(map[string]interface{}); ok {
-				role, _ := msgMap["role"].(string)
-				content, ok := ConvertResponsesContentToChatContent(msgMap["content"])
-				if role != "" && ok {
-					chatReq.Messages = append(chatReq.Messages, core.Message{
-						Role:    role,
-						Content: content,
-					})
-				}
+		for i, item := range input {
+			msgMap, ok := item.(map[string]interface{})
+			if !ok {
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: expected object", i), nil)
 			}
+
+			role, _ := msgMap["role"].(string)
+			if strings.TrimSpace(role) == "" {
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", i), nil)
+			}
+
+			content, ok := ConvertResponsesContentToChatContent(msgMap["content"])
+			if !ok {
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: unsupported content", i), nil)
+			}
+			chatReq.Messages = append(chatReq.Messages, core.Message{
+				Role:    role,
+				Content: content,
+			})
 		}
+	case nil:
+		return nil, core.NewInvalidRequestError("invalid responses input: unsupported type", nil)
+	default:
+		return nil, core.NewInvalidRequestError("invalid responses input: unsupported type", nil)
 	}
 
-	return chatReq
+	return chatReq, nil
 }
 
 // ConvertResponsesContentToChatContent maps Responses input content to Chat content.
@@ -177,7 +190,7 @@ func extractResponsesInputAudio(value interface{}) (data string, format string, 
 func ConvertChatResponseToResponses(resp *core.ChatResponse) *core.ResponsesResponse {
 	content := ""
 	if len(resp.Choices) > 0 {
-		content = resp.Choices[0].Message.Content
+		content = core.ExtractTextContent(resp.Choices[0].Message.Content)
 	}
 
 	return &core.ResponsesResponse{
@@ -212,7 +225,10 @@ func ConvertChatResponseToResponses(resp *core.ChatResponse) *core.ResponsesResp
 
 // ResponsesViaChat implements the Responses API by converting to/from Chat format.
 func ResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	chatReq := ConvertResponsesRequestToChat(req)
+	chatReq, err := ConvertResponsesRequestToChat(req)
+	if err != nil {
+		return nil, err
+	}
 
 	chatResp, err := p.ChatCompletion(ctx, chatReq)
 	if err != nil {
@@ -224,7 +240,10 @@ func ResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRe
 
 // StreamResponsesViaChat implements streaming Responses API by converting to/from Chat format.
 func StreamResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRequest, providerName string) (io.ReadCloser, error) {
-	chatReq := ConvertResponsesRequestToChat(req)
+	chatReq, err := ConvertResponsesRequestToChat(req)
+	if err != nil {
+		return nil, err
+	}
 
 	stream, err := p.StreamChatCompletion(ctx, chatReq)
 	if err != nil {

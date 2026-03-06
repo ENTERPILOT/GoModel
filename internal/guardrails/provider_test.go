@@ -274,6 +274,59 @@ func TestGuardedProvider_ChatCompletion_PreservesNonTextMultimodalContentWhileAp
 	}
 }
 
+func TestGuardedProvider_ChatCompletion_MixedMultimodalAndTextPreservesTextRewrites(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	pipeline.Add(&mockGuardrail{
+		name: "rewrite-user-text",
+		processFn: func(_ context.Context, msgs []Message) ([]Message, error) {
+			out := make([]Message, len(msgs))
+			copy(out, msgs)
+			for i := range out {
+				if out[i].Role == "user" {
+					out[i].Content = out[i].Content + " [rewritten]"
+				}
+			}
+			return out, nil
+		},
+	}, 0)
+
+	guarded := NewGuardedProvider(inner, pipeline)
+
+	req := &core.ChatRequest{
+		Model: "gpt-4",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{Type: "text", Text: "describe"},
+					{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
+				},
+			},
+			{Role: "user", Content: "plain text"},
+		},
+	}
+
+	_, err := guarded.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if inner.chatReq == nil {
+		t.Fatal("inner provider was not called")
+	}
+	if len(inner.chatReq.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(inner.chatReq.Messages))
+	}
+	parts, ok := inner.chatReq.Messages[0].Content.([]core.ContentPart)
+	if !ok || len(parts) != 2 || parts[1].Type != "image_url" {
+		t.Fatalf("expected first message multimodal content preserved, got %#v", inner.chatReq.Messages[0].Content)
+	}
+	if got := core.ExtractTextContent(inner.chatReq.Messages[1].Content); got != "plain text [rewritten]" {
+		t.Fatalf("expected rewritten text-only message, got %q", got)
+	}
+}
+
 // --- Responses adapter integration tests ---
 
 func TestGuardedProvider_Responses_AppliesGuardrails(t *testing.T) {

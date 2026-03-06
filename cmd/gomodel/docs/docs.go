@@ -2307,9 +2307,7 @@ const docTemplate = `{
         "core.ResponseMessage": {
             "type": "object",
             "properties": {
-                "content": {
-                    "type": "string"
-                },
+                "content": {},
                 "role": {
                     "type": "string"
                 },
@@ -2378,9 +2376,11 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "input": {
-                    "description": "string or []ResponsesInputItem — see docs for array form",
-                    "type": "string",
-                    "example": "Tell me a joke"
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ContentPart"
+                    },
+                    "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"
                 },
                 "instructions": {
                     "type": "string"
