@@ -907,6 +907,174 @@ func TestConvertToAnthropicRequest_InvalidToolDefinition(t *testing.T) {
 	}
 }
 
+func TestConvertOpenAIToolsToAnthropic(t *testing.T) {
+	tests := []struct {
+		name      string
+		tools     []map[string]any
+		wantNil   bool
+		wantLen   int
+		checkFn   func(t *testing.T, tools []anthropicTool)
+		wantError bool
+	}{
+		{
+			name:    "nil tools returns nil",
+			tools:   nil,
+			wantNil: true,
+		},
+		{
+			name:    "empty tools returns nil",
+			tools:   []map[string]any{},
+			wantNil: true,
+		},
+		{
+			name: "valid function tool",
+			tools: []map[string]any{
+				{
+					"type": "function",
+					"function": map[string]any{
+						"name":        "lookup_weather",
+						"description": "Get weather for a city",
+						"parameters": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"city": map[string]any{"type": "string"},
+							},
+						},
+					},
+				},
+			},
+			wantLen: 1,
+			checkFn: func(t *testing.T, tools []anthropicTool) {
+				if tools[0].Name != "lookup_weather" {
+					t.Fatalf("Name = %q, want lookup_weather", tools[0].Name)
+				}
+				if tools[0].Description != "Get weather for a city" {
+					t.Fatalf("Description = %q, want tool description", tools[0].Description)
+				}
+				if schemaType, _ := tools[0].InputSchema["type"].(string); schemaType != "object" {
+					t.Fatalf("InputSchema.type = %q, want object", schemaType)
+				}
+			},
+		},
+		{
+			name: "missing parameters uses default object schema",
+			tools: []map[string]any{
+				{
+					"type": "function",
+					"function": map[string]any{
+						"name": "lookup_weather",
+					},
+				},
+			},
+			wantLen: 1,
+			checkFn: func(t *testing.T, tools []anthropicTool) {
+				if schemaType, _ := tools[0].InputSchema["type"].(string); schemaType != "object" {
+					t.Fatalf("InputSchema.type = %q, want object", schemaType)
+				}
+				if _, ok := tools[0].InputSchema["properties"].(map[string]any); !ok {
+					t.Fatalf("InputSchema.properties = %#v, want object map", tools[0].InputSchema["properties"])
+				}
+			},
+		},
+		{
+			name: "unsupported tool type returns error",
+			tools: []map[string]any{
+				{
+					"type": "web_search",
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "missing function object returns error",
+			tools: []map[string]any{
+				{
+					"type": "function",
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "empty function name returns error",
+			tools: []map[string]any{
+				{
+					"type": "function",
+					"function": map[string]any{
+						"name": "   ",
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "non object parameters returns error",
+			tools: []map[string]any{
+				{
+					"type": "function",
+					"function": map[string]any{
+						"name":       "lookup_weather",
+						"parameters": []any{"invalid"},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "non object schema type returns error",
+			tools: []map[string]any{
+				{
+					"type": "function",
+					"function": map[string]any{
+						"name": "lookup_weather",
+						"parameters": map[string]any{
+							"type": "array",
+						},
+					},
+				},
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := convertOpenAIToolsToAnthropic(tt.tools)
+			if tt.wantError {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				var gatewayErr *core.GatewayError
+				if !errors.As(err, &gatewayErr) {
+					t.Fatalf("error = %T, want *core.GatewayError", err)
+				}
+				if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+					t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
+				}
+				if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
+					t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("convertOpenAIToolsToAnthropic() error = %v, want nil", err)
+			}
+			if tt.wantNil {
+				if result != nil {
+					t.Fatalf("result = %#v, want nil", result)
+				}
+				return
+			}
+			if len(result) != tt.wantLen {
+				t.Fatalf("len(result) = %d, want %d", len(result), tt.wantLen)
+			}
+			if tt.checkFn != nil {
+				tt.checkFn(t, result)
+			}
+		})
+	}
+}
+
 func TestConvertToAnthropicRequest_InvalidToolChoice(t *testing.T) {
 	_, err := convertToAnthropicRequest(&core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",

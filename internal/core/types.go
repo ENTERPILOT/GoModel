@@ -39,19 +39,9 @@ type ChatRequest struct {
 // WithStreaming returns a shallow copy of the request with Stream set to true.
 // This avoids mutating the caller's request object.
 func (r *ChatRequest) WithStreaming() *ChatRequest {
-	return &ChatRequest{
-		Temperature:       r.Temperature,
-		MaxTokens:         r.MaxTokens,
-		Model:             r.Model,
-		Provider:          r.Provider,
-		Messages:          r.Messages,
-		Tools:             r.Tools,
-		ToolChoice:        r.ToolChoice,
-		ParallelToolCalls: r.ParallelToolCalls,
-		Stream:            true,
-		StreamOptions:     r.StreamOptions,
-		Reasoning:         r.Reasoning,
-	}
+	cp := *r
+	cp.Stream = true
+	return &cp
 }
 
 // Message represents a single message in the chat

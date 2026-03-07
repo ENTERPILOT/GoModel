@@ -4,7 +4,7 @@
 [![Docs](https://img.shields.io/badge/docs-gomodel-blue)](https://gomodel.enterpilot.io/docs)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/gaEB9BQSPH)
 
-A high-performance AI gateway written in Go, providing a unified OpenAI-compatible API for multiple AI model providers, full-observability and more. Chat and Responses APIs pass through OpenAI tool-calling fields including `tools`, `tool_choice`, `parallel_tool_calls`, message-level `tool_call_id`, and Responses `function_call` outputs.
+A high-performance AI gateway written in Go, providing a unified OpenAI-compatible API for multiple AI model providers, full-observability and more.
 
 ## Quick Start
 

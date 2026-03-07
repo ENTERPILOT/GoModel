@@ -21,21 +21,9 @@ type ResponsesRequest struct {
 // WithStreaming returns a shallow copy of the request with Stream set to true.
 // This avoids mutating the caller's request object.
 func (r *ResponsesRequest) WithStreaming() *ResponsesRequest {
-	return &ResponsesRequest{
-		Model:             r.Model,
-		Provider:          r.Provider,
-		Input:             r.Input,
-		Instructions:      r.Instructions,
-		Tools:             r.Tools,
-		ToolChoice:        r.ToolChoice,
-		ParallelToolCalls: r.ParallelToolCalls,
-		Temperature:       r.Temperature,
-		MaxOutputTokens:   r.MaxOutputTokens,
-		Stream:            true,
-		StreamOptions:     r.StreamOptions,
-		Metadata:          r.Metadata,
-		Reasoning:         r.Reasoning,
-	}
+	cp := *r
+	cp.Stream = true
+	return &cp
 }
 
 // ResponsesInputItem represents an input item when Input is an array.

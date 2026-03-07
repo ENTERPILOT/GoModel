@@ -287,6 +287,34 @@ func TestChatAdaptersPreserveContentNull(t *testing.T) {
 	}
 }
 
+func TestApplyMessagesToChat_ClearsContentNullWhenContentPresent(t *testing.T) {
+	msgs := []Message{
+		{
+			Role:        "assistant",
+			Content:     "I'll check that now.",
+			ContentNull: true,
+			ToolCalls: []core.ToolCall{
+				{
+					ID:   "call_123",
+					Type: "function",
+					Function: core.FunctionCall{
+						Name:      "lookup_weather",
+						Arguments: `{"city":"Warsaw"}`,
+					},
+				},
+			},
+		},
+	}
+
+	chatReq := applyMessagesToChat(&core.ChatRequest{}, msgs)
+	if chatReq.Messages[0].Content != "I'll check that now." {
+		t.Fatalf("Content = %q, want assistant text", chatReq.Messages[0].Content)
+	}
+	if chatReq.Messages[0].ContentNull {
+		t.Fatal("applyMessagesToChat should clear ContentNull when Content is present")
+	}
+}
+
 // --- Responses adapter integration tests ---
 
 func TestGuardedProvider_Responses_AppliesGuardrails(t *testing.T) {
