@@ -256,6 +256,37 @@ func TestChatAdaptersCloneToolCalls(t *testing.T) {
 	}
 }
 
+func TestChatAdaptersPreserveContentNull(t *testing.T) {
+	req := &core.ChatRequest{
+		Messages: []core.Message{
+			{
+				Role:        "assistant",
+				ContentNull: true,
+				ToolCalls: []core.ToolCall{
+					{
+						ID:   "call_123",
+						Type: "function",
+						Function: core.FunctionCall{
+							Name:      "lookup_weather",
+							Arguments: `{"city":"Warsaw"}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	msgs := chatToMessages(req)
+	if !msgs[0].ContentNull {
+		t.Fatal("chatToMessages should preserve ContentNull")
+	}
+
+	chatReq := applyMessagesToChat(&core.ChatRequest{}, msgs)
+	if !chatReq.Messages[0].ContentNull {
+		t.Fatal("applyMessagesToChat should preserve ContentNull")
+	}
+}
+
 // --- Responses adapter integration tests ---
 
 func TestGuardedProvider_Responses_AppliesGuardrails(t *testing.T) {

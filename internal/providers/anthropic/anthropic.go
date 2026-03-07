@@ -522,14 +522,19 @@ func buildAnthropicMessageContent(msg core.Message) (any, error) {
 		})
 	}
 	for _, toolCall := range msg.ToolCalls {
+		toolCallID := providers.ResponsesFunctionCallCallID(strings.TrimSpace(toolCall.ID))
+		toolName := strings.TrimSpace(toolCall.Function.Name)
+		if toolName == "" {
+			return nil, core.NewInvalidRequestError("tool_call.function.name is required", nil)
+		}
 		input, err := parseToolCallArguments(toolCall.Function.Arguments)
 		if err != nil {
 			return nil, err
 		}
 		blocks = append(blocks, anthropicMessageContentBlock{
 			Type:  "tool_use",
-			ID:    toolCall.ID,
-			Name:  toolCall.Function.Name,
+			ID:    toolCallID,
+			Name:  toolName,
 			Input: input,
 		})
 	}
@@ -870,7 +875,10 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 
 			initialArguments := extractInitialToolArguments(event.ContentBlock.Input)
 			state.PlaceholderObject = initialArguments == "{}"
-			if initialArguments != "" {
+			emittedArguments := initialArguments
+			if state.PlaceholderObject {
+				emittedArguments = ""
+			} else if initialArguments != "" {
 				_, _ = state.Arguments.WriteString(initialArguments)
 			}
 			sc.toolCalls[event.Index] = state
@@ -883,7 +891,7 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 						"type":  "function",
 						"function": map[string]any{
 							"name":      state.Name,
-							"arguments": initialArguments,
+							"arguments": emittedArguments,
 						},
 					},
 				},
@@ -1750,21 +1758,32 @@ func (sc *responsesStreamConverter) newResponsesToolCallState(contentBlock *anth
 
 	initialArguments := extractInitialToolArguments(contentBlock.Input)
 	state.PlaceholderObject = initialArguments == "{}"
-	if initialArguments != "" {
+	if initialArguments != "" && !state.PlaceholderObject {
 		_, _ = state.Arguments.WriteString(initialArguments)
 	}
 
 	return state
 }
 
-func (sc *responsesStreamConverter) renderResponsesToolCallItem(state *responsesToolCallState, status string) map[string]any {
+func (sc *responsesStreamConverter) toolCallArguments(state *responsesToolCallState) string {
+	if state.PlaceholderObject && state.Arguments.Len() == 0 {
+		return "{}"
+	}
+	return state.Arguments.String()
+}
+
+func (sc *responsesStreamConverter) renderResponsesToolCallItem(state *responsesToolCallState, status string, includePlaceholder bool) map[string]any {
+	arguments := state.Arguments.String()
+	if includePlaceholder {
+		arguments = sc.toolCallArguments(state)
+	}
 	item := map[string]any{
 		"id":        state.ID,
 		"type":      "function_call",
 		"status":    status,
 		"call_id":   state.CallID,
 		"name":      state.Name,
-		"arguments": state.Arguments.String(),
+		"arguments": arguments,
 	}
 	return item
 }
@@ -1797,7 +1816,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 			sc.toolCalls[event.Index] = state
 			return sc.writeResponsesEvent("response.output_item.added", map[string]any{
 				"type":         "response.output_item.added",
-				"item":         sc.renderResponsesToolCallItem(state, "in_progress"),
+				"item":         sc.renderResponsesToolCallItem(state, "in_progress", false),
 				"output_index": state.OutputIndex,
 			})
 		}
@@ -1855,10 +1874,10 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 			"type":         "response.function_call_arguments.done",
 			"item_id":      state.ID,
 			"output_index": state.OutputIndex,
-			"arguments":    state.Arguments.String(),
+			"arguments":    sc.toolCallArguments(state),
 		}) + sc.writeResponsesEvent("response.output_item.done", map[string]any{
 			"type":         "response.output_item.done",
-			"item":         sc.renderResponsesToolCallItem(state, "completed"),
+			"item":         sc.renderResponsesToolCallItem(state, "completed", true),
 			"output_index": state.OutputIndex,
 		})
 

@@ -314,10 +314,11 @@ func chatToMessages(req *core.ChatRequest) []Message {
 	msgs := make([]Message, len(req.Messages))
 	for i, m := range req.Messages {
 		msgs[i] = Message{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCalls:  cloneToolCalls(m.ToolCalls),
-			ToolCallID: m.ToolCallID,
+			Role:        m.Role,
+			Content:     m.Content,
+			ToolCalls:   cloneToolCalls(m.ToolCalls),
+			ToolCallID:  m.ToolCallID,
+			ContentNull: m.ContentNull,
 		}
 	}
 	return msgs
@@ -328,10 +329,11 @@ func applyMessagesToChat(req *core.ChatRequest, msgs []Message) *core.ChatReques
 	coreMessages := make([]core.Message, len(msgs))
 	for i, m := range msgs {
 		coreMessages[i] = core.Message{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCalls:  cloneToolCalls(m.ToolCalls),
-			ToolCallID: m.ToolCallID,
+			Role:        m.Role,
+			Content:     m.Content,
+			ToolCalls:   cloneToolCalls(m.ToolCalls),
+			ToolCallID:  m.ToolCallID,
+			ContentNull: m.ContentNull,
 		}
 	}
 	result := *req
