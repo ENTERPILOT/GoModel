@@ -395,7 +395,7 @@ data: {"type":"message_stop"}
 		}
 		function, _ := toolCall["function"].(map[string]interface{})
 
-		if toolCall["id"] == "toolu_123" && function["name"] == "lookup_weather" && function["arguments"] == "" {
+		if toolCall["id"] == "toolu_123" && function["name"] == "lookup_weather" && function["arguments"] == "{}" {
 			foundToolStart = true
 		}
 		if arguments, _ := function["arguments"].(string); arguments != "" && arguments != "{}" {
@@ -1216,6 +1216,45 @@ func TestConvertToAnthropicRequest_NormalizesToolCallIDAndName(t *testing.T) {
 	}
 }
 
+func TestConvertToAnthropicRequest_NormalizesToolResultID(t *testing.T) {
+	result, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "tool", ToolCallID: "  call_123  ", Content: `{"temperature_c":21}`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v, want nil", err)
+	}
+
+	blocks, ok := result.Messages[0].Content.([]anthropicMessageContentBlock)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("content = %#v, want one tool_result block", result.Messages[0].Content)
+	}
+	if blocks[0].ToolUseID != "call_123" {
+		t.Fatalf("ToolUseID = %q, want call_123", blocks[0].ToolUseID)
+	}
+}
+
+func TestParseToolCallArguments_UsesJSONNumber(t *testing.T) {
+	parsed, err := parseToolCallArguments(`{"value":9007199254740993}`)
+	if err != nil {
+		t.Fatalf("parseToolCallArguments() error = %v, want nil", err)
+	}
+
+	obj, ok := parsed.(map[string]any)
+	if !ok {
+		t.Fatalf("parsed = %T, want map[string]any", parsed)
+	}
+	num, ok := obj["value"].(json.Number)
+	if !ok {
+		t.Fatalf("value = %T, want json.Number", obj["value"])
+	}
+	if string(num) != "9007199254740993" {
+		t.Fatalf("value = %q, want exact integer string", string(num))
+	}
+}
+
 func TestConvertFromAnthropicResponse(t *testing.T) {
 	resp := &anthropicResponse{
 		ID:    "msg_123",
@@ -2027,7 +2066,7 @@ data: {"type":"message_stop"}
 			}
 		case "response.output_item.added":
 			item, _ := event.Payload["item"].(map[string]interface{})
-			if item["type"] == "function_call" && item["call_id"] == "toolu_123" && item["name"] == "lookup_weather" && item["arguments"] == "" && event.Payload["output_index"] == float64(1) {
+			if item["type"] == "function_call" && item["call_id"] == "toolu_123" && item["name"] == "lookup_weather" && item["arguments"] == "{}" && event.Payload["output_index"] == float64(1) {
 				foundAdded = true
 			}
 		case "response.function_call_arguments.delta":
@@ -2120,7 +2159,7 @@ data: {"type":"message_stop"}
 		switch event.Name {
 		case "response.output_item.added":
 			item, _ := event.Payload["item"].(map[string]interface{})
-			if item["type"] == "function_call" && item["arguments"] == "" {
+			if item["type"] == "function_call" && item["arguments"] == "{}" {
 				foundAdded = true
 			}
 		case "response.function_call_arguments.done":

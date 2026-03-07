@@ -487,7 +487,9 @@ func parseToolCallArguments(arguments string) (any, error) {
 	}
 
 	var parsed any
-	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.UseNumber()
+	if err := decoder.Decode(&parsed); err != nil {
 		return nil, err
 	}
 	if _, ok := parsed.(map[string]any); !ok {
@@ -498,13 +500,14 @@ func parseToolCallArguments(arguments string) (any, error) {
 
 func buildAnthropicMessageContent(msg core.Message) (any, error) {
 	if msg.Role == "tool" {
-		if strings.TrimSpace(msg.ToolCallID) == "" {
+		toolUseID := strings.TrimSpace(msg.ToolCallID)
+		if toolUseID == "" {
 			return nil, core.NewInvalidRequestError("tool message is missing tool_call_id", nil)
 		}
 		return []anthropicMessageContentBlock{
 			{
 				Type:      "tool_result",
-				ToolUseID: msg.ToolCallID,
+				ToolUseID: toolUseID,
 				Content:   msg.Content,
 			},
 		}, nil
@@ -877,7 +880,7 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 			state.PlaceholderObject = initialArguments == "{}"
 			emittedArguments := initialArguments
 			if state.PlaceholderObject {
-				emittedArguments = ""
+				emittedArguments = "{}"
 			} else if initialArguments != "" {
 				_, _ = state.Arguments.WriteString(initialArguments)
 			}
@@ -1816,7 +1819,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 			sc.toolCalls[event.Index] = state
 			return sc.writeResponsesEvent("response.output_item.added", map[string]any{
 				"type":         "response.output_item.added",
-				"item":         sc.renderResponsesToolCallItem(state, "in_progress", false),
+				"item":         sc.renderResponsesToolCallItem(state, "in_progress", true),
 				"output_index": state.OutputIndex,
 			})
 		}
