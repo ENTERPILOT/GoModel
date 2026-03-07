@@ -8,7 +8,7 @@ type ResponsesRequest struct {
 	Input             interface{}       `json:"input" swaggertype:"string" example:"Tell me a joke"` // string or []ResponsesInputItem — see docs for array form
 	Instructions      string            `json:"instructions,omitempty"`
 	Tools             []map[string]any  `json:"tools,omitempty"`
-	ToolChoice        any               `json:"tool_choice,omitempty" swaggertype:"object"` // string or object
+	ToolChoice        any               `json:"tool_choice,omitempty"` // string or object
 	ParallelToolCalls *bool             `json:"parallel_tool_calls,omitempty"`
 	Temperature       *float64          `json:"temperature,omitempty"`
 	MaxOutputTokens   *int              `json:"max_output_tokens,omitempty"`

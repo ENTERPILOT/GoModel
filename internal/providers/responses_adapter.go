@@ -218,19 +218,13 @@ func ExtractContentFromInput(content interface{}) string {
 		}
 		return strings.Join(texts, " ")
 	case []map[string]any:
-		var texts []string
-		for _, part := range c {
-			if text, ok := part["text"].(string); ok {
-				texts = append(texts, text)
-			}
-		}
-		return strings.Join(texts, " ")
+		return extractTextFromMapSlice(c)
 	case []interface{}:
 		// Array of content parts - extract text
 		var texts []string
 		for _, part := range c {
 			if partMap, ok := part.(map[string]interface{}); ok {
-				if text, ok := partMap["text"].(string); ok {
+				if text := extractTextFromInputMap(partMap); text != "" {
 					texts = append(texts, text)
 				}
 			}
@@ -238,6 +232,29 @@ func ExtractContentFromInput(content interface{}) string {
 		return strings.Join(texts, " ")
 	}
 	return ""
+}
+
+func extractTextFromMapSlice(parts []map[string]any) string {
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if text := extractTextFromInputMap(part); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return strings.Join(texts, " ")
+}
+
+func extractTextFromInputMap(part map[string]any) string {
+	var texts []string
+	if text, ok := part["text"].(string); ok && text != "" {
+		texts = append(texts, text)
+	}
+	if nested, ok := part["content"]; ok {
+		if text := ExtractContentFromInput(nested); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return strings.Join(texts, " ")
 }
 
 // ResponsesFunctionCallCallID returns the call id if present or generates one.

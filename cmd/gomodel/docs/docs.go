@@ -1798,15 +1798,7 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "tool_choice": {
-                    "description": "string or object",
-                    "oneOf": [
-                        {
-                            "type": "string"
-                        },
-                        {
-                            "type": "object"
-                        }
-                    ]
+                    "description": "string or object"
                 },
                 "tools": {
                     "type": "array",
@@ -2385,15 +2377,7 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "tool_choice": {
-                    "description": "string or object",
-                    "oneOf": [
-                        {
-                            "type": "string"
-                        },
-                        {
-                            "type": "object"
-                        }
-                    ]
+                    "description": "string or object"
                 },
                 "tools": {
                     "type": "array",

@@ -371,72 +371,84 @@ func reasoningEffortToBudgetTokens(effort string) int {
 	}
 }
 
-func convertOpenAIToolsToAnthropic(tools []map[string]any) []anthropicTool {
+func convertOpenAIToolsToAnthropic(tools []map[string]any) ([]anthropicTool, error) {
 	out := make([]anthropicTool, 0, len(tools))
 	for _, tool := range tools {
 		toolType, _ := tool["type"].(string)
 		if toolType != "function" {
-			continue
+			return nil, core.NewInvalidRequestError("unsupported tool type", nil)
 		}
 
 		function, ok := tool["function"].(map[string]any)
 		if !ok {
-			continue
+			return nil, core.NewInvalidRequestError("tool.function must be an object", nil)
 		}
 
 		name, _ := function["name"].(string)
-		if name == "" {
-			continue
+		if strings.TrimSpace(name) == "" {
+			return nil, core.NewInvalidRequestError("tool.function.name is required", nil)
 		}
 
 		description, _ := function["description"].(string)
-		inputSchema, ok := function["parameters"].(map[string]any)
-		if !ok || inputSchema == nil {
+		inputSchema, hasParameters := function["parameters"]
+		if !hasParameters || inputSchema == nil {
 			inputSchema = map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
 			}
+		} else {
+			schema, ok := inputSchema.(map[string]any)
+			if !ok {
+				return nil, core.NewInvalidRequestError("tool.function.parameters must be an object", nil)
+			}
+			if schemaType, ok := schema["type"].(string); ok && schemaType != "" && schemaType != "object" {
+				return nil, core.NewInvalidRequestError("tool.function.parameters must define an object schema", nil)
+			}
+			inputSchema = schema
 		}
 
 		out = append(out, anthropicTool{
 			Name:        name,
 			Description: description,
-			InputSchema: inputSchema,
+			InputSchema: inputSchema.(map[string]any),
 		})
 	}
 	if len(out) == 0 {
-		return nil
+		return nil, nil
 	}
-	return out
+	return out, nil
 }
 
-func convertOpenAIToolChoiceToAnthropic(choice any) (*anthropicToolChoice, bool) {
+func convertOpenAIToolChoiceToAnthropic(choice any) (*anthropicToolChoice, bool, error) {
 	switch c := choice.(type) {
 	case nil:
-		return nil, false
+		return nil, false, nil
 	case string:
 		switch strings.TrimSpace(c) {
 		case "", "auto":
-			return &anthropicToolChoice{Type: "auto"}, false
+			return &anthropicToolChoice{Type: "auto"}, false, nil
 		case "required":
-			return &anthropicToolChoice{Type: "any"}, false
+			return &anthropicToolChoice{Type: "any"}, false, nil
 		case "none":
-			return nil, true
+			return nil, true, nil
+		default:
+			return nil, false, core.NewInvalidRequestError("unsupported tool_choice value", nil)
 		}
 	case map[string]any:
 		choiceType, _ := c["type"].(string)
 		switch choiceType {
 		case "auto", "any":
-			return &anthropicToolChoice{Type: choiceType}, false
+			return &anthropicToolChoice{Type: choiceType}, false, nil
 		case "none":
-			return nil, true
+			return nil, true, nil
 		case "function":
 			if function, ok := c["function"].(map[string]any); ok {
 				name, _ := function["name"].(string)
-				if name != "" {
-					return &anthropicToolChoice{Type: "tool", Name: name}, false
+				if strings.TrimSpace(name) != "" {
+					return &anthropicToolChoice{Type: "tool", Name: name}, false, nil
 				}
 			}
+			return nil, false, core.NewInvalidRequestError("tool_choice.function.name is required", nil)
 		case "tool":
 			name, _ := c["name"].(string)
 			if name == "" {
@@ -444,11 +456,16 @@ func convertOpenAIToolChoiceToAnthropic(choice any) (*anthropicToolChoice, bool)
 					name, _ = function["name"].(string)
 				}
 			}
-			return &anthropicToolChoice{Type: "tool", Name: name}, false
+			if strings.TrimSpace(name) == "" {
+				return nil, false, core.NewInvalidRequestError("tool_choice.name is required", nil)
+			}
+			return &anthropicToolChoice{Type: "tool", Name: name}, false, nil
+		default:
+			return nil, false, core.NewInvalidRequestError("unsupported tool_choice type", nil)
 		}
+	default:
+		return nil, false, core.NewInvalidRequestError("tool_choice must be a string or object", nil)
 	}
-
-	return nil, false
 }
 
 func applyParallelToolCalls(choice *anthropicToolChoice, parallelToolCalls *bool) *anthropicToolChoice {
@@ -477,6 +494,9 @@ func parseToolCallArguments(arguments string) (any, error) {
 
 func buildAnthropicMessageContent(msg core.Message) (any, error) {
 	if msg.Role == "tool" {
+		if strings.TrimSpace(msg.ToolCallID) == "" {
+			return nil, core.NewInvalidRequestError("tool message is missing tool_call_id", nil)
+		}
 		return []anthropicMessageContentBlock{
 			{
 				Type:      "tool_result",
@@ -530,8 +550,14 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		applyReasoning(anthropicReq, req.Model, req.Reasoning.Effort)
 	}
 
-	anthropicReq.Tools = convertOpenAIToolsToAnthropic(req.Tools)
-	if toolChoice, disableTools := convertOpenAIToolChoiceToAnthropic(req.ToolChoice); disableTools {
+	tools, err := convertOpenAIToolsToAnthropic(req.Tools)
+	if err != nil {
+		return nil, err
+	}
+	anthropicReq.Tools = tools
+	if toolChoice, disableTools, err := convertOpenAIToolChoiceToAnthropic(req.ToolChoice); err != nil {
+		return nil, err
+	} else if disableTools {
 		anthropicReq.Tools = nil
 	} else if len(anthropicReq.Tools) > 0 {
 		if toolChoice == nil && req.ParallelToolCalls != nil && !*req.ParallelToolCalls {
@@ -547,7 +573,7 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		} else {
 			content, err := buildAnthropicMessageContent(msg)
 			if err != nil {
-				return nil, core.NewInvalidRequestError("invalid tool_call.function.arguments JSON", err)
+				return nil, normalizeAnthropicRequestError(err)
 			}
 			anthropicReq.Messages = append(anthropicReq.Messages, anthropicMessage{
 				Role: func() string {
@@ -969,8 +995,14 @@ func convertResponsesRequestToAnthropic(req *core.ResponsesRequest) (*anthropicR
 		applyReasoning(anthropicReq, req.Model, req.Reasoning.Effort)
 	}
 
-	anthropicReq.Tools = convertOpenAIToolsToAnthropic(chatReq.Tools)
-	if toolChoice, disableTools := convertOpenAIToolChoiceToAnthropic(chatReq.ToolChoice); disableTools {
+	tools, err := convertOpenAIToolsToAnthropic(chatReq.Tools)
+	if err != nil {
+		return nil, err
+	}
+	anthropicReq.Tools = tools
+	if toolChoice, disableTools, err := convertOpenAIToolChoiceToAnthropic(chatReq.ToolChoice); err != nil {
+		return nil, err
+	} else if disableTools {
 		anthropicReq.Tools = nil
 	} else if len(anthropicReq.Tools) > 0 {
 		if toolChoice == nil && chatReq.ParallelToolCalls != nil && !*chatReq.ParallelToolCalls {
@@ -987,7 +1019,7 @@ func convertResponsesRequestToAnthropic(req *core.ResponsesRequest) (*anthropicR
 		}
 		content, err := buildAnthropicMessageContent(msg)
 		if err != nil {
-			return nil, core.NewInvalidRequestError("invalid tool_call.function.arguments JSON", err)
+			return nil, normalizeAnthropicRequestError(err)
 		}
 		anthropicReq.Messages = append(anthropicReq.Messages, anthropicMessage{
 			Role: func() string {
@@ -1001,6 +1033,13 @@ func convertResponsesRequestToAnthropic(req *core.ResponsesRequest) (*anthropicR
 	}
 
 	return anthropicReq, nil
+}
+
+func normalizeAnthropicRequestError(err error) error {
+	if gatewayErr, ok := err.(*core.GatewayError); ok {
+		return gatewayErr
+	}
+	return core.NewInvalidRequestError("invalid tool_call.function.arguments JSON", err)
 }
 
 // extractTextContent returns the text from the last "text" content block.

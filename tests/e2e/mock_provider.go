@@ -36,6 +36,7 @@ type RecordedRequest struct {
 	Body    []byte
 }
 
+// Requests returns a thread-safe snapshot of recorded requests with cloned headers and body bytes.
 func (m *MockLLMServer) Requests() []RecordedRequest {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -54,6 +55,7 @@ func (m *MockLLMServer) Requests() []RecordedRequest {
 	return out
 }
 
+// ResetRequests clears all recorded requests in a thread-safe manner.
 func (m *MockLLMServer) ResetRequests() {
 	m.mu.Lock()
 	m.requests = m.requests[:0]

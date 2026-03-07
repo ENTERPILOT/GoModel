@@ -360,8 +360,8 @@ data: {"type":"message_stop"}
 
 	events := parseTestSSEEvents(t, string(raw))
 	foundToolStart := false
-	foundArgumentsDelta := false
 	foundFinish := false
+	var argumentDeltas strings.Builder
 
 	for _, event := range events {
 		if event.Done {
@@ -398,16 +398,16 @@ data: {"type":"message_stop"}
 		if toolCall["id"] == "toolu_123" && function["name"] == "lookup_weather" && function["arguments"] == "{}" {
 			foundToolStart = true
 		}
-		if function["arguments"] == "{\"city\":\"War" || function["arguments"] == "saw\"}" {
-			foundArgumentsDelta = true
+		if arguments, _ := function["arguments"].(string); arguments != "" && arguments != "{}" {
+			argumentDeltas.WriteString(arguments)
 		}
 	}
 
 	if !foundToolStart {
 		t.Fatal("expected a streaming tool call header chunk")
 	}
-	if !foundArgumentsDelta {
-		t.Fatal("expected a streaming tool call arguments delta chunk")
+	if argumentDeltas.String() != `{"city":"Warsaw"}` {
+		t.Fatalf("streamed tool call arguments = %q, want %q", argumentDeltas.String(), `{"city":"Warsaw"}`)
 	}
 	if !foundFinish {
 		t.Fatal("expected a final tool_calls finish_reason chunk")
@@ -859,6 +859,90 @@ func TestConvertToAnthropicRequest_InvalidToolArguments(t *testing.T) {
 					},
 				},
 			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid request error, got nil")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
+		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
+	}
+}
+
+func TestConvertToAnthropicRequest_InvalidToolDefinition(t *testing.T) {
+	_, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+		Tools: []map[string]any{
+			{
+				"type": "function",
+				"function": map[string]any{
+					"name":       "lookup_weather",
+					"parameters": []any{"invalid"},
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid request error, got nil")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
+		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
+	}
+}
+
+func TestConvertToAnthropicRequest_InvalidToolChoice(t *testing.T) {
+	_, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+		Tools: []map[string]any{
+			{
+				"type": "function",
+				"function": map[string]any{
+					"name": "lookup_weather",
+				},
+			},
+		},
+		ToolChoice: map[string]any{
+			"type":     "function",
+			"function": map[string]any{},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid request error, got nil")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
+	}
+}
+
+func TestConvertToAnthropicRequest_ToolMessageRequiresToolCallID(t *testing.T) {
+	_, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "tool", Content: `{"temperature_c":21}`},
 		},
 	})
 	if err == nil {
@@ -1611,20 +1695,26 @@ func TestStreamResponses_WithToolCalls(t *testing.T) {
 		_, _ = w.Write([]byte(`event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
 
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
 event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I'll check that for you."}}
 
-event: content_block_start
-data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_123","name":"lookup_weather","input":{}}}
-
-event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"War"}}
-
-event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"saw\"}"}}
-
 event: content_block_stop
 data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_123","name":"lookup_weather","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"War"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"saw\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
 
 event: message_delta
 data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":10,"output_tokens":4}}
@@ -1663,9 +1753,9 @@ data: {"type":"message_stop"}
 	events := parseTestSSEEvents(t, string(raw))
 	foundAdded := false
 	foundTextDelta := false
-	foundArgumentsDelta := false
 	foundArgumentsDone := false
 	foundItemDone := false
+	var argumentsDelta strings.Builder
 
 	for _, event := range events {
 		if event.Done {
@@ -1682,8 +1772,8 @@ data: {"type":"message_stop"}
 				foundAdded = true
 			}
 		case "response.function_call_arguments.delta":
-			if event.Payload["delta"] == "{\"city\":\"War" || event.Payload["delta"] == "saw\"}" {
-				foundArgumentsDelta = true
+			if delta, _ := event.Payload["delta"].(string); delta != "" {
+				argumentsDelta.WriteString(delta)
 			}
 		case "response.function_call_arguments.done":
 			if event.Payload["arguments"] == `{"city":"Warsaw"}` {
@@ -1703,8 +1793,8 @@ data: {"type":"message_stop"}
 	if !foundTextDelta {
 		t.Fatal("expected response.output_text.delta for assistant preamble")
 	}
-	if !foundArgumentsDelta {
-		t.Fatal("expected response.function_call_arguments.delta for function_call")
+	if argumentsDelta.String() != `{"city":"Warsaw"}` {
+		t.Fatalf("streamed response.function_call_arguments.delta = %q, want %q", argumentsDelta.String(), `{"city":"Warsaw"}`)
 	}
 	if !foundArgumentsDone {
 		t.Fatal("expected response.function_call_arguments.done for function_call")

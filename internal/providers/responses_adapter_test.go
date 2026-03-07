@@ -513,6 +513,30 @@ func TestExtractContentFromInput(t *testing.T) {
 			},
 			expected: "",
 		},
+		{
+			name: "nested []map content",
+			input: []map[string]any{
+				{
+					"type": "message",
+					"content": []map[string]any{
+						{
+							"type": "output_text",
+							"text": "Hello",
+						},
+						{
+							"type": "wrapper",
+							"content": []interface{}{
+								map[string]any{
+									"type": "output_text",
+									"text": "world",
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: "Hello world",
+		},
 	}
 
 	for _, tt := range tests {

@@ -26,7 +26,7 @@ type ChatRequest struct {
 	Provider          string           `json:"provider,omitempty"`
 	Messages          []Message        `json:"messages"`
 	Tools             []map[string]any `json:"tools,omitempty"`
-	ToolChoice        any              `json:"tool_choice,omitempty" swaggertype:"object"` // string or object
+	ToolChoice        any              `json:"tool_choice,omitempty"` // string or object
 	ParallelToolCalls *bool            `json:"parallel_tool_calls,omitempty"`
 	Stream            bool             `json:"stream,omitempty"`
 	StreamOptions     *StreamOptions   `json:"stream_options,omitempty"`
