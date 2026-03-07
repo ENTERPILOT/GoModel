@@ -26,6 +26,9 @@ func TestMessageUnmarshalJSON_AllowsNullContent(t *testing.T) {
 	if msg.Content != "" {
 		t.Fatalf("Content = %q, want empty string", msg.Content)
 	}
+	if !msg.ContentNull {
+		t.Fatal("ContentNull = false, want true")
+	}
 	if len(msg.ToolCalls) != 1 {
 		t.Fatalf("len(ToolCalls) = %d, want 1", len(msg.ToolCalls))
 	}
@@ -44,6 +47,33 @@ func TestMessageUnmarshalJSON_PreservesStringContent(t *testing.T) {
 
 	if msg.Content != "hello" {
 		t.Fatalf("Content = %q, want hello", msg.Content)
+	}
+	if msg.ContentNull {
+		t.Fatal("ContentNull = true, want false")
+	}
+}
+
+func TestMessageMarshalJSON_PreservesNullContent(t *testing.T) {
+	payload, err := json.Marshal(Message{
+		Role:        "assistant",
+		ContentNull: true,
+		ToolCalls: []ToolCall{
+			{
+				ID:   "call_123",
+				Type: "function",
+				Function: FunctionCall{
+					Name:      "lookup_weather",
+					Arguments: `{"city":"Warsaw"}`,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v, want nil", err)
+	}
+
+	if string(payload) != `{"role":"assistant","content":null,"tool_calls":[{"id":"call_123","type":"function","function":{"name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"}}]}` {
+		t.Fatalf("json.Marshal() = %s", payload)
 	}
 }
 

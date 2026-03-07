@@ -278,6 +278,30 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 			},
 		},
 		{
+			name: "function call input generates missing call id",
+			input: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: []interface{}{
+					map[string]interface{}{
+						"type":      "function_call",
+						"name":      "lookup_weather",
+						"arguments": `{"city":"Warsaw"}`,
+					},
+				},
+			},
+			checkFn: func(t *testing.T, req *core.ChatRequest) {
+				if len(req.Messages) != 1 {
+					t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
+				}
+				if len(req.Messages[0].ToolCalls) != 1 {
+					t.Fatalf("len(Messages[0].ToolCalls) = %d, want 1", len(req.Messages[0].ToolCalls))
+				}
+				if req.Messages[0].ToolCalls[0].ID == "" {
+					t.Fatal("Messages[0].ToolCalls[0].ID should not be empty")
+				}
+			},
+		},
+		{
 			name: "array input with []map[string]any",
 			input: &core.ResponsesRequest{
 				Model: "test-model",

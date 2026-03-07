@@ -143,6 +143,7 @@ func convertResponsesInputMap(item map[string]interface{}) (core.Message, bool) 
 		if name == "" {
 			return core.Message{}, false
 		}
+		callID = ResponsesFunctionCallCallID(callID)
 		return core.Message{
 			Role: "assistant",
 			ToolCalls: []core.ToolCall{

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -489,6 +490,9 @@ func parseToolCallArguments(arguments string) (any, error) {
 	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
 		return nil, err
 	}
+	if _, ok := parsed.(map[string]any); !ok {
+		return nil, fmt.Errorf("tool arguments must be a JSON object")
+	}
 	return parsed, nil
 }
 
@@ -557,6 +561,8 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	anthropicReq.Tools = tools
 	if toolChoice, disableTools, err := convertOpenAIToolChoiceToAnthropic(req.ToolChoice); err != nil {
 		return nil, err
+	} else if err := validateAnthropicToolChoice(toolChoice, anthropicReq.Tools, disableTools); err != nil {
+		return nil, err
 	} else if disableTools {
 		anthropicReq.Tools = nil
 	} else if len(anthropicReq.Tools) > 0 {
@@ -611,6 +617,15 @@ func convertFromAnthropicResponse(resp *anthropicResponse) *core.ChatResponse {
 		usage.RawUsage = rawUsage
 	}
 
+	message := core.Message{
+		Role:      "assistant",
+		Content:   content,
+		ToolCalls: toolCalls,
+	}
+	if content == "" && len(toolCalls) > 0 {
+		message.ContentNull = true
+	}
+
 	return &core.ChatResponse{
 		ID:      resp.ID,
 		Object:  "chat.completion",
@@ -618,12 +633,8 @@ func convertFromAnthropicResponse(resp *anthropicResponse) *core.ChatResponse {
 		Created: time.Now().Unix(),
 		Choices: []core.Choice{
 			{
-				Index: 0,
-				Message: core.Message{
-					Role:      "assistant",
-					Content:   content,
-					ToolCalls: toolCalls,
-				},
+				Index:        0,
+				Message:      message,
 				FinishReason: finishReason,
 			},
 		},
@@ -1002,6 +1013,8 @@ func convertResponsesRequestToAnthropic(req *core.ResponsesRequest) (*anthropicR
 	anthropicReq.Tools = tools
 	if toolChoice, disableTools, err := convertOpenAIToolChoiceToAnthropic(chatReq.ToolChoice); err != nil {
 		return nil, err
+	} else if err := validateAnthropicToolChoice(toolChoice, anthropicReq.Tools, disableTools); err != nil {
+		return nil, err
 	} else if disableTools {
 		anthropicReq.Tools = nil
 	} else if len(anthropicReq.Tools) > 0 {
@@ -1039,7 +1052,28 @@ func normalizeAnthropicRequestError(err error) error {
 	if gatewayErr, ok := err.(*core.GatewayError); ok {
 		return gatewayErr
 	}
-	return core.NewInvalidRequestError("invalid tool_call.function.arguments JSON", err)
+	message := "invalid tool_call.function.arguments JSON"
+	if err != nil && strings.TrimSpace(err.Error()) != "" {
+		message = err.Error()
+	}
+	return core.NewInvalidRequestError(message, err)
+}
+
+func validateAnthropicToolChoice(toolChoice *anthropicToolChoice, tools []anthropicTool, disableTools bool) error {
+	if disableTools || toolChoice == nil || len(tools) > 0 {
+		return nil
+	}
+	return core.NewInvalidRequestError("tool_choice requires at least one tool", nil)
+}
+
+func prefixAnthropicBatchItemError(index int, err error) error {
+	var gatewayErr *core.GatewayError
+	if errors.As(err, &gatewayErr) {
+		prefixed := *gatewayErr
+		prefixed.Message = fmt.Sprintf("batch item %d: %s", index, gatewayErr.Message)
+		return &prefixed
+	}
+	return core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %v", index, err), err)
 }
 
 // extractTextContent returns the text from the last "text" content block.
@@ -1281,7 +1315,7 @@ func buildAnthropicBatchCreateRequest(req *core.BatchRequest) (*anthropicBatchCr
 			var err error
 			params, err = convertToAnthropicRequest(&chatReq)
 			if err != nil {
-				return nil, nil, core.NewInvalidRequestError(fmt.Sprintf("batch item %d: invalid tool_call.function.arguments JSON", i), err)
+				return nil, nil, prefixAnthropicBatchItemError(i, err)
 			}
 			params.Stream = false
 		case "/v1/responses":
@@ -1295,7 +1329,7 @@ func buildAnthropicBatchCreateRequest(req *core.BatchRequest) (*anthropicBatchCr
 			var err error
 			params, err = convertResponsesRequestToAnthropic(&respReq)
 			if err != nil {
-				return nil, nil, core.NewInvalidRequestError(fmt.Sprintf("batch item %d: invalid tool_call.function.arguments JSON", i), err)
+				return nil, nil, prefixAnthropicBatchItemError(i, err)
 			}
 			params.Stream = false
 		case "/v1/embeddings":

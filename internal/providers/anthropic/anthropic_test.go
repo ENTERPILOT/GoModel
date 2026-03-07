@@ -936,6 +936,9 @@ func TestConvertToAnthropicRequest_InvalidToolChoice(t *testing.T) {
 	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
 		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
 	}
+	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
+		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
+	}
 }
 
 func TestConvertToAnthropicRequest_ToolMessageRequiresToolCallID(t *testing.T) {
@@ -954,6 +957,59 @@ func TestConvertToAnthropicRequest_ToolMessageRequiresToolCallID(t *testing.T) {
 	}
 	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
 		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
+		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
+	}
+}
+
+func TestConvertToAnthropicRequest_ToolChoiceRequiresTools(t *testing.T) {
+	_, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+		ToolChoice: "auto",
+	})
+	if err == nil {
+		t.Fatal("expected invalid request error, got nil")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
+		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
+	}
+}
+
+func TestConvertToAnthropicRequest_ToolArgumentsMustBeJSONObject(t *testing.T) {
+	_, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{
+				Role: "assistant",
+				ToolCalls: []core.ToolCall{
+					{
+						ID:   "call_123",
+						Type: "function",
+						Function: core.FunctionCall{
+							Name:      "lookup_weather",
+							Arguments: `["Warsaw"]`,
+						},
+					},
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid request error, got nil")
+	}
+	if !strings.Contains(err.Error(), "tool arguments must be a JSON object") {
+		t.Fatalf("error = %v, want JSON object validation", err)
 	}
 }
 
@@ -2101,6 +2157,60 @@ func TestConvertResponsesRequestToAnthropic_InvalidToolArguments(t *testing.T) {
 	}
 	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
 		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
+		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
+	}
+}
+
+func TestConvertResponsesRequestToAnthropic_ToolChoiceRequiresTools(t *testing.T) {
+	_, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+		Model:      "claude-sonnet-4-5-20250929",
+		Input:      "Hello",
+		ToolChoice: "auto",
+	})
+	if err == nil {
+		t.Fatal("expected invalid request error, got nil")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
+		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
+	}
+}
+
+func TestBuildAnthropicBatchCreateRequest_PreservesGatewayErrorDetails(t *testing.T) {
+	req := &core.BatchRequest{
+		Requests: []core.BatchRequestItem{
+			{
+				URL: "/v1/chat/completions",
+				Body: json.RawMessage(`{
+					"model":"claude-sonnet-4-5-20250929",
+					"messages":[{"role":"user","content":"Hello"}],
+					"tool_choice":"auto"
+				}`),
+			},
+		},
+	}
+
+	_, _, err := buildAnthropicBatchCreateRequest(req)
+	if err == nil {
+		t.Fatal("expected invalid request error, got nil")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
+	}
+	if gatewayErr.Message != "batch item 0: tool_choice requires at least one tool" {
+		t.Fatalf("error message = %q", gatewayErr.Message)
 	}
 }
 

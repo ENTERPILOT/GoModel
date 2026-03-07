@@ -35,9 +35,9 @@ data: [DONE]
 
 	events := parseResponsesConverterTestEvents(t, string(raw))
 	foundAdded := false
-	foundArgumentsDelta := false
 	foundArgumentsDone := false
 	foundItemDone := false
+	var argumentDeltas []string
 
 	for _, event := range events {
 		if event.Done {
@@ -50,8 +50,8 @@ data: [DONE]
 				foundAdded = true
 			}
 		case "response.function_call_arguments.delta":
-			if event.Payload["delta"] == "{\"city\":\"War" || event.Payload["delta"] == "saw\"}" {
-				foundArgumentsDelta = true
+			if delta, _ := event.Payload["delta"].(string); delta != "" {
+				argumentDeltas = append(argumentDeltas, delta)
 			}
 		case "response.function_call_arguments.done":
 			if event.Payload["arguments"] == `{"city":"Warsaw"}` {
@@ -68,8 +68,8 @@ data: [DONE]
 	if !foundAdded {
 		t.Fatal("expected response.output_item.added for function_call")
 	}
-	if !foundArgumentsDelta {
-		t.Fatal("expected response.function_call_arguments.delta for function_call")
+	if len(argumentDeltas) != 2 || argumentDeltas[0] != "{\"city\":\"War" || argumentDeltas[1] != "saw\"}" {
+		t.Fatalf("response.function_call_arguments.delta sequence = %#v, want two ordered fragments", argumentDeltas)
 	}
 	if !foundArgumentsDone {
 		t.Fatal("expected response.function_call_arguments.done for function_call")

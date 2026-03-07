@@ -1,6 +1,9 @@
 package core
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // StreamOptions controls streaming behavior options.
 // This is used to request usage data in streaming responses.
@@ -53,20 +56,21 @@ func (r *ChatRequest) WithStreaming() *ChatRequest {
 
 // Message represents a single message in the chat
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Role        string     `json:"role"`
+	Content     string     `json:"content"`
+	ToolCalls   []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID  string     `json:"tool_call_id,omitempty"`
+	ContentNull bool       `json:"-"`
 }
 
 // UnmarshalJSON accepts content as string or null for compatibility with
 // tool-calling responses that omit assistant text.
 func (m *Message) UnmarshalJSON(data []byte) error {
 	type rawMessage struct {
-		Role       string     `json:"role"`
-		Content    *string    `json:"content"`
-		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-		ToolCallID string     `json:"tool_call_id,omitempty"`
+		Role       string          `json:"role"`
+		Content    json.RawMessage `json:"content"`
+		ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
+		ToolCallID string          `json:"tool_call_id,omitempty"`
 	}
 
 	var raw rawMessage
@@ -75,15 +79,44 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	}
 
 	m.Role = raw.Role
-	if raw.Content != nil {
-		m.Content = *raw.Content
-	} else {
+	m.ContentNull = false
+	switch trimmed := bytes.TrimSpace(raw.Content); {
+	case len(trimmed) == 0:
 		m.Content = ""
+	case bytes.Equal(trimmed, []byte("null")):
+		m.Content = ""
+		m.ContentNull = true
+	default:
+		if err := json.Unmarshal(trimmed, &m.Content); err != nil {
+			return err
+		}
 	}
 	m.ToolCalls = raw.ToolCalls
 	m.ToolCallID = raw.ToolCallID
 
 	return nil
+}
+
+// MarshalJSON preserves explicit null content for tool-calling assistant messages.
+func (m Message) MarshalJSON() ([]byte, error) {
+	type rawMessage struct {
+		Role       string     `json:"role"`
+		Content    any        `json:"content"`
+		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+		ToolCallID string     `json:"tool_call_id,omitempty"`
+	}
+
+	content := any(m.Content)
+	if m.ContentNull {
+		content = nil
+	}
+
+	return json.Marshal(rawMessage{
+		Role:       m.Role,
+		Content:    content,
+		ToolCalls:  m.ToolCalls,
+		ToolCallID: m.ToolCallID,
+	})
 }
 
 // ToolCall represents a single tool invocation emitted by a model.

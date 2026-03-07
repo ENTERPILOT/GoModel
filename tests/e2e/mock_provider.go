@@ -303,7 +303,17 @@ func (m *MockLLMServer) handleStreamingToolResponse(w http.ResponseWriter, req c
 			{
 				"index": 0,
 				"delta": map[string]interface{}{
-					"tool_calls": []core.ToolCall{toolCall},
+					"tool_calls": []map[string]interface{}{
+						{
+							"index": 0,
+							"id":    toolCall.ID,
+							"type":  toolCall.Type,
+							"function": map[string]interface{}{
+								"name":      toolCall.Function.Name,
+								"arguments": toolCall.Function.Arguments,
+							},
+						},
+					},
 				},
 				"finish_reason": nil,
 			},
