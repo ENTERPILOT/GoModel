@@ -32,8 +32,8 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 		Model:             req.Model,
 		Provider:          req.Provider,
 		Messages:          make([]core.Message, 0),
-		Tools:             req.Tools,
-		ToolChoice:        req.ToolChoice,
+		Tools:             normalizeResponsesToolsForChat(req.Tools),
+		ToolChoice:        normalizeResponsesToolChoiceForChat(req.ToolChoice),
 		ParallelToolCalls: req.ParallelToolCalls,
 		Temperature:       req.Temperature,
 		Stream:            req.Stream,
@@ -59,6 +59,83 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 	chatReq.Messages = append(chatReq.Messages, messages...)
 
 	return chatReq, nil
+}
+
+func normalizeResponsesToolsForChat(tools []map[string]any) []map[string]any {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	normalized := make([]map[string]any, 0, len(tools))
+	for _, tool := range tools {
+		normalized = append(normalized, normalizeResponsesToolForChat(tool))
+	}
+	return normalized
+}
+
+func normalizeResponsesToolForChat(tool map[string]any) map[string]any {
+	if len(tool) == 0 {
+		return tool
+	}
+
+	toolType, _ := tool["type"].(string)
+	if strings.TrimSpace(toolType) != "function" {
+		return cloneStringAnyMap(tool)
+	}
+	if _, ok := tool["function"].(map[string]any); ok {
+		return cloneStringAnyMap(tool)
+	}
+
+	normalized := cloneStringAnyMap(tool)
+	function := map[string]any{}
+	for _, key := range []string{"name", "description", "parameters", "strict"} {
+		if value, ok := normalized[key]; ok {
+			function[key] = value
+			delete(normalized, key)
+		}
+	}
+	if len(function) == 0 {
+		return normalized
+	}
+
+	normalized["function"] = function
+	return normalized
+}
+
+func normalizeResponsesToolChoiceForChat(choice any) any {
+	choiceMap, ok := choice.(map[string]any)
+	if !ok {
+		return choice
+	}
+
+	choiceType, _ := choiceMap["type"].(string)
+	if strings.TrimSpace(choiceType) != "function" {
+		return choice
+	}
+	if _, ok := choiceMap["function"].(map[string]any); ok {
+		return cloneStringAnyMap(choiceMap)
+	}
+
+	name, hasName := choiceMap["name"]
+	if !hasName {
+		return cloneStringAnyMap(choiceMap)
+	}
+
+	normalized := cloneStringAnyMap(choiceMap)
+	delete(normalized, "name")
+	normalized["function"] = map[string]any{"name": name}
+	return normalized
+}
+
+func cloneStringAnyMap(src map[string]any) map[string]any {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]any, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }
 
 // ConvertResponsesInputToMessages converts a Responses API input payload into Chat API messages.

@@ -3668,6 +3668,52 @@ func TestConvertResponsesRequestToAnthropic_TypedInputPromotesSystemRole(t *test
 	}
 }
 
+func TestConvertResponsesRequestToAnthropic_PreservesMultimodalImageInput(t *testing.T) {
+	req, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: []interface{}{
+			map[string]interface{}{
+				"role": "user",
+				"content": []interface{}{
+					map[string]interface{}{
+						"type": "input_text",
+						"text": "Describe the image.",
+					},
+					map[string]interface{}{
+						"type": "input_image",
+						"image_url": map[string]interface{}{
+							"url": "data:image/png;base64,ZmFrZQ==",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("convertResponsesRequestToAnthropic() error = %v", err)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
+	}
+
+	blocks, ok := req.Messages[0].Content.([]anthropicContentBlock)
+	if !ok {
+		t.Fatalf("Messages[0].Content = %#v, want []anthropicContentBlock", req.Messages[0].Content)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
+	}
+	if blocks[0].Type != "text" || blocks[0].Text != "Describe the image." {
+		t.Fatalf("unexpected text block: %+v", blocks[0])
+	}
+	if blocks[1].Type != "image" || blocks[1].Source == nil {
+		t.Fatalf("unexpected image block: %+v", blocks[1])
+	}
+	if blocks[1].Source.Type != "base64" || blocks[1].Source.MediaType != "image/png" || blocks[1].Source.Data != "ZmFrZQ==" {
+		t.Fatalf("unexpected image source: %+v", blocks[1].Source)
+	}
+}
+
 func TestConvertResponsesRequestToAnthropic_ToolRoleRequiresToolCallID(t *testing.T) {
 	_, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",

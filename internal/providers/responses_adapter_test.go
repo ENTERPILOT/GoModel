@@ -99,6 +99,61 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 			},
 		},
 		{
+			name: "normalizes native responses tool format",
+			input: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: "Hello",
+				Tools: []map[string]any{
+					{
+						"type":        "function",
+						"name":        "lookup_weather",
+						"description": "Get weather by city.",
+						"parameters": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"city": map[string]any{"type": "string"},
+							},
+						},
+					},
+				},
+				ToolChoice: map[string]any{
+					"type": "function",
+					"name": "lookup_weather",
+				},
+			},
+			checkFn: func(t *testing.T, req *core.ChatRequest) {
+				if len(req.Tools) != 1 {
+					t.Fatalf("len(Tools) = %d, want 1", len(req.Tools))
+				}
+
+				function, ok := req.Tools[0]["function"].(map[string]any)
+				if !ok {
+					t.Fatalf("Tools[0].function = %#v, want object", req.Tools[0]["function"])
+				}
+				if function["name"] != "lookup_weather" {
+					t.Fatalf("Tools[0].function.name = %#v, want lookup_weather", function["name"])
+				}
+				if _, ok := req.Tools[0]["name"]; ok {
+					t.Fatalf("Tools[0].name should be wrapped into function, got %+v", req.Tools[0])
+				}
+
+				toolChoice, ok := req.ToolChoice.(map[string]any)
+				if !ok {
+					t.Fatalf("ToolChoice = %#v, want object", req.ToolChoice)
+				}
+				selected, ok := toolChoice["function"].(map[string]any)
+				if !ok {
+					t.Fatalf("ToolChoice.function = %#v, want object", toolChoice["function"])
+				}
+				if selected["name"] != "lookup_weather" {
+					t.Fatalf("ToolChoice.function.name = %#v, want lookup_weather", selected["name"])
+				}
+				if _, ok := toolChoice["name"]; ok {
+					t.Fatalf("ToolChoice.name should be wrapped into function, got %+v", toolChoice)
+				}
+			},
+		},
+		{
 			name: "typed multimodal input",
 			input: &core.ResponsesRequest{
 				Model: "test-model",
