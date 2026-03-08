@@ -17,6 +17,21 @@
     },
     {
       "Done": false,
+      "Name": "response.output_item.added",
+      "Payload": {
+        "item": {
+          "content": [],
+          "id": "msg_\u003cgenerated\u003e",
+          "role": "assistant",
+          "status": "in_progress",
+          "type": "message"
+        },
+        "output_index": 0,
+        "type": "response.output_item.added"
+      }
+    },
+    {
+      "Done": false,
       "Name": "response.output_text.delta",
       "Payload": {
         "delta": "Hello",
@@ -37,6 +52,27 @@
       "Payload": {
         "delta": "!",
         "type": "response.output_text.delta"
+      }
+    },
+    {
+      "Done": false,
+      "Name": "response.output_item.done",
+      "Payload": {
+        "item": {
+          "content": [
+            {
+              "annotations": [],
+              "text": "Hello World!",
+              "type": "output_text"
+            }
+          ],
+          "id": "msg_\u003cgenerated\u003e",
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "output_index": 0,
+        "type": "response.output_item.done"
       }
     },
     {

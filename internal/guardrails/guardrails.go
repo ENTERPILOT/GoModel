@@ -18,14 +18,21 @@
 //	           └── guardrail B ──┘                                         └── guardrail E ──┘
 package guardrails
 
-import "context"
+import (
+	"context"
+
+	"gomodel/internal/core"
+)
 
 // Message represents a single message in a conversation.
 // This is the normalized DTO that all text guardrails operate on,
 // decoupled from concrete API request types.
 type Message struct {
-	Role    string // "system", "user", "assistant"
-	Content string
+	Role        string // "system", "user", "assistant", "tool"
+	Content     string
+	ToolCalls   []core.ToolCall
+	ToolCallID  string
+	ContentNull bool
 }
 
 // Guardrail processes a message list and returns the (possibly modified) messages or an error.

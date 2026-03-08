@@ -254,6 +254,39 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
+#### Chat Completion with Function Calling
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [
+      {"role": "user", "content": "What is the weather in Warsaw?"}
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup_weather",
+          "description": "Get the weather for a city.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {"type": "string"}
+            },
+            "required": ["city"]
+          }
+        }
+      }
+    ],
+    "tool_choice": {
+      "type": "function",
+      "function": {"name": "lookup_weather"}
+    }
+  }'
+```
+
 #### Streaming Response
 
 ```bash

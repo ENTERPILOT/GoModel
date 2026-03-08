@@ -20,36 +20,43 @@ type Reasoning struct {
 
 // ChatRequest represents the incoming chat completion request
 type ChatRequest struct {
-	Temperature   *float64       `json:"temperature,omitempty"`
-	MaxTokens     *int           `json:"max_tokens,omitempty"`
-	Model         string         `json:"model"`
-	Provider      string         `json:"provider,omitempty"`
-	Messages      []Message      `json:"messages"`
-	Stream        bool           `json:"stream,omitempty"`
-	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
-	Reasoning     *Reasoning     `json:"reasoning,omitempty"`
+	Temperature       *float64         `json:"temperature,omitempty"`
+	MaxTokens         *int             `json:"max_tokens,omitempty"`
+	Model             string           `json:"model"`
+	Provider          string           `json:"provider,omitempty"`
+	Messages          []Message        `json:"messages"`
+	Tools             []map[string]any `json:"tools,omitempty"`
+	ToolChoice        any              `json:"tool_choice,omitempty"` // string or object
+	ParallelToolCalls *bool            `json:"parallel_tool_calls,omitempty"`
+	Stream            bool             `json:"stream,omitempty"`
+	StreamOptions     *StreamOptions   `json:"stream_options,omitempty"`
+	Reasoning         *Reasoning       `json:"reasoning,omitempty"`
 }
 
 // WithStreaming returns a shallow copy of the request with Stream set to true.
 // This avoids mutating the caller's request object.
 func (r *ChatRequest) WithStreaming() *ChatRequest {
-	return &ChatRequest{
-		Temperature:   r.Temperature,
-		MaxTokens:     r.MaxTokens,
-		Model:         r.Model,
-		Provider:      r.Provider,
-		Messages:      r.Messages,
-		Stream:        true,
-		StreamOptions: r.StreamOptions,
-		Reasoning:     r.Reasoning,
-	}
+	cp := *r
+	cp.Stream = true
+	return &cp
 }
 
-// Message represents a single message in the chat
+// MessageContent stores message content as either text or structured parts.
+type MessageContent any
+
+// Message represents a single message in the chat.
 type Message struct {
-	Role      string     `json:"role"`
-	Content   string     `json:"content"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	Role        string `json:"role"`
+	ToolCallID  string `json:"tool_call_id,omitempty"`
+	ContentNull bool   `json:"-"`
+	// Content accepts either a plain string or an array of ContentPart values.
+	// This preserves OpenAI-compatible multimodal chat payloads.
+	Content MessageContent `json:"content"`
+	//nolint:govet // Intentional duplicate json tag for Swagger docs: content is null OR string OR []ContentPart.
+	// ContentSchema documents that `content` accepts either a plain string
+	// or an array of ContentPart values.
+	ContentSchema []ContentPart `json:"content,omitempty" extensions:"x-oneOf=[{\"type\":\"null\"},{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"`
+	ToolCalls     []ToolCall    `json:"tool_calls,omitempty"`
 }
 
 // ToolCall represents a single tool invocation emitted by a model.
@@ -78,9 +85,18 @@ type ChatResponse struct {
 
 // Choice represents a single completion choice
 type Choice struct {
-	Message      Message `json:"message"`
-	FinishReason string  `json:"finish_reason"`
-	Index        int     `json:"index"`
+	Message      ResponseMessage `json:"message"`
+	FinishReason string          `json:"finish_reason"`
+	Index        int             `json:"index"`
+}
+
+// ResponseMessage represents a single assistant message in a chat response.
+type ResponseMessage struct {
+	Role    string         `json:"role"`
+	Content MessageContent `json:"content"`
+	//nolint:govet // Intentional duplicate json tag for Swagger docs: content is null OR string OR []ContentPart.
+	ContentSchema []ContentPart `json:"content,omitempty" extensions:"x-oneOf=[{\"type\":\"null\"},{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"`
+	ToolCalls     []ToolCall    `json:"tool_calls,omitempty"`
 }
 
 // PromptTokensDetails holds extended input token breakdown (OpenAI/xAI).

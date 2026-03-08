@@ -166,6 +166,94 @@ func TestChatCompletion(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_PreservesMultimodalContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+
+		var req map[string]interface{}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+
+		messages, ok := req["messages"].([]interface{})
+		if !ok || len(messages) != 1 {
+			t.Fatalf("messages = %#v, want single message", req["messages"])
+		}
+		message, ok := messages[0].(map[string]interface{})
+		if !ok {
+			t.Fatalf("message type = %T", messages[0])
+		}
+		content, ok := message["content"].([]interface{})
+		if !ok {
+			t.Fatalf("content type = %T, want []interface{}", message["content"])
+		}
+		if len(content) != 2 {
+			t.Fatalf("len(content) = %d, want 2", len(content))
+		}
+		second, ok := content[1].(map[string]interface{})
+		if !ok {
+			t.Fatalf("second part type = %T", content[1])
+		}
+		if second["type"] != "image_url" {
+			t.Fatalf("second part type = %v, want image_url", second["type"])
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id": "chatcmpl-123",
+			"object": "chat.completion",
+			"created": 1677652288,
+			"model": "gpt-4o-mini",
+			"choices": [{
+				"index": 0,
+				"message": {
+					"role": "assistant",
+					"content": "ok"
+				},
+				"finish_reason": "stop"
+			}],
+			"usage": {
+				"prompt_tokens": 10,
+				"completion_tokens": 20,
+				"total_tokens": 30
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	req := &core.ChatRequest{
+		Model: "gpt-4o-mini",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{Type: "text", Text: "Describe the image."},
+					{
+						Type: "image_url",
+						ImageURL: &core.ImageURLContent{
+							URL: "https://example.com/image.png",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	resp, err := provider.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Choices[0].Message.Content != "ok" {
+		t.Fatalf("response content = %q, want ok", resp.Choices[0].Message.Content)
+	}
+}
+
 func TestStreamChatCompletion(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -907,6 +995,89 @@ func TestChatCompletion_NonReasoningModel_PassesMaxTokens(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_NonReasoningModel_PreservesToolConfiguration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+
+		var raw map[string]interface{}
+		if err := json.Unmarshal(body, &raw); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+
+		tools, ok := raw["tools"].([]interface{})
+		if !ok || len(tools) != 1 {
+			t.Fatalf("tools = %#v, want one tool", raw["tools"])
+		}
+
+		toolChoice, ok := raw["tool_choice"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("tool_choice = %#v, want object", raw["tool_choice"])
+		}
+		function, ok := toolChoice["function"].(map[string]interface{})
+		if !ok || function["name"] != "lookup_weather" {
+			t.Fatalf("tool_choice.function = %#v, want lookup_weather", toolChoice["function"])
+		}
+
+		parallelToolCalls, ok := raw["parallel_tool_calls"].(bool)
+		if !ok || parallelToolCalls {
+			t.Fatalf("parallel_tool_calls = %#v, want false", raw["parallel_tool_calls"])
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id": "chatcmpl-tools",
+			"object": "chat.completion",
+			"model": "gpt-4o-mini",
+			"choices": [{"index": 0, "message": {"role": "assistant", "content": "", "tool_calls": [{"id": "call_123", "type": "function", "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"}}]}, "finish_reason": "tool_calls"}],
+			"usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	parallelToolCalls := false
+	req := &core.ChatRequest{
+		Model: "gpt-4o-mini",
+		Messages: []core.Message{
+			{Role: "user", Content: "What's the weather?"},
+		},
+		Tools: []map[string]any{
+			{
+				"type": "function",
+				"function": map[string]any{
+					"name":        "lookup_weather",
+					"description": "Get the weather for a city.",
+					"parameters": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"city": map[string]any{"type": "string"},
+						},
+						"required": []string{"city"},
+					},
+				},
+			},
+		},
+		ToolChoice:        map[string]any{"type": "function", "function": map[string]any{"name": "lookup_weather"}},
+		ParallelToolCalls: &parallelToolCalls,
+	}
+
+	resp, err := provider.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Choices[0].FinishReason != "tool_calls" {
+		t.Fatalf("FinishReason = %q, want tool_calls", resp.Choices[0].FinishReason)
+	}
+	if len(resp.Choices[0].Message.ToolCalls) != 1 || resp.Choices[0].Message.ToolCalls[0].Function.Name != "lookup_weather" {
+		t.Fatalf("tool_calls = %+v, want lookup_weather", resp.Choices[0].Message.ToolCalls)
+	}
+}
+
 func TestStreamChatCompletion_ReasoningModel_AdaptsParameters(t *testing.T) {
 	maxTokens := 2000
 
@@ -967,6 +1138,86 @@ data: [DONE]
 	}
 	if !strings.Contains(string(respBody), "o4-mini") {
 		t.Error("response should contain o4-mini model")
+	}
+}
+
+func TestChatCompletion_ReasoningModel_PreservesToolConfiguration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+
+		var raw map[string]interface{}
+		if err := json.Unmarshal(body, &raw); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+
+		tools, ok := raw["tools"].([]interface{})
+		if !ok || len(tools) != 1 {
+			t.Fatalf("tools = %#v, want one tool", raw["tools"])
+		}
+
+		toolChoice, ok := raw["tool_choice"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("tool_choice = %#v, want object", raw["tool_choice"])
+		}
+		function, ok := toolChoice["function"].(map[string]interface{})
+		if !ok || function["name"] != "lookup_weather" {
+			t.Fatalf("tool_choice.function = %#v, want lookup_weather", toolChoice["function"])
+		}
+
+		if _, ok := raw["max_tokens"]; ok {
+			t.Fatal("reasoning model request should not contain max_tokens")
+		}
+		if _, ok := raw["max_completion_tokens"]; !ok {
+			t.Fatal("reasoning model request should contain max_completion_tokens")
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id": "chatcmpl-tools-o3",
+			"object": "chat.completion",
+			"model": "o3-mini",
+			"choices": [{"index": 0, "message": {"role": "assistant", "content": "", "tool_calls": [{"id": "call_123", "type": "function", "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"}}]}, "finish_reason": "tool_calls"}],
+			"usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	maxTokens := 256
+	req := &core.ChatRequest{
+		Model: "o3-mini",
+		Messages: []core.Message{
+			{Role: "user", Content: "What's the weather?"},
+		},
+		MaxTokens: &maxTokens,
+		Tools: []map[string]any{
+			{
+				"type": "function",
+				"function": map[string]any{
+					"name": "lookup_weather",
+					"parameters": map[string]any{
+						"type": "object",
+					},
+				},
+			},
+		},
+		ToolChoice: map[string]any{"type": "function", "function": map[string]any{"name": "lookup_weather"}},
+	}
+
+	resp, err := provider.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Choices[0].FinishReason != "tool_calls" {
+		t.Fatalf("FinishReason = %q, want tool_calls", resp.Choices[0].FinishReason)
+	}
+	if len(resp.Choices[0].Message.ToolCalls) != 1 || resp.Choices[0].Message.ToolCalls[0].Function.Name != "lookup_weather" {
+		t.Fatalf("tool_calls = %+v, want lookup_weather", resp.Choices[0].Message.ToolCalls)
 	}
 }
 

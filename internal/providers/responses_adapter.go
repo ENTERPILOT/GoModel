@@ -2,6 +2,8 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 
@@ -19,20 +21,30 @@ type ChatProvider interface {
 }
 
 // ConvertResponsesRequestToChat converts a ResponsesRequest to a ChatRequest.
-func ConvertResponsesRequestToChat(req *core.ResponsesRequest) *core.ChatRequest {
+// It also validates the supported Responses input shapes and returns an error
+// when the request cannot be converted safely.
+func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatRequest, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("responses request is required", nil)
+	}
+
 	chatReq := &core.ChatRequest{
-		Model:       req.Model,
-		Provider:    req.Provider,
-		Messages:    make([]core.Message, 0),
-		Temperature: req.Temperature,
-		Stream:      req.Stream,
+		Model:             req.Model,
+		Provider:          req.Provider,
+		Messages:          make([]core.Message, 0),
+		Tools:             normalizeResponsesToolsForChat(req.Tools),
+		ToolChoice:        normalizeResponsesToolChoiceForChat(req.ToolChoice),
+		ParallelToolCalls: req.ParallelToolCalls,
+		Temperature:       req.Temperature,
+		Stream:            req.Stream,
+		StreamOptions:     req.StreamOptions,
+		Reasoning:         req.Reasoning,
 	}
 
 	if req.MaxOutputTokens != nil {
 		chatReq.MaxTokens = req.MaxOutputTokens
 	}
 
-	// Add system instruction if provided
 	if req.Instructions != "" {
 		chatReq.Messages = append(chatReq.Messages, core.Message{
 			Role:    "system",
@@ -40,29 +52,531 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) *core.ChatRequest
 		})
 	}
 
-	// Convert input to messages
-	switch input := req.Input.(type) {
+	messages, err := ConvertResponsesInputToMessages(req.Input)
+	if err != nil {
+		return nil, err
+	}
+	chatReq.Messages = append(chatReq.Messages, messages...)
+
+	return chatReq, nil
+}
+
+func normalizeResponsesToolsForChat(tools []map[string]any) []map[string]any {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	normalized := make([]map[string]any, 0, len(tools))
+	for _, tool := range tools {
+		normalized = append(normalized, normalizeResponsesToolForChat(tool))
+	}
+	return normalized
+}
+
+func normalizeResponsesToolForChat(tool map[string]any) map[string]any {
+	if len(tool) == 0 {
+		return tool
+	}
+
+	toolType, _ := tool["type"].(string)
+	if strings.TrimSpace(toolType) != "function" {
+		return cloneStringAnyMap(tool)
+	}
+	if _, ok := tool["function"].(map[string]any); ok {
+		return cloneStringAnyMap(tool)
+	}
+
+	normalized := cloneStringAnyMap(tool)
+	function := map[string]any{}
+	for _, key := range []string{"name", "description", "parameters", "strict"} {
+		if value, ok := normalized[key]; ok {
+			function[key] = value
+			delete(normalized, key)
+		}
+	}
+	if len(function) == 0 {
+		return normalized
+	}
+
+	normalized["function"] = function
+	return normalized
+}
+
+func normalizeResponsesToolChoiceForChat(choice any) any {
+	choiceMap, ok := choice.(map[string]any)
+	if !ok {
+		return choice
+	}
+
+	choiceType, _ := choiceMap["type"].(string)
+	if strings.TrimSpace(choiceType) != "function" {
+		return choice
+	}
+	if _, ok := choiceMap["function"].(map[string]any); ok {
+		return cloneStringAnyMap(choiceMap)
+	}
+
+	name, hasName := choiceMap["name"]
+	if !hasName {
+		return cloneStringAnyMap(choiceMap)
+	}
+
+	normalized := cloneStringAnyMap(choiceMap)
+	delete(normalized, "name")
+	normalized["function"] = map[string]any{"name": name}
+	return normalized
+}
+
+func cloneStringAnyMap(src map[string]any) map[string]any {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]any, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+// ConvertResponsesInputToMessages converts a Responses API input payload into Chat API messages.
+func ConvertResponsesInputToMessages(input interface{}) ([]core.Message, error) {
+	switch in := input.(type) {
 	case string:
-		chatReq.Messages = append(chatReq.Messages, core.Message{
-			Role:    "user",
-			Content: input,
-		})
+		return []core.Message{{Role: "user", Content: in}}, nil
+	case []map[string]any:
+		items := make([]interface{}, 0, len(in))
+		for _, item := range in {
+			items = append(items, item)
+		}
+		return convertResponsesInputItems(items)
 	case []interface{}:
-		for _, item := range input {
-			if msgMap, ok := item.(map[string]interface{}); ok {
-				role, _ := msgMap["role"].(string)
-				content := ExtractContentFromInput(msgMap["content"])
-				if role != "" && content != "" {
-					chatReq.Messages = append(chatReq.Messages, core.Message{
-						Role:    role,
-						Content: content,
-					})
-				}
+		return convertResponsesInputItems(in)
+	case []core.ResponsesInputElement:
+		items := make([]interface{}, 0, len(in))
+		for _, item := range in {
+			items = append(items, item)
+		}
+		return convertResponsesInputItems(items)
+	case nil:
+		return nil, core.NewInvalidRequestError("invalid responses input: unsupported type", nil)
+	default:
+		return nil, core.NewInvalidRequestError("invalid responses input: unsupported type", nil)
+	}
+}
+
+func convertResponsesInputItems(items []interface{}) ([]core.Message, error) {
+	messages := make([]core.Message, 0, len(items))
+	var pendingAssistant *core.Message
+
+	flushPendingAssistant := func() {
+		if pendingAssistant == nil {
+			return
+		}
+		messages = append(messages, *pendingAssistant)
+		pendingAssistant = nil
+	}
+
+	for i, item := range items {
+		msg, itemType, err := convertResponsesInputItem(item, i)
+		if err != nil {
+			return nil, err
+		}
+
+		if msg.Role == "assistant" {
+			if itemType == "message" {
+				flushPendingAssistant()
 			}
+			if pendingAssistant == nil {
+				assistant := cloneResponsesMessage(msg)
+				pendingAssistant = &assistant
+			} else if canMergeAssistantMessages(*pendingAssistant, msg) {
+				mergeAssistantMessage(pendingAssistant, msg)
+			} else {
+				flushPendingAssistant()
+				assistant := cloneResponsesMessage(msg)
+				pendingAssistant = &assistant
+			}
+			continue
+		}
+
+		flushPendingAssistant()
+		messages = append(messages, msg)
+	}
+
+	flushPendingAssistant()
+	return messages, nil
+}
+
+func convertResponsesInputItem(item interface{}, index int) (core.Message, string, error) {
+	switch typed := item.(type) {
+	case core.ResponsesInputElement:
+		return convertResponsesInputElement(typed, index)
+	case map[string]interface{}:
+		return convertResponsesInputMap(typed, index)
+	default:
+		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: expected object", index), nil)
+	}
+}
+
+func convertResponsesInputElement(item core.ResponsesInputElement, index int) (core.Message, string, error) {
+	switch item.Type {
+	case "function_call":
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: function_call name is required", index), nil)
+		}
+		callID := ResponsesFunctionCallCallID(item.CallID)
+		return core.Message{
+			Role:        "assistant",
+			Content:     "",
+			ContentNull: true,
+			ToolCalls: []core.ToolCall{
+				{
+					ID:   callID,
+					Type: "function",
+					Function: core.FunctionCall{
+						Name:      name,
+						Arguments: item.Arguments,
+					},
+				},
+			},
+		}, "function_call", nil
+	case "function_call_output":
+		callID := strings.TrimSpace(item.CallID)
+		if callID == "" {
+			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: function_call_output call_id is required", index), nil)
+		}
+		return core.Message{
+			Role:       "tool",
+			ToolCallID: callID,
+			Content:    item.Output,
+		}, "function_call_output", nil
+	default: // message (type="" or "message")
+		role := strings.TrimSpace(item.Role)
+		if role == "" {
+			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", index), nil)
+		}
+		content, ok := ConvertResponsesContentToChatContent(item.Content)
+		if !ok {
+			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: unsupported content", index), nil)
+		}
+		return core.Message{Role: role, Content: content}, "message", nil
+	}
+}
+
+func convertResponsesInputMap(item map[string]interface{}, index int) (core.Message, string, error) {
+	itemType, _ := item["type"].(string)
+	switch itemType {
+	case "function_call":
+		name, _ := item["name"].(string)
+		callID := firstNonEmptyString(item, "call_id", "id")
+		if strings.TrimSpace(name) == "" {
+			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: function_call name is required", index), nil)
+		}
+		callID = ResponsesFunctionCallCallID(callID)
+		return core.Message{
+			Role:        "assistant",
+			Content:     "",
+			ContentNull: true,
+			ToolCalls: []core.ToolCall{
+				{
+					ID:   callID,
+					Type: "function",
+					Function: core.FunctionCall{
+						Name:      name,
+						Arguments: stringifyResponsesInputValue(item["arguments"]),
+					},
+				},
+			},
+		}, "function_call", nil
+	case "function_call_output":
+		callID := firstNonEmptyString(item, "call_id")
+		if callID == "" {
+			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: function_call_output call_id is required", index), nil)
+		}
+		return core.Message{
+			Role:       "tool",
+			ToolCallID: callID,
+			Content:    stringifyResponsesInputValue(item["output"]),
+		}, "function_call_output", nil
+	}
+
+	role, _ := item["role"].(string)
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", index), nil)
+	}
+
+	content, ok := ConvertResponsesContentToChatContent(item["content"])
+	if !ok {
+		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: unsupported content", index), nil)
+	}
+	return core.Message{Role: role, Content: content}, "message", nil
+}
+
+func cloneResponsesMessage(msg core.Message) core.Message {
+	cloned := msg
+	if len(msg.ToolCalls) > 0 {
+		cloned.ToolCalls = append([]core.ToolCall(nil), msg.ToolCalls...)
+	}
+	if parts, ok := msg.Content.([]core.ContentPart); ok {
+		clonedParts := make([]core.ContentPart, len(parts))
+		copy(clonedParts, parts)
+		cloned.Content = clonedParts
+	}
+	return cloned
+}
+
+func canMergeAssistantMessages(current, next core.Message) bool {
+	if !core.HasStructuredContent(current.Content) && !core.HasStructuredContent(next.Content) {
+		return true
+	}
+	return isAssistantToolCallOnlyMessage(next)
+}
+
+func mergeAssistantMessage(dst *core.Message, src core.Message) {
+	if text := core.ExtractTextContent(src.Content); text != "" {
+		existing := core.ExtractTextContent(dst.Content)
+		dst.Content = existing + text
+		dst.ContentNull = false
+	}
+	if len(src.ToolCalls) > 0 {
+		dst.ToolCalls = append(dst.ToolCalls, src.ToolCalls...)
+		if core.ExtractTextContent(dst.Content) == "" {
+			dst.ContentNull = dst.ContentNull || src.ContentNull
+		}
+	}
+}
+
+func isAssistantToolCallOnlyMessage(msg core.Message) bool {
+	if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
+		return false
+	}
+	if core.HasStructuredContent(msg.Content) {
+		return false
+	}
+	return core.ExtractTextContent(msg.Content) == ""
+}
+
+// ConvertResponsesContentToChatContent maps Responses input content to Chat content.
+// Text-only arrays are flattened to strings for broader provider compatibility.
+// Any non-text part preserves the array form so multimodal payloads survive routing.
+func ConvertResponsesContentToChatContent(content interface{}) (any, bool) {
+	switch c := content.(type) {
+	case string:
+		return c, true
+	case []map[string]any:
+		items := make([]interface{}, 0, len(c))
+		for _, item := range c {
+			items = append(items, item)
+		}
+		return convertResponsesContentParts(items)
+	case []interface{}:
+		return convertResponsesContentParts(c)
+	case []core.ContentPart:
+		parts := make([]core.ContentPart, 0, len(c))
+		for _, part := range c {
+			normalized, ok := normalizeTypedResponsesContentPart(part)
+			if !ok {
+				return nil, false
+			}
+			parts = append(parts, normalized)
+		}
+		return finalizeResponsesChatContent(parts)
+	case core.ContentPart:
+		normalized, ok := normalizeTypedResponsesContentPart(c)
+		if !ok {
+			return nil, false
+		}
+		return finalizeResponsesChatContent([]core.ContentPart{normalized})
+	default:
+		return nil, false
+	}
+}
+
+func convertResponsesContentParts(parts []interface{}) (any, bool) {
+	typedParts := make([]core.ContentPart, 0, len(parts))
+	texts := make([]string, 0, len(parts))
+	allOutputText := true
+
+	for _, part := range parts {
+		partMap, ok := part.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+
+		partType, _ := partMap["type"].(string)
+		switch partType {
+		case "text", "input_text", "output_text":
+			text, ok := partMap["text"].(string)
+			if !ok || text == "" {
+				return nil, false
+			}
+			typedParts = append(typedParts, core.ContentPart{Type: "text", Text: text})
+			texts = append(texts, text)
+		case "image_url", "input_image":
+			imageURL, detail, mediaType, ok := extractResponsesImageURL(partMap["image_url"])
+			if !ok {
+				return nil, false
+			}
+			allOutputText = false
+			typedParts = append(typedParts, core.ContentPart{
+				Type: "image_url",
+				ImageURL: &core.ImageURLContent{
+					URL:       imageURL,
+					Detail:    detail,
+					MediaType: mediaType,
+				},
+			})
+		case "input_audio":
+			data, format, ok := extractResponsesInputAudio(partMap["input_audio"])
+			if !ok {
+				return nil, false
+			}
+			allOutputText = false
+			typedParts = append(typedParts, core.ContentPart{
+				Type: "input_audio",
+				InputAudio: &core.InputAudioContent{
+					Data:   data,
+					Format: format,
+				},
+			})
+		default:
+			if nested, ok := partMap["content"]; ok {
+				text := ExtractContentFromInput(nested)
+				if text == "" {
+					return nil, false
+				}
+				typedParts = append(typedParts, core.ContentPart{Type: "text", Text: text})
+				texts = append(texts, text)
+				continue
+			}
+			return nil, false
 		}
 	}
 
-	return chatReq
+	if len(typedParts) == 0 {
+		return nil, false
+	}
+	if allOutputText {
+		return strings.Join(texts, " "), true
+	}
+	return finalizeResponsesChatContent(typedParts)
+}
+
+func normalizeTypedResponsesContentPart(part core.ContentPart) (core.ContentPart, bool) {
+	switch part.Type {
+	case "text", "input_text", "output_text":
+		if part.Text == "" {
+			return core.ContentPart{}, false
+		}
+		return core.ContentPart{
+			Type: "text",
+			Text: part.Text,
+		}, true
+	case "image_url", "input_image":
+		if part.ImageURL == nil || part.ImageURL.URL == "" {
+			return core.ContentPart{}, false
+		}
+		return core.ContentPart{
+			Type: "image_url",
+			ImageURL: &core.ImageURLContent{
+				URL:       part.ImageURL.URL,
+				Detail:    part.ImageURL.Detail,
+				MediaType: part.ImageURL.MediaType,
+			},
+		}, true
+	case "input_audio":
+		if part.InputAudio == nil || part.InputAudio.Data == "" || part.InputAudio.Format == "" {
+			return core.ContentPart{}, false
+		}
+		return core.ContentPart{
+			Type: "input_audio",
+			InputAudio: &core.InputAudioContent{
+				Data:   part.InputAudio.Data,
+				Format: part.InputAudio.Format,
+			},
+		}, true
+	default:
+		return core.ContentPart{}, false
+	}
+}
+
+func finalizeResponsesChatContent(parts []core.ContentPart) (any, bool) {
+	if len(parts) == 0 {
+		return nil, false
+	}
+
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Type != "text" {
+			return parts, true
+		}
+		texts = append(texts, part.Text)
+	}
+	return strings.Join(texts, " "), true
+}
+
+func extractResponsesImageURL(value interface{}) (url string, detail string, mediaType string, ok bool) {
+	switch v := value.(type) {
+	case string:
+		if v == "" {
+			return "", "", "", false
+		}
+		return v, "", "", true
+	case map[string]string:
+		url = v["url"]
+		detail = v["detail"]
+		mediaType = v["media_type"]
+		return url, detail, mediaType, url != ""
+	case map[string]interface{}:
+		url, _ = v["url"].(string)
+		detail, _ = v["detail"].(string)
+		mediaType, _ = v["media_type"].(string)
+		return url, detail, mediaType, url != ""
+	default:
+		return "", "", "", false
+	}
+}
+
+func extractResponsesInputAudio(value interface{}) (data string, format string, ok bool) {
+	switch v := value.(type) {
+	case map[string]string:
+		data = v["data"]
+		format = v["format"]
+		return data, format, data != "" && format != ""
+	case map[string]interface{}:
+		data, _ = v["data"].(string)
+		format, _ = v["format"].(string)
+		return data, format, data != "" && format != ""
+	default:
+		return "", "", false
+	}
+}
+
+func firstNonEmptyString(item map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		value, _ := item[key].(string)
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func stringifyResponsesInputValue(value interface{}) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	default:
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			return ""
+		}
+		return string(encoded)
+	}
 }
 
 // ExtractContentFromInput extracts text content from responses input.
@@ -70,26 +584,197 @@ func ExtractContentFromInput(content interface{}) string {
 	switch c := content.(type) {
 	case string:
 		return c
+	case []core.ContentPart:
+		texts := make([]string, 0, len(c))
+		for _, part := range c {
+			if part.Text != "" {
+				texts = append(texts, part.Text)
+			}
+		}
+		return strings.Join(texts, " ")
+	case []map[string]any:
+		return extractTextFromMapSlice(c)
 	case []interface{}:
-		// Array of content parts - extract text
-		var texts []string
+		texts := make([]string, 0, len(c))
 		for _, part := range c {
 			if partMap, ok := part.(map[string]interface{}); ok {
-				if text, ok := partMap["text"].(string); ok {
+				if text := extractTextFromInputMap(partMap); text != "" {
 					texts = append(texts, text)
 				}
 			}
 		}
 		return strings.Join(texts, " ")
+	default:
+		return ""
 	}
-	return ""
+}
+
+func extractTextFromMapSlice(parts []map[string]any) string {
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if text := extractTextFromInputMap(part); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return strings.Join(texts, " ")
+}
+
+func extractTextFromInputMap(part map[string]any) string {
+	texts := make([]string, 0, 2)
+	if text, ok := part["text"].(string); ok && text != "" {
+		texts = append(texts, text)
+	}
+	if nested, ok := part["content"]; ok {
+		if text := ExtractContentFromInput(nested); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return strings.Join(texts, " ")
+}
+
+// ResponsesFunctionCallCallID returns the call id if present or generates one.
+func ResponsesFunctionCallCallID(callID string) string {
+	if strings.TrimSpace(callID) != "" {
+		return callID
+	}
+	return "call_" + uuid.New().String()
+}
+
+// ResponsesFunctionCallItemID returns a stable function-call item id.
+func ResponsesFunctionCallItemID(callID string) string {
+	normalizedCallID := strings.TrimSpace(callID)
+	if normalizedCallID == "" {
+		normalizedCallID = "call_" + uuid.New().String()
+	}
+	return "fc_" + normalizedCallID
+}
+
+func buildResponsesMessageContent(content any) []core.ResponsesContentItem {
+	switch c := content.(type) {
+	case string:
+		return []core.ResponsesContentItem{
+			{
+				Type:        "output_text",
+				Text:        c,
+				Annotations: []string{},
+			},
+		}
+	case []core.ContentPart:
+		return buildResponsesContentItemsFromParts(c)
+	case []interface{}:
+		parts, ok := core.NormalizeContentParts(c)
+		if !ok {
+			return nil
+		}
+		return buildResponsesContentItemsFromParts(parts)
+	default:
+		text := core.ExtractTextContent(content)
+		if text == "" {
+			return nil
+		}
+		return []core.ResponsesContentItem{
+			{
+				Type:        "output_text",
+				Text:        text,
+				Annotations: []string{},
+			},
+		}
+	}
+}
+
+func buildResponsesContentItemsFromParts(parts []core.ContentPart) []core.ResponsesContentItem {
+	items := make([]core.ResponsesContentItem, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			items = append(items, core.ResponsesContentItem{
+				Type:        "output_text",
+				Text:        part.Text,
+				Annotations: []string{},
+			})
+		case "image_url":
+			if part.ImageURL == nil || part.ImageURL.URL == "" {
+				continue
+			}
+			items = append(items, core.ResponsesContentItem{
+				Type: "input_image",
+				ImageURL: &core.ImageURLContent{
+					URL:       part.ImageURL.URL,
+					Detail:    part.ImageURL.Detail,
+					MediaType: part.ImageURL.MediaType,
+				},
+			})
+		case "input_audio":
+			if part.InputAudio == nil || part.InputAudio.Data == "" || part.InputAudio.Format == "" {
+				continue
+			}
+			items = append(items, core.ResponsesContentItem{
+				Type: "input_audio",
+				InputAudio: &core.InputAudioContent{
+					Data:   part.InputAudio.Data,
+					Format: part.InputAudio.Format,
+				},
+			})
+		}
+	}
+	return items
+}
+
+// BuildResponsesOutputItems converts a response message into Responses API output items.
+func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputItem {
+	output := make([]core.ResponsesOutputItem, 0, len(msg.ToolCalls)+1)
+	contentItems := buildResponsesMessageContent(msg.Content)
+	if len(contentItems) > 0 || len(msg.ToolCalls) == 0 {
+		if len(contentItems) == 0 {
+			contentItems = []core.ResponsesContentItem{
+				{
+					Type:        "output_text",
+					Text:        "",
+					Annotations: []string{},
+				},
+			}
+		}
+		output = append(output, core.ResponsesOutputItem{
+			ID:      "msg_" + uuid.New().String(),
+			Type:    "message",
+			Role:    "assistant",
+			Status:  "completed",
+			Content: contentItems,
+		})
+	}
+	for _, toolCall := range msg.ToolCalls {
+		callID := ResponsesFunctionCallCallID(toolCall.ID)
+		output = append(output, core.ResponsesOutputItem{
+			ID:        ResponsesFunctionCallItemID(callID),
+			Type:      "function_call",
+			Status:    "completed",
+			CallID:    callID,
+			Name:      toolCall.Function.Name,
+			Arguments: toolCall.Function.Arguments,
+		})
+	}
+	return output
 }
 
 // ConvertChatResponseToResponses converts a ChatResponse to a ResponsesResponse.
 func ConvertChatResponseToResponses(resp *core.ChatResponse) *core.ResponsesResponse {
-	content := ""
+	output := []core.ResponsesOutputItem{
+		{
+			ID:     "msg_" + uuid.New().String(),
+			Type:   "message",
+			Role:   "assistant",
+			Status: "completed",
+			Content: []core.ResponsesContentItem{
+				{
+					Type:        "output_text",
+					Text:        "",
+					Annotations: []string{},
+				},
+			},
+		},
+	}
 	if len(resp.Choices) > 0 {
-		content = resp.Choices[0].Message.Content
+		output = BuildResponsesOutputItems(resp.Choices[0].Message)
 	}
 
 	return &core.ResponsesResponse{
@@ -99,32 +784,24 @@ func ConvertChatResponseToResponses(resp *core.ChatResponse) *core.ResponsesResp
 		Model:     resp.Model,
 		Provider:  resp.Provider,
 		Status:    "completed",
-		Output: []core.ResponsesOutputItem{
-			{
-				ID:     "msg_" + uuid.New().String(),
-				Type:   "message",
-				Role:   "assistant",
-				Status: "completed",
-				Content: []core.ResponsesContentItem{
-					{
-						Type:        "output_text",
-						Text:        content,
-						Annotations: []string{},
-					},
-				},
-			},
-		},
+		Output:    output,
 		Usage: &core.ResponsesUsage{
-			InputTokens:  resp.Usage.PromptTokens,
-			OutputTokens: resp.Usage.CompletionTokens,
-			TotalTokens:  resp.Usage.TotalTokens,
+			InputTokens:             resp.Usage.PromptTokens,
+			OutputTokens:            resp.Usage.CompletionTokens,
+			TotalTokens:             resp.Usage.TotalTokens,
+			PromptTokensDetails:     resp.Usage.PromptTokensDetails,
+			CompletionTokensDetails: resp.Usage.CompletionTokensDetails,
+			RawUsage:                resp.Usage.RawUsage,
 		},
 	}
 }
 
 // ResponsesViaChat implements the Responses API by converting to/from Chat format.
 func ResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	chatReq := ConvertResponsesRequestToChat(req)
+	chatReq, err := ConvertResponsesRequestToChat(req)
+	if err != nil {
+		return nil, err
+	}
 
 	chatResp, err := p.ChatCompletion(ctx, chatReq)
 	if err != nil {
@@ -136,7 +813,10 @@ func ResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRe
 
 // StreamResponsesViaChat implements streaming Responses API by converting to/from Chat format.
 func StreamResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRequest, providerName string) (io.ReadCloser, error) {
-	chatReq := ConvertResponsesRequestToChat(req)
+	chatReq, err := ConvertResponsesRequestToChat(req)
+	if err != nil {
+		return nil, err
+	}
 
 	stream, err := p.StreamChatCompletion(ctx, chatReq)
 	if err != nil {

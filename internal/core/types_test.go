@@ -1,6 +1,183 @@
 package core
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestMessageUnmarshalJSON_AllowsNullContent(t *testing.T) {
+	payload := []byte(`{
+		"role":"assistant",
+		"content":null,
+		"tool_calls":[
+			{
+				"id":"call_123",
+				"type":"function",
+				"function":{"name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"}
+			}
+		]
+	}`)
+
+	var msg Message
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, want nil", err)
+	}
+
+	if msg.Content != nil {
+		t.Fatalf("Content = %#v, want nil", msg.Content)
+	}
+	if !msg.ContentNull {
+		t.Fatal("ContentNull = false, want true")
+	}
+	if len(msg.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(msg.ToolCalls))
+	}
+	if msg.ToolCalls[0].ID != "call_123" {
+		t.Fatalf("ToolCalls[0].ID = %q, want call_123", msg.ToolCalls[0].ID)
+	}
+}
+
+func TestMessageUnmarshalJSON_PreservesStringContent(t *testing.T) {
+	payload := []byte(`{"role":"assistant","content":"hello"}`)
+
+	var msg Message
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, want nil", err)
+	}
+
+	if msg.Content != "hello" {
+		t.Fatalf("Content = %q, want hello", msg.Content)
+	}
+	if msg.ContentNull {
+		t.Fatal("ContentNull = true, want false")
+	}
+}
+
+func TestMessageMarshalJSON_PreservesNullContent(t *testing.T) {
+	payload, err := json.Marshal(Message{
+		Role:        "assistant",
+		ContentNull: true,
+		ToolCalls: []ToolCall{
+			{
+				ID:   "call_123",
+				Type: "function",
+				Function: FunctionCall{
+					Name:      "lookup_weather",
+					Arguments: `{"city":"Warsaw"}`,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v, want nil", err)
+	}
+
+	if string(payload) != `{"role":"assistant","content":null,"tool_calls":[{"id":"call_123","type":"function","function":{"name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"}}]}` {
+		t.Fatalf("json.Marshal() = %s", payload)
+	}
+}
+
+func TestMessageMarshalJSON_ContentWinsOverContentNull(t *testing.T) {
+	payload, err := json.Marshal(Message{
+		Role:        "assistant",
+		Content:     "hello",
+		ContentNull: true,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v, want nil", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if raw["content"] != "hello" {
+		t.Fatalf("content = %v, want \"hello\"", raw["content"])
+	}
+}
+
+func TestChatRequestWithStreaming_PreservesToolFields(t *testing.T) {
+	parallelToolCalls := false
+	req := &ChatRequest{
+		Model: "gpt-4o-mini",
+		Messages: []Message{
+			{
+				Role: "assistant",
+				ToolCalls: []ToolCall{
+					{
+						ID:   "call_123",
+						Type: "function",
+						Function: FunctionCall{
+							Name:      "lookup_weather",
+							Arguments: `{"city":"Warsaw"}`,
+						},
+					},
+				},
+			},
+			{Role: "tool", ToolCallID: "call_123", Content: `{"temperature_c":21}`},
+		},
+		Tools: []map[string]any{
+			{
+				"type": "function",
+				"function": map[string]any{
+					"name": "lookup_weather",
+				},
+			},
+		},
+		ToolChoice:        map[string]any{"type": "function", "function": map[string]any{"name": "lookup_weather"}},
+		ParallelToolCalls: &parallelToolCalls,
+	}
+
+	streamReq := req.WithStreaming()
+
+	if !streamReq.Stream {
+		t.Fatal("Stream should be true")
+	}
+	if len(streamReq.Tools) != 1 {
+		t.Fatalf("len(Tools) = %d, want 1", len(streamReq.Tools))
+	}
+	if streamReq.ToolChoice == nil {
+		t.Fatal("ToolChoice should not be nil")
+	}
+	if streamReq.ParallelToolCalls == nil || *streamReq.ParallelToolCalls {
+		t.Fatal("ParallelToolCalls should be false")
+	}
+	if len(streamReq.Messages) != 2 {
+		t.Fatalf("len(Messages) = %d, want 2", len(streamReq.Messages))
+	}
+	if len(streamReq.Messages[0].ToolCalls) != 1 || streamReq.Messages[0].ToolCalls[0].ID != "call_123" {
+		t.Fatalf("assistant tool_calls = %+v, want call_123", streamReq.Messages[0].ToolCalls)
+	}
+	if streamReq.Messages[1].ToolCallID != "call_123" {
+		t.Fatalf("tool message ToolCallID = %q, want call_123", streamReq.Messages[1].ToolCallID)
+	}
+}
+
+func TestResponsesRequestWithStreaming_PreservesToolFields(t *testing.T) {
+	parallelToolCalls := false
+	req := &ResponsesRequest{
+		Model:             "gpt-4o-mini",
+		Input:             "Hello",
+		Tools:             []map[string]any{{"type": "function", "function": map[string]any{"name": "lookup_weather"}}},
+		ToolChoice:        map[string]any{"type": "function", "function": map[string]any{"name": "lookup_weather"}},
+		ParallelToolCalls: &parallelToolCalls,
+	}
+
+	streamReq := req.WithStreaming()
+
+	if !streamReq.Stream {
+		t.Fatal("Stream should be true")
+	}
+	if len(streamReq.Tools) != 1 {
+		t.Fatalf("len(Tools) = %d, want 1", len(streamReq.Tools))
+	}
+	if streamReq.ToolChoice == nil {
+		t.Fatal("ToolChoice should not be nil")
+	}
+	if streamReq.ParallelToolCalls == nil || *streamReq.ParallelToolCalls {
+		t.Fatal("ParallelToolCalls should be false")
+	}
+}
 
 func TestCategoriesForModes_KnownModes(t *testing.T) {
 	tests := []struct {

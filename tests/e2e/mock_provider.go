@@ -36,6 +36,32 @@ type RecordedRequest struct {
 	Body    []byte
 }
 
+// Requests returns a thread-safe snapshot of recorded requests with cloned headers and body bytes.
+func (m *MockLLMServer) Requests() []RecordedRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	out := make([]RecordedRequest, len(m.requests))
+	for i, req := range m.requests {
+		body := make([]byte, len(req.Body))
+		copy(body, req.Body)
+		out[i] = RecordedRequest{
+			Method:  req.Method,
+			Path:    req.Path,
+			Headers: req.Headers.Clone(),
+			Body:    body,
+		}
+	}
+	return out
+}
+
+// ResetRequests clears all recorded requests in a thread-safe manner.
+func (m *MockLLMServer) ResetRequests() {
+	m.mu.Lock()
+	m.requests = m.requests[:0]
+	m.mu.Unlock()
+}
+
 // NewMockLLMServer creates a new mock LLM server.
 func NewMockLLMServer() *MockLLMServer {
 	m := &MockLLMServer{
@@ -125,7 +151,48 @@ func (m *MockLLMServer) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 
 	// Check for streaming
 	if req.Stream {
+		if toolName := forcedToolName(req); toolName != "" {
+			m.handleStreamingToolResponse(w, req, toolName)
+			return
+		}
 		m.handleStreamingResponse(w, req)
+		return
+	}
+
+	if toolName := forcedToolName(req); toolName != "" {
+		response := core.ChatResponse{
+			ID:      "chatcmpl-test-" + time.Now().Format("20060102150405"),
+			Object:  "chat.completion",
+			Model:   req.Model,
+			Created: time.Now().Unix(),
+			Choices: []core.Choice{
+				{
+					Index: 0,
+					Message: core.ResponseMessage{
+						Role: "assistant",
+						ToolCalls: []core.ToolCall{
+							{
+								ID:   "call_mock_123",
+								Type: "function",
+								Function: core.FunctionCall{
+									Name:      toolName,
+									Arguments: `{"city":"Warsaw"}`,
+								},
+							},
+						},
+					},
+					FinishReason: "tool_calls",
+				},
+			},
+			Usage: core.Usage{
+				PromptTokens:     10,
+				CompletionTokens: 20,
+				TotalTokens:      30,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
 		return
 	}
 
@@ -140,7 +207,7 @@ func (m *MockLLMServer) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 		Choices: []core.Choice{
 			{
 				Index: 0,
-				Message: core.Message{
+				Message: core.ResponseMessage{
 					Role:    "assistant",
 					Content: responseContent,
 				},
@@ -203,6 +270,79 @@ func (m *MockLLMServer) handleStreamingResponse(w http.ResponseWriter, req core.
 	}
 
 	// Send done marker
+	_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+	flusher.Flush()
+}
+
+func (m *MockLLMServer) handleStreamingToolResponse(w http.ResponseWriter, req core.ChatRequest, toolName string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return
+	}
+
+	toolCall := core.ToolCall{
+		ID:   "call_mock_123",
+		Type: "function",
+		Function: core.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"city":"Warsaw"}`,
+		},
+	}
+
+	firstChunk := map[string]interface{}{
+		"id":      "chatcmpl-test-stream",
+		"object":  "chat.completion.chunk",
+		"model":   req.Model,
+		"created": time.Now().Unix(),
+		"choices": []map[string]interface{}{
+			{
+				"index": 0,
+				"delta": map[string]interface{}{
+					"tool_calls": []map[string]interface{}{
+						{
+							"index": 0,
+							"id":    toolCall.ID,
+							"type":  toolCall.Type,
+							"function": map[string]interface{}{
+								"name":      toolCall.Function.Name,
+								"arguments": toolCall.Function.Arguments,
+							},
+						},
+					},
+				},
+				"finish_reason": nil,
+			},
+		},
+	}
+
+	data, _ := json.Marshal(firstChunk)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+	flusher.Flush()
+	time.Sleep(10 * time.Millisecond)
+
+	finalChunk := map[string]interface{}{
+		"id":      "chatcmpl-test-stream",
+		"object":  "chat.completion.chunk",
+		"model":   req.Model,
+		"created": time.Now().Unix(),
+		"choices": []map[string]interface{}{
+			{
+				"index":         0,
+				"delta":         map[string]interface{}{},
+				"finish_reason": "tool_calls",
+			},
+		},
+	}
+
+	data, _ = json.Marshal(finalChunk)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+	flusher.Flush()
+
 	_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()
 }
@@ -386,10 +526,33 @@ func generateMockResponse(req core.ChatRequest) string {
 		return "Hello! How can I help you today?"
 	}
 
-	lastMessage := req.Messages[len(req.Messages)-1].Content
+	lastMessage := core.ExtractTextContent(req.Messages[len(req.Messages)-1].Content)
 
 	// Echo-style response for testing
 	return fmt.Sprintf("Mock response to: %s", lastMessage)
+}
+
+func forcedToolName(req core.ChatRequest) string {
+	switch choice := req.ToolChoice.(type) {
+	case map[string]interface{}:
+		if choiceType, _ := choice["type"].(string); choiceType == "function" {
+			if function, ok := choice["function"].(map[string]interface{}); ok {
+				if name, _ := function["name"].(string); name != "" {
+					return name
+				}
+			}
+		}
+	case string:
+		if choice == "required" && len(req.Tools) > 0 {
+			if function, ok := req.Tools[0]["function"].(map[string]interface{}); ok {
+				if name, _ := function["name"].(string); name != "" {
+					return name
+				}
+			}
+		}
+	}
+
+	return ""
 }
 
 // splitIntoChunks splits a string into chunks of approximately n characters.

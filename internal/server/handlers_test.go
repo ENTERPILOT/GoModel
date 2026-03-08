@@ -452,7 +452,7 @@ func TestChatCompletion(t *testing.T) {
 			Choices: []core.Choice{
 				{
 					Index:        0,
-					Message:      core.Message{Role: "assistant", Content: "Hello!"},
+					Message:      core.ResponseMessage{Role: "assistant", Content: "Hello!"},
 					FinishReason: "stop",
 				},
 			},
@@ -488,6 +488,61 @@ func TestChatCompletion(t *testing.T) {
 	}
 	if !strings.Contains(body, "Hello!") {
 		t.Errorf("response missing expected content, got: %s", body)
+	}
+}
+
+func TestChatCompletion_BindsMultimodalContent(t *testing.T) {
+	provider := &capturingProvider{
+		mockProvider: mockProvider{
+			supportedModels: []string{"gpt-4o-mini"},
+			response: &core.ChatResponse{
+				ID:      "chatcmpl-123",
+				Object:  "chat.completion",
+				Created: 1234567890,
+				Model:   "gpt-4o-mini",
+				Choices: []core.Choice{
+					{
+						Index:        0,
+						Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
+						FinishReason: "stop",
+					},
+				},
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	reqBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":[{"type":"text","text":"Describe this image"},{"type":"image_url","image_url":{"url":"https://example.com/image.png","detail":"high"}}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler.ChatCompletion(c)
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if provider.capturedChatReq == nil {
+		t.Fatal("expected chat request to be captured")
+	}
+
+	parts, ok := core.NormalizeContentParts(provider.capturedChatReq.Messages[0].Content)
+	if !ok {
+		t.Fatalf("captured content type = %T, want structured content", provider.capturedChatReq.Messages[0].Content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("len(parts) = %d, want 2", len(parts))
+	}
+	if parts[0].Type != "text" || parts[0].Text != "Describe this image" {
+		t.Fatalf("unexpected first part: %+v", parts[0])
+	}
+	if parts[1].Type != "image_url" || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "https://example.com/image.png" {
+		t.Fatalf("unexpected second part: %+v", parts[1])
 	}
 }
 
@@ -1048,6 +1103,43 @@ func TestChatCompletion_InvalidJSON(t *testing.T) {
 	}
 	if !strings.Contains(body, "invalid request body") {
 		t.Errorf("response should contain error message, got: %s", body)
+	}
+}
+
+func TestChatCompletion_InvalidContentType(t *testing.T) {
+	provider := &capturingProvider{
+		mockProvider: mockProvider{
+			supportedModels: []string{"gpt-4o-mini"},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	reqBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":123}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler.ChatCompletion(c)
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if provider.capturedChatReq != nil {
+		t.Fatal("provider should not have been called for invalid content")
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "invalid request body") {
+		t.Fatalf("response should contain invalid request message, got: %s", body)
+	}
+	if !strings.Contains(body, "string or array of content parts") {
+		t.Fatalf("response should mention supported content types, got: %s", body)
 	}
 }
 
@@ -1762,6 +1854,14 @@ type capturingProvider struct {
 	mockProvider
 	capturedChatReq      *core.ChatRequest
 	capturedResponsesReq *core.ResponsesRequest
+}
+
+func (c *capturingProvider) ChatCompletion(_ context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	c.capturedChatReq = req
+	if c.err != nil {
+		return nil, c.err
+	}
+	return c.response, nil
 }
 
 func (c *capturingProvider) StreamChatCompletion(_ context.Context, req *core.ChatRequest) (io.ReadCloser, error) {

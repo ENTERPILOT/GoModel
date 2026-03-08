@@ -1,6 +1,18 @@
 version: "2"
 linters:
+  enable:
+    - dupl
+  settings:
+    dupl:
+      threshold: 150
   exclusions:
+    rules:
+      - linters:
+          - dupl
+        path: _test\.go
+      - linters:
+          - dupl
+        path: tests/
     generated: lax
     presets:
       - comments

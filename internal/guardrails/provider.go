@@ -289,10 +289,16 @@ func (g *GuardedProvider) GetFileContent(ctx context.Context, providerType, id s
 
 // processChat runs the pipeline for a ChatRequest via the message adapter.
 func (g *GuardedProvider) processChat(ctx context.Context, req *core.ChatRequest) (*core.ChatRequest, error) {
-	msgs := chatToMessages(req)
+	msgs, err := chatToMessages(req)
+	if err != nil {
+		return nil, err
+	}
 	modified, err := g.pipeline.Process(ctx, msgs)
 	if err != nil {
 		return nil, err
+	}
+	if chatNeedsEnvelopePreservation(req) {
+		return applySystemMessagesToMultimodalChat(req, modified)
 	}
 	return applyMessagesToChat(req, modified), nil
 }
@@ -310,23 +316,177 @@ func (g *GuardedProvider) processResponses(ctx context.Context, req *core.Respon
 // --- Adapters: concrete requests ↔ normalized []Message ---
 
 // chatToMessages extracts the normalized message list from a ChatRequest.
-func chatToMessages(req *core.ChatRequest) []Message {
+func chatToMessages(req *core.ChatRequest) ([]Message, error) {
 	msgs := make([]Message, len(req.Messages))
 	for i, m := range req.Messages {
-		msgs[i] = Message{Role: m.Role, Content: m.Content}
+		text, err := normalizeGuardrailMessageText(m.Content)
+		if err != nil {
+			return nil, core.NewInvalidRequestError("invalid chat message content", err)
+		}
+		msgs[i] = Message{
+			Role:        m.Role,
+			Content:     text,
+			ToolCalls:   cloneToolCalls(m.ToolCalls),
+			ToolCallID:  m.ToolCallID,
+			ContentNull: m.ContentNull || m.Content == nil,
+		}
 	}
-	return msgs
+	return msgs, nil
 }
 
 // applyMessagesToChat returns a shallow copy of req with messages replaced.
 func applyMessagesToChat(req *core.ChatRequest, msgs []Message) *core.ChatRequest {
 	coreMessages := make([]core.Message, len(msgs))
 	for i, m := range msgs {
-		coreMessages[i] = core.Message{Role: m.Role, Content: m.Content}
+		contentNull := m.ContentNull
+		if m.Content != "" {
+			contentNull = false
+		}
+		coreMessages[i] = core.Message{
+			Role:        m.Role,
+			Content:     m.Content,
+			ToolCalls:   cloneToolCalls(m.ToolCalls),
+			ToolCallID:  m.ToolCallID,
+			ContentNull: contentNull,
+		}
 	}
 	result := *req
 	result.Messages = coreMessages
 	return &result
+}
+
+// applySystemMessagesToMultimodalChat applies system-message updates and preserves
+// original content only for messages that contain non-text multimodal parts.
+// Text-only messages keep guardrail-rewritten text.
+func applySystemMessagesToMultimodalChat(req *core.ChatRequest, msgs []Message) (*core.ChatRequest, error) {
+	nonSystemOriginal := make([]core.Message, 0, len(req.Messages))
+	for _, original := range req.Messages {
+		if original.Role != "system" {
+			nonSystemOriginal = append(nonSystemOriginal, original)
+		}
+	}
+
+	coreMessages := make([]core.Message, 0, len(msgs))
+	nextNonSystem := 0
+	modifiedNonSystemCount := 0
+	for _, modified := range msgs {
+		if modified.Role == "system" {
+			coreMessages = append(coreMessages, core.Message{Role: "system", Content: modified.Content})
+			continue
+		}
+		modifiedNonSystemCount++
+		if nextNonSystem >= len(nonSystemOriginal) {
+			return nil, core.NewInvalidRequestError("guardrails cannot insert non-system multimodal or tool-call messages", nil)
+		}
+		original := nonSystemOriginal[nextNonSystem]
+		if modified.Role != original.Role {
+			return nil, core.NewInvalidRequestError("guardrails cannot reorder non-system multimodal or tool-call messages", nil)
+		}
+		preserved := original
+		preserved.Role = modified.Role
+		if core.HasNonTextContent(original.Content) {
+			mergedContent, err := mergeMultimodalContentWithTextRewrite(original.Content, modified.Content)
+			if err != nil {
+				return nil, err
+			}
+			preserved.Content = mergedContent
+		} else {
+			preserved.Content = modified.Content
+		}
+		coreMessages = append(coreMessages, preserved)
+		nextNonSystem++
+	}
+
+	if modifiedNonSystemCount != len(nonSystemOriginal) {
+		return nil, core.NewInvalidRequestError("guardrails cannot add or remove non-system multimodal or tool-call messages", nil)
+	}
+
+	result := *req
+	result.Messages = coreMessages
+	return &result, nil
+}
+
+func mergeMultimodalContentWithTextRewrite(originalContent any, rewrittenText string) (any, error) {
+	parts, ok := core.NormalizeContentParts(originalContent)
+	if !ok {
+		return nil, core.NewInvalidRequestError("guardrails cannot merge rewritten text into multimodal message", nil)
+	}
+
+	// Guard against pathological numbers of content parts that could cause size
+	// computations for allocations to overflow on some platforms.
+	const maxContentParts = 1_000_000
+	if len(parts) >= maxContentParts {
+		return nil, core.NewInvalidRequestError("guardrails cannot merge multimodal message with too many content parts", nil)
+	}
+
+	capacity := len(parts) + 1
+	merged := make([]core.ContentPart, 0, capacity)
+	hadTextPart := false
+	insertedRewrittenText := false
+	textPartCount := 0
+	originalTexts := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		if part.Type == "text" {
+			textPartCount++
+			hadTextPart = true
+			originalTexts = append(originalTexts, part.Text)
+			if !insertedRewrittenText {
+				if rewrittenText != "" {
+					merged = append(merged, core.ContentPart{Type: "text", Text: rewrittenText})
+				}
+				insertedRewrittenText = true
+			}
+			continue
+		}
+		merged = append(merged, part)
+	}
+
+	if textPartCount > 1 && rewrittenText == strings.Join(originalTexts, " ") {
+		copied := make([]core.ContentPart, len(parts))
+		copy(copied, parts)
+		return copied, nil
+	}
+
+	if !hadTextPart && rewrittenText != "" {
+		merged = append([]core.ContentPart{{Type: "text", Text: rewrittenText}}, merged...)
+	}
+
+	if len(merged) == 0 {
+		return nil, core.NewInvalidRequestError("guardrails produced empty multimodal message after rewrite", nil)
+	}
+
+	return merged, nil
+}
+
+func chatHasNonTextContent(req *core.ChatRequest) bool {
+	for _, msg := range req.Messages {
+		if core.HasNonTextContent(msg.Content) {
+			return true
+		}
+	}
+	return false
+}
+
+func chatHasToolCalls(req *core.ChatRequest) bool {
+	for _, msg := range req.Messages {
+		if len(msg.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func chatNeedsEnvelopePreservation(req *core.ChatRequest) bool {
+	return chatHasNonTextContent(req) || chatHasToolCalls(req)
+}
+
+func normalizeGuardrailMessageText(content any) (string, error) {
+	normalized, err := core.NormalizeMessageContent(content)
+	if err != nil {
+		return "", err
+	}
+	return core.ExtractTextContent(normalized), nil
 }
 
 // responsesToMessages extracts the normalized message list from a ResponsesRequest.
@@ -354,4 +514,13 @@ func applyMessagesToResponses(req *core.ResponsesRequest, msgs []Message) *core.
 	}
 	result.Instructions = instructions
 	return &result
+}
+
+func cloneToolCalls(toolCalls []core.ToolCall) []core.ToolCall {
+	if len(toolCalls) == 0 {
+		return nil
+	}
+	cloned := make([]core.ToolCall, len(toolCalls))
+	copy(cloned, toolCalls)
+	return cloned
 }

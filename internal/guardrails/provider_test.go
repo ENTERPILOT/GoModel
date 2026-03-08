@@ -155,13 +155,32 @@ func TestGuardedProvider_ChatPreservesFields(t *testing.T) {
 
 	temp := 0.7
 	maxTok := 100
+	parallelToolCalls := false
 	req := &core.ChatRequest{
-		Model:       "gpt-4",
-		Temperature: &temp,
-		MaxTokens:   &maxTok,
-		Messages:    []core.Message{{Role: "user", Content: "hello"}},
-		Stream:      true,
-		Reasoning:   &core.Reasoning{Effort: "high"},
+		Model:             "gpt-4",
+		Temperature:       &temp,
+		MaxTokens:         &maxTok,
+		Tools:             []map[string]any{{"type": "function"}},
+		ToolChoice:        map[string]any{"type": "function", "function": map[string]any{"name": "lookup_weather"}},
+		ParallelToolCalls: &parallelToolCalls,
+		Messages: []core.Message{
+			{
+				Role: "assistant",
+				ToolCalls: []core.ToolCall{
+					{
+						ID:   "call_123",
+						Type: "function",
+						Function: core.FunctionCall{
+							Name:      "lookup_weather",
+							Arguments: `{"city":"Warsaw"}`,
+						},
+					},
+				},
+			},
+			{Role: "tool", ToolCallID: "call_123", Content: `{"temperature_c":21}`},
+		},
+		Stream:    true,
+		Reasoning: &core.Reasoning{Effort: "high"},
 	}
 
 	_, err := guarded.ChatCompletion(context.Background(), req)
@@ -179,11 +198,508 @@ func TestGuardedProvider_ChatPreservesFields(t *testing.T) {
 	if got.MaxTokens == nil || *got.MaxTokens != 100 {
 		t.Errorf("max_tokens not preserved")
 	}
+	if len(got.Tools) != 1 {
+		t.Errorf("tools not preserved")
+	}
+	if got.ToolChoice == nil {
+		t.Errorf("tool_choice not preserved")
+	}
+	if got.ParallelToolCalls == nil || *got.ParallelToolCalls {
+		t.Errorf("parallel_tool_calls not preserved")
+	}
 	if !got.Stream {
 		t.Errorf("stream not preserved")
 	}
 	if got.Reasoning == nil || got.Reasoning.Effort != "high" {
 		t.Errorf("reasoning not preserved")
+	}
+	if len(got.Messages) != 3 {
+		t.Fatalf("len(messages) = %d, want 3", len(got.Messages))
+	}
+	if len(got.Messages[1].ToolCalls) != 1 || got.Messages[1].ToolCalls[0].ID != "call_123" {
+		t.Errorf("assistant tool_calls not preserved: %+v", got.Messages[1].ToolCalls)
+	}
+	if got.Messages[2].ToolCallID != "call_123" {
+		t.Errorf("tool_call_id not preserved: %+v", got.Messages[2])
+	}
+}
+
+func TestChatAdaptersCloneToolCalls(t *testing.T) {
+	req := &core.ChatRequest{
+		Messages: []core.Message{
+			{
+				Role: "assistant",
+				ToolCalls: []core.ToolCall{
+					{
+						ID:   "call_123",
+						Type: "function",
+						Function: core.FunctionCall{
+							Name:      "lookup_weather",
+							Arguments: `{"city":"Warsaw"}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	msgs, err := chatToMessages(req)
+	if err != nil {
+		t.Fatalf("chatToMessages() error = %v", err)
+	}
+	req.Messages[0].ToolCalls[0].Function.Name = "mutated"
+	if msgs[0].ToolCalls[0].Function.Name != "lookup_weather" {
+		t.Fatalf("chatToMessages should clone tool calls, got %+v", msgs[0].ToolCalls)
+	}
+
+	chatReq := applyMessagesToChat(&core.ChatRequest{}, msgs)
+	msgs[0].ToolCalls[0].Function.Name = "mutated-again"
+	if chatReq.Messages[0].ToolCalls[0].Function.Name != "lookup_weather" {
+		t.Fatalf("applyMessagesToChat should clone tool calls, got %+v", chatReq.Messages[0].ToolCalls)
+	}
+}
+
+func TestChatAdaptersPreserveContentNull(t *testing.T) {
+	req := &core.ChatRequest{
+		Messages: []core.Message{
+			{
+				Role:        "assistant",
+				ContentNull: true,
+				ToolCalls: []core.ToolCall{
+					{
+						ID:   "call_123",
+						Type: "function",
+						Function: core.FunctionCall{
+							Name:      "lookup_weather",
+							Arguments: `{"city":"Warsaw"}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	msgs, err := chatToMessages(req)
+	if err != nil {
+		t.Fatalf("chatToMessages() error = %v", err)
+	}
+	if !msgs[0].ContentNull {
+		t.Fatal("chatToMessages should preserve ContentNull")
+	}
+
+	chatReq := applyMessagesToChat(&core.ChatRequest{}, msgs)
+	if !chatReq.Messages[0].ContentNull {
+		t.Fatal("applyMessagesToChat should preserve ContentNull")
+	}
+}
+
+func TestApplyMessagesToChat_ClearsContentNullWhenContentPresent(t *testing.T) {
+	msgs := []Message{
+		{
+			Role:        "assistant",
+			Content:     "I'll check that now.",
+			ContentNull: true,
+			ToolCalls: []core.ToolCall{
+				{
+					ID:   "call_123",
+					Type: "function",
+					Function: core.FunctionCall{
+						Name:      "lookup_weather",
+						Arguments: `{"city":"Warsaw"}`,
+					},
+				},
+			},
+		},
+	}
+
+	chatReq := applyMessagesToChat(&core.ChatRequest{}, msgs)
+	if chatReq.Messages[0].Content != "I'll check that now." {
+		t.Fatalf("Content = %q, want assistant text", chatReq.Messages[0].Content)
+	}
+	if chatReq.Messages[0].ContentNull {
+		t.Fatal("applyMessagesToChat should clear ContentNull when Content is present")
+	}
+}
+
+func TestGuardedProvider_ChatCompletion_AppliesGuardrailsToTextOnlyContentArray(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+
+	g, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
+	pipeline.Add(g, 0)
+
+	guarded := NewGuardedProvider(inner, pipeline)
+
+	req := &core.ChatRequest{
+		Model: "gpt-4",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{Type: "text", Text: "hello"},
+				},
+			},
+		},
+	}
+
+	_, err := guarded.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if inner.chatReq == nil {
+		t.Fatal("inner provider was not called")
+	}
+	if len(inner.chatReq.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(inner.chatReq.Messages))
+	}
+	if inner.chatReq.Messages[0].Role != "system" || inner.chatReq.Messages[0].Content != "guardrail system" {
+		t.Fatalf("expected injected system message, got %+v", inner.chatReq.Messages[0])
+	}
+	if got := core.ExtractTextContent(inner.chatReq.Messages[1].Content); got != "hello" {
+		t.Fatalf("user content = %q, want hello", got)
+	}
+
+	parts, ok := req.Messages[0].Content.([]core.ContentPart)
+	if !ok || len(parts) != 1 || parts[0].Text != "hello" {
+		t.Fatalf("original request content mutated: %#v", req.Messages[0].Content)
+	}
+}
+
+func TestGuardedProvider_ChatCompletion_PreservesNonTextMultimodalContentWhileApplyingSystemGuardrails(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+
+	g, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
+	pipeline.Add(g, 0)
+
+	guarded := NewGuardedProvider(inner, pipeline)
+
+	req := &core.ChatRequest{
+		Model: "gpt-4",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{Type: "text", Text: "hello"},
+					{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
+				},
+			},
+		},
+	}
+
+	_, err := guarded.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if inner.chatReq == nil {
+		t.Fatal("inner provider was not called")
+	}
+	if len(inner.chatReq.Messages) != 2 {
+		t.Fatalf("expected guarded multimodal request with injected system message, got %d messages", len(inner.chatReq.Messages))
+	}
+	if inner.chatReq.Messages[0].Role != "system" || inner.chatReq.Messages[0].Content != "guardrail system" {
+		t.Fatalf("expected injected system message, got %+v", inner.chatReq.Messages[0])
+	}
+	parts, ok := inner.chatReq.Messages[1].Content.([]core.ContentPart)
+	if !ok || len(parts) != 2 || parts[1].Type != "image_url" {
+		t.Fatalf("expected preserved multimodal content, got %#v", inner.chatReq.Messages[1].Content)
+	}
+}
+
+func TestGuardedProvider_ChatCompletion_MixedMultimodalAndTextPreservesTextRewrites(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	pipeline.Add(&mockGuardrail{
+		name: "rewrite-user-text",
+		processFn: func(_ context.Context, msgs []Message) ([]Message, error) {
+			out := make([]Message, len(msgs))
+			copy(out, msgs)
+			for i := range out {
+				if out[i].Role == "user" {
+					out[i].Content = out[i].Content + " [rewritten]"
+				}
+			}
+			return out, nil
+		},
+	}, 0)
+
+	guarded := NewGuardedProvider(inner, pipeline)
+
+	req := &core.ChatRequest{
+		Model: "gpt-4",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{Type: "text", Text: "describe"},
+					{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
+				},
+			},
+			{Role: "user", Content: "plain text"},
+		},
+	}
+
+	_, err := guarded.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if inner.chatReq == nil {
+		t.Fatal("inner provider was not called")
+	}
+	if len(inner.chatReq.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(inner.chatReq.Messages))
+	}
+	parts, ok := inner.chatReq.Messages[0].Content.([]core.ContentPart)
+	if !ok || len(parts) != 2 || parts[1].Type != "image_url" {
+		t.Fatalf("expected first message multimodal content preserved, got %#v", inner.chatReq.Messages[0].Content)
+	}
+	if parts[0].Type != "text" || parts[0].Text != "describe [rewritten]" {
+		t.Fatalf("expected rewritten text merged into multimodal content, got %#v", parts[0])
+	}
+	if got := core.ExtractTextContent(inner.chatReq.Messages[1].Content); got != "plain text [rewritten]" {
+		t.Fatalf("expected rewritten text-only message, got %q", got)
+	}
+}
+
+func TestGuardedProvider_ChatCompletion_RewritesMultimodalMessageWithMultipleTextParts(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	pipeline.Add(&mockGuardrail{
+		name: "rewrite-user-text",
+		processFn: func(_ context.Context, msgs []Message) ([]Message, error) {
+			out := make([]Message, len(msgs))
+			copy(out, msgs)
+			for i := range out {
+				if out[i].Role == "user" {
+					out[i].Content = out[i].Content + " [rewritten]"
+				}
+			}
+			return out, nil
+		},
+	}, 0)
+
+	guarded := NewGuardedProvider(inner, pipeline)
+
+	req := &core.ChatRequest{
+		Model: "gpt-4",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{Type: "text", Text: "before"},
+					{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
+					{Type: "text", Text: "after"},
+				},
+			},
+		},
+	}
+
+	_, err := guarded.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v, want multimodal rewrite to succeed", err)
+	}
+
+	if inner.chatReq == nil {
+		t.Fatal("inner provider was not called")
+	}
+
+	parts, ok := inner.chatReq.Messages[0].Content.([]core.ContentPart)
+	if !ok {
+		t.Fatalf("Messages[0].Content type = %T, want []core.ContentPart", inner.chatReq.Messages[0].Content)
+	}
+
+	if got := core.ExtractTextContent(parts); got != "before after [rewritten]" {
+		t.Fatalf("ExtractTextContent(Messages[0].Content) = %q, want %q", got, "before after [rewritten]")
+	}
+
+	imageParts := 0
+	for _, part := range parts {
+		if part.Type == "image_url" {
+			imageParts++
+		}
+	}
+	if imageParts != 1 {
+		t.Fatalf("expected one preserved image part, got %+v", parts)
+	}
+}
+
+func TestGuardedProvider_ChatCompletion_PreservesToolCallsWithoutMultimodalContent(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	guarded := NewGuardedProvider(inner, NewPipeline())
+
+	req := &core.ChatRequest{
+		Model: "gpt-4",
+		Messages: []core.Message{
+			{
+				Role:    "assistant",
+				Content: nil,
+				ToolCalls: []core.ToolCall{
+					{
+						ID:   "call_1",
+						Type: "function",
+						Function: core.FunctionCall{
+							Name:      "lookup",
+							Arguments: "{}",
+						},
+					},
+				},
+			},
+			{Role: "user", Content: "continue"},
+		},
+	}
+
+	_, err := guarded.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inner.chatReq == nil {
+		t.Fatal("inner provider was not called")
+	}
+	if len(inner.chatReq.Messages) != 2 {
+		t.Fatalf("len(Messages) = %d, want 2", len(inner.chatReq.Messages))
+	}
+	if len(inner.chatReq.Messages[0].ToolCalls) != 1 || inner.chatReq.Messages[0].ToolCalls[0].ID != "call_1" {
+		t.Fatalf("expected tool_calls to be preserved, got %+v", inner.chatReq.Messages[0].ToolCalls)
+	}
+}
+
+func TestGuardedProvider_ChatCompletion_RejectsUnsupportedContent(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	guarded := NewGuardedProvider(inner, NewPipeline())
+
+	req := &core.ChatRequest{
+		Model: "gpt-4",
+		Messages: []core.Message{
+			{Role: "user", Content: 123},
+		},
+	}
+
+	_, err := guarded.ChatCompletion(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if inner.chatReq != nil {
+		t.Fatal("inner provider should not have been called")
+	}
+}
+
+func TestApplySystemMessagesToMultimodalChat_PreservesOriginalEnvelope(t *testing.T) {
+	req := &core.ChatRequest{
+		Messages: []core.Message{
+			{
+				Role: "assistant",
+				Content: []core.ContentPart{
+					{Type: "text", Text: "describe"},
+					{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
+				},
+				ToolCalls: []core.ToolCall{
+					{
+						ID:   "call_1",
+						Type: "function",
+						Function: core.FunctionCall{
+							Name:      "lookup",
+							Arguments: "{}",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := applySystemMessagesToMultimodalChat(req, []Message{
+		{Role: "assistant", Content: "describe [rewritten]"},
+	})
+	if err != nil {
+		t.Fatalf("applySystemMessagesToMultimodalChat() error = %v", err)
+	}
+	if len(result.Messages) != 1 {
+		t.Fatalf("len(Messages) = %d, want 1", len(result.Messages))
+	}
+	if len(result.Messages[0].ToolCalls) != 1 || result.Messages[0].ToolCalls[0].ID != "call_1" {
+		t.Fatalf("expected tool_calls to be preserved, got %+v", result.Messages[0].ToolCalls)
+	}
+	parts, ok := result.Messages[0].Content.([]core.ContentPart)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("unexpected merged content: %#v", result.Messages[0].Content)
+	}
+	if parts[0].Text != "describe [rewritten]" || parts[1].Type != "image_url" {
+		t.Fatalf("unexpected merged parts: %+v", parts)
+	}
+}
+
+func TestApplySystemMessagesToMultimodalChat_RejectsDroppedMessages(t *testing.T) {
+	req := &core.ChatRequest{
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{Type: "text", Text: "keep"},
+					{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
+				},
+			},
+			{Role: "assistant", Content: "drop me"},
+		},
+	}
+
+	_, err := applySystemMessagesToMultimodalChat(req, []Message{
+		{Role: "user", Content: "keep [rewritten]"},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestApplySystemMessagesToMultimodalChat_RejectsShiftedNonSystemTurns(t *testing.T) {
+	req := &core.ChatRequest{
+		Messages: []core.Message{
+			{
+				Role: "assistant",
+				ToolCalls: []core.ToolCall{
+					{
+						ID:   "call_1",
+						Type: "function",
+						Function: core.FunctionCall{
+							Name:      "lookup",
+							Arguments: "{}",
+						},
+					},
+				},
+				ContentNull: true,
+			},
+			{Role: "tool", ToolCallID: "call_1", Content: "{}"},
+		},
+	}
+
+	_, err := applySystemMessagesToMultimodalChat(req, []Message{
+		{Role: "tool", Content: "{}"},
+		{Role: "assistant", Content: ""},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestMergeMultimodalContentWithTextRewrite_MergesMultipleTextParts(t *testing.T) {
+	merged, err := mergeMultimodalContentWithTextRewrite([]core.ContentPart{
+		{Type: "text", Text: "before"},
+		{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
+		{Type: "text", Text: "after"},
+	}, "rewritten")
+	if err != nil {
+		t.Fatalf("mergeMultimodalContentWithTextRewrite() error = %v", err)
+	}
+	if got := core.ExtractTextContent(merged); got != "rewritten" {
+		t.Fatalf("ExtractTextContent(merged) = %q, want rewritten", got)
+	}
+	parts, ok := merged.([]core.ContentPart)
+	if !ok {
+		t.Fatalf("merged type = %T, want []core.ContentPart", merged)
+	}
+	if len(parts) != 2 || parts[0].Type != "text" || parts[1].Type != "image_url" {
+		t.Fatalf("unexpected merged content: %+v", parts)
 	}
 }
 
@@ -351,6 +867,44 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled(t *testing.T) {
 	}
 	if len(chatReq.Messages) != 2 || chatReq.Messages[0].Role != "system" {
 		t.Fatalf("expected guarded batch chat request, got: %+v", chatReq.Messages)
+	}
+}
+
+func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_TextOnlyContentArray(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	g, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
+	pipeline.Add(g, 0)
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+
+	req := &core.BatchRequest{
+		Endpoint: "/v1/chat/completions",
+		Requests: []core.BatchRequestItem{
+			{
+				Method: http.MethodPost,
+				URL:    "/v1/chat/completions",
+				Body:   json.RawMessage(`{"model":"gpt-4","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`),
+			},
+		},
+	}
+
+	_, err := guarded.CreateBatch(context.Background(), "mock", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inner.batchReq == nil || len(inner.batchReq.Requests) != 1 {
+		t.Fatalf("expected delegated batch request")
+	}
+
+	var chatReq core.ChatRequest
+	if err := json.Unmarshal(inner.batchReq.Requests[0].Body, &chatReq); err != nil {
+		t.Fatal(err)
+	}
+	if len(chatReq.Messages) != 2 || chatReq.Messages[0].Role != "system" {
+		t.Fatalf("expected guarded batch chat request, got: %+v", chatReq.Messages)
+	}
+	if got := core.ExtractTextContent(chatReq.Messages[1].Content); got != "hello" {
+		t.Fatalf("batch user content = %q, want hello", got)
 	}
 }
 
@@ -531,6 +1085,40 @@ func TestGuardedProvider_GuardrailError_BlocksRequest(t *testing.T) {
 	}
 }
 
+func TestGuardedProvider_GuardrailError_BlocksMultimodalRequest(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	pipeline.Add(&mockGuardrail{
+		name: "blocker",
+		processFn: func(_ context.Context, _ []Message) ([]Message, error) {
+			return nil, core.NewInvalidRequestError("guardrail violation", nil)
+		},
+	}, 0)
+
+	guarded := NewGuardedProvider(inner, pipeline)
+
+	req := &core.ChatRequest{
+		Model: "gpt-4",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{Type: "text", Text: "hello"},
+					{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
+				},
+			},
+		},
+	}
+
+	_, err := guarded.ChatCompletion(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error from guardrail")
+	}
+	if inner.chatReq != nil {
+		t.Error("inner provider should not have been called when guardrail blocks")
+	}
+}
+
 // --- Adapter unit tests ---
 
 func TestChatToMessages(t *testing.T) {
@@ -541,7 +1129,10 @@ func TestChatToMessages(t *testing.T) {
 			{Role: "user", Content: "hello"},
 		},
 	}
-	msgs := chatToMessages(req)
+	msgs, err := chatToMessages(req)
+	if err != nil {
+		t.Fatalf("chatToMessages() error = %v", err)
+	}
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(msgs))
 	}
@@ -550,6 +1141,20 @@ func TestChatToMessages(t *testing.T) {
 	}
 	if msgs[1].Role != "user" || msgs[1].Content != "hello" {
 		t.Errorf("unexpected second message: %+v", msgs[1])
+	}
+}
+
+func TestChatToMessages_RejectsUnsupportedContent(t *testing.T) {
+	req := &core.ChatRequest{
+		Model: "gpt-4",
+		Messages: []core.Message{
+			{Role: "user", Content: map[string]any{"bad": "content"}},
+		},
+	}
+
+	_, err := chatToMessages(req)
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
 }
 
@@ -588,6 +1193,23 @@ func TestApplyMessagesToResponses_SystemToInstructions(t *testing.T) {
 	// Original untouched
 	if req.Instructions != "" {
 		t.Error("original request was mutated")
+	}
+}
+
+func TestMergeMultimodalContentWithTextRewrite_RejectsExcessiveContentParts(t *testing.T) {
+	parts := make([]core.ContentPart, 1_000_000)
+	for i := range parts {
+		parts[i] = core.ContentPart{
+			Type:     "image_url",
+			ImageURL: &core.ImageURLContent{URL: "https://example.com/img.png"},
+		}
+	}
+	_, err := mergeMultimodalContentWithTextRewrite(parts, "rewritten")
+	if err == nil {
+		t.Fatal("expected error for excessive content parts, got nil")
+	}
+	if !strings.Contains(err.Error(), "too many content parts") {
+		t.Fatalf("expected 'too many content parts' error, got: %v", err)
 	}
 }
 
