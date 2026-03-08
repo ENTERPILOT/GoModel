@@ -198,6 +198,44 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 			},
 		},
 		{
+			name: "assistant structured content merges with later function call item",
+			input: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: []interface{}{
+					map[string]interface{}{
+						"type":   "message",
+						"role":   "assistant",
+						"status": "completed",
+						"content": []map[string]interface{}{
+							{"type": "output_text", "text": "I'll check that for you."},
+							{"type": "input_image", "image_url": map[string]interface{}{"url": "https://example.com/image.png"}},
+						},
+					},
+					map[string]interface{}{
+						"type":      "function_call",
+						"call_id":   "call_123",
+						"name":      "lookup_weather",
+						"arguments": `{"city":"Warsaw"}`,
+					},
+				},
+			},
+			checkFn: func(t *testing.T, req *core.ChatRequest) {
+				if len(req.Messages) != 1 {
+					t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
+				}
+				parts, ok := req.Messages[0].Content.([]core.ContentPart)
+				if !ok {
+					t.Fatalf("Messages[0].Content type = %T, want []core.ContentPart", req.Messages[0].Content)
+				}
+				if len(parts) != 2 || parts[0].Text != "I'll check that for you." || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "https://example.com/image.png" {
+					t.Fatalf("unexpected structured assistant content: %+v", parts)
+				}
+				if len(req.Messages[0].ToolCalls) != 1 || req.Messages[0].ToolCalls[0].ID != "call_123" {
+					t.Fatalf("unexpected assistant tool_calls: %+v", req.Messages[0].ToolCalls)
+				}
+			},
+		},
+		{
 			name: "invalid content fails",
 			input: &core.ResponsesRequest{
 				Model: "test-model",

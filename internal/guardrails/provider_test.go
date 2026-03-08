@@ -568,7 +568,7 @@ func TestApplySystemMessagesToMultimodalChat_PreservesOriginalEnvelope(t *testin
 	}
 }
 
-func TestApplySystemMessagesToMultimodalChat_DoesNotRestoreDroppedMessages(t *testing.T) {
+func TestApplySystemMessagesToMultimodalChat_RejectsDroppedMessages(t *testing.T) {
 	req := &core.ChatRequest{
 		Messages: []core.Message{
 			{
@@ -582,17 +582,52 @@ func TestApplySystemMessagesToMultimodalChat_DoesNotRestoreDroppedMessages(t *te
 		},
 	}
 
-	result, err := applySystemMessagesToMultimodalChat(req, []Message{
+	_, err := applySystemMessagesToMultimodalChat(req, []Message{
 		{Role: "user", Content: "keep [rewritten]"},
 	})
-	if err != nil {
-		t.Fatalf("applySystemMessagesToMultimodalChat() error = %v", err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
-	if len(result.Messages) != 1 {
-		t.Fatalf("len(Messages) = %d, want 1", len(result.Messages))
+}
+
+func TestApplySystemMessagesToMultimodalChat_RejectsShiftedNonSystemTurns(t *testing.T) {
+	req := &core.ChatRequest{
+		Messages: []core.Message{
+			{
+				Role: "assistant",
+				ToolCalls: []core.ToolCall{
+					{
+						ID:   "call_1",
+						Type: "function",
+						Function: core.FunctionCall{
+							Name:      "lookup",
+							Arguments: "{}",
+						},
+					},
+				},
+				ContentNull: true,
+			},
+			{Role: "tool", ToolCallID: "call_1", Content: "{}"},
+		},
 	}
-	if got := core.ExtractTextContent(result.Messages[0].Content); got != "keep [rewritten]" {
-		t.Fatalf("Messages[0].Content = %q, want keep [rewritten]", got)
+
+	_, err := applySystemMessagesToMultimodalChat(req, []Message{
+		{Role: "tool", Content: "{}"},
+		{Role: "assistant", Content: ""},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestMergeMultimodalContentWithTextRewrite_RejectsMultipleTextPartRewrite(t *testing.T) {
+	_, err := mergeMultimodalContentWithTextRewrite([]core.ContentPart{
+		{Type: "text", Text: "before"},
+		{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
+		{Type: "text", Text: "after"},
+	}, "rewritten")
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
 }
 

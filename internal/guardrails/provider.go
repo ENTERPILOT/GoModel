@@ -376,9 +376,12 @@ func applySystemMessagesToMultimodalChat(req *core.ChatRequest, msgs []Message) 
 		}
 		modifiedNonSystemCount++
 		if nextNonSystem >= len(nonSystemOriginal) {
-			continue
+			return nil, core.NewInvalidRequestError("guardrails cannot insert non-system multimodal or tool-call messages", nil)
 		}
 		original := nonSystemOriginal[nextNonSystem]
+		if modified.Role != original.Role {
+			return nil, core.NewInvalidRequestError("guardrails cannot reorder non-system multimodal or tool-call messages", nil)
+		}
 		preserved := original
 		preserved.Role = modified.Role
 		if core.HasNonTextContent(original.Content) {
@@ -392,6 +395,10 @@ func applySystemMessagesToMultimodalChat(req *core.ChatRequest, msgs []Message) 
 		}
 		coreMessages = append(coreMessages, preserved)
 		nextNonSystem++
+	}
+
+	if modifiedNonSystemCount != len(nonSystemOriginal) {
+		return nil, core.NewInvalidRequestError("guardrails cannot add or remove non-system multimodal or tool-call messages", nil)
 	}
 
 	// Preserve untouched trailing originals only when the guardrail kept at least
@@ -425,10 +432,14 @@ func mergeMultimodalContentWithTextRewrite(originalContent any, rewrittenText st
 	merged := make([]core.ContentPart, 0, capacity)
 	hadTextPart := false
 	insertedRewrittenText := false
+	textPartCount := 0
+	originalTexts := make([]string, 0, len(parts))
 
 	for _, part := range parts {
 		if part.Type == "text" {
+			textPartCount++
 			hadTextPart = true
+			originalTexts = append(originalTexts, part.Text)
 			if !insertedRewrittenText {
 				if rewrittenText != "" {
 					merged = append(merged, core.ContentPart{Type: "text", Text: rewrittenText})
@@ -438,6 +449,15 @@ func mergeMultimodalContentWithTextRewrite(originalContent any, rewrittenText st
 			continue
 		}
 		merged = append(merged, part)
+	}
+
+	if textPartCount > 1 {
+		if rewrittenText == strings.Join(originalTexts, " ") {
+			copied := make([]core.ContentPart, len(parts))
+			copy(copied, parts)
+			return copied, nil
+		}
+		return nil, core.NewInvalidRequestError("guardrails cannot rewrite multimodal messages with multiple text parts", nil)
 	}
 
 	if !hadTextPart && rewrittenText != "" {

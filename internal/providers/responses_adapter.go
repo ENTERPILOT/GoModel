@@ -215,7 +215,10 @@ func cloneResponsesMessage(msg core.Message) core.Message {
 }
 
 func canMergeAssistantMessages(current, next core.Message) bool {
-	return !core.HasStructuredContent(current.Content) && !core.HasStructuredContent(next.Content)
+	if !core.HasStructuredContent(current.Content) && !core.HasStructuredContent(next.Content) {
+		return true
+	}
+	return isAssistantToolCallOnlyMessage(next)
 }
 
 func mergeAssistantMessage(dst *core.Message, src core.Message) {
@@ -230,6 +233,16 @@ func mergeAssistantMessage(dst *core.Message, src core.Message) {
 			dst.ContentNull = dst.ContentNull || src.ContentNull
 		}
 	}
+}
+
+func isAssistantToolCallOnlyMessage(msg core.Message) bool {
+	if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
+		return false
+	}
+	if core.HasStructuredContent(msg.Content) {
+		return false
+	}
+	return core.ExtractTextContent(msg.Content) == ""
 }
 
 // ConvertResponsesContentToChatContent maps Responses input content to Chat content.
