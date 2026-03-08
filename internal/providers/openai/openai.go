@@ -147,13 +147,17 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	// OpenAI can return assistant tool_calls with finish_reason="stop" instead of
+	// "tool_calls". Preserve the upstream finish_reason as-is for API parity.
 	if resp.Model == "" {
 		resp.Model = req.Model
 	}
 	return &resp, nil
 }
 
-// StreamChatCompletion returns a raw response body for streaming (caller must close)
+// StreamChatCompletion returns a raw response body for streaming (caller must close).
+// OpenAI can emit tool_calls while the final chunk still carries finish_reason="stop";
+// this provider forwards the upstream SSE stream unchanged for API parity.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
 	streamReq := req.WithStreaming()
 	return p.client.DoStream(ctx, llmclient.Request{
