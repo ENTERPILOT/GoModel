@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"sort"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -149,79 +148,7 @@ func (r *PostgreSQLReader) GetLogByID(ctx context.Context, id string) (*LogEntry
 
 // GetConversation returns a linear conversation thread around a seed log entry.
 func (r *PostgreSQLReader) GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error) {
-	limit = clampConversationLimit(limit)
-
-	anchor, err := r.GetLogByID(ctx, logID)
-	if err != nil {
-		return nil, err
-	}
-	if anchor == nil {
-		return &ConversationResult{
-			AnchorID: logID,
-			Entries:  []LogEntry{},
-		}, nil
-	}
-
-	thread := []*LogEntry{anchor}
-	seen := map[string]struct{}{anchor.ID: {}}
-
-	current := anchor
-	for len(thread) < limit {
-		prevID := extractPreviousResponseID(current)
-		if prevID == "" {
-			break
-		}
-		parent, err := r.findByResponseID(ctx, prevID)
-		if err != nil {
-			return nil, err
-		}
-		if parent == nil {
-			break
-		}
-		if _, ok := seen[parent.ID]; ok {
-			break
-		}
-		thread = append([]*LogEntry{parent}, thread...)
-		seen[parent.ID] = struct{}{}
-		current = parent
-	}
-
-	current = anchor
-	for len(thread) < limit {
-		respID := extractResponseID(current)
-		if respID == "" {
-			break
-		}
-		child, err := r.findByPreviousResponseID(ctx, respID)
-		if err != nil {
-			return nil, err
-		}
-		if child == nil {
-			break
-		}
-		if _, ok := seen[child.ID]; ok {
-			break
-		}
-		thread = append(thread, child)
-		seen[child.ID] = struct{}{}
-		current = child
-	}
-
-	sort.Slice(thread, func(i, j int) bool {
-		return thread[i].Timestamp.Before(thread[j].Timestamp)
-	})
-
-	entries := make([]LogEntry, 0, len(thread))
-	for _, entry := range thread {
-		if entry != nil {
-			entries = append(entries, *entry)
-		}
-	}
-
-	return &ConversationResult{
-		AnchorID: anchor.ID,
-		Entries:  entries,
-	}, nil
+	return buildConversationThread(ctx, logID, limit, r.GetLogByID, r.findByResponseID, r.findByPreviousResponseID)
 }
 
 func pgDateRangeConditions(params QueryParams, argIdx int) (conditions []string, args []interface{}, nextIdx int) {
