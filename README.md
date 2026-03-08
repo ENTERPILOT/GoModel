@@ -44,23 +44,6 @@ curl http://localhost:8080/v1/chat/completions \
 
 **That's it!** GOModel automatically detects which providers are available based on the credentials you supply.
 
-Multimodal chat inputs can use OpenAI-style content parts:
-
-```bash
-curl http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-4o-mini",
-    "messages": [{
-      "role": "user",
-      "content": [
-        {"type": "text", "text": "Describe this image."},
-        {"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}
-      ]
-    }]
-  }'
-```
-
 ### Supported Providers
 
 Example model identifiers are illustrative and subject to change; consult provider catalogs for current models.
