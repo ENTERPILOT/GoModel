@@ -55,11 +55,6 @@ The most common way to configure GOModel. Set any of the variables below to over
 | `REDIS_TTL_MODELS`     | TTL in seconds for model cache      | `86400` (24h)    |
 | `REDIS_TTL_RESPONSES`  | TTL in seconds for response cache   | `3600` (1h)      |
 
-<Note>
-  **Migration note:** In previous versions, `REDIS_KEY` and `REDIS_TTL` were used for the model cache.
-  These have been renamed to `REDIS_KEY_MODELS` and `REDIS_TTL_MODELS`. Update your configuration if upgrading.
-</Note>
-
 #### Storage
 
 Storage is shared by audit logging, usage tracking, and future features like IAM.
