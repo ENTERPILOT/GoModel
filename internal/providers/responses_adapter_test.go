@@ -336,6 +336,49 @@ func TestConvertChatResponseToResponses(t *testing.T) {
 	}
 }
 
+func TestConvertChatResponseToResponses_PreservesStructuredAssistantContent(t *testing.T) {
+	resp := &core.ChatResponse{
+		ID:      "chatcmpl-structured",
+		Object:  "chat.completion",
+		Model:   "test-model",
+		Created: 1677652288,
+		Choices: []core.Choice{
+			{
+				Index: 0,
+				Message: core.ResponseMessage{
+					Role: "assistant",
+					Content: []core.ContentPart{
+						{Type: "text", Text: "Here is the result."},
+						{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/result.png"}},
+					},
+				},
+				FinishReason: "stop",
+			},
+		},
+	}
+
+	result := ConvertChatResponseToResponses(resp)
+
+	if len(result.Output) != 1 {
+		t.Fatalf("len(Output) = %d, want 1", len(result.Output))
+	}
+	if result.Output[0].Type != "message" {
+		t.Fatalf("Output[0].Type = %q, want message", result.Output[0].Type)
+	}
+	if len(result.Output[0].Content) != 2 {
+		t.Fatalf("len(Output[0].Content) = %d, want 2 structured content items", len(result.Output[0].Content))
+	}
+	if result.Output[0].Content[0].Type != "output_text" || result.Output[0].Content[0].Text != "Here is the result." {
+		t.Fatalf("unexpected text content item: %+v", result.Output[0].Content[0])
+	}
+	if result.Output[0].Content[1].Type != "input_image" {
+		t.Fatalf("expected preserved non-text content item, got %+v", result.Output[0].Content[1])
+	}
+	if result.Output[0].Content[1].ImageURL == nil || result.Output[0].Content[1].ImageURL.URL != "https://example.com/result.png" {
+		t.Fatalf("unexpected preserved image content item: %+v", result.Output[0].Content[1])
+	}
+}
+
 func TestExtractContentFromInput(t *testing.T) {
 	tests := []struct {
 		name     string

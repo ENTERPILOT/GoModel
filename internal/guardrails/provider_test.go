@@ -464,6 +464,68 @@ func TestGuardedProvider_ChatCompletion_MixedMultimodalAndTextPreservesTextRewri
 	}
 }
 
+func TestGuardedProvider_ChatCompletion_RewritesMultimodalMessageWithMultipleTextParts(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	pipeline.Add(&mockGuardrail{
+		name: "rewrite-user-text",
+		processFn: func(_ context.Context, msgs []Message) ([]Message, error) {
+			out := make([]Message, len(msgs))
+			copy(out, msgs)
+			for i := range out {
+				if out[i].Role == "user" {
+					out[i].Content = out[i].Content + " [rewritten]"
+				}
+			}
+			return out, nil
+		},
+	}, 0)
+
+	guarded := NewGuardedProvider(inner, pipeline)
+
+	req := &core.ChatRequest{
+		Model: "gpt-4",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{Type: "text", Text: "before"},
+					{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
+					{Type: "text", Text: "after"},
+				},
+			},
+		},
+	}
+
+	_, err := guarded.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v, want multimodal rewrite to succeed", err)
+	}
+
+	if inner.chatReq == nil {
+		t.Fatal("inner provider was not called")
+	}
+
+	parts, ok := inner.chatReq.Messages[0].Content.([]core.ContentPart)
+	if !ok {
+		t.Fatalf("Messages[0].Content type = %T, want []core.ContentPart", inner.chatReq.Messages[0].Content)
+	}
+
+	if got := core.ExtractTextContent(parts); got != "before after [rewritten]" {
+		t.Fatalf("ExtractTextContent(Messages[0].Content) = %q, want %q", got, "before after [rewritten]")
+	}
+
+	imageParts := 0
+	for _, part := range parts {
+		if part.Type == "image_url" {
+			imageParts++
+		}
+	}
+	if imageParts != 1 {
+		t.Fatalf("expected one preserved image part, got %+v", parts)
+	}
+}
+
 func TestGuardedProvider_ChatCompletion_PreservesToolCallsWithoutMultimodalContent(t *testing.T) {
 	inner := &mockRoutableProvider{}
 	guarded := NewGuardedProvider(inner, NewPipeline())
@@ -620,14 +682,24 @@ func TestApplySystemMessagesToMultimodalChat_RejectsShiftedNonSystemTurns(t *tes
 	}
 }
 
-func TestMergeMultimodalContentWithTextRewrite_RejectsMultipleTextPartRewrite(t *testing.T) {
-	_, err := mergeMultimodalContentWithTextRewrite([]core.ContentPart{
+func TestMergeMultimodalContentWithTextRewrite_MergesMultipleTextParts(t *testing.T) {
+	merged, err := mergeMultimodalContentWithTextRewrite([]core.ContentPart{
 		{Type: "text", Text: "before"},
 		{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
 		{Type: "text", Text: "after"},
 	}, "rewritten")
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if err != nil {
+		t.Fatalf("mergeMultimodalContentWithTextRewrite() error = %v", err)
+	}
+	if got := core.ExtractTextContent(merged); got != "rewritten" {
+		t.Fatalf("ExtractTextContent(merged) = %q, want rewritten", got)
+	}
+	parts, ok := merged.([]core.ContentPart)
+	if !ok {
+		t.Fatalf("merged type = %T, want []core.ContentPart", merged)
+	}
+	if len(parts) != 2 || parts[0].Type != "text" || parts[1].Type != "image_url" {
+		t.Fatalf("unexpected merged content: %+v", parts)
 	}
 }
 

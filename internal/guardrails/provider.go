@@ -451,13 +451,10 @@ func mergeMultimodalContentWithTextRewrite(originalContent any, rewrittenText st
 		merged = append(merged, part)
 	}
 
-	if textPartCount > 1 {
-		if rewrittenText == strings.Join(originalTexts, " ") {
-			copied := make([]core.ContentPart, len(parts))
-			copy(copied, parts)
-			return copied, nil
-		}
-		return nil, core.NewInvalidRequestError("guardrails cannot rewrite multimodal messages with multiple text parts", nil)
+	if textPartCount > 1 && rewrittenText == strings.Join(originalTexts, " ") {
+		copied := make([]core.ContentPart, len(parts))
+		copy(copied, parts)
+		return copied, nil
 	}
 
 	if !hadTextPart && rewrittenText != "" {

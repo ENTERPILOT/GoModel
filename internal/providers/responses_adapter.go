@@ -536,23 +536,97 @@ func ResponsesFunctionCallItemID(callID string) string {
 	return "fc_" + normalizedCallID
 }
 
+func buildResponsesMessageContent(content any) []core.ResponsesContentItem {
+	switch c := content.(type) {
+	case string:
+		return []core.ResponsesContentItem{
+			{
+				Type:        "output_text",
+				Text:        c,
+				Annotations: []string{},
+			},
+		}
+	case []core.ContentPart:
+		return buildResponsesContentItemsFromParts(c)
+	case []interface{}:
+		parts, ok := core.NormalizeContentParts(c)
+		if !ok {
+			return nil
+		}
+		return buildResponsesContentItemsFromParts(parts)
+	default:
+		text := core.ExtractTextContent(content)
+		if text == "" {
+			return nil
+		}
+		return []core.ResponsesContentItem{
+			{
+				Type:        "output_text",
+				Text:        text,
+				Annotations: []string{},
+			},
+		}
+	}
+}
+
+func buildResponsesContentItemsFromParts(parts []core.ContentPart) []core.ResponsesContentItem {
+	items := make([]core.ResponsesContentItem, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			items = append(items, core.ResponsesContentItem{
+				Type:        "output_text",
+				Text:        part.Text,
+				Annotations: []string{},
+			})
+		case "image_url":
+			if part.ImageURL == nil || part.ImageURL.URL == "" {
+				continue
+			}
+			items = append(items, core.ResponsesContentItem{
+				Type: "input_image",
+				ImageURL: &core.ImageURLContent{
+					URL:       part.ImageURL.URL,
+					Detail:    part.ImageURL.Detail,
+					MediaType: part.ImageURL.MediaType,
+				},
+			})
+		case "input_audio":
+			if part.InputAudio == nil || part.InputAudio.Data == "" || part.InputAudio.Format == "" {
+				continue
+			}
+			items = append(items, core.ResponsesContentItem{
+				Type: "input_audio",
+				InputAudio: &core.InputAudioContent{
+					Data:   part.InputAudio.Data,
+					Format: part.InputAudio.Format,
+				},
+			})
+		}
+	}
+	return items
+}
+
 // BuildResponsesOutputItems converts a response message into Responses API output items.
 func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputItem {
 	output := make([]core.ResponsesOutputItem, 0, len(msg.ToolCalls)+1)
-	text := core.ExtractTextContent(msg.Content)
-	if text != "" || len(msg.ToolCalls) == 0 {
-		output = append(output, core.ResponsesOutputItem{
-			ID:     "msg_" + uuid.New().String(),
-			Type:   "message",
-			Role:   "assistant",
-			Status: "completed",
-			Content: []core.ResponsesContentItem{
+	contentItems := buildResponsesMessageContent(msg.Content)
+	if len(contentItems) > 0 || len(msg.ToolCalls) == 0 {
+		if len(contentItems) == 0 {
+			contentItems = []core.ResponsesContentItem{
 				{
 					Type:        "output_text",
-					Text:        text,
+					Text:        "",
 					Annotations: []string{},
 				},
-			},
+			}
+		}
+		output = append(output, core.ResponsesOutputItem{
+			ID:      "msg_" + uuid.New().String(),
+			Type:    "message",
+			Role:    "assistant",
+			Status:  "completed",
+			Content: contentItems,
 		})
 	}
 	for _, toolCall := range msg.ToolCalls {

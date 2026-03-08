@@ -2350,11 +2350,17 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "image_url": {
+                    "$ref": "#/definitions/core.ImageURLContent"
+                },
+                "input_audio": {
+                    "$ref": "#/definitions/core.InputAudioContent"
+                },
                 "text": {
                     "type": "string"
                 },
                 "type": {
-                    "description": "\"output_text\", etc.",
+                    "description": "\"output_text\", \"input_image\", \"input_audio\", etc.",
                     "type": "string"
                 }
             }

@@ -63,9 +63,11 @@ type ResponsesOutputItem struct {
 
 // ResponsesContentItem represents a content item in the output.
 type ResponsesContentItem struct {
-	Type        string   `json:"type"` // "output_text", etc.
-	Text        string   `json:"text,omitempty"`
-	Annotations []string `json:"annotations,omitempty"`
+	Type        string             `json:"type"` // "output_text", "input_image", "input_audio", etc.
+	Text        string             `json:"text,omitempty"`
+	ImageURL    *ImageURLContent   `json:"image_url,omitempty"`
+	InputAudio  *InputAudioContent `json:"input_audio,omitempty"`
+	Annotations []string           `json:"annotations,omitempty"`
 }
 
 // ResponsesUsage represents token usage for the Responses API.
