@@ -74,14 +74,12 @@ func ConvertResponsesInputToMessages(input interface{}) ([]core.Message, error) 
 		return convertResponsesInputItems(items)
 	case []interface{}:
 		return convertResponsesInputItems(in)
-	case []core.ResponsesInputItem:
+	case []core.ResponsesInputElement:
 		items := make([]interface{}, 0, len(in))
 		for _, item := range in {
 			items = append(items, item)
 		}
 		return convertResponsesInputItems(items)
-	case core.ResponsesInputItem:
-		return convertResponsesInputItems([]interface{}{in})
 	case nil:
 		return nil, core.NewInvalidRequestError("invalid responses input: unsupported type", nil)
 	default:
@@ -134,20 +132,58 @@ func convertResponsesInputItems(items []interface{}) ([]core.Message, error) {
 
 func convertResponsesInputItem(item interface{}, index int) (core.Message, string, error) {
 	switch typed := item.(type) {
-	case core.ResponsesInputItem:
-		role := strings.TrimSpace(typed.Role)
-		if role == "" {
-			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", index), nil)
-		}
-		content, ok := ConvertResponsesContentToChatContent(typed.Content)
-		if !ok {
-			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: unsupported content", index), nil)
-		}
-		return core.Message{Role: role, Content: content}, "message", nil
+	case core.ResponsesInputElement:
+		return convertResponsesInputElement(typed, index)
 	case map[string]interface{}:
 		return convertResponsesInputMap(typed, index)
 	default:
 		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: expected object", index), nil)
+	}
+}
+
+func convertResponsesInputElement(item core.ResponsesInputElement, index int) (core.Message, string, error) {
+	switch item.Type {
+	case "function_call":
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: function_call name is required", index), nil)
+		}
+		callID := ResponsesFunctionCallCallID(item.CallID)
+		return core.Message{
+			Role:        "assistant",
+			Content:     "",
+			ContentNull: true,
+			ToolCalls: []core.ToolCall{
+				{
+					ID:   callID,
+					Type: "function",
+					Function: core.FunctionCall{
+						Name:      name,
+						Arguments: item.Arguments,
+					},
+				},
+			},
+		}, "function_call", nil
+	case "function_call_output":
+		callID := strings.TrimSpace(item.CallID)
+		if callID == "" {
+			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: function_call_output call_id is required", index), nil)
+		}
+		return core.Message{
+			Role:       "tool",
+			ToolCallID: callID,
+			Content:    item.Output,
+		}, "function_call_output", nil
+	default: // message (type="" or "message")
+		role := strings.TrimSpace(item.Role)
+		if role == "" {
+			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", index), nil)
+		}
+		content, ok := ConvertResponsesContentToChatContent(item.Content)
+		if !ok {
+			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: unsupported content", index), nil)
+		}
+		return core.Message{Role: role, Content: content}, "message", nil
 	}
 }
 

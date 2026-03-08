@@ -102,7 +102,7 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 			name: "typed multimodal input",
 			input: &core.ResponsesRequest{
 				Model: "test-model",
-				Input: []core.ResponsesInputItem{
+				Input: []core.ResponsesInputElement{
 					{
 						Role: " user ",
 						Content: []core.ContentPart{

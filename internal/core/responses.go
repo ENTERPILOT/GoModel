@@ -5,19 +5,19 @@ package core
 type ResponsesRequest struct {
 	Model    string      `json:"model"`
 	Provider string      `json:"provider,omitempty"`
-	Input    interface{} `json:"input"` // string or []ResponsesInputItem — see docs for array form
-	//nolint:govet // Intentional duplicate json tag for Swagger docs: input is string OR []ResponsesInputItem.
-	InputSchema       []ResponsesInputItem `json:"input,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputItem\"}}]"`
-	Instructions      string               `json:"instructions,omitempty"`
-	Tools             []map[string]any     `json:"tools,omitempty"`
-	ToolChoice        any                  `json:"tool_choice,omitempty"` // string or object
-	ParallelToolCalls *bool                `json:"parallel_tool_calls,omitempty"`
-	Temperature       *float64             `json:"temperature,omitempty"`
-	MaxOutputTokens   *int                 `json:"max_output_tokens,omitempty"`
-	Stream            bool                 `json:"stream,omitempty"`
-	StreamOptions     *StreamOptions       `json:"stream_options,omitempty"`
-	Metadata          map[string]string    `json:"metadata,omitempty"`
-	Reasoning         *Reasoning           `json:"reasoning,omitempty"`
+	Input    interface{} `json:"input"` // string or []ResponsesInputElement — see docs for array form
+	//nolint:govet // Intentional duplicate json tag for Swagger docs: input is string OR []ResponsesInputElement.
+	InputSchema       []ResponsesInputElement `json:"input,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"`
+	Instructions      string                  `json:"instructions,omitempty"`
+	Tools             []map[string]any        `json:"tools,omitempty"`
+	ToolChoice        any                     `json:"tool_choice,omitempty"` // string or object
+	ParallelToolCalls *bool                   `json:"parallel_tool_calls,omitempty"`
+	Temperature       *float64                `json:"temperature,omitempty"`
+	MaxOutputTokens   *int                    `json:"max_output_tokens,omitempty"`
+	Stream            bool                    `json:"stream,omitempty"`
+	StreamOptions     *StreamOptions          `json:"stream_options,omitempty"`
+	Metadata          map[string]string       `json:"metadata,omitempty"`
+	Reasoning         *Reasoning              `json:"reasoning,omitempty"`
 }
 
 // WithStreaming returns a shallow copy of the request with Stream set to true.
@@ -28,12 +28,28 @@ func (r *ResponsesRequest) WithStreaming() *ResponsesRequest {
 	return &cp
 }
 
-// ResponsesInputItem represents an input item when Input is an array.
-type ResponsesInputItem struct {
-	Role    string      `json:"role"`
-	Content interface{} `json:"content"` // Can be string or []ContentPart
+// ResponsesInputElement represents a single item in the Responses API input array.
+// It is a discriminated union keyed on Type:
+//   - "" or "message": a chat-style message with Role and Content
+//   - "function_call": a tool invocation with CallID, Name, and Arguments
+//   - "function_call_output": a tool result with CallID and Output
+type ResponsesInputElement struct {
+	Type string `json:"type,omitempty"` // "message", "function_call", "function_call_output"
+
+	// Message fields (type="" or "message")
+	Role    string      `json:"role,omitempty"`
+	Status  string      `json:"status,omitempty"`
+	Content interface{} `json:"content,omitempty"` // Can be string or []ContentPart
 	//nolint:govet // Intentional duplicate json tag for Swagger docs: content is string OR []ContentPart.
 	ContentSchema []ContentPart `json:"content,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"`
+
+	// Function call fields (type="function_call")
+	CallID    string `json:"call_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+
+	// Function call output fields (type="function_call_output") — CallID shared above
+	Output string `json:"output,omitempty"`
 }
 
 // ResponsesResponse represents the response from the Responses API.

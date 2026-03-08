@@ -3606,7 +3606,7 @@ func TestConvertResponsesRequestToAnthropic_PreservesAllSystemMessages(t *testin
 	req, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
 		Model:        "claude-sonnet-4-5-20250929",
 		Instructions: "instruction system",
-		Input: []core.ResponsesInputItem{
+		Input: []core.ResponsesInputElement{
 			{
 				Role:    "system",
 				Content: "input system",
@@ -3638,7 +3638,7 @@ func TestConvertResponsesRequestToAnthropic_RejectsNilRequest(t *testing.T) {
 func TestConvertResponsesRequestToAnthropic_TypedInputPromotesSystemRole(t *testing.T) {
 	req, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
-		Input: []core.ResponsesInputItem{
+		Input: []core.ResponsesInputElement{
 			{
 				Role:    "system",
 				Content: "be concise",
@@ -3671,7 +3671,7 @@ func TestConvertResponsesRequestToAnthropic_TypedInputPromotesSystemRole(t *test
 func TestConvertResponsesRequestToAnthropic_ToolRoleRequiresToolCallID(t *testing.T) {
 	_, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
-		Input: []core.ResponsesInputItem{
+		Input: []core.ResponsesInputElement{
 			{
 				Role:    "tool",
 				Content: "hello",

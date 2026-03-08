@@ -25,9 +25,53 @@ func TestResponsesRequestUnmarshalJSON_ArrayInput(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	input, ok := req.Input.([]interface{})
+	input, ok := req.Input.([]ResponsesInputElement)
 	if !ok || len(input) != 1 {
-		t.Fatalf("Input = %#v, want []interface{} len=1", req.Input)
+		t.Fatalf("Input = %#v, want []ResponsesInputElement len=1", req.Input)
+	}
+	if input[0].Role != "user" {
+		t.Fatalf("Input[0].Role = %q, want user", input[0].Role)
+	}
+}
+
+func TestResponsesRequestUnmarshalJSON_ArrayInputFunctionCall(t *testing.T) {
+	var req ResponsesRequest
+	if err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini","input":[
+		{"type":"function_call","call_id":"call_123","name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"},
+		{"type":"function_call_output","call_id":"call_123","output":{"temperature_c":21}}
+	]}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	input, ok := req.Input.([]ResponsesInputElement)
+	if !ok || len(input) != 2 {
+		t.Fatalf("Input = %#v, want []ResponsesInputElement len=2", req.Input)
+	}
+	if input[0].Type != "function_call" || input[0].CallID != "call_123" || input[0].Name != "lookup_weather" {
+		t.Fatalf("Input[0] = %+v, want function_call with call_id=call_123 name=lookup_weather", input[0])
+	}
+	if input[0].Arguments != `{"city":"Warsaw"}` {
+		t.Fatalf("Input[0].Arguments = %q, want JSON string", input[0].Arguments)
+	}
+	if input[1].Type != "function_call_output" || input[1].CallID != "call_123" {
+		t.Fatalf("Input[1] = %+v, want function_call_output with call_id=call_123", input[1])
+	}
+	if input[1].Output != `{"temperature_c":21}` {
+		t.Fatalf("Input[1].Output = %q, want stringified JSON object", input[1].Output)
+	}
+}
+
+func TestResponsesRequestUnmarshalJSON_FunctionCallAcceptsIDField(t *testing.T) {
+	var req ResponsesRequest
+	if err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini","input":[
+		{"type":"function_call","id":"call_456","name":"get_time","arguments":"{}"}
+	]}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	input := req.Input.([]ResponsesInputElement)
+	if input[0].CallID != "call_456" {
+		t.Fatalf("Input[0].CallID = %q, want call_456 (from id field)", input[0].CallID)
 	}
 }
 
@@ -151,10 +195,10 @@ func TestResponsesRequestMarshalJSON_PreservesToolCallingControls(t *testing.T) 
 	}
 }
 
-func TestResponsesRequestMarshalJSON_PreservesTypedInputItemContent(t *testing.T) {
+func TestResponsesRequestMarshalJSON_PreservesTypedInputElementContent(t *testing.T) {
 	body, err := json.Marshal(ResponsesRequest{
 		Model: "gpt-4o-mini",
-		Input: []ResponsesInputItem{
+		Input: []ResponsesInputElement{
 			{
 				Role:    "user",
 				Content: "hello",
@@ -184,5 +228,124 @@ func TestResponsesRequestMarshalJSON_PreservesTypedInputItemContent(t *testing.T
 	}
 	if content, _ := first["content"].(string); content != "hello" {
 		t.Fatalf("decoded content = %#v, want hello", first["content"])
+	}
+}
+
+func TestResponsesInputElementMarshalJSON_FunctionCall(t *testing.T) {
+	elem := ResponsesInputElement{
+		Type:      "function_call",
+		CallID:    "call_123",
+		Name:      "lookup_weather",
+		Arguments: `{"city":"Warsaw"}`,
+	}
+
+	body, err := json.Marshal(elem)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if decoded["type"] != "function_call" {
+		t.Fatalf("type = %v, want function_call", decoded["type"])
+	}
+	if decoded["call_id"] != "call_123" {
+		t.Fatalf("call_id = %v, want call_123", decoded["call_id"])
+	}
+	if decoded["name"] != "lookup_weather" {
+		t.Fatalf("name = %v, want lookup_weather", decoded["name"])
+	}
+	// Must not emit message-specific fields.
+	if _, ok := decoded["role"]; ok {
+		t.Fatal("function_call should not emit role")
+	}
+	if _, ok := decoded["content"]; ok {
+		t.Fatal("function_call should not emit content")
+	}
+}
+
+func TestResponsesInputElementMarshalJSON_FunctionCallOutput(t *testing.T) {
+	elem := ResponsesInputElement{
+		Type:   "function_call_output",
+		CallID: "call_123",
+		Output: `{"temperature_c":21}`,
+	}
+
+	body, err := json.Marshal(elem)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if decoded["type"] != "function_call_output" {
+		t.Fatalf("type = %v, want function_call_output", decoded["type"])
+	}
+	if decoded["call_id"] != "call_123" {
+		t.Fatalf("call_id = %v, want call_123", decoded["call_id"])
+	}
+	if decoded["output"] != `{"temperature_c":21}` {
+		t.Fatalf("output = %v, want JSON string", decoded["output"])
+	}
+}
+
+func TestResponsesInputElementRoundTrip(t *testing.T) {
+	original := `{"model":"gpt-4o-mini","input":[
+		{"role":"user","content":"What is the weather?"},
+		{"type":"function_call","call_id":"call_123","name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"},
+		{"type":"function_call_output","call_id":"call_123","output":"{\"temperature_c\":21}"},
+		{"role":"assistant","content":"It is 21°C in Warsaw."}
+	]}`
+
+	var req ResponsesRequest
+	if err := json.Unmarshal([]byte(original), &req); err != nil {
+		t.Fatalf("unmarshal error = %v", err)
+	}
+
+	input, ok := req.Input.([]ResponsesInputElement)
+	if !ok || len(input) != 4 {
+		t.Fatalf("Input = %#v, want []ResponsesInputElement len=4", req.Input)
+	}
+
+	// Verify each element type.
+	if input[0].Type != "" || input[0].Role != "user" {
+		t.Fatalf("Input[0] = %+v, want message role=user", input[0])
+	}
+	if input[1].Type != "function_call" || input[1].Name != "lookup_weather" {
+		t.Fatalf("Input[1] = %+v, want function_call", input[1])
+	}
+	if input[2].Type != "function_call_output" || input[2].Output != `{"temperature_c":21}` {
+		t.Fatalf("Input[2] = %+v, want function_call_output", input[2])
+	}
+	if input[3].Role != "assistant" {
+		t.Fatalf("Input[3] = %+v, want message role=assistant", input[3])
+	}
+
+	// Marshal and re-unmarshal to verify round-trip.
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal error = %v", err)
+	}
+
+	var req2 ResponsesRequest
+	if err := json.Unmarshal(body, &req2); err != nil {
+		t.Fatalf("re-unmarshal error = %v", err)
+	}
+
+	input2, ok := req2.Input.([]ResponsesInputElement)
+	if !ok || len(input2) != 4 {
+		t.Fatalf("round-trip Input = %#v, want []ResponsesInputElement len=4", req2.Input)
+	}
+	if input2[1].Type != "function_call" || input2[1].Arguments != `{"city":"Warsaw"}` {
+		t.Fatalf("round-trip Input[1] = %+v, want function_call with arguments preserved", input2[1])
+	}
+	if input2[2].Type != "function_call_output" || input2[2].Output != `{"temperature_c":21}` {
+		t.Fatalf("round-trip Input[2] = %+v, want function_call_output with output preserved", input2[2])
 	}
 }
