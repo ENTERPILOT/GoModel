@@ -279,8 +279,9 @@ type RedisModelConfig struct {
 }
 
 // RedisResponseConfig holds Redis connection configuration for the response cache.
-// Uses separate env vars from RedisModelConfig to allow independent configuration.
-// URL and TTL fall back to the same env vars as the model cache when not set separately.
+// Uses separate env vars from RedisModelConfig for key and TTL to allow independent
+// configuration. The URL is shared via REDIS_URL to simplify single-Redis deployments;
+// use YAML config if different Redis instances are needed for model and response caches.
 type RedisResponseConfig struct {
 	URL string `yaml:"url" env:"REDIS_URL"`
 	Key string `yaml:"key" env:"REDIS_KEY_RESPONSES"`
