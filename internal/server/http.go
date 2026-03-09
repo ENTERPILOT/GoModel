@@ -47,7 +47,7 @@ type Config struct {
 	AdminHandler             *admin.Handler           // Admin API handler (nil if disabled)
 	DashboardHandler         *dashboard.Handler       // Dashboard UI handler (nil if disabled)
 	SwaggerEnabled           bool                     // Whether to expose the Swagger UI at /swagger/index.html
-	ResponseCacheMiddleware  *responsecache.ResponseCacheMiddleware
+	ResponseCacheMiddleware  *responsecache.ResponseCacheMiddleware // Optional: response cache middleware for cacheable endpoints
 }
 
 // New creates a new HTTP server
