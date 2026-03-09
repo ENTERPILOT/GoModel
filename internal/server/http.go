@@ -50,6 +50,7 @@ type Config struct {
 // New creates a new HTTP server
 func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e := echo.New()
+	e.Logger = slog.Default()
 
 	// Get loggers from config (may be nil)
 	var auditLogger auditlog.LoggerInterface
