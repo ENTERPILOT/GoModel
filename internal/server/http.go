@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"path"
@@ -242,16 +241,14 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 	return sc.Start(ctx, s.echo)
 }
 
-// Shutdown gracefully shuts down the HTTP server and releases resources.
-func (s *Server) Shutdown(ctx context.Context) error {
-	// Stop accepting new requests first so no handler can touch the cache store
-	// after it is closed.
-	echoErr := s.echo.Shutdown(ctx)
-	var cacheErr error
+// Shutdown releases server resources. The HTTP server itself is stopped by
+// cancelling the context passed to Start; this method drains any in-flight
+// response cache writes and closes the cache store.
+func (s *Server) Shutdown(_ context.Context) error {
 	if s.responseCacheMiddleware != nil {
-		cacheErr = s.responseCacheMiddleware.Close()
+		return s.responseCacheMiddleware.Close()
 	}
-	return errors.Join(echoErr, cacheErr)
+	return nil
 }
 
 // ServeHTTP implements the http.Handler interface, allowing Server to be used with httptest
