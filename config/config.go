@@ -298,17 +298,15 @@ type SimpleCacheConfig struct {
 	Redis *RedisResponseConfig `yaml:"redis"`
 }
 
-// ModelListConfig holds configuration for fetching the external model metadata registry.
-type ModelListConfig struct {
-	URL string `yaml:"url" env:"MODEL_LIST_URL"`
-}
-
 // ValidateCacheConfig validates the cache configuration in c.
 // For the model cache, exactly one backend (Local or Redis) must be configured;
 // having both or neither is an error. When Redis is selected, its URL must be
 // non-empty. Returns a descriptive error if any constraint is violated, or nil
 // if the configuration is valid.
 func ValidateCacheConfig(c *CacheConfig) error {
+	if c == nil {
+		return fmt.Errorf("cache: configuration is required")
+	}
 	m := &c.Model
 	hasLocal := m.Local != nil
 	hasRedis := m.Redis != nil
@@ -323,6 +321,7 @@ func ValidateCacheConfig(c *CacheConfig) error {
 		return fmt.Errorf("cache.model.redis: URL is required when using redis")
 	}
 	return nil
+}
 }
 
 // ServerConfig holds HTTP server configuration
