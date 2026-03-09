@@ -10,6 +10,7 @@ import (
 
 	"gomodel/config"
 	"gomodel/internal/cache"
+	"gomodel/internal/cache/modelcache"
 	"gomodel/internal/core"
 	"gomodel/internal/modeldata"
 )
@@ -18,7 +19,7 @@ import (
 type InitResult struct {
 	Registry *ModelRegistry
 	Router   *Router
-	Cache    cache.Cache
+	Cache    modelcache.Cache
 	Factory  *ProviderFactory
 
 	// stopRefresh is called to stop the background refresh goroutine
@@ -88,7 +89,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	)
 
 	// Fetch model list in background (best-effort, non-blocking)
-	modelListURL := result.Config.Cache.ModelList.URL
+	modelListURL := result.Config.Cache.Model.ModelList.URL
 	if modelListURL != "" {
 		go func() {
 			fetchCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
@@ -117,7 +118,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 		}()
 	}
 
-	refreshInterval := time.Duration(result.Config.Cache.RefreshInterval) * time.Second
+	refreshInterval := time.Duration(result.Config.Cache.Model.RefreshInterval) * time.Second
 	if refreshInterval <= 0 {
 		refreshInterval = time.Hour
 	}
@@ -140,42 +141,39 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 }
 
 // initCache initializes the appropriate cache backend based on configuration.
-func initCache(cfg *config.Config) (cache.Cache, error) {
-	cacheType := cfg.Cache.Type
-	if cacheType == "" {
-		cacheType = "local"
-	}
-
-	switch cacheType {
-	case "redis":
-		ttl := time.Duration(cfg.Cache.Redis.TTL) * time.Second
+func initCache(cfg *config.Config) (modelcache.Cache, error) {
+	m := cfg.Cache.Model
+	if m.Redis != nil && m.Redis.URL != "" {
+		ttl := time.Duration(m.Redis.TTL) * time.Second
 		if ttl == 0 {
 			ttl = cache.DefaultRedisTTL
 		}
-
-		redisCfg := cache.RedisConfig{
-			URL: cfg.Cache.Redis.URL,
-			Key: cfg.Cache.Redis.Key,
+		redisCfg := modelcache.RedisModelCacheConfig{
+			URL: m.Redis.URL,
+			Key: m.Redis.Key,
 			TTL: ttl,
 		}
-
-		redisCache, err := cache.NewRedisCache(redisCfg)
+		mc, err := modelcache.NewRedisModelCache(redisCfg)
 		if err != nil {
 			return nil, err
 		}
-
-		slog.Info("using redis cache", "url", cfg.Cache.Redis.URL, "key", cfg.Cache.Redis.Key)
-		return redisCache, nil
-
-	default: // "local" or any other value defaults to local
-		cacheDir := cfg.Cache.CacheDir
+		key := m.Redis.Key
+		if key == "" {
+			key = modelcache.DefaultRedisKey
+		}
+		slog.Info("using redis cache", "key", key)
+		return mc, nil
+	}
+	if m.Local != nil {
+		cacheDir := m.Local.CacheDir
 		if cacheDir == "" {
 			cacheDir = ".cache"
 		}
 		cacheFile := filepath.Join(cacheDir, "models.json")
 		slog.Info("using local file cache", "path", cacheFile)
-		return cache.NewLocalCache(cacheFile), nil
+		return modelcache.NewLocalCache(cacheFile), nil
 	}
+	return nil, fmt.Errorf("cache.model: must have either local or redis configured")
 }
 
 // initializeProviders instantiates and registers all resolved providers.

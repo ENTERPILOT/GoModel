@@ -1,6 +1,7 @@
-// Package cache provides a cache abstraction for storing model data.
-// Supports both local (in-memory/file) and Redis backends for multi-instance deployments.
-package cache
+// Package modelcache provides model-specific cache types and interfaces.
+// It defines the data structures for caching LLM provider model lists
+// and the Cache interface that local and Redis backends implement.
+package modelcache
 
 import (
 	"context"
@@ -12,8 +13,8 @@ import (
 // Models are grouped by provider to avoid repeating shared fields (provider_type, owned_by)
 // on every model entry.
 type ModelCache struct {
-	UpdatedAt     time.Time                `json:"updated_at"`
-	Providers     map[string]CachedProvider `json:"providers"`
+	UpdatedAt time.Time                `json:"updated_at"`
+	Providers map[string]CachedProvider `json:"providers"`
 	// ModelListData holds the raw JSON model registry bytes for cache persistence,
 	// allowing the registry to restore its full model list without re-fetching.
 	ModelListData json.RawMessage `json:"model_list_data,omitempty"`

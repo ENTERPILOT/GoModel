@@ -187,7 +187,9 @@ func buildAppConfig(t *testing.T, cfg TestServerConfig, mockLLMURL string, port 
 			UIEnabled:        cfg.AdminUIEnabled,
 		},
 		Cache: config.CacheConfig{
-			Type: "local",
+			Model: config.ModelCacheConfig{
+				Local: &config.LocalCacheConfig{CacheDir: ".cache"},
+			},
 		},
 		Logging: config.LogConfig{
 			Enabled:               cfg.AuditLogEnabled,

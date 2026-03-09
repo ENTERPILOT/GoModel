@@ -27,8 +27,8 @@ func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"PORT", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT",
-		"CACHE_TYPE", "GOMODEL_CACHE_DIR",
-		"REDIS_URL", "REDIS_KEY", "REDIS_TTL",
+		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL",
+		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"STORAGE_TYPE", "SQLITE_PATH", "POSTGRES_URL", "POSTGRES_MAX_CONNS",
 		"MONGODB_URL", "MONGODB_DATABASE",
 		"METRICS_ENABLED", "METRICS_ENDPOINT",
@@ -67,20 +67,11 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Server.Port != "8080" {
 		t.Errorf("expected Server.Port=8080, got %s", cfg.Server.Port)
 	}
-	if cfg.Cache.Type != "local" {
-		t.Errorf("expected Cache.Type=local, got %s", cfg.Cache.Type)
+	if cfg.Cache.Model.Local != nil {
+		t.Error("expected Cache.Model.Local to be nil in raw defaults")
 	}
-	if cfg.Cache.CacheDir != ".cache" {
-		t.Errorf("expected Cache.CacheDir=.cache, got %s", cfg.Cache.CacheDir)
-	}
-	if cfg.Cache.RefreshInterval != 3600 {
-		t.Errorf("expected Cache.RefreshInterval=3600, got %d", cfg.Cache.RefreshInterval)
-	}
-	if cfg.Cache.Redis.Key != "gomodel:models" {
-		t.Errorf("expected Cache.Redis.Key=gomodel:models, got %s", cfg.Cache.Redis.Key)
-	}
-	if cfg.Cache.Redis.TTL != 86400 {
-		t.Errorf("expected Cache.Redis.TTL=86400, got %d", cfg.Cache.Redis.TTL)
+	if cfg.Cache.Model.RefreshInterval != 3600 {
+		t.Errorf("expected Cache.Model.RefreshInterval=3600, got %d", cfg.Cache.Model.RefreshInterval)
 	}
 	if cfg.Storage.Type != "sqlite" {
 		t.Errorf("expected Storage.Type=sqlite, got %s", cfg.Storage.Type)
@@ -183,11 +174,11 @@ func TestLoad_YAMLOverridesDefaults(t *testing.T) {
 server:
   port: "3000"
 cache:
-  type: "redis"
-  redis:
-    url: "redis://myhost:6379"
-    key: "custom:key"
-    ttl: 3600
+  model:
+    redis:
+      url: "redis://myhost:6379"
+      key: "custom:key"
+      ttl: 3600
 logging:
   enabled: true
   log_bodies: false
@@ -206,17 +197,20 @@ logging:
 		if cfg.Server.Port != "3000" {
 			t.Errorf("expected port 3000, got %s", cfg.Server.Port)
 		}
-		if cfg.Cache.Type != "redis" {
-			t.Errorf("expected cache type redis, got %s", cfg.Cache.Type)
+		if cfg.Cache.Model.Redis == nil {
+			t.Fatal("expected Cache.Model.Redis to be set")
 		}
-		if cfg.Cache.Redis.URL != "redis://myhost:6379" {
-			t.Errorf("expected redis URL redis://myhost:6379, got %s", cfg.Cache.Redis.URL)
+		if cfg.Cache.Model.Redis.URL != "redis://myhost:6379" {
+			t.Errorf("expected redis URL redis://myhost:6379, got %s", cfg.Cache.Model.Redis.URL)
 		}
-		if cfg.Cache.Redis.Key != "custom:key" {
-			t.Errorf("expected redis key custom:key, got %s", cfg.Cache.Redis.Key)
+		if cfg.Cache.Model.Redis.Key != "custom:key" {
+			t.Errorf("expected redis key custom:key, got %s", cfg.Cache.Model.Redis.Key)
 		}
-		if cfg.Cache.Redis.TTL != 3600 {
-			t.Errorf("expected redis TTL 3600, got %d", cfg.Cache.Redis.TTL)
+		if cfg.Cache.Model.Redis.TTL != 3600 {
+			t.Errorf("expected redis TTL 3600, got %d", cfg.Cache.Model.Redis.TTL)
+		}
+		if cfg.Cache.Model.Local != nil {
+			t.Errorf("expected Cache.Model.Local to be nil when redis is configured, got %v", cfg.Cache.Model.Local)
 		}
 		if !cfg.Logging.Enabled {
 			t.Error("expected Logging.Enabled=true from YAML")
@@ -244,7 +238,10 @@ func TestLoad_EnvOverridesYAML(t *testing.T) {
 server:
   port: "3000"
 cache:
-  type: "redis"
+  model:
+    local: null
+    redis:
+      url: "redis://myhost:6379"
 logging:
   enabled: true
 `
@@ -253,7 +250,7 @@ logging:
 		}
 
 		t.Setenv("PORT", "9090")
-		t.Setenv("CACHE_TYPE", "local")
+		t.Setenv("CACHE_REFRESH_INTERVAL", "1800")
 		t.Setenv("LOGGING_ENABLED", "false")
 
 		result, err := Load()
@@ -265,8 +262,8 @@ logging:
 		if cfg.Server.Port != "9090" {
 			t.Errorf("expected port 9090 (env override), got %s", cfg.Server.Port)
 		}
-		if cfg.Cache.Type != "local" {
-			t.Errorf("expected cache type local (env override), got %s", cfg.Cache.Type)
+		if cfg.Cache.Model.RefreshInterval != 1800 {
+			t.Errorf("expected Cache.Model.RefreshInterval=1800 (env override), got %d", cfg.Cache.Model.RefreshInterval)
 		}
 		if cfg.Logging.Enabled {
 			t.Error("expected Logging.Enabled=false (env override)")
@@ -427,8 +424,8 @@ func TestLoad_CacheDir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.Cache.CacheDir != ".cache" {
-			t.Errorf("expected Cache.CacheDir=.cache, got %s", result.Config.Cache.CacheDir)
+		if result.Config.Cache.Model.Local == nil {
+			t.Error("expected Cache.Model.Local to be set by default")
 		}
 	})
 
@@ -439,8 +436,8 @@ func TestLoad_CacheDir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.Cache.CacheDir != "/tmp/gomodel-cache" {
-			t.Errorf("expected Cache.CacheDir=/tmp/gomodel-cache, got %s", result.Config.Cache.CacheDir)
+		if result.Config.Cache.Model.Local == nil || result.Config.Cache.Model.Local.CacheDir != "/tmp/gomodel-cache" {
+			t.Errorf("expected Cache.Model.Local.CacheDir=/tmp/gomodel-cache, got %v", result.Config.Cache.Model.Local)
 		}
 	})
 }
@@ -638,6 +635,67 @@ func TestValidateBodySizeLimit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoad_EnvOnlyRedisModelCache(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(_ string) {
+		t.Setenv("REDIS_URL", "redis://env-host:6379")
+		t.Setenv("REDIS_KEY_MODELS", "env:models")
+		t.Setenv("REDIS_TTL_MODELS", "7200")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		cfg := result.Config
+
+		if cfg.Cache.Model.Redis == nil {
+			t.Fatal("expected Cache.Model.Redis to be allocated from env vars")
+		}
+		if cfg.Cache.Model.Redis.URL != "redis://env-host:6379" {
+			t.Errorf("expected REDIS_URL=redis://env-host:6379, got %s", cfg.Cache.Model.Redis.URL)
+		}
+		if cfg.Cache.Model.Redis.Key != "env:models" {
+			t.Errorf("expected REDIS_KEY_MODELS=env:models, got %s", cfg.Cache.Model.Redis.Key)
+		}
+		if cfg.Cache.Model.Redis.TTL != 7200 {
+			t.Errorf("expected REDIS_TTL_MODELS=7200, got %d", cfg.Cache.Model.Redis.TTL)
+		}
+		if cfg.Cache.Model.Local != nil {
+			t.Errorf("expected Cache.Model.Local to be nil when Redis is configured via env, got %v", cfg.Cache.Model.Local)
+		}
+	})
+}
+
+func TestLoad_EnvOnlyRedisResponseCache(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(_ string) {
+		t.Setenv("REDIS_URL", "redis://env-host:6379")
+		t.Setenv("REDIS_KEY_RESPONSES", "env:responses")
+		t.Setenv("REDIS_TTL_RESPONSES", "1800")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		cfg := result.Config
+
+		if cfg.Cache.Response.Simple.Redis == nil {
+			t.Fatal("expected Cache.Response.Simple.Redis to be allocated from env vars")
+		}
+		if cfg.Cache.Response.Simple.Redis.URL != "redis://env-host:6379" {
+			t.Errorf("expected REDIS_URL=redis://env-host:6379, got %s", cfg.Cache.Response.Simple.Redis.URL)
+		}
+		if cfg.Cache.Response.Simple.Redis.Key != "env:responses" {
+			t.Errorf("expected REDIS_KEY_RESPONSES=env:responses, got %s", cfg.Cache.Response.Simple.Redis.Key)
+		}
+		if cfg.Cache.Response.Simple.Redis.TTL != 1800 {
+			t.Errorf("expected REDIS_TTL_RESPONSES=1800, got %d", cfg.Cache.Response.Simple.Redis.TTL)
+		}
+	})
 }
 
 func TestParseBodySizeLimitBytes(t *testing.T) {

@@ -243,8 +243,8 @@ func TestApplyEnvOverrides(t *testing.T) {
 			name:    "CACHE_REFRESH_INTERVAL override",
 			envVars: map[string]string{"CACHE_REFRESH_INTERVAL": "1800"},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Cache.RefreshInterval != 1800 {
-					t.Errorf("Cache.RefreshInterval = %d, want 1800", cfg.Cache.RefreshInterval)
+				if cfg.Cache.Model.RefreshInterval != 1800 {
+					t.Errorf("Cache.Model.RefreshInterval = %d, want 1800", cfg.Cache.Model.RefreshInterval)
 				}
 			},
 		},

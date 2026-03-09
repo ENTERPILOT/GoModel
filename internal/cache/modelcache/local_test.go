@@ -1,4 +1,4 @@
-package cache
+package modelcache
 
 import (
 	"context"
@@ -17,7 +17,6 @@ func TestLocalCache(t *testing.T) {
 		cache := NewLocalCache(cacheFile)
 		ctx := context.Background()
 
-		// Initially empty
 		result, err := cache.Get(ctx)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -26,7 +25,6 @@ func TestLocalCache(t *testing.T) {
 			t.Fatalf("expected nil result for empty cache, got %v", result)
 		}
 
-		// Set data
 		data := &ModelCache{
 			UpdatedAt: time.Now().UTC(),
 			Providers: map[string]CachedProvider{
@@ -45,7 +43,6 @@ func TestLocalCache(t *testing.T) {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		// Get data back
 		result, err = cache.Get(ctx)
 		if err != nil {
 			t.Fatalf("unexpected error on get: %v", err)
@@ -78,7 +75,6 @@ func TestLocalCache(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify file was created
 		if _, err := os.Stat(cacheFile); os.IsNotExist(err) {
 			t.Fatal("cache file was not created")
 		}
@@ -88,7 +84,6 @@ func TestLocalCache(t *testing.T) {
 		cache := NewLocalCache("")
 		ctx := context.Background()
 
-		// Get should return nil
 		result, err := cache.Get(ctx)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -97,7 +92,6 @@ func TestLocalCache(t *testing.T) {
 			t.Fatal("expected nil result for empty path")
 		}
 
-		// Set should be a no-op
 		data := &ModelCache{}
 		err = cache.Set(ctx, data)
 		if err != nil {
@@ -117,7 +111,6 @@ func TestLocalCache(t *testing.T) {
 		tmpDir := t.TempDir()
 		cacheFile := filepath.Join(tmpDir, "models.json")
 
-		// Write invalid JSON
 		if err := os.WriteFile(cacheFile, []byte("not valid json"), 0o644); err != nil {
 			t.Fatalf("failed to write test file: %v", err)
 		}

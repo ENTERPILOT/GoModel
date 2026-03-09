@@ -18,6 +18,7 @@ import (
 	"gomodel/internal/auditlog"
 	batchstore "gomodel/internal/batch"
 	"gomodel/internal/core"
+	"gomodel/internal/responsecache"
 	"gomodel/internal/usage"
 
 	echoswagger "github.com/swaggo/echo-swagger"
@@ -25,8 +26,9 @@ import (
 
 // Server wraps the Echo server
 type Server struct {
-	echo    *echo.Echo
-	handler *Handler
+	echo                    *echo.Echo
+	handler                 *Handler
+	responseCacheMiddleware *responsecache.ResponseCacheMiddleware
 }
 
 // Config holds server configuration options
@@ -45,6 +47,7 @@ type Config struct {
 	AdminHandler             *admin.Handler           // Admin API handler (nil if disabled)
 	DashboardHandler         *dashboard.Handler       // Dashboard UI handler (nil if disabled)
 	SwaggerEnabled           bool                     // Whether to expose the Swagger UI at /swagger/index.html
+	ResponseCacheMiddleware  *responsecache.ResponseCacheMiddleware // Optional: response cache middleware for cacheable endpoints
 }
 
 // New creates a new HTTP server
@@ -169,6 +172,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Model validation (skips non-model paths via IsModelInteractionPath)
 	e.Use(ModelValidation(provider))
 
+	if cfg != nil && cfg.ResponseCacheMiddleware != nil {
+		e.Use(cfg.ResponseCacheMiddleware.Middleware())
+	}
+
 	// Public routes
 	e.GET("/health", handler.Health)
 	if cfg != nil && cfg.SwaggerEnabled {
@@ -214,9 +221,14 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.GET("/admin/static/*", cfg.DashboardHandler.Static)
 	}
 
+	var rcm *responsecache.ResponseCacheMiddleware
+	if cfg != nil {
+		rcm = cfg.ResponseCacheMiddleware
+	}
 	return &Server{
-		echo:    e,
-		handler: handler,
+		echo:                    e,
+		handler:                 handler,
+		responseCacheMiddleware: rcm,
 	}
 }
 
@@ -227,6 +239,16 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 		HideBanner: true,
 	}
 	return sc.Start(ctx, s.echo)
+}
+
+// Shutdown releases server resources. The HTTP server itself is stopped by
+// cancelling the context passed to Start; this method drains any in-flight
+// response cache writes and closes the cache store.
+func (s *Server) Shutdown(_ context.Context) error {
+	if s.responseCacheMiddleware != nil {
+		return s.responseCacheMiddleware.Close()
+	}
+	return nil
 }
 
 // ServeHTTP implements the http.Handler interface, allowing Server to be used with httptest

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/cache"
+	"gomodel/internal/cache/modelcache"
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
 	"gomodel/internal/providers"
@@ -377,11 +377,11 @@ func TestEmptyCacheStartup(t *testing.T) {
 
 type emptyCache struct{}
 
-func (e *emptyCache) Get(ctx context.Context) (*cache.ModelCache, error) {
-	return nil, nil // Empty cache
+func (e *emptyCache) Get(ctx context.Context) (*modelcache.ModelCache, error) {
+	return nil, nil
 }
 
-func (e *emptyCache) Set(ctx context.Context, cache *cache.ModelCache) error {
+func (e *emptyCache) Set(ctx context.Context, cache *modelcache.ModelCache) error {
 	return nil
 }
 

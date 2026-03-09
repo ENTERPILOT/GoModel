@@ -1,4 +1,4 @@
-package cache
+package modelcache
 
 import (
 	"context"
@@ -36,7 +36,7 @@ func (c *LocalCache) Get(ctx context.Context) (*ModelCache, error) {
 	data, err := os.ReadFile(c.filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil // No cache file yet, not an error
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to read cache file: %w", err)
 	}
@@ -58,7 +58,6 @@ func (c *LocalCache) Set(ctx context.Context, cache *ModelCache) error {
 		return nil
 	}
 
-	// Ensure directory exists
 	dir := filepath.Dir(c.filePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)
@@ -75,7 +74,7 @@ func (c *LocalCache) Set(ctx context.Context, cache *ModelCache) error {
 		return fmt.Errorf("failed to write cache file: %w", err)
 	}
 	if err := os.Rename(tmpFile, c.filePath); err != nil {
-		os.Remove(tmpFile) // Clean up temp file
+		os.Remove(tmpFile)
 		return fmt.Errorf("failed to rename cache file: %w", err)
 	}
 

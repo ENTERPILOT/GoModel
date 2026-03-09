@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"gomodel/internal/cache"
+	"gomodel/internal/cache/modelcache"
 	"gomodel/internal/core"
 	"gomodel/internal/modeldata"
 )
@@ -32,7 +32,7 @@ type ModelRegistry struct {
 	providers        []core.Provider
 	providerTypes    map[core.Provider]string // provider -> type string
 	providerNames    map[core.Provider]string // provider -> configured provider instance name
-	cache            cache.Cache              // cache backend (local or redis)
+	cache            modelcache.Cache         // cache backend (local or redis)
 	initialized      bool                     // true when at least one successful network fetch completed
 	initMu           sync.Mutex               // protects initialized flag
 	modelList        *modeldata.ModelList     // parsed model list (nil = not loaded)
@@ -57,7 +57,7 @@ func NewModelRegistry() *ModelRegistry {
 
 // SetCache sets the cache backend for persistent model storage.
 // The cache can be a local file-based cache or a Redis cache.
-func (r *ModelRegistry) SetCache(c cache.Cache) {
+func (r *ModelRegistry) SetCache(c modelcache.Cache) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.cache = c
@@ -250,19 +250,19 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	// Populate model maps from grouped cache structure. Unqualified lookups keep "first provider wins".
 	newModels := make(map[string]*ModelInfo)
 	newModelsByProvider := make(map[string]map[string]*ModelInfo)
-	for providerName, cachedProvider := range modelCache.Providers {
+	for providerName, cachedProv := range modelCache.Providers {
 		provider, ok := nameToProvider[providerName]
 		if !ok {
 			// Provider not configured, skip all its models
 			continue
 		}
-		providerModels := make(map[string]*ModelInfo, len(cachedProvider.Models))
-		for _, cached := range cachedProvider.Models {
+		providerModels := make(map[string]*ModelInfo, len(cachedProv.Models))
+		for _, cached := range cachedProv.Models {
 			info := &ModelInfo{
 				Model: core.Model{
 					ID:      cached.ID,
 					Object:  "model",
-					OwnedBy: cachedProvider.OwnedBy,
+					OwnedBy: cachedProv.OwnedBy,
 					Created: cached.Created,
 				},
 				Provider: provider,
@@ -332,10 +332,9 @@ func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 		return nil
 	}
 
-	// Build grouped cache structure: one entry per provider with its models.
-	modelCache := &cache.ModelCache{
+	mc := &modelcache.ModelCache{
 		UpdatedAt:     time.Now().UTC(),
-		Providers:     make(map[string]cache.CachedProvider, len(modelsByProvider)),
+		Providers:     make(map[string]modelcache.CachedProvider, len(modelsByProvider)),
 		ModelListData: modelListRaw,
 	}
 
@@ -363,15 +362,15 @@ func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 		}
 		sort.Strings(modelIDs)
 
-		cachedModels := make([]cache.CachedModel, 0, len(modelIDs))
+		cachedModels := make([]modelcache.CachedModel, 0, len(modelIDs))
 		for _, modelID := range modelIDs {
 			info := models[modelID]
-			cachedModels = append(cachedModels, cache.CachedModel{
+			cachedModels = append(cachedModels, modelcache.CachedModel{
 				ID:      modelID,
 				Created: info.Model.Created,
 			})
 		}
-		modelCache.Providers[providerName] = cache.CachedProvider{
+		mc.Providers[providerName] = modelcache.CachedProvider{
 			ProviderType: pType,
 			OwnedBy:      ownedBy,
 			Models:       cachedModels,
@@ -379,7 +378,7 @@ func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 		totalModels += len(cachedModels)
 	}
 
-	if err := cacheBackend.Set(ctx, modelCache); err != nil {
+	if err := cacheBackend.Set(ctx, mc); err != nil {
 		return fmt.Errorf("failed to save cache: %w", err)
 	}
 

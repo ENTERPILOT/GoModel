@@ -66,11 +66,26 @@ spec:
                   name: {{ include "gomodel.providerSecretName" . }}
                   key: REDIS_URL
                   optional: true
-            - name: REDIS_KEY
+            - name: REDIS_KEY_MODELS
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
-                  key: REDIS_KEY
+                  key: REDIS_KEY_MODELS
+            - name: REDIS_KEY_RESPONSES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "gomodel.fullname" . }}
+                  key: REDIS_KEY_RESPONSES
+            - name: REDIS_TTL_MODELS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "gomodel.fullname" . }}
+                  key: REDIS_TTL_MODELS
+            - name: REDIS_TTL_RESPONSES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "gomodel.fullname" . }}
+                  key: REDIS_TTL_RESPONSES
             {{- end }}
             # Logging configuration
             - name: LOG_FORMAT

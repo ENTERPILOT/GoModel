@@ -50,8 +50,10 @@ The most common way to configure GOModel. Set any of the variables below to over
 | `CACHE_TYPE`        | Cache backend: `local` or `redis` | `local`          |
 | `GOMODEL_CACHE_DIR` | Directory for local cache files   | `.cache`         |
 | `REDIS_URL`         | Redis connection URL              | _(empty)_        |
-| `REDIS_KEY`         | Redis key for model cache         | `gomodel:models` |
-| `REDIS_TTL`         | Cache TTL in seconds              | `86400` (24h)    |
+| `REDIS_KEY_MODELS`     | Redis key for model cache           | `gomodel:models`    |
+| `REDIS_KEY_RESPONSES`  | Redis key for response cache        | `gomodel:response:` |
+| `REDIS_TTL_MODELS`     | TTL in seconds for model cache      | `86400` (24h)    |
+| `REDIS_TTL_RESPONSES`  | TTL in seconds for response cache   | `3600` (1h)      |
 
 #### Storage
 

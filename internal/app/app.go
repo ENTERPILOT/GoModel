@@ -18,6 +18,7 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/providers"
+	"gomodel/internal/responsecache"
 	"gomodel/internal/server"
 	"gomodel/internal/storage"
 	"gomodel/internal/usage"
@@ -196,6 +197,20 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if appCfg.Server.SwaggerEnabled {
 		slog.Info("swagger UI enabled", "path", "/swagger/index.html")
 	}
+
+	rcm, err := responsecache.NewResponseCacheMiddleware(appCfg.Cache.Response)
+	if err != nil {
+		var batchCloseErr error
+		if app.batch != nil {
+			batchCloseErr = app.batch.Close()
+		}
+		closeErr := errors.Join(batchCloseErr, app.usage.Close(), app.audit.Close(), app.providers.Close())
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to initialize response cache: %w (also: close error: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to initialize response cache: %w", err)
+	}
+	serverCfg.ResponseCacheMiddleware = rcm
 
 	app.server = server.New(provider, serverCfg)
 

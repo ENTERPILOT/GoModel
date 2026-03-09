@@ -251,23 +251,24 @@ type MongoDBStorageConfig struct {
 	Database string `yaml:"database" env:"MONGODB_DATABASE"`
 }
 
-// CacheConfig holds cache configuration for model storage
+// CacheConfig holds model and response cache configuration.
 type CacheConfig struct {
-	// Type specifies the cache backend: "local" (default) or "redis"
-	Type string `yaml:"type" env:"CACHE_TYPE"`
+	Model    ModelCacheConfig    `yaml:"model"`
+	Response ResponseCacheConfig `yaml:"response"`
+}
 
-	// CacheDir is the directory for local cache files (default: ".cache")
+// ModelCacheConfig holds cache configuration for model registry.
+// Exactly one of Local or Redis must be non-nil.
+type ModelCacheConfig struct {
+	RefreshInterval int                 `yaml:"refresh_interval" env:"CACHE_REFRESH_INTERVAL"`
+	ModelList       ModelListConfig     `yaml:"model_list"`
+	Local           *LocalCacheConfig  `yaml:"local"`
+	Redis           *RedisModelConfig  `yaml:"redis"`
+}
+
+// LocalCacheConfig holds local file cache configuration.
+type LocalCacheConfig struct {
 	CacheDir string `yaml:"cache_dir" env:"GOMODEL_CACHE_DIR"`
-
-	// RefreshInterval is how often to refresh the model registry in seconds.
-	// Default: 3600 (1 hour)
-	RefreshInterval int `yaml:"refresh_interval" env:"CACHE_REFRESH_INTERVAL"`
-
-	// Redis configuration (only used when Type is "redis")
-	Redis RedisConfig `yaml:"redis"`
-
-	// ModelList configuration for the external model metadata registry
-	ModelList ModelListConfig `yaml:"model_list"`
 }
 
 // ModelListConfig holds configuration for fetching the external model metadata registry.
@@ -276,16 +277,56 @@ type ModelListConfig struct {
 	URL string `yaml:"url" env:"MODEL_LIST_URL"`
 }
 
-// RedisConfig holds Redis-specific configuration
-type RedisConfig struct {
-	// URL is the Redis connection URL (e.g., "redis://localhost:6379")
+// RedisModelConfig holds Redis connection configuration for the model registry cache.
+type RedisModelConfig struct {
 	URL string `yaml:"url" env:"REDIS_URL"`
+	Key string `yaml:"key" env:"REDIS_KEY_MODELS"`
+	TTL int    `yaml:"ttl" env:"REDIS_TTL_MODELS"`
+}
 
-	// Key is the Redis key for storing the model cache (default: "gomodel:models")
-	Key string `yaml:"key" env:"REDIS_KEY"`
+// RedisResponseConfig holds Redis connection configuration for the response cache.
+// Uses separate env vars from RedisModelConfig for key and TTL to allow independent
+// configuration. The URL is shared via REDIS_URL to simplify single-Redis deployments;
+// use YAML config if different Redis instances are needed for model and response caches.
+type RedisResponseConfig struct {
+	URL string `yaml:"url" env:"REDIS_URL"`
+	Key string `yaml:"key" env:"REDIS_KEY_RESPONSES"`
+	TTL int    `yaml:"ttl" env:"REDIS_TTL_RESPONSES"`
+}
 
-	// TTL is the time-to-live for cached data in seconds (default: 86400 = 24 hours)
-	TTL int `yaml:"ttl" env:"REDIS_TTL"`
+// ResponseCacheConfig holds configuration for response cache middleware.
+type ResponseCacheConfig struct {
+	Simple SimpleCacheConfig `yaml:"simple"`
+}
+
+// SimpleCacheConfig holds configuration for exact-match response caching.
+type SimpleCacheConfig struct {
+	Redis *RedisResponseConfig `yaml:"redis"`
+}
+
+// ValidateCacheConfig validates the cache configuration in c.
+// For the model cache, exactly one backend (Local or Redis) must be configured;
+// having both or neither is an error. When Redis is selected, its URL must be
+// non-empty. Returns a descriptive error if any constraint is violated, or nil
+// if the configuration is valid.
+func ValidateCacheConfig(c *CacheConfig) error {
+	if c == nil {
+		return fmt.Errorf("cache: configuration is required")
+	}
+	m := &c.Model
+	hasLocal := m.Local != nil
+	hasRedis := m.Redis != nil
+
+	if hasLocal && hasRedis {
+		return fmt.Errorf("cache.model: cannot have both local and redis configured; choose one")
+	}
+	if !hasLocal && !hasRedis {
+		return fmt.Errorf("cache.model: must have either local or redis configured")
+	}
+	if hasRedis && m.Redis.URL == "" {
+		return fmt.Errorf("cache.model.redis: URL is required when using redis")
+	}
+	return nil
 }
 
 // ServerConfig holds HTTP server configuration
@@ -356,16 +397,15 @@ func buildDefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{Port: "8080", SwaggerEnabled: true},
 		Cache: CacheConfig{
-			Type:            "local",
-			CacheDir:        ".cache",
-			RefreshInterval: 3600,
-			Redis: RedisConfig{
-				Key: "gomodel:models",
-				TTL: 86400,
+			Model: ModelCacheConfig{
+				RefreshInterval: 3600,
+				ModelList: ModelListConfig{
+					URL: "https://raw.githubusercontent.com/ENTERPILOT/ai-model-list/refs/heads/main/models.json",
+				},
+			Local: nil,
+			Redis: nil,
 			},
-			ModelList: ModelListConfig{
-				URL: "https://raw.githubusercontent.com/ENTERPILOT/ai-model-list/refs/heads/main/models.json",
-			},
+			Response: ResponseCacheConfig{},
 		},
 		Storage: StorageConfig{
 			Type: "sqlite",
@@ -431,10 +471,19 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 
+	// When no model cache backend was specified at all, default to local.
+	if cfg.Cache.Model.Local == nil && cfg.Cache.Model.Redis == nil {
+		cfg.Cache.Model.Local = &LocalCacheConfig{}
+	}
+
 	if cfg.Server.BodySizeLimit != "" {
 		if err := ValidateBodySizeLimit(cfg.Server.BodySizeLimit); err != nil {
 			return nil, fmt.Errorf("invalid BODY_SIZE_LIMIT: %w", err)
 		}
+	}
+
+	if err := ValidateCacheConfig(&cfg.Cache); err != nil {
+		return nil, err
 	}
 
 	return &LoadResult{
@@ -494,6 +543,29 @@ func applyEnvOverrides(cfg *Config) error {
 	return applyEnvOverridesValue(reflect.ValueOf(cfg).Elem())
 }
 
+// hasEnvDescendants reports whether t (a struct type) contains any field (at
+// any depth) with a non-empty "env" struct tag. Used to decide whether to
+// allocate a nil pointer-to-struct before recursing into it.
+func hasEnvDescendants(t reflect.Type) bool {
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Tag.Get("env") != "" {
+			return true
+		}
+		ft := f.Type
+		if ft.Kind() == reflect.Ptr {
+			ft = ft.Elem()
+		}
+		if ft.Kind() == reflect.Struct && hasEnvDescendants(ft) {
+			return true
+		}
+	}
+	return false
+}
+
 func applyEnvOverridesValue(v reflect.Value) error {
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
@@ -506,6 +578,30 @@ func applyEnvOverridesValue(v reflect.Value) error {
 		if field.Type.Kind() == reflect.Struct {
 			if err := applyEnvOverridesValue(fieldVal); err != nil {
 				return err
+			}
+			continue
+		}
+		if field.Type.Kind() == reflect.Ptr {
+			if fieldVal.IsNil() {
+				// Only allocate if the pointed-to struct has env-tagged descendants;
+				// otherwise leave it nil so optional config sections stay absent.
+				elemType := field.Type.Elem()
+				if elemType.Kind() != reflect.Struct || !hasEnvDescendants(elemType) {
+					continue
+				}
+				// Allocate a zero-value struct so env vars can populate its fields.
+				newVal := reflect.New(elemType)
+				if err := applyEnvOverridesValue(newVal.Elem()); err != nil {
+					return err
+				}
+				// Only keep the allocation if at least one field was actually set.
+				if !reflect.DeepEqual(newVal.Elem().Interface(), reflect.Zero(elemType).Interface()) {
+					fieldVal.Set(newVal)
+				}
+			} else {
+				if err := applyEnvOverridesValue(fieldVal.Elem()); err != nil {
+					return err
+				}
 			}
 			continue
 		}

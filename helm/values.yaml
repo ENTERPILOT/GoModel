@@ -90,10 +90,14 @@ cache:
     # -- Redis connection URL (e.g., "redis://redis:6379")
     # If redis.enabled is true, this is auto-configured to use the subchart
     url: ""
-    # -- Redis key for storing the model cache
-    key: "gomodel:models"
-    # -- TTL for cached data in seconds (default: 24 hours)
-    ttl: 86400
+    # -- Redis key prefix for storing the model cache
+    keyModels: "gomodel:models"
+    # -- TTL for model cache data in seconds (default: 24 hours)
+    ttlModels: 86400
+    # -- Redis key prefix for storing the response cache
+    keyResponses: "gomodel:response:"
+    # -- TTL for response cache data in seconds (default: 1 hour)
+    ttlResponses: 3600
 
 # Redis subchart configuration (Bitnami Redis)
 redis:

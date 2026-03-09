@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"gomodel/internal/cache"
+	"gomodel/internal/cache/modelcache"
 	"gomodel/internal/core"
 )
 
 func TestCacheFile(t *testing.T) {
 	t.Run("SetCache", func(t *testing.T) {
 		registry := NewModelRegistry()
-		localCache := cache.NewLocalCache("/tmp/test-cache.json")
+		localCache := modelcache.NewLocalCache("/tmp/test-cache.json")
 		registry.SetCache(localCache)
 		// Verify no panic, cache is set (private field)
 	})
@@ -25,7 +25,7 @@ func TestCacheFile(t *testing.T) {
 		cacheFile := filepath.Join(tmpDir, "models.json")
 
 		registry := NewModelRegistry()
-		localCache := cache.NewLocalCache(cacheFile)
+		localCache := modelcache.NewLocalCache(cacheFile)
 		registry.SetCache(localCache)
 
 		mock := &registryMockProvider{
@@ -57,7 +57,7 @@ func TestCacheFile(t *testing.T) {
 			t.Fatalf("failed to read cache file: %v", err)
 		}
 
-		var modelCache cache.ModelCache
+		var modelCache modelcache.ModelCache
 		if err := json.Unmarshal(data, &modelCache); err != nil {
 			t.Fatalf("failed to unmarshal cache: %v", err)
 		}
@@ -76,20 +76,20 @@ func TestCacheFile(t *testing.T) {
 		cacheFile := filepath.Join(tmpDir, "models.json")
 
 		// Create a cache file
-		modelCache := cache.ModelCache{
+		modelCache := modelcache.ModelCache{
 			UpdatedAt: time.Now().UTC(),
-			Providers: map[string]cache.CachedProvider{
+			Providers: map[string]modelcache.CachedProvider{
 				"openai-main": {
 					ProviderType: "openai",
 					OwnedBy:      "openai",
-					Models: []cache.CachedModel{
+					Models: []modelcache.CachedModel{
 						{ID: "gpt-4o", Created: 1234567890},
 					},
 				},
 				"anthropic-main": {
 					ProviderType: "anthropic",
 					OwnedBy:      "anthropic",
-					Models: []cache.CachedModel{
+					Models: []modelcache.CachedModel{
 						{ID: "claude-3-5-sonnet", Created: 1234567891},
 					},
 				},
@@ -102,7 +102,7 @@ func TestCacheFile(t *testing.T) {
 
 		// Create registry with providers
 		registry := NewModelRegistry()
-		localCache := cache.NewLocalCache(cacheFile)
+		localCache := modelcache.NewLocalCache(cacheFile)
 		registry.SetCache(localCache)
 
 		openaiMock := &registryMockProvider{
@@ -150,20 +150,20 @@ func TestCacheFile(t *testing.T) {
 		tmpDir := t.TempDir()
 		cacheFile := filepath.Join(tmpDir, "models.json")
 
-		modelCache := cache.ModelCache{
+		modelCache := modelcache.ModelCache{
 			UpdatedAt: time.Now().UTC(),
-			Providers: map[string]cache.CachedProvider{
+			Providers: map[string]modelcache.CachedProvider{
 				"openai-east": {
 					ProviderType: "openai",
 					OwnedBy:      "openai",
-					Models: []cache.CachedModel{
+					Models: []modelcache.CachedModel{
 						{ID: "gpt-4o"},
 					},
 				},
 				"openai-west": {
 					ProviderType: "openai",
 					OwnedBy:      "openai",
-					Models: []cache.CachedModel{
+					Models: []modelcache.CachedModel{
 						{ID: "gpt-4o"},
 					},
 				},
@@ -175,7 +175,7 @@ func TestCacheFile(t *testing.T) {
 		}
 
 		registry := NewModelRegistry()
-		localCache := cache.NewLocalCache(cacheFile)
+		localCache := modelcache.NewLocalCache(cacheFile)
 		registry.SetCache(localCache)
 
 		east := &registryMockProvider{name: "openai-east"}
@@ -208,20 +208,20 @@ func TestCacheFile(t *testing.T) {
 		cacheFile := filepath.Join(tmpDir, "models.json")
 
 		// Create cache with models from multiple providers
-		modelCache := cache.ModelCache{
+		modelCache := modelcache.ModelCache{
 			UpdatedAt: time.Now().UTC(),
-			Providers: map[string]cache.CachedProvider{
+			Providers: map[string]modelcache.CachedProvider{
 				"openai-main": {
 					ProviderType: "openai",
 					OwnedBy:      "openai",
-					Models: []cache.CachedModel{
+					Models: []modelcache.CachedModel{
 						{ID: "gpt-4o"},
 					},
 				},
 				"anthropic-main": {
 					ProviderType: "anthropic",
 					OwnedBy:      "anthropic",
-					Models: []cache.CachedModel{
+					Models: []modelcache.CachedModel{
 						{ID: "claude-3"},
 					},
 				},
@@ -232,7 +232,7 @@ func TestCacheFile(t *testing.T) {
 
 		// Only register OpenAI provider
 		registry := NewModelRegistry()
-		localCache := cache.NewLocalCache(cacheFile)
+		localCache := modelcache.NewLocalCache(cacheFile)
 		registry.SetCache(localCache)
 		openaiMock := &registryMockProvider{name: "openai"}
 		registry.RegisterProviderWithNameAndType(openaiMock, "openai-main", "openai")
@@ -259,7 +259,7 @@ func TestCacheFile(t *testing.T) {
 		cacheFile := filepath.Join(tmpDir, "nonexistent.json")
 
 		registry := NewModelRegistry()
-		localCache := cache.NewLocalCache(cacheFile)
+		localCache := modelcache.NewLocalCache(cacheFile)
 		registry.SetCache(localCache)
 
 		loaded, err := registry.LoadFromCache(context.Background())
@@ -297,7 +297,7 @@ func TestCacheFile(t *testing.T) {
 		cacheFile := filepath.Join(tmpDir, "subdir", "nested", "models.json")
 
 		registry := NewModelRegistry()
-		localCache := cache.NewLocalCache(cacheFile)
+		localCache := modelcache.NewLocalCache(cacheFile)
 		registry.SetCache(localCache)
 
 		mock := &registryMockProvider{
@@ -329,13 +329,13 @@ func TestInitializeAsync(t *testing.T) {
 		cacheFile := filepath.Join(tmpDir, "models.json")
 
 		// Create a cache file
-		modelCache := cache.ModelCache{
+		modelCache := modelcache.ModelCache{
 			UpdatedAt: time.Now().UTC(),
-			Providers: map[string]cache.CachedProvider{
+			Providers: map[string]modelcache.CachedProvider{
 				"test": {
 					ProviderType: "test",
 					OwnedBy:      "test",
-					Models: []cache.CachedModel{
+					Models: []modelcache.CachedModel{
 						{ID: "cached-model"},
 					},
 				},
@@ -346,7 +346,7 @@ func TestInitializeAsync(t *testing.T) {
 
 		// Create registry with slow provider (delay ensures cache check happens before network fetch)
 		registry := NewModelRegistry()
-		localCache := cache.NewLocalCache(cacheFile)
+		localCache := modelcache.NewLocalCache(cacheFile)
 		registry.SetCache(localCache)
 
 		mock := &registryMockProvider{
@@ -378,7 +378,7 @@ func TestInitializeAsync(t *testing.T) {
 		cacheFile := filepath.Join(tmpDir, "models.json")
 
 		registry := NewModelRegistry()
-		localCache := cache.NewLocalCache(cacheFile)
+		localCache := modelcache.NewLocalCache(cacheFile)
 		registry.SetCache(localCache)
 
 		mock := &registryMockProvider{
@@ -414,7 +414,7 @@ func TestInitializeAsync(t *testing.T) {
 		cacheFile := filepath.Join(tmpDir, "models.json")
 
 		registry := NewModelRegistry()
-		localCache := cache.NewLocalCache(cacheFile)
+		localCache := modelcache.NewLocalCache(cacheFile)
 		registry.SetCache(localCache)
 
 		mock := &registryMockProvider{
@@ -441,7 +441,7 @@ func TestInitializeAsync(t *testing.T) {
 
 		// Verify cache contains the network model
 		data, _ := os.ReadFile(cacheFile)
-		var modelCache cache.ModelCache
+		var modelCache modelcache.ModelCache
 		_ = json.Unmarshal(data, &modelCache)
 
 		p, ok := modelCache.Providers["test"]
@@ -491,13 +491,13 @@ func TestIsInitialized(t *testing.T) {
 		cacheFile := filepath.Join(tmpDir, "models.json")
 
 		// Create a cache file
-		modelCache := cache.ModelCache{
+		modelCache := modelcache.ModelCache{
 			UpdatedAt: time.Now().UTC(),
-			Providers: map[string]cache.CachedProvider{
+			Providers: map[string]modelcache.CachedProvider{
 				"test": {
 					ProviderType: "test",
 					OwnedBy:      "test",
-					Models: []cache.CachedModel{
+					Models: []modelcache.CachedModel{
 						{ID: "cached-model"},
 					},
 				},
@@ -507,7 +507,7 @@ func TestIsInitialized(t *testing.T) {
 		_ = os.WriteFile(cacheFile, data, 0o644)
 
 		registry := NewModelRegistry()
-		localCache := cache.NewLocalCache(cacheFile)
+		localCache := modelcache.NewLocalCache(cacheFile)
 		registry.SetCache(localCache)
 		mock := &registryMockProvider{name: "test"}
 		registry.RegisterProviderWithNameAndType(mock, "test", "test")

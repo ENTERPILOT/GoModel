@@ -191,9 +191,11 @@
         "redis": {
           "type": "object",
           "properties": {
-            "url": { "type": "string" },
-            "key": { "type": "string" },
-            "ttl": { "type": "integer" }
+            "url": { "type": "string", "description": "Redis connection URL" },
+            "keyModels": { "type": "string", "description": "Redis key prefix for the model registry cache (default: gomodel:models)" },
+            "ttlModels": { "type": "integer", "description": "TTL for model cache entries in seconds (default: 86400)" },
+            "keyResponses": { "type": "string", "description": "Redis key prefix for the response cache (default: gomodel:response:)" },
+            "ttlResponses": { "type": "integer", "description": "TTL for response cache entries in seconds (default: 3600)" }
           }
         }
       }
