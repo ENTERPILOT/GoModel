@@ -1,11 +1,38 @@
 package core
 
+const (
+	// FileActionCreate represents POST /v1/files.
+	FileActionCreate = "create"
+	// FileActionList represents GET /v1/files.
+	FileActionList = "list"
+	// FileActionGet represents GET /v1/files/{id}.
+	FileActionGet = "get"
+	// FileActionDelete represents DELETE /v1/files/{id}.
+	FileActionDelete = "delete"
+	// FileActionContent represents GET /v1/files/{id}/content.
+	FileActionContent = "content"
+)
+
 // FileCreateRequest represents an OpenAI-compatible file upload request.
 // The actual request is multipart/form-data; Content is not serialized.
 type FileCreateRequest struct {
 	Purpose  string `json:"purpose"`
 	Filename string `json:"filename,omitempty"`
 	Content  []byte `json:"-"`
+}
+
+// FileRequestSemantic is the sparse canonical metadata the gateway can derive for /v1/files* routes.
+// It intentionally excludes file bytes, which remain transport data rather than semantic data.
+type FileRequestSemantic struct {
+	Action   string
+	Provider string
+	Purpose  string
+	Filename string
+	FileID   string
+	After    string
+	LimitRaw string
+	Limit    int
+	HasLimit bool
 }
 
 // FileObject represents an OpenAI-compatible file object.

@@ -3,6 +3,9 @@ package core
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
 )
 
 // SelectorHints holds the minimal routing-relevant request hints derived from ingress.
@@ -24,6 +27,7 @@ type SemanticEnvelope struct {
 	ResponsesRequest *ResponsesRequest
 	EmbeddingRequest *EmbeddingRequest
 	BatchRequest     *BatchRequest
+	FileRequest      *FileRequestSemantic
 }
 
 // BuildSemanticEnvelope derives a best-effort semantic envelope from ingress.
@@ -45,6 +49,13 @@ func BuildSemanticEnvelope(frame *IngressFrame) *SemanticEnvelope {
 	}
 	env.Dialect = desc.Dialect
 	env.Operation = desc.Operation
+
+	if env.Operation == "files" {
+		env.FileRequest = buildFileRequestSemantic(frame)
+		if env.FileRequest != nil && env.SelectorHints.Provider == "" {
+			env.SelectorHints.Provider = env.FileRequest.Provider
+		}
+	}
 
 	if env.Dialect == "provider_passthrough" {
 		env.SelectorHints.Endpoint = ""
@@ -90,4 +101,73 @@ func BuildSemanticEnvelope(frame *IngressFrame) *SemanticEnvelope {
 	}
 
 	return env
+}
+
+func buildFileRequestSemantic(frame *IngressFrame) *FileRequestSemantic {
+	if frame == nil {
+		return nil
+	}
+
+	req := &FileRequestSemantic{
+		Action:   fileActionFromIngress(frame.Method, frame.Path),
+		Provider: firstIngressValue(frame.QueryParams, "provider"),
+		Purpose:  firstIngressValue(frame.QueryParams, "purpose"),
+		After:    firstIngressValue(frame.QueryParams, "after"),
+		LimitRaw: firstIngressValue(frame.QueryParams, "limit"),
+		FileID:   fileIDFromIngress(frame),
+	}
+	if req.LimitRaw != "" {
+		if parsed, err := strconv.Atoi(req.LimitRaw); err == nil {
+			req.Limit = parsed
+			req.HasLimit = true
+		}
+	}
+	if req.Action == "" && req.Provider == "" && req.Purpose == "" && req.After == "" && req.LimitRaw == "" && req.FileID == "" {
+		return nil
+	}
+	return req
+}
+
+func fileActionFromIngress(method, path string) string {
+	switch {
+	case path == "/v1/files" && method == http.MethodPost:
+		return FileActionCreate
+	case path == "/v1/files" && method == http.MethodGet:
+		return FileActionList
+	case strings.HasSuffix(path, "/content") && method == http.MethodGet:
+		return FileActionContent
+	case strings.HasPrefix(path, "/v1/files/") && method == http.MethodGet:
+		return FileActionGet
+	case strings.HasPrefix(path, "/v1/files/") && method == http.MethodDelete:
+		return FileActionDelete
+	default:
+		return ""
+	}
+}
+
+func fileIDFromIngress(frame *IngressFrame) string {
+	if frame == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(frame.RouteParams["id"]); id != "" {
+		return id
+	}
+
+	trimmed := strings.Trim(strings.TrimSpace(frame.Path), "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) < 3 || parts[0] != "v1" || parts[1] != "files" {
+		return ""
+	}
+	return strings.TrimSpace(parts[2])
+}
+
+func firstIngressValue(values map[string][]string, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	items, ok := values[key]
+	if !ok || len(items) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(items[0])
 }

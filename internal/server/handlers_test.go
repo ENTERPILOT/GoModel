@@ -2490,6 +2490,14 @@ func TestCreateFile(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/files", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	frame := &core.IngressFrame{
+		Method:      http.MethodPost,
+		Path:        "/v1/files",
+		ContentType: writer.FormDataContentType(),
+	}
+	ctx := core.WithIngressFrame(req.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -2501,6 +2509,16 @@ func TestCreateFile(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "\"object\":\"file\"") {
 		t.Fatalf("unexpected response body: %s", rec.Body.String())
+	}
+	env := core.GetSemanticEnvelope(c.Request().Context())
+	if env == nil || env.FileRequest == nil {
+		t.Fatal("expected file semantic envelope to be populated")
+	}
+	if env.FileRequest.Purpose != "batch" {
+		t.Fatalf("purpose = %q, want batch", env.FileRequest.Purpose)
+	}
+	if env.FileRequest.Filename != "requests.jsonl" {
+		t.Fatalf("filename = %q, want requests.jsonl", env.FileRequest.Filename)
 	}
 }
 
@@ -2606,6 +2624,16 @@ func TestListFiles(t *testing.T) {
 	handler := NewHandler(mock, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/files?limit=5", nil)
+	frame := &core.IngressFrame{
+		Method: http.MethodGet,
+		Path:   "/v1/files",
+		QueryParams: map[string][]string{
+			"limit": {"5"},
+		},
+	}
+	ctx := core.WithIngressFrame(req.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -2620,6 +2648,13 @@ func TestListFiles(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "\"id\":\"file_ok_1\"") {
 		t.Fatalf("unexpected response body: %s", rec.Body.String())
+	}
+	env := core.GetSemanticEnvelope(c.Request().Context())
+	if env == nil || env.FileRequest == nil {
+		t.Fatal("expected file semantic envelope to be populated")
+	}
+	if !env.FileRequest.HasLimit || env.FileRequest.Limit != 5 {
+		t.Fatalf("limit = %d/%v, want 5/true", env.FileRequest.Limit, env.FileRequest.HasLimit)
 	}
 }
 

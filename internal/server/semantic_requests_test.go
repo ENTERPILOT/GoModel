@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -169,4 +171,82 @@ func TestBatchRequestFromSemanticEnvelope_CachesCanonicalRequest(t *testing.T) {
 	require.NotNil(t, env)
 	require.Same(t, first, env.BatchRequest)
 	assert.True(t, env.JSONBodyParsed)
+}
+
+func TestFileRequestFromSemanticEnvelope_EnrichesCreateMetadata(t *testing.T) {
+	e := echo.New()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("provider", "openai"))
+	require.NoError(t, writer.WriteField("purpose", "batch"))
+	part, err := writer.CreateFormFile("file", "requests.jsonl")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("{\"custom_id\":\"1\"}\n"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/files", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	frame := &core.IngressFrame{
+		Method:      http.MethodPost,
+		Path:        "/v1/files",
+		ContentType: writer.FormDataContentType(),
+	}
+	ctx := core.WithIngressFrame(req.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	req = req.WithContext(ctx)
+
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	first, err := fileRequestFromSemanticEnvelope(c)
+	require.NoError(t, err)
+	second, err := fileRequestFromSemanticEnvelope(c)
+	require.NoError(t, err)
+
+	require.Same(t, first, second)
+	assert.Equal(t, core.FileActionCreate, first.Action)
+	assert.Equal(t, "openai", first.Provider)
+	assert.Equal(t, "batch", first.Purpose)
+	assert.Equal(t, "requests.jsonl", first.Filename)
+
+	env := core.GetSemanticEnvelope(c.Request().Context())
+	require.NotNil(t, env)
+	require.Same(t, first, env.FileRequest)
+	assert.Equal(t, "openai", env.SelectorHints.Provider)
+}
+
+func TestFileRequestFromSemanticEnvelope_CachesListMetadata(t *testing.T) {
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/files?provider=openai&purpose=batch&after=file_prev&limit=5", nil)
+	frame := &core.IngressFrame{
+		Method: http.MethodGet,
+		Path:   "/v1/files",
+		QueryParams: map[string][]string{
+			"provider": {"openai"},
+			"purpose":  {"batch"},
+			"after":    {"file_prev"},
+			"limit":    {"5"},
+		},
+	}
+	ctx := core.WithIngressFrame(req.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	req = req.WithContext(ctx)
+
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	first, err := fileRequestFromSemanticEnvelope(c)
+	require.NoError(t, err)
+	second, err := fileRequestFromSemanticEnvelope(c)
+	require.NoError(t, err)
+
+	require.Same(t, first, second)
+	assert.Equal(t, core.FileActionList, first.Action)
+	assert.Equal(t, "openai", first.Provider)
+	assert.Equal(t, "batch", first.Purpose)
+	assert.Equal(t, "file_prev", first.After)
+	assert.True(t, first.HasLimit)
+	assert.Equal(t, 5, first.Limit)
 }

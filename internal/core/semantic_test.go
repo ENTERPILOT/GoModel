@@ -34,7 +34,7 @@ func TestBuildSemanticEnvelope_OpenAICompat(t *testing.T) {
 	if env.SelectorHints.Provider != "openai" {
 		t.Fatalf("SelectorHints.Provider = %q, want openai", env.SelectorHints.Provider)
 	}
-	if env.ChatRequest != nil || env.ResponsesRequest != nil || env.EmbeddingRequest != nil || env.BatchRequest != nil {
+	if env.ChatRequest != nil || env.ResponsesRequest != nil || env.EmbeddingRequest != nil || env.BatchRequest != nil || env.FileRequest != nil {
 		t.Fatalf("canonical request payloads should be nil, got %+v", env)
 	}
 }
@@ -92,7 +92,7 @@ func TestBuildSemanticEnvelope_PassthroughRouteParams(t *testing.T) {
 	if env.SelectorHints.Model != "gpt-5-mini" {
 		t.Fatalf("SelectorHints.Model = %q, want gpt-5-mini", env.SelectorHints.Model)
 	}
-	if env.ChatRequest != nil || env.ResponsesRequest != nil || env.EmbeddingRequest != nil || env.BatchRequest != nil {
+	if env.ChatRequest != nil || env.ResponsesRequest != nil || env.EmbeddingRequest != nil || env.BatchRequest != nil || env.FileRequest != nil {
 		t.Fatalf("canonical request payloads should be nil, got %+v", env)
 	}
 }
@@ -132,5 +132,40 @@ func TestBuildSemanticEnvelope_SkipsBodyParsingWhenIngressBodyWasNotCaptured(t *
 	}
 	if env.SelectorHints.Model != "" {
 		t.Fatalf("SelectorHints.Model = %q, want empty", env.SelectorHints.Model)
+	}
+}
+
+func TestBuildSemanticEnvelope_FilesMetadata(t *testing.T) {
+	frame := &IngressFrame{
+		Method:      "GET",
+		Path:        "/v1/files/file_123/content",
+		RouteParams: map[string]string{"id": "file_123"},
+		QueryParams: map[string][]string{
+			"provider": {"openai"},
+		},
+		ContentType: "application/octet-stream",
+	}
+
+	env := BuildSemanticEnvelope(frame)
+	if env == nil {
+		t.Fatal("BuildSemanticEnvelope() = nil")
+	}
+	if env.Operation != "files" {
+		t.Fatalf("Operation = %q, want files", env.Operation)
+	}
+	if env.FileRequest == nil {
+		t.Fatal("FileRequest = nil")
+	}
+	if env.FileRequest.Action != FileActionContent {
+		t.Fatalf("FileRequest.Action = %q, want %q", env.FileRequest.Action, FileActionContent)
+	}
+	if env.FileRequest.FileID != "file_123" {
+		t.Fatalf("FileRequest.FileID = %q, want file_123", env.FileRequest.FileID)
+	}
+	if env.FileRequest.Provider != "openai" {
+		t.Fatalf("FileRequest.Provider = %q, want openai", env.FileRequest.Provider)
+	}
+	if env.SelectorHints.Provider != "openai" {
+		t.Fatalf("SelectorHints.Provider = %q, want openai", env.SelectorHints.Provider)
 	}
 }

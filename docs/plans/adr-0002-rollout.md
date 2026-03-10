@@ -29,6 +29,8 @@ Completed in this slice:
 - harden `/p/{provider}/{endpoint}` so passthrough still works when guardrails wrap the router
 - make passthrough use the same retry and circuit-breaker policy as the translated provider clients while still proxying raw upstream responses
 - make `/v1/files*` ingress-managed with bounded multipart handling so file routes also receive `IngressFrame` without eagerly buffering upload bodies
+- add sparse file semantics for `/v1/files*` so handlers consume shared provider, purpose, filename, file ID, and pagination metadata without trying to canonicalize uploaded bytes
+- collapse the repeated JSON semantic decode/cache pattern behind one shared helper so the semantic layer gets slimmer as more endpoints move onto it
 
 ## Broader endpoint migration scope
 
@@ -141,7 +143,7 @@ Exit criteria:
 
 - guardrail rewrites can still drop unknown nested fields if the gateway reconstructs nested objects instead of preserving raw ingress
 - provider-specific adapters may reintroduce field loss when they build fresh structs instead of rewriting raw-plus-canonical payloads
-- file semantics still need a transport-first follow-up beyond ingress capture so upload routes do not remain a second semantic pipeline
+- file uploads still need careful discipline so sparse semantic metadata does not grow into a fake rich schema that pretends to understand multipart bytes
 - trying to add too many provider-specific pass-through variants at once can turn the transport-first `/p/*` route into another adapter matrix before the shared foundation is stable
 
 ## Next implementation targets
@@ -149,6 +151,6 @@ Exit criteria:
 1. Centralize model-facing endpoint classification so ingress capture, audit classification, and semantic extraction use one shared route descriptor table.
 2. Add a thin `/p/{provider}/{endpoint}` opaque passthrough route on the shared ingress pipeline, with OpenAI and Anthropic as the required first providers.
 3. Extend the same `/p/*` route to other providers only when they fit the same low-friction opaque forwarding model without meaningful extra branching.
-4. Extend ADR-0002 beyond ingress capture for `/v1/files*` with intentionally sparse file semantics and shared metadata access, without buffering multipart uploads into memory.
-5. Continue collapsing duplicate per-endpoint semantic decode boilerplate so `SemanticEnvelope` stays authoritative without growing one-off route helpers forever.
-6. Migrate non-batch guardrail and provider rewrite paths toward semantic canonical data plus raw-plus-canonical patching where partial understanding is unavoidable.
+4. Keep collapsing duplicate semantic decode boilerplate so `SemanticEnvelope` stays authoritative without growing one-off route helpers forever.
+5. Migrate non-batch guardrail and provider rewrite paths toward semantic canonical data plus raw-plus-canonical patching where partial understanding is unavoidable.
+6. Decide whether any additional provider-native routes under `/p/*` merit richer semantics or should remain intentionally sparse.

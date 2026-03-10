@@ -2,6 +2,8 @@ package server
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -39,10 +41,16 @@ func updateSemanticSelectorHints(env *core.SemanticEnvelope, model, provider str
 	}
 }
 
-func chatRequestFromSemanticEnvelope(c *echo.Context) (*core.ChatRequest, error) {
+func decodeJSONRequestFromSemanticEnvelope[T any](
+	c *echo.Context,
+	current func(*core.SemanticEnvelope) *T,
+	cache func(*core.SemanticEnvelope, *T),
+) (*T, error) {
 	env := ensureSemanticEnvelope(c)
-	if env != nil && env.ChatRequest != nil {
-		return env.ChatRequest, nil
+	if env != nil {
+		if req := current(env); req != nil {
+			return req, nil
+		}
 	}
 
 	bodyBytes, err := requestBodyBytes(c)
@@ -50,79 +58,145 @@ func chatRequestFromSemanticEnvelope(c *echo.Context) (*core.ChatRequest, error)
 		return nil, err
 	}
 
-	var req core.ChatRequest
-	if err := json.Unmarshal(bodyBytes, &req); err != nil {
+	req := new(T)
+	if err := json.Unmarshal(bodyBytes, req); err != nil {
 		return nil, err
 	}
 	if env != nil {
-		env.ChatRequest = &req
-		updateSemanticSelectorHints(env, req.Model, req.Provider)
+		cache(env, req)
 	}
-	return &req, nil
+	return req, nil
+}
+
+func chatRequestFromSemanticEnvelope(c *echo.Context) (*core.ChatRequest, error) {
+	return decodeJSONRequestFromSemanticEnvelope(c,
+		func(env *core.SemanticEnvelope) *core.ChatRequest {
+			return env.ChatRequest
+		},
+		func(env *core.SemanticEnvelope, req *core.ChatRequest) {
+			env.ChatRequest = req
+			updateSemanticSelectorHints(env, req.Model, req.Provider)
+		},
+	)
 }
 
 func responsesRequestFromSemanticEnvelope(c *echo.Context) (*core.ResponsesRequest, error) {
-	env := ensureSemanticEnvelope(c)
-	if env != nil && env.ResponsesRequest != nil {
-		return env.ResponsesRequest, nil
-	}
-
-	bodyBytes, err := requestBodyBytes(c)
-	if err != nil {
-		return nil, err
-	}
-
-	var req core.ResponsesRequest
-	if err := json.Unmarshal(bodyBytes, &req); err != nil {
-		return nil, err
-	}
-	if env != nil {
-		env.ResponsesRequest = &req
-		updateSemanticSelectorHints(env, req.Model, req.Provider)
-	}
-	return &req, nil
+	return decodeJSONRequestFromSemanticEnvelope(c,
+		func(env *core.SemanticEnvelope) *core.ResponsesRequest {
+			return env.ResponsesRequest
+		},
+		func(env *core.SemanticEnvelope, req *core.ResponsesRequest) {
+			env.ResponsesRequest = req
+			updateSemanticSelectorHints(env, req.Model, req.Provider)
+		},
+	)
 }
 
 func embeddingRequestFromSemanticEnvelope(c *echo.Context) (*core.EmbeddingRequest, error) {
-	env := ensureSemanticEnvelope(c)
-	if env != nil && env.EmbeddingRequest != nil {
-		return env.EmbeddingRequest, nil
-	}
-
-	bodyBytes, err := requestBodyBytes(c)
-	if err != nil {
-		return nil, err
-	}
-
-	var req core.EmbeddingRequest
-	if err := json.Unmarshal(bodyBytes, &req); err != nil {
-		return nil, err
-	}
-	if env != nil {
-		env.EmbeddingRequest = &req
-		updateSemanticSelectorHints(env, req.Model, req.Provider)
-	}
-	return &req, nil
+	return decodeJSONRequestFromSemanticEnvelope(c,
+		func(env *core.SemanticEnvelope) *core.EmbeddingRequest {
+			return env.EmbeddingRequest
+		},
+		func(env *core.SemanticEnvelope, req *core.EmbeddingRequest) {
+			env.EmbeddingRequest = req
+			updateSemanticSelectorHints(env, req.Model, req.Provider)
+		},
+	)
 }
 
 func batchRequestFromSemanticEnvelope(c *echo.Context) (*core.BatchRequest, error) {
+	return decodeJSONRequestFromSemanticEnvelope(c,
+		func(env *core.SemanticEnvelope) *core.BatchRequest {
+			return env.BatchRequest
+		},
+		func(env *core.SemanticEnvelope, req *core.BatchRequest) {
+			env.BatchRequest = req
+			env.JSONBodyParsed = true
+		},
+	)
+}
+
+func fileRequestFromSemanticEnvelope(c *echo.Context) (*core.FileRequestSemantic, error) {
 	env := ensureSemanticEnvelope(c)
-	if env != nil && env.BatchRequest != nil {
-		return env.BatchRequest, nil
+
+	var req *core.FileRequestSemantic
+	if env != nil && env.FileRequest != nil {
+		req = env.FileRequest
+	} else {
+		req = &core.FileRequestSemantic{}
 	}
 
-	bodyBytes, err := requestBodyBytes(c)
-	if err != nil {
-		return nil, err
+	if req.Action == "" {
+		req.Action = fileActionFromRequest(c.Request().Method, c.Request().URL.Path)
 	}
 
-	var req core.BatchRequest
-	if err := json.Unmarshal(bodyBytes, &req); err != nil {
-		return nil, err
+	if req.Provider == "" {
+		if provider := strings.TrimSpace(c.QueryParam("provider")); provider != "" {
+			req.Provider = provider
+		}
 	}
+
+	switch req.Action {
+	case core.FileActionCreate:
+		if req.Provider == "" {
+			req.Provider = strings.TrimSpace(c.FormValue("provider"))
+		}
+		if req.Purpose == "" {
+			req.Purpose = strings.TrimSpace(c.FormValue("purpose"))
+		}
+		if req.Filename == "" {
+			fileHeader, err := c.FormFile("file")
+			if err == nil && fileHeader != nil {
+				req.Filename = strings.TrimSpace(fileHeader.Filename)
+			}
+		}
+	case core.FileActionList:
+		if req.Purpose == "" {
+			req.Purpose = strings.TrimSpace(c.QueryParam("purpose"))
+		}
+		if req.After == "" {
+			req.After = strings.TrimSpace(c.QueryParam("after"))
+		}
+		if !req.HasLimit {
+			raw := strings.TrimSpace(c.QueryParam("limit"))
+			if raw != "" {
+				parsed, err := strconv.Atoi(raw)
+				if err != nil {
+					return nil, core.NewInvalidRequestError("invalid limit parameter", err)
+				}
+				req.Limit = parsed
+				req.HasLimit = true
+				req.LimitRaw = raw
+			}
+		}
+	default:
+		if req.FileID == "" {
+			req.FileID = strings.TrimSpace(c.Param("id"))
+		}
+	}
+
 	if env != nil {
-		env.BatchRequest = &req
-		env.JSONBodyParsed = true
+		env.FileRequest = req
+		if req.Provider != "" && env.SelectorHints.Provider == "" {
+			env.SelectorHints.Provider = req.Provider
+		}
 	}
-	return &req, nil
+	return req, nil
+}
+
+func fileActionFromRequest(method, path string) string {
+	switch {
+	case path == "/v1/files" && method == "POST":
+		return core.FileActionCreate
+	case path == "/v1/files" && method == "GET":
+		return core.FileActionList
+	case strings.HasSuffix(path, "/content") && method == "GET":
+		return core.FileActionContent
+	case strings.HasPrefix(path, "/v1/files/") && method == "GET":
+		return core.FileActionGet
+	case strings.HasPrefix(path, "/v1/files/") && method == "DELETE":
+		return core.FileActionDelete
+	default:
+		return ""
+	}
 }

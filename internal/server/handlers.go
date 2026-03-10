@@ -507,13 +507,6 @@ func (h *Handler) fileProviderTypes(ctx *echo.Context) ([]string, error) {
 	return providers, nil
 }
 
-func resolveProviderHint(c *echo.Context) string {
-	if provider := strings.TrimSpace(c.QueryParam("provider")); provider != "" {
-		return provider
-	}
-	return strings.TrimSpace(c.FormValue("provider"))
-}
-
 func (h *Handler) fileByID(
 	c *echo.Context,
 	callFn func(core.NativeFileRoutableProvider, string, string) (any, error),
@@ -524,12 +517,17 @@ func (h *Handler) fileByID(
 		return handleError(c, err)
 	}
 
-	id := strings.TrimSpace(c.Param("id"))
+	fileReq, err := fileRequestFromSemanticEnvelope(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	id := strings.TrimSpace(fileReq.FileID)
 	if id == "" {
 		return handleError(c, core.NewInvalidRequestError("file id is required", nil))
 	}
 
-	if providerType := resolveProviderHint(c); providerType != "" {
+	if providerType := fileReq.Provider; providerType != "" {
 		auditlog.EnrichEntry(c, "file", providerType)
 		result, err := callFn(nativeRouter, providerType, id)
 		if err != nil {
@@ -625,12 +623,17 @@ func (h *Handler) CreateFile(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
+	fileReq, err := fileRequestFromSemanticEnvelope(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+
 	providers, err := h.fileProviderTypes(c)
 	if err != nil {
 		return handleError(c, err)
 	}
 
-	providerType := resolveProviderHint(c)
+	providerType := fileReq.Provider
 	if providerType == "" {
 		if len(providers) == 1 {
 			providerType = providers[0]
@@ -642,7 +645,7 @@ func (h *Handler) CreateFile(c *echo.Context) error {
 	}
 	auditlog.EnrichEntry(c, "file", providerType)
 
-	purpose := strings.TrimSpace(c.FormValue("purpose"))
+	purpose := strings.TrimSpace(fileReq.Purpose)
 	if purpose == "" {
 		return handleError(c, core.NewInvalidRequestError("purpose is required", nil))
 	}
@@ -666,9 +669,13 @@ func (h *Handler) CreateFile(c *echo.Context) error {
 
 	requestID := strings.TrimSpace(c.Request().Header.Get("X-Request-ID"))
 	ctx := core.WithRequestID(c.Request().Context(), requestID)
+	filename := strings.TrimSpace(fileReq.Filename)
+	if filename == "" {
+		filename = fileHeader.Filename
+	}
 	resp, err := nativeRouter.CreateFile(ctx, providerType, &core.FileCreateRequest{
 		Purpose:  purpose,
-		Filename: fileHeader.Filename,
+		Filename: filename,
 		Content:  content,
 	})
 	if err != nil {
@@ -699,13 +706,13 @@ func (h *Handler) ListFiles(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
+	fileReq, err := fileRequestFromSemanticEnvelope(c)
+	if err != nil {
+		return handleError(c, err)
+	}
 	limit := 20
-	if raw := strings.TrimSpace(c.QueryParam("limit")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil {
-			return handleError(c, core.NewInvalidRequestError("invalid limit parameter", err))
-		}
-		limit = parsed
+	if fileReq.HasLimit {
+		limit = fileReq.Limit
 	}
 	if limit <= 0 {
 		limit = 20
@@ -714,9 +721,9 @@ func (h *Handler) ListFiles(c *echo.Context) error {
 		limit = 100
 	}
 
-	purpose := strings.TrimSpace(c.QueryParam("purpose"))
-	after := strings.TrimSpace(c.QueryParam("after"))
-	providerType := strings.TrimSpace(c.QueryParam("provider"))
+	purpose := fileReq.Purpose
+	after := fileReq.After
+	providerType := fileReq.Provider
 
 	if providerType != "" {
 		auditlog.EnrichEntry(c, "file", providerType)
