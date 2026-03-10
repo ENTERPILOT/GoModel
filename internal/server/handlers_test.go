@@ -2596,6 +2596,69 @@ func TestProviderPassthrough_OpenAI(t *testing.T) {
 	}
 }
 
+func TestProviderPassthrough_OpenAIV1AliasNormalizesByDefault(t *testing.T) {
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers: map[string][]string{
+				"Content-Type": {"application/json"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if provider.lastPassthroughReq == nil {
+		t.Fatal("lastPassthroughReq = nil")
+	}
+	if got := provider.lastPassthroughReq.Endpoint; got != "chat/completions" {
+		t.Fatalf("endpoint = %q, want chat/completions", got)
+	}
+}
+
+func TestProviderPassthrough_OpenAIV1AliasCanBeDisabled(t *testing.T) {
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers: map[string][]string{
+				"Content-Type": {"application/json"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+	handler.normalizeOpenAICompatiblePassthroughV1Prefix = false
+	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if provider.lastPassthroughReq == nil {
+		t.Fatal("lastPassthroughReq = nil")
+	}
+	if got := provider.lastPassthroughReq.Endpoint; got != "v1/chat/completions" {
+		t.Fatalf("endpoint = %q, want v1/chat/completions", got)
+	}
+}
+
 func TestProviderPassthrough_AnthropicStream(t *testing.T) {
 	provider := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{

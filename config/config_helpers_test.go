@@ -189,6 +189,15 @@ func TestApplyEnvOverrides(t *testing.T) {
 			},
 		},
 		{
+			name:    "passthrough v1 normalization override",
+			envVars: map[string]string{"NORMALIZE_OPENAI_COMPATIBLE_PASSTHROUGH_V1_PREFIX": "false"},
+			check: func(t *testing.T, cfg *Config) {
+				if cfg.Server.NormalizeOpenAICompatiblePassthroughV1Prefix {
+					t.Error("Server.NormalizeOpenAICompatiblePassthroughV1Prefix should be false")
+				}
+			},
+		},
+		{
 			name:    "storage overrides",
 			envVars: map[string]string{"STORAGE_TYPE": "postgresql", "POSTGRES_URL": "postgres://localhost/test", "POSTGRES_MAX_CONNS": "20"},
 			check: func(t *testing.T, cfg *Config) {

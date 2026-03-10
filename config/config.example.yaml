@@ -7,6 +7,7 @@ server:
   port: "8080"
   master_key: "your-secret-key"
   body_size_limit: "10M"
+  normalize_openai_compatible_passthrough_v1_prefix: true # allow /p/openai/v1/... while keeping /p/openai/... canonical
 
 cache:
   type: "local" # "local" or "redis"

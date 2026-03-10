@@ -35,11 +35,12 @@ var batchResultsPending404Providers = map[string]struct{}{
 
 // Handler holds the HTTP handlers
 type Handler struct {
-	provider        core.RoutableProvider
-	logger          auditlog.LoggerInterface
-	usageLogger     usage.LoggerInterface
-	pricingResolver usage.PricingResolver
-	batchStore      batchstore.Store
+	provider                                     core.RoutableProvider
+	logger                                       auditlog.LoggerInterface
+	usageLogger                                  usage.LoggerInterface
+	pricingResolver                              usage.PricingResolver
+	batchStore                                   batchstore.Store
+	normalizeOpenAICompatiblePassthroughV1Prefix bool
 }
 
 // NewHandler creates a new handler with the given routable provider (typically the Router)
@@ -50,6 +51,7 @@ func NewHandler(provider core.RoutableProvider, logger auditlog.LoggerInterface,
 		usageLogger:     usageLogger,
 		pricingResolver: pricingResolver,
 		batchStore:      batchstore.NewMemoryStore(),
+		normalizeOpenAICompatiblePassthroughV1Prefix: true,
 	}
 }
 
@@ -189,11 +191,36 @@ func isSupportedPassthroughProvider(providerType string) bool {
 	}
 }
 
-func passthroughEndpoint(c *echo.Context) (string, string, error) {
+func isOpenAICompatiblePassthroughProvider(providerType string) bool {
+	switch strings.TrimSpace(providerType) {
+	case "openai":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizePassthroughEndpoint(providerType, endpoint string, enabled bool) string {
+	if !enabled || !isOpenAICompatiblePassthroughProvider(providerType) {
+		return endpoint
+	}
+	endpoint = strings.TrimSpace(endpoint)
+	switch {
+	case endpoint == "v1":
+		return ""
+	case strings.HasPrefix(endpoint, "v1/"):
+		return strings.TrimPrefix(endpoint, "v1/")
+	default:
+		return endpoint
+	}
+}
+
+func (h *Handler) passthroughEndpoint(c *echo.Context) (string, string, error) {
 	providerType, endpoint, ok := core.ParseProviderPassthroughPath(c.Request().URL.Path)
 	if !ok {
 		return "", "", core.NewInvalidRequestError("invalid provider passthrough path", nil)
 	}
+	endpoint = normalizePassthroughEndpoint(providerType, endpoint, h.normalizeOpenAICompatiblePassthroughV1Prefix)
 	if endpoint == "" {
 		return "", "", core.NewInvalidRequestError("provider passthrough endpoint is required", nil)
 	}
@@ -341,7 +368,7 @@ func (h *Handler) ProviderPassthrough(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("provider passthrough is not supported by the current provider router", nil))
 	}
 
-	providerType, endpoint, err := passthroughEndpoint(c)
+	providerType, endpoint, err := h.passthroughEndpoint(c)
 	if err != nil {
 		return handleError(c, err)
 	}

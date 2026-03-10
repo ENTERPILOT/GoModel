@@ -260,10 +260,10 @@ type CacheConfig struct {
 // ModelCacheConfig holds cache configuration for model registry.
 // Exactly one of Local or Redis must be non-nil.
 type ModelCacheConfig struct {
-	RefreshInterval int                 `yaml:"refresh_interval" env:"CACHE_REFRESH_INTERVAL"`
-	ModelList       ModelListConfig     `yaml:"model_list"`
-	Local           *LocalCacheConfig  `yaml:"local"`
-	Redis           *RedisModelConfig  `yaml:"redis"`
+	RefreshInterval int               `yaml:"refresh_interval" env:"CACHE_REFRESH_INTERVAL"`
+	ModelList       ModelListConfig   `yaml:"model_list"`
+	Local           *LocalCacheConfig `yaml:"local"`
+	Redis           *RedisModelConfig `yaml:"redis"`
 }
 
 // LocalCacheConfig holds local file cache configuration.
@@ -335,6 +335,10 @@ type ServerConfig struct {
 	MasterKey      string `yaml:"master_key" env:"GOMODEL_MASTER_KEY"`   // Optional: Master key for authentication
 	BodySizeLimit  string `yaml:"body_size_limit" env:"BODY_SIZE_LIMIT"` // Max request body size (e.g., "10M", "1024K")
 	SwaggerEnabled bool   `yaml:"swagger_enabled" env:"SWAGGER_ENABLED"` // Whether to expose the Swagger UI at /swagger/index.html
+	// NormalizeOpenAICompatiblePassthroughV1Prefix allows /p/openai/v1/... style
+	// passthrough routes while keeping /p/openai/... as the canonical form.
+	// Default: true
+	NormalizeOpenAICompatiblePassthroughV1Prefix bool `yaml:"normalize_openai_compatible_passthrough_v1_prefix" env:"NORMALIZE_OPENAI_COMPATIBLE_PASSTHROUGH_V1_PREFIX"`
 }
 
 // MetricsConfig holds observability configuration for Prometheus metrics
@@ -395,15 +399,19 @@ type ResilienceConfig struct {
 // buildDefaultConfig returns the single source of truth for all configuration defaults.
 func buildDefaultConfig() *Config {
 	return &Config{
-		Server: ServerConfig{Port: "8080", SwaggerEnabled: true},
+		Server: ServerConfig{
+			Port:           "8080",
+			SwaggerEnabled: true,
+			NormalizeOpenAICompatiblePassthroughV1Prefix: true,
+		},
 		Cache: CacheConfig{
 			Model: ModelCacheConfig{
 				RefreshInterval: 3600,
 				ModelList: ModelListConfig{
 					URL: "https://raw.githubusercontent.com/ENTERPILOT/ai-model-list/refs/heads/main/models.json",
 				},
-			Local: nil,
-			Redis: nil,
+				Local: nil,
+				Redis: nil,
 			},
 			Response: ResponseCacheConfig{},
 		},

@@ -167,7 +167,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		PricingResolver:          providerResult.Registry,
 		BatchStore:               batchResult.Store,
 		LogOnlyModelInteractions: appCfg.Logging.OnlyModelInteractions,
-		SwaggerEnabled:           appCfg.Server.SwaggerEnabled,
+		DisableOpenAICompatiblePassthroughV1PrefixNormalization: !appCfg.Server.NormalizeOpenAICompatiblePassthroughV1Prefix,
+		SwaggerEnabled: appCfg.Server.SwaggerEnabled,
 	}
 
 	// Initialize admin API and dashboard (behind separate feature flags)
