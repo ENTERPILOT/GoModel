@@ -404,8 +404,8 @@ func (h *Handler) ProviderPassthrough(c *echo.Context) error {
 // @Failure      502      {object}  core.GatewayError
 // @Router       /v1/chat/completions [post]
 func (h *Handler) ChatCompletion(c *echo.Context) error {
-	var req core.ChatRequest
-	if err := decodeJSONRequest(c, &req); err != nil {
+	req, err := chatRequestFromSemanticEnvelope(c)
+	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 	if err := resolveModelSelector(&req.Model, &req.Provider); err != nil {
@@ -424,11 +424,11 @@ func (h *Handler) ChatCompletion(c *echo.Context) error {
 			req.StreamOptions.IncludeUsage = true
 		}
 		return h.handleStreamingResponse(c, req.Model, providerType, func() (io.ReadCloser, error) {
-			return h.provider.StreamChatCompletion(ctx, &req)
+			return h.provider.StreamChatCompletion(ctx, req)
 		})
 	}
 
-	resp, err := h.provider.ChatCompletion(ctx, &req)
+	resp, err := h.provider.ChatCompletion(ctx, req)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -875,8 +875,8 @@ func (h *Handler) GetFileContent(c *echo.Context) error {
 // @Failure      502      {object}  core.GatewayError
 // @Router       /v1/responses [post]
 func (h *Handler) Responses(c *echo.Context) error {
-	var req core.ResponsesRequest
-	if err := decodeJSONRequest(c, &req); err != nil {
+	req, err := responsesRequestFromSemanticEnvelope(c)
+	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 	if err := resolveModelSelector(&req.Model, &req.Provider); err != nil {
@@ -888,11 +888,11 @@ func (h *Handler) Responses(c *echo.Context) error {
 
 	if req.Stream {
 		return h.handleStreamingResponse(c, req.Model, providerType, func() (io.ReadCloser, error) {
-			return h.provider.StreamResponses(ctx, &req)
+			return h.provider.StreamResponses(ctx, req)
 		})
 	}
 
-	resp, err := h.provider.Responses(ctx, &req)
+	resp, err := h.provider.Responses(ctx, req)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -919,8 +919,8 @@ func (h *Handler) Responses(c *echo.Context) error {
 // @Failure      502      {object}  core.GatewayError
 // @Router       /v1/embeddings [post]
 func (h *Handler) Embeddings(c *echo.Context) error {
-	var req core.EmbeddingRequest
-	if err := decodeJSONRequest(c, &req); err != nil {
+	req, err := embeddingRequestFromSemanticEnvelope(c)
+	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 	if err := resolveModelSelector(&req.Model, &req.Provider); err != nil {
@@ -930,7 +930,7 @@ func (h *Handler) Embeddings(c *echo.Context) error {
 	ctx, providerType := ModelCtx(c)
 	requestID := c.Request().Header.Get("X-Request-ID")
 
-	resp, err := h.provider.Embeddings(ctx, &req)
+	resp, err := h.provider.Embeddings(ctx, req)
 	if err != nil {
 		return handleError(c, err)
 	}

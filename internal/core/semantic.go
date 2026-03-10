@@ -19,8 +19,10 @@ type SemanticEnvelope struct {
 	Dialect          string
 	Operation        string
 	SelectorHints    SelectorHints
-	OpaqueJSONFields map[string]json.RawMessage
 	JSONBodyParsed   bool
+	ChatRequest      *ChatRequest
+	ResponsesRequest *ResponsesRequest
+	EmbeddingRequest *EmbeddingRequest
 }
 
 // BuildSemanticEnvelope derives a best-effort semantic envelope from ingress.

@@ -71,6 +71,14 @@ func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
 
 func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed bool, err error) {
 	if env := core.GetSemanticEnvelope(c.Request().Context()); env != nil {
+		switch {
+		case env.ChatRequest != nil:
+			return env.ChatRequest.Model, env.ChatRequest.Provider, true, nil
+		case env.ResponsesRequest != nil:
+			return env.ResponsesRequest.Model, env.ResponsesRequest.Provider, true, nil
+		case env.EmbeddingRequest != nil:
+			return env.EmbeddingRequest.Model, env.EmbeddingRequest.Provider, true, nil
+		}
 		if env.JSONBodyParsed || env.SelectorHints.Model != "" || env.SelectorHints.Provider != "" {
 			return env.SelectorHints.Model, env.SelectorHints.Provider, true, nil
 		}

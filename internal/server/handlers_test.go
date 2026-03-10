@@ -750,6 +750,137 @@ func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
 	if provider.capturedChatReq.ExtraFields["response_format"] == nil {
 		t.Fatalf("response_format missing from ExtraFields: %+v", provider.capturedChatReq.ExtraFields)
 	}
+
+	env := core.GetSemanticEnvelope(c.Request().Context())
+	if env == nil || env.ChatRequest == nil {
+		t.Fatalf("expected semantic envelope to cache ChatRequest, got %+v", env)
+	}
+	if env.ChatRequest != provider.capturedChatReq {
+		t.Fatal("cached ChatRequest does not match provider request")
+	}
+}
+
+func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
+	provider := &capturingProvider{
+		mockProvider: mockProvider{
+			supportedModels: []string{"gpt-5-mini"},
+			responsesResponse: &core.ResponsesResponse{
+				ID:        "resp_123",
+				Object:    "response",
+				CreatedAt: 1234567890,
+				Model:     "gpt-5-mini",
+				Status:    "completed",
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = &explodingReadCloser{}
+
+	frame := &core.IngressFrame{
+		Method:      http.MethodPost,
+		Path:        "/v1/responses",
+		ContentType: "application/json",
+		RawBody: []byte(`{
+			"model":"gpt-5-mini",
+			"input":[{"type":"message","role":"user","content":"hello","x_trace":{"id":"trace-1"}}]
+		}`),
+	}
+	ctx := core.WithIngressFrame(req.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.Responses(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if provider.capturedResponsesReq == nil {
+		t.Fatal("expected responses request to be captured")
+	}
+	input, ok := provider.capturedResponsesReq.Input.([]core.ResponsesInputElement)
+	if !ok || len(input) != 1 {
+		t.Fatalf("captured input = %#v, want []ResponsesInputElement len=1", provider.capturedResponsesReq.Input)
+	}
+	if input[0].ExtraFields["x_trace"] == nil {
+		t.Fatalf("input[0].x_trace missing from ExtraFields: %+v", input[0].ExtraFields)
+	}
+
+	env := core.GetSemanticEnvelope(c.Request().Context())
+	if env == nil || env.ResponsesRequest == nil {
+		t.Fatalf("expected semantic envelope to cache ResponsesRequest, got %+v", env)
+	}
+	if env.ResponsesRequest != provider.capturedResponsesReq {
+		t.Fatal("cached ResponsesRequest does not match provider request")
+	}
+}
+
+func TestEmbeddings_UsesIngressFrameForDecoding(t *testing.T) {
+	provider := &capturingProvider{
+		mockProvider: mockProvider{
+			supportedModels: []string{"text-embedding-3-large"},
+			embeddingResponse: &core.EmbeddingResponse{
+				Object: "list",
+				Model:  "text-embedding-3-large",
+				Data: []core.EmbeddingData{
+					{Object: "embedding", Embedding: json.RawMessage(`[0.1,0.2]`), Index: 0},
+				},
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = &explodingReadCloser{}
+
+	frame := &core.IngressFrame{
+		Method:      http.MethodPost,
+		Path:        "/v1/embeddings",
+		ContentType: "application/json",
+		RawBody: []byte(`{
+			"model":"text-embedding-3-large",
+			"input":"hello",
+			"x_meta":{"trace":"abc"}
+		}`),
+	}
+	ctx := core.WithIngressFrame(req.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.Embeddings(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if provider.capturedEmbeddingReq == nil {
+		t.Fatal("expected embeddings request to be captured")
+	}
+	if provider.capturedEmbeddingReq.ExtraFields["x_meta"] == nil {
+		t.Fatalf("x_meta missing from ExtraFields: %+v", provider.capturedEmbeddingReq.ExtraFields)
+	}
+
+	env := core.GetSemanticEnvelope(c.Request().Context())
+	if env == nil || env.EmbeddingRequest == nil {
+		t.Fatalf("expected semantic envelope to cache EmbeddingRequest, got %+v", env)
+	}
+	if env.EmbeddingRequest != provider.capturedEmbeddingReq {
+		t.Fatal("cached EmbeddingRequest does not match provider request")
+	}
 }
 
 func TestChatCompletionStreaming(t *testing.T) {
@@ -2053,6 +2184,7 @@ type capturingProvider struct {
 	mockProvider
 	capturedChatReq      *core.ChatRequest
 	capturedResponsesReq *core.ResponsesRequest
+	capturedEmbeddingReq *core.EmbeddingRequest
 }
 
 func (c *capturingProvider) ChatCompletion(_ context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
@@ -2079,6 +2211,17 @@ func (c *capturingProvider) Responses(_ context.Context, req *core.ResponsesRequ
 func (c *capturingProvider) StreamResponses(_ context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
 	c.capturedResponsesReq = req
 	return io.NopCloser(strings.NewReader(c.streamData)), nil
+}
+
+func (c *capturingProvider) Embeddings(_ context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	c.capturedEmbeddingReq = req
+	if c.embeddingErr != nil {
+		return nil, c.embeddingErr
+	}
+	if c.err != nil {
+		return nil, c.err
+	}
+	return c.embeddingResponse, nil
 }
 
 func TestStreamingResponses_DoesNotInjectStreamOptions(t *testing.T) {

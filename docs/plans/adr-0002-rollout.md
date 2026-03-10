@@ -22,6 +22,8 @@ Completed in this slice:
 - add regression tests for JSON round-tripping, handler binding, and upstream provider forwarding
 - preserve unknown nested JSON fields on normal non-batch chat messages, tool calls, content parts, and responses input elements
 - preserve unknown nested JSON fields through normal handler decoding and OpenAI provider marshaling
+- keep the base `SemanticEnvelope` sparse at ingress time and cache canonical `ChatRequest`, `ResponsesRequest`, and `EmbeddingRequest` payloads lazily for the JSON routes the gateway already understands
+- make chat, responses, and embeddings handlers consume those cached semantic request payloads instead of re-decoding the body independently
 
 ## Broader endpoint migration scope
 
@@ -91,12 +93,14 @@ Exit criteria:
 - represent dialect, operation kind, selector hints, canonical request fields, and opaque extras separately from raw ingress
 - allow partial semantics instead of forcing every request into a full typed schema
 - split minimal selector extraction from richer canonical extraction so routing does not depend on a fully populated semantic envelope
+- keep the base semantic envelope cheap at ingress time; populate canonical request content lazily for operations the gateway understands well instead of eagerly cloning request JSON
 - let routing use selector hints derived from ingress even when the semantic envelope is sparse
 - keep pass-through semantic extraction intentionally sparse for provider-native routes unless the gateway already has a clear canonical understanding of the operation
 
 Exit criteria:
 
 - handlers no longer own request semantics directly
+- chat, responses, and embeddings handlers consume canonical semantic request payloads rather than independently unmarshaling request bodies
 - semantic extraction can succeed partially while preserving raw ingress losslessly
 - route resolution works from ingress-derived selector hints without requiring full canonicalization
 - provider pass-through routes do not require fake canonical schemas to execute

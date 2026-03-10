@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -171,12 +170,4 @@ func requestBodyBytes(c *echo.Context) ([]byte, error) {
 	}
 	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	return bodyBytes, nil
-}
-
-func decodeJSONRequest(c *echo.Context, target any) error {
-	bodyBytes, err := requestBodyBytes(c)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(bodyBytes, target)
 }

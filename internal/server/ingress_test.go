@@ -68,7 +68,9 @@ func TestIngressCapture_SetsFrameAndSemanticEnvelope(t *testing.T) {
 	assert.Equal(t, "chat_completions", capturedEnv.Operation)
 	assert.Equal(t, "gpt-5-mini", capturedEnv.SelectorHints.Model)
 	assert.True(t, capturedEnv.JSONBodyParsed)
-	assert.Empty(t, capturedEnv.OpaqueJSONFields)
+	assert.Nil(t, capturedEnv.ChatRequest)
+	assert.Nil(t, capturedEnv.ResponsesRequest)
+	assert.Nil(t, capturedEnv.EmbeddingRequest)
 }
 
 func TestIngressCapture_PreservesPassthroughRouteParams(t *testing.T) {
