@@ -2,6 +2,10 @@
     "$schema": "https://mintlify.com/docs.json",
     "theme": "maple",
     "name": "GoModel",
+    "logo": {
+        "light": "/logo.svg",
+        "dark": "/logo.svg"
+    },
     "colors": {
         "primary": "#755c3d"
     },
