@@ -764,6 +764,80 @@ func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_NormalizesSemanticSelectorHints(t *testing.T) {
+	provider := &capturingProvider{
+		mockProvider: mockProvider{
+			supportedModels: []string{"gpt-5-mini"},
+			response: &core.ChatResponse{
+				ID:     "chatcmpl_123",
+				Object: "chat.completion",
+				Model:  "gpt-5-mini",
+				Choices: []core.Choice{
+					{
+						Index:        0,
+						FinishReason: "stop",
+						Message: core.ResponseMessage{
+							Role:    "assistant",
+							Content: "ok",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = &explodingReadCloser{}
+
+	frame := &core.IngressFrame{
+		Method:      http.MethodPost,
+		Path:        "/v1/chat/completions",
+		ContentType: "application/json",
+		RawBody: []byte(`{
+			"model":"openai/gpt-5-mini",
+			"messages":[{"role":"user","content":"return json"}]
+		}`),
+	}
+	ctx := core.WithIngressFrame(req.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler.ChatCompletion(c)
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if provider.capturedChatReq == nil {
+		t.Fatal("expected chat request to be captured")
+	}
+	if provider.capturedChatReq.Model != "gpt-5-mini" {
+		t.Fatalf("captured model = %q, want gpt-5-mini", provider.capturedChatReq.Model)
+	}
+	if provider.capturedChatReq.Provider != "openai" {
+		t.Fatalf("captured provider = %q, want openai", provider.capturedChatReq.Provider)
+	}
+
+	env := core.GetSemanticEnvelope(c.Request().Context())
+	if env == nil || env.ChatRequest == nil {
+		t.Fatalf("expected semantic envelope to cache ChatRequest, got %+v", env)
+	}
+	if env.SelectorHints.Model != "gpt-5-mini" {
+		t.Fatalf("SelectorHints.Model = %q, want gpt-5-mini", env.SelectorHints.Model)
+	}
+	if env.SelectorHints.Provider != "openai" {
+		t.Fatalf("SelectorHints.Provider = %q, want openai", env.SelectorHints.Provider)
+	}
+}
+
 func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
 	provider := &capturingProvider{
 		mockProvider: mockProvider{

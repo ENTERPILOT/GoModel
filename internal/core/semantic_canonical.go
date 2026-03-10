@@ -113,6 +113,28 @@ func FileRouteMetadata(env *SemanticEnvelope, method, path string, routeParams m
 	return req, nil
 }
 
+// NormalizeModelSelector canonicalizes model/provider selector inputs and keeps
+// semantic selector hints aligned with the normalized request state.
+func NormalizeModelSelector(env *SemanticEnvelope, model, provider *string) error {
+	if model == nil || provider == nil {
+		return NewInvalidRequestError("model selector targets are required", nil)
+	}
+
+	selector, err := ParseModelSelector(*model, *provider)
+	if err != nil {
+		return NewInvalidRequestError(err.Error(), err)
+	}
+
+	*model = selector.Model
+	*provider = selector.Provider
+
+	if env != nil {
+		env.SelectorHints.Model = selector.Model
+		env.SelectorHints.Provider = selector.Provider
+	}
+	return nil
+}
+
 func decodeCanonicalJSON[T any](
 	body []byte,
 	env *SemanticEnvelope,

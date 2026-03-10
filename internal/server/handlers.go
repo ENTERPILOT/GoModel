@@ -2,6 +2,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -171,14 +172,8 @@ func (h *Handler) logUsage(model, providerType string, extractFn func(*core.Mode
 	}
 }
 
-func resolveModelSelector(model, provider *string) error {
-	selector, err := core.ParseModelSelector(*model, *provider)
-	if err != nil {
-		return core.NewInvalidRequestError(err.Error(), err)
-	}
-	*model = selector.Model
-	*provider = selector.Provider
-	return nil
+func resolveModelSelector(ctx context.Context, model, provider *string) error {
+	return core.NormalizeModelSelector(core.GetSemanticEnvelope(ctx), model, provider)
 }
 
 func isSupportedPassthroughProvider(providerType string) bool {
@@ -407,7 +402,7 @@ func (h *Handler) ChatCompletion(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if err := resolveModelSelector(&req.Model, &req.Provider); err != nil {
+	if err := resolveModelSelector(c.Request().Context(), &req.Model, &req.Provider); err != nil {
 		return handleError(c, err)
 	}
 
@@ -885,7 +880,7 @@ func (h *Handler) Responses(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if err := resolveModelSelector(&req.Model, &req.Provider); err != nil {
+	if err := resolveModelSelector(c.Request().Context(), &req.Model, &req.Provider); err != nil {
 		return handleError(c, err)
 	}
 
@@ -929,7 +924,7 @@ func (h *Handler) Embeddings(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if err := resolveModelSelector(&req.Model, &req.Provider); err != nil {
+	if err := resolveModelSelector(c.Request().Context(), &req.Model, &req.Provider); err != nil {
 		return handleError(c, err)
 	}
 

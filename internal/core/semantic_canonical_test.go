@@ -77,3 +77,34 @@ func TestFileRouteMetadata_CachesProviderHint(t *testing.T) {
 		t.Fatalf("SelectorHints.Provider = %q, want openai", env.SelectorHints.Provider)
 	}
 }
+
+func TestNormalizeModelSelector_UpdatesSemanticHints(t *testing.T) {
+	t.Parallel()
+
+	env := &SemanticEnvelope{
+		SelectorHints: SelectorHints{
+			Model:    "openai/gpt-4o-mini",
+			Provider: "",
+		},
+	}
+	model := "openai/gpt-4o-mini"
+	provider := ""
+
+	err := NormalizeModelSelector(env, &model, &provider)
+	if err != nil {
+		t.Fatalf("NormalizeModelSelector() error = %v", err)
+	}
+
+	if model != "gpt-4o-mini" {
+		t.Fatalf("model = %q, want gpt-4o-mini", model)
+	}
+	if provider != "openai" {
+		t.Fatalf("provider = %q, want openai", provider)
+	}
+	if env.SelectorHints.Model != "gpt-4o-mini" {
+		t.Fatalf("SelectorHints.Model = %q, want gpt-4o-mini", env.SelectorHints.Model)
+	}
+	if env.SelectorHints.Provider != "openai" {
+		t.Fatalf("SelectorHints.Provider = %q, want openai", env.SelectorHints.Provider)
+	}
+}
