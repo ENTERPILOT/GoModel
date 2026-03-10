@@ -10,20 +10,6 @@ Flow:
 
 `Claude Code -> GoModel -> Anthropic`
 
-## Validated on March 10, 2026
-
-This guide was validated against:
-
-- a local GoModel instance on `http://localhost:8080`
-- a GoModel branch exposing `/p/{provider}/v1/...`
-- Claude Code `2.1.72`
-
-Local validation confirmed:
-
-- `GET /p/anthropic/v1/models` returned `200 OK`
-- `POST /p/anthropic/v1/messages` returned `200 OK`
-- `claude` returned `ok` when pointed at GoModel
-
 ## Before you start
 
 - Install Claude Code on your machine.
@@ -50,20 +36,6 @@ settings.
   Claude paid plans (Pro, Max, Team, Enterprise) and Claude API Console billing
   are separate. API key usage is billed as API usage.
 </Warning>
-
-## How to avoid API charges from your subscription workflow
-
-If you want Claude Code to use included subscription usage and avoid API key
-billing, keep `ANTHROPIC_API_KEY` unset in your Claude Code shell environment.
-
-Check active auth method in Claude Code with:
-
-```text
-/status
-```
-
-For this GoModel passthrough integration specifically, GoModel still needs an
-upstream `ANTHROPIC_API_KEY`, so Anthropic API billing applies to gateway calls.
 
 ## 1. Run GoModel
 
@@ -154,3 +126,17 @@ can keep following your GoModel traffic and usage.
 - Claude Help: [Managing API key environment variables in Claude Code](https://support.claude.com/en/articles/12304248-managing-api-key-environment-variables-in-claude-code)
 - Claude Help: [Paid Claude plans vs API Console billing](https://support.claude.com/en/articles/9876003-i-have-a-paid-claude-subscription-pro-max-team-or-enterprise-plans-why-do-i-have-to-pay-separately-to-use-the-claude-api-and-console)
 - Claude API docs: [API overview (keys from Console account settings)](https://docs.anthropic.com/en/api/getting-started)
+
+## Validated on March 10, 2026
+
+This guide was validated against:
+
+- a local GoModel instance on `http://localhost:8080`
+- a GoModel branch exposing `/p/{provider}/v1/...`
+- Claude Code `2.1.72`
+
+Local validation confirmed:
+
+- `GET /p/anthropic/v1/models` returned `200 OK`
+- `POST /p/anthropic/v1/messages` returned `200 OK`
+- `claude` returned `ok` when pointed at GoModel

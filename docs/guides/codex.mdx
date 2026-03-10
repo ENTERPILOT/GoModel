@@ -10,20 +10,6 @@ Flow:
 
 `Codex -> GoModel -> OpenAI`
 
-## Validated on March 10, 2026
-
-This guide was validated against:
-
-- a local GoModel instance on `http://localhost:8080`
-- Codex CLI `0.113.0`
-
-Local validation confirmed:
-
-- `POST /v1/responses` returned `200 OK` with `curl`
-- Codex sent requests to `POST /v1/responses`
-- the tested GoModel instance does not yet accept Codex's `Content-Encoding: zstd`
-  request bodies
-
 ## Before you start
 
 - Install Codex on your machine.
@@ -43,8 +29,12 @@ docker run --rm -p 8080:8080 \
 
 ## 2. Confirm the Responses API with curl
 
-Before testing Codex itself, verify that GoModel answers a normal Responses API
-request:
+Before testing Codex itself, you can optionally verify that GoModel answers a
+normal Responses API request:
+
+This step is optional. If you are sure you have configured a valid
+`OPENAI_API_KEY` in GoModel, you can skip it and go straight to
+[step 3](#3-configure-codex-to-use-gomodel).
 
 ```bash
 curl -s http://localhost:8080/v1/responses \
@@ -81,17 +71,8 @@ wire_api = "responses"
 ## 4. Run a Codex test prompt
 
 ```bash
-codex exec -m gpt-4.1-mini \
+codex exec -m gpt-4.1-mini --disable enable_request_compression \
   'Reply with exactly ok and no punctuation.'
-```
-
-In the March 10, 2026 validation, Codex reached the correct GoModel endpoint
-but the request failed because Codex compressed the body with `zstd`.
-
-The observed error from GoModel was:
-
-```json
-{"error":{"message":"invalid request body: invalid character '(' looking for beginning of value","type":"invalid_request_error"}}
 ```
 
 ## 5. Check the traffic in GoModel
@@ -114,3 +95,35 @@ and usage as the integration matures.
 ## References
 
 - OpenAI Codex discussion: [Deprecating `chat/completions` support in Codex](https://github.com/openai/codex/discussions/7782)
+
+## Validated on March 10, 2026
+
+This guide was validated against:
+
+- a local GoModel instance on `http://localhost:8080`
+- Codex CLI `0.113.0`
+
+Local validation confirmed:
+
+- `POST /v1/responses` returned `200 OK` with `curl`
+- Codex sent requests to `POST /v1/responses`
+- the tested GoModel instance does not yet accept Codex's `Content-Encoding: zstd`
+  request bodies
+
+## Known issues
+
+In the March 10, 2026 validation, Codex reached the correct GoModel endpoint,
+but the request failed because Codex compressed the body with `zstd`.
+
+The observed error from GoModel was:
+
+```json
+{"error":{"message":"invalid request body: invalid character '(' looking for beginning of value","type":"invalid_request_error"}}
+```
+
+Workaround: disable request compression in Codex CLI:
+
+```bash
+codex exec -m gpt-4.1-mini --disable enable_request_compression \
+  'Reply with exactly ok and no punctuation.'
+```

@@ -10,20 +10,6 @@ Flow:
 
 `OpenCode / Cline / Roo Code / Kilo Code -> GoModel -> your upstream providers`
 
-## Validated on March 10, 2026
-
-This guide combines:
-
-- local validation against a GoModel instance on `http://localhost:8080`
-- local validation with OpenCode `1.1.36`
-- official documentation for Cline, Roo Code, and Kilo Code
-
-Local validation confirmed:
-
-- OpenCode worked against `http://localhost:8080/v1`
-- the validated OpenCode request used `POST /v1/chat/completions`
-- GoModel dashboard audit logs showed the OpenCode traffic immediately
-
 ## Before you start
 
 - Choose a GoModel master key, for example `change-me`.
@@ -190,3 +176,17 @@ following your GoModel traffic and usage.
 - Cline OpenAI-compatible provider docs: [OpenAI Compatible](https://docs.cline.bot/provider-config/openai-compatible)
 - Roo Code OpenAI-compatible provider docs: [OpenAI Compatible](https://docs.roocode.com/providers/openai-compatible)
 - Kilo Code OpenAI-compatible provider docs: [OpenAI Compatible](https://kilo.ai/docs/providers/openai-compatible)
+
+## Validated on March 10, 2026
+
+This guide combines:
+
+- local validation against a GoModel instance on `http://localhost:8080`
+- local validation with OpenCode `1.1.36`
+- official documentation for Cline, Roo Code, and Kilo Code
+
+Local validation confirmed:
+
+- OpenCode worked against `http://localhost:8080/v1`
+- the validated OpenCode request used `POST /v1/chat/completions`
+- GoModel dashboard audit logs showed the OpenCode traffic immediately
