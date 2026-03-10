@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -13,8 +14,8 @@ import (
 )
 
 // IngressCapture captures immutable transport-level request data for model-facing endpoints.
-// It reads the request body once, restores it for downstream consumers, and stores both the
-// ingress frame and a best-effort semantic envelope in the request context.
+// Small request bodies are captured once and shared through context; oversized bodies are left
+// on the live request stream so ingress capture does not defeat audit-log body limits.
 func IngressCapture() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
@@ -23,25 +24,21 @@ func IngressCapture() echo.MiddlewareFunc {
 			}
 
 			req := c.Request()
-			var bodyBytes []byte
-			if req.Body != nil {
-				var err error
-				bodyBytes, err = io.ReadAll(req.Body)
-				if err != nil {
-					return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
-				}
+			bodyBytes, bodyTooLarge, err := captureIngressBody(req)
+			if err != nil {
+				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
 			}
-			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 			frame := &core.IngressFrame{
-				Method:        req.Method,
-				Path:          req.URL.Path,
-				RouteParams:   cloneRouteParams(c.PathValues()),
-				QueryParams:   cloneMultiMap(req.URL.Query()),
-				Headers:       cloneMultiMap(req.Header),
-				ContentType:   req.Header.Get("Content-Type"),
-				RawBody:       append([]byte(nil), bodyBytes...),
-				RequestID:     req.Header.Get("X-Request-ID"),
+				Method:          req.Method,
+				Path:            req.URL.Path,
+				RouteParams:     cloneRouteParams(c.PathValues()),
+				QueryParams:     cloneMultiMap(req.URL.Query()),
+				Headers:         cloneMultiMap(req.Header),
+				ContentType:     req.Header.Get("Content-Type"),
+				RawBody:         bodyBytes,
+				RawBodyTooLarge: bodyTooLarge,
+				RequestID:       req.Header.Get("X-Request-ID"),
 				TraceMetadata: extractTraceMetadata(req.Header),
 			}
 
@@ -108,19 +105,60 @@ func extractTraceMetadata(headers map[string][]string) map[string]string {
 	return metadata
 }
 
+func captureIngressBody(req *http.Request) ([]byte, bool, error) {
+	if req.Body == nil {
+		return []byte{}, false, nil
+	}
+	if req.ContentLength > auditlog.MaxBodyCapture {
+		return nil, true, nil
+	}
+
+	limitedReader := io.LimitReader(req.Body, auditlog.MaxBodyCapture+1)
+	bodyBytes, err := io.ReadAll(limitedReader)
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(bodyBytes)) > auditlog.MaxBodyCapture {
+		origBody := req.Body
+		req.Body = &combinedReadCloser{
+			Reader: io.MultiReader(bytes.NewReader(bodyBytes), origBody),
+			rc:     origBody,
+		}
+		return nil, true, nil
+	}
+
+	if bodyBytes == nil {
+		bodyBytes = []byte{}
+	}
+	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	return bodyBytes, false, nil
+}
+
+type combinedReadCloser struct {
+	io.Reader
+	rc io.ReadCloser
+}
+
+func (c *combinedReadCloser) Close() error {
+	return c.rc.Close()
+}
+
 func requestBodyBytes(c *echo.Context) ([]byte, error) {
-	if frame := core.GetIngressFrame(c.Request().Context()); frame != nil {
-		return append([]byte(nil), frame.RawBody...), nil
+	if frame := core.GetIngressFrame(c.Request().Context()); frame != nil && frame.RawBody != nil {
+		return frame.RawBody, nil
 	}
 
 	req := c.Request()
 	if req.Body == nil {
-		return nil, nil
+		return []byte{}, nil
 	}
 
 	bodyBytes, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil, err
+	}
+	if bodyBytes == nil {
+		bodyBytes = []byte{}
 	}
 	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	return bodyBytes, nil

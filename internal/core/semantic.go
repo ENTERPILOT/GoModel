@@ -60,27 +60,28 @@ func BuildSemanticEnvelope(frame *IngressFrame) *SemanticEnvelope {
 		return nil
 	}
 
+	if frame.RawBody == nil {
+		return env
+	}
+
 	trimmed := bytes.TrimSpace(frame.RawBody)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return env
 	}
 
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(trimmed, &raw); err != nil {
+	var selectors struct {
+		Model    string `json:"model"`
+		Provider string `json:"provider"`
+	}
+	if err := json.Unmarshal(trimmed, &selectors); err != nil {
 		return env
 	}
 	env.JSONBodyParsed = true
 
-	if value, ok := raw["model"]; ok {
-		_ = json.Unmarshal(value, &env.SelectorHints.Model)
+	env.SelectorHints.Model = selectors.Model
+	if env.SelectorHints.Provider == "" {
+		env.SelectorHints.Provider = selectors.Provider
 	}
-	if value, ok := raw["provider"]; ok && env.SelectorHints.Provider == "" {
-		_ = json.Unmarshal(value, &env.SelectorHints.Provider)
-	}
-
-	delete(raw, "model")
-	delete(raw, "provider")
-	env.OpaqueJSONFields = cloneRawJSONMap(raw)
 
 	return env
 }

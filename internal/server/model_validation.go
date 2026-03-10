@@ -1,10 +1,8 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -68,14 +66,12 @@ func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed
 		if env.JSONBodyParsed || env.SelectorHints.Model != "" || env.SelectorHints.Provider != "" {
 			return env.SelectorHints.Model, env.SelectorHints.Provider, true, nil
 		}
-		return "", "", false, nil
 	}
 
-	bodyBytes, err := io.ReadAll(c.Request().Body)
+	bodyBytes, err := requestBodyBytes(c)
 	if err != nil {
 		return "", "", false, err
 	}
-	c.Request().Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	var peek struct {
 		Model    string `json:"model"`

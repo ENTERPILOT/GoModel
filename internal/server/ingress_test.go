@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 )
 
@@ -67,7 +68,7 @@ func TestIngressCapture_SetsFrameAndSemanticEnvelope(t *testing.T) {
 	assert.Equal(t, "chat_completions", capturedEnv.Operation)
 	assert.Equal(t, "gpt-5-mini", capturedEnv.SelectorHints.Model)
 	assert.True(t, capturedEnv.JSONBodyParsed)
-	require.Contains(t, capturedEnv.OpaqueJSONFields, "response_format")
+	assert.Empty(t, capturedEnv.OpaqueJSONFields)
 }
 
 func TestIngressCapture_PreservesPassthroughRouteParams(t *testing.T) {
@@ -134,4 +135,36 @@ func TestModelValidation_UsesSemanticEnvelopeWithoutReadingBody(t *testing.T) {
 	err := handler(c)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestIngressCapture_SkipsOversizedBodies(t *testing.T) {
+	e := echo.New()
+
+	largeContent := strings.Repeat("x", int(auditlog.MaxBodyCapture)+128)
+	reqBody := `{"model":"gpt-5-mini","messages":[{"role":"user","content":"` + largeContent + `"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	var capturedFrame *core.IngressFrame
+	var downstreamBody string
+
+	handler := IngressCapture()(func(c *echo.Context) error {
+		capturedFrame = core.GetIngressFrame(c.Request().Context())
+		bodyBytes, err := io.ReadAll(c.Request().Body)
+		require.NoError(t, err)
+		downstreamBody = string(bodyBytes)
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+
+	require.NotNil(t, capturedFrame)
+	assert.Nil(t, capturedFrame.RawBody)
+	assert.True(t, capturedFrame.RawBodyTooLarge)
+	assert.Equal(t, len(reqBody), len(downstreamBody))
+	assert.True(t, strings.HasPrefix(downstreamBody, `{"model":"gpt-5-mini"`))
+	assert.True(t, strings.HasSuffix(downstreamBody, `"}]}`))
 }

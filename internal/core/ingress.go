@@ -11,6 +11,7 @@ type IngressFrame struct {
 	Headers       map[string][]string
 	ContentType   string
 	RawBody       []byte
+	RawBodyTooLarge bool
 	RequestID     string
 	TraceMetadata map[string]string
 }

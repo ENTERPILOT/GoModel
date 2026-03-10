@@ -1,9 +1,6 @@
 package core
 
-import (
-	"encoding/json"
-	"testing"
-)
+import "testing"
 
 func TestBuildSemanticEnvelope_OpenAICompat(t *testing.T) {
 	frame := &IngressFrame{
@@ -37,8 +34,8 @@ func TestBuildSemanticEnvelope_OpenAICompat(t *testing.T) {
 	if env.SelectorHints.Provider != "openai" {
 		t.Fatalf("SelectorHints.Provider = %q, want openai", env.SelectorHints.Provider)
 	}
-	if env.OpaqueJSONFields["response_format"] == nil {
-		t.Fatalf("response_format missing from OpaqueJSONFields: %+v", env.OpaqueJSONFields)
+	if len(env.OpaqueJSONFields) != 0 {
+		t.Fatalf("OpaqueJSONFields = %+v, want empty", env.OpaqueJSONFields)
 	}
 }
 
@@ -95,9 +92,26 @@ func TestBuildSemanticEnvelope_PassthroughRouteParams(t *testing.T) {
 	if env.SelectorHints.Model != "gpt-5-mini" {
 		t.Fatalf("SelectorHints.Model = %q, want gpt-5-mini", env.SelectorHints.Model)
 	}
+	if len(env.OpaqueJSONFields) != 0 {
+		t.Fatalf("OpaqueJSONFields = %+v, want empty", env.OpaqueJSONFields)
+	}
+}
 
-	var decoded map[string]any
-	if err := json.Unmarshal(env.OpaqueJSONFields["foo"], &decoded); err == nil {
-		t.Fatalf("expected scalar raw field for foo, got object %#v", decoded)
+func TestBuildSemanticEnvelope_SkipsBodyParsingWhenIngressBodyWasNotCaptured(t *testing.T) {
+	frame := &IngressFrame{
+		Method:          "POST",
+		Path:            "/v1/chat/completions",
+		RawBodyTooLarge: true,
+	}
+
+	env := BuildSemanticEnvelope(frame)
+	if env == nil {
+		t.Fatal("BuildSemanticEnvelope() = nil")
+	}
+	if env.JSONBodyParsed {
+		t.Fatal("JSONBodyParsed = true, want false")
+	}
+	if env.SelectorHints.Model != "" {
+		t.Fatalf("SelectorHints.Model = %q, want empty", env.SelectorHints.Model)
 	}
 }

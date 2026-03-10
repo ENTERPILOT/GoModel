@@ -9,12 +9,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/andybalholm/brotli"
+	"github.com/labstack/echo/v5"
+
+	"gomodel/internal/core"
 )
 
 func TestRedactHeaders(t *testing.T) {
@@ -214,6 +218,40 @@ type mockStore struct {
 	closed  bool
 }
 
+type capturingLogger struct {
+	cfg     Config
+	entries []*LogEntry
+}
+
+func (l *capturingLogger) Write(entry *LogEntry) {
+	l.entries = append(l.entries, entry)
+}
+
+func (l *capturingLogger) Config() Config {
+	return l.cfg
+}
+
+func (l *capturingLogger) Close() error {
+	return nil
+}
+
+type readCountCloser struct {
+	reader    io.Reader
+	readCalls int
+}
+
+func (r *readCountCloser) Read(p []byte) (int, error) {
+	r.readCalls++
+	if r.reader == nil {
+		return 0, io.EOF
+	}
+	return r.reader.Read(p)
+}
+
+func (r *readCountCloser) Close() error {
+	return nil
+}
+
 func (m *mockStore) WriteBatch(_ context.Context, entries []*LogEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -270,6 +308,84 @@ func TestLogger(t *testing.T) {
 	// Verify entries were written
 	if len(store.getEntries()) != 5 {
 		t.Errorf("expected 5 entries, got %d", len(store.getEntries()))
+	}
+}
+
+func TestMiddleware_UsesIngressFrameRequestBodyWithoutReadingStream(t *testing.T) {
+	e := echo.New()
+	logger := &capturingLogger{
+		cfg: Config{Enabled: true, LogBodies: true},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	trackedBody := &readCountCloser{reader: strings.NewReader(`{"model":"from-body"}`)}
+	req.Body = trackedBody
+	req = req.WithContext(core.WithIngressFrame(req.Context(), &core.IngressFrame{
+		Path:    "/v1/chat/completions",
+		RawBody: []byte(`{"model":"from-ingress"}`),
+	}))
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		return c.NoContent(http.StatusNoContent)
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if trackedBody.readCalls != 0 {
+		t.Fatalf("request body was read %d times, want 0", trackedBody.readCalls)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
+	}
+
+	requestBody, ok := logger.entries[0].Data.RequestBody.(map[string]any)
+	if !ok {
+		t.Fatalf("RequestBody = %T, want map[string]any", logger.entries[0].Data.RequestBody)
+	}
+	if requestBody["model"] != "from-ingress" {
+		t.Fatalf("RequestBody.model = %#v, want from-ingress", requestBody["model"])
+	}
+}
+
+func TestMiddleware_UsesIngressTooLargeFlagWithoutReadingStream(t *testing.T) {
+	e := echo.New()
+	logger := &capturingLogger{
+		cfg: Config{Enabled: true, LogBodies: true},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	trackedBody := &readCountCloser{reader: strings.NewReader(strings.Repeat("x", 16))}
+	req.Body = trackedBody
+	req = req.WithContext(core.WithIngressFrame(req.Context(), &core.IngressFrame{
+		Path:            "/v1/chat/completions",
+		RawBodyTooLarge: true,
+	}))
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		return c.NoContent(http.StatusNoContent)
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if trackedBody.readCalls != 0 {
+		t.Fatalf("request body was read %d times, want 0", trackedBody.readCalls)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
+	}
+	if !logger.entries[0].Data.RequestBodyTooBigToHandle {
+		t.Fatal("RequestBodyTooBigToHandle = false, want true")
+	}
+	if logger.entries[0].Data.RequestBody != nil {
+		t.Fatalf("RequestBody = %#v, want nil", logger.entries[0].Data.RequestBody)
 	}
 }
 

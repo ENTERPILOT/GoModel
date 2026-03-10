@@ -18,6 +18,8 @@ import (
 	"github.com/andybalholm/brotli"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
+
+	"gomodel/internal/core"
 )
 
 // Note: contextKey type and constants (LogEntryKey, LogEntryStreamingKey,
@@ -72,37 +74,17 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 
 			// Capture request body if enabled
 			if cfg.LogBodies && req.Body != nil {
-				if req.ContentLength > MaxBodyCapture {
-					// Known-large body: skip reading, flag it
-					entry.Data.RequestBodyTooBigToHandle = true
-				} else {
-					// Read up to MaxBodyCapture+1 to detect overflow safely.
-					// Uses io.LimitReader to enforce the cap regardless of
-					// Content-Length (handles chunked/unknown-length requests).
-					limitedReader := io.LimitReader(req.Body, MaxBodyCapture+1)
-					bodyBytes, err := io.ReadAll(limitedReader)
-					if err == nil {
-						if int64(len(bodyBytes)) > MaxBodyCapture {
-							entry.Data.RequestBodyTooBigToHandle = true
-							// Reconstruct full body for downstream: read bytes + unread remainder
-							origBody := req.Body
-							req.Body = &combinedReadCloser{
-								Reader: io.MultiReader(bytes.NewReader(bodyBytes), origBody),
-								rc:     origBody,
-							}
-						} else if len(bodyBytes) > 0 {
-							// Parse JSON to interface{} for native BSON storage in MongoDB
-							var parsed interface{}
-							if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
-								entry.Data.RequestBody = parsed
-							} else {
-								// Fallback: store as valid UTF-8 string if not valid JSON
-								entry.Data.RequestBody = toValidUTF8String(bodyBytes)
-							}
-							// Restore the body for the handler
-							req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-						}
+				if frame := core.GetIngressFrame(req.Context()); frame != nil {
+					switch {
+					case frame.RawBodyTooLarge:
+						entry.Data.RequestBodyTooBigToHandle = true
+					case frame.RawBody != nil:
+						captureLoggedRequestBody(entry, frame.RawBody)
+					default:
+						captureRequestBodyForLogging(entry, req)
 					}
+				} else {
+					captureRequestBodyForLogging(entry, req)
 				}
 			}
 
@@ -168,6 +150,51 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			return err
 		}
 	}
+}
+
+func captureRequestBodyForLogging(entry *LogEntry, req *http.Request) {
+	if req.ContentLength > MaxBodyCapture {
+		entry.Data.RequestBodyTooBigToHandle = true
+		return
+	}
+
+	// Read up to MaxBodyCapture+1 to detect overflow safely.
+	// Uses io.LimitReader to enforce the cap regardless of
+	// Content-Length (handles chunked/unknown-length requests).
+	limitedReader := io.LimitReader(req.Body, MaxBodyCapture+1)
+	bodyBytes, err := io.ReadAll(limitedReader)
+	if err != nil {
+		return
+	}
+	if int64(len(bodyBytes)) > MaxBodyCapture {
+		entry.Data.RequestBodyTooBigToHandle = true
+		// Reconstruct full body for downstream: read bytes + unread remainder
+		origBody := req.Body
+		req.Body = &combinedReadCloser{
+			Reader: io.MultiReader(bytes.NewReader(bodyBytes), origBody),
+			rc:     origBody,
+		}
+		return
+	}
+
+	captureLoggedRequestBody(entry, bodyBytes)
+	req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+}
+
+func captureLoggedRequestBody(entry *LogEntry, bodyBytes []byte) {
+	if len(bodyBytes) == 0 {
+		return
+	}
+
+	// Parse JSON to interface{} for native BSON storage in MongoDB
+	var parsed interface{}
+	if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
+		entry.Data.RequestBody = parsed
+		return
+	}
+
+	// Fallback: store as valid UTF-8 string if not valid JSON
+	entry.Data.RequestBody = toValidUTF8String(bodyBytes)
 }
 
 // combinedReadCloser delegates Read to an io.Reader and Close to an io.ReadCloser.
