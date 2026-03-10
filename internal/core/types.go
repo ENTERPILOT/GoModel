@@ -20,17 +20,18 @@ type Reasoning struct {
 
 // ChatRequest represents the incoming chat completion request
 type ChatRequest struct {
-	Temperature       *float64         `json:"temperature,omitempty"`
-	MaxTokens         *int             `json:"max_tokens,omitempty"`
-	Model             string           `json:"model"`
-	Provider          string           `json:"provider,omitempty"`
-	Messages          []Message        `json:"messages"`
-	Tools             []map[string]any `json:"tools,omitempty"`
-	ToolChoice        any              `json:"tool_choice,omitempty"` // string or object
-	ParallelToolCalls *bool            `json:"parallel_tool_calls,omitempty"`
-	Stream            bool             `json:"stream,omitempty"`
-	StreamOptions     *StreamOptions   `json:"stream_options,omitempty"`
-	Reasoning         *Reasoning       `json:"reasoning,omitempty"`
+	Temperature       *float64                   `json:"temperature,omitempty"`
+	MaxTokens         *int                       `json:"max_tokens,omitempty"`
+	Model             string                     `json:"model"`
+	Provider          string                     `json:"provider,omitempty"`
+	Messages          []Message                  `json:"messages"`
+	Tools             []map[string]any           `json:"tools,omitempty"`
+	ToolChoice        any                        `json:"tool_choice,omitempty"` // string or object
+	ParallelToolCalls *bool                      `json:"parallel_tool_calls,omitempty"`
+	Stream            bool                       `json:"stream,omitempty"`
+	StreamOptions     *StreamOptions             `json:"stream_options,omitempty"`
+	Reasoning         *Reasoning                 `json:"reasoning,omitempty"`
+	ExtraFields       map[string]json.RawMessage `json:"-" swaggerignore:"true"`
 }
 
 // WithStreaming returns a shallow copy of the request with Stream set to true.
@@ -249,11 +250,12 @@ type ModelsResponse struct {
 
 // EmbeddingRequest represents the incoming embeddings request (OpenAI-compatible).
 type EmbeddingRequest struct {
-	Model          string `json:"model"`
-	Provider       string `json:"provider,omitempty"`
-	Input          any    `json:"input"`
-	EncodingFormat string `json:"encoding_format,omitempty"`
-	Dimensions     *int   `json:"dimensions,omitempty"`
+	Model          string                     `json:"model"`
+	Provider       string                     `json:"provider,omitempty"`
+	Input          any                        `json:"input"`
+	EncodingFormat string                     `json:"encoding_format,omitempty"`
+	Dimensions     *int                       `json:"dimensions,omitempty"`
+	ExtraFields    map[string]json.RawMessage `json:"-" swaggerignore:"true"`
 }
 
 // EmbeddingResponse represents the embeddings response (OpenAI-compatible).

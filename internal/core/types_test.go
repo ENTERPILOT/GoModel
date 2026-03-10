@@ -153,6 +153,77 @@ func TestChatRequestWithStreaming_PreservesToolFields(t *testing.T) {
 	}
 }
 
+func TestChatRequestJSON_PreservesUnknownFields(t *testing.T) {
+	payload := []byte(`{
+		"model":"gpt-5-mini",
+		"messages":[{"role":"user","content":"return json"}],
+		"response_format":{
+			"type":"json_schema",
+			"json_schema":{
+				"name":"math_response",
+				"schema":{"type":"object","properties":{"answer":{"type":"string"}}}
+			}
+		}
+	}`)
+
+	var req ChatRequest
+	if err := json.Unmarshal(payload, &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if req.ExtraFields["response_format"] == nil {
+		t.Fatalf("response_format missing from ExtraFields: %+v", req.ExtraFields)
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	responseFormat, ok := decoded["response_format"].(map[string]any)
+	if !ok {
+		t.Fatalf("decoded response_format = %#v, want object", decoded["response_format"])
+	}
+	if responseFormat["type"] != "json_schema" {
+		t.Fatalf("decoded response_format.type = %#v, want json_schema", responseFormat["type"])
+	}
+}
+
+func TestEmbeddingRequestJSON_PreservesUnknownFields(t *testing.T) {
+	payload := []byte(`{
+		"model":"text-embedding-3-small",
+		"input":"hello",
+		"user":"tenant-123"
+	}`)
+
+	var req EmbeddingRequest
+	if err := json.Unmarshal(payload, &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if req.ExtraFields["user"] == nil {
+		t.Fatalf("user missing from ExtraFields: %+v", req.ExtraFields)
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if decoded["user"] != "tenant-123" {
+		t.Fatalf("decoded user = %#v, want tenant-123", decoded["user"])
+	}
+}
+
 func TestResponsesRequestWithStreaming_PreservesToolFields(t *testing.T) {
 	parallelToolCalls := false
 	req := &ResponsesRequest{

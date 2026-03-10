@@ -3,6 +3,7 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -97,34 +98,35 @@ func isOSeriesModel(model string) bool {
 	return len(m) >= 2 && m[0] == 'o' && m[1] >= '0' && m[1] <= '9'
 }
 
-// oSeriesChatRequest is the JSON body sent to OpenAI for o-series models.
-// It uses max_completion_tokens (required) instead of max_tokens (rejected).
-type oSeriesChatRequest struct {
-	Model               string              `json:"model"`
-	Messages            []core.Message      `json:"messages"`
-	Tools               []map[string]any    `json:"tools,omitempty"`
-	ToolChoice          any                 `json:"tool_choice,omitempty"`
-	ParallelToolCalls   *bool               `json:"parallel_tool_calls,omitempty"`
-	Stream              bool                `json:"stream,omitempty"`
-	StreamOptions       *core.StreamOptions `json:"stream_options,omitempty"`
-	Reasoning           *core.Reasoning     `json:"reasoning,omitempty"`
-	MaxCompletionTokens *int                `json:"max_completion_tokens,omitempty"`
-}
-
-// adaptForOSeries converts a ChatRequest into an oSeriesChatRequest,
-// mapping max_tokens → max_completion_tokens and dropping temperature.
-func adaptForOSeries(req *core.ChatRequest) *oSeriesChatRequest {
-	return &oSeriesChatRequest{
-		Model:               req.Model,
-		Messages:            req.Messages,
-		Tools:               req.Tools,
-		ToolChoice:          req.ToolChoice,
-		ParallelToolCalls:   req.ParallelToolCalls,
-		Stream:              req.Stream,
-		StreamOptions:       req.StreamOptions,
-		Reasoning:           req.Reasoning,
-		MaxCompletionTokens: req.MaxTokens,
+// adaptForOSeries rewrites a ChatRequest body for OpenAI o-series models,
+// mapping max_tokens -> max_completion_tokens and dropping temperature while
+// preserving all unknown top-level JSON fields.
+func adaptForOSeries(req *core.ChatRequest) any {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return map[string]any{
+			"model":                 req.Model,
+			"messages":              req.Messages,
+			"tools":                 req.Tools,
+			"tool_choice":           req.ToolChoice,
+			"parallel_tool_calls":   req.ParallelToolCalls,
+			"stream":                req.Stream,
+			"stream_options":        req.StreamOptions,
+			"reasoning":             req.Reasoning,
+			"max_completion_tokens": req.MaxTokens,
+		}
 	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return req
+	}
+	if maxTokens, ok := raw["max_tokens"]; ok {
+		raw["max_completion_tokens"] = maxTokens
+		delete(raw, "max_tokens")
+	}
+	delete(raw, "temperature")
+	return raw
 }
 
 // chatRequestBody returns the appropriate request body for the model.

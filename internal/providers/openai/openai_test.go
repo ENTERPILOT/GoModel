@@ -254,6 +254,158 @@ func TestChatCompletion_PreservesMultimodalContent(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+
+		var req map[string]any
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+
+		responseFormat, ok := req["response_format"].(map[string]any)
+		if !ok {
+			t.Fatalf("response_format = %#v, want object", req["response_format"])
+		}
+		if responseFormat["type"] != "json_schema" {
+			t.Fatalf("response_format.type = %#v, want json_schema", responseFormat["type"])
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id": "chatcmpl-123",
+			"object": "chat.completion",
+			"created": 1677652288,
+			"model": "gpt-5-mini",
+			"choices": [{
+				"index": 0,
+				"message": {
+					"role": "assistant",
+					"content": "ok"
+				},
+				"finish_reason": "stop"
+			}],
+			"usage": {
+				"prompt_tokens": 10,
+				"completion_tokens": 20,
+				"total_tokens": 30
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	req := &core.ChatRequest{
+		Model: "gpt-5-mini",
+		Messages: []core.Message{
+			{Role: "user", Content: "Return JSON."},
+		},
+		ExtraFields: map[string]json.RawMessage{
+			"response_format": json.RawMessage(`{
+				"type":"json_schema",
+				"json_schema":{
+					"name":"math_response",
+					"schema":{"type":"object","properties":{"answer":{"type":"string"}}}
+				}
+			}`),
+		},
+	}
+
+	resp, err := provider.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Choices[0].Message.Content != "ok" {
+		t.Fatalf("response content = %q, want ok", resp.Choices[0].Message.Content)
+	}
+}
+
+func TestChatCompletion_PreservesUnknownTopLevelFieldsForOSeries(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+
+		var req map[string]any
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+
+		if _, exists := req["temperature"]; exists {
+			t.Fatalf("temperature should be removed for o-series models, got %#v", req["temperature"])
+		}
+		if req["max_completion_tokens"] != float64(128) {
+			t.Fatalf("max_completion_tokens = %#v, want 128", req["max_completion_tokens"])
+		}
+		responseFormat, ok := req["response_format"].(map[string]any)
+		if !ok {
+			t.Fatalf("response_format = %#v, want object", req["response_format"])
+		}
+		if responseFormat["type"] != "json_schema" {
+			t.Fatalf("response_format.type = %#v, want json_schema", responseFormat["type"])
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id": "chatcmpl-123",
+			"object": "chat.completion",
+			"created": 1677652288,
+			"model": "o3-mini",
+			"choices": [{
+				"index": 0,
+				"message": {
+					"role": "assistant",
+					"content": "ok"
+				},
+				"finish_reason": "stop"
+			}],
+			"usage": {
+				"prompt_tokens": 10,
+				"completion_tokens": 20,
+				"total_tokens": 30
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	maxTokens := 128
+	temperature := 0.7
+	req := &core.ChatRequest{
+		Model:       "o3-mini",
+		Temperature: &temperature,
+		MaxTokens:   &maxTokens,
+		Messages: []core.Message{
+			{Role: "user", Content: "Return JSON."},
+		},
+		ExtraFields: map[string]json.RawMessage{
+			"response_format": json.RawMessage(`{
+				"type":"json_schema",
+				"json_schema":{
+					"name":"math_response",
+					"schema":{"type":"object","properties":{"answer":{"type":"string"}}}
+				}
+			}`),
+		},
+	}
+
+	resp, err := provider.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Choices[0].Message.Content != "ok" {
+		t.Fatalf("response content = %q, want ok", resp.Choices[0].Message.Content)
+	}
+}
+
 func TestStreamChatCompletion(t *testing.T) {
 	tests := []struct {
 		name          string

@@ -550,6 +550,64 @@ func TestChatCompletion_BindsMultimodalContent(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
+	provider := &capturingProvider{
+		mockProvider: mockProvider{
+			supportedModels: []string{"gpt-5-mini"},
+			response: &core.ChatResponse{
+				ID:      "chatcmpl-123",
+				Object:  "chat.completion",
+				Created: 1234567890,
+				Model:   "gpt-5-mini",
+				Choices: []core.Choice{
+					{
+						Index:        0,
+						Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
+						FinishReason: "stop",
+					},
+				},
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	reqBody := `{
+		"model":"gpt-5-mini",
+		"messages":[{"role":"user","content":"return json"}],
+		"response_format":{
+			"type":"json_schema",
+			"json_schema":{
+				"name":"math_response",
+				"schema":{"type":"object","properties":{"answer":{"type":"string"}}}
+			}
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.ChatCompletion(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if provider.capturedChatReq == nil {
+		t.Fatal("expected chat request to be captured")
+	}
+	if provider.capturedChatReq.ExtraFields["response_format"] == nil {
+		t.Fatalf("response_format missing from ExtraFields: %+v", provider.capturedChatReq.ExtraFields)
+	}
+
+	body, err := json.Marshal(provider.capturedChatReq)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if !bytes.Contains(body, []byte(`"response_format"`)) {
+		t.Fatalf("marshaled request missing response_format: %s", string(body))
+	}
+}
+
 func TestChatCompletionStreaming(t *testing.T) {
 	streamData := `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
 

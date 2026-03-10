@@ -33,21 +33,15 @@ func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
 				return next(c)
 			}
 
-			bodyBytes, err := io.ReadAll(c.Request().Body)
+			model, providerHint, parsed, err := selectorHintsForValidation(c)
 			if err != nil {
-				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
+				return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 			}
-			c.Request().Body = io.NopCloser(bytes.NewReader(bodyBytes))
-
-			var peek struct {
-				Model    string `json:"model"`
-				Provider string `json:"provider"`
-			}
-			if err := json.Unmarshal(bodyBytes, &peek); err != nil {
+			if !parsed {
 				return next(c)
 			}
 
-			selector, err := core.ParseModelSelector(peek.Model, peek.Provider)
+			selector, err := core.ParseModelSelector(model, providerHint)
 			if err != nil {
 				return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 			}
@@ -67,6 +61,30 @@ func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed bool, err error) {
+	if env := core.GetSemanticEnvelope(c.Request().Context()); env != nil {
+		if env.JSONBodyParsed || env.SelectorHints.Model != "" || env.SelectorHints.Provider != "" {
+			return env.SelectorHints.Model, env.SelectorHints.Provider, true, nil
+		}
+		return "", "", false, nil
+	}
+
+	bodyBytes, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		return "", "", false, err
+	}
+	c.Request().Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	var peek struct {
+		Model    string `json:"model"`
+		Provider string `json:"provider"`
+	}
+	if err := json.Unmarshal(bodyBytes, &peek); err != nil {
+		return "", "", false, nil
+	}
+	return peek.Model, peek.Provider, true, nil
 }
 
 func isBatchOrFileRootOrSubresource(path string) bool {

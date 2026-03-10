@@ -27,6 +27,25 @@ func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
+	extraFields, err := extractUnknownJSONFields(data,
+		"model",
+		"provider",
+		"input",
+		"instructions",
+		"tools",
+		"tool_choice",
+		"parallel_tool_calls",
+		"temperature",
+		"max_output_tokens",
+		"stream",
+		"stream_options",
+		"metadata",
+		"reasoning",
+	)
+	if err != nil {
+		return err
+	}
+
 	var input any
 	trimmed := bytes.TrimSpace(raw.Input)
 	if len(trimmed) != 0 && !bytes.Equal(trimmed, []byte("null")) {
@@ -56,12 +75,13 @@ func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 	r.StreamOptions = raw.StreamOptions
 	r.Metadata = raw.Metadata
 	r.Reasoning = raw.Reasoning
+	r.ExtraFields = extraFields
 	return nil
 }
 
 // MarshalJSON preserves dynamic input payloads while supporting Swagger-only schema fields.
 func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
+	return marshalWithUnknownJSONFields(struct {
 		Model             string            `json:"model"`
 		Provider          string            `json:"provider,omitempty"`
 		Input             any               `json:"input"`
@@ -89,7 +109,7 @@ func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
 		StreamOptions:     r.StreamOptions,
 		Metadata:          r.Metadata,
 		Reasoning:         r.Reasoning,
-	})
+	}, r.ExtraFields)
 }
 
 // UnmarshalJSON deserializes a ResponsesInputElement, switching on the "type"

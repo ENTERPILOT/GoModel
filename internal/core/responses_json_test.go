@@ -231,6 +231,48 @@ func TestResponsesRequestMarshalJSON_PreservesTypedInputElementContent(t *testin
 	}
 }
 
+func TestResponsesRequestJSON_PreservesUnknownFields(t *testing.T) {
+	var req ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"gpt-5-mini",
+		"input":"hello",
+		"text":{
+			"format":{
+				"type":"json_schema",
+				"name":"answer"
+			}
+		}
+	}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if req.ExtraFields["text"] == nil {
+		t.Fatalf("text missing from ExtraFields: %+v", req.ExtraFields)
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	textField, ok := decoded["text"].(map[string]any)
+	if !ok {
+		t.Fatalf("decoded text = %#v, want object", decoded["text"])
+	}
+	formatField, ok := textField["format"].(map[string]any)
+	if !ok {
+		t.Fatalf("decoded text.format = %#v, want object", textField["format"])
+	}
+	if formatField["type"] != "json_schema" {
+		t.Fatalf("decoded text.format.type = %#v, want json_schema", formatField["type"])
+	}
+}
+
 func TestResponsesInputElementMarshalJSON_FunctionCall(t *testing.T) {
 	elem := ResponsesInputElement{
 		Type:      "function_call",
