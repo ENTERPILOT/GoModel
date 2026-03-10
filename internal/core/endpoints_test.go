@@ -12,7 +12,7 @@ func TestDescribeEndpointPath(t *testing.T) {
 	}{
 		{path: "/v1/chat/completions", managed: true, dialect: "openai_compat", operation: "chat_completions", bodyMode: BodyModeJSON},
 		{path: "/v1/batches", managed: true, dialect: "openai_compat", operation: "batches", bodyMode: BodyModeJSON},
-		{path: "/v1/files/file_1", managed: false, dialect: "openai_compat", operation: "files", bodyMode: BodyModeMultipart},
+		{path: "/v1/files/file_1", managed: true, dialect: "openai_compat", operation: "files", bodyMode: BodyModeMultipart},
 		{path: "/p/openai/responses", managed: true, dialect: "provider_passthrough", operation: "provider_passthrough", bodyMode: BodyModeOpaque},
 	}
 

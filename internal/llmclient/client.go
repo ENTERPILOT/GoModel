@@ -490,39 +490,81 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 		}
 	}
 
-	if c.circuitBreaker != nil && !c.circuitBreaker.Allow() {
-		err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable,
-			"circuit breaker is open - provider temporarily unavailable", nil)
-		callEndHook(http.StatusServiceUnavailable, err)
-		return nil, err
-	}
-
-	httpReq, err := c.buildRequest(ctx, req)
-	if err != nil {
-		callEndHook(extractStatusCode(err), err)
-		return nil, err
-	}
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		if c.circuitBreaker != nil {
-			c.circuitBreaker.RecordFailure()
-		}
-		providerErr := core.NewProviderError(c.config.ProviderName, http.StatusBadGateway, "failed to send request: "+err.Error(), err)
-		callEndHook(extractStatusCode(providerErr), providerErr)
-		return nil, providerErr
-	}
-
+	halfOpenProbe := false
 	if c.circuitBreaker != nil {
-		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
-			c.circuitBreaker.RecordFailure()
-		} else {
-			c.circuitBreaker.RecordSuccess()
+		allowed, probe := c.circuitBreaker.acquire()
+		if !allowed {
+			err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable,
+				"circuit breaker is open - provider temporarily unavailable", nil)
+			callEndHook(http.StatusServiceUnavailable, err)
+			return nil, err
 		}
+		halfOpenProbe = probe
 	}
 
-	callEndHook(resp.StatusCode, nil)
-	return resp, nil
+	maxAttempts := c.config.Retry.MaxRetries + 1
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			backoff := c.calculateBackoff(attempt)
+			select {
+			case <-ctx.Done():
+				callEndHook(0, ctx.Err())
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+
+		httpReq, err := c.buildRequest(ctx, req)
+		if err != nil {
+			callEndHook(extractStatusCode(err), err)
+			return nil, err
+		}
+
+		resp, err := c.httpClient.Do(httpReq)
+		if err != nil {
+			if c.circuitBreaker != nil {
+				c.circuitBreaker.RecordFailure()
+			}
+			providerErr := core.NewProviderError(c.config.ProviderName, http.StatusBadGateway, "failed to send request: "+err.Error(), err)
+			if halfOpenProbe || attempt == maxAttempts-1 {
+				callEndHook(extractStatusCode(providerErr), providerErr)
+				return nil, providerErr
+			}
+			continue
+		}
+
+		retryable := c.isRetryable(resp.StatusCode)
+		if retryable {
+			if c.circuitBreaker != nil {
+				c.circuitBreaker.RecordFailure()
+			}
+			if halfOpenProbe || attempt == maxAttempts-1 {
+				callEndHook(resp.StatusCode, nil)
+				return resp, nil
+			}
+			_ = resp.Body.Close()
+			continue
+		}
+
+		if c.circuitBreaker != nil {
+			if resp.StatusCode >= 500 {
+				c.circuitBreaker.RecordFailure()
+			} else {
+				c.circuitBreaker.RecordSuccess()
+			}
+		}
+
+		callEndHook(resp.StatusCode, nil)
+		return resp, nil
+	}
+
+	err := core.NewProviderError(c.config.ProviderName, http.StatusBadGateway, "request failed after retries", nil)
+	callEndHook(http.StatusBadGateway, err)
+	return nil, err
 }
 
 // extractModel attempts to extract the model name from a request body

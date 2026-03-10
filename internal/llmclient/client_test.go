@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -393,6 +394,94 @@ func TestClient_DoRaw_WithRetries(t *testing.T) {
 	}
 	if atomic.LoadInt32(&attempts) != 2 {
 		t.Errorf("expected 2 attempts, got %d", atomic.LoadInt32(&attempts))
+	}
+}
+
+func TestClient_DoPassthrough_WithRetries(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := atomic.AddInt32(&attempts, 1)
+		if count < 3 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	config := DefaultConfig("test", server.URL)
+	config.Retry.MaxRetries = 3
+	config.Retry.InitialBackoff = 10 * time.Millisecond
+	config.Retry.JitterFactor = 0
+	client := New(config, nil)
+
+	resp, err := client.DoPassthrough(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read body: %v", err)
+	}
+	if got := string(body); got != `{"ok":true}` {
+		t.Fatalf("body = %q, want success response", got)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
+	}
+}
+
+func TestClient_DoPassthrough_ReturnsLastRetryableResponseAfterRetries(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := atomic.AddInt32(&attempts, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"attempt":` + strconv.FormatInt(int64(count), 10) + `}`))
+	}))
+	defer server.Close()
+
+	config := DefaultConfig("test", server.URL)
+	config.Retry.MaxRetries = 2
+	config.Retry.InitialBackoff = 10 * time.Millisecond
+	config.Retry.MaxBackoff = 10 * time.Millisecond
+	config.Retry.BackoffFactor = 1
+	config.Retry.JitterFactor = 0
+	client := New(config, nil)
+
+	resp, err := client.DoPassthrough(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read body: %v", err)
+	}
+	if got := string(body); got != `{"attempt":3}` {
+		t.Fatalf("body = %q, want final retry response", got)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
 	}
 }
 

@@ -171,3 +171,35 @@ func TestIngressCapture_SkipsOversizedBodies(t *testing.T) {
 	assert.True(t, strings.HasPrefix(downstreamBody, `{"model":"gpt-5-mini"`))
 	assert.True(t, strings.HasSuffix(downstreamBody, `"}]}`))
 }
+
+func TestIngressCapture_ManagesFilesWithoutReadingMultipartBody(t *testing.T) {
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/files", nil)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+	req.Body = &explodingReadCloser{}
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	var capturedFrame *core.IngressFrame
+	var capturedEnv *core.SemanticEnvelope
+
+	handler := IngressCapture()(func(c *echo.Context) error {
+		capturedFrame = core.GetIngressFrame(c.Request().Context())
+		capturedEnv = core.GetSemanticEnvelope(c.Request().Context())
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+
+	require.NotNil(t, capturedFrame)
+	assert.Equal(t, "/v1/files", capturedFrame.Path)
+	assert.Equal(t, "multipart/form-data; boundary=test", capturedFrame.ContentType)
+	assert.Nil(t, capturedFrame.RawBody)
+	assert.False(t, capturedFrame.RawBodyTooLarge)
+
+	require.NotNil(t, capturedEnv)
+	assert.Equal(t, "files", capturedEnv.Operation)
+	assert.False(t, capturedEnv.JSONBodyParsed)
+}

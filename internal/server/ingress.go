@@ -18,12 +18,13 @@ import (
 func IngressCapture() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			if !isIngressManagedPath(c.Request().URL.Path) {
+			desc := core.DescribeEndpointPath(c.Request().URL.Path)
+			if !desc.IngressManaged {
 				return next(c)
 			}
 
 			req := c.Request()
-			bodyBytes, bodyTooLarge, err := captureIngressBody(req)
+			bodyBytes, bodyTooLarge, err := captureIngressBody(req, desc.BodyMode)
 			if err != nil {
 				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
 			}
@@ -50,10 +51,6 @@ func IngressCapture() echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
-}
-
-func isIngressManagedPath(path string) bool {
-	return core.DescribeEndpointPath(path).IngressManaged
 }
 
 func cloneMultiMap(src map[string][]string) map[string][]string {
@@ -113,9 +110,12 @@ func extractTraceMetadata(headers map[string][]string) map[string]string {
 	return metadata
 }
 
-func captureIngressBody(req *http.Request) ([]byte, bool, error) {
+func captureIngressBody(req *http.Request, bodyMode core.BodyMode) ([]byte, bool, error) {
 	if req.Body == nil {
 		return []byte{}, false, nil
+	}
+	if bodyMode == core.BodyModeMultipart {
+		return nil, false, nil
 	}
 	if req.ContentLength > auditlog.MaxBodyCapture {
 		return nil, true, nil

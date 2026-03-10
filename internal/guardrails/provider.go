@@ -114,6 +114,14 @@ func (g *GuardedProvider) nativeFileRouter() (core.NativeFileRoutableProvider, e
 	return fp, nil
 }
 
+func (g *GuardedProvider) passthroughRouter() (core.PassthroughRoutableProvider, error) {
+	pp, ok := g.inner.(core.PassthroughRoutableProvider)
+	if !ok {
+		return nil, core.NewInvalidRequestError("passthrough routing is not supported by the current provider router", nil)
+	}
+	return pp, nil
+}
+
 func (g *GuardedProvider) normalizeBatchEndpoint(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -464,6 +472,15 @@ func (g *GuardedProvider) GetFileContent(ctx context.Context, providerType, id s
 		return nil, err
 	}
 	return fp.GetFileContent(ctx, providerType, id)
+}
+
+// Passthrough delegates opaque provider-native requests without semantic guardrail processing.
+func (g *GuardedProvider) Passthrough(ctx context.Context, providerType string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+	pp, err := g.passthroughRouter()
+	if err != nil {
+		return nil, err
+	}
+	return pp.Passthrough(ctx, providerType, req)
 }
 
 // processChat runs the pipeline for a ChatRequest via the message adapter.

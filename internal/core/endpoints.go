@@ -61,7 +61,7 @@ func DescribeEndpointPath(path string) EndpointDescriptor {
 	case path == "/v1/files" || strings.HasPrefix(path, "/v1/files/"):
 		return EndpointDescriptor{
 			ModelInteraction: true,
-			IngressManaged:   false,
+			IngressManaged:   true,
 			Dialect:          "openai_compat",
 			Operation:        "files",
 			BodyMode:         BodyModeMultipart,

@@ -18,6 +18,8 @@ type mockRoutableProvider struct {
 	chatReq           *core.ChatRequest
 	responsesReq      *core.ResponsesRequest
 	batchReq          *core.BatchRequest
+	passthroughReq    *core.PassthroughRequest
+	passthroughType   string
 }
 
 func (m *mockRoutableProvider) Supports(model string) bool {
@@ -81,6 +83,18 @@ func (m *mockRoutableProvider) CancelBatch(_ context.Context, _, _ string) (*cor
 
 func (m *mockRoutableProvider) GetBatchResults(_ context.Context, _, _ string) (*core.BatchResultsResponse, error) {
 	return &core.BatchResultsResponse{Object: "list", BatchID: "batch_1"}, nil
+}
+
+func (m *mockRoutableProvider) Passthrough(_ context.Context, providerType string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+	m.passthroughType = providerType
+	m.passthroughReq = req
+	return &core.PassthroughResponse{
+		StatusCode: http.StatusAccepted,
+		Headers: map[string][]string{
+			"Content-Type": {"application/json"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"ok":true}`)),
+	}, nil
 }
 
 // --- Chat adapter integration tests ---
@@ -1244,6 +1258,41 @@ func TestGuardedProvider_DelegatesGetProviderType(t *testing.T) {
 
 	if guarded.GetProviderType("gpt-4") != "openai" {
 		t.Errorf("expected 'openai', got %q", guarded.GetProviderType("gpt-4"))
+	}
+}
+
+func TestGuardedProvider_Passthrough_Delegates(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	guarded := NewGuardedProvider(inner, pipeline)
+
+	resp, err := guarded.Passthrough(context.Background(), "openai", &core.PassthroughRequest{
+		Method:   http.MethodPost,
+		Endpoint: "responses",
+		Body:     []byte(`{"foo":"bar"}`),
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if inner.passthroughType != "openai" {
+		t.Fatalf("providerType = %q, want openai", inner.passthroughType)
+	}
+	if inner.passthroughReq == nil {
+		t.Fatal("passthroughReq = nil")
+	}
+	if inner.passthroughReq.Endpoint != "responses" {
+		t.Fatalf("Endpoint = %q, want responses", inner.passthroughReq.Endpoint)
+	}
+	if string(inner.passthroughReq.Body) != `{"foo":"bar"}` {
+		t.Fatalf("Body = %q, want request body", string(inner.passthroughReq.Body))
+	}
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("StatusCode = %d, want %d", resp.StatusCode, http.StatusAccepted)
 	}
 }
 

@@ -26,6 +26,9 @@ Completed in this slice:
 - make chat, responses, and embeddings handlers consume those cached semantic request payloads instead of re-decoding the body independently
 - preserve unknown top-level and batch-item JSON fields on `BatchRequest`
 - make `/v1/batches` consume ingress-backed semantic decoding instead of `Bind()`
+- harden `/p/{provider}/{endpoint}` so passthrough still works when guardrails wrap the router
+- make passthrough use the same retry and circuit-breaker policy as the translated provider clients while still proxying raw upstream responses
+- make `/v1/files*` ingress-managed with bounded multipart handling so file routes also receive `IngressFrame` without eagerly buffering upload bodies
 
 ## Broader endpoint migration scope
 
@@ -88,6 +91,7 @@ Exit criteria:
 - raw request bytes are available to later semantic extraction and pass-through flows
 - selector extraction no longer requires ad hoc body reads from separate middleware
 - `/p/openai/{endpoint}` and `/p/anthropic/{endpoint}` run on the shared ingress capture path
+- `/v1/files*` also receive `IngressFrame`, while multipart bodies remain intentionally uncaptured unless a later slice has a bounded reason to inspect them
 
 ### Phase 3: Introduce `SemanticEnvelope`
 
@@ -137,7 +141,7 @@ Exit criteria:
 
 - guardrail rewrites can still drop unknown nested fields if the gateway reconstructs nested objects instead of preserving raw ingress
 - provider-specific adapters may reintroduce field loss when they build fresh structs instead of rewriting raw-plus-canonical payloads
-- batch and file flows will need the same transport-first treatment to avoid a second request pipeline
+- file semantics still need a transport-first follow-up beyond ingress capture so upload routes do not remain a second semantic pipeline
 - trying to add too many provider-specific pass-through variants at once can turn the transport-first `/p/*` route into another adapter matrix before the shared foundation is stable
 
 ## Next implementation targets
@@ -145,6 +149,6 @@ Exit criteria:
 1. Centralize model-facing endpoint classification so ingress capture, audit classification, and semantic extraction use one shared route descriptor table.
 2. Add a thin `/p/{provider}/{endpoint}` opaque passthrough route on the shared ingress pipeline, with OpenAI and Anthropic as the required first providers.
 3. Extend the same `/p/*` route to other providers only when they fit the same low-friction opaque forwarding model without meaningful extra branching.
-4. Move more model-facing handlers, especially `/v1/batches` and later `/v1/files` where appropriate, onto ingress-first decoding instead of ad hoc request parsing.
-5. Extend `SemanticEnvelope` from selector hints toward canonical operation content for `/v1/chat/completions`, `/v1/responses`, and `/v1/embeddings`, while keeping `/p/*` and file semantics intentionally partial when that is the honest representation.
+4. Extend ADR-0002 beyond ingress capture for `/v1/files*` with intentionally sparse file semantics and shared metadata access, without buffering multipart uploads into memory.
+5. Continue collapsing duplicate per-endpoint semantic decode boilerplate so `SemanticEnvelope` stays authoritative without growing one-off route helpers forever.
 6. Migrate non-batch guardrail and provider rewrite paths toward semantic canonical data plus raw-plus-canonical patching where partial understanding is unavoidable.
