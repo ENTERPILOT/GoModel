@@ -231,6 +231,69 @@ func TestResponsesRequestMarshalJSON_PreservesTypedInputElementContent(t *testin
 	}
 }
 
+func TestResponsesRequestJSON_PreservesUnknownNestedFields(t *testing.T) {
+	var req ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"gpt-4o-mini",
+		"input":[
+			{
+				"type":"message",
+				"role":"user",
+				"content":"hello",
+				"x_trace":{"id":"trace-1"}
+			},
+			{
+				"type":"function_call",
+				"call_id":"call_123",
+				"name":"lookup_weather",
+				"arguments":"{}",
+				"strict":true
+			}
+		]
+	}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	input, ok := req.Input.([]ResponsesInputElement)
+	if !ok || len(input) != 2 {
+		t.Fatalf("Input = %#v, want []ResponsesInputElement len=2", req.Input)
+	}
+	if input[0].ExtraFields["x_trace"] == nil {
+		t.Fatalf("input[0].x_trace missing from ExtraFields: %+v", input[0].ExtraFields)
+	}
+	if input[1].ExtraFields["strict"] == nil {
+		t.Fatalf("input[1].strict missing from ExtraFields: %+v", input[1].ExtraFields)
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	decodedInput, ok := decoded["input"].([]any)
+	if !ok || len(decodedInput) != 2 {
+		t.Fatalf("decoded input = %#v, want []any len=2", decoded["input"])
+	}
+	firstInput, ok := decodedInput[0].(map[string]any)
+	if !ok {
+		t.Fatalf("decoded input[0] = %#v, want object", decodedInput[0])
+	}
+	if _, ok := firstInput["x_trace"].(map[string]any); !ok {
+		t.Fatalf("decoded input[0].x_trace = %#v, want object", firstInput["x_trace"])
+	}
+	secondInput, ok := decodedInput[1].(map[string]any)
+	if !ok {
+		t.Fatalf("decoded input[1] = %#v, want object", decodedInput[1])
+	}
+	if secondInput["strict"] != true {
+		t.Fatalf("decoded input[1].strict = %#v, want true", secondInput["strict"])
+	}
+}
+
 func TestResponsesRequestJSON_PreservesUnknownFields(t *testing.T) {
 	var req ResponsesRequest
 	if err := json.Unmarshal([]byte(`{

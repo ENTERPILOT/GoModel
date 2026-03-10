@@ -20,6 +20,8 @@ Completed in this slice:
 - preserve those fields through handler binding and OpenAI provider request marshaling
 - preserve them even through OpenAI o-series request rewriting
 - add regression tests for JSON round-tripping, handler binding, and upstream provider forwarding
+- preserve unknown nested JSON fields on normal non-batch chat messages, tool calls, content parts, and responses input elements
+- preserve unknown nested JSON fields through normal handler decoding and OpenAI provider marshaling
 
 ## Rollout phases
 
@@ -109,8 +111,7 @@ Exit criteria:
 
 ## Next implementation targets
 
-1. Add `IngressFrame` creation middleware and request-context plumbing.
-2. Move selector extraction to ingress-backed helpers so model validation stops re-reading request bodies.
-3. Add semantic extraction helpers for `/v1/chat/completions`, `/v1/responses`, and `/v1/embeddings`.
-4. Move handler request parsing to consume ingress + semantic extraction rather than direct `Bind()` into endpoint structs.
-5. Extend preservation to nested opaque JSON where guardrails or adapters currently rebuild request bodies.
+1. Add a thin `/p/{provider}/{endpoint}` opaque passthrough route on the shared ingress pipeline.
+2. Move more model-facing handlers, especially `/v1/batches` and later file flows where appropriate, onto ingress-first decoding instead of ad hoc request parsing.
+3. Extend `SemanticEnvelope` from selector hints toward canonical operation content for `/v1/chat/completions`, `/v1/responses`, and `/v1/embeddings`.
+4. Migrate non-batch guardrail and provider rewrite paths toward semantic canonical data plus raw-plus-canonical patching where partial understanding is unavoidable.

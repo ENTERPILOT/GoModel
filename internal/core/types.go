@@ -56,21 +56,24 @@ type Message struct {
 	//nolint:govet // Intentional duplicate json tag for Swagger docs: content is null OR string OR []ContentPart.
 	// ContentSchema documents that `content` accepts either a plain string
 	// or an array of ContentPart values.
-	ContentSchema []ContentPart `json:"content,omitempty" extensions:"x-oneOf=[{\"type\":\"null\"},{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"`
-	ToolCalls     []ToolCall    `json:"tool_calls,omitempty"`
+	ContentSchema []ContentPart              `json:"content,omitempty" extensions:"x-oneOf=[{\"type\":\"null\"},{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"`
+	ToolCalls     []ToolCall                 `json:"tool_calls,omitempty"`
+	ExtraFields   map[string]json.RawMessage `json:"-" swaggerignore:"true"`
 }
 
 // ToolCall represents a single tool invocation emitted by a model.
 type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"`
-	Function FunctionCall `json:"function"`
+	ID          string                     `json:"id"`
+	Type        string                     `json:"type"`
+	Function    FunctionCall               `json:"function"`
+	ExtraFields map[string]json.RawMessage `json:"-" swaggerignore:"true"`
 }
 
 // FunctionCall contains the function name and serialized arguments payload.
 type FunctionCall struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	Name        string                     `json:"name"`
+	Arguments   string                     `json:"arguments"`
+	ExtraFields map[string]json.RawMessage `json:"-" swaggerignore:"true"`
 }
 
 // ChatResponse represents the chat completion response
@@ -96,8 +99,9 @@ type ResponseMessage struct {
 	Role    string         `json:"role"`
 	Content MessageContent `json:"content"`
 	//nolint:govet // Intentional duplicate json tag for Swagger docs: content is null OR string OR []ContentPart.
-	ContentSchema []ContentPart `json:"content,omitempty" extensions:"x-oneOf=[{\"type\":\"null\"},{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"`
-	ToolCalls     []ToolCall    `json:"tool_calls,omitempty"`
+	ContentSchema []ContentPart              `json:"content,omitempty" extensions:"x-oneOf=[{\"type\":\"null\"},{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"`
+	ToolCalls     []ToolCall                 `json:"tool_calls,omitempty"`
+	ExtraFields   map[string]json.RawMessage `json:"-" swaggerignore:"true"`
 }
 
 // PromptTokensDetails holds extended input token breakdown (OpenAI/xAI).

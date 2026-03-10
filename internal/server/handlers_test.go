@@ -608,6 +608,75 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
+	provider := &capturingProvider{
+		mockProvider: mockProvider{
+			supportedModels: []string{"gpt-5-mini"},
+			response: &core.ChatResponse{
+				ID:      "chatcmpl-123",
+				Object:  "chat.completion",
+				Created: 1234567890,
+				Model:   "gpt-5-mini",
+				Choices: []core.Choice{
+					{
+						Index:        0,
+						Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
+						FinishReason: "stop",
+					},
+				},
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	reqBody := `{
+		"model":"gpt-5-mini",
+		"messages":[
+			{
+				"role":"user",
+				"name":"alice",
+				"content":[{"type":"text","text":"hello","cache_control":{"type":"ephemeral"}}]
+			}
+		]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.ChatCompletion(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if provider.capturedChatReq == nil {
+		t.Fatal("expected chat request to be captured")
+	}
+	if provider.capturedChatReq.Messages[0].ExtraFields["name"] == nil {
+		t.Fatalf("message.name missing from ExtraFields: %+v", provider.capturedChatReq.Messages[0].ExtraFields)
+	}
+
+	body, err := json.Marshal(provider.capturedChatReq)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	messages := decoded["messages"].([]any)
+	firstMsg := messages[0].(map[string]any)
+	if firstMsg["name"] != "alice" {
+		t.Fatalf("messages[0].name = %#v, want alice", firstMsg["name"])
+	}
+	content := firstMsg["content"].([]any)
+	firstPart := content[0].(map[string]any)
+	if _, ok := firstPart["cache_control"].(map[string]any); !ok {
+		t.Fatalf("messages[0].content[0].cache_control = %#v, want object", firstPart["cache_control"])
+	}
+}
+
 func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
 	provider := &capturingProvider{
 		mockProvider: mockProvider{
@@ -1985,6 +2054,14 @@ func (c *capturingProvider) StreamChatCompletion(_ context.Context, req *core.Ch
 	return io.NopCloser(strings.NewReader(c.streamData)), nil
 }
 
+func (c *capturingProvider) Responses(_ context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	c.capturedResponsesReq = req
+	if c.err != nil {
+		return nil, c.err
+	}
+	return c.responsesResponse, nil
+}
+
 func (c *capturingProvider) StreamResponses(_ context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
 	c.capturedResponsesReq = req
 	return io.NopCloser(strings.NewReader(c.streamData)), nil
@@ -2030,6 +2107,74 @@ func TestStreamingResponses_DoesNotInjectStreamOptions(t *testing.T) {
 	}
 	if provider.capturedResponsesReq.StreamOptions != nil {
 		t.Errorf("Responses streaming should NOT have StreamOptions injected, got: %+v", provider.capturedResponsesReq.StreamOptions)
+	}
+}
+
+func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
+	provider := &capturingProvider{
+		mockProvider: mockProvider{
+			supportedModels: []string{"gpt-5-mini"},
+			responsesResponse: &core.ResponsesResponse{
+				ID:        "resp_123",
+				Object:    "response",
+				CreatedAt: 1234567890,
+				Model:     "gpt-5-mini",
+				Status:    "completed",
+				Output: []core.ResponsesOutputItem{
+					{
+						ID:     "msg_123",
+						Type:   "message",
+						Role:   "assistant",
+						Status: "completed",
+						Content: []core.ResponsesContentItem{
+							{Type: "output_text", Text: "ok"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	reqBody := `{
+		"model":"gpt-5-mini",
+		"input":[{"type":"message","role":"user","content":"hello","x_trace":{"id":"trace-1"}}]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.Responses(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if provider.capturedResponsesReq == nil {
+		t.Fatal("expected responses request to be captured")
+	}
+
+	input, ok := provider.capturedResponsesReq.Input.([]core.ResponsesInputElement)
+	if !ok || len(input) != 1 {
+		t.Fatalf("captured input = %#v, want []ResponsesInputElement len=1", provider.capturedResponsesReq.Input)
+	}
+	if input[0].ExtraFields["x_trace"] == nil {
+		t.Fatalf("input[0].x_trace missing from ExtraFields: %+v", input[0].ExtraFields)
+	}
+
+	body, err := json.Marshal(provider.capturedResponsesReq)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	decodedInput := decoded["input"].([]any)
+	firstInput := decodedInput[0].(map[string]any)
+	if _, ok := firstInput["x_trace"].(map[string]any); !ok {
+		t.Fatalf("input[0].x_trace = %#v, want object", firstInput["x_trace"])
 	}
 }
 

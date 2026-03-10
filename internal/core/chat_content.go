@@ -9,23 +9,184 @@ import (
 
 // ContentPart represents a single OpenAI-compatible multimodal chat content part.
 type ContentPart struct {
-	Type       string             `json:"type"`
-	Text       string             `json:"text,omitempty"`
-	ImageURL   *ImageURLContent   `json:"image_url,omitempty"`
-	InputAudio *InputAudioContent `json:"input_audio,omitempty"`
+	Type        string                     `json:"type"`
+	Text        string                     `json:"text,omitempty"`
+	ImageURL    *ImageURLContent           `json:"image_url,omitempty"`
+	InputAudio  *InputAudioContent         `json:"input_audio,omitempty"`
+	ExtraFields map[string]json.RawMessage `json:"-" swaggerignore:"true"`
 }
 
 // ImageURLContent contains an image reference for image_url parts.
 type ImageURLContent struct {
-	URL       string `json:"url"`
-	Detail    string `json:"detail,omitempty"`
-	MediaType string `json:"media_type,omitempty"`
+	URL         string                     `json:"url"`
+	Detail      string                     `json:"detail,omitempty"`
+	MediaType   string                     `json:"media_type,omitempty"`
+	ExtraFields map[string]json.RawMessage `json:"-" swaggerignore:"true"`
 }
 
 // InputAudioContent contains inline audio payload metadata.
 type InputAudioContent struct {
-	Data   string `json:"data"`
-	Format string `json:"format"`
+	Data        string                     `json:"data"`
+	Format      string                     `json:"format"`
+	ExtraFields map[string]json.RawMessage `json:"-" swaggerignore:"true"`
+}
+
+func (p *ContentPart) UnmarshalJSON(data []byte) error {
+	part, err := unmarshalContentPart(data)
+	if err != nil {
+		return err
+	}
+	*p = part
+	return nil
+}
+
+func (p ContentPart) MarshalJSON() ([]byte, error) {
+	switch p.Type {
+	case "text", "input_text":
+		if p.Text == "" {
+			return nil, fmt.Errorf("text part is missing text")
+		}
+		return marshalWithUnknownJSONFields(struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}{
+			Type: "text",
+			Text: p.Text,
+		}, p.ExtraFields)
+	case "image_url", "input_image":
+		if p.ImageURL == nil || p.ImageURL.URL == "" {
+			return nil, fmt.Errorf("image_url part is missing image_url.url")
+		}
+		return marshalWithUnknownJSONFields(struct {
+			Type     string           `json:"type"`
+			ImageURL *ImageURLContent `json:"image_url"`
+		}{
+			Type:     "image_url",
+			ImageURL: p.ImageURL,
+		}, p.ExtraFields)
+	case "input_audio":
+		if p.InputAudio == nil || p.InputAudio.Data == "" || p.InputAudio.Format == "" {
+			return nil, fmt.Errorf("input_audio part is missing data or format")
+		}
+		return marshalWithUnknownJSONFields(struct {
+			Type       string             `json:"type"`
+			InputAudio *InputAudioContent `json:"input_audio"`
+		}{
+			Type:       "input_audio",
+			InputAudio: p.InputAudio,
+		}, p.ExtraFields)
+	default:
+		return nil, fmt.Errorf("unsupported content part type %q", p.Type)
+	}
+}
+
+func (c *ImageURLContent) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return fmt.Errorf("image_url part is missing image_url.url")
+	}
+
+	if trimmed[0] == '"' {
+		var url string
+		if err := json.Unmarshal(trimmed, &url); err != nil {
+			return err
+		}
+		if url == "" {
+			return fmt.Errorf("image_url part is missing image_url.url")
+		}
+		c.URL = url
+		c.Detail = ""
+		c.MediaType = ""
+		c.ExtraFields = nil
+		return nil
+	}
+
+	var raw struct {
+		URL       string `json:"url"`
+		Detail    string `json:"detail,omitempty"`
+		MediaType string `json:"media_type,omitempty"`
+	}
+	if err := json.Unmarshal(trimmed, &raw); err != nil {
+		return err
+	}
+	if raw.URL == "" {
+		return fmt.Errorf("image_url part is missing image_url.url")
+	}
+	extraFields, err := extractUnknownJSONFields(trimmed,
+		"url",
+		"detail",
+		"media_type",
+	)
+	if err != nil {
+		return err
+	}
+
+	c.URL = raw.URL
+	c.Detail = raw.Detail
+	c.MediaType = raw.MediaType
+	c.ExtraFields = extraFields
+	return nil
+}
+
+func (c ImageURLContent) MarshalJSON() ([]byte, error) {
+	if c.URL == "" {
+		return nil, fmt.Errorf("image_url part is missing image_url.url")
+	}
+	return marshalWithUnknownJSONFields(struct {
+		URL       string `json:"url"`
+		Detail    string `json:"detail,omitempty"`
+		MediaType string `json:"media_type,omitempty"`
+	}{
+		URL:       c.URL,
+		Detail:    c.Detail,
+		MediaType: c.MediaType,
+	}, c.ExtraFields)
+}
+
+func (a *InputAudioContent) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return fmt.Errorf("input_audio part is missing data or format")
+	}
+	if trimmed[0] != '{' {
+		return fmt.Errorf("input_audio must be an object")
+	}
+
+	var raw struct {
+		Data   string `json:"data"`
+		Format string `json:"format"`
+	}
+	if err := json.Unmarshal(trimmed, &raw); err != nil {
+		return err
+	}
+	if raw.Data == "" || raw.Format == "" {
+		return fmt.Errorf("input_audio part is missing data or format")
+	}
+	extraFields, err := extractUnknownJSONFields(trimmed,
+		"data",
+		"format",
+	)
+	if err != nil {
+		return err
+	}
+
+	a.Data = raw.Data
+	a.Format = raw.Format
+	a.ExtraFields = extraFields
+	return nil
+}
+
+func (a InputAudioContent) MarshalJSON() ([]byte, error) {
+	if a.Data == "" || a.Format == "" {
+		return nil, fmt.Errorf("input_audio part is missing data or format")
+	}
+	return marshalWithUnknownJSONFields(struct {
+		Data   string `json:"data"`
+		Format string `json:"format"`
+	}{
+		Data:   a.Data,
+		Format: a.Format,
+	}, a.ExtraFields)
 }
 
 // UnmarshalMessageContent decodes supported chat message content payloads.
@@ -197,25 +358,46 @@ func unmarshalContentPart(data []byte) (ContentPart, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return ContentPart{}, err
 	}
+	extraFields, err := extractUnknownJSONFields(data,
+		"type",
+		"text",
+		"image_url",
+		"input_audio",
+	)
+	if err != nil {
+		return ContentPart{}, err
+	}
 
 	switch raw.Type {
 	case "text", "input_text":
 		if raw.Text == nil || *raw.Text == "" {
 			return ContentPart{}, fmt.Errorf("text part is missing text")
 		}
-		return ContentPart{Type: "text", Text: *raw.Text}, nil
+		return ContentPart{
+			Type:        "text",
+			Text:        *raw.Text,
+			ExtraFields: extraFields,
+		}, nil
 	case "image_url", "input_image":
 		imageURL, err := unmarshalImageURLContent(raw.ImageURL)
 		if err != nil {
 			return ContentPart{}, err
 		}
-		return ContentPart{Type: "image_url", ImageURL: imageURL}, nil
+		return ContentPart{
+			Type:        "image_url",
+			ImageURL:    imageURL,
+			ExtraFields: extraFields,
+		}, nil
 	case "input_audio":
 		audio, err := unmarshalInputAudioContent(raw.InputAudio)
 		if err != nil {
 			return ContentPart{}, err
 		}
-		return ContentPart{Type: "input_audio", InputAudio: audio}, nil
+		return ContentPart{
+			Type:        "input_audio",
+			InputAudio:  audio,
+			ExtraFields: extraFields,
+		}, nil
 	default:
 		return ContentPart{}, fmt.Errorf("unsupported content part type %q", raw.Type)
 	}
@@ -227,7 +409,11 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 		if part.Text == "" {
 			return ContentPart{}, fmt.Errorf("text part is missing text")
 		}
-		return ContentPart{Type: "text", Text: part.Text}, nil
+		return ContentPart{
+			Type:        "text",
+			Text:        part.Text,
+			ExtraFields: cloneRawJSONMap(part.ExtraFields),
+		}, nil
 	case "image_url", "input_image":
 		if part.ImageURL == nil || part.ImageURL.URL == "" {
 			return ContentPart{}, fmt.Errorf("image_url part is missing image_url.url")
@@ -235,10 +421,12 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 		return ContentPart{
 			Type: "image_url",
 			ImageURL: &ImageURLContent{
-				URL:       part.ImageURL.URL,
-				Detail:    part.ImageURL.Detail,
-				MediaType: part.ImageURL.MediaType,
+				URL:         part.ImageURL.URL,
+				Detail:      part.ImageURL.Detail,
+				MediaType:   part.ImageURL.MediaType,
+				ExtraFields: cloneRawJSONMap(part.ImageURL.ExtraFields),
 			},
+			ExtraFields: cloneRawJSONMap(part.ExtraFields),
 		}, nil
 	case "input_audio":
 		if part.InputAudio == nil || part.InputAudio.Data == "" || part.InputAudio.Format == "" {
@@ -247,9 +435,11 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 		return ContentPart{
 			Type: "input_audio",
 			InputAudio: &InputAudioContent{
-				Data:   part.InputAudio.Data,
-				Format: part.InputAudio.Format,
+				Data:        part.InputAudio.Data,
+				Format:      part.InputAudio.Format,
+				ExtraFields: cloneRawJSONMap(part.InputAudio.ExtraFields),
 			},
+			ExtraFields: cloneRawJSONMap(part.ExtraFields),
 		}, nil
 	default:
 		return ContentPart{}, fmt.Errorf("unsupported content part type %q", part.Type)
@@ -268,42 +458,11 @@ func normalizeContentPartValue(part any) (ContentPart, error) {
 }
 
 func normalizeContentPartMap(partMap map[string]interface{}) (ContentPart, error) {
-	partType, _ := partMap["type"].(string)
-	switch partType {
-	case "text", "input_text":
-		text, ok := partMap["text"].(string)
-		if !ok || text == "" {
-			return ContentPart{}, fmt.Errorf("text part is missing text")
-		}
-		return ContentPart{Type: "text", Text: text}, nil
-	case "image_url", "input_image":
-		imageURL, ok := parseImageURLValue(partMap["image_url"])
-		if !ok {
-			return ContentPart{}, fmt.Errorf("image_url part is missing image_url.url")
-		}
-		return ContentPart{
-			Type: "image_url",
-			ImageURL: &ImageURLContent{
-				URL:       imageURL.URL,
-				Detail:    imageURL.Detail,
-				MediaType: imageURL.MediaType,
-			},
-		}, nil
-	case "input_audio":
-		audio, ok := parseInputAudioValue(partMap["input_audio"])
-		if !ok {
-			return ContentPart{}, fmt.Errorf("input_audio part is missing data or format")
-		}
-		return ContentPart{
-			Type: "input_audio",
-			InputAudio: &InputAudioContent{
-				Data:   audio.Data,
-				Format: audio.Format,
-			},
-		}, nil
-	default:
-		return ContentPart{}, fmt.Errorf("unsupported content part type %q", partType)
+	rawPart, err := json.Marshal(partMap)
+	if err != nil {
+		return ContentPart{}, fmt.Errorf("content part must be an object")
 	}
+	return unmarshalContentPart(rawPart)
 }
 
 func unmarshalImageURLContent(data []byte) (*ImageURLContent, error) {
@@ -354,62 +513,4 @@ func unmarshalInputAudioContent(data []byte) (*InputAudioContent, error) {
 		return nil, fmt.Errorf("input_audio part is missing data or format")
 	}
 	return &audio, nil
-}
-
-func parseImageURLValue(value any) (*ImageURLContent, bool) {
-	switch v := value.(type) {
-	case string:
-		if v == "" {
-			return nil, false
-		}
-		return &ImageURLContent{URL: v}, true
-	case map[string]string:
-		if v["url"] == "" {
-			return nil, false
-		}
-		return &ImageURLContent{
-			URL:       v["url"],
-			Detail:    v["detail"],
-			MediaType: v["media_type"],
-		}, true
-	case map[string]interface{}:
-		url, _ := v["url"].(string)
-		if url == "" {
-			return nil, false
-		}
-		detail, _ := v["detail"].(string)
-		mediaType, _ := v["media_type"].(string)
-		return &ImageURLContent{
-			URL:       url,
-			Detail:    detail,
-			MediaType: mediaType,
-		}, true
-	default:
-		return nil, false
-	}
-}
-
-func parseInputAudioValue(value any) (*InputAudioContent, bool) {
-	switch v := value.(type) {
-	case map[string]string:
-		if v["data"] == "" || v["format"] == "" {
-			return nil, false
-		}
-		return &InputAudioContent{
-			Data:   v["data"],
-			Format: v["format"],
-		}, true
-	case map[string]interface{}:
-		data, _ := v["data"].(string)
-		format, _ := v["format"].(string)
-		if data == "" || format == "" {
-			return nil, false
-		}
-		return &InputAudioContent{
-			Data:   data,
-			Format: format,
-		}, true
-	default:
-		return nil, false
-	}
 }

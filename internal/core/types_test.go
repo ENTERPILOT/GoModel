@@ -194,6 +194,123 @@ func TestChatRequestJSON_PreservesUnknownFields(t *testing.T) {
 	}
 }
 
+func TestChatRequestJSON_PreservesUnknownNestedFields(t *testing.T) {
+	payload := []byte(`{
+		"model":"gpt-5-mini",
+		"messages":[
+			{
+				"role":"user",
+				"name":"alice",
+				"content":[
+					{
+						"type":"text",
+						"text":"hello",
+						"cache_control":{"type":"ephemeral"}
+					}
+				]
+			},
+			{
+				"role":"assistant",
+				"content":null,
+				"tool_calls":[
+					{
+						"id":"call_123",
+						"type":"function",
+						"vendor_data":{"trace":"abc"},
+						"function":{
+							"name":"lookup_weather",
+							"arguments":"{}",
+							"strict":true
+						}
+					}
+				]
+			}
+		]
+	}`)
+
+	var req ChatRequest
+	if err := json.Unmarshal(payload, &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(req.Messages) != 2 {
+		t.Fatalf("len(Messages) = %d, want 2", len(req.Messages))
+	}
+	if req.Messages[0].ExtraFields["name"] == nil {
+		t.Fatalf("message[0].name missing from ExtraFields: %+v", req.Messages[0].ExtraFields)
+	}
+	parts, ok := req.Messages[0].Content.([]ContentPart)
+	if !ok || len(parts) != 1 {
+		t.Fatalf("message[0].content = %#v, want []ContentPart len=1", req.Messages[0].Content)
+	}
+	if parts[0].ExtraFields["cache_control"] == nil {
+		t.Fatalf("content part cache_control missing from ExtraFields: %+v", parts[0].ExtraFields)
+	}
+	if len(req.Messages[1].ToolCalls) != 1 {
+		t.Fatalf("len(message[1].ToolCalls) = %d, want 1", len(req.Messages[1].ToolCalls))
+	}
+	if req.Messages[1].ToolCalls[0].ExtraFields["vendor_data"] == nil {
+		t.Fatalf("tool_call vendor_data missing from ExtraFields: %+v", req.Messages[1].ToolCalls[0].ExtraFields)
+	}
+	if req.Messages[1].ToolCalls[0].Function.ExtraFields["strict"] == nil {
+		t.Fatalf("function strict missing from ExtraFields: %+v", req.Messages[1].ToolCalls[0].Function.ExtraFields)
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	messages, ok := decoded["messages"].([]any)
+	if !ok || len(messages) != 2 {
+		t.Fatalf("decoded messages = %#v, want []any len=2", decoded["messages"])
+	}
+	firstMsg, ok := messages[0].(map[string]any)
+	if !ok {
+		t.Fatalf("messages[0] = %#v, want object", messages[0])
+	}
+	if firstMsg["name"] != "alice" {
+		t.Fatalf("messages[0].name = %#v, want alice", firstMsg["name"])
+	}
+	firstContent, ok := firstMsg["content"].([]any)
+	if !ok || len(firstContent) != 1 {
+		t.Fatalf("messages[0].content = %#v, want []any len=1", firstMsg["content"])
+	}
+	firstPart, ok := firstContent[0].(map[string]any)
+	if !ok {
+		t.Fatalf("messages[0].content[0] = %#v, want object", firstContent[0])
+	}
+	if _, ok := firstPart["cache_control"].(map[string]any); !ok {
+		t.Fatalf("messages[0].content[0].cache_control = %#v, want object", firstPart["cache_control"])
+	}
+
+	secondMsg, ok := messages[1].(map[string]any)
+	if !ok {
+		t.Fatalf("messages[1] = %#v, want object", messages[1])
+	}
+	toolCalls, ok := secondMsg["tool_calls"].([]any)
+	if !ok || len(toolCalls) != 1 {
+		t.Fatalf("messages[1].tool_calls = %#v, want []any len=1", secondMsg["tool_calls"])
+	}
+	toolCall, ok := toolCalls[0].(map[string]any)
+	if !ok {
+		t.Fatalf("tool_calls[0] = %#v, want object", toolCalls[0])
+	}
+	if _, ok := toolCall["vendor_data"].(map[string]any); !ok {
+		t.Fatalf("tool_calls[0].vendor_data = %#v, want object", toolCall["vendor_data"])
+	}
+	function, ok := toolCall["function"].(map[string]any)
+	if !ok {
+		t.Fatalf("tool_calls[0].function = %#v, want object", toolCall["function"])
+	}
+	if function["strict"] != true {
+		t.Fatalf("tool_calls[0].function.strict = %#v, want true", function["strict"])
+	}
+}
+
 func TestEmbeddingRequestJSON_PreservesUnknownFields(t *testing.T) {
 	payload := []byte(`{
 		"model":"text-embedding-3-small",

@@ -52,7 +52,8 @@ type ResponsesInputElement struct {
 	Arguments string `json:"arguments,omitempty"`
 
 	// Function call output fields (type="function_call_output") — CallID shared above
-	Output string `json:"output,omitempty"`
+	Output      string                     `json:"output,omitempty"`
+	ExtraFields map[string]json.RawMessage `json:"-" swaggerignore:"true"`
 }
 
 // ResponsesResponse represents the response from the Responses API.
