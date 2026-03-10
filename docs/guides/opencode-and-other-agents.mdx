@@ -1,9 +1,16 @@
 ---
-title: "Using GoModel with OpenCode and Other OpenAI-Compatible Agents"
-description: "Validated OpenCode setup for GoModel and implementation notes for other OpenAI-compatible coding agents such as Cline, Roo Code, and Kilo Code."
+title: "Using GoModel with OpenCode, Cline, Roo Code, and Kilo Code"
+description: "Step-by-step guide for OpenAI-compatible coding agents with GoModel."
 ---
 
-## Tested on March 10, 2026
+Most coding agents outside Claude Code are easiest to connect to GoModel
+through the standard OpenAI-compatible API.
+
+Flow:
+
+`OpenCode / Cline / Roo Code / Kilo Code -> GoModel -> your upstream providers`
+
+## Validated on March 10, 2026
 
 This guide combines:
 
@@ -11,28 +18,60 @@ This guide combines:
 - local validation with OpenCode `1.1.36`
 - official documentation for Cline, Roo Code, and Kilo Code
 
-## Short Answer
+Local validation confirmed:
 
-| Client | Status | Best target |
-| --- | --- | --- |
-| OpenCode | Validated locally | `http://localhost:8080/v1` |
-| Cline | Docs-backed, not locally executed here | `http://localhost:8080/v1` |
-| Roo Code | Docs-backed, not locally executed here | `http://localhost:8080/v1` |
-| Kilo Code | Docs-backed, not locally executed here | `http://localhost:8080/v1` or full endpoint URL |
+- OpenCode worked against `http://localhost:8080/v1`
+- the validated OpenCode request used `POST /v1/chat/completions`
+- GoModel dashboard audit logs showed the OpenCode traffic immediately
 
-The important pattern is:
+## Before you start
 
-- these clients are generally **OpenAI-compatible**, not provider-passthrough clients
-- that makes them a better fit for GoModel standard `/v1/*`
-- standard `/v1/*` is where GoModel usage tracking and audit logging worked in local testing
+- Choose a GoModel master key, for example `change-me`.
+- Start GoModel with at least one upstream provider key.
+- Use GoModel standard `http://localhost:8080/v1` unless your client
+  specifically requires a full endpoint URL.
 
-## OpenCode
+## 1. Run GoModel
 
-### What We Validated
+Start GoModel with a master key and at least one upstream provider:
 
-OpenCode worked against GoModel with a custom OpenAI-compatible provider configuration.
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OPENAI_API_KEY="sk-..." \
+  enterpilot/gomodel
+```
 
-This temporary `opencode.json` worked in local testing:
+<Note>
+  You can swap `OPENAI_API_KEY` for another provider key if that is what your
+  target models use. The important part is that GoModel has at least one
+  upstream provider configured.
+</Note>
+
+## 2. Confirm the OpenAI-compatible API with curl
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4.1-mini",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Reply with exactly ok"
+      }
+    ]
+  }'
+```
+
+If the gateway is wired correctly, the response will contain `ok`.
+
+## 3. Configure your coding agent
+
+### OpenCode
+
+Create an `opencode.json` file with a GoModel provider:
 
 ```json
 {
@@ -59,112 +98,91 @@ This temporary `opencode.json` worked in local testing:
 }
 ```
 
-Then:
+Then export the GoModel key:
 
 ```bash
-export OPENAI_API_KEY="$GOMODEL_MASTER_KEY"
-
-opencode run -m gomodel/gpt-4.1-mini \
-  'Reply with exactly ok and no punctuation.'
+export OPENAI_API_KEY=change-me
 ```
 
-returned `ok`.
+### Cline
 
-### What Endpoint OpenCode Used
-
-OpenCode hit:
-
-- `POST /v1/chat/completions`
-
-not `/v1/responses`.
-
-That is still a good fit for GoModel because local testing showed:
-
-- audit logging worked
-- usage tracking worked
-- usage summary incremented
-
-The validated OpenCode request also sent a very large system prompt and tool schema, which produced a much larger token count than the user prompt alone. That is exactly the kind of agent behavior GoModel usage tracking helps developers understand.
-
-## Cline
-
-Cline's official docs describe an **OpenAI Compatible** provider mode with these fields:
-
-- Base URL
-- API Key
-- Model ID
-
-For GoModel, the intended setup is:
+In Cline, choose:
 
 - API Provider: `OpenAI Compatible`
 - Base URL: `http://localhost:8080/v1`
-- API Key: `GOMODEL_MASTER_KEY`
-- Model: any GoModel-served OpenAI-compatible model
+- API Key: `change-me`
+- Model ID: a model returned by `GET /v1/models`
 
-Because Cline is OpenAI-compatible rather than Anthropic-native, it should target GoModel standard `/v1/*`, not passthrough.
+### Roo Code
 
-## Roo Code
-
-Roo Code also has an **OpenAI Compatible** provider mode with:
-
-- Base URL
-- API Key
-- Model ID
-
-For GoModel, the intended setup is the same:
+In Roo Code, choose:
 
 - API Provider: `OpenAI Compatible`
 - Base URL: `http://localhost:8080/v1`
-- API Key: `GOMODEL_MASTER_KEY`
-- Model: a GoModel-served model
+- API Key: `change-me`
+- Model ID: a model returned by `GET /v1/models`
 
-Important: Roo Code's docs explicitly require **native tool calling** for the selected model/provider path. If you use Roo Code, choose models and provider paths that support OpenAI-compatible tool calling well.
+<Note>
+  Roo Code requires native tool calling. Choose a model and provider path that
+  support OpenAI-compatible tool calling.
+</Note>
 
-## Kilo Code
+### Kilo Code
 
-Kilo Code's docs also support an **OpenAI Compatible** provider mode with:
+In Kilo Code, choose:
 
-- Base URL
-- API Key
-- Model ID
+- API Provider: `OpenAI Compatible`
+- Base URL: `http://localhost:8080/v1`
+- API Key: `change-me`
+- Model ID: a model returned by `GET /v1/models`
 
-Kilo Code adds one useful detail: it supports **full endpoint URLs** in the Base URL field.
-
-That means both of these are viable:
-
-```text
-http://localhost:8080/v1
-```
+Kilo Code also supports a full endpoint URL if you need it:
 
 ```text
 http://localhost:8080/v1/chat/completions
 ```
 
-In most cases, prefer the simpler base URL:
+Start with the simpler base URL first and only switch to a full endpoint URL if
+your setup requires it.
 
-```text
-http://localhost:8080/v1
-```
+## 4. Run a test prompt
 
-## Recommendation
-
-Use this decision rule:
-
-1. If the client supports OpenAI-compatible configuration, point it at GoModel standard `/v1/*`
-2. If the client specifically speaks Anthropic native wire format, use `/p/anthropic/...`
-3. If you care about usage tracking, cost tracking, audit logs, and guardrails, prefer standard `/v1/*`
-
-For OpenCode, Cline, Roo Code, and Kilo Code, standard `/v1/*` is the right first choice.
-
-## Admin Endpoints
-
-After testing these clients, inspect:
+For OpenCode, this validated command worked:
 
 ```bash
-curl -s http://localhost:8080/admin/api/v1/usage/summary
-curl -s 'http://localhost:8080/admin/api/v1/usage/log?days=1&limit=20&offset=0'
-curl -s 'http://localhost:8080/admin/api/v1/audit/log?days=1&limit=20&offset=0'
+opencode run -m gomodel/gpt-4.1-mini \
+  'Reply with exactly ok and no punctuation.'
 ```
+
+The validated result was:
+
+```text
+ok
+```
+
+For Cline, Roo Code, and Kilo Code, save the provider settings above and send a
+small prompt such as:
+
+```text
+Reply with exactly ok and no punctuation.
+```
+
+## 5. Check the traffic in GoModel
+
+Open the GoModel dashboard audit logs:
+
+[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+
+This is the quickest way to confirm that your coding agent is reaching GoModel
+and to inspect each interaction. From the same dashboard, you can keep
+following your GoModel traffic and usage.
+
+## Current status
+
+- OpenCode was validated locally and worked against standard `http://localhost:8080/v1`
+- Cline, Roo Code, and Kilo Code follow the same OpenAI-compatible setup model
+- Roo Code needs native tool calling support from the selected model
+- Kilo Code can use either a base URL or a full endpoint URL
 
 ## References
 
