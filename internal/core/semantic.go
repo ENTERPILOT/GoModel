@@ -52,13 +52,13 @@ func BuildSemanticEnvelope(frame *IngressFrame) *SemanticEnvelope {
 	env.Operation = desc.Operation
 
 	if env.Operation == "files" {
-		env.FileRequest = buildFileRequestSemantic(frame)
+		env.FileRequest = BuildFileRequestSemanticFromTransport(frame.Method, frame.Path, frame.RouteParams, frame.QueryParams)
 		if env.FileRequest != nil && env.SelectorHints.Provider == "" {
 			env.SelectorHints.Provider = env.FileRequest.Provider
 		}
 	}
 	if env.Operation == "batches" {
-		env.BatchMetadata = buildBatchRequestSemantic(frame)
+		env.BatchMetadata = BuildBatchRequestSemanticFromTransport(frame.Method, frame.Path, frame.RouteParams, frame.QueryParams)
 	}
 
 	if env.Dialect == "provider_passthrough" {
@@ -107,18 +107,15 @@ func BuildSemanticEnvelope(frame *IngressFrame) *SemanticEnvelope {
 	return env
 }
 
-func buildFileRequestSemantic(frame *IngressFrame) *FileRequestSemantic {
-	if frame == nil {
-		return nil
-	}
-
+// BuildFileRequestSemanticFromTransport derives sparse file semantics from transport metadata.
+func BuildFileRequestSemanticFromTransport(method, path string, routeParams map[string]string, queryParams map[string][]string) *FileRequestSemantic {
 	req := &FileRequestSemantic{
-		Action:   fileActionFromIngress(frame.Method, frame.Path),
-		Provider: firstIngressValue(frame.QueryParams, "provider"),
-		Purpose:  firstIngressValue(frame.QueryParams, "purpose"),
-		After:    firstIngressValue(frame.QueryParams, "after"),
-		LimitRaw: firstIngressValue(frame.QueryParams, "limit"),
-		FileID:   fileIDFromIngress(frame),
+		Action:   fileActionFromIngress(method, path),
+		Provider: firstTransportValue(queryParams, "provider"),
+		Purpose:  firstTransportValue(queryParams, "purpose"),
+		After:    firstTransportValue(queryParams, "after"),
+		LimitRaw: firstTransportValue(queryParams, "limit"),
+		FileID:   fileIDFromTransport(path, routeParams),
 	}
 	if req.LimitRaw != "" {
 		if parsed, err := strconv.Atoi(req.LimitRaw); err == nil {
@@ -132,16 +129,13 @@ func buildFileRequestSemantic(frame *IngressFrame) *FileRequestSemantic {
 	return req
 }
 
-func buildBatchRequestSemantic(frame *IngressFrame) *BatchRequestSemantic {
-	if frame == nil {
-		return nil
-	}
-
+// BuildBatchRequestSemanticFromTransport derives sparse batch route semantics from transport metadata.
+func BuildBatchRequestSemanticFromTransport(method, path string, routeParams map[string]string, queryParams map[string][]string) *BatchRequestSemantic {
 	req := &BatchRequestSemantic{
-		Action:   batchActionFromIngress(frame.Method, frame.Path),
-		BatchID:  batchIDFromIngress(frame),
-		After:    firstIngressValue(frame.QueryParams, "after"),
-		LimitRaw: firstIngressValue(frame.QueryParams, "limit"),
+		Action:   batchActionFromIngress(method, path),
+		BatchID:  batchIDFromTransport(path, routeParams),
+		After:    firstTransportValue(queryParams, "after"),
+		LimitRaw: firstTransportValue(queryParams, "limit"),
 	}
 	if req.LimitRaw != "" {
 		if parsed, err := strconv.Atoi(req.LimitRaw); err == nil {
@@ -172,15 +166,12 @@ func fileActionFromIngress(method, path string) string {
 	}
 }
 
-func fileIDFromIngress(frame *IngressFrame) string {
-	if frame == nil {
-		return ""
-	}
-	if id := strings.TrimSpace(frame.RouteParams["id"]); id != "" {
+func fileIDFromTransport(path string, routeParams map[string]string) string {
+	if id := strings.TrimSpace(routeParams["id"]); id != "" {
 		return id
 	}
 
-	trimmed := strings.Trim(strings.TrimSpace(frame.Path), "/")
+	trimmed := strings.Trim(strings.TrimSpace(path), "/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) < 3 || parts[0] != "v1" || parts[1] != "files" {
 		return ""
@@ -205,15 +196,12 @@ func batchActionFromIngress(method, path string) string {
 	}
 }
 
-func batchIDFromIngress(frame *IngressFrame) string {
-	if frame == nil {
-		return ""
-	}
-	if id := strings.TrimSpace(frame.RouteParams["id"]); id != "" {
+func batchIDFromTransport(path string, routeParams map[string]string) string {
+	if id := strings.TrimSpace(routeParams["id"]); id != "" {
 		return id
 	}
 
-	trimmed := strings.Trim(strings.TrimSpace(frame.Path), "/")
+	trimmed := strings.Trim(strings.TrimSpace(path), "/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) < 3 || parts[0] != "v1" || parts[1] != "batches" {
 		return ""
@@ -221,7 +209,7 @@ func batchIDFromIngress(frame *IngressFrame) string {
 	return strings.TrimSpace(parts[2])
 }
 
-func firstIngressValue(values map[string][]string, key string) string {
+func firstTransportValue(values map[string][]string, key string) string {
 	if len(values) == 0 {
 		return ""
 	}
