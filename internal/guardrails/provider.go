@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	neturl "net/url"
 	"strings"
 
 	"gomodel/internal/core"
@@ -122,22 +121,6 @@ func (g *GuardedProvider) passthroughRouter() (core.PassthroughRoutableProvider,
 	return pp, nil
 }
 
-func (g *GuardedProvider) normalizeBatchEndpoint(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ""
-	}
-	if parsed, err := neturl.Parse(trimmed); err == nil && parsed.Path != "" {
-		trimmed = parsed.Path
-	}
-	trimmed = strings.TrimSpace(trimmed)
-	trimmed = strings.TrimRight(trimmed, "/")
-	if trimmed == "" {
-		return "/"
-	}
-	return trimmed
-}
-
 func (g *GuardedProvider) processBatchRequest(ctx context.Context, req *core.BatchRequest) (*core.BatchRequest, error) {
 	if req == nil || len(req.Requests) == 0 {
 		return req, nil
@@ -162,7 +145,7 @@ func (g *GuardedProvider) processBatchRequest(ctx context.Context, req *core.Bat
 			endpoint = strings.TrimSpace(req.Endpoint)
 		}
 
-		switch g.normalizeBatchEndpoint(endpoint) {
+		switch core.NormalizeOperationPath(endpoint) {
 		case "/v1/chat/completions":
 			var chatReq core.ChatRequest
 			if err := json.Unmarshal(item.Body, &chatReq); err != nil {

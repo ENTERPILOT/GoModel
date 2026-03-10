@@ -173,6 +173,62 @@ func TestBatchRequestFromSemanticEnvelope_CachesCanonicalRequest(t *testing.T) {
 	assert.True(t, env.JSONBodyParsed)
 }
 
+func TestBatchRequestMetadataFromSemanticEnvelope_CachesListMetadata(t *testing.T) {
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/batches?after=batch_prev&limit=5", nil)
+	frame := &core.IngressFrame{
+		Method: http.MethodGet,
+		Path:   "/v1/batches",
+		QueryParams: map[string][]string{
+			"after": {"batch_prev"},
+			"limit": {"5"},
+		},
+	}
+	ctx := core.WithIngressFrame(req.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	req = req.WithContext(ctx)
+
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	first, err := batchRequestMetadataFromSemanticEnvelope(c)
+	require.NoError(t, err)
+	second, err := batchRequestMetadataFromSemanticEnvelope(c)
+	require.NoError(t, err)
+
+	require.Same(t, first, second)
+	assert.Equal(t, core.BatchActionList, first.Action)
+	assert.Equal(t, "batch_prev", first.After)
+	assert.True(t, first.HasLimit)
+	assert.Equal(t, 5, first.Limit)
+
+	env := core.GetSemanticEnvelope(c.Request().Context())
+	require.NotNil(t, env)
+	require.Same(t, first, env.BatchMetadata)
+}
+
+func TestFileRequestFromSemanticEnvelope_InvalidLimitFromIngressReturnsError(t *testing.T) {
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/files?limit=bad", nil)
+	frame := &core.IngressFrame{
+		Method: http.MethodGet,
+		Path:   "/v1/files",
+		QueryParams: map[string][]string{
+			"limit": {"bad"},
+		},
+	}
+	ctx := core.WithIngressFrame(req.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	req = req.WithContext(ctx)
+
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	_, err := fileRequestFromSemanticEnvelope(c)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid limit parameter")
+}
+
 func TestFileRequestFromSemanticEnvelope_EnrichesCreateMetadata(t *testing.T) {
 	e := echo.New()
 

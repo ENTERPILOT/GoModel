@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,16 @@ import (
 
 	"gomodel/internal/core"
 )
+
+type explodingValidationReadCloser struct{}
+
+func (explodingValidationReadCloser) Read([]byte) (int, error) {
+	return 0, errors.New("live request body should not be read")
+}
+
+func (explodingValidationReadCloser) Close() error {
+	return nil
+}
 
 func TestModelValidation(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini", "text-embedding-3-small"}}
@@ -280,6 +291,41 @@ func TestModelValidation_BodyRewound(t *testing.T) {
 
 	assert.Equal(t, "gpt-4o-mini", boundReq.Model)
 	assert.Len(t, boundReq.Messages, 1)
+}
+
+func TestModelValidation_DoesNotReadLiveBodyWhenIngressFrameExists(t *testing.T) {
+	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
+
+	e := echo.New()
+	handlerCalled := false
+
+	middleware := ModelValidation(provider)
+	handler := middleware(func(c *echo.Context) error {
+		handlerCalled = true
+		return c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = explodingValidationReadCloser{}
+
+	frame := &core.IngressFrame{
+		Method:          http.MethodPost,
+		Path:            "/v1/chat/completions",
+		ContentType:     "application/json",
+		RawBodyTooLarge: true,
+	}
+	ctx := core.WithIngressFrame(req.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.True(t, handlerCalled)
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestModelCtx_ReturnsContextAndProviderType(t *testing.T) {

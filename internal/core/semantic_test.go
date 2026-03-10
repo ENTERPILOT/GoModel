@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
 
 func TestBuildSemanticEnvelope_OpenAICompat(t *testing.T) {
 	frame := &IngressFrame{
@@ -34,7 +37,7 @@ func TestBuildSemanticEnvelope_OpenAICompat(t *testing.T) {
 	if env.SelectorHints.Provider != "openai" {
 		t.Fatalf("SelectorHints.Provider = %q, want openai", env.SelectorHints.Provider)
 	}
-	if env.ChatRequest != nil || env.ResponsesRequest != nil || env.EmbeddingRequest != nil || env.BatchRequest != nil || env.FileRequest != nil {
+	if env.ChatRequest != nil || env.ResponsesRequest != nil || env.EmbeddingRequest != nil || env.BatchRequest != nil || env.BatchMetadata != nil || env.FileRequest != nil {
 		t.Fatalf("canonical request payloads should be nil, got %+v", env)
 	}
 }
@@ -92,7 +95,7 @@ func TestBuildSemanticEnvelope_PassthroughRouteParams(t *testing.T) {
 	if env.SelectorHints.Model != "gpt-5-mini" {
 		t.Fatalf("SelectorHints.Model = %q, want gpt-5-mini", env.SelectorHints.Model)
 	}
-	if env.ChatRequest != nil || env.ResponsesRequest != nil || env.EmbeddingRequest != nil || env.BatchRequest != nil || env.FileRequest != nil {
+	if env.ChatRequest != nil || env.ResponsesRequest != nil || env.EmbeddingRequest != nil || env.BatchRequest != nil || env.BatchMetadata != nil || env.FileRequest != nil {
 		t.Fatalf("canonical request payloads should be nil, got %+v", env)
 	}
 }
@@ -167,5 +170,61 @@ func TestBuildSemanticEnvelope_FilesMetadata(t *testing.T) {
 	}
 	if env.SelectorHints.Provider != "openai" {
 		t.Fatalf("SelectorHints.Provider = %q, want openai", env.SelectorHints.Provider)
+	}
+}
+
+func TestBuildSemanticEnvelope_BatchesListMetadata(t *testing.T) {
+	frame := &IngressFrame{
+		Method: http.MethodGet,
+		Path:   "/v1/batches",
+		QueryParams: map[string][]string{
+			"after": {"batch_prev"},
+			"limit": {"5"},
+		},
+	}
+
+	env := BuildSemanticEnvelope(frame)
+	if env == nil {
+		t.Fatal("BuildSemanticEnvelope() = nil")
+	}
+	if env.Operation != "batches" {
+		t.Fatalf("Operation = %q, want batches", env.Operation)
+	}
+	if env.BatchMetadata == nil {
+		t.Fatal("BatchMetadata = nil")
+	}
+	if env.BatchMetadata.Action != BatchActionList {
+		t.Fatalf("BatchMetadata.Action = %q, want %q", env.BatchMetadata.Action, BatchActionList)
+	}
+	if env.BatchMetadata.After != "batch_prev" {
+		t.Fatalf("BatchMetadata.After = %q, want batch_prev", env.BatchMetadata.After)
+	}
+	if !env.BatchMetadata.HasLimit || env.BatchMetadata.Limit != 5 {
+		t.Fatalf("BatchMetadata limit = %d/%v, want 5/true", env.BatchMetadata.Limit, env.BatchMetadata.HasLimit)
+	}
+}
+
+func TestBuildSemanticEnvelope_BatchResultsMetadata(t *testing.T) {
+	frame := &IngressFrame{
+		Method:      http.MethodGet,
+		Path:        "/v1/batches/batch_123/results",
+		RouteParams: map[string]string{"id": "batch_123"},
+	}
+
+	env := BuildSemanticEnvelope(frame)
+	if env == nil {
+		t.Fatal("BuildSemanticEnvelope() = nil")
+	}
+	if env.Operation != "batches" {
+		t.Fatalf("Operation = %q, want batches", env.Operation)
+	}
+	if env.BatchMetadata == nil {
+		t.Fatal("BatchMetadata = nil")
+	}
+	if env.BatchMetadata.Action != BatchActionResults {
+		t.Fatalf("BatchMetadata.Action = %q, want %q", env.BatchMetadata.Action, BatchActionResults)
+	}
+	if env.BatchMetadata.BatchID != "batch_123" {
+		t.Fatalf("BatchMetadata.BatchID = %q, want batch_123", env.BatchMetadata.BatchID)
 	}
 }

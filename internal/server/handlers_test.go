@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
@@ -959,6 +961,106 @@ func TestBatches_UsesIngressFrameForDecoding(t *testing.T) {
 	}
 }
 
+func TestGetBatch_UsesSemanticEnvelopeRouteMetadata(t *testing.T) {
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini"},
+		batchCreateResponse: &core.BatchResponse{
+			ID:               "provider-batch-123",
+			Object:           "batch",
+			Status:           "in_progress",
+			Endpoint:         "/v1/chat/completions",
+			CompletionWindow: "24h",
+			CreatedAt:        1234567890,
+			RequestCounts:    core.BatchRequestCounts{Total: 1},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+
+	createBody := `{
+		"endpoint":"/v1/chat/completions",
+		"requests":[{"custom_id":"chat-1","method":"POST","body":{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}}]
+	}`
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	createCtx := e.NewContext(createReq, createRec)
+	require.NoError(t, handler.Batches(createCtx))
+
+	var created core.BatchResponse
+	require.NoError(t, json.Unmarshal(createRec.Body.Bytes(), &created))
+
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/batches/wrong-id", nil)
+	frame := &core.IngressFrame{
+		Method:      http.MethodGet,
+		Path:        "/v1/batches/" + created.ID,
+		RouteParams: map[string]string{"id": created.ID},
+	}
+	ctx := core.WithIngressFrame(getReq.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	getReq = getReq.WithContext(ctx)
+
+	getRec := httptest.NewRecorder()
+	getCtx := e.NewContext(getReq, getRec)
+	getCtx.SetPath("/v1/batches/:id")
+	setPathParam(getCtx, "id", "wrong-id")
+
+	require.NoError(t, handler.GetBatch(getCtx))
+	require.Equal(t, http.StatusOK, getRec.Code)
+	assert.Contains(t, getRec.Body.String(), created.ID)
+}
+
+func TestListBatches_UsesSemanticEnvelopeQueryMetadata(t *testing.T) {
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini"},
+		batchCreateResponse: &core.BatchResponse{
+			ID:               "provider-batch-123",
+			Object:           "batch",
+			Status:           "in_progress",
+			Endpoint:         "/v1/chat/completions",
+			CompletionWindow: "24h",
+			CreatedAt:        1234567890,
+			RequestCounts:    core.BatchRequestCounts{Total: 1},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+
+	createBody := `{
+		"endpoint":"/v1/chat/completions",
+		"requests":[{"custom_id":"chat-1","method":"POST","body":{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}}]
+	}`
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	createCtx := e.NewContext(createReq, createRec)
+	require.NoError(t, handler.Batches(createCtx))
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/batches?limit=bad", nil)
+	frame := &core.IngressFrame{
+		Method: http.MethodGet,
+		Path:   "/v1/batches",
+		QueryParams: map[string][]string{
+			"limit": {"1"},
+		},
+	}
+	ctx := core.WithIngressFrame(listReq.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	listReq = listReq.WithContext(ctx)
+
+	listRec := httptest.NewRecorder()
+	listCtx := e.NewContext(listReq, listRec)
+
+	require.NoError(t, handler.ListBatches(listCtx))
+	require.Equal(t, http.StatusOK, listRec.Code)
+
+	var listResp core.BatchListResponse
+	require.NoError(t, json.Unmarshal(listRec.Body.Bytes(), &listResp))
+	require.Len(t, listResp.Data, 1)
+}
+
 func TestChatCompletionStreaming(t *testing.T) {
 	streamData := `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
 
@@ -1799,6 +1901,61 @@ func TestBatches(t *testing.T) {
 	}
 	if resp.ProviderBatchID != "provider-batch-123" {
 		t.Errorf("ProviderBatchID = %q, want %q", resp.ProviderBatchID, "provider-batch-123")
+	}
+}
+
+func TestBatches_FullURLResponsesItemUsesSharedSelectorExtraction(t *testing.T) {
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini"},
+		providerTypes: map[string]string{
+			"openai/gpt-4o-mini": "openai",
+		},
+		batchCreateResponse: &core.BatchResponse{
+			ID:            "provider-batch-234",
+			Object:        "batch",
+			Status:        "in_progress",
+			Endpoint:      "/v1/responses",
+			CreatedAt:     1234567890,
+			RequestCounts: core.BatchRequestCounts{Total: 1},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+
+	reqBody := `{
+	  "completion_window":"24h",
+	  "requests":[
+	    {
+	      "custom_id":"responses-1",
+	      "method":"POST",
+	      "url":"https://provider.example/v1/responses/",
+	      "body":{"model":"gpt-4o-mini","provider":"openai","input":"Hi"}
+	    }
+	  ]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler.Batches(c)
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if mock.capturedBatchReq == nil {
+		t.Fatal("capturedBatchReq = nil")
+	}
+
+	var resp core.BatchResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Provider != "openai" {
+		t.Fatalf("Provider = %q, want openai", resp.Provider)
 	}
 }
 

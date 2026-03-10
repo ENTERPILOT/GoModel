@@ -21,6 +21,30 @@ type BatchRequest struct {
 	ExtraFields      map[string]json.RawMessage `json:"-" swaggerignore:"true"`
 }
 
+const (
+	// BatchActionCreate represents POST /v1/batches.
+	BatchActionCreate = "create"
+	// BatchActionList represents GET /v1/batches.
+	BatchActionList = "list"
+	// BatchActionGet represents GET /v1/batches/{id}.
+	BatchActionGet = "get"
+	// BatchActionCancel represents POST /v1/batches/{id}/cancel.
+	BatchActionCancel = "cancel"
+	// BatchActionResults represents GET /v1/batches/{id}/results.
+	BatchActionResults = "results"
+)
+
+// BatchRequestSemantic is the sparse canonical metadata the gateway can derive for /v1/batches* routes.
+// The full create payload remains in BatchRequest when the gateway lazily decodes JSON bodies.
+type BatchRequestSemantic struct {
+	Action   string
+	BatchID  string
+	After    string
+	LimitRaw string
+	Limit    int
+	HasLimit bool
+}
+
 // BatchRequestItem represents one sub-request in an inline batch.
 type BatchRequestItem struct {
 	CustomID    string                     `json:"custom_id,omitempty"`

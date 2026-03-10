@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -1007,7 +1006,7 @@ func (h *Handler) Batches(c *echo.Context) error {
 	resp.ID = "batch_" + uuid.NewString()
 	resp.Object = "batch"
 	if resp.Endpoint == "" {
-		resp.Endpoint = normalizeBatchEndpoint(req.Endpoint)
+		resp.Endpoint = core.NormalizeOperationPath(req.Endpoint)
 	}
 	if resp.CompletionWindow == "" {
 		resp.CompletionWindow = req.CompletionWindow
@@ -1055,10 +1054,11 @@ func determineBatchProviderType(provider core.RoutableProvider, req *core.BatchR
 
 	var providerType string
 	for i, item := range req.Requests {
-		model, err := extractBatchItemModel(resolveBatchEndpoint(req.Endpoint, item.URL), item.Method, item.Body)
+		selector, err := core.BatchItemModelSelector(req.Endpoint, item)
 		if err != nil {
 			return "", core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
 		}
+		model := selector.QualifiedModel()
 		if model == "" {
 			return "", core.NewInvalidRequestError(fmt.Sprintf("batch item %d: model is required", i), nil)
 		}
@@ -1079,58 +1079,6 @@ func determineBatchProviderType(provider core.RoutableProvider, req *core.BatchR
 		return "", core.NewInvalidRequestError("unable to resolve provider for batch", nil)
 	}
 	return providerType, nil
-}
-
-func extractBatchItemModel(endpoint, method string, body json.RawMessage) (string, error) {
-	normalized := normalizeBatchEndpoint(endpoint)
-	if normalized == "" {
-		return "", fmt.Errorf("url is required")
-	}
-	normalizedMethod := strings.ToUpper(strings.TrimSpace(method))
-	if normalizedMethod == "" {
-		normalizedMethod = http.MethodPost
-	}
-	if normalizedMethod != http.MethodPost {
-		return "", fmt.Errorf("only POST is supported")
-	}
-	if len(body) == 0 {
-		return "", fmt.Errorf("body is required")
-	}
-
-	switch normalized {
-	case "/v1/chat/completions":
-		var req core.ChatRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			return "", fmt.Errorf("invalid chat request body: %w", err)
-		}
-		selector, err := core.ParseModelSelector(req.Model, req.Provider)
-		if err != nil {
-			return "", err
-		}
-		return selector.QualifiedModel(), nil
-	case "/v1/responses":
-		var req core.ResponsesRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			return "", fmt.Errorf("invalid responses request body: %w", err)
-		}
-		selector, err := core.ParseModelSelector(req.Model, req.Provider)
-		if err != nil {
-			return "", err
-		}
-		return selector.QualifiedModel(), nil
-	case "/v1/embeddings":
-		var req core.EmbeddingRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			return "", fmt.Errorf("invalid embeddings request body: %w", err)
-		}
-		selector, err := core.ParseModelSelector(req.Model, req.Provider)
-		if err != nil {
-			return "", err
-		}
-		return selector.QualifiedModel(), nil
-	default:
-		return "", fmt.Errorf("unsupported batch item url: %s", normalized)
-	}
 }
 
 func (h *Handler) loadBatch(c *echo.Context, id string) (*core.BatchResponse, error) {
@@ -1160,7 +1108,14 @@ func (h *Handler) loadBatch(c *echo.Context, id string) (*core.BatchResponse, er
 // @Failure      502  {object}  core.GatewayError
 // @Router       /v1/batches/{id} [get]
 func (h *Handler) GetBatch(c *echo.Context) error {
-	id := strings.TrimSpace(c.Param("id"))
+	batchMeta, err := batchRequestMetadataFromSemanticEnvelope(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+	id := ""
+	if batchMeta != nil {
+		id = strings.TrimSpace(batchMeta.BatchID)
+	}
 	if id == "" {
 		return handleError(c, core.NewInvalidRequestError("batch id is required", nil))
 	}
@@ -1207,16 +1162,20 @@ func (h *Handler) GetBatch(c *echo.Context) error {
 // @Failure      500    {object}  core.GatewayError
 // @Router       /v1/batches [get]
 func (h *Handler) ListBatches(c *echo.Context) error {
-	limit := 20
-	if v := strings.TrimSpace(c.QueryParam("limit")); v != "" {
-		parsed, err := strconv.Atoi(v)
-		if err != nil {
-			return handleError(c, core.NewInvalidRequestError("invalid limit parameter", err))
-		}
-		limit = parsed
+	batchMeta, err := batchRequestMetadataFromSemanticEnvelope(c)
+	if err != nil {
+		return handleError(c, err)
 	}
 
-	after := strings.TrimSpace(c.QueryParam("after"))
+	limit := 20
+	if batchMeta != nil && batchMeta.HasLimit {
+		limit = batchMeta.Limit
+	}
+
+	after := ""
+	if batchMeta != nil {
+		after = strings.TrimSpace(batchMeta.After)
+	}
 	normalizedLimit := limit
 	if normalizedLimit <= 0 {
 		normalizedLimit = 20
@@ -1276,7 +1235,14 @@ func (h *Handler) ListBatches(c *echo.Context) error {
 // @Failure      502  {object}  core.GatewayError
 // @Router       /v1/batches/{id}/cancel [post]
 func (h *Handler) CancelBatch(c *echo.Context) error {
-	id := strings.TrimSpace(c.Param("id"))
+	batchMeta, err := batchRequestMetadataFromSemanticEnvelope(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+	id := ""
+	if batchMeta != nil {
+		id = strings.TrimSpace(batchMeta.BatchID)
+	}
 	if id == "" {
 		return handleError(c, core.NewInvalidRequestError("batch id is required", nil))
 	}
@@ -1325,7 +1291,14 @@ func (h *Handler) CancelBatch(c *echo.Context) error {
 // @Failure      502  {object}  core.GatewayError
 // @Router       /v1/batches/{id}/results [get]
 func (h *Handler) BatchResults(c *echo.Context) error {
-	id := strings.TrimSpace(c.Param("id"))
+	batchMeta, err := batchRequestMetadataFromSemanticEnvelope(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+	id := ""
+	if batchMeta != nil {
+		id = strings.TrimSpace(batchMeta.BatchID)
+	}
 	if id == "" {
 		return handleError(c, core.NewInvalidRequestError("batch id is required", nil))
 	}
@@ -1394,32 +1367,6 @@ func (h *Handler) BatchResults(c *echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, result)
-}
-
-func resolveBatchEndpoint(topLevel, itemURL string) string {
-	if strings.TrimSpace(itemURL) != "" {
-		return itemURL
-	}
-	return topLevel
-}
-
-func normalizeBatchEndpoint(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ""
-	}
-	if parsed, err := url.Parse(trimmed); err == nil && parsed.Path != "" {
-		trimmed = parsed.Path
-	}
-	trimmed = strings.TrimSpace(trimmed)
-	if trimmed == "" {
-		return ""
-	}
-	trimmed = strings.TrimRight(trimmed, "/")
-	if trimmed == "" {
-		return "/"
-	}
-	return trimmed
 }
 
 func (h *Handler) logBatchUsageFromBatchResults(stored *core.BatchResponse, result *core.BatchResultsResponse, fallbackRequestID string) bool {

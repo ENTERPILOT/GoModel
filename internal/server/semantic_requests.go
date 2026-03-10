@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -116,11 +117,59 @@ func batchRequestFromSemanticEnvelope(c *echo.Context) (*core.BatchRequest, erro
 	)
 }
 
+func batchRequestMetadataFromSemanticEnvelope(c *echo.Context) (*core.BatchRequestSemantic, error) {
+	env := ensureSemanticEnvelope(c)
+
+	var req *core.BatchRequestSemantic
+	fromEnvelope := env != nil && env.BatchMetadata != nil
+	if fromEnvelope {
+		req = env.BatchMetadata
+	} else {
+		req = &core.BatchRequestSemantic{}
+	}
+
+	if req.Action == "" {
+		req.Action = batchActionFromRequest(c.Request().Method, c.Request().URL.Path)
+	}
+
+	switch req.Action {
+	case core.BatchActionList:
+		if req.After == "" && !fromEnvelope {
+			req.After = strings.TrimSpace(c.QueryParam("after"))
+		}
+		if !req.HasLimit {
+			raw := strings.TrimSpace(req.LimitRaw)
+			if raw == "" && !fromEnvelope {
+				raw = strings.TrimSpace(c.QueryParam("limit"))
+			}
+			if raw != "" {
+				parsed, err := strconv.Atoi(raw)
+				if err != nil {
+					return nil, core.NewInvalidRequestError("invalid limit parameter", err)
+				}
+				req.Limit = parsed
+				req.HasLimit = true
+				req.LimitRaw = raw
+			}
+		}
+	default:
+		if req.BatchID == "" && !fromEnvelope {
+			req.BatchID = strings.TrimSpace(c.Param("id"))
+		}
+	}
+
+	if env != nil {
+		env.BatchMetadata = req
+	}
+	return req, nil
+}
+
 func fileRequestFromSemanticEnvelope(c *echo.Context) (*core.FileRequestSemantic, error) {
 	env := ensureSemanticEnvelope(c)
 
 	var req *core.FileRequestSemantic
-	if env != nil && env.FileRequest != nil {
+	fromEnvelope := env != nil && env.FileRequest != nil
+	if fromEnvelope {
 		req = env.FileRequest
 	} else {
 		req = &core.FileRequestSemantic{}
@@ -130,7 +179,7 @@ func fileRequestFromSemanticEnvelope(c *echo.Context) (*core.FileRequestSemantic
 		req.Action = fileActionFromRequest(c.Request().Method, c.Request().URL.Path)
 	}
 
-	if req.Provider == "" {
+	if req.Provider == "" && !fromEnvelope {
 		if provider := strings.TrimSpace(c.QueryParam("provider")); provider != "" {
 			req.Provider = provider
 		}
@@ -151,14 +200,17 @@ func fileRequestFromSemanticEnvelope(c *echo.Context) (*core.FileRequestSemantic
 			}
 		}
 	case core.FileActionList:
-		if req.Purpose == "" {
+		if req.Purpose == "" && !fromEnvelope {
 			req.Purpose = strings.TrimSpace(c.QueryParam("purpose"))
 		}
-		if req.After == "" {
+		if req.After == "" && !fromEnvelope {
 			req.After = strings.TrimSpace(c.QueryParam("after"))
 		}
 		if !req.HasLimit {
-			raw := strings.TrimSpace(c.QueryParam("limit"))
+			raw := strings.TrimSpace(req.LimitRaw)
+			if raw == "" && !fromEnvelope {
+				raw = strings.TrimSpace(c.QueryParam("limit"))
+			}
 			if raw != "" {
 				parsed, err := strconv.Atoi(raw)
 				if err != nil {
@@ -170,7 +222,7 @@ func fileRequestFromSemanticEnvelope(c *echo.Context) (*core.FileRequestSemantic
 			}
 		}
 	default:
-		if req.FileID == "" {
+		if req.FileID == "" && !fromEnvelope {
 			req.FileID = strings.TrimSpace(c.Param("id"))
 		}
 	}
@@ -182,6 +234,23 @@ func fileRequestFromSemanticEnvelope(c *echo.Context) (*core.FileRequestSemantic
 		}
 	}
 	return req, nil
+}
+
+func batchActionFromRequest(method, path string) string {
+	switch {
+	case path == "/v1/batches" && method == http.MethodPost:
+		return core.BatchActionCreate
+	case path == "/v1/batches" && method == http.MethodGet:
+		return core.BatchActionList
+	case strings.HasSuffix(path, "/results") && strings.HasPrefix(path, "/v1/batches/") && method == http.MethodGet:
+		return core.BatchActionResults
+	case strings.HasSuffix(path, "/cancel") && strings.HasPrefix(path, "/v1/batches/") && method == http.MethodPost:
+		return core.BatchActionCancel
+	case strings.HasPrefix(path, "/v1/batches/") && method == http.MethodGet:
+		return core.BatchActionGet
+	default:
+		return ""
+	}
 }
 
 func fileActionFromRequest(method, path string) string {

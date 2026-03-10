@@ -27,6 +27,7 @@ type SemanticEnvelope struct {
 	ResponsesRequest *ResponsesRequest
 	EmbeddingRequest *EmbeddingRequest
 	BatchRequest     *BatchRequest
+	BatchMetadata    *BatchRequestSemantic
 	FileRequest      *FileRequestSemantic
 }
 
@@ -55,6 +56,9 @@ func BuildSemanticEnvelope(frame *IngressFrame) *SemanticEnvelope {
 		if env.FileRequest != nil && env.SelectorHints.Provider == "" {
 			env.SelectorHints.Provider = env.FileRequest.Provider
 		}
+	}
+	if env.Operation == "batches" {
+		env.BatchMetadata = buildBatchRequestSemantic(frame)
 	}
 
 	if env.Dialect == "provider_passthrough" {
@@ -128,6 +132,29 @@ func buildFileRequestSemantic(frame *IngressFrame) *FileRequestSemantic {
 	return req
 }
 
+func buildBatchRequestSemantic(frame *IngressFrame) *BatchRequestSemantic {
+	if frame == nil {
+		return nil
+	}
+
+	req := &BatchRequestSemantic{
+		Action:   batchActionFromIngress(frame.Method, frame.Path),
+		BatchID:  batchIDFromIngress(frame),
+		After:    firstIngressValue(frame.QueryParams, "after"),
+		LimitRaw: firstIngressValue(frame.QueryParams, "limit"),
+	}
+	if req.LimitRaw != "" {
+		if parsed, err := strconv.Atoi(req.LimitRaw); err == nil {
+			req.Limit = parsed
+			req.HasLimit = true
+		}
+	}
+	if req.Action == "" && req.BatchID == "" && req.After == "" && req.LimitRaw == "" {
+		return nil
+	}
+	return req
+}
+
 func fileActionFromIngress(method, path string) string {
 	switch {
 	case path == "/v1/files" && method == http.MethodPost:
@@ -156,6 +183,39 @@ func fileIDFromIngress(frame *IngressFrame) string {
 	trimmed := strings.Trim(strings.TrimSpace(frame.Path), "/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) < 3 || parts[0] != "v1" || parts[1] != "files" {
+		return ""
+	}
+	return strings.TrimSpace(parts[2])
+}
+
+func batchActionFromIngress(method, path string) string {
+	switch {
+	case path == "/v1/batches" && method == http.MethodPost:
+		return BatchActionCreate
+	case path == "/v1/batches" && method == http.MethodGet:
+		return BatchActionList
+	case strings.HasSuffix(path, "/results") && strings.HasPrefix(path, "/v1/batches/") && method == http.MethodGet:
+		return BatchActionResults
+	case strings.HasSuffix(path, "/cancel") && strings.HasPrefix(path, "/v1/batches/") && method == http.MethodPost:
+		return BatchActionCancel
+	case strings.HasPrefix(path, "/v1/batches/") && method == http.MethodGet:
+		return BatchActionGet
+	default:
+		return ""
+	}
+}
+
+func batchIDFromIngress(frame *IngressFrame) string {
+	if frame == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(frame.RouteParams["id"]); id != "" {
+		return id
+	}
+
+	trimmed := strings.Trim(strings.TrimSpace(frame.Path), "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) < 3 || parts[0] != "v1" || parts[1] != "batches" {
 		return ""
 	}
 	return strings.TrimSpace(parts[2])

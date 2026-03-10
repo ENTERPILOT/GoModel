@@ -70,7 +70,8 @@ func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
 }
 
 func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed bool, err error) {
-	if env := core.GetSemanticEnvelope(c.Request().Context()); env != nil {
+	ctx := c.Request().Context()
+	if env := core.GetSemanticEnvelope(ctx); env != nil {
 		switch {
 		case env.ChatRequest != nil:
 			return env.ChatRequest.Model, env.ChatRequest.Provider, true, nil
@@ -82,6 +83,9 @@ func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed
 		if env.JSONBodyParsed || env.SelectorHints.Model != "" || env.SelectorHints.Provider != "" {
 			return env.SelectorHints.Model, env.SelectorHints.Provider, true, nil
 		}
+	}
+	if frame := core.GetIngressFrame(ctx); frame != nil {
+		return "", "", false, nil
 	}
 
 	bodyBytes, err := requestBodyBytes(c)
