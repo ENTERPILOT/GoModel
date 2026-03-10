@@ -228,67 +228,62 @@ func patchChatMessagesJSON(originalRaw json.RawMessage, original, modified []cor
 	if err != nil {
 		return nil, err
 	}
+	if len(originalRawItems) != len(original) {
+		return nil, core.NewInvalidRequestError("guardrails chat message payload does not match parsed request", nil)
+	}
 
-	switch {
-	case len(originalRawItems) == len(modified) && len(original) == len(modified):
-		return marshalPatchedChatMessages(originalRawItems, modified)
-	case len(originalRawItems) == len(original) && len(modified) == len(original)+1 && len(modified) > 0 && modified[0].Role == "system":
-		patchedOriginals, err := marshalPatchedChatMessages(originalRawItems, modified[1:])
-		if err != nil {
-			return nil, err
+	systemOriginals := make([]json.RawMessage, 0, len(original))
+	nonSystemOriginals := make([]json.RawMessage, 0, len(original))
+	nonSystemMessages := make([]core.Message, 0, len(original))
+	for i, msg := range original {
+		if msg.Role == "system" {
+			systemOriginals = append(systemOriginals, originalRawItems[i])
+			continue
 		}
-		systemMessage, err := json.Marshal(modified[0])
-		if err != nil {
-			return nil, err
-		}
-		var patchedOriginalItems []json.RawMessage
-		if err := json.Unmarshal(patchedOriginals, &patchedOriginalItems); err != nil {
-			return nil, err
-		}
-		return json.Marshal(append([]json.RawMessage{systemMessage}, patchedOriginalItems...))
-	case len(originalRawItems) == len(original) && len(modified) > 0 && modified[0].Role == "system":
-		originalNonSystem := make([]json.RawMessage, 0, len(originalRawItems))
-		modifiedNonSystem := make([]core.Message, 0, len(modified))
-		for i, msg := range original {
-			if msg.Role != "system" {
-				originalNonSystem = append(originalNonSystem, originalRawItems[i])
+		nonSystemOriginals = append(nonSystemOriginals, originalRawItems[i])
+		nonSystemMessages = append(nonSystemMessages, msg)
+	}
+
+	patched := make([]json.RawMessage, 0, len(modified))
+	nextSystem := 0
+	nextNonSystem := 0
+	for _, msg := range modified {
+		if msg.Role == "system" {
+			if nextSystem < len(systemOriginals) {
+				item, err := patchRawChatMessage(systemOriginals[nextSystem], msg)
+				if err != nil {
+					return nil, err
+				}
+				patched = append(patched, item)
+				nextSystem++
+				continue
 			}
+
+			item, err := json.Marshal(msg)
+			if err != nil {
+				return nil, err
+			}
+			patched = append(patched, item)
+			continue
 		}
-		modifiedNonSystem = append(modifiedNonSystem, modified[1:]...)
-		if len(originalNonSystem) != len(modifiedNonSystem) {
-			break
+
+		if nextNonSystem >= len(nonSystemOriginals) {
+			return nil, core.NewInvalidRequestError("guardrails cannot insert non-system chat messages", nil)
 		}
-		patchedOriginals, err := marshalPatchedChatMessages(originalNonSystem, modifiedNonSystem)
+		if nonSystemMessages[nextNonSystem].Role != msg.Role {
+			return nil, core.NewInvalidRequestError("guardrails cannot reorder non-system chat messages", nil)
+		}
+		item, err := patchRawChatMessage(nonSystemOriginals[nextNonSystem], msg)
 		if err != nil {
 			return nil, err
 		}
-		systemMessage, err := json.Marshal(modified[0])
-		if err != nil {
-			return nil, err
-		}
-		var patchedOriginalItems []json.RawMessage
-		if err := json.Unmarshal(patchedOriginals, &patchedOriginalItems); err != nil {
-			return nil, err
-		}
-		return json.Marshal(append([]json.RawMessage{systemMessage}, patchedOriginalItems...))
+		patched = append(patched, item)
+		nextNonSystem++
+	}
+	if nextNonSystem != len(nonSystemOriginals) {
+		return nil, core.NewInvalidRequestError("guardrails cannot add or remove non-system chat messages", nil)
 	}
 
-	return json.Marshal(modified)
-}
-
-func marshalPatchedChatMessages(originals []json.RawMessage, modified []core.Message) (json.RawMessage, error) {
-	if len(originals) != len(modified) {
-		return nil, core.NewInvalidRequestError("guardrails changed chat message cardinality unexpectedly", nil)
-	}
-
-	patched := make([]json.RawMessage, len(modified))
-	for i := range modified {
-		item, err := patchRawChatMessage(originals[i], modified[i])
-		if err != nil {
-			return nil, err
-		}
-		patched[i] = item
-	}
 	return json.Marshal(patched)
 }
 
@@ -493,10 +488,7 @@ func (g *GuardedProvider) processChat(ctx context.Context, req *core.ChatRequest
 	if err != nil {
 		return nil, err
 	}
-	if chatNeedsEnvelopePreservation(req) {
-		return applySystemMessagesToMultimodalChat(req, modified)
-	}
-	return applyMessagesToChat(req, modified), nil
+	return applyMessagesToChatPreservingEnvelope(req, modified)
 }
 
 // processResponses runs the pipeline for a ResponsesRequest via the message adapter.
@@ -530,71 +522,55 @@ func chatToMessages(req *core.ChatRequest) ([]Message, error) {
 	return msgs, nil
 }
 
-// applyMessagesToChat returns a shallow copy of req with messages replaced.
-func applyMessagesToChat(req *core.ChatRequest, msgs []Message) *core.ChatRequest {
-	coreMessages := make([]core.Message, len(msgs))
-	for i, m := range msgs {
-		contentNull := m.ContentNull
-		if m.Content != "" {
-			contentNull = false
-		}
-		coreMessages[i] = core.Message{
-			Role:        m.Role,
-			Content:     m.Content,
-			ToolCalls:   cloneToolCalls(m.ToolCalls),
-			ToolCallID:  m.ToolCallID,
-			ContentNull: contentNull,
-		}
-	}
-	result := *req
-	result.Messages = coreMessages
-	return &result
-}
-
-// applySystemMessagesToMultimodalChat applies system-message updates and preserves
-// original content only for messages that contain non-text multimodal parts.
-// Text-only messages keep guardrail-rewritten text.
-func applySystemMessagesToMultimodalChat(req *core.ChatRequest, msgs []Message) (*core.ChatRequest, error) {
+// applyMessagesToChatPreservingEnvelope applies guardrail message updates while
+// preserving the original chat message envelopes and structured content shapes.
+func applyMessagesToChatPreservingEnvelope(req *core.ChatRequest, msgs []Message) (*core.ChatRequest, error) {
+	systemOriginal := make([]core.Message, 0, len(req.Messages))
 	nonSystemOriginal := make([]core.Message, 0, len(req.Messages))
 	for _, original := range req.Messages {
-		if original.Role != "system" {
-			nonSystemOriginal = append(nonSystemOriginal, original)
+		if original.Role == "system" {
+			systemOriginal = append(systemOriginal, original)
+			continue
 		}
+		nonSystemOriginal = append(nonSystemOriginal, original)
 	}
 
 	coreMessages := make([]core.Message, 0, len(msgs))
+	nextSystem := 0
 	nextNonSystem := 0
-	modifiedNonSystemCount := 0
 	for _, modified := range msgs {
 		if modified.Role == "system" {
-			coreMessages = append(coreMessages, core.Message{Role: "system", Content: modified.Content})
+			if nextSystem < len(systemOriginal) {
+				preserved, err := applyGuardedMessageToOriginal(systemOriginal[nextSystem], modified)
+				if err != nil {
+					return nil, err
+				}
+				coreMessages = append(coreMessages, preserved)
+				nextSystem++
+				continue
+			}
+
+			coreMessages = append(coreMessages, newChatMessageFromGuardrail(modified))
 			continue
 		}
-		modifiedNonSystemCount++
+
 		if nextNonSystem >= len(nonSystemOriginal) {
-			return nil, core.NewInvalidRequestError("guardrails cannot insert non-system multimodal or tool-call messages", nil)
+			return nil, core.NewInvalidRequestError("guardrails cannot insert non-system chat messages", nil)
 		}
 		original := nonSystemOriginal[nextNonSystem]
 		if modified.Role != original.Role {
-			return nil, core.NewInvalidRequestError("guardrails cannot reorder non-system multimodal or tool-call messages", nil)
+			return nil, core.NewInvalidRequestError("guardrails cannot reorder non-system chat messages", nil)
 		}
-		preserved := original
-		preserved.Role = modified.Role
-		if core.HasNonTextContent(original.Content) {
-			mergedContent, err := mergeMultimodalContentWithTextRewrite(original.Content, modified.Content)
-			if err != nil {
-				return nil, err
-			}
-			preserved.Content = mergedContent
-		} else {
-			preserved.Content = modified.Content
+		preserved, err := applyGuardedMessageToOriginal(original, modified)
+		if err != nil {
+			return nil, err
 		}
 		coreMessages = append(coreMessages, preserved)
 		nextNonSystem++
 	}
 
-	if modifiedNonSystemCount != len(nonSystemOriginal) {
-		return nil, core.NewInvalidRequestError("guardrails cannot add or remove non-system multimodal or tool-call messages", nil)
+	if nextNonSystem != len(nonSystemOriginal) {
+		return nil, core.NewInvalidRequestError("guardrails cannot add or remove non-system chat messages", nil)
 	}
 
 	result := *req
@@ -602,79 +578,133 @@ func applySystemMessagesToMultimodalChat(req *core.ChatRequest, msgs []Message) 
 	return &result, nil
 }
 
-func mergeMultimodalContentWithTextRewrite(originalContent any, rewrittenText string) (any, error) {
+func applyGuardedMessageToOriginal(original core.Message, modified Message) (core.Message, error) {
+	preserved := cloneChatMessageEnvelope(original)
+	preserved.Role = modified.Role
+	if len(modified.ToolCalls) > 0 {
+		preserved.ToolCalls = cloneToolCalls(modified.ToolCalls)
+	}
+	if modified.ToolCallID != "" {
+		preserved.ToolCallID = modified.ToolCallID
+	}
+
+	content, contentNull, err := applyGuardedContentToOriginal(original.Content, modified.Content, modified.ContentNull)
+	if err != nil {
+		return core.Message{}, err
+	}
+	preserved.Content = content
+	preserved.ContentNull = contentNull
+	return preserved, nil
+}
+
+func newChatMessageFromGuardrail(m Message) core.Message {
+	contentNull := m.ContentNull
+	if m.Content != "" {
+		contentNull = false
+	}
+
+	content := any(m.Content)
+	if contentNull {
+		content = nil
+	}
+
+	return core.Message{
+		Role:        m.Role,
+		Content:     content,
+		ToolCalls:   cloneToolCalls(m.ToolCalls),
+		ToolCallID:  m.ToolCallID,
+		ContentNull: contentNull,
+	}
+}
+
+func applyGuardedContentToOriginal(originalContent any, rewrittenText string, contentNull bool) (any, bool, error) {
+	if core.HasStructuredContent(originalContent) {
+		mergedContent, err := rewriteStructuredContentWithTextRewrite(originalContent, rewrittenText)
+		if err != nil {
+			return nil, false, err
+		}
+		return mergedContent, false, nil
+	}
+
+	if rewrittenText != "" {
+		contentNull = false
+	}
+	if contentNull {
+		return nil, true, nil
+	}
+	return rewrittenText, false, nil
+}
+
+func rewriteStructuredContentWithTextRewrite(originalContent any, rewrittenText string) (any, error) {
 	parts, ok := core.NormalizeContentParts(originalContent)
 	if !ok {
-		return nil, core.NewInvalidRequestError("guardrails cannot merge rewritten text into multimodal message", nil)
+		return nil, core.NewInvalidRequestError("guardrails cannot merge rewritten text into structured message", nil)
 	}
 
 	// Guard against pathological numbers of content parts that could cause size
 	// computations for allocations to overflow on some platforms.
 	const maxContentParts = 1_000_000
 	if len(parts) >= maxContentParts {
-		return nil, core.NewInvalidRequestError("guardrails cannot merge multimodal message with too many content parts", nil)
+		return nil, core.NewInvalidRequestError("guardrails cannot merge structured message with too many content parts", nil)
 	}
 
-	capacity := len(parts) + 1
-	merged := make([]core.ContentPart, 0, capacity)
-	hadTextPart := false
-	insertedRewrittenText := false
-	textPartCount := 0
 	originalTexts := make([]string, 0, len(parts))
+	textPartIndexes := make([]int, 0, len(parts))
+	for i, part := range parts {
+		if part.Type == "text" {
+			textPartIndexes = append(textPartIndexes, i)
+			originalTexts = append(originalTexts, part.Text)
+		}
+	}
 
+	if len(textPartIndexes) == 0 {
+		merged := cloneContentParts(parts)
+		if rewrittenText != "" {
+			merged = append([]core.ContentPart{{Type: "text", Text: rewrittenText}}, merged...)
+		}
+		if len(merged) == 0 {
+			return nil, core.NewInvalidRequestError("guardrails produced empty structured message after rewrite", nil)
+		}
+		return merged, nil
+	}
+
+	if len(textPartIndexes) == 1 {
+		merged := cloneContentParts(parts)
+		textIndex := textPartIndexes[0]
+		if rewrittenText == "" {
+			merged = append(merged[:textIndex], merged[textIndex+1:]...)
+		} else {
+			merged[textIndex].Text = rewrittenText
+		}
+		if len(merged) == 0 {
+			return nil, core.NewInvalidRequestError("guardrails produced empty structured message after rewrite", nil)
+		}
+		return merged, nil
+	}
+
+	if rewrittenText == strings.Join(originalTexts, " ") {
+		return cloneContentParts(parts), nil
+	}
+
+	merged := make([]core.ContentPart, 0, len(parts))
+	insertedRewrittenText := false
 	for _, part := range parts {
 		if part.Type == "text" {
-			textPartCount++
-			hadTextPart = true
-			originalTexts = append(originalTexts, part.Text)
-			if !insertedRewrittenText {
-				if rewrittenText != "" {
-					merged = append(merged, core.ContentPart{Type: "text", Text: rewrittenText})
-				}
+			if !insertedRewrittenText && rewrittenText != "" {
+				rewrittenPart := cloneContentPart(part)
+				rewrittenPart.Text = rewrittenText
+				merged = append(merged, rewrittenPart)
 				insertedRewrittenText = true
 			}
 			continue
 		}
-		merged = append(merged, part)
-	}
-
-	if textPartCount > 1 && rewrittenText == strings.Join(originalTexts, " ") {
-		copied := make([]core.ContentPart, len(parts))
-		copy(copied, parts)
-		return copied, nil
-	}
-
-	if !hadTextPart && rewrittenText != "" {
-		merged = append([]core.ContentPart{{Type: "text", Text: rewrittenText}}, merged...)
+		merged = append(merged, cloneContentPart(part))
 	}
 
 	if len(merged) == 0 {
-		return nil, core.NewInvalidRequestError("guardrails produced empty multimodal message after rewrite", nil)
+		return nil, core.NewInvalidRequestError("guardrails produced empty structured message after rewrite", nil)
 	}
-
 	return merged, nil
-}
-
-func chatHasNonTextContent(req *core.ChatRequest) bool {
-	for _, msg := range req.Messages {
-		if core.HasNonTextContent(msg.Content) {
-			return true
-		}
-	}
-	return false
-}
-
-func chatHasToolCalls(req *core.ChatRequest) bool {
-	for _, msg := range req.Messages {
-		if len(msg.ToolCalls) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func chatNeedsEnvelopePreservation(req *core.ChatRequest) bool {
-	return chatHasNonTextContent(req) || chatHasToolCalls(req)
 }
 
 func normalizeGuardrailMessageText(content any) (string, error) {
@@ -717,6 +747,98 @@ func cloneToolCalls(toolCalls []core.ToolCall) []core.ToolCall {
 		return nil
 	}
 	cloned := make([]core.ToolCall, len(toolCalls))
-	copy(cloned, toolCalls)
+	for i, toolCall := range toolCalls {
+		cloned[i] = core.ToolCall{
+			ID:   toolCall.ID,
+			Type: toolCall.Type,
+			Function: core.FunctionCall{
+				Name:        toolCall.Function.Name,
+				Arguments:   toolCall.Function.Arguments,
+				ExtraFields: cloneRawJSONMap(toolCall.Function.ExtraFields),
+			},
+			ExtraFields: cloneRawJSONMap(toolCall.ExtraFields),
+		}
+	}
+	return cloned
+}
+
+func cloneChatMessageEnvelope(message core.Message) core.Message {
+	return core.Message{
+		Role:        message.Role,
+		ToolCallID:  message.ToolCallID,
+		ContentNull: message.ContentNull,
+		Content:     cloneMessageContent(message.Content),
+		ToolCalls:   cloneToolCalls(message.ToolCalls),
+		ExtraFields: cloneRawJSONMap(message.ExtraFields),
+	}
+}
+
+func cloneMessageContent(content any) any {
+	switch value := content.(type) {
+	case nil:
+		return nil
+	case string:
+		return value
+	case []core.ContentPart:
+		return cloneContentParts(value)
+	default:
+		parts, ok := core.NormalizeContentParts(content)
+		if !ok {
+			return value
+		}
+		return cloneContentParts(parts)
+	}
+}
+
+func cloneContentParts(parts []core.ContentPart) []core.ContentPart {
+	if len(parts) == 0 {
+		return nil
+	}
+	cloned := make([]core.ContentPart, len(parts))
+	for i, part := range parts {
+		cloned[i] = cloneContentPart(part)
+	}
+	return cloned
+}
+
+func cloneContentPart(part core.ContentPart) core.ContentPart {
+	cloned := core.ContentPart{
+		Type:        part.Type,
+		Text:        part.Text,
+		ExtraFields: cloneRawJSONMap(part.ExtraFields),
+	}
+	if part.ImageURL != nil {
+		cloned.ImageURL = &core.ImageURLContent{
+			URL:         part.ImageURL.URL,
+			Detail:      part.ImageURL.Detail,
+			MediaType:   part.ImageURL.MediaType,
+			ExtraFields: cloneRawJSONMap(part.ImageURL.ExtraFields),
+		}
+	}
+	if part.InputAudio != nil {
+		cloned.InputAudio = &core.InputAudioContent{
+			Data:        part.InputAudio.Data,
+			Format:      part.InputAudio.Format,
+			ExtraFields: cloneRawJSONMap(part.InputAudio.ExtraFields),
+		}
+	}
+	return cloned
+}
+
+func cloneRawJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	return append(json.RawMessage(nil), raw...)
+}
+
+func cloneRawJSONMap(fields map[string]json.RawMessage) map[string]json.RawMessage {
+	if len(fields) == 0 {
+		return nil
+	}
+	cloned := make(map[string]json.RawMessage, len(fields))
+	for key, value := range fields {
+		cloned[key] = cloneRawJSON(value)
+	}
 	return cloned
 }
