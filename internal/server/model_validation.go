@@ -72,13 +72,11 @@ func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
 func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed bool, err error) {
 	ctx := c.Request().Context()
 	if env := core.GetSemanticEnvelope(ctx); env != nil {
-		switch {
-		case env.ChatRequest != nil:
-			return env.ChatRequest.Model, env.ChatRequest.Provider, true, nil
-		case env.ResponsesRequest != nil:
-			return env.ResponsesRequest.Model, env.ResponsesRequest.Provider, true, nil
-		case env.EmbeddingRequest != nil:
-			return env.EmbeddingRequest.Model, env.EmbeddingRequest.Provider, true, nil
+		if model, provider, ok := cachedCanonicalSelectorHints(env); ok {
+			return model, provider, true, nil
+		}
+		if model, provider, ok := decodeCanonicalSelectorHintsForValidation(ctx, env); ok {
+			return model, provider, true, nil
 		}
 		if env.JSONBodyParsed || env.SelectorHints.Model != "" || env.SelectorHints.Provider != "" {
 			return env.SelectorHints.Model, env.SelectorHints.Provider, true, nil
@@ -101,6 +99,54 @@ func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed
 		return "", "", false, nil
 	}
 	return peek.Model, peek.Provider, true, nil
+}
+
+func cachedCanonicalSelectorHints(env *core.SemanticEnvelope) (model, provider string, ok bool) {
+	switch {
+	case env == nil:
+		return "", "", false
+	case env.ChatRequest != nil:
+		return env.ChatRequest.Model, env.ChatRequest.Provider, true
+	case env.ResponsesRequest != nil:
+		return env.ResponsesRequest.Model, env.ResponsesRequest.Provider, true
+	case env.EmbeddingRequest != nil:
+		return env.EmbeddingRequest.Model, env.EmbeddingRequest.Provider, true
+	default:
+		return "", "", false
+	}
+}
+
+func decodeCanonicalSelectorHintsForValidation(ctx context.Context, env *core.SemanticEnvelope) (model, provider string, ok bool) {
+	if env == nil {
+		return "", "", false
+	}
+	frame := core.GetIngressFrame(ctx)
+	if frame == nil || frame.RawBody == nil {
+		return "", "", false
+	}
+
+	switch env.Operation {
+	case "chat_completions":
+		req, err := core.DecodeChatRequest(frame.RawBody, env)
+		if err != nil {
+			return "", "", false
+		}
+		return req.Model, req.Provider, true
+	case "responses":
+		req, err := core.DecodeResponsesRequest(frame.RawBody, env)
+		if err != nil {
+			return "", "", false
+		}
+		return req.Model, req.Provider, true
+	case "embeddings":
+		req, err := core.DecodeEmbeddingRequest(frame.RawBody, env)
+		if err != nil {
+			return "", "", false
+		}
+		return req.Model, req.Provider, true
+	default:
+		return "", "", false
+	}
 }
 
 func isBatchOrFileRootOrSubresource(path string) bool {

@@ -37,6 +37,7 @@ Completed in this slice:
 - collapse the repeated JSON semantic decode/cache pattern behind one shared helper so the semantic layer gets slimmer as more endpoints move onto it
 - move canonical JSON decode/cache and sparse batch/file route-metadata caching into `internal/core` so `internal/server/semantic_requests.go` becomes an Echo-facing adapter instead of owning semantic state transitions
 - preserve opaque top-level and nested request extras through the shared `Responses -> Chat` provider adapter so providers that implement `/v1/responses` via chat translation do not re-drop fields after ingress has preserved them
+- make model validation hydrate canonical chat/responses/embeddings requests from ingress-backed semantic decoding when raw JSON is already captured, instead of doing a separate selector-only parse and leaving full decoding to handlers
 
 ## Broader endpoint migration scope
 

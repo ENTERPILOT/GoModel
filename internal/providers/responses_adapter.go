@@ -544,43 +544,6 @@ func canFlattenResponsesPartsToText(parts []core.ContentPart) bool {
 	return true
 }
 
-func extractResponsesImageURL(value interface{}) (url string, detail string, mediaType string, ok bool) {
-	switch v := value.(type) {
-	case string:
-		if v == "" {
-			return "", "", "", false
-		}
-		return v, "", "", true
-	case map[string]string:
-		url = v["url"]
-		detail = v["detail"]
-		mediaType = v["media_type"]
-		return url, detail, mediaType, url != ""
-	case map[string]interface{}:
-		url, _ = v["url"].(string)
-		detail, _ = v["detail"].(string)
-		mediaType, _ = v["media_type"].(string)
-		return url, detail, mediaType, url != ""
-	default:
-		return "", "", "", false
-	}
-}
-
-func extractResponsesInputAudio(value interface{}) (data string, format string, ok bool) {
-	switch v := value.(type) {
-	case map[string]string:
-		data = v["data"]
-		format = v["format"]
-		return data, format, data != "" && format != ""
-	case map[string]interface{}:
-		data, _ = v["data"].(string)
-		format, _ = v["format"].(string)
-		return data, format, data != "" && format != ""
-	default:
-		return "", "", false
-	}
-}
-
 func normalizeResponsesImageURLForChat(value interface{}) (*core.ImageURLContent, bool) {
 	switch v := value.(type) {
 	case string:
