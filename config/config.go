@@ -338,10 +338,10 @@ type ServerConfig struct {
 	// EnableProviderPassthrough exposes provider-native passthrough endpoints
 	// under /p/{provider}/{endpoint}. Default: true
 	EnableProviderPassthrough bool `yaml:"enable_provider_passthrough" env:"ENABLE_PROVIDER_PASSTHROUGH"`
-	// NormalizeOpenAICompatiblePassthroughV1Prefix allows /p/openai/v1/... style
-	// passthrough routes while keeping /p/openai/... as the canonical form.
+	// NormalizePassthroughV1Prefix allows /p/{provider}/v1/... style
+	// passthrough routes while keeping /p/{provider}/... as the canonical form.
 	// Default: true
-	NormalizeOpenAICompatiblePassthroughV1Prefix bool `yaml:"normalize_openai_compatible_passthrough_v1_prefix" env:"NORMALIZE_OPENAI_COMPATIBLE_PASSTHROUGH_V1_PREFIX"`
+	NormalizePassthroughV1Prefix bool `yaml:"normalize_passthrough_v1_prefix" env:"NORMALIZE_PASSTHROUGH_V1_PREFIX"`
 }
 
 // MetricsConfig holds observability configuration for Prometheus metrics
@@ -403,10 +403,10 @@ type ResilienceConfig struct {
 func buildDefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Port:                      "8080",
-			SwaggerEnabled:            true,
-			EnableProviderPassthrough: true,
-			NormalizeOpenAICompatiblePassthroughV1Prefix: true,
+			Port:                         "8080",
+			SwaggerEnabled:               true,
+			EnableProviderPassthrough:    true,
+			NormalizePassthroughV1Prefix: true,
 		},
 		Cache: CacheConfig{
 			Model: ModelCacheConfig{

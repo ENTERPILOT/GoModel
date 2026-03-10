@@ -538,7 +538,7 @@ const docTemplate = `{
         },
         "/p/{provider}/{endpoint}": {
             "get": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -600,7 +600,7 @@ const docTemplate = `{
                 ]
             },
             "put": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -662,7 +662,7 @@ const docTemplate = `{
                 ]
             },
             "post": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -724,7 +724,7 @@ const docTemplate = `{
                 ]
             },
             "delete": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -786,7 +786,7 @@ const docTemplate = `{
                 ]
             },
             "options": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -848,7 +848,7 @@ const docTemplate = `{
                 ]
             },
             "head": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -910,7 +910,7 @@ const docTemplate = `{
                 ]
             },
             "patch": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"

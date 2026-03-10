@@ -534,7 +534,7 @@
         },
         "/p/{provider}/{endpoint}": {
             "get": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -596,7 +596,7 @@
                 ]
             },
             "put": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -658,7 +658,7 @@
                 ]
             },
             "post": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -720,7 +720,7 @@
                 ]
             },
             "delete": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -782,7 +782,7 @@
                 ]
             },
             "options": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -844,7 +844,7 @@
                 ]
             },
             "head": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -906,7 +906,7 @@
                 ]
             },
             "patch": {
-                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"

@@ -8,7 +8,7 @@ server:
   master_key: "your-secret-key"
   body_size_limit: "10M"
   enable_provider_passthrough: true # expose /p/{provider}/{endpoint} passthrough routes
-  normalize_openai_compatible_passthrough_v1_prefix: true # allow /p/openai/v1/... while keeping /p/openai/... canonical
+  normalize_passthrough_v1_prefix: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
 
 cache:
   type: "local" # "local" or "redis"

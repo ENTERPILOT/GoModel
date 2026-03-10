@@ -35,23 +35,23 @@ var batchResultsPending404Providers = map[string]struct{}{
 
 // Handler holds the HTTP handlers
 type Handler struct {
-	provider                                     core.RoutableProvider
-	logger                                       auditlog.LoggerInterface
-	usageLogger                                  usage.LoggerInterface
-	pricingResolver                              usage.PricingResolver
-	batchStore                                   batchstore.Store
-	normalizeOpenAICompatiblePassthroughV1Prefix bool
+	provider                     core.RoutableProvider
+	logger                       auditlog.LoggerInterface
+	usageLogger                  usage.LoggerInterface
+	pricingResolver              usage.PricingResolver
+	batchStore                   batchstore.Store
+	normalizePassthroughV1Prefix bool
 }
 
 // NewHandler creates a new handler with the given routable provider (typically the Router)
 func NewHandler(provider core.RoutableProvider, logger auditlog.LoggerInterface, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver) *Handler {
 	return &Handler{
-		provider:        provider,
-		logger:          logger,
-		usageLogger:     usageLogger,
-		pricingResolver: pricingResolver,
-		batchStore:      batchstore.NewMemoryStore(),
-		normalizeOpenAICompatiblePassthroughV1Prefix: true,
+		provider:                     provider,
+		logger:                       logger,
+		usageLogger:                  usageLogger,
+		pricingResolver:              pricingResolver,
+		batchStore:                   batchstore.NewMemoryStore(),
+		normalizePassthroughV1Prefix: true,
 	}
 }
 
@@ -191,17 +191,8 @@ func isSupportedPassthroughProvider(providerType string) bool {
 	}
 }
 
-func isOpenAICompatiblePassthroughProvider(providerType string) bool {
-	switch strings.TrimSpace(providerType) {
-	case "openai":
-		return true
-	default:
-		return false
-	}
-}
-
-func normalizePassthroughEndpoint(providerType, endpoint string, enabled bool) string {
-	if !enabled || !isOpenAICompatiblePassthroughProvider(providerType) {
+func normalizePassthroughEndpoint(endpoint string, enabled bool) string {
+	if !enabled {
 		return endpoint
 	}
 	endpoint = strings.TrimSpace(endpoint)
@@ -220,7 +211,7 @@ func (h *Handler) passthroughEndpoint(c *echo.Context) (string, string, error) {
 	if !ok {
 		return "", "", core.NewInvalidRequestError("invalid provider passthrough path", nil)
 	}
-	endpoint = normalizePassthroughEndpoint(providerType, endpoint, h.normalizeOpenAICompatiblePassthroughV1Prefix)
+	endpoint = normalizePassthroughEndpoint(endpoint, h.normalizePassthroughV1Prefix)
 	if endpoint == "" {
 		return "", "", core.NewInvalidRequestError("provider passthrough endpoint is required", nil)
 	}
@@ -343,7 +334,7 @@ func (h *Handler) proxyPassthroughResponse(c *echo.Context, providerType, endpoi
 // providers are intentionally deferred until they fit the same low-friction opaque path.
 //
 // @Summary      Provider passthrough
-// @Description  Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.
+// @Description  Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.
 // @Tags         passthrough
 // @Accept       json
 // @Accept       mpfd

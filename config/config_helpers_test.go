@@ -190,10 +190,10 @@ func TestApplyEnvOverrides(t *testing.T) {
 		},
 		{
 			name:    "passthrough v1 normalization override",
-			envVars: map[string]string{"NORMALIZE_OPENAI_COMPATIBLE_PASSTHROUGH_V1_PREFIX": "false"},
+			envVars: map[string]string{"NORMALIZE_PASSTHROUGH_V1_PREFIX": "false"},
 			check: func(t *testing.T, cfg *Config) {
-				if cfg.Server.NormalizeOpenAICompatiblePassthroughV1Prefix {
-					t.Error("Server.NormalizeOpenAICompatiblePassthroughV1Prefix should be false")
+				if cfg.Server.NormalizePassthroughV1Prefix {
+					t.Error("Server.NormalizePassthroughV1Prefix should be false")
 				}
 			},
 		},

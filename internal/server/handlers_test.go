@@ -2627,7 +2627,7 @@ func TestProviderPassthrough_OpenAIV1AliasNormalizesByDefault(t *testing.T) {
 	}
 }
 
-func TestProviderPassthrough_OpenAIV1AliasCanBeDisabled(t *testing.T) {
+func TestProviderPassthrough_AnthropicV1AliasNormalizesByDefault(t *testing.T) {
 	provider := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
 			StatusCode: http.StatusOK,
@@ -2640,7 +2640,38 @@ func TestProviderPassthrough_OpenAIV1AliasCanBeDisabled(t *testing.T) {
 
 	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
-	handler.normalizeOpenAICompatiblePassthroughV1Prefix = false
+	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+
+	req := httptest.NewRequest(http.MethodPost, "/p/anthropic/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if provider.lastPassthroughReq == nil {
+		t.Fatal("lastPassthroughReq = nil")
+	}
+	if got := provider.lastPassthroughReq.Endpoint; got != "messages" {
+		t.Fatalf("endpoint = %q, want messages", got)
+	}
+}
+
+func TestProviderPassthrough_V1AliasCanBeDisabled(t *testing.T) {
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers: map[string][]string{
+				"Content-Type": {"application/json"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+	handler.normalizePassthroughV1Prefix = false
 	e.POST("/p/:provider/*", handler.ProviderPassthrough)
 
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))

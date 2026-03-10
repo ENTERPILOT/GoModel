@@ -26,7 +26,7 @@ func clearProviderEnvVars(t *testing.T) {
 func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"PORT", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "ENABLE_PROVIDER_PASSTHROUGH", "NORMALIZE_OPENAI_COMPATIBLE_PASSTHROUGH_V1_PREFIX",
+		"PORT", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "ENABLE_PROVIDER_PASSTHROUGH", "NORMALIZE_PASSTHROUGH_V1_PREFIX",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"STORAGE_TYPE", "SQLITE_PATH", "POSTGRES_URL", "POSTGRES_MAX_CONNS",
@@ -70,8 +70,8 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if !cfg.Server.EnableProviderPassthrough {
 		t.Error("expected Server.EnableProviderPassthrough=true")
 	}
-	if !cfg.Server.NormalizeOpenAICompatiblePassthroughV1Prefix {
-		t.Error("expected Server.NormalizeOpenAICompatiblePassthroughV1Prefix=true")
+	if !cfg.Server.NormalizePassthroughV1Prefix {
+		t.Error("expected Server.NormalizePassthroughV1Prefix=true")
 	}
 	if cfg.Cache.Model.Local != nil {
 		t.Error("expected Cache.Model.Local to be nil in raw defaults")
