@@ -13,7 +13,12 @@
             },
             {
                 "group": "Guides",
-                "pages": ["guides/openclaw"]
+                "pages": [
+                    "guides/openclaw",
+                    "guides/claude-code",
+                    "guides/codex",
+                    "guides/opencode-and-other-agents"
+                ]
             },
             {
                 "group": "Advanced",

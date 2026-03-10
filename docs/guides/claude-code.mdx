@@ -1,0 +1,108 @@
+---
+title: "Using GoModel with Claude Code"
+description: "Validated Claude Code setup for GoModel, including Anthropic passthrough paths, audit visibility, and current usage-tracking limitations."
+---
+
+## Tested on March 10, 2026
+
+This guide was validated against:
+
+- a local GoModel instance on `http://localhost:8080`
+- a passthrough branch exposing `/p/{provider}/...`
+- Claude Code `2.1.72`
+
+## Short Answer
+
+Claude Code works on the tested GoModel instance when you point it at Anthropic passthrough:
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:8080/p/anthropic
+export ANTHROPIC_AUTH_TOKEN="$GOMODEL_MASTER_KEY"
+```
+
+Claude Code then calls:
+
+- `GET /p/anthropic/v1/models`
+- `POST /p/anthropic/v1/messages`
+
+Both paths returned `200 OK` in local testing.
+
+## What We Validated
+
+### Raw passthrough with curl
+
+These both succeeded:
+
+```bash
+curl -s http://localhost:8080/p/anthropic/v1/models
+```
+
+```bash
+curl -s http://localhost:8080/p/anthropic/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{"model":"claude-3-haiku-20240307","max_tokens":16,"messages":[{"role":"user","content":"Reply with exactly: ok"}]}'
+```
+
+### Real Claude Code CLI
+
+This also worked:
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:8080/p/anthropic \
+ANTHROPIC_AUTH_TOKEN=dummy \
+CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 \
+claude -p --output-format text --model claude-3-haiku-20240307 \
+  'Reply with exactly ok and no punctuation.'
+```
+
+The response was `ok`.
+
+## Authentication
+
+If your gateway expects Bearer auth, prefer:
+
+```bash
+export ANTHROPIC_AUTH_TOKEN="$GOMODEL_MASTER_KEY"
+```
+
+If your gateway accepts native Anthropic-style API key headers, you can also try:
+
+```bash
+export ANTHROPIC_API_KEY="$GOMODEL_MASTER_KEY"
+```
+
+## Tracking and Guardrails
+
+What local testing showed:
+
+- Claude Code passthrough traffic appeared in `GET /admin/api/v1/audit/log`
+- the same traffic did **not** increment `GET /admin/api/v1/usage/summary`
+- the same traffic did **not** appear in `GET /admin/api/v1/usage/log`
+
+So Claude Code is now operational through GoModel passthrough, but on the tested branch it is still **audit-visible, not usage-accounted**.
+
+If you need GoModel platform features such as:
+
+- token and cost tracking
+- usage reports
+- stronger guardrail coverage
+
+prefer clients that can use GoModel's standard `/v1/*` API instead of provider passthrough.
+
+This mirrors Anthropic's own Claude Code gateway guidance for LiteLLM: the unified endpoint is the recommended path, and provider pass-through is the fallback.
+
+## Admin Endpoints
+
+Use these to inspect Claude Code traffic:
+
+```bash
+curl -s 'http://localhost:8080/admin/api/v1/audit/log?days=1&limit=20&offset=0'
+curl -s 'http://localhost:8080/admin/api/v1/usage/log?days=1&limit=20&offset=0'
+curl -s http://localhost:8080/admin/api/v1/usage/summary
+```
+
+## References
+
+- Anthropic Claude Code gateway docs: [LLM gateway](https://code.claude.com/docs/en/llm-gateway)
+- Anthropic Claude Code settings: [Settings](https://code.claude.com/docs/en/settings)

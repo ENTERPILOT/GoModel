@@ -1,0 +1,113 @@
+---
+title: "Using GoModel with Codex"
+description: "Validated Codex findings for GoModel, including the correct Responses API target and the current zstd request-body blocker."
+---
+
+## Tested on March 10, 2026
+
+This guide was validated against:
+
+- a local GoModel instance on `http://localhost:8080`
+- Codex CLI `0.113.0`
+
+## Short Answer
+
+Codex is **not directly compatible yet** with the tested GoModel instance, but the integration path is clear:
+
+- target GoModel standard `/v1/*`, not passthrough
+- use the OpenAI Responses API
+- add request decompression support for `Content-Encoding: zstd`
+
+The intended target is:
+
+```bash
+export OPENAI_BASE_URL=http://localhost:8080/v1
+export OPENAI_API_KEY="$GOMODEL_MASTER_KEY"
+```
+
+## What We Validated
+
+### GoModel standard Responses API works
+
+This worked with `curl`:
+
+```bash
+curl -s http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4.1-mini","input":"Reply with exactly: ok","max_output_tokens":16}'
+```
+
+That request showed up in:
+
+- `GET /admin/api/v1/usage/summary`
+- `GET /admin/api/v1/usage/log`
+- `GET /admin/api/v1/audit/log`
+
+So `/v1/responses` is the correct GoModel surface for Codex if you want usage tracking, cost tracking, audit logs, and guardrails.
+
+### Real Codex CLI call
+
+This is the command shape that Codex used:
+
+```bash
+OPENAI_BASE_URL=http://localhost:8080/v1 \
+OPENAI_API_KEY=dummy \
+codex exec -m gpt-4.1-mini 'Reply with exactly ok and no punctuation.'
+```
+
+In local testing, Codex correctly sent:
+
+- `POST /v1/responses`
+
+But it also sent:
+
+- `Content-Encoding: zstd`
+
+The tested GoModel instance tried to parse the compressed bytes as raw JSON and returned:
+
+```json
+{"error":{"message":"invalid request body: invalid character '(' looking for beginning of value","type":"invalid_request_error"}}
+```
+
+## What Needs To Change
+
+One of these needs to exist before Codex will work cleanly:
+
+- GoModel support for request-body decompression when `Content-Encoding: zstd` is present
+- a front proxy that decompresses requests before forwarding to GoModel
+- a confirmed Codex configuration that truly disables request compression
+
+## Recommended Codex Provider Config
+
+Codex is moving to the Responses API. If you define a custom provider, it should look like this:
+
+```toml
+[model_providers.gomodel]
+name = "GoModel"
+base_url = "http://localhost:8080/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
+```
+
+## Why Standard `/v1` Matters
+
+On the tested instance:
+
+- `/v1/responses` produced usage records and audit records
+- passthrough traffic did not consistently produce usage records
+
+So Codex should integrate against standard GoModel `/v1/*`, not `/p/openai/...`.
+
+## Admin Endpoints
+
+Use these after testing Codex:
+
+```bash
+curl -s http://localhost:8080/admin/api/v1/usage/summary
+curl -s 'http://localhost:8080/admin/api/v1/usage/log?days=1&limit=20&offset=0'
+curl -s 'http://localhost:8080/admin/api/v1/audit/log?days=1&limit=20&offset=0'
+```
+
+## References
+
+- OpenAI Codex provider discussion: [Deprecating `chat/completions` support in Codex](https://github.com/openai/codex/discussions/7782)
