@@ -324,6 +324,15 @@ func TestApplyEnvOverrides(t *testing.T) {
 			},
 		},
 		{
+			name:    "provider passthrough override",
+			envVars: map[string]string{"ENABLE_PROVIDER_PASSTHROUGH": "false"},
+			check: func(t *testing.T, cfg *Config) {
+				if cfg.Server.EnableProviderPassthrough {
+					t.Error("EnableProviderPassthrough = true, want false")
+				}
+			},
+		},
+		{
 			name:    "circuit breaker timeout override",
 			envVars: map[string]string{"CIRCUIT_BREAKER_TIMEOUT": "10s"},
 			check: func(t *testing.T, cfg *Config) {

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"gomodel/internal/admin"
 	"gomodel/internal/admin/dashboard"
+	"gomodel/internal/core"
 
 	_ "gomodel/cmd/gomodel/docs"
 )
@@ -515,5 +517,49 @@ func TestSwaggerDocJson_ReturnsExpectedContent(t *testing.T) {
 	}
 	if !strings.Contains(body, "swagger") {
 		t.Errorf("expected doc.json to contain swagger spec, got: %s", body[:min(300, len(body))])
+	}
+}
+
+func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
+	mock := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers: map[string][]string{
+				"Content-Type": {"application/json"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
+	}
+	srv := New(mock, &Config{})
+
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if got := mock.lastPassthroughProvider; got != "openai" {
+		t.Fatalf("provider = %q, want openai", got)
+	}
+}
+
+func TestProviderPassthroughRoute_DisabledReturns404(t *testing.T) {
+	mock := &mockProvider{}
+	srv := New(mock, &Config{
+		MasterKey:                  "test-secret-key",
+		DisableProviderPassthrough: true,
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", rec.Code)
 	}
 }

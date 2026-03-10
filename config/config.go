@@ -335,6 +335,9 @@ type ServerConfig struct {
 	MasterKey      string `yaml:"master_key" env:"GOMODEL_MASTER_KEY"`   // Optional: Master key for authentication
 	BodySizeLimit  string `yaml:"body_size_limit" env:"BODY_SIZE_LIMIT"` // Max request body size (e.g., "10M", "1024K")
 	SwaggerEnabled bool   `yaml:"swagger_enabled" env:"SWAGGER_ENABLED"` // Whether to expose the Swagger UI at /swagger/index.html
+	// EnableProviderPassthrough exposes provider-native passthrough endpoints
+	// under /p/{provider}/{endpoint}. Default: true
+	EnableProviderPassthrough bool `yaml:"enable_provider_passthrough" env:"ENABLE_PROVIDER_PASSTHROUGH"`
 	// NormalizeOpenAICompatiblePassthroughV1Prefix allows /p/openai/v1/... style
 	// passthrough routes while keeping /p/openai/... as the canonical form.
 	// Default: true
@@ -400,8 +403,9 @@ type ResilienceConfig struct {
 func buildDefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Port:           "8080",
-			SwaggerEnabled: true,
+			Port:                      "8080",
+			SwaggerEnabled:            true,
+			EnableProviderPassthrough: true,
 			NormalizeOpenAICompatiblePassthroughV1Prefix: true,
 		},
 		Cache: CacheConfig{

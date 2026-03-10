@@ -343,6 +343,7 @@ func (h *Handler) proxyPassthroughResponse(c *echo.Context, providerType, endpoi
 // providers are intentionally deferred until they fit the same low-friction opaque path.
 //
 // @Summary      Provider passthrough
+// @Description  Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.
 // @Tags         passthrough
 // @Accept       json
 // @Accept       mpfd

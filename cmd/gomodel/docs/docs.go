@@ -538,6 +538,7 @@ const docTemplate = `{
         },
         "/p/{provider}/{endpoint}": {
             "get": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -599,6 +600,7 @@ const docTemplate = `{
                 ]
             },
             "put": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -660,6 +662,7 @@ const docTemplate = `{
                 ]
             },
             "post": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -721,6 +724,7 @@ const docTemplate = `{
                 ]
             },
             "delete": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -782,6 +786,7 @@ const docTemplate = `{
                 ]
             },
             "options": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -843,6 +848,7 @@ const docTemplate = `{
                 ]
             },
             "head": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -904,6 +910,7 @@ const docTemplate = `{
                 ]
             },
             "patch": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"

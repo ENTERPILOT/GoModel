@@ -158,15 +158,16 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	// Create server
 	serverCfg := &server.Config{
-		MasterKey:                appCfg.Server.MasterKey,
-		MetricsEnabled:           appCfg.Metrics.Enabled,
-		MetricsEndpoint:          appCfg.Metrics.Endpoint,
-		BodySizeLimit:            appCfg.Server.BodySizeLimit,
-		AuditLogger:              auditResult.Logger,
-		UsageLogger:              usageResult.Logger,
-		PricingResolver:          providerResult.Registry,
-		BatchStore:               batchResult.Store,
-		LogOnlyModelInteractions: appCfg.Logging.OnlyModelInteractions,
+		MasterKey:                  appCfg.Server.MasterKey,
+		MetricsEnabled:             appCfg.Metrics.Enabled,
+		MetricsEndpoint:            appCfg.Metrics.Endpoint,
+		BodySizeLimit:              appCfg.Server.BodySizeLimit,
+		AuditLogger:                auditResult.Logger,
+		UsageLogger:                usageResult.Logger,
+		PricingResolver:            providerResult.Registry,
+		BatchStore:                 batchResult.Store,
+		LogOnlyModelInteractions:   appCfg.Logging.OnlyModelInteractions,
+		DisableProviderPassthrough: !appCfg.Server.EnableProviderPassthrough,
 		DisableOpenAICompatiblePassthroughV1PrefixNormalization: !appCfg.Server.NormalizeOpenAICompatiblePassthroughV1Prefix,
 		SwaggerEnabled: appCfg.Server.SwaggerEnabled,
 	}
@@ -197,6 +198,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	if appCfg.Server.SwaggerEnabled {
 		slog.Info("swagger UI enabled", "path", "/swagger/index.html")
+	}
+	if appCfg.Server.EnableProviderPassthrough {
+		slog.Info("provider passthrough enabled", "path", "/p/{provider}/{endpoint}")
+	} else {
+		slog.Info("provider passthrough disabled")
 	}
 
 	rcm, err := responsecache.NewResponseCacheMiddleware(appCfg.Cache.Response)

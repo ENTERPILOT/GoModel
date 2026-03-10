@@ -534,6 +534,7 @@
         },
         "/p/{provider}/{endpoint}": {
             "get": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -595,6 +596,7 @@
                 ]
             },
             "put": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -656,6 +658,7 @@
                 ]
             },
             "post": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -717,6 +720,7 @@
                 ]
             },
             "delete": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -778,6 +782,7 @@
                 ]
             },
             "options": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -839,6 +844,7 @@
                 ]
             },
             "head": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -900,6 +906,7 @@
                 ]
             },
             "patch": {
+                "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_provider_passthrough.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"

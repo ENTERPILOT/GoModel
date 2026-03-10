@@ -42,6 +42,7 @@ type Config struct {
 	PricingResolver                                         usage.PricingResolver                  // Optional: Resolves pricing for cost calculation
 	BatchStore                                              batchstore.Store                       // Optional: Batch lifecycle persistence store
 	LogOnlyModelInteractions                                bool                                   // Only log AI model endpoints (default: true)
+	DisableProviderPassthrough                              bool                                   // Disable /p/{provider}/{endpoint} route registration
 	DisableOpenAICompatiblePassthroughV1PrefixNormalization bool                                   // Disable /p/openai/v1/... normalization while keeping canonical /p/openai/... routes
 	AdminEndpointsEnabled                                   bool                                   // Whether admin API endpoints are enabled
 	AdminUIEnabled                                          bool                                   // Whether admin dashboard UI is enabled
@@ -100,6 +101,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	if cfg != nil && cfg.SwaggerEnabled {
 		authSkipPaths = append(authSkipPaths, "/swagger/*")
+	}
+	if cfg != nil && cfg.DisableProviderPassthrough {
+		authSkipPaths = append(authSkipPaths, "/p/*")
 	}
 
 	// Global middleware stack (order matters)
@@ -193,13 +197,15 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	// API routes
-	e.GET("/p/:provider/*", handler.ProviderPassthrough)
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
-	e.PUT("/p/:provider/*", handler.ProviderPassthrough)
-	e.PATCH("/p/:provider/*", handler.ProviderPassthrough)
-	e.DELETE("/p/:provider/*", handler.ProviderPassthrough)
-	e.HEAD("/p/:provider/*", handler.ProviderPassthrough)
-	e.OPTIONS("/p/:provider/*", handler.ProviderPassthrough)
+	if cfg == nil || !cfg.DisableProviderPassthrough {
+		e.GET("/p/:provider/*", handler.ProviderPassthrough)
+		e.POST("/p/:provider/*", handler.ProviderPassthrough)
+		e.PUT("/p/:provider/*", handler.ProviderPassthrough)
+		e.PATCH("/p/:provider/*", handler.ProviderPassthrough)
+		e.DELETE("/p/:provider/*", handler.ProviderPassthrough)
+		e.HEAD("/p/:provider/*", handler.ProviderPassthrough)
+		e.OPTIONS("/p/:provider/*", handler.ProviderPassthrough)
+	}
 	e.GET("/v1/models", handler.ListModels)
 	e.POST("/v1/chat/completions", handler.ChatCompletion)
 	e.POST("/v1/responses", handler.Responses)
