@@ -113,29 +113,7 @@ func decodeCanonicalSelectorHintsForValidation(ctx context.Context, env *core.Se
 	if frame == nil || frame.RawBody == nil {
 		return "", "", false
 	}
-
-	switch env.Operation {
-	case "chat_completions":
-		req, err := core.DecodeChatRequest(frame.RawBody, env)
-		if err != nil {
-			return "", "", false
-		}
-		return req.Model, req.Provider, true
-	case "responses":
-		req, err := core.DecodeResponsesRequest(frame.RawBody, env)
-		if err != nil {
-			return "", "", false
-		}
-		return req.Model, req.Provider, true
-	case "embeddings":
-		req, err := core.DecodeEmbeddingRequest(frame.RawBody, env)
-		if err != nil {
-			return "", "", false
-		}
-		return req.Model, req.Provider, true
-	default:
-		return "", "", false
-	}
+	return core.DecodeCanonicalSelector(frame.RawBody, env)
 }
 
 func isBatchOrFileRootOrSubresource(path string) bool {

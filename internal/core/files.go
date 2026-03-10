@@ -1,5 +1,7 @@
 package core
 
+import "strings"
+
 const (
 	// FileActionCreate represents POST /v1/files.
 	FileActionCreate = "create"
@@ -33,6 +35,32 @@ type FileRequestSemantic struct {
 	LimitRaw string
 	Limit    int
 	HasLimit bool
+}
+
+// FileMultipartMetadataReader exposes the small subset of multipart form data
+// needed for sparse file-create semantics.
+type FileMultipartMetadataReader interface {
+	Value(name string) string
+	Filename(name string) (string, bool)
+}
+
+func EnrichFileCreateRequestSemantic(req *FileRequestSemantic, reader FileMultipartMetadataReader) *FileRequestSemantic {
+	if req == nil || req.Action != FileActionCreate || reader == nil {
+		return req
+	}
+
+	if req.Provider == "" {
+		req.Provider = strings.TrimSpace(reader.Value("provider"))
+	}
+	if req.Purpose == "" {
+		req.Purpose = strings.TrimSpace(reader.Value("purpose"))
+	}
+	if req.Filename == "" {
+		if filename, ok := reader.Filename("file"); ok {
+			req.Filename = strings.TrimSpace(filename)
+		}
+	}
+	return req
 }
 
 // FileObject represents an OpenAI-compatible file object.

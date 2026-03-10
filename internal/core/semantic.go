@@ -27,6 +27,12 @@ const (
 	semanticFileRequestKey      semanticCacheKey = "file_request"
 )
 
+var selectorSemanticCacheKeys = map[string]semanticCacheKey{
+	"chat_completions": semanticChatRequestKey,
+	"responses":        semanticResponsesRequestKey,
+	"embeddings":       semanticEmbeddingRequestKey,
+}
+
 // SemanticEnvelope is the gateway's best-effort semantic extraction from ingress.
 // It may be partial and should not be treated as authoritative transport state.
 type SemanticEnvelope struct {
@@ -80,22 +86,15 @@ func (env *SemanticEnvelope) CachedCanonicalSelector() (model, provider string, 
 	if env == nil {
 		return "", "", false
 	}
-
-	switch env.Operation {
-	case "chat_completions":
-		if req := env.CachedChatRequest(); req != nil {
-			return req.Model, req.Provider, true
-		}
-	case "responses":
-		if req := env.CachedResponsesRequest(); req != nil {
-			return req.Model, req.Provider, true
-		}
-	case "embeddings":
-		if req := env.CachedEmbeddingRequest(); req != nil {
-			return req.Model, req.Provider, true
-		}
+	key, ok := selectorSemanticCacheKeys[env.Operation]
+	if !ok {
+		return "", "", false
 	}
-	return "", "", false
+	req, ok := cachedSemanticAny(env, key)
+	if !ok {
+		return "", "", false
+	}
+	return semanticSelectorFromCanonicalRequest(req)
 }
 
 func (env *SemanticEnvelope) cacheValue(key semanticCacheKey, value any) {
@@ -122,6 +121,14 @@ func cachedSemanticValue[T any](env *SemanticEnvelope, key semanticCacheKey) (T,
 		return zero, false
 	}
 	return typed, true
+}
+
+func cachedSemanticAny(env *SemanticEnvelope, key semanticCacheKey) (any, bool) {
+	if env == nil || env.cachedValues == nil {
+		return nil, false
+	}
+	value, ok := env.cachedValues[key]
+	return value, ok
 }
 
 func cacheBatchRouteMetadata(env *SemanticEnvelope, req *BatchRequestSemantic) {

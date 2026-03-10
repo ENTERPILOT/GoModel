@@ -12,6 +12,22 @@ type canonicalJSONSpec[T any] struct {
 	afterDecode func(*SemanticEnvelope, T)
 }
 
+type semanticSelectorCarrier interface {
+	semanticSelector() (string, string)
+}
+
+var canonicalSelectorDecoders = map[string]func([]byte, *SemanticEnvelope) (any, error){
+	"chat_completions": func(body []byte, env *SemanticEnvelope) (any, error) {
+		return DecodeChatRequest(body, env)
+	},
+	"responses": func(body []byte, env *SemanticEnvelope) (any, error) {
+		return DecodeResponsesRequest(body, env)
+	},
+	"embeddings": func(body []byte, env *SemanticEnvelope) (any, error) {
+		return DecodeEmbeddingRequest(body, env)
+	},
+}
+
 func unmarshalCanonicalJSON[T any](body []byte, newValue func() T) (T, error) {
 	req := newValue()
 	if err := json.Unmarshal(body, req); err != nil {
@@ -27,7 +43,7 @@ func DecodeChatRequest(body []byte, env *SemanticEnvelope) (*ChatRequest, error)
 		key:      semanticChatRequestKey,
 		newValue: func() *ChatRequest { return &ChatRequest{} },
 		afterDecode: func(env *SemanticEnvelope, req *ChatRequest) {
-			cacheSemanticSelectorHints(env, req.Model, req.Provider)
+			cacheSemanticSelectorHintsFromRequest(env, req)
 		},
 	})
 }
@@ -38,7 +54,7 @@ func DecodeResponsesRequest(body []byte, env *SemanticEnvelope) (*ResponsesReque
 		key:      semanticResponsesRequestKey,
 		newValue: func() *ResponsesRequest { return &ResponsesRequest{} },
 		afterDecode: func(env *SemanticEnvelope, req *ResponsesRequest) {
-			cacheSemanticSelectorHints(env, req.Model, req.Provider)
+			cacheSemanticSelectorHintsFromRequest(env, req)
 		},
 	})
 }
@@ -49,7 +65,7 @@ func DecodeEmbeddingRequest(body []byte, env *SemanticEnvelope) (*EmbeddingReque
 		key:      semanticEmbeddingRequestKey,
 		newValue: func() *EmbeddingRequest { return &EmbeddingRequest{} },
 		afterDecode: func(env *SemanticEnvelope, req *EmbeddingRequest) {
-			cacheSemanticSelectorHints(env, req.Model, req.Provider)
+			cacheSemanticSelectorHintsFromRequest(env, req)
 		},
 	})
 }
@@ -137,6 +153,21 @@ func NormalizeModelSelector(env *SemanticEnvelope, model, provider *string) erro
 	return nil
 }
 
+func DecodeCanonicalSelector(body []byte, env *SemanticEnvelope) (model, provider string, ok bool) {
+	if env == nil {
+		return "", "", false
+	}
+	decode, ok := canonicalSelectorDecoders[env.Operation]
+	if !ok {
+		return "", "", false
+	}
+	req, err := decode(body, env)
+	if err != nil {
+		return "", "", false
+	}
+	return semanticSelectorFromCanonicalRequest(req)
+}
+
 func decodeCanonicalJSON[T any](body []byte, env *SemanticEnvelope, spec canonicalJSONSpec[T]) (T, error) {
 	if req, ok := cachedSemanticValue[T](env, spec.key); ok {
 		return req, nil
@@ -165,4 +196,21 @@ func cacheSemanticSelectorHints(env *SemanticEnvelope, model, provider string) {
 	if env.SelectorHints.Provider == "" {
 		env.SelectorHints.Provider = provider
 	}
+}
+
+func cacheSemanticSelectorHintsFromRequest(env *SemanticEnvelope, req any) {
+	model, provider, ok := semanticSelectorFromCanonicalRequest(req)
+	if !ok {
+		return
+	}
+	cacheSemanticSelectorHints(env, model, provider)
+}
+
+func semanticSelectorFromCanonicalRequest(req any) (model, provider string, ok bool) {
+	carrier, ok := req.(semanticSelectorCarrier)
+	if !ok || carrier == nil {
+		return "", "", false
+	}
+	model, provider = carrier.semanticSelector()
+	return model, provider, true
 }

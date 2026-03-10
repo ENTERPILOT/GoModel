@@ -34,6 +34,13 @@ type ChatRequest struct {
 	ExtraFields       map[string]json.RawMessage `json:"-" swaggerignore:"true"`
 }
 
+func (r *ChatRequest) semanticSelector() (string, string) {
+	if r == nil {
+		return "", ""
+	}
+	return r.Model, r.Provider
+}
+
 // WithStreaming returns a shallow copy of the request with Stream set to true.
 // This avoids mutating the caller's request object.
 func (r *ChatRequest) WithStreaming() *ChatRequest {
@@ -260,6 +267,13 @@ type EmbeddingRequest struct {
 	EncodingFormat string                     `json:"encoding_format,omitempty"`
 	Dimensions     *int                       `json:"dimensions,omitempty"`
 	ExtraFields    map[string]json.RawMessage `json:"-" swaggerignore:"true"`
+}
+
+func (r *EmbeddingRequest) semanticSelector() (string, string) {
+	if r == nil {
+		return "", ""
+	}
+	return r.Model, r.Provider
 }
 
 // EmbeddingResponse represents the embeddings response (OpenAI-compatible).

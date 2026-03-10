@@ -23,6 +23,13 @@ type ResponsesRequest struct {
 	ExtraFields       map[string]json.RawMessage `json:"-" swaggerignore:"true"`
 }
 
+func (r *ResponsesRequest) semanticSelector() (string, string) {
+	if r == nil {
+		return "", ""
+	}
+	return r.Model, r.Provider
+}
+
 // WithStreaming returns a shallow copy of the request with Stream set to true.
 // This avoids mutating the caller's request object.
 func (r *ResponsesRequest) WithStreaming() *ResponsesRequest {

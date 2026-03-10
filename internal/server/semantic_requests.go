@@ -1,8 +1,6 @@
 package server
 
 import (
-	"strings"
-
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/core"
@@ -68,25 +66,31 @@ func fileRequestFromSemanticEnvelope(c *echo.Context) (*core.FileRequestSemantic
 	if err != nil {
 		return nil, err
 	}
-
-	switch req.Action {
-	case core.FileActionCreate:
-		if req.Provider == "" {
-			req.Provider = strings.TrimSpace(c.FormValue("provider"))
-		}
-		if req.Purpose == "" {
-			req.Purpose = strings.TrimSpace(c.FormValue("purpose"))
-		}
-		if req.Filename == "" {
-			fileHeader, err := c.FormFile("file")
-			if err == nil && fileHeader != nil {
-				req.Filename = strings.TrimSpace(fileHeader.Filename)
-			}
-		}
-	}
-
+	req = core.EnrichFileCreateRequestSemantic(req, echoFileMultipartReader{ctx: c})
 	core.CacheFileRequestSemantic(env, req)
 	return req, nil
+}
+
+type echoFileMultipartReader struct {
+	ctx *echo.Context
+}
+
+func (r echoFileMultipartReader) Value(name string) string {
+	if r.ctx == nil {
+		return ""
+	}
+	return r.ctx.FormValue(name)
+}
+
+func (r echoFileMultipartReader) Filename(name string) (string, bool) {
+	if r.ctx == nil {
+		return "", false
+	}
+	fileHeader, err := r.ctx.FormFile(name)
+	if err != nil || fileHeader == nil {
+		return "", false
+	}
+	return fileHeader.Filename, true
 }
 
 func pathValuesToMap(values echo.PathValues) map[string]string {

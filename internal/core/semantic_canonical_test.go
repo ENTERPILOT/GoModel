@@ -2,6 +2,20 @@ package core
 
 import "testing"
 
+type testFileMultipartReader struct {
+	values    map[string]string
+	filenames map[string]string
+}
+
+func (r testFileMultipartReader) Value(name string) string {
+	return r.values[name]
+}
+
+func (r testFileMultipartReader) Filename(name string) (string, bool) {
+	value, ok := r.filenames[name]
+	return value, ok
+}
+
 func TestDecodeChatRequest_CachesOnSemanticEnvelope(t *testing.T) {
 	t.Parallel()
 
@@ -106,5 +120,49 @@ func TestNormalizeModelSelector_UpdatesSemanticHints(t *testing.T) {
 	}
 	if env.SelectorHints.Provider != "openai" {
 		t.Fatalf("SelectorHints.Provider = %q, want openai", env.SelectorHints.Provider)
+	}
+}
+
+func TestDecodeCanonicalSelector_UsesOperationCodec(t *testing.T) {
+	t.Parallel()
+
+	env := &SemanticEnvelope{Operation: "responses"}
+	model, provider, ok := DecodeCanonicalSelector([]byte(`{"model":"gpt-5-mini","provider":"openai","input":"hi"}`), env)
+	if !ok {
+		t.Fatal("DecodeCanonicalSelector() ok = false, want true")
+	}
+	if model != "gpt-5-mini" {
+		t.Fatalf("model = %q, want gpt-5-mini", model)
+	}
+	if provider != "openai" {
+		t.Fatalf("provider = %q, want openai", provider)
+	}
+	if env.CachedResponsesRequest() == nil {
+		t.Fatal("ResponsesRequest was not cached on semantic envelope")
+	}
+}
+
+func TestEnrichFileCreateRequestSemantic_FillsMultipartMetadata(t *testing.T) {
+	t.Parallel()
+
+	req := &FileRequestSemantic{Action: FileActionCreate}
+	req = EnrichFileCreateRequestSemantic(req, testFileMultipartReader{
+		values: map[string]string{
+			"provider": "openai",
+			"purpose":  "batch",
+		},
+		filenames: map[string]string{
+			"file": "requests.jsonl",
+		},
+	})
+
+	if req.Provider != "openai" {
+		t.Fatalf("Provider = %q, want openai", req.Provider)
+	}
+	if req.Purpose != "batch" {
+		t.Fatalf("Purpose = %q, want batch", req.Purpose)
+	}
+	if req.Filename != "requests.jsonl" {
+		t.Fatalf("Filename = %q, want requests.jsonl", req.Filename)
 	}
 }

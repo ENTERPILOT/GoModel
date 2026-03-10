@@ -7,6 +7,18 @@ import (
 	"strings"
 )
 
+var knownBatchItemDecoders = map[string]func([]byte) (any, error){
+	"chat_completions": func(body []byte) (any, error) {
+		return unmarshalCanonicalJSON(body, func() *ChatRequest { return &ChatRequest{} })
+	},
+	"responses": func(body []byte) (any, error) {
+		return unmarshalCanonicalJSON(body, func() *ResponsesRequest { return &ResponsesRequest{} })
+	},
+	"embeddings": func(body []byte) (any, error) {
+		return unmarshalCanonicalJSON(body, func() *EmbeddingRequest { return &EmbeddingRequest{} })
+	},
+}
+
 // DecodedBatchItemRequest is the canonical decode result for known JSON batch subrequests.
 type DecodedBatchItemRequest struct {
 	Endpoint  string
@@ -43,29 +55,11 @@ func (decoded *DecodedBatchItemRequest) ModelSelector() (ModelSelector, error) {
 	if decoded == nil {
 		return ModelSelector{}, fmt.Errorf("decoded batch request is required")
 	}
-
-	switch decoded.Operation {
-	case "chat_completions":
-		req := decoded.ChatRequest()
-		if req == nil {
-			return ModelSelector{}, fmt.Errorf("missing chat request")
-		}
-		return ParseModelSelector(req.Model, req.Provider)
-	case "responses":
-		req := decoded.ResponsesRequest()
-		if req == nil {
-			return ModelSelector{}, fmt.Errorf("missing responses request")
-		}
-		return ParseModelSelector(req.Model, req.Provider)
-	case "embeddings":
-		req := decoded.EmbeddingRequest()
-		if req == nil {
-			return ModelSelector{}, fmt.Errorf("missing embeddings request")
-		}
-		return ParseModelSelector(req.Model, req.Provider)
-	default:
+	model, provider, ok := semanticSelectorFromCanonicalRequest(decoded.Request)
+	if !ok {
 		return ModelSelector{}, fmt.Errorf("unsupported batch item url: %s", decoded.Endpoint)
 	}
+	return ParseModelSelector(model, provider)
 }
 
 // NormalizeOperationPath returns a stable path-only form for model-facing endpoints.
@@ -120,28 +114,15 @@ func DecodeKnownBatchItemRequest(defaultEndpoint string, item BatchRequestItem) 
 		Operation: DescribeEndpointPath(endpoint).Operation,
 	}
 
-	switch decoded.Operation {
-	case "chat_completions":
-		req, err := unmarshalCanonicalJSON(item.Body, func() *ChatRequest { return &ChatRequest{} })
-		if err != nil {
-			return nil, fmt.Errorf("invalid chat request body: %w", err)
-		}
-		decoded.Request = req
-	case "responses":
-		req, err := unmarshalCanonicalJSON(item.Body, func() *ResponsesRequest { return &ResponsesRequest{} })
-		if err != nil {
-			return nil, fmt.Errorf("invalid responses request body: %w", err)
-		}
-		decoded.Request = req
-	case "embeddings":
-		req, err := unmarshalCanonicalJSON(item.Body, func() *EmbeddingRequest { return &EmbeddingRequest{} })
-		if err != nil {
-			return nil, fmt.Errorf("invalid embeddings request body: %w", err)
-		}
-		decoded.Request = req
-	default:
+	decode, ok := knownBatchItemDecoders[decoded.Operation]
+	if !ok {
 		return nil, fmt.Errorf("unsupported batch item url: %s", endpoint)
 	}
+	req, err := decode(item.Body)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s request body: %w", strings.ReplaceAll(decoded.Operation, "_", " "), err)
+	}
+	decoded.Request = req
 	return decoded, nil
 }
 
