@@ -908,6 +908,196 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_TextOnlyContentArray
 	}
 }
 
+func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_PreservesOpaqueChatFields(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	g, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
+	pipeline.Add(g, 0)
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+
+	req := &core.BatchRequest{
+		Endpoint: "/v1/chat/completions",
+		Requests: []core.BatchRequestItem{
+			{
+				Method: http.MethodPost,
+				URL:    "/v1/chat/completions",
+				Body: json.RawMessage(`{
+					"model":"gpt-4",
+					"messages":[{"role":"user","content":"hello","name":"alice","x_meta":{"tier":"gold"}}],
+					"response_format":{"type":"json_schema","json_schema":{"name":"reply"}}
+				}`),
+			},
+		},
+	}
+
+	_, err := guarded.CreateBatch(context.Background(), "mock", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inner.batchReq == nil || len(inner.batchReq.Requests) != 1 {
+		t.Fatalf("expected delegated batch request")
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(inner.batchReq.Requests[0].Body, &body); err != nil {
+		t.Fatal(err)
+	}
+
+	responseFormat, ok := body["response_format"].(map[string]any)
+	if !ok {
+		t.Fatalf("response_format = %#v, want object", body["response_format"])
+	}
+	if responseFormat["type"] != "json_schema" {
+		t.Fatalf("response_format.type = %#v, want json_schema", responseFormat["type"])
+	}
+
+	messages, ok := body["messages"].([]any)
+	if !ok || len(messages) != 2 {
+		t.Fatalf("messages = %#v, want 2 entries", body["messages"])
+	}
+	systemMsg, ok := messages[0].(map[string]any)
+	if !ok || systemMsg["role"] != "system" {
+		t.Fatalf("messages[0] = %#v, want injected system message", messages[0])
+	}
+	userMsg, ok := messages[1].(map[string]any)
+	if !ok {
+		t.Fatalf("messages[1] = %#v, want object", messages[1])
+	}
+	if userMsg["name"] != "alice" {
+		t.Fatalf("messages[1].name = %#v, want alice", userMsg["name"])
+	}
+	xMeta, ok := userMsg["x_meta"].(map[string]any)
+	if !ok || xMeta["tier"] != "gold" {
+		t.Fatalf("messages[1].x_meta = %#v, want preserved nested metadata", userMsg["x_meta"])
+	}
+	if userMsg["content"] != "hello" {
+		t.Fatalf("messages[1].content = %#v, want hello", userMsg["content"])
+	}
+}
+
+func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_RewritesChatContentWithoutDroppingOpaqueMessageFields(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	pipeline.Add(&mockGuardrail{
+		name: "rewrite-user-text",
+		processFn: func(_ context.Context, msgs []Message) ([]Message, error) {
+			out := make([]Message, len(msgs))
+			copy(out, msgs)
+			for i := range out {
+				if out[i].Role == "user" {
+					out[i].Content = out[i].Content + " [rewritten]"
+				}
+			}
+			return out, nil
+		},
+	}, 0)
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+
+	req := &core.BatchRequest{
+		Endpoint: "/v1/chat/completions",
+		Requests: []core.BatchRequestItem{
+			{
+				Method: http.MethodPost,
+				URL:    "/v1/chat/completions",
+				Body: json.RawMessage(`{
+					"model":"gpt-4",
+					"messages":[{"role":"user","content":"hello","name":"alice","x_meta":{"tier":"gold"}}]
+				}`),
+			},
+		},
+	}
+
+	_, err := guarded.CreateBatch(context.Background(), "mock", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inner.batchReq == nil || len(inner.batchReq.Requests) != 1 {
+		t.Fatalf("expected delegated batch request")
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(inner.batchReq.Requests[0].Body, &body); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, ok := body["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages = %#v, want 1 entry", body["messages"])
+	}
+	userMsg, ok := messages[0].(map[string]any)
+	if !ok {
+		t.Fatalf("messages[0] = %#v, want object", messages[0])
+	}
+	if userMsg["content"] != "hello [rewritten]" {
+		t.Fatalf("messages[0].content = %#v, want rewritten text", userMsg["content"])
+	}
+	if userMsg["name"] != "alice" {
+		t.Fatalf("messages[0].name = %#v, want alice", userMsg["name"])
+	}
+	xMeta, ok := userMsg["x_meta"].(map[string]any)
+	if !ok || xMeta["tier"] != "gold" {
+		t.Fatalf("messages[0].x_meta = %#v, want preserved nested metadata", userMsg["x_meta"])
+	}
+}
+
+func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_PreservesOpaqueResponsesFields(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	g, _ := NewSystemPromptGuardrail("test", SystemPromptOverride, "guardrail instructions")
+	pipeline.Add(g, 0)
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+
+	req := &core.BatchRequest{
+		Endpoint: "/v1/responses",
+		Requests: []core.BatchRequestItem{
+			{
+				Method: http.MethodPost,
+				URL:    "/v1/responses",
+				Body: json.RawMessage(`{
+					"model":"gpt-4",
+					"instructions":"original",
+					"input":[{"type":"message","role":"user","content":"hello","x_trace":{"id":"trace-1"}}],
+					"response_format":{"type":"json_schema","json_schema":{"name":"reply"}}
+				}`),
+			},
+		},
+	}
+
+	_, err := guarded.CreateBatch(context.Background(), "mock", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inner.batchReq == nil || len(inner.batchReq.Requests) != 1 {
+		t.Fatalf("expected delegated batch request")
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(inner.batchReq.Requests[0].Body, &body); err != nil {
+		t.Fatal(err)
+	}
+
+	if body["instructions"] != "guardrail instructions" {
+		t.Fatalf("instructions = %#v, want guarded text", body["instructions"])
+	}
+	responseFormat, ok := body["response_format"].(map[string]any)
+	if !ok || responseFormat["type"] != "json_schema" {
+		t.Fatalf("response_format = %#v, want preserved json_schema object", body["response_format"])
+	}
+
+	input, ok := body["input"].([]any)
+	if !ok || len(input) != 1 {
+		t.Fatalf("input = %#v, want 1 entry", body["input"])
+	}
+	inputMsg, ok := input[0].(map[string]any)
+	if !ok {
+		t.Fatalf("input[0] = %#v, want object", input[0])
+	}
+	xTrace, ok := inputMsg["x_trace"].(map[string]any)
+	if !ok || xTrace["id"] != "trace-1" {
+		t.Fatalf("input[0].x_trace = %#v, want preserved nested metadata", inputMsg["x_trace"])
+	}
+}
+
 func TestGuardedProvider_Responses_OverrideClearsExisting(t *testing.T) {
 	inner := &mockRoutableProvider{}
 	pipeline := NewPipeline()
