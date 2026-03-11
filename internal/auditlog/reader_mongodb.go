@@ -233,23 +233,15 @@ func mongoDateRangeFilter(params QueryParams) bson.D {
 }
 
 func (r *MongoDBReader) findByResponseID(ctx context.Context, responseID string) (*LogEntry, error) {
-	filter := bson.D{{Key: "data.response_body.id", Value: responseID}}
-	opts := options.FindOne().SetSort(bson.D{{Key: "timestamp", Value: 1}})
-
-	var row mongoLogRow
-
-	if err := r.collection.FindOne(ctx, filter, opts).Decode(&row); err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to query audit log by response id: %w", err)
-	}
-
-	return row.toLogEntry(), nil
+	return r.findFirstByField(ctx, "data.response_body.id", responseID, "response id")
 }
 
 func (r *MongoDBReader) findByPreviousResponseID(ctx context.Context, previousResponseID string) (*LogEntry, error) {
-	filter := bson.D{{Key: "data.request_body.previous_response_id", Value: previousResponseID}}
+	return r.findFirstByField(ctx, "data.request_body.previous_response_id", previousResponseID, "previous_response_id")
+}
+
+func (r *MongoDBReader) findFirstByField(ctx context.Context, field string, value any, label string) (*LogEntry, error) {
+	filter := bson.D{{Key: field, Value: value}}
 	opts := options.FindOne().SetSort(bson.D{{Key: "timestamp", Value: 1}})
 
 	var row mongoLogRow
@@ -258,7 +250,7 @@ func (r *MongoDBReader) findByPreviousResponseID(ctx context.Context, previousRe
 		if err == mongo.ErrNoDocuments {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to query audit log by previous_response_id: %w", err)
+		return nil, fmt.Errorf("failed to query audit log by %s: %w", label, err)
 	}
 
 	return row.toLogEntry(), nil

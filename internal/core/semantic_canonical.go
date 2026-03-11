@@ -107,54 +107,66 @@ func DecodeBatchRequest(body []byte, env *SemanticEnvelope) (*BatchRequest, erro
 	return decodeCanonicalOperation[*BatchRequest](body, env, "batches")
 }
 
-// BatchRouteMetadata returns sparse batch route semantics, caching them on the envelope when present.
-func BatchRouteMetadata(env *SemanticEnvelope, method, path string, routeParams map[string]string, queryParams map[string][]string) (*BatchRequestSemantic, error) {
-	req := (*BatchRequestSemantic)(nil)
+func parseRouteLimit(limitRaw string) (int, error) {
+	parsed, err := strconv.Atoi(strings.TrimSpace(limitRaw))
+	if err != nil {
+		return 0, NewInvalidRequestError("invalid limit parameter", err)
+	}
+	return parsed, nil
+}
+
+func cachedRouteMetadata[T any](
+	env *SemanticEnvelope,
+	cached func(*SemanticEnvelope) *T,
+	build func() *T,
+	applyLimit func(*T) error,
+	store func(*SemanticEnvelope, *T),
+) (*T, error) {
+	req := (*T)(nil)
 	if env != nil {
-		req = env.CachedBatchMetadata()
+		req = cached(env)
 	}
 	if req == nil {
-		req = BuildBatchRequestSemanticFromTransport(method, path, routeParams, queryParams)
+		req = build()
 		if req == nil {
-			req = &BatchRequestSemantic{}
+			req = new(T)
 		}
 	}
-
-	if req.LimitRaw != "" && !req.HasLimit {
-		parsed, err := strconv.Atoi(strings.TrimSpace(req.LimitRaw))
-		if err != nil {
-			return nil, NewInvalidRequestError("invalid limit parameter", err)
-		}
-		req.Limit = parsed
-		req.HasLimit = true
+	if err := applyLimit(req); err != nil {
+		return nil, err
 	}
-	cacheBatchRouteMetadata(env, req)
+	store(env, req)
 	return req, nil
+}
+
+// BatchRouteMetadata returns sparse batch route semantics, caching them on the envelope when present.
+func BatchRouteMetadata(env *SemanticEnvelope, method, path string, routeParams map[string]string, queryParams map[string][]string) (*BatchRequestSemantic, error) {
+	return cachedRouteMetadata(
+		env,
+		func(env *SemanticEnvelope) *BatchRequestSemantic {
+			return env.CachedBatchMetadata()
+		},
+		func() *BatchRequestSemantic {
+			return BuildBatchRequestSemanticFromTransport(method, path, routeParams, queryParams)
+		},
+		(*BatchRequestSemantic).ensureParsedLimit,
+		cacheBatchRouteMetadata,
+	)
 }
 
 // FileRouteMetadata returns sparse file route semantics, caching them on the envelope when present.
 func FileRouteMetadata(env *SemanticEnvelope, method, path string, routeParams map[string]string, queryParams map[string][]string) (*FileRequestSemantic, error) {
-	req := (*FileRequestSemantic)(nil)
-	if env != nil {
-		req = env.CachedFileRequest()
-	}
-	if req == nil {
-		req = BuildFileRequestSemanticFromTransport(method, path, routeParams, queryParams)
-		if req == nil {
-			req = &FileRequestSemantic{}
-		}
-	}
-
-	if req.LimitRaw != "" && !req.HasLimit {
-		parsed, err := strconv.Atoi(strings.TrimSpace(req.LimitRaw))
-		if err != nil {
-			return nil, NewInvalidRequestError("invalid limit parameter", err)
-		}
-		req.Limit = parsed
-		req.HasLimit = true
-	}
-	CacheFileRequestSemantic(env, req)
-	return req, nil
+	return cachedRouteMetadata(
+		env,
+		func(env *SemanticEnvelope) *FileRequestSemantic {
+			return env.CachedFileRequest()
+		},
+		func() *FileRequestSemantic {
+			return BuildFileRequestSemanticFromTransport(method, path, routeParams, queryParams)
+		},
+		(*FileRequestSemantic).ensureParsedLimit,
+		CacheFileRequestSemantic,
+	)
 }
 
 // NormalizeModelSelector canonicalizes model/provider selector inputs and keeps

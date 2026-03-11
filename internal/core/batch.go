@@ -45,6 +45,19 @@ type BatchRequestSemantic struct {
 	HasLimit bool
 }
 
+func (req *BatchRequestSemantic) ensureParsedLimit() error {
+	if req == nil || req.LimitRaw == "" || req.HasLimit {
+		return nil
+	}
+	parsed, err := parseRouteLimit(req.LimitRaw)
+	if err != nil {
+		return err
+	}
+	req.Limit = parsed
+	req.HasLimit = true
+	return nil
+}
+
 // BatchRequestItem represents one sub-request in an inline batch.
 type BatchRequestItem struct {
 	CustomID    string                     `json:"custom_id,omitempty"`

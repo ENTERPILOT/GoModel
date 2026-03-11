@@ -37,6 +37,19 @@ type FileRequestSemantic struct {
 	HasLimit bool
 }
 
+func (req *FileRequestSemantic) ensureParsedLimit() error {
+	if req == nil || req.LimitRaw == "" || req.HasLimit {
+		return nil
+	}
+	parsed, err := parseRouteLimit(req.LimitRaw)
+	if err != nil {
+		return err
+	}
+	req.Limit = parsed
+	req.HasLimit = true
+	return nil
+}
+
 // FileMultipartMetadataReader exposes the small subset of multipart form data
 // needed for sparse file-create semantics.
 type FileMultipartMetadataReader interface {

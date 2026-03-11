@@ -2,6 +2,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -174,6 +175,30 @@ func (h *Handler) UsageSummary(c *echo.Context) error {
 	return c.JSON(http.StatusOK, summary)
 }
 
+func usageSliceResponse[T any](
+	c *echo.Context,
+	reader usage.UsageReader,
+	fetch func(context.Context, usage.UsageQueryParams) ([]T, error),
+) error {
+	if reader == nil {
+		return c.JSON(http.StatusOK, []T{})
+	}
+
+	params, err := parseUsageParams(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	values, err := fetch(c.Request().Context(), params)
+	if err != nil {
+		return handleError(c, err)
+	}
+	if values == nil {
+		values = []T{}
+	}
+	return c.JSON(http.StatusOK, values)
+}
+
 // DailyUsage handles GET /admin/api/v1/usage/daily
 //
 // @Summary      Get usage breakdown by period
@@ -189,25 +214,9 @@ func (h *Handler) UsageSummary(c *echo.Context) error {
 // @Failure      401  {object}  core.GatewayError
 // @Router       /admin/api/v1/usage/daily [get]
 func (h *Handler) DailyUsage(c *echo.Context) error {
-	if h.usageReader == nil {
-		return c.JSON(http.StatusOK, []usage.DailyUsage{})
-	}
-
-	params, err := parseUsageParams(c)
-	if err != nil {
-		return handleError(c, err)
-	}
-
-	daily, err := h.usageReader.GetDailyUsage(c.Request().Context(), params)
-	if err != nil {
-		return handleError(c, err)
-	}
-
-	if daily == nil {
-		daily = []usage.DailyUsage{}
-	}
-
-	return c.JSON(http.StatusOK, daily)
+	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.DailyUsage, error) {
+		return h.usageReader.GetDailyUsage(ctx, params)
+	})
 }
 
 // UsageByModel handles GET /admin/api/v1/usage/models
@@ -224,25 +233,9 @@ func (h *Handler) DailyUsage(c *echo.Context) error {
 // @Failure      401  {object}  core.GatewayError
 // @Router       /admin/api/v1/usage/models [get]
 func (h *Handler) UsageByModel(c *echo.Context) error {
-	if h.usageReader == nil {
-		return c.JSON(http.StatusOK, []usage.ModelUsage{})
-	}
-
-	params, err := parseUsageParams(c)
-	if err != nil {
-		return handleError(c, err)
-	}
-
-	models, err := h.usageReader.GetUsageByModel(c.Request().Context(), params)
-	if err != nil {
-		return handleError(c, err)
-	}
-
-	if models == nil {
-		models = []usage.ModelUsage{}
-	}
-
-	return c.JSON(http.StatusOK, models)
+	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.ModelUsage, error) {
+		return h.usageReader.GetUsageByModel(ctx, params)
+	})
 }
 
 // UsageLog handles GET /admin/api/v1/usage/log

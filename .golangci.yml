@@ -4,7 +4,7 @@ linters:
     - dupl
   settings:
     dupl:
-      threshold: 150
+      threshold: 100
   exclusions:
     rules:
       - linters:

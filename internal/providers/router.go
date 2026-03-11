@@ -57,6 +57,167 @@ func (r *Router) resolveProvider(model, provider string) (core.Provider, core.Mo
 	return p, selector, nil
 }
 
+func (r *Router) resolveProviderType(providerType string) (core.Provider, error) {
+	if err := r.checkReady(); err != nil {
+		return nil, err
+	}
+	if providerType == "" {
+		return nil, core.NewInvalidRequestError("provider type is required", nil)
+	}
+	provider := r.providerByType(providerType)
+	if provider == nil {
+		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
+	}
+	return provider, nil
+}
+
+func (r *Router) resolveNativeBatchProvider(providerType string) (core.NativeBatchProvider, error) {
+	provider, err := r.resolveProviderType(providerType)
+	if err != nil {
+		return nil, err
+	}
+	bp, ok := provider.(core.NativeBatchProvider)
+	if !ok {
+		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native batch processing", providerType), nil)
+	}
+	return bp, nil
+}
+
+func (r *Router) resolveNativeFileProvider(providerType string) (core.NativeFileProvider, error) {
+	provider, err := r.resolveProviderType(providerType)
+	if err != nil {
+		return nil, err
+	}
+	fp, ok := provider.(core.NativeFileProvider)
+	if !ok {
+		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native file operations", providerType), nil)
+	}
+	return fp, nil
+}
+
+func (r *Router) resolvePassthroughProvider(providerType string) (core.PassthroughProvider, error) {
+	provider, err := r.resolveProviderType(providerType)
+	if err != nil {
+		return nil, err
+	}
+	pp, ok := provider.(core.PassthroughProvider)
+	if !ok {
+		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support provider passthrough", providerType), nil)
+	}
+	return pp, nil
+}
+
+func routeResolvedModelCall[Req any, Resp any](
+	r *Router,
+	ctx context.Context,
+	model string,
+	provider string,
+	buildForward func(core.ModelSelector) Req,
+	call func(context.Context, core.Provider, Req) (Resp, error),
+) (Resp, string, error) {
+	p, selector, err := r.resolveProvider(model, provider)
+	if err != nil {
+		var zero Resp
+		return zero, "", err
+	}
+
+	resp, err := call(ctx, p, buildForward(selector))
+	return resp, r.GetProviderType(selector.QualifiedModel()), err
+}
+
+func routeStampedModelResponse[Req any, Resp any](
+	r *Router,
+	ctx context.Context,
+	model string,
+	provider string,
+	buildForward func(core.ModelSelector) Req,
+	call func(context.Context, core.Provider, Req) (Resp, error),
+) (Resp, error) {
+	resp, providerType, err := routeResolvedModelCall(r, ctx, model, provider, buildForward, call)
+	if err != nil {
+		var zero Resp
+		return zero, err
+	}
+	return stampProvider(resp, providerType), nil
+}
+
+func routeNativeBatchCall[T any](r *Router, ctx context.Context, providerType string, call func(context.Context, core.NativeBatchProvider) (T, error)) (T, error) {
+	bp, err := r.resolveNativeBatchProvider(providerType)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return call(ctx, bp)
+}
+
+func routeNativeFileCall[T any](r *Router, ctx context.Context, providerType string, call func(context.Context, core.NativeFileProvider) (T, error)) (T, error) {
+	fp, err := r.resolveNativeFileProvider(providerType)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return call(ctx, fp)
+}
+
+func stampProvider[T any](resp T, providerType string) T {
+	switch typed := any(resp).(type) {
+	case *core.ChatResponse:
+		if typed != nil {
+			typed.Provider = providerType
+		}
+	case *core.ResponsesResponse:
+		if typed != nil {
+			typed.Provider = providerType
+		}
+	case *core.EmbeddingResponse:
+		if typed != nil {
+			typed.Provider = providerType
+		}
+	case *core.BatchResponse:
+		if typed != nil {
+			typed.Provider = providerType
+		}
+	case *core.FileObject:
+		if typed != nil {
+			typed.Provider = providerType
+		}
+	}
+	return resp
+}
+
+func forwardChatRequest(req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
+	forwardReq := *req
+	forwardReq.Model = selector.Model
+	forwardReq.Provider = ""
+	return &forwardReq
+}
+
+func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
+	forwardReq := *req
+	forwardReq.Model = selector.Model
+	forwardReq.Provider = ""
+	return &forwardReq
+}
+
+func forwardEmbeddingRequest(req *core.EmbeddingRequest, selector core.ModelSelector) *core.EmbeddingRequest {
+	forwardReq := *req
+	forwardReq.Model = selector.Model
+	forwardReq.Provider = ""
+	return &forwardReq
+}
+
+func callChatCompletion(ctx context.Context, provider core.Provider, req *core.ChatRequest) (*core.ChatResponse, error) {
+	return provider.ChatCompletion(ctx, req)
+}
+
+func callResponses(ctx context.Context, provider core.Provider, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	return provider.Responses(ctx, req)
+}
+
+func callEmbeddings(ctx context.Context, provider core.Provider, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	return provider.Embeddings(ctx, req)
+}
+
 // Supports returns true if any provider supports the given model.
 // Returns false if the lookup has no models loaded.
 func (r *Router) Supports(model string) bool {
@@ -69,31 +230,34 @@ func (r *Router) Supports(model string) bool {
 // ChatCompletion routes the request to the appropriate provider.
 // Returns ErrRegistryNotInitialized if the lookup has no models loaded.
 func (r *Router) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	provider, selector, err := r.resolveProvider(req.Model, req.Provider)
-	if err != nil {
-		return nil, err
-	}
-	forwardReq := *req
-	forwardReq.Model = selector.Model
-	forwardReq.Provider = ""
-	resp, err := provider.ChatCompletion(ctx, &forwardReq)
-	if err == nil && resp != nil {
-		resp.Provider = r.GetProviderType(selector.QualifiedModel())
-	}
-	return resp, err
+	return routeStampedModelResponse(
+		r,
+		ctx,
+		req.Model,
+		req.Provider,
+		func(selector core.ModelSelector) *core.ChatRequest {
+			return forwardChatRequest(req, selector)
+		},
+		callChatCompletion,
+	)
 }
 
 // StreamChatCompletion routes the streaming request to the appropriate provider.
 // Returns ErrRegistryNotInitialized if the lookup has no models loaded.
 func (r *Router) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	provider, selector, err := r.resolveProvider(req.Model, req.Provider)
-	if err != nil {
-		return nil, err
-	}
-	forwardReq := *req
-	forwardReq.Model = selector.Model
-	forwardReq.Provider = ""
-	return provider.StreamChatCompletion(ctx, &forwardReq)
+	stream, _, err := routeResolvedModelCall(
+		r,
+		ctx,
+		req.Model,
+		req.Provider,
+		func(selector core.ModelSelector) *core.ChatRequest {
+			return forwardChatRequest(req, selector)
+		},
+		func(ctx context.Context, provider core.Provider, forwardReq *core.ChatRequest) (io.ReadCloser, error) {
+			return provider.StreamChatCompletion(ctx, forwardReq)
+		},
+	)
+	return stream, err
 }
 
 // ListModels returns all models from the lookup.
@@ -112,47 +276,48 @@ func (r *Router) ListModels(_ context.Context) (*core.ModelsResponse, error) {
 // Responses routes the Responses API request to the appropriate provider.
 // Returns ErrRegistryNotInitialized if the lookup has no models loaded.
 func (r *Router) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	provider, selector, err := r.resolveProvider(req.Model, req.Provider)
-	if err != nil {
-		return nil, err
-	}
-	forwardReq := *req
-	forwardReq.Model = selector.Model
-	forwardReq.Provider = ""
-	resp, err := provider.Responses(ctx, &forwardReq)
-	if err == nil && resp != nil {
-		resp.Provider = r.GetProviderType(selector.QualifiedModel())
-	}
-	return resp, err
+	return routeStampedModelResponse(
+		r,
+		ctx,
+		req.Model,
+		req.Provider,
+		func(selector core.ModelSelector) *core.ResponsesRequest {
+			return forwardResponsesRequest(req, selector)
+		},
+		callResponses,
+	)
 }
 
 // StreamResponses routes the streaming Responses API request to the appropriate provider.
 // Returns ErrRegistryNotInitialized if the lookup has no models loaded.
 func (r *Router) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	provider, selector, err := r.resolveProvider(req.Model, req.Provider)
-	if err != nil {
-		return nil, err
-	}
-	forwardReq := *req
-	forwardReq.Model = selector.Model
-	forwardReq.Provider = ""
-	return provider.StreamResponses(ctx, &forwardReq)
+	stream, _, err := routeResolvedModelCall(
+		r,
+		ctx,
+		req.Model,
+		req.Provider,
+		func(selector core.ModelSelector) *core.ResponsesRequest {
+			return forwardResponsesRequest(req, selector)
+		},
+		func(ctx context.Context, provider core.Provider, forwardReq *core.ResponsesRequest) (io.ReadCloser, error) {
+			return provider.StreamResponses(ctx, forwardReq)
+		},
+	)
+	return stream, err
 }
 
 // Embeddings routes the embeddings request to the appropriate provider.
 func (r *Router) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
-	provider, selector, err := r.resolveProvider(req.Model, req.Provider)
-	if err != nil {
-		return nil, err
-	}
-	forwardReq := *req
-	forwardReq.Model = selector.Model
-	forwardReq.Provider = ""
-	resp, err := provider.Embeddings(ctx, &forwardReq)
-	if err == nil && resp != nil {
-		resp.Provider = r.GetProviderType(selector.QualifiedModel())
-	}
-	return resp, err
+	return routeStampedModelResponse(
+		r,
+		ctx,
+		req.Model,
+		req.Provider,
+		func(selector core.ModelSelector) *core.EmbeddingRequest {
+			return forwardEmbeddingRequest(req, selector)
+		},
+		callEmbeddings,
+	)
 }
 
 // GetProviderType returns the provider type string for the given model.
@@ -177,86 +342,34 @@ func (r *Router) providerByType(providerType string) core.Provider {
 
 // Passthrough routes an opaque provider-native request by provider type.
 func (r *Router) Passthrough(ctx context.Context, providerType string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
-	if err := r.checkReady(); err != nil {
+	pp, err := r.resolvePassthroughProvider(providerType)
+	if err != nil {
 		return nil, err
-	}
-	if providerType == "" {
-		return nil, core.NewInvalidRequestError("provider type is required", nil)
-	}
-	provider := r.providerByType(providerType)
-	if provider == nil {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
-	}
-	pp, ok := provider.(core.PassthroughProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support provider passthrough", providerType), nil)
 	}
 	return pp.Passthrough(ctx, req)
 }
 
 // CreateBatch routes native batch creation to a provider type.
 func (r *Router) CreateBatch(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	if providerType == "" {
-		return nil, core.NewInvalidRequestError("provider type is required", nil)
-	}
-	provider := r.providerByType(providerType)
-	if provider == nil {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
-	}
-	bp, ok := provider.(core.NativeBatchProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native batch processing", providerType), nil)
-	}
-	resp, err := bp.CreateBatch(ctx, req)
-	if err == nil && resp != nil {
-		resp.Provider = providerType
-	}
-	return resp, err
+	resp, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResponse, error) {
+		return bp.CreateBatch(ctx, req)
+	})
+	return stampProvider(resp, providerType), err
 }
 
 // GetBatch routes native batch lookup to a provider type.
 func (r *Router) GetBatch(ctx context.Context, providerType, id string) (*core.BatchResponse, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	if providerType == "" {
-		return nil, core.NewInvalidRequestError("provider type is required", nil)
-	}
-	provider := r.providerByType(providerType)
-	if provider == nil {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
-	}
-	bp, ok := provider.(core.NativeBatchProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native batch processing", providerType), nil)
-	}
-	resp, err := bp.GetBatch(ctx, id)
-	if err == nil && resp != nil {
-		resp.Provider = providerType
-	}
-	return resp, err
+	resp, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResponse, error) {
+		return bp.GetBatch(ctx, id)
+	})
+	return stampProvider(resp, providerType), err
 }
 
 // ListBatches routes native batch listing to a provider type.
 func (r *Router) ListBatches(ctx context.Context, providerType string, limit int, after string) (*core.BatchListResponse, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	if providerType == "" {
-		return nil, core.NewInvalidRequestError("provider type is required", nil)
-	}
-	provider := r.providerByType(providerType)
-	if provider == nil {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
-	}
-	bp, ok := provider.(core.NativeBatchProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native batch processing", providerType), nil)
-	}
-	resp, err := bp.ListBatches(ctx, limit, after)
+	resp, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchListResponse, error) {
+		return bp.ListBatches(ctx, limit, after)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -270,86 +383,32 @@ func (r *Router) ListBatches(ctx context.Context, providerType string, limit int
 
 // CancelBatch routes native batch cancellation to a provider type.
 func (r *Router) CancelBatch(ctx context.Context, providerType, id string) (*core.BatchResponse, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	if providerType == "" {
-		return nil, core.NewInvalidRequestError("provider type is required", nil)
-	}
-	provider := r.providerByType(providerType)
-	if provider == nil {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
-	}
-	bp, ok := provider.(core.NativeBatchProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native batch processing", providerType), nil)
-	}
-	resp, err := bp.CancelBatch(ctx, id)
-	if err == nil && resp != nil {
-		resp.Provider = providerType
-	}
-	return resp, err
+	resp, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResponse, error) {
+		return bp.CancelBatch(ctx, id)
+	})
+	return stampProvider(resp, providerType), err
 }
 
 // GetBatchResults routes native batch results lookup to a provider type.
 func (r *Router) GetBatchResults(ctx context.Context, providerType, id string) (*core.BatchResultsResponse, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	if providerType == "" {
-		return nil, core.NewInvalidRequestError("provider type is required", nil)
-	}
-	provider := r.providerByType(providerType)
-	if provider == nil {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
-	}
-	bp, ok := provider.(core.NativeBatchProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native batch processing", providerType), nil)
-	}
-	return bp.GetBatchResults(ctx, id)
+	return routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResultsResponse, error) {
+		return bp.GetBatchResults(ctx, id)
+	})
 }
 
 // CreateFile routes file upload to a provider type.
 func (r *Router) CreateFile(ctx context.Context, providerType string, req *core.FileCreateRequest) (*core.FileObject, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	if providerType == "" {
-		return nil, core.NewInvalidRequestError("provider type is required", nil)
-	}
-	provider := r.providerByType(providerType)
-	if provider == nil {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
-	}
-	fp, ok := provider.(core.NativeFileProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native file operations", providerType), nil)
-	}
-	resp, err := fp.CreateFile(ctx, req)
-	if err == nil && resp != nil {
-		resp.Provider = providerType
-	}
-	return resp, err
+	resp, err := routeNativeFileCall(r, ctx, providerType, func(ctx context.Context, fp core.NativeFileProvider) (*core.FileObject, error) {
+		return fp.CreateFile(ctx, req)
+	})
+	return stampProvider(resp, providerType), err
 }
 
 // ListFiles routes file listing to a provider type.
 func (r *Router) ListFiles(ctx context.Context, providerType, purpose string, limit int, after string) (*core.FileListResponse, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	if providerType == "" {
-		return nil, core.NewInvalidRequestError("provider type is required", nil)
-	}
-	provider := r.providerByType(providerType)
-	if provider == nil {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
-	}
-	fp, ok := provider.(core.NativeFileProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native file operations", providerType), nil)
-	}
-	resp, err := fp.ListFiles(ctx, purpose, limit, after)
+	resp, err := routeNativeFileCall(r, ctx, providerType, func(ctx context.Context, fp core.NativeFileProvider) (*core.FileListResponse, error) {
+		return fp.ListFiles(ctx, purpose, limit, after)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -363,61 +422,22 @@ func (r *Router) ListFiles(ctx context.Context, providerType, purpose string, li
 
 // GetFile routes file retrieval to a provider type.
 func (r *Router) GetFile(ctx context.Context, providerType, id string) (*core.FileObject, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	if providerType == "" {
-		return nil, core.NewInvalidRequestError("provider type is required", nil)
-	}
-	provider := r.providerByType(providerType)
-	if provider == nil {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
-	}
-	fp, ok := provider.(core.NativeFileProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native file operations", providerType), nil)
-	}
-	resp, err := fp.GetFile(ctx, id)
-	if err == nil && resp != nil {
-		resp.Provider = providerType
-	}
-	return resp, err
+	resp, err := routeNativeFileCall(r, ctx, providerType, func(ctx context.Context, fp core.NativeFileProvider) (*core.FileObject, error) {
+		return fp.GetFile(ctx, id)
+	})
+	return stampProvider(resp, providerType), err
 }
 
 // DeleteFile routes file deletion to a provider type.
 func (r *Router) DeleteFile(ctx context.Context, providerType, id string) (*core.FileDeleteResponse, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	if providerType == "" {
-		return nil, core.NewInvalidRequestError("provider type is required", nil)
-	}
-	provider := r.providerByType(providerType)
-	if provider == nil {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
-	}
-	fp, ok := provider.(core.NativeFileProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native file operations", providerType), nil)
-	}
-	return fp.DeleteFile(ctx, id)
+	return routeNativeFileCall(r, ctx, providerType, func(ctx context.Context, fp core.NativeFileProvider) (*core.FileDeleteResponse, error) {
+		return fp.DeleteFile(ctx, id)
+	})
 }
 
 // GetFileContent routes file content retrieval to a provider type.
 func (r *Router) GetFileContent(ctx context.Context, providerType, id string) (*core.FileContentResponse, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, err
-	}
-	if providerType == "" {
-		return nil, core.NewInvalidRequestError("provider type is required", nil)
-	}
-	provider := r.providerByType(providerType)
-	if provider == nil {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
-	}
-	fp, ok := provider.(core.NativeFileProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native file operations", providerType), nil)
-	}
-	return fp.GetFileContent(ctx, id)
+	return routeNativeFileCall(r, ctx, providerType, func(ctx context.Context, fp core.NativeFileProvider) (*core.FileContentResponse, error) {
+		return fp.GetFileContent(ctx, id)
+	})
 }
