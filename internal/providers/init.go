@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"gomodel/config"
@@ -24,19 +25,27 @@ type InitResult struct {
 
 	// stopRefresh is called to stop the background refresh goroutine
 	stopRefresh func()
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // Close releases all resources and stops background goroutines.
 // Safe to call multiple times (but stopRefresh is only called once).
 func (r *InitResult) Close() error {
-	if r.stopRefresh != nil {
-		r.stopRefresh()
-		r.stopRefresh = nil // Prevent double-call
+	if r == nil {
+		return nil
 	}
-	if r.Cache != nil {
-		return r.Cache.Close()
-	}
-	return nil
+	r.closeOnce.Do(func() {
+		if r.stopRefresh != nil {
+			r.stopRefresh()
+			r.stopRefresh = nil
+		}
+		if r.Cache != nil {
+			r.closeErr = r.Cache.Close()
+		}
+	})
+	return r.closeErr
 }
 
 // Init initializes the provider registry, cache, and router.
