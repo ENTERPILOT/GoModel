@@ -458,6 +458,8 @@ type streamConverter struct {
 	msgID             string
 	nextToolCallIndex int
 	toolCalls         map[int]*streamToolCallState
+	usage             anthropicUsage
+	hasUsage          bool
 	buffer            []byte
 	closed            bool
 	emittedToolCalls  bool
@@ -484,6 +486,70 @@ func newStreamConverter(body io.ReadCloser, model string) *streamConverter {
 
 func malformedAnthropicStreamError(err error) error {
 	return core.NewProviderError("anthropic", http.StatusBadGateway, "failed to decode anthropic stream event: "+err.Error(), err)
+}
+
+func mergeAnthropicUsage(dst *anthropicUsage, src *anthropicUsage) bool {
+	if dst == nil || src == nil {
+		return false
+	}
+
+	merged := false
+	if src.InputTokens != 0 {
+		dst.InputTokens = src.InputTokens
+		merged = true
+	}
+	if src.OutputTokens != 0 {
+		dst.OutputTokens = src.OutputTokens
+		merged = true
+	}
+	if src.CacheCreationInputTokens != 0 {
+		dst.CacheCreationInputTokens = src.CacheCreationInputTokens
+		merged = true
+	}
+	if src.CacheReadInputTokens != 0 {
+		dst.CacheReadInputTokens = src.CacheReadInputTokens
+		merged = true
+	}
+
+	return merged
+}
+
+func anthropicChatUsagePayload(usage *anthropicUsage) map[string]any {
+	if usage == nil {
+		return nil
+	}
+
+	payload := map[string]any{
+		"prompt_tokens":     usage.InputTokens,
+		"completion_tokens": usage.OutputTokens,
+		"total_tokens":      usage.InputTokens + usage.OutputTokens,
+	}
+	if usage.CacheCreationInputTokens > 0 {
+		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
+	}
+	if usage.CacheReadInputTokens > 0 {
+		payload["cache_read_input_tokens"] = usage.CacheReadInputTokens
+	}
+	return payload
+}
+
+func anthropicResponsesUsagePayload(usage *anthropicUsage) map[string]any {
+	if usage == nil {
+		return nil
+	}
+
+	payload := map[string]any{
+		"input_tokens":  usage.InputTokens,
+		"output_tokens": usage.OutputTokens,
+		"total_tokens":  usage.InputTokens + usage.OutputTokens,
+	}
+	if usage.CacheCreationInputTokens > 0 {
+		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
+	}
+	if usage.CacheReadInputTokens > 0 {
+		payload["cache_read_input_tokens"] = usage.CacheReadInputTokens
+	}
+	return payload
 }
 
 func (sc *streamConverter) Read(p []byte) (n int, err error) {
@@ -620,11 +686,7 @@ func (sc *streamConverter) formatChatChunk(delta map[string]any, finishReason an
 		},
 	}
 	if usage != nil {
-		chunk["usage"] = map[string]any{
-			"prompt_tokens":     usage.InputTokens,
-			"completion_tokens": usage.OutputTokens,
-			"total_tokens":      usage.InputTokens + usage.OutputTokens,
-		}
+		chunk["usage"] = anthropicChatUsagePayload(usage)
 	}
 
 	jsonData, err := json.Marshal(chunk)
@@ -641,6 +703,12 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 	case "message_start":
 		if event.Message != nil {
 			sc.msgID = event.Message.ID
+			if mergeAnthropicUsage(&sc.usage, &event.Message.Usage) {
+				sc.hasUsage = true
+			}
+		}
+		if mergeAnthropicUsage(&sc.usage, event.Usage) {
+			sc.hasUsage = true
 		}
 		return ""
 
@@ -759,13 +827,20 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 		return ""
 
 	case "message_delta":
+		if mergeAnthropicUsage(&sc.usage, event.Usage) {
+			sc.hasUsage = true
+		}
 		// Emit chunk if we have stop_reason or usage data
 		if (event.Delta != nil && event.Delta.StopReason != "") || event.Usage != nil {
 			var finishReason interface{}
 			if event.Delta != nil && event.Delta.StopReason != "" {
 				finishReason = sc.mapStreamStopReason(event.Delta.StopReason)
 			}
-			return sc.formatChatChunk(map[string]any{}, finishReason, event.Usage)
+			var usage *anthropicUsage
+			if sc.hasUsage {
+				usage = &sc.usage
+			}
+			return sc.formatChatChunk(map[string]any{}, finishReason, usage)
 		}
 
 	case "message_stop":
@@ -1277,7 +1352,8 @@ type responsesStreamConverter struct {
 	buffer          []byte
 	closed          bool
 	sentDone        bool
-	cachedUsage     *anthropicUsage // Stores usage from message_delta for inclusion in response.completed
+	usage           anthropicUsage
+	hasUsage        bool
 }
 
 func newResponsesStreamConverter(body io.ReadCloser, model string) *responsesStreamConverter {
@@ -1322,13 +1398,9 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 						"provider":   "anthropic",
 						"created_at": time.Now().Unix(),
 					}
-					// Include usage data if captured from message_delta
-					if sc.cachedUsage != nil {
-						responseData["usage"] = map[string]interface{}{
-							"input_tokens":  sc.cachedUsage.InputTokens,
-							"output_tokens": sc.cachedUsage.OutputTokens,
-							"total_tokens":  sc.cachedUsage.InputTokens + sc.cachedUsage.OutputTokens,
-						}
+					// Include merged usage data captured across message_start/message_delta.
+					if sc.hasUsage {
+						responseData["usage"] = anthropicResponsesUsagePayload(&sc.usage)
 					}
 					doneEvent := map[string]interface{}{
 						"type":     "response.completed",
@@ -1426,6 +1498,14 @@ func (sc *responsesStreamConverter) newResponsesToolCallState(contentBlock *anth
 func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) string {
 	switch event.Type {
 	case "message_start":
+		if event.Message != nil {
+			if mergeAnthropicUsage(&sc.usage, &event.Message.Usage) {
+				sc.hasUsage = true
+			}
+		}
+		if mergeAnthropicUsage(&sc.usage, event.Usage) {
+			sc.hasUsage = true
+		}
 		// Send response.created event
 		createdEvent := map[string]interface{}{
 			"type": "response.created",
@@ -1509,8 +1589,8 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 
 	case "message_delta":
 		// Capture usage data for inclusion in response.completed
-		if event.Usage != nil {
-			sc.cachedUsage = event.Usage
+		if mergeAnthropicUsage(&sc.usage, event.Usage) {
+			sc.hasUsage = true
 		}
 		if !sc.output.AssistantReserved() && len(sc.toolCalls) == 0 {
 			sc.reserveAssistantMessageOutput()

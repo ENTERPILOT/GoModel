@@ -304,6 +304,61 @@ data: {"type":"message_stop"}
 	}
 }
 
+func TestStreamChatCompletion_MergesUsageFromMessageStart(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0,"cache_read_input_tokens":6}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	responseStr := string(raw)
+	if !strings.Contains(responseStr, `"prompt_tokens":10`) {
+		t.Fatalf("expected prompt_tokens in streamed usage, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"completion_tokens":2`) {
+		t.Fatalf("expected completion_tokens in streamed usage, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"total_tokens":12`) {
+		t.Fatalf("expected total_tokens in streamed usage, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"cache_read_input_tokens":6`) {
+		t.Fatalf("expected cache_read_input_tokens in streamed usage, got %q", responseStr)
+	}
+}
+
 func TestStreamChatCompletion_WithToolCalls(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2230,6 +2285,62 @@ data: {"type":"message_stop"}
 				}
 			}
 		})
+	}
+}
+
+func TestStreamResponses_MergesUsageFromMessageStart(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0,"cache_creation_input_tokens":4}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "Hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	responseStr := string(raw)
+	if !strings.Contains(responseStr, `"type":"response.completed"`) {
+		t.Fatalf("expected response.completed event, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"input_tokens":10`) {
+		t.Fatalf("expected input_tokens in response.completed usage, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"output_tokens":2`) {
+		t.Fatalf("expected output_tokens in response.completed usage, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"total_tokens":12`) {
+		t.Fatalf("expected total_tokens in response.completed usage, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"cache_creation_input_tokens":4`) {
+		t.Fatalf("expected cache_creation_input_tokens in response.completed usage, got %q", responseStr)
 	}
 }
 
