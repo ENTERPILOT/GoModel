@@ -10,6 +10,14 @@ import (
 
 // SelectorHints holds the minimal routing-relevant request hints derived from ingress.
 // These hints are intentionally smaller than a full semantic interpretation.
+//
+// Lifecycle:
+//   - BuildSemanticEnvelope seeds these values directly from ingress transport/body data.
+//   - Canonical JSON decode may refine them from a cached request object.
+//   - NormalizeModelSelector canonicalizes model/provider values in place.
+//
+// Consumers that require canonical selector state should prefer a cached canonical
+// request or call NormalizeModelSelector before relying on these fields.
 type SelectorHints struct {
 	Model    string
 	Provider string
@@ -29,6 +37,12 @@ const (
 
 // SemanticEnvelope is the gateway's best-effort semantic extraction from ingress.
 // It may be partial and should not be treated as authoritative transport state.
+//
+// The envelope is populated incrementally:
+//   - ingress seeds Dialect/Operation plus sparse SelectorHints
+//   - route-specific metadata may be cached on demand
+//   - canonical request decode may cache a parsed request and refine SelectorHints
+//   - NormalizeModelSelector may rewrite selector hints into canonical form
 type SemanticEnvelope struct {
 	Dialect        string
 	Operation      string

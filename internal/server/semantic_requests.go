@@ -49,7 +49,7 @@ func batchRequestMetadataFromSemanticEnvelope(c *echo.Context) (*core.BatchReque
 		ensureSemanticEnvelope(c),
 		c.Request().Method,
 		c.Request().URL.Path,
-		pathValuesToMap(c.PathValues()),
+		routeParamsMap(c.PathValues()),
 		c.Request().URL.Query(),
 	)
 }
@@ -60,7 +60,7 @@ func fileRequestFromSemanticEnvelope(c *echo.Context) (*core.FileRequestSemantic
 		env,
 		c.Request().Method,
 		c.Request().URL.Path,
-		pathValuesToMap(c.PathValues()),
+		routeParamsMap(c.PathValues()),
 		c.Request().URL.Query(),
 	)
 	if err != nil {
@@ -91,15 +91,4 @@ func (r echoFileMultipartReader) Filename(name string) (string, bool) {
 		return "", false
 	}
 	return fileHeader.Filename, true
-}
-
-func pathValuesToMap(values echo.PathValues) map[string]string {
-	if len(values) == 0 {
-		return nil
-	}
-	params := make(map[string]string, len(values))
-	for _, item := range values {
-		params[item.Name] = item.Value
-	}
-	return params
 }

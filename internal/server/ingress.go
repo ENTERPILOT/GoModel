@@ -32,7 +32,7 @@ func IngressCapture() echo.MiddlewareFunc {
 			frame := &core.IngressFrame{
 				Method:          req.Method,
 				Path:            req.URL.Path,
-				RouteParams:     ingressRouteParams(req.URL.Path, cloneRouteParams(c.PathValues())),
+				RouteParams:     ingressRouteParams(req.URL.Path, routeParamsMap(c.PathValues())),
 				QueryParams:     cloneMultiMap(req.URL.Query()),
 				Headers:         cloneMultiMap(req.Header),
 				ContentType:     req.Header.Get("Content-Type"),
@@ -68,17 +68,6 @@ func cloneMultiMap(src map[string][]string) map[string][]string {
 		dst[key] = cloned
 	}
 	return dst
-}
-
-func cloneRouteParams(pathValues echo.PathValues) map[string]string {
-	if len(pathValues) == 0 {
-		return nil
-	}
-	params := make(map[string]string, len(pathValues))
-	for _, pv := range pathValues {
-		params[pv.Name] = pv.Value
-	}
-	return params
 }
 
 func ingressRouteParams(path string, params map[string]string) map[string]string {

@@ -171,6 +171,10 @@ func FileRouteMetadata(env *SemanticEnvelope, method, path string, routeParams m
 
 // NormalizeModelSelector canonicalizes model/provider selector inputs and keeps
 // semantic selector hints aligned with the normalized request state.
+//
+// This is the point where SelectorHints transition from raw ingress values
+// (which may still contain a qualified model string like "openai/gpt-5-mini")
+// to canonical model/provider fields.
 func NormalizeModelSelector(env *SemanticEnvelope, model, provider *string) error {
 	if model == nil || provider == nil {
 		return NewInvalidRequestError("model selector targets are required", nil)
