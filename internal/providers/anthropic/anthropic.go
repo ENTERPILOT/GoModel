@@ -1230,15 +1230,24 @@ func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchRespo
 
 // GetBatchResults retrieves Anthropic native message batch results.
 func (p *Provider) GetBatchResults(ctx context.Context, id string) (*core.BatchResultsResponse, error) {
-	raw, err := p.client.DoRaw(ctx, llmclient.Request{
+	resp, err := p.client.DoPassthrough(ctx, llmclient.Request{
 		Method:   http.MethodGet,
 		Endpoint: "/messages/batches/" + url.PathEscape(id) + "/results",
 	})
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = resp.Body.Close() }()
 
-	scanner := bufio.NewScanner(bytes.NewReader(raw.Body))
+	if resp.StatusCode != http.StatusOK {
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			body = []byte("failed to read error response")
+		}
+		return nil, core.ParseProviderError("anthropic", resp.StatusCode, body, nil)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
 	// Allow larger result lines than Scanner's default 64K.
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	endpointByCustomID := p.getBatchResultEndpoints(id)
