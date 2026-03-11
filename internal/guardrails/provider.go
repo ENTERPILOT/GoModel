@@ -734,9 +734,9 @@ func cloneToolCalls(toolCalls []core.ToolCall) []core.ToolCall {
 			Function: core.FunctionCall{
 				Name:        toolCall.Function.Name,
 				Arguments:   toolCall.Function.Arguments,
-				ExtraFields: cloneRawJSONMap(toolCall.Function.ExtraFields),
+				ExtraFields: core.CloneRawJSONMap(toolCall.Function.ExtraFields),
 			},
-			ExtraFields: cloneRawJSONMap(toolCall.ExtraFields),
+			ExtraFields: core.CloneRawJSONMap(toolCall.ExtraFields),
 		}
 	}
 	return cloned
@@ -749,7 +749,7 @@ func cloneChatMessageEnvelope(message core.Message) core.Message {
 		ContentNull: message.ContentNull,
 		Content:     cloneMessageContent(message.Content),
 		ToolCalls:   cloneToolCalls(message.ToolCalls),
-		ExtraFields: cloneRawJSONMap(message.ExtraFields),
+		ExtraFields: core.CloneRawJSONMap(message.ExtraFields),
 	}
 }
 
@@ -785,40 +785,22 @@ func cloneContentPart(part core.ContentPart) core.ContentPart {
 	cloned := core.ContentPart{
 		Type:        part.Type,
 		Text:        part.Text,
-		ExtraFields: cloneRawJSONMap(part.ExtraFields),
+		ExtraFields: core.CloneRawJSONMap(part.ExtraFields),
 	}
 	if part.ImageURL != nil {
 		cloned.ImageURL = &core.ImageURLContent{
 			URL:         part.ImageURL.URL,
 			Detail:      part.ImageURL.Detail,
 			MediaType:   part.ImageURL.MediaType,
-			ExtraFields: cloneRawJSONMap(part.ImageURL.ExtraFields),
+			ExtraFields: core.CloneRawJSONMap(part.ImageURL.ExtraFields),
 		}
 	}
 	if part.InputAudio != nil {
 		cloned.InputAudio = &core.InputAudioContent{
 			Data:        part.InputAudio.Data,
 			Format:      part.InputAudio.Format,
-			ExtraFields: cloneRawJSONMap(part.InputAudio.ExtraFields),
+			ExtraFields: core.CloneRawJSONMap(part.InputAudio.ExtraFields),
 		}
-	}
-	return cloned
-}
-
-func cloneRawJSON(raw json.RawMessage) json.RawMessage {
-	if len(raw) == 0 {
-		return nil
-	}
-	return append(json.RawMessage(nil), raw...)
-}
-
-func cloneRawJSONMap(fields map[string]json.RawMessage) map[string]json.RawMessage {
-	if len(fields) == 0 {
-		return nil
-	}
-	cloned := make(map[string]json.RawMessage, len(fields))
-	for key, value := range fields {
-		cloned[key] = cloneRawJSON(value)
 	}
 	return cloned
 }

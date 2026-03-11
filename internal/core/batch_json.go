@@ -76,7 +76,7 @@ func (r *BatchRequestItem) UnmarshalJSON(data []byte) error {
 	r.CustomID = raw.CustomID
 	r.Method = raw.Method
 	r.URL = raw.URL
-	r.Body = cloneRawJSON(raw.Body)
+	r.Body = CloneRawJSON(raw.Body)
 	r.ExtraFields = extraFields
 	return nil
 }
@@ -93,6 +93,6 @@ func (r BatchRequestItem) MarshalJSON() ([]byte, error) {
 		CustomID: r.CustomID,
 		Method:   r.Method,
 		URL:      r.URL,
-		Body:     cloneRawJSON(r.Body),
+		Body:     CloneRawJSON(r.Body),
 	}, r.ExtraFields)
 }

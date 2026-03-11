@@ -412,7 +412,7 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 		return ContentPart{
 			Type:        "text",
 			Text:        part.Text,
-			ExtraFields: cloneRawJSONMap(part.ExtraFields),
+			ExtraFields: CloneRawJSONMap(part.ExtraFields),
 		}, nil
 	case "image_url", "input_image":
 		if part.ImageURL == nil || part.ImageURL.URL == "" {
@@ -424,9 +424,9 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 				URL:         part.ImageURL.URL,
 				Detail:      part.ImageURL.Detail,
 				MediaType:   part.ImageURL.MediaType,
-				ExtraFields: cloneRawJSONMap(part.ImageURL.ExtraFields),
+				ExtraFields: CloneRawJSONMap(part.ImageURL.ExtraFields),
 			},
-			ExtraFields: cloneRawJSONMap(part.ExtraFields),
+			ExtraFields: CloneRawJSONMap(part.ExtraFields),
 		}, nil
 	case "input_audio":
 		if part.InputAudio == nil || part.InputAudio.Data == "" || part.InputAudio.Format == "" {
@@ -437,9 +437,9 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 			InputAudio: &InputAudioContent{
 				Data:        part.InputAudio.Data,
 				Format:      part.InputAudio.Format,
-				ExtraFields: cloneRawJSONMap(part.InputAudio.ExtraFields),
+				ExtraFields: CloneRawJSONMap(part.InputAudio.ExtraFields),
 			},
-			ExtraFields: cloneRawJSONMap(part.ExtraFields),
+			ExtraFields: CloneRawJSONMap(part.ExtraFields),
 		}, nil
 	default:
 		return ContentPart{}, fmt.Errorf("unsupported content part type %q", part.Type)

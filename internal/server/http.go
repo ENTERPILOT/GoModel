@@ -102,9 +102,6 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.SwaggerEnabled {
 		authSkipPaths = append(authSkipPaths, "/swagger/*")
 	}
-	if cfg != nil && cfg.DisableProviderPassthrough {
-		authSkipPaths = append(authSkipPaths, "/p/*")
-	}
 
 	// Global middleware stack (order matters)
 	// Request logger with optional filtering for model-only interactions

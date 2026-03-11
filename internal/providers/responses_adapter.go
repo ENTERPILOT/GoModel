@@ -39,7 +39,7 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 		Stream:            req.Stream,
 		StreamOptions:     req.StreamOptions,
 		Reasoning:         req.Reasoning,
-		ExtraFields:       cloneRawJSONMap(req.ExtraFields),
+		ExtraFields:       core.CloneRawJSONMap(req.ExtraFields),
 	}
 
 	if req.MaxOutputTokens != nil {
@@ -235,7 +235,7 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 				{
 					ID:          callID,
 					Type:        "function",
-					ExtraFields: cloneRawJSONMap(item.ExtraFields),
+					ExtraFields: core.CloneRawJSONMap(item.ExtraFields),
 					Function: core.FunctionCall{
 						Name:      name,
 						Arguments: item.Arguments,
@@ -252,7 +252,7 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 			Role:        "tool",
 			ToolCallID:  callID,
 			Content:     item.Output,
-			ExtraFields: cloneRawJSONMap(item.ExtraFields),
+			ExtraFields: core.CloneRawJSONMap(item.ExtraFields),
 		}, "function_call_output", nil
 	default: // message (type="" or "message")
 		role := strings.TrimSpace(item.Role)
@@ -266,7 +266,7 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 		return core.Message{
 			Role:        role,
 			Content:     content,
-			ExtraFields: cloneRawJSONMap(item.ExtraFields),
+			ExtraFields: core.CloneRawJSONMap(item.ExtraFields),
 		}, "message", nil
 	}
 }
@@ -342,7 +342,7 @@ func cloneResponsesMessage(msg core.Message) core.Message {
 		}
 		cloned.Content = clonedParts
 	}
-	cloned.ExtraFields = cloneRawJSONMap(msg.ExtraFields)
+	cloned.ExtraFields = core.CloneRawJSONMap(msg.ExtraFields)
 	return cloned
 }
 
@@ -482,7 +482,7 @@ func normalizeTypedResponsesContentPart(part core.ContentPart) (core.ContentPart
 		return core.ContentPart{
 			Type:        "text",
 			Text:        part.Text,
-			ExtraFields: cloneRawJSONMap(part.ExtraFields),
+			ExtraFields: core.CloneRawJSONMap(part.ExtraFields),
 		}, true
 	case "image_url", "input_image":
 		if part.ImageURL == nil || part.ImageURL.URL == "" {
@@ -494,9 +494,9 @@ func normalizeTypedResponsesContentPart(part core.ContentPart) (core.ContentPart
 				URL:         part.ImageURL.URL,
 				Detail:      part.ImageURL.Detail,
 				MediaType:   part.ImageURL.MediaType,
-				ExtraFields: cloneRawJSONMap(part.ImageURL.ExtraFields),
+				ExtraFields: core.CloneRawJSONMap(part.ImageURL.ExtraFields),
 			},
-			ExtraFields: cloneRawJSONMap(part.ExtraFields),
+			ExtraFields: core.CloneRawJSONMap(part.ExtraFields),
 		}, true
 	case "input_audio":
 		if part.InputAudio == nil || part.InputAudio.Data == "" || part.InputAudio.Format == "" {
@@ -507,9 +507,9 @@ func normalizeTypedResponsesContentPart(part core.ContentPart) (core.ContentPart
 			InputAudio: &core.InputAudioContent{
 				Data:        part.InputAudio.Data,
 				Format:      part.InputAudio.Format,
-				ExtraFields: cloneRawJSONMap(part.InputAudio.ExtraFields),
+				ExtraFields: core.CloneRawJSONMap(part.InputAudio.ExtraFields),
 			},
-			ExtraFields: cloneRawJSONMap(part.ExtraFields),
+			ExtraFields: core.CloneRawJSONMap(part.ExtraFields),
 		}, true
 	default:
 		return core.ContentPart{}, false
@@ -606,36 +606,25 @@ func normalizeResponsesInputAudioForChat(value interface{}) (*core.InputAudioCon
 
 func cloneResponsesToolCall(call core.ToolCall) core.ToolCall {
 	cloned := call
-	cloned.ExtraFields = cloneRawJSONMap(call.ExtraFields)
-	cloned.Function.ExtraFields = cloneRawJSONMap(call.Function.ExtraFields)
+	cloned.ExtraFields = core.CloneRawJSONMap(call.ExtraFields)
+	cloned.Function.ExtraFields = core.CloneRawJSONMap(call.Function.ExtraFields)
 	return cloned
 }
 
 func cloneResponsesContentPart(part core.ContentPart) core.ContentPart {
 	cloned := part
-	cloned.ExtraFields = cloneRawJSONMap(part.ExtraFields)
+	cloned.ExtraFields = core.CloneRawJSONMap(part.ExtraFields)
 	if part.ImageURL != nil {
 		image := *part.ImageURL
-		image.ExtraFields = cloneRawJSONMap(part.ImageURL.ExtraFields)
+		image.ExtraFields = core.CloneRawJSONMap(part.ImageURL.ExtraFields)
 		cloned.ImageURL = &image
 	}
 	if part.InputAudio != nil {
 		audio := *part.InputAudio
-		audio.ExtraFields = cloneRawJSONMap(part.InputAudio.ExtraFields)
+		audio.ExtraFields = core.CloneRawJSONMap(part.InputAudio.ExtraFields)
 		cloned.InputAudio = &audio
 	}
 	return cloned
-}
-
-func cloneRawJSONMap(src map[string]json.RawMessage) map[string]json.RawMessage {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make(map[string]json.RawMessage, len(src))
-	for key, value := range src {
-		dst[key] = append(json.RawMessage(nil), value...)
-	}
-	return dst
 }
 
 func rawJSONMapFromUnknownKeys(src map[string]interface{}, knownKeys ...string) map[string]json.RawMessage {

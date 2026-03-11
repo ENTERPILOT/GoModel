@@ -2,20 +2,22 @@ package core
 
 import "encoding/json"
 
-func cloneRawJSON(raw json.RawMessage) json.RawMessage {
+// CloneRawJSON returns a detached copy of a raw JSON value.
+func CloneRawJSON(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {
 		return nil
 	}
 	return append(json.RawMessage(nil), raw...)
 }
 
-func cloneRawJSONMap(fields map[string]json.RawMessage) map[string]json.RawMessage {
+// CloneRawJSONMap returns a detached copy of a raw JSON field map.
+func CloneRawJSONMap(fields map[string]json.RawMessage) map[string]json.RawMessage {
 	if len(fields) == 0 {
 		return nil
 	}
 	cloned := make(map[string]json.RawMessage, len(fields))
 	for key, value := range fields {
-		cloned[key] = cloneRawJSON(value)
+		cloned[key] = CloneRawJSON(value)
 	}
 	return cloned
 }
@@ -28,7 +30,7 @@ func extractUnknownJSONFields(data []byte, knownFields ...string) (map[string]js
 	for _, field := range knownFields {
 		delete(raw, field)
 	}
-	return cloneRawJSONMap(raw), nil
+	return CloneRawJSONMap(raw), nil
 }
 
 func marshalWithUnknownJSONFields(base any, extraFields map[string]json.RawMessage) ([]byte, error) {
@@ -51,7 +53,7 @@ func marshalWithUnknownJSONFields(base any, extraFields map[string]json.RawMessa
 		if _, exists := raw[key]; exists {
 			continue
 		}
-		raw[key] = cloneRawJSON(value)
+		raw[key] = CloneRawJSON(value)
 	}
 	return json.Marshal(raw)
 }

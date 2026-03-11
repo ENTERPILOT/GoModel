@@ -546,7 +546,7 @@ func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
 	}
 }
 
-func TestProviderPassthroughRoute_DisabledReturns404(t *testing.T) {
+func TestProviderPassthroughRoute_DisabledRequiresAuthBefore404(t *testing.T) {
 	mock := &mockProvider{}
 	srv := New(mock, &Config{
 		MasterKey:                  "test-secret-key",
@@ -559,7 +559,7 @@ func TestProviderPassthroughRoute_DisabledReturns404(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected status 404, got %d", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", rec.Code)
 	}
 }
