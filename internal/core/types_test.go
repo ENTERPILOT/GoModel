@@ -96,6 +96,48 @@ func TestMessageMarshalJSON_ContentWinsOverContentNull(t *testing.T) {
 	}
 }
 
+func TestChatResponseJSON_PreservesSystemFingerprint(t *testing.T) {
+	payload := []byte(`{
+		"id":"chatcmpl-123",
+		"object":"chat.completion",
+		"created":1741723200,
+		"model":"gpt-4o-mini",
+		"provider":"openai",
+		"system_fingerprint":"fp_abc123",
+		"choices":[
+			{
+				"index":0,
+				"message":{"role":"assistant","content":"hello"},
+				"finish_reason":"stop"
+			}
+		],
+		"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+	}`)
+
+	var resp ChatResponse
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if resp.SystemFingerprint != "fp_abc123" {
+		t.Fatalf("SystemFingerprint = %q, want fp_abc123", resp.SystemFingerprint)
+	}
+
+	body, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if decoded["system_fingerprint"] != "fp_abc123" {
+		t.Fatalf("decoded system_fingerprint = %#v, want fp_abc123", decoded["system_fingerprint"])
+	}
+}
+
 func TestChatRequestWithStreaming_PreservesToolFields(t *testing.T) {
 	parallelToolCalls := false
 	req := &ChatRequest{
