@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -34,6 +35,66 @@ func TestNew_ReturnsProvider(t *testing.T) {
 
 	if provider == nil {
 		t.Error("provider should not be nil")
+	}
+}
+
+func TestSetBatchResultEndpoints_EvictsOldestBatch(t *testing.T) {
+	provider := &Provider{
+		batchResultEndpoints: make(map[string]map[string]string),
+	}
+
+	for i := 0; i <= maxBatchResultEndpointHints; i++ {
+		batchID := "batch-" + strconv.Itoa(i)
+		provider.setBatchResultEndpoints(batchID, map[string]string{
+			"req-1": "/v1/chat/completions",
+		})
+	}
+
+	if got := provider.getBatchResultEndpoints("batch-0"); got != nil {
+		t.Fatalf("batch-0 should have been evicted, got %#v", got)
+	}
+	if got := provider.getBatchResultEndpoints("batch-1"); got == nil {
+		t.Fatal("batch-1 should still be present")
+	}
+	if got := provider.getBatchResultEndpoints("batch-" + strconv.Itoa(maxBatchResultEndpointHints)); got == nil {
+		t.Fatal("newest batch should still be present")
+	}
+	if got := len(provider.batchResultEndpoints); got != maxBatchResultEndpointHints {
+		t.Fatalf("len(batchResultEndpoints) = %d, want %d", got, maxBatchResultEndpointHints)
+	}
+}
+
+func TestSetBatchResultEndpoints_RefreshesExistingBatchWithoutDuplicateOrder(t *testing.T) {
+	provider := &Provider{
+		batchResultEndpoints: make(map[string]map[string]string),
+	}
+
+	for i := 0; i < maxBatchResultEndpointHints; i++ {
+		batchID := "batch-" + strconv.Itoa(i)
+		provider.setBatchResultEndpoints(batchID, map[string]string{
+			"req-1": "/v1/chat/completions",
+		})
+	}
+
+	provider.setBatchResultEndpoints("batch-0", map[string]string{
+		"req-1": "/v1/responses",
+	})
+	provider.setBatchResultEndpoints("batch-new", map[string]string{
+		"req-1": "/v1/chat/completions",
+	})
+
+	if got := provider.getBatchResultEndpoints("batch-1"); got != nil {
+		t.Fatalf("batch-1 should have been evicted after refreshing batch-0, got %#v", got)
+	}
+	refreshed := provider.getBatchResultEndpoints("batch-0")
+	if refreshed == nil {
+		t.Fatal("batch-0 should still be present after refresh")
+	}
+	if refreshed["req-1"] != "/v1/responses" {
+		t.Fatalf("batch-0 endpoint = %q, want /v1/responses", refreshed["req-1"])
+	}
+	if got := len(provider.batchResultEndpoints); got != maxBatchResultEndpointHints {
+		t.Fatalf("len(batchResultEndpoints) = %d, want %d", got, maxBatchResultEndpointHints)
 	}
 }
 
