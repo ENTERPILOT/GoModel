@@ -30,9 +30,8 @@ var Registration = providers.Registration{
 }
 
 const (
-	defaultBaseURL              = "https://api.anthropic.com/v1"
-	anthropicAPIVersion         = "2023-06-01"
-	maxBatchResultEndpointHints = 1024
+	defaultBaseURL      = "https://api.anthropic.com/v1"
+	anthropicAPIVersion = "2023-06-01"
 )
 
 var allowedAnthropicImageMediaTypes = map[string]struct{}{
@@ -51,7 +50,6 @@ type Provider struct {
 	// batchResultEndpoints keeps endpoint hints by provider batch id and custom_id.
 	// Used only to shape native batch result items (e.g., /v1/responses vs /v1/chat/completions).
 	batchResultEndpoints map[string]map[string]string
-	batchResultOrder     []string
 }
 
 // New creates a new Anthropic provider.
@@ -113,19 +111,7 @@ func (p *Provider) setBatchResultEndpoints(batchID string, endpoints map[string]
 	if p.batchResultEndpoints == nil {
 		p.batchResultEndpoints = make(map[string]map[string]string)
 	}
-	for i, existingID := range p.batchResultOrder {
-		if existingID == batchID {
-			p.batchResultOrder = append(p.batchResultOrder[:i], p.batchResultOrder[i+1:]...)
-			break
-		}
-	}
 	p.batchResultEndpoints[batchID] = cloned
-	p.batchResultOrder = append(p.batchResultOrder, batchID)
-	for len(p.batchResultEndpoints) > maxBatchResultEndpointHints && len(p.batchResultOrder) > 0 {
-		evictID := p.batchResultOrder[0]
-		p.batchResultOrder = p.batchResultOrder[1:]
-		delete(p.batchResultEndpoints, evictID)
-	}
 	p.batchEndpointsMu.Unlock()
 }
 
