@@ -511,6 +511,34 @@ func malformedAnthropicStreamError(err error) error {
 	return core.NewProviderError("anthropic", http.StatusBadGateway, "failed to decode anthropic stream event: "+err.Error(), err)
 }
 
+func consumeAnthropicSSELine(p []byte, line []byte, body io.ReadCloser, buffer *[]byte, convert func(*anthropicStreamEvent) string) (n int, handled bool, err error) {
+	line = bytes.TrimSpace(line)
+	if len(line) == 0 || bytes.HasPrefix(line, []byte("event:")) {
+		return 0, false, nil
+	}
+	if !bytes.HasPrefix(line, []byte("data:")) {
+		return 0, false, nil
+	}
+
+	data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+
+	var event anthropicStreamEvent
+	if err := json.Unmarshal(data, &event); err != nil {
+		_ = body.Close() //nolint:errcheck
+		return 0, false, malformedAnthropicStreamError(err)
+	}
+
+	chunk := convert(&event)
+	if chunk == "" {
+		return 0, false, nil
+	}
+
+	*buffer = append(*buffer, []byte(chunk)...)
+	n = copy(p, *buffer)
+	*buffer = (*buffer)[n:]
+	return n, true, nil
+}
+
 func mergeAnthropicUsage(dst *anthropicUsage, src *anthropicUsage) bool {
 	if dst == nil || src == nil {
 		return false
@@ -605,38 +633,15 @@ func (sc *streamConverter) Read(p []byte) (n int, err error) {
 			return 0, err
 		}
 
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
+		n, handled, err := consumeAnthropicSSELine(p, line, sc.body, &sc.buffer, sc.convertEvent)
+		if err != nil {
+			sc.closed = true
+			return 0, err
 		}
-
-		// Parse SSE line
-		if bytes.HasPrefix(line, []byte("event:")) {
-			continue // Skip event type lines
-		}
-
-		if bytes.HasPrefix(line, []byte("data:")) {
-			data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
-
-			var event anthropicStreamEvent
-			if err := json.Unmarshal(data, &event); err != nil {
-				sc.closed = true
-				_ = sc.body.Close() //nolint:errcheck
-				return 0, malformedAnthropicStreamError(err)
-			}
-
-			// Convert Anthropic event to OpenAI format
-			openAIChunk := sc.convertEvent(&event)
-			if openAIChunk == "" {
+		if handled {
+			if n == 0 {
 				continue
 			}
-
-			// Buffer the converted chunk
-			sc.buffer = append(sc.buffer, []byte(openAIChunk)...)
-
-			// Return as much as we can
-			n = copy(p, sc.buffer)
-			sc.buffer = sc.buffer[n:]
 			return n, nil
 		}
 	}
@@ -1480,38 +1485,15 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 			return 0, err
 		}
 
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
+		n, handled, err := consumeAnthropicSSELine(p, line, sc.body, &sc.buffer, sc.convertEvent)
+		if err != nil {
+			sc.closed = true
+			return 0, err
 		}
-
-		// Parse SSE line
-		if bytes.HasPrefix(line, []byte("event:")) {
-			continue // Skip event type lines
-		}
-
-		if bytes.HasPrefix(line, []byte("data:")) {
-			data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
-
-			var event anthropicStreamEvent
-			if err := json.Unmarshal(data, &event); err != nil {
-				sc.closed = true
-				_ = sc.body.Close() //nolint:errcheck
-				return 0, malformedAnthropicStreamError(err)
-			}
-
-			// Convert Anthropic event to Responses API format
-			responsesChunk := sc.convertEvent(&event)
-			if responsesChunk == "" {
+		if handled {
+			if n == 0 {
 				continue
 			}
-
-			// Buffer the converted chunk
-			sc.buffer = append(sc.buffer, []byte(responsesChunk)...)
-
-			// Return as much as we can
-			n = copy(p, sc.buffer)
-			sc.buffer = sc.buffer[n:]
 			return n, nil
 		}
 	}
