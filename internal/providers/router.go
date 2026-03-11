@@ -248,6 +248,14 @@ func (r *Router) Supports(model string) bool {
 	return r.lookup.Supports(model)
 }
 
+// ModelCount returns the number of models currently loaded into the router lookup.
+func (r *Router) ModelCount() int {
+	if r == nil || r.lookup == nil {
+		return 0
+	}
+	return r.lookup.ModelCount()
+}
+
 // ChatCompletion routes the request to the appropriate provider.
 // Returns ErrRegistryNotInitialized if the lookup has no models loaded.
 func (r *Router) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {

@@ -15,6 +15,10 @@ type contextKey string
 
 const providerTypeKey contextKey = "providerType"
 
+type modelCountProvider interface {
+	ModelCount() int
+}
+
 // ModelValidation validates model-interaction requests, enriches audit metadata,
 // and propagates request-scoped values needed by downstream handlers.
 func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
@@ -46,10 +50,12 @@ func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
 			if !parsed {
 				return next(c)
 			}
-
 			selector, err := core.ParseModelSelector(model, providerHint)
 			if err != nil {
 				return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+			}
+			if counted, ok := provider.(modelCountProvider); ok && counted.ModelCount() == 0 {
+				return handleError(c, core.NewProviderError("", 0, "model registry not initialized", nil))
 			}
 
 			if !provider.Supports(selector.QualifiedModel()) {
@@ -81,9 +87,6 @@ func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed
 		if env.JSONBodyParsed || env.SelectorHints.Model != "" || env.SelectorHints.Provider != "" {
 			return env.SelectorHints.Model, env.SelectorHints.Provider, true, nil
 		}
-	}
-	if frame := core.GetIngressFrame(ctx); frame != nil && !frame.RawBodyTooLarge {
-		return "", "", false, nil
 	}
 
 	bodyBytes, err := requestBodyBytes(c)

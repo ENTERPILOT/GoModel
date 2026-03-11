@@ -360,12 +360,18 @@ func isSSEContentType(headers map[string][]string) bool {
 
 func passthroughStreamAuditPath(requestPath, providerType, endpoint string) string {
 	normalized := "/" + strings.TrimLeft(strings.SplitN(endpoint, "?", 2)[0], "/")
-	if providerType == "openai" {
+	switch providerType {
+	case "openai":
 		switch normalized {
 		case "/chat/completions":
 			return "/v1/chat/completions"
 		case "/responses":
 			return "/v1/responses"
+		}
+	case "anthropic":
+		switch normalized {
+		case "/messages":
+			return "/v1/messages"
 		}
 	}
 	return requestPath

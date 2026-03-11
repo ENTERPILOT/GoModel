@@ -305,6 +305,7 @@ func TestLoad_PassthroughFlags_YAMLExpansion(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		clearAllConfigEnvVars(t)
 		t.Setenv("PASSTHROUGH_ENABLED_FROM_YAML", "false")
+		t.Setenv("PASSTHROUGH_NORMALIZE_FROM_YAML", "")
 
 		yaml := `
 server:
@@ -324,6 +325,43 @@ server:
 		}
 		if result.Config.Server.NormalizePassthroughV1Prefix {
 			t.Fatal("expected YAML ${VAR:-default} expansion to set NormalizePassthroughV1Prefix=false")
+		}
+	})
+}
+
+func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	examplePath, err := filepath.Abs("config.example.yaml")
+	if err != nil {
+		t.Fatalf("Failed to resolve config.example.yaml path: %v", err)
+	}
+	exampleData, err := os.ReadFile(examplePath)
+	if err != nil {
+		t.Fatalf("Failed to read config.example.yaml: %v", err)
+	}
+
+	withTempDir(t, func(dir string) {
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), exampleData, 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+
+		if result.Config.Cache.Model.RefreshInterval != 3600 {
+			t.Fatalf("Cache.Model.RefreshInterval = %d, want 3600", result.Config.Cache.Model.RefreshInterval)
+		}
+		if result.Config.Cache.Model.Local == nil {
+			t.Fatal("expected Cache.Model.Local to be configured from example config")
+		}
+		if result.Config.Cache.Model.Local.CacheDir != ".cache" {
+			t.Fatalf("Cache.Model.Local.CacheDir = %q, want .cache", result.Config.Cache.Model.Local.CacheDir)
+		}
+		if result.Config.Cache.Model.Redis != nil {
+			t.Fatalf("expected Cache.Model.Redis to be nil in example config, got %+v", result.Config.Cache.Model.Redis)
 		}
 	})
 }

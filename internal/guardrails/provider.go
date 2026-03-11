@@ -50,6 +50,14 @@ func (g *GuardedProvider) GetProviderType(model string) string {
 	return g.inner.GetProviderType(model)
 }
 
+// ModelCount delegates to the inner provider when it exposes registry size.
+func (g *GuardedProvider) ModelCount() int {
+	if counted, ok := g.inner.(interface{ ModelCount() int }); ok {
+		return counted.ModelCount()
+	}
+	return 0
+}
+
 // ChatCompletion extracts messages, applies guardrails, then routes the request.
 func (g *GuardedProvider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
 	modified, err := g.processChat(ctx, req)

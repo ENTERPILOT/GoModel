@@ -3294,6 +3294,46 @@ func TestProviderPassthrough_AnthropicStream(t *testing.T) {
 	}
 }
 
+func TestPassthroughStreamAuditPath_NormalizesKnownEndpoints(t *testing.T) {
+	tests := []struct {
+		name        string
+		requestPath string
+		provider    string
+		endpoint    string
+		want        string
+	}{
+		{
+			name:        "openai responses",
+			requestPath: "/p/openai/responses",
+			provider:    "openai",
+			endpoint:    "responses?trace=1",
+			want:        "/v1/responses",
+		},
+		{
+			name:        "anthropic messages",
+			requestPath: "/p/anthropic/messages",
+			provider:    "anthropic",
+			endpoint:    "messages",
+			want:        "/v1/messages",
+		},
+		{
+			name:        "unknown endpoint falls back",
+			requestPath: "/p/openai/unknown",
+			provider:    "openai",
+			endpoint:    "unknown",
+			want:        "/p/openai/unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := passthroughStreamAuditPath(tt.requestPath, tt.provider, tt.endpoint); got != tt.want {
+				t.Fatalf("passthroughStreamAuditPath(%q, %q, %q) = %q, want %q", tt.requestPath, tt.provider, tt.endpoint, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProviderPassthrough_RejectsUnsupportedProvider(t *testing.T) {
 	provider := &mockProvider{}
 

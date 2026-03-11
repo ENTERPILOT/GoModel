@@ -2,6 +2,7 @@ package providers
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 
@@ -401,6 +402,59 @@ func TestConvertResponsesRequestToChat_DoesNotMergeAssistantMessagesWithExtraFie
 	}
 }
 
+func TestConvertResponsesRequestToChat_RejectsWhitespaceOnlyMediaFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		input any
+	}{
+		{
+			name: "typed image url",
+			input: []core.ResponsesInputElement{
+				{
+					Type: "message",
+					Role: "user",
+					Content: []core.ContentPart{
+						{
+							Type:     "image_url",
+							ImageURL: &core.ImageURLContent{URL: "   "},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "map input audio",
+			input: []interface{}{
+				map[string]interface{}{
+					"type": "message",
+					"role": "user",
+					"content": []map[string]interface{}{
+						{
+							"type":        "input_audio",
+							"input_audio": map[string]interface{}{"data": "  ", "format": "wav"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{
+				Model: "test-model",
+				Input: tt.input,
+			})
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "unsupported content") {
+				t.Fatalf("error = %v, want unsupported content", err)
+			}
+		})
+	}
+}
+
 func TestConvertResponsesRequestToChat_PreservesOpaqueExtras(t *testing.T) {
 	req := &core.ResponsesRequest{
 		Model: "test-model",
@@ -602,7 +656,21 @@ func TestConvertChatResponseToResponses_PreservesStructuredAssistantContent(t *t
 					Role: "assistant",
 					Content: []core.ContentPart{
 						{Type: "text", Text: "Here is the result."},
-						{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/result.png"}},
+						{
+							Type: "image_url",
+							ImageURL: &core.ImageURLContent{
+								URL:         "https://example.com/result.png",
+								ExtraFields: map[string]json.RawMessage{"x_image": json.RawMessage(`true`)},
+							},
+						},
+						{
+							Type: "input_audio",
+							InputAudio: &core.InputAudioContent{
+								Data:        "YWJj",
+								Format:      "wav",
+								ExtraFields: map[string]json.RawMessage{"x_audio": json.RawMessage(`true`)},
+							},
+						},
 					},
 				},
 				FinishReason: "stop",
@@ -618,8 +686,8 @@ func TestConvertChatResponseToResponses_PreservesStructuredAssistantContent(t *t
 	if result.Output[0].Type != "message" {
 		t.Fatalf("Output[0].Type = %q, want message", result.Output[0].Type)
 	}
-	if len(result.Output[0].Content) != 2 {
-		t.Fatalf("len(Output[0].Content) = %d, want 2 structured content items", len(result.Output[0].Content))
+	if len(result.Output[0].Content) != 3 {
+		t.Fatalf("len(Output[0].Content) = %d, want 3 structured content items", len(result.Output[0].Content))
 	}
 	if result.Output[0].Content[0].Type != "output_text" || result.Output[0].Content[0].Text != "Here is the result." {
 		t.Fatalf("unexpected text content item: %+v", result.Output[0].Content[0])
@@ -629,6 +697,37 @@ func TestConvertChatResponseToResponses_PreservesStructuredAssistantContent(t *t
 	}
 	if result.Output[0].Content[1].ImageURL == nil || result.Output[0].Content[1].ImageURL.URL != "https://example.com/result.png" {
 		t.Fatalf("unexpected preserved image content item: %+v", result.Output[0].Content[1])
+	}
+	if result.Output[0].Content[1].ImageURL.ExtraFields["x_image"] == nil {
+		t.Fatalf("image extra missing after conversion: %+v", result.Output[0].Content[1].ImageURL)
+	}
+	if result.Output[0].Content[2].Type != "input_audio" {
+		t.Fatalf("expected preserved audio content item, got %+v", result.Output[0].Content[2])
+	}
+	if result.Output[0].Content[2].InputAudio == nil || result.Output[0].Content[2].InputAudio.Format != "wav" {
+		t.Fatalf("unexpected preserved audio content item: %+v", result.Output[0].Content[2])
+	}
+	if result.Output[0].Content[2].InputAudio.ExtraFields["x_audio"] == nil {
+		t.Fatalf("audio extra missing after conversion: %+v", result.Output[0].Content[2].InputAudio)
+	}
+}
+
+func TestConvertResponsesRequestToChat_RejectsNonSerializableFunctionCallOutputMap(t *testing.T) {
+	_, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{
+		Model: "test-model",
+		Input: []interface{}{
+			map[string]interface{}{
+				"type":    "function_call_output",
+				"call_id": "call_123",
+				"output":  math.Inf(1),
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "function_call_output.output must be JSON-serializable") {
+		t.Fatalf("error = %v, want JSON-serializable validation error", err)
 	}
 }
 

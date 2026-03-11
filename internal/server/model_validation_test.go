@@ -16,12 +16,21 @@ import (
 
 type explodingValidationReadCloser struct{}
 
+type modelCountingValidationProvider struct {
+	*mockProvider
+	modelCount int
+}
+
 func (explodingValidationReadCloser) Read([]byte) (int, error) {
 	return 0, errors.New("live request body should not be read")
 }
 
 func (explodingValidationReadCloser) Close() error {
 	return nil
+}
+
+func (p *modelCountingValidationProvider) ModelCount() int {
+	return p.modelCount
 }
 
 func TestModelValidation(t *testing.T) {
@@ -293,7 +302,7 @@ func TestModelValidation_BodyRewound(t *testing.T) {
 	assert.Len(t, boundReq.Messages, 1)
 }
 
-func TestModelValidation_DoesNotReadLiveBodyWhenIngressFrameExistsWithoutOversizedBody(t *testing.T) {
+func TestModelValidation_DoesNotReadLiveBodyWhenSelectorHintsAlreadyExist(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
 
 	e := echo.New()
@@ -311,6 +320,54 @@ func TestModelValidation_DoesNotReadLiveBodyWhenIngressFrameExistsWithoutOversiz
 
 	frame := core.NewIngressFrame(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", nil, false, "", nil)
 	ctx := core.WithIngressFrame(req.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, &core.SemanticEnvelope{
+		Dialect:        "openai_compat",
+		Operation:      "chat_completions",
+		JSONBodyParsed: true,
+		SelectorHints: core.SelectorHints{
+			Model: "gpt-4o-mini",
+		},
+	})
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.True(t, handlerCalled)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestModelValidation_UsesIngressBodyForMissingSelectorHints(t *testing.T) {
+	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
+
+	e := echo.New()
+	handlerCalled := false
+
+	middleware := ModelValidation(provider)
+	handler := middleware(func(c *echo.Context) error {
+		handlerCalled = true
+		return c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = explodingValidationReadCloser{}
+
+	frame := core.NewIngressFrame(
+		http.MethodPost,
+		"/v1/chat/completions",
+		nil,
+		nil,
+		nil,
+		"application/json",
+		[]byte(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`),
+		false,
+		"",
+		nil,
+	)
+	ctx := core.WithIngressFrame(req.Context(), frame)
 	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
 	req = req.WithContext(ctx)
 
@@ -321,6 +378,35 @@ func TestModelValidation_DoesNotReadLiveBodyWhenIngressFrameExistsWithoutOversiz
 	require.NoError(t, err)
 	assert.True(t, handlerCalled)
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestModelValidation_RegistryNotInitializedReturnsGatewayError(t *testing.T) {
+	provider := &modelCountingValidationProvider{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini"}},
+		modelCount:   0,
+	}
+
+	e := echo.New()
+	handlerCalled := false
+
+	middleware := ModelValidation(provider)
+	handler := middleware(func(c *echo.Context) error {
+		handlerCalled = true
+		return c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler(c)
+	require.NoError(t, err)
+
+	assert.False(t, handlerCalled)
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Contains(t, rec.Body.String(), "model registry not initialized")
 }
 
 func TestModelValidation_ResolvesProviderTypeFromOversizedLiveBody(t *testing.T) {
