@@ -3143,7 +3143,7 @@ func TestProviderPassthrough_AnthropicV1AliasNormalizesByDefault(t *testing.T) {
 	}
 }
 
-func TestProviderPassthrough_V1AliasCanBeDisabled(t *testing.T) {
+func TestProviderPassthrough_V1AliasDisabledReturnsBadRequest(t *testing.T) {
 	provider := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
 			StatusCode: http.StatusOK,
@@ -3164,14 +3164,14 @@ func TestProviderPassthrough_V1AliasCanBeDisabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
 	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("lastPassthroughReq = nil")
+	if !strings.Contains(rec.Body.String(), "v1 alias is disabled") {
+		t.Fatalf("body = %q, want v1 alias error", rec.Body.String())
 	}
-	if got := provider.lastPassthroughReq.Endpoint; got != "v1/chat/completions" {
-		t.Fatalf("endpoint = %q, want v1/chat/completions", got)
+	if provider.lastPassthroughReq != nil {
+		t.Fatalf("provider should not have been called, got endpoint %q", provider.lastPassthroughReq.Endpoint)
 	}
 }
 

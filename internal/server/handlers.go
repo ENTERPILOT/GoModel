@@ -185,18 +185,21 @@ func isSupportedPassthroughProvider(providerType string) bool {
 	}
 }
 
-func normalizePassthroughEndpoint(endpoint string, enabled bool) string {
-	if !enabled {
-		return endpoint
-	}
+func normalizePassthroughEndpoint(endpoint string, enabled bool) (string, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	switch {
 	case endpoint == "v1":
-		return ""
+		if !enabled {
+			return "", core.NewInvalidRequestError("provider passthrough v1 alias is disabled; use /p/{provider}/... without the v1 prefix", nil)
+		}
+		return "", nil
 	case strings.HasPrefix(endpoint, "v1/"):
-		return strings.TrimPrefix(endpoint, "v1/")
+		if !enabled {
+			return "", core.NewInvalidRequestError("provider passthrough v1 alias is disabled; use /p/{provider}/... without the v1 prefix", nil)
+		}
+		return strings.TrimPrefix(endpoint, "v1/"), nil
 	default:
-		return endpoint
+		return endpoint, nil
 	}
 }
 
@@ -205,7 +208,10 @@ func (h *Handler) passthroughEndpoint(c *echo.Context) (string, string, error) {
 	if !ok {
 		return "", "", core.NewInvalidRequestError("invalid provider passthrough path", nil)
 	}
-	endpoint = normalizePassthroughEndpoint(endpoint, h.normalizePassthroughV1Prefix)
+	endpoint, err := normalizePassthroughEndpoint(endpoint, h.normalizePassthroughV1Prefix)
+	if err != nil {
+		return "", "", err
+	}
 	if endpoint == "" {
 		return "", "", core.NewInvalidRequestError("provider passthrough endpoint is required", nil)
 	}

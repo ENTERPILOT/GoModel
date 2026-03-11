@@ -293,7 +293,7 @@ func TestModelValidation_BodyRewound(t *testing.T) {
 	assert.Len(t, boundReq.Messages, 1)
 }
 
-func TestModelValidation_DoesNotReadLiveBodyWhenIngressFrameExists(t *testing.T) {
+func TestModelValidation_DoesNotReadLiveBodyWhenIngressFrameExistsWithoutOversizedBody(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
 
 	e := echo.New()
@@ -310,6 +310,51 @@ func TestModelValidation_DoesNotReadLiveBodyWhenIngressFrameExists(t *testing.T)
 	req.Body = explodingValidationReadCloser{}
 
 	frame := &core.IngressFrame{
+		Method:      http.MethodPost,
+		Path:        "/v1/chat/completions",
+		ContentType: "application/json",
+	}
+	ctx := core.WithIngressFrame(req.Context(), frame)
+	ctx = core.WithSemanticEnvelope(ctx, core.BuildSemanticEnvelope(frame))
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.True(t, handlerCalled)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestModelValidation_ResolvesProviderTypeFromOversizedLiveBody(t *testing.T) {
+	provider := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini"},
+		providerTypes: map[string]string{
+			"openai/gpt-4o-mini": "openai",
+		},
+	}
+
+	e := echo.New()
+	var capturedEnv *core.SemanticEnvelope
+	var capturedProviderType string
+
+	middleware := ModelValidation(provider)
+	handler := middleware(func(c *echo.Context) error {
+		capturedEnv = core.GetSemanticEnvelope(c.Request().Context())
+		capturedProviderType = GetProviderType(c)
+		return c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"provider":"openai",
+		"model":"gpt-4o-mini",
+		"messages":[{"role":"user","content":"hi"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-ID", "oversized-live-body")
+
+	frame := &core.IngressFrame{
 		Method:          http.MethodPost,
 		Path:            "/v1/chat/completions",
 		ContentType:     "application/json",
@@ -324,7 +369,12 @@ func TestModelValidation_DoesNotReadLiveBodyWhenIngressFrameExists(t *testing.T)
 
 	err := handler(c)
 	require.NoError(t, err)
-	assert.True(t, handlerCalled)
+	require.NotNil(t, capturedEnv)
+	assert.Equal(t, "openai", capturedProviderType)
+	canonicalReq := capturedEnv.CachedChatRequest()
+	require.NotNil(t, canonicalReq)
+	assert.Equal(t, "gpt-4o-mini", canonicalReq.Model)
+	assert.Equal(t, "openai", canonicalReq.Provider)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 

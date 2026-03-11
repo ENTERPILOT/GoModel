@@ -82,13 +82,18 @@ func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed
 			return env.SelectorHints.Model, env.SelectorHints.Provider, true, nil
 		}
 	}
-	if frame := core.GetIngressFrame(ctx); frame != nil {
+	if frame := core.GetIngressFrame(ctx); frame != nil && !frame.RawBodyTooLarge {
 		return "", "", false, nil
 	}
 
 	bodyBytes, err := requestBodyBytes(c)
 	if err != nil {
 		return "", "", false, err
+	}
+	if env := core.GetSemanticEnvelope(ctx); env != nil {
+		if model, provider, ok := core.DecodeCanonicalSelector(bodyBytes, env); ok {
+			return model, provider, true, nil
+		}
 	}
 
 	var peek struct {
