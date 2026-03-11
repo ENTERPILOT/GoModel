@@ -95,7 +95,7 @@ func (h *Handler) handleStreamingResponse(c *echo.Context, model, provider strin
 	wrappedStream := auditlog.WrapStreamForLogging(stream, h.logger, streamEntry, c.Request().URL.Path)
 
 	// Wrap with usage tracking if enabled
-	requestID := c.Request().Header.Get("X-Request-ID")
+	requestID := requestIDFromContextOrHeader(c.Request())
 	endpoint := c.Request().URL.Path
 	wrappedStream = usage.WrapStreamForUsage(wrappedStream, h.usageLogger, model, provider, requestID, endpoint, h.pricingResolver)
 
@@ -165,6 +165,17 @@ func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path,
 		"path", path,
 		"request_id", requestID,
 	)
+}
+
+func requestIDFromContextOrHeader(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	requestID := strings.TrimSpace(core.GetRequestID(req.Context()))
+	if requestID != "" {
+		return requestID
+	}
+	return strings.TrimSpace(req.Header.Get("X-Request-ID"))
 }
 
 func (h *Handler) logUsage(model, providerType string, extractFn func(*core.ModelPricing) *usage.UsageEntry) {
@@ -404,7 +415,7 @@ func (h *Handler) proxyPassthroughResponse(c *echo.Context, providerType, endpoi
 
 		c.Response().WriteHeader(resp.StatusCode)
 		if err := flushStream(c.Response(), wrappedStream); err != nil {
-			recordStreamingError(streamEntry, "", providerType, c.Request().URL.Path, c.Request().Header.Get("X-Request-ID"), err)
+			recordStreamingError(streamEntry, "", providerType, c.Request().URL.Path, requestIDFromContextOrHeader(c.Request()), err)
 			return err
 		}
 		return nil

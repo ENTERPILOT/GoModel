@@ -1286,6 +1286,33 @@ func TestFlushStream_ReturnsWriteError(t *testing.T) {
 	}
 }
 
+func TestRequestIDFromContextOrHeader(t *testing.T) {
+	t.Run("prefers context request id", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		req.Header.Set("X-Request-ID", "header-id")
+		req = req.WithContext(core.WithRequestID(req.Context(), "context-id"))
+
+		if got := requestIDFromContextOrHeader(req); got != "context-id" {
+			t.Fatalf("requestIDFromContextOrHeader() = %q, want context-id", got)
+		}
+	})
+
+	t.Run("falls back to header request id", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		req.Header.Set("X-Request-ID", "  header-id  ")
+
+		if got := requestIDFromContextOrHeader(req); got != "header-id" {
+			t.Fatalf("requestIDFromContextOrHeader() = %q, want header-id", got)
+		}
+	})
+
+	t.Run("nil request returns empty", func(t *testing.T) {
+		if got := requestIDFromContextOrHeader(nil); got != "" {
+			t.Fatalf("requestIDFromContextOrHeader(nil) = %q, want empty", got)
+		}
+	})
+}
+
 func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 	expectedErr := errors.New("upstream stream failed")
 	logger := &capturingAuditLogger{

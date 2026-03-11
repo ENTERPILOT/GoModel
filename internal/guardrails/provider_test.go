@@ -1657,6 +1657,16 @@ func TestGuardedProvider_DelegatesGetProviderType(t *testing.T) {
 	}
 }
 
+func TestGuardedProvider_ModelCount_UnknownWhenInnerDoesNotExposeCount(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	guarded := NewGuardedProvider(inner, pipeline)
+
+	if got := guarded.ModelCount(); got != -1 {
+		t.Fatalf("ModelCount() = %d, want -1 for unknown count", got)
+	}
+}
+
 func TestGuardedProvider_Passthrough_Delegates(t *testing.T) {
 	inner := &mockRoutableProvider{}
 	pipeline := NewPipeline()

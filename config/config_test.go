@@ -363,6 +363,11 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 		if result.Config.Cache.Model.Redis != nil {
 			t.Fatalf("expected Cache.Model.Redis to be nil in example config, got %+v", result.Config.Cache.Model.Redis)
 		}
+		gotProviders := result.Config.Server.SupportedPassthroughProviders
+		wantProviders := []string{"openai", "anthropic"}
+		if len(gotProviders) != len(wantProviders) || gotProviders[0] != wantProviders[0] || gotProviders[1] != wantProviders[1] {
+			t.Fatalf("Server.SupportedPassthroughProviders = %v, want %v", gotProviders, wantProviders)
+		}
 	})
 }
 

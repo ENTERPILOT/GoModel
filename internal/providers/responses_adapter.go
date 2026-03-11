@@ -248,10 +248,17 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 		if callID == "" {
 			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: function_call_output call_id is required", index), nil)
 		}
+		content, err := stringifyResponsesInputValueWithError(item.Output)
+		if err != nil {
+			return core.Message{}, "", core.NewInvalidRequestError(
+				fmt.Sprintf("invalid responses input item at index %d: function_call_output.output must be JSON-serializable", index),
+				err,
+			)
+		}
 		return core.Message{
 			Role:        "tool",
 			ToolCallID:  callID,
-			Content:     stringifyResponsesInputValue(item.Output),
+			Content:     content,
 			ExtraFields: core.CloneRawJSONMap(item.ExtraFields),
 		}, "function_call_output", nil
 	default: // message (type="" or "message")
