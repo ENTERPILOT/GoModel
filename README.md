@@ -1,4 +1,4 @@
-# GOModel — AI Gateway Written in Go
+# GOModel - AI Gateway Written in Go
 
 [![CI](https://github.com/ENTERPILOT/GOModel/actions/workflows/test.yml/badge.svg)](https://github.com/ENTERPILOT/GOModel/actions/workflows/test.yml)
 [![Docs](https://img.shields.io/badge/docs-gomodel-blue)](https://gomodel.enterpilot.io/docs)
@@ -8,7 +8,7 @@
 
 A high-performance AI gateway written in Go, providing a unified OpenAI-compatible API for multiple AI model providers, full-observability and more.
 
-## Quick Start — Deploy the AI Gateway
+## Quick Start - Deploy the AI Gateway
 
 **Step 1:** Start GOModel
 
@@ -31,7 +31,7 @@ docker run --rm -p 8080:8080 \
   enterpilot/gomodel
 ```
 
-⚠️ Avoid passing secrets via `-e` on the command line—they can leak via shell history and process lists. For production, use `docker run --env-file .env` to load API keys from a file instead.
+⚠️ Avoid passing secrets via `-e` on the command line - they can leak via shell history and process lists. For production, use `docker run --env-file .env` to load API keys from a file instead.
 
 **Step 2:** Make your first API call
 
@@ -159,7 +159,7 @@ Key settings:
 | `LOGGING_ENABLED` | `false` | Enable audit logging |
 | `GUARDRAILS_ENABLED` | `false` | Enable the configured guardrails pipeline |
 
-**Quick Start — Authentication:** By default `GOMODEL_MASTER_KEY` is unset. Without this key, API endpoints are unprotected and anyone can call them. This is insecure for production. **Strongly recommend** setting a strong secret before exposing the service. Add `GOMODEL_MASTER_KEY` to your `.env` or environment for production deployments.
+**Quick Start - Authentication:** By default `GOMODEL_MASTER_KEY` is unset. Without this key, API endpoints are unprotected and anyone can call them. This is insecure for production. **Strongly recommend** setting a strong secret before exposing the service. Add `GOMODEL_MASTER_KEY` to your `.env` or environment for production deployments.
 
 ---
 
