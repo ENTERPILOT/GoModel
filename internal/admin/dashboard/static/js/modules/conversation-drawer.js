@@ -196,10 +196,12 @@
                                 if (item.type === 'function_call_output') {
                                     const text = typeof item.output === 'string' ? item.output : extractText(item.output);
                                     if (text) messages.push(this._conversationMessage('function_result', text, ts, entry.id, isAnchor, ++idx, [], callIdMap[item.call_id] || ''));
-                                } else {
-                                    extractResponsesInputMessages(item).forEach((m) => {
-                                        if (m.text) messages.push(this._conversationMessage(m.role, m.text, ts, entry.id, isAnchor, ++idx));
-                                    });
+                                } else if (item.type === 'function_call') {
+                                    messages.push(this._conversationMessage('function_call', '', ts, entry.id, isAnchor, ++idx, [{name: item.name || '', arguments: item.arguments || ''}]));
+                                } else if (item.role) {
+                                    const role = String(item.role).toLowerCase();
+                                    const text = extractText(item.content);
+                                    if (text) messages.push(this._conversationMessage(role, text, ts, entry.id, isAnchor, ++idx));
                                 }
                             });
                         } else {
