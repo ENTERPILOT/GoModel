@@ -17,7 +17,7 @@ Guidance for AI models (like Claude) working with this codebase.
 - The gateway accepts client requests generously (e.g. `max_tokens` for any model) and adapts them to each provider's specific requirements before forwarding (e.g. translating `max_tokens` → `max_completion_tokens` for OpenAI reasoning models).
 - The gateway accepts provider's response liberally and pass it to the user in a conservative OpenAI-compatible shape.
 
-2. [The Twelve-Factor App](https://12factor.net/).
+1. [The Twelve-Factor App](https://12factor.net/).
 
 ## Commands
 
@@ -46,7 +46,23 @@ make swagger           # Regenerate Swagger docs
 
 ## Error Handling
 
-- Error responses should be OpenAI-compatible
+- All errors returned to clients must be instances of `core.GatewayError`.
+- Use the typed client-facing categories `provider_error`, `rate_limit_error`, `invalid_request_error`, `authentication_error`, and `not_found_error`.
+- Public error responses must use the OpenAI-compatible shape:
+
+```json
+{
+  "error": {
+    "type": "provider_error",
+    "message": "human readable message",
+    "param": null,
+    "code": null
+  }
+}
+```
+
+- If `param` or `code` metadata is available from validation or an upstream provider, it must be exposed in those fields; otherwise both fields must still be present with `null`.
+- Update this document whenever behavior, configuration, providers, supported commands, or public API contracts change.
 
 ## Testing
 
