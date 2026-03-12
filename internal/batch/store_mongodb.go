@@ -9,8 +9,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-
-	"gomodel/internal/core"
 )
 
 type mongoBatchDocument struct {
@@ -48,17 +46,17 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 }
 
 // Create inserts a new batch.
-func (s *MongoDBStore) Create(ctx context.Context, batch *core.BatchResponse) error {
+func (s *MongoDBStore) Create(ctx context.Context, batch *StoredBatch) error {
 	payload, err := serializeBatch(batch)
 	if err != nil {
 		return err
 	}
 
 	doc := mongoBatchDocument{
-		ID:        batch.ID,
-		CreatedAt: batch.CreatedAt,
+		ID:        batch.Batch.ID,
+		CreatedAt: batch.Batch.CreatedAt,
 		UpdatedAt: time.Now().Unix(),
-		Status:    batch.Status,
+		Status:    batch.Batch.Status,
 		Data:      payload,
 	}
 	if _, err := s.collection.InsertOne(ctx, doc); err != nil {
@@ -68,7 +66,7 @@ func (s *MongoDBStore) Create(ctx context.Context, batch *core.BatchResponse) er
 }
 
 // Get returns a batch by id.
-func (s *MongoDBStore) Get(ctx context.Context, id string) (*core.BatchResponse, error) {
+func (s *MongoDBStore) Get(ctx context.Context, id string) (*StoredBatch, error) {
 	var doc mongoBatchDocument
 	err := s.collection.FindOne(ctx, bson.M{"_id": id}).Decode(&doc)
 	if err != nil {
@@ -86,7 +84,7 @@ func (s *MongoDBStore) Get(ctx context.Context, id string) (*core.BatchResponse,
 }
 
 // List returns batches ordered by created_at desc, id desc.
-func (s *MongoDBStore) List(ctx context.Context, limit int, after string) ([]*core.BatchResponse, error) {
+func (s *MongoDBStore) List(ctx context.Context, limit int, after string) ([]*StoredBatch, error) {
 	limit = normalizeLimit(limit)
 	filter := bson.M{}
 
@@ -119,7 +117,7 @@ func (s *MongoDBStore) List(ctx context.Context, limit int, after string) ([]*co
 	}
 	defer cursor.Close(ctx)
 
-	items := make([]*core.BatchResponse, 0, limit)
+	items := make([]*StoredBatch, 0, limit)
 	for cursor.Next(ctx) {
 		var doc mongoBatchDocument
 		if err := cursor.Decode(&doc); err != nil {
@@ -139,17 +137,17 @@ func (s *MongoDBStore) List(ctx context.Context, limit int, after string) ([]*co
 }
 
 // Update updates a stored batch object.
-func (s *MongoDBStore) Update(ctx context.Context, batch *core.BatchResponse) error {
+func (s *MongoDBStore) Update(ctx context.Context, batch *StoredBatch) error {
 	payload, err := serializeBatch(batch)
 	if err != nil {
 		return err
 	}
 
 	result, err := s.collection.UpdateOne(ctx,
-		bson.M{"_id": batch.ID},
+		bson.M{"_id": batch.Batch.ID},
 		bson.M{"$set": bson.M{
 			"updated_at": time.Now().Unix(),
-			"status":     batch.Status,
+			"status":     batch.Batch.Status,
 			"data":       payload,
 		}},
 	)

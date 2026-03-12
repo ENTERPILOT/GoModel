@@ -121,9 +121,13 @@ func TestGatewayError_HTTPStatusCode(t *testing.T) {
 }
 
 func TestGatewayError_ToJSON(t *testing.T) {
+	param := "model"
+	code := "model_not_found"
 	err := &GatewayError{
 		Type:    ErrorTypeRateLimit,
 		Message: "too many requests",
+		Param:   &param,
+		Code:    &code,
 	}
 
 	result := err.ToJSON()
@@ -139,6 +143,32 @@ func TestGatewayError_ToJSON(t *testing.T) {
 
 	if errorData["message"] != "too many requests" {
 		t.Errorf("ToJSON() message = %v, want %v", errorData["message"], "too many requests")
+	}
+
+	if errorData["param"] != param {
+		t.Errorf("ToJSON() param = %v, want %v", errorData["param"], param)
+	}
+
+	if errorData["code"] != code {
+		t.Errorf("ToJSON() code = %v, want %v", errorData["code"], code)
+	}
+}
+
+func TestGatewayError_ToJSON_DefaultsParamAndCodeToNull(t *testing.T) {
+	err := &GatewayError{
+		Type:    ErrorTypeRateLimit,
+		Message: "too many requests",
+	}
+
+	result := err.ToJSON()
+	errorData := result["error"].(map[string]interface{})
+
+	if value, ok := errorData["param"]; !ok || value != nil {
+		t.Fatalf("ToJSON() param = %v, want nil", value)
+	}
+
+	if value, ok := errorData["code"]; !ok || value != nil {
+		t.Fatalf("ToJSON() code = %v, want nil", value)
 	}
 }
 
@@ -252,6 +282,8 @@ func TestParseProviderError(t *testing.T) {
 		body           []byte
 		expectedType   ErrorType
 		expectedStatus int
+		expectedParam  *string
+		expectedCode   *string
 	}{
 		{
 			name:           "401 unauthorized",
@@ -267,7 +299,7 @@ func TestParseProviderError(t *testing.T) {
 			statusCode:     http.StatusForbidden,
 			body:           []byte(`{"error": {"message": "Access denied"}}`),
 			expectedType:   ErrorTypeAuthentication,
-			expectedStatus: http.StatusUnauthorized,
+			expectedStatus: http.StatusForbidden,
 		},
 		{
 			name:           "429 rate limit",
@@ -313,9 +345,11 @@ func TestParseProviderError(t *testing.T) {
 			name:           "json parse with message",
 			provider:       "openai",
 			statusCode:     http.StatusBadRequest,
-			body:           []byte(`{"error": {"message": "Model not found", "type": "not_found"}}`),
+			body:           []byte(`{"error": {"message": "Model not found", "type": "not_found", "param": "model", "code": "model_not_found"}}`),
 			expectedType:   ErrorTypeInvalidRequest,
 			expectedStatus: http.StatusBadRequest,
+			expectedParam:  ptr("model"),
+			expectedCode:   ptr("model_not_found"),
 		},
 	}
 
@@ -338,7 +372,30 @@ func TestParseProviderError(t *testing.T) {
 			if err.Message == "" {
 				t.Error("Message should not be empty")
 			}
+
+			if !equalStringPointers(err.Param, tt.expectedParam) {
+				t.Errorf("Param = %v, want %v", err.Param, tt.expectedParam)
+			}
+
+			if !equalStringPointers(err.Code, tt.expectedCode) {
+				t.Errorf("Code = %v, want %v", err.Code, tt.expectedCode)
+			}
 		})
+	}
+}
+
+func ptr(value string) *string {
+	return &value
+}
+
+func equalStringPointers(a, b *string) bool {
+	switch {
+	case a == nil && b == nil:
+		return true
+	case a == nil || b == nil:
+		return false
+	default:
+		return *a == *b
 	}
 }
 
@@ -481,6 +538,44 @@ func TestParseProviderError_Preserves4xxStatusCodes(t *testing.T) {
 	}
 }
 
+func TestParseProviderError_PreservesWrappedErrorsForAuthAndRateLimit(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		wantType   ErrorType
+	}{
+		{
+			name:       "401 unauthorized",
+			statusCode: http.StatusUnauthorized,
+			wantType:   ErrorTypeAuthentication,
+		},
+		{
+			name:       "403 forbidden",
+			statusCode: http.StatusForbidden,
+			wantType:   ErrorTypeAuthentication,
+		},
+		{
+			name:       "429 rate limit",
+			statusCode: http.StatusTooManyRequests,
+			wantType:   ErrorTypeRateLimit,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			originalErr := errors.New("upstream transport error")
+			err := ParseProviderError("openai", tt.statusCode, []byte(`{"error":{"message":"boom"}}`), originalErr)
+
+			if err.Type != tt.wantType {
+				t.Fatalf("Type = %v, want %v", err.Type, tt.wantType)
+			}
+			if !errors.Is(err, originalErr) {
+				t.Fatalf("expected wrapped original error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestParseProviderError_SpecialStatusCodesOverride(t *testing.T) {
 	// Verify that special status codes (401, 403, 429) still have their special handling
 	tests := []struct {
@@ -499,7 +594,7 @@ func TestParseProviderError_SpecialStatusCodesOverride(t *testing.T) {
 			name:           "403 uses authentication error",
 			statusCode:     http.StatusForbidden,
 			expectedType:   ErrorTypeAuthentication,
-			expectedStatus: http.StatusUnauthorized, // Note: 403 is converted to 401
+			expectedStatus: http.StatusForbidden,
 		},
 		{
 			name:           "429 uses rate limit error",

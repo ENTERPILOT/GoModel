@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -34,6 +35,199 @@ func TestNew_ReturnsProvider(t *testing.T) {
 
 	if provider == nil {
 		t.Error("provider should not be nil")
+	}
+}
+
+func TestStreamConverter_DrainsBufferedDoneMessage(t *testing.T) {
+	stream := newStreamConverter(io.NopCloser(strings.NewReader("")), "claude-sonnet-4-5-20250929")
+	defer func() { _ = stream.Close() }()
+
+	buf := make([]byte, 4)
+	var out strings.Builder
+
+	for {
+		n, err := stream.Read(buf)
+		if n > 0 {
+			out.Write(buf[:n])
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Read() error = %v", err)
+		}
+	}
+
+	if out.String() != "data: [DONE]\n\n" {
+		t.Fatalf("stream output = %q, want %q", out.String(), "data: [DONE]\\n\\n")
+	}
+}
+
+func TestSetBatchResultEndpoints_PreservesOlderBatches(t *testing.T) {
+	provider := &Provider{
+		batchResultEndpoints: make(map[string]map[string]string),
+	}
+
+	for i := 0; i <= 1024; i++ {
+		batchID := "batch-" + strconv.Itoa(i)
+		provider.setBatchResultEndpoints(batchID, map[string]string{
+			"req-1": "/v1/chat/completions",
+		})
+	}
+
+	if got := provider.getBatchResultEndpoints("batch-0"); got == nil {
+		t.Fatal("batch-0 should still be present")
+	}
+	if got := provider.getBatchResultEndpoints("batch-1"); got == nil {
+		t.Fatal("batch-1 should still be present")
+	}
+	if got := provider.getBatchResultEndpoints("batch-1024"); got == nil {
+		t.Fatal("newest batch should still be present")
+	}
+	if got := len(provider.batchResultEndpoints); got != 1025 {
+		t.Fatalf("len(batchResultEndpoints) = %d, want 1025", got)
+	}
+}
+
+func TestSetBatchResultEndpoints_OverwritesExistingBatch(t *testing.T) {
+	provider := &Provider{
+		batchResultEndpoints: make(map[string]map[string]string),
+	}
+
+	provider.setBatchResultEndpoints("batch-0", map[string]string{
+		"req-1": "/v1/chat/completions",
+	})
+	provider.setBatchResultEndpoints("batch-0", map[string]string{
+		"req-1": "/v1/responses",
+	})
+
+	refreshed := provider.getBatchResultEndpoints("batch-0")
+	if refreshed == nil {
+		t.Fatal("batch-0 should still be present after refresh")
+	}
+	if refreshed["req-1"] != "/v1/responses" {
+		t.Fatalf("batch-0 endpoint = %q, want /v1/responses", refreshed["req-1"])
+	}
+	if got := len(provider.batchResultEndpoints); got != 1 {
+		t.Fatalf("len(batchResultEndpoints) = %d, want 1", got)
+	}
+}
+
+func TestGetBatchResults(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/messages/batches/batch_1/results" {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(
+			`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}` + "\n" +
+				`{"custom_id":"err-1","result":{"type":"errored","error":{"type":"invalid_request_error","message":"bad request"}}}`,
+		))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+	provider.setBatchResultEndpoints("batch_1", map[string]string{
+		"ok-1":  "/v1/responses",
+		"err-1": "/v1/chat/completions",
+	})
+
+	resp, err := provider.GetBatchResults(context.Background(), "batch_1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.BatchID != "batch_1" {
+		t.Fatalf("BatchID = %q, want %q", resp.BatchID, "batch_1")
+	}
+	if len(resp.Data) != 2 {
+		t.Fatalf("len(Data) = %d, want 2", len(resp.Data))
+	}
+	if resp.Data[0].URL != "/v1/responses" || resp.Data[0].StatusCode != http.StatusOK {
+		t.Fatalf("unexpected first row: %+v", resp.Data[0])
+	}
+	if resp.Data[1].Error == nil || resp.Data[1].Error.Message != "bad request" {
+		t.Fatalf("unexpected error row: %+v", resp.Data[1])
+	}
+}
+
+func TestGetBatchResultsWithHints(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/messages/batches/batch_1/results" {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(
+			`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}`,
+		))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	resp, err := provider.GetBatchResultsWithHints(context.Background(), "batch_1", map[string]string{
+		"ok-1": "/v1/responses",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("len(Data) = %d, want 1", len(resp.Data))
+	}
+	if resp.Data[0].URL != "/v1/responses" {
+		t.Fatalf("URL = %q, want /v1/responses", resp.Data[0].URL)
+	}
+}
+
+func TestGetBatchResultsWithHints_ExplicitEmptyHintsDoNotUseTransientHints(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/messages/batches/batch_1/results" {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(
+			`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}`,
+		))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+	provider.setBatchResultEndpoints("batch_1", map[string]string{
+		"ok-1": "/v1/responses",
+	})
+
+	resp, err := provider.GetBatchResultsWithHints(context.Background(), "batch_1", map[string]string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("len(Data) = %d, want 1", len(resp.Data))
+	}
+	if resp.Data[0].URL != "/v1/chat/completions" {
+		t.Fatalf("URL = %q, want /v1/chat/completions", resp.Data[0].URL)
+	}
+}
+
+func TestClearBatchResultHints(t *testing.T) {
+	provider := &Provider{
+		batchResultEndpoints: map[string]map[string]string{
+			"batch_1": {
+				"resp-1": "/v1/responses",
+			},
+		},
+	}
+
+	provider.ClearBatchResultHints("batch_1")
+	if got := provider.getBatchResultEndpoints("batch_1"); got != nil {
+		t.Fatalf("batch_1 hints should be cleared, got %#v", got)
 	}
 }
 
@@ -304,6 +498,61 @@ data: {"type":"message_stop"}
 	}
 }
 
+func TestStreamChatCompletion_MergesUsageFromMessageStart(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0,"cache_read_input_tokens":6}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	responseStr := string(raw)
+	if !strings.Contains(responseStr, `"prompt_tokens":10`) {
+		t.Fatalf("expected prompt_tokens in streamed usage, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"completion_tokens":2`) {
+		t.Fatalf("expected completion_tokens in streamed usage, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"total_tokens":12`) {
+		t.Fatalf("expected total_tokens in streamed usage, got %q", responseStr)
+	}
+	if strings.Contains(responseStr, `"cache_read_input_tokens":6`) {
+		t.Fatalf("did not expect cache_read_input_tokens in normalized streamed usage, got %q", responseStr)
+	}
+}
+
 func TestStreamChatCompletion_WithToolCalls(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -565,6 +814,61 @@ data: {"type":"message_stop"}
 	}
 
 	t.Fatal("expected a chat completion chunk")
+}
+
+func TestStreamChatCompletion_MalformedEventReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"broken"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err == nil {
+		t.Fatal("expected malformed stream error")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", gatewayErr.StatusCode, http.StatusBadGateway)
+	}
+	if !strings.Contains(gatewayErr.Message, "failed to decode anthropic stream event") {
+		t.Fatalf("message = %q, want decode failure", gatewayErr.Message)
+	}
+	if !strings.Contains(string(raw), `"content":"Hello"`) {
+		t.Fatalf("expected stream to include prior converted chunk, got %q", string(raw))
+	}
+	if strings.Contains(string(raw), "[DONE]") {
+		t.Fatalf("did not expect [DONE] after malformed event, got %q", string(raw))
+	}
 }
 
 type testSSEEvent struct {
@@ -2178,6 +2482,62 @@ data: {"type":"message_stop"}
 	}
 }
 
+func TestStreamResponses_MergesUsageFromMessageStart(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0,"cache_creation_input_tokens":4}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "Hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	responseStr := string(raw)
+	if !strings.Contains(responseStr, `"type":"response.completed"`) {
+		t.Fatalf("expected response.completed event, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"input_tokens":10`) {
+		t.Fatalf("expected input_tokens in response.completed usage, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"output_tokens":2`) {
+		t.Fatalf("expected output_tokens in response.completed usage, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"total_tokens":12`) {
+		t.Fatalf("expected total_tokens in response.completed usage, got %q", responseStr)
+	}
+	if strings.Contains(responseStr, `"cache_creation_input_tokens":4`) {
+		t.Fatalf("did not expect cache_creation_input_tokens in normalized response.completed usage, got %q", responseStr)
+	}
+}
+
 func TestStreamResponses_WithToolCalls(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2379,6 +2739,59 @@ data: {"type":"message_stop"}
 	}
 	if !foundDone {
 		t.Fatal("expected response.function_call_arguments.done with {} arguments")
+	}
+}
+
+func TestStreamResponses_MalformedEventReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"broken"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "Hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err == nil {
+		t.Fatal("expected malformed stream error")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", gatewayErr.StatusCode, http.StatusBadGateway)
+	}
+	if !strings.Contains(gatewayErr.Message, "failed to decode anthropic stream event") {
+		t.Fatalf("message = %q, want decode failure", gatewayErr.Message)
+	}
+	if !strings.Contains(string(raw), "response.created") {
+		t.Fatalf("expected stream to include prior response.created event, got %q", string(raw))
+	}
+	if strings.Contains(string(raw), "[DONE]") {
+		t.Fatalf("did not expect [DONE] after malformed event, got %q", string(raw))
 	}
 }
 
@@ -2757,6 +3170,46 @@ func TestBuildAnthropicBatchCreateRequest_NormalizesFullURLResponsesEndpoint(t *
 	}
 	if got := endpointByCustomID["resp-1"]; got != "/v1/responses" {
 		t.Fatalf("endpointByCustomID[resp-1] = %q, want /v1/responses", got)
+	}
+}
+
+func TestBuildAnthropicBatchCreateRequest_RejectsDuplicateCustomIDs(t *testing.T) {
+	req := &core.BatchRequest{
+		Requests: []core.BatchRequestItem{
+			{
+				CustomID: "dup-1",
+				Method:   http.MethodPost,
+				URL:      "/v1/chat/completions",
+				Body: json.RawMessage(`{
+					"model":"claude-sonnet-4-5-20250929",
+					"messages":[{"role":"user","content":"hello"}]
+				}`),
+			},
+			{
+				CustomID: "dup-1",
+				Method:   http.MethodPost,
+				URL:      "/v1/responses",
+				Body: json.RawMessage(`{
+					"model":"claude-sonnet-4-5-20250929",
+					"input":"hello"
+				}`),
+			},
+		},
+	}
+
+	_, _, err := buildAnthropicBatchCreateRequest(req)
+	if err == nil {
+		t.Fatal("expected error for duplicate custom_id")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
+	}
+	if !strings.Contains(gatewayErr.Message, `duplicate custom_id "dup-1"`) {
+		t.Fatalf("error message = %q, want duplicate custom_id", gatewayErr.Message)
 	}
 }
 

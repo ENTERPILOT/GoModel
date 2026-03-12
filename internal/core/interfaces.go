@@ -38,6 +38,19 @@ type NativeBatchProvider interface {
 	GetBatchResults(ctx context.Context, id string) (*BatchResultsResponse, error)
 }
 
+// BatchCreateHintAwareProvider is an optional native batch extension for
+// providers that need gateway persistence for per-item endpoint hints.
+type BatchCreateHintAwareProvider interface {
+	CreateBatchWithHints(ctx context.Context, req *BatchRequest) (*BatchResponse, map[string]string, error)
+}
+
+// BatchResultHintAwareProvider is an optional native batch extension for
+// providers that need persisted per-item endpoint hints to shape results.
+type BatchResultHintAwareProvider interface {
+	GetBatchResultsWithHints(ctx context.Context, id string, endpointByCustomID map[string]string) (*BatchResultsResponse, error)
+	ClearBatchResultHints(batchID string)
+}
+
 // NativeBatchRoutableProvider extends routing with native batch operations.
 type NativeBatchRoutableProvider interface {
 	CreateBatch(ctx context.Context, providerType string, req *BatchRequest) (*BatchResponse, error)
@@ -45,6 +58,14 @@ type NativeBatchRoutableProvider interface {
 	ListBatches(ctx context.Context, providerType string, limit int, after string) (*BatchListResponse, error)
 	CancelBatch(ctx context.Context, providerType, id string) (*BatchResponse, error)
 	GetBatchResults(ctx context.Context, providerType, id string) (*BatchResultsResponse, error)
+}
+
+// NativeBatchHintRoutableProvider is an optional routing extension for
+// providers that can consume persisted per-item endpoint hints.
+type NativeBatchHintRoutableProvider interface {
+	CreateBatchWithHints(ctx context.Context, providerType string, req *BatchRequest) (*BatchResponse, map[string]string, error)
+	GetBatchResultsWithHints(ctx context.Context, providerType, id string, endpointByCustomID map[string]string) (*BatchResultsResponse, error)
+	ClearBatchResultHints(providerType, batchID string)
 }
 
 // NativeFileProvider is implemented by providers that support OpenAI-compatible files APIs.

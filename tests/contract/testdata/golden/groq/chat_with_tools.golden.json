@@ -3,6 +3,7 @@
     {
       "finish_reason": "tool_calls",
       "index": 0,
+      "logprobs": null,
       "message": {
         "content": null,
         "role": "assistant",
@@ -24,6 +25,7 @@
   "model": "llama-3.3-70b-versatile",
   "object": "chat.completion",
   "provider": "",
+  "system_fingerprint": "fp_dae98b5ecb",
   "usage": {
     "completion_tokens": 14,
     "prompt_tokens": 203,

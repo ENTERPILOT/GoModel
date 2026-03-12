@@ -3,6 +3,7 @@
     {
       "finish_reason": "stop",
       "index": 0,
+      "logprobs": null,
       "message": {
         "content": "Hello World!",
         "role": "assistant"
@@ -14,6 +15,7 @@
   "model": "llama-3.3-70b-versatile",
   "object": "chat.completion",
   "provider": "",
+  "system_fingerprint": "fp_c06d5113ec",
   "usage": {
     "completion_tokens": 4,
     "prompt_tokens": 38,

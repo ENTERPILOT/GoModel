@@ -3,6 +3,7 @@
     {
       "finish_reason": "stop",
       "index": 0,
+      "logprobs": null,
       "message": {
         "annotations": [],
         "content": "The image includes the following colors:\n\n- Blue\n- Red\n- Yellow\n- Green\n\nThese colors are combined in the logo design.",
@@ -16,6 +17,7 @@
   "model": "gpt-4o-mini-2024-07-18",
   "object": "chat.completion",
   "provider": "",
+  "system_fingerprint": "fp_8bbc38b4db",
   "usage": {
     "completion_tokens": 28,
     "completion_tokens_details": {

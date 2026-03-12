@@ -585,6 +585,7 @@ func TestCreateStreamEntry(t *testing.T) {
 	streamEntry := CreateStreamEntry(baseEntry)
 	if streamEntry == nil {
 		t.Fatal("expected non-nil stream entry")
+		return
 	}
 
 	// Verify fields are copied
@@ -613,11 +614,13 @@ func TestCreateStreamEntry(t *testing.T) {
 	// Verify Data fields are copied
 	if streamEntry.Data == nil {
 		t.Fatal("Data is nil")
+		return
 	}
 
 	// Verify headers are copied (not same reference)
 	if streamEntry.Data.RequestHeaders == nil {
 		t.Fatal("RequestHeaders is nil")
+		return
 	}
 	baseEntry.Data.RequestHeaders["New"] = "value"
 	if streamEntry.Data.RequestHeaders["New"] == "value" {

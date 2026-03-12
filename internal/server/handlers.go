@@ -24,11 +24,6 @@ import (
 	"gomodel/internal/usage"
 )
 
-const (
-	batchMetadataRequestIDKey   = "request_id"
-	batchMetadataUsageLoggedKey = "usage_logged_at"
-)
-
 var batchResultsPending404Providers = map[string]struct{}{
 	"anthropic": {},
 }
@@ -176,6 +171,48 @@ func requestIDFromContextOrHeader(req *http.Request) string {
 		return requestID
 	}
 	return strings.TrimSpace(req.Header.Get("X-Request-ID"))
+}
+
+func requestContextWithRequestID(req *http.Request) (context.Context, string) {
+	if req == nil {
+		requestID := uuid.NewString()
+		return core.WithRequestID(context.Background(), requestID), requestID
+	}
+
+	requestID := requestIDFromContextOrHeader(req)
+	if requestID == "" {
+		requestID = uuid.NewString()
+	}
+
+	req.Header.Set("X-Request-ID", requestID)
+
+	ctx := req.Context()
+	if strings.TrimSpace(core.GetRequestID(ctx)) != requestID {
+		ctx = core.WithRequestID(ctx, requestID)
+		*req = *req.WithContext(ctx)
+	}
+
+	return ctx, requestID
+}
+
+func sanitizePublicBatchMetadata(metadata map[string]string) map[string]string {
+	if len(metadata) == 0 {
+		return nil
+	}
+
+	publicMetadata := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		switch key {
+		case batchstore.RequestIDMetadataKey, batchstore.UsageLoggedAtMetadataKey:
+			continue
+		default:
+			publicMetadata[key] = value
+		}
+	}
+	if len(publicMetadata) == 0 {
+		return nil
+	}
+	return publicMetadata
 }
 
 func (h *Handler) logUsage(model, providerType string, extractFn func(*core.ModelPricing) *usage.UsageEntry) {
@@ -963,7 +1000,10 @@ func (h *Handler) GetFileContent(c *echo.Context) error {
 			return r.GetFileContent(c.Request().Context(), provider, id)
 		},
 		func(c *echo.Context, result any) error {
-			resp := result.(*core.FileContentResponse)
+			resp, ok := result.(*core.FileContentResponse)
+			if !ok || resp == nil {
+				return handleError(c, core.NewProviderError("", http.StatusBadGateway, "provider returned empty file content response", nil))
+			}
 			contentType := strings.TrimSpace(resp.ContentType)
 			if contentType == "" {
 				contentType = "application/octet-stream"
@@ -1077,8 +1117,7 @@ func (h *Handler) Batches(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
-	requestID := c.Request().Header.Get("X-Request-ID")
-	ctx := core.WithRequestID(c.Request().Context(), requestID)
+	ctx, requestID := requestContextWithRequestID(c.Request())
 
 	nativeRouter, ok := h.provider.(core.NativeBatchRoutableProvider)
 	if !ok {
@@ -1091,7 +1130,15 @@ func (h *Handler) Batches(c *echo.Context) error {
 	}
 	auditlog.EnrichEntry(c, "batch", providerType)
 
-	upstream, err := nativeRouter.CreateBatch(ctx, providerType, req)
+	var (
+		upstream *core.BatchResponse
+		hints    map[string]string
+	)
+	if hintedRouter, ok := h.provider.(core.NativeBatchHintRoutableProvider); ok {
+		upstream, hints, err = hintedRouter.CreateBatchWithHints(ctx, providerType, req)
+	} else {
+		upstream, err = nativeRouter.CreateBatch(ctx, providerType, req)
+	}
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -1126,13 +1173,19 @@ func (h *Handler) Batches(c *echo.Context) error {
 	}
 	resp.Metadata["provider"] = providerType
 	resp.Metadata["provider_batch_id"] = providerBatchID
-	if requestID != "" {
-		resp.Metadata[batchMetadataRequestIDKey] = requestID
-	}
+	resp.Metadata = sanitizePublicBatchMetadata(resp.Metadata)
 
 	if h.batchStore != nil {
-		if err := h.batchStore.Create(ctx, &resp); err != nil {
+		stored := &batchstore.StoredBatch{
+			Batch:                     &resp,
+			RequestEndpointByCustomID: hints,
+			RequestID:                 requestID,
+		}
+		if err := h.batchStore.Create(ctx, stored); err != nil {
 			return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "failed to persist batch", err))
+		}
+		if hintedRouter, ok := h.provider.(core.NativeBatchHintRoutableProvider); ok && len(hints) > 0 {
+			hintedRouter.ClearBatchResultHints(providerType, providerBatchID)
 		}
 	}
 
@@ -1188,7 +1241,7 @@ func determineBatchProviderType(provider core.RoutableProvider, req *core.BatchR
 	return providerType, nil
 }
 
-func (h *Handler) loadBatch(c *echo.Context, id string) (*core.BatchResponse, error) {
+func (h *Handler) loadBatch(c *echo.Context, id string) (*batchstore.StoredBatch, error) {
 	resp, err := h.batchStore.Get(c.Request().Context(), id)
 	if err != nil {
 		if errors.Is(err, batchstore.ErrNotFound) {
@@ -1196,7 +1249,9 @@ func (h *Handler) loadBatch(c *echo.Context, id string) (*core.BatchResponse, er
 		}
 		return nil, core.NewProviderError("batch_store", http.StatusInternalServerError, "failed to load batch", err)
 	}
-	auditlog.EnrichEntry(c, "batch", resp.Provider)
+	if resp.Batch != nil {
+		auditlog.EnrichEntry(c, "batch", resp.Batch.Provider)
+	}
 	return resp, nil
 }
 
@@ -1215,6 +1270,8 @@ func (h *Handler) loadBatch(c *echo.Context, id string) (*core.BatchResponse, er
 // @Failure      502  {object}  core.GatewayError
 // @Router       /v1/batches/{id} [get]
 func (h *Handler) GetBatch(c *echo.Context) error {
+	ctx, _ := requestContextWithRequestID(c.Request())
+
 	batchMeta, err := batchRequestMetadataFromSemanticEnvelope(c)
 	if err != nil {
 		return handleError(c, err)
@@ -1231,27 +1288,30 @@ func (h *Handler) GetBatch(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	if resp.Batch == nil {
+		return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "stored batch payload missing", nil))
+	}
 
 	nativeRouter, ok := h.provider.(core.NativeBatchRoutableProvider)
 	if !ok {
-		return c.JSON(http.StatusOK, resp)
+		return c.JSON(http.StatusOK, resp.Batch)
 	}
-	if resp.Provider == "" || resp.ProviderBatchID == "" {
-		return c.JSON(http.StatusOK, resp)
+	if resp.Batch.Provider == "" || resp.Batch.ProviderBatchID == "" {
+		return c.JSON(http.StatusOK, resp.Batch)
 	}
 
-	latest, err := nativeRouter.GetBatch(c.Request().Context(), resp.Provider, resp.ProviderBatchID)
+	latest, err := nativeRouter.GetBatch(ctx, resp.Batch.Provider, resp.Batch.ProviderBatchID)
 	if err != nil {
 		return handleError(c, err)
 	}
 	if latest != nil {
-		mergeStoredBatchFromUpstream(resp, latest)
+		mergeStoredBatchFromUpstream(resp.Batch, latest)
 		if err := h.batchStore.Update(c.Request().Context(), resp); err != nil && !errors.Is(err, batchstore.ErrNotFound) {
 			return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "failed to persist refreshed batch", err))
 		}
 	}
 
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, resp.Batch)
 }
 
 // ListBatches handles GET /v1/batches.
@@ -1307,10 +1367,10 @@ func (h *Handler) ListBatches(c *echo.Context) error {
 
 	data := make([]core.BatchResponse, 0, len(items))
 	for _, item := range items {
-		if item == nil {
+		if item == nil || item.Batch == nil {
 			continue
 		}
-		data = append(data, *item)
+		data = append(data, *item.Batch)
 	}
 
 	resp := core.BatchListResponse{
@@ -1342,6 +1402,8 @@ func (h *Handler) ListBatches(c *echo.Context) error {
 // @Failure      502  {object}  core.GatewayError
 // @Router       /v1/batches/{id}/cancel [post]
 func (h *Handler) CancelBatch(c *echo.Context) error {
+	ctx, _ := requestContextWithRequestID(c.Request())
+
 	batchMeta, err := batchRequestMetadataFromSemanticEnvelope(c)
 	if err != nil {
 		return handleError(c, err)
@@ -1358,18 +1420,21 @@ func (h *Handler) CancelBatch(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	if resp.Batch == nil {
+		return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "stored batch payload missing", nil))
+	}
 
 	nativeRouter, ok := h.provider.(core.NativeBatchRoutableProvider)
-	if !ok || resp.Provider == "" || resp.ProviderBatchID == "" {
+	if !ok || resp.Batch.Provider == "" || resp.Batch.ProviderBatchID == "" {
 		return handleError(c, core.NewInvalidRequestError("native batch cancellation is not available", nil))
 	}
 
-	latest, err := nativeRouter.CancelBatch(c.Request().Context(), resp.Provider, resp.ProviderBatchID)
+	latest, err := nativeRouter.CancelBatch(ctx, resp.Batch.Provider, resp.Batch.ProviderBatchID)
 	if err != nil {
 		return handleError(c, err)
 	}
 	if latest != nil {
-		mergeStoredBatchFromUpstream(resp, latest)
+		mergeStoredBatchFromUpstream(resp.Batch, latest)
 	}
 
 	if err := h.batchStore.Update(c.Request().Context(), resp); err != nil {
@@ -1379,7 +1444,7 @@ func (h *Handler) CancelBatch(c *echo.Context) error {
 		return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "failed to cancel batch", err))
 	}
 
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, resp.Batch)
 }
 
 // BatchResults handles GET /v1/batches/{id}/results.
@@ -1398,6 +1463,8 @@ func (h *Handler) CancelBatch(c *echo.Context) error {
 // @Failure      502  {object}  core.GatewayError
 // @Router       /v1/batches/{id}/results [get]
 func (h *Handler) BatchResults(c *echo.Context) error {
+	ctx, requestID := requestContextWithRequestID(c.Request())
+
 	batchMeta, err := batchRequestMetadataFromSemanticEnvelope(c)
 	if err != nil {
 		return handleError(c, err)
@@ -1414,32 +1481,40 @@ func (h *Handler) BatchResults(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	if stored.Batch == nil {
+		return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "stored batch payload missing", nil))
+	}
 
 	nativeRouter, ok := h.provider.(core.NativeBatchRoutableProvider)
-	if !ok || stored.Provider == "" || stored.ProviderBatchID == "" {
+	if !ok || stored.Batch.Provider == "" || stored.Batch.ProviderBatchID == "" {
 		return c.JSON(http.StatusOK, core.BatchResultsResponse{
 			Object:  "list",
-			BatchID: stored.ID,
-			Data:    stored.Results,
+			BatchID: stored.Batch.ID,
+			Data:    stored.Batch.Results,
 		})
 	}
 
-	upstream, err := nativeRouter.GetBatchResults(c.Request().Context(), stored.Provider, stored.ProviderBatchID)
+	var upstream *core.BatchResultsResponse
+	if hintedRouter, ok := nativeRouter.(core.NativeBatchHintRoutableProvider); ok && len(stored.RequestEndpointByCustomID) > 0 {
+		upstream, err = hintedRouter.GetBatchResultsWithHints(ctx, stored.Batch.Provider, stored.Batch.ProviderBatchID, stored.RequestEndpointByCustomID)
+	} else {
+		upstream, err = nativeRouter.GetBatchResults(ctx, stored.Batch.Provider, stored.Batch.ProviderBatchID)
+	}
 	if err != nil {
 		if isNativeBatchResultsPending(err) {
-			if latest, getErr := nativeRouter.GetBatch(c.Request().Context(), stored.Provider, stored.ProviderBatchID); getErr == nil && latest != nil {
-				mergeStoredBatchFromUpstream(stored, latest)
+			if latest, getErr := nativeRouter.GetBatch(ctx, stored.Batch.Provider, stored.Batch.ProviderBatchID); getErr == nil && latest != nil {
+				mergeStoredBatchFromUpstream(stored.Batch, latest)
 				if updateErr := h.batchStore.Update(c.Request().Context(), stored); updateErr != nil && !errors.Is(updateErr, batchstore.ErrNotFound) {
 					slog.Warn(
 						"failed to update batch store after refreshing pending results",
-						"batch_id", stored.ID,
-						"provider", stored.Provider,
-						"provider_batch_id", stored.ProviderBatchID,
+						"batch_id", stored.Batch.ID,
+						"provider", stored.Batch.Provider,
+						"provider_batch_id", stored.Batch.ProviderBatchID,
 						"error", updateErr,
 					)
 				}
 			}
-			status := strings.TrimSpace(stored.Status)
+			status := strings.TrimSpace(stored.Batch.Status)
 			if status == "" {
 				status = "in_progress"
 			}
@@ -1452,22 +1527,22 @@ func (h *Handler) BatchResults(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if upstream == nil {
-		return handleError(c, core.NewProviderError(stored.Provider, http.StatusBadGateway, "provider returned empty batch results response", nil))
+		return handleError(c, core.NewProviderError(stored.Batch.Provider, http.StatusBadGateway, "provider returned empty batch results response", nil))
 	}
 
 	result := *upstream
-	result.BatchID = stored.ID
-	usageLogged := h.logBatchUsageFromBatchResults(stored, &result, strings.TrimSpace(c.Request().Header.Get("X-Request-ID")))
+	result.BatchID = stored.Batch.ID
+	usageLogged := h.logBatchUsageFromBatchResults(stored, &result, requestID)
 	if len(result.Data) > 0 {
-		stored.Results = result.Data
+		stored.Batch.Results = result.Data
 	}
 	if len(result.Data) > 0 || usageLogged {
 		if updateErr := h.batchStore.Update(c.Request().Context(), stored); updateErr != nil {
 			slog.Warn(
 				"failed to update batch store after receiving batch results",
-				"batch_id", stored.ID,
-				"provider", stored.Provider,
-				"provider_batch_id", stored.ProviderBatchID,
+				"batch_id", stored.Batch.ID,
+				"provider", stored.Batch.Provider,
+				"provider_batch_id", stored.Batch.ProviderBatchID,
 				"error", updateErr,
 			)
 		}
@@ -1476,22 +1551,20 @@ func (h *Handler) BatchResults(c *echo.Context) error {
 	return c.JSON(http.StatusOK, result)
 }
 
-func (h *Handler) logBatchUsageFromBatchResults(stored *core.BatchResponse, result *core.BatchResultsResponse, fallbackRequestID string) bool {
-	if h.usageLogger == nil || !h.usageLogger.Config().Enabled || stored == nil || result == nil || len(result.Data) == 0 {
+func (h *Handler) logBatchUsageFromBatchResults(stored *batchstore.StoredBatch, result *core.BatchResultsResponse, fallbackRequestID string) bool {
+	if h.usageLogger == nil || !h.usageLogger.Config().Enabled || stored == nil || stored.Batch == nil || result == nil || len(result.Data) == 0 {
 		return false
 	}
-	if stored.Metadata != nil && strings.TrimSpace(stored.Metadata[batchMetadataUsageLoggedKey]) != "" {
+	if stored.UsageLoggedAt != nil {
 		return false
 	}
 
-	requestID := strings.TrimSpace(fallbackRequestID)
-	if stored.Metadata != nil {
-		if originalRequestID := strings.TrimSpace(stored.Metadata[batchMetadataRequestIDKey]); originalRequestID != "" {
-			requestID = originalRequestID
-		}
+	requestID := strings.TrimSpace(stored.RequestID)
+	if requestID == "" {
+		requestID = strings.TrimSpace(fallbackRequestID)
 	}
 	if requestID == "" {
-		requestID = "batch:" + stored.ID
+		requestID = "batch:" + stored.Batch.ID
 	}
 
 	loggedEntries := 0
@@ -1522,14 +1595,14 @@ func (h *Handler) logBatchUsageFromBatchResults(stored *core.BatchResponse, resu
 			continue
 		}
 
-		provider := firstNonEmpty(item.Provider, stored.Provider)
+		provider := firstNonEmpty(item.Provider, stored.Batch.Provider)
 		model := firstNonEmpty(item.Model, stringFromAny(payload["model"]))
 		providerID := firstNonEmpty(
 			stringFromAny(payload["id"]),
 			item.CustomID,
-			fmt.Sprintf("%s:%d", firstNonEmpty(stored.ProviderBatchID, stored.ID), item.Index),
+			fmt.Sprintf("%s:%d", firstNonEmpty(stored.Batch.ProviderBatchID, stored.Batch.ID), item.Index),
 		)
-		rawUsage := buildBatchUsageRawData(usagePayload, stored, item)
+		rawUsage := buildBatchUsageRawData(usagePayload, stored.Batch, item)
 
 		var pricing *core.ModelPricing
 		if h.pricingResolver != nil && model != "" {
@@ -1551,7 +1624,7 @@ func (h *Handler) logBatchUsageFromBatchResults(stored *core.BatchResponse, resu
 		if entry == nil {
 			continue
 		}
-		entry.ID = deterministicBatchUsageID(stored, item, providerID)
+		entry.ID = deterministicBatchUsageID(stored.Batch, item, providerID)
 
 		h.usageLogger.Write(entry)
 		loggedEntries++
@@ -1576,19 +1649,17 @@ func (h *Handler) logBatchUsageFromBatchResults(stored *core.BatchResponse, resu
 		return false
 	}
 
-	if stored.Metadata == nil {
-		stored.Metadata = map[string]string{}
-	}
-	stored.Metadata[batchMetadataUsageLoggedKey] = strconv.FormatInt(time.Now().Unix(), 10)
-	stored.Metadata[batchMetadataRequestIDKey] = requestID
+	now := time.Now().UTC()
+	stored.RequestID = requestID
+	stored.UsageLoggedAt = &now
 
-	stored.Usage.InputTokens = inputTotal
-	stored.Usage.OutputTokens = outputTotal
-	stored.Usage.TotalTokens = totalTokens
+	stored.Batch.Usage.InputTokens = inputTotal
+	stored.Batch.Usage.OutputTokens = outputTotal
+	stored.Batch.Usage.TotalTokens = totalTokens
 	if hasAnyCost {
-		stored.Usage.InputCost = &inputCostTotal
-		stored.Usage.OutputCost = &outputCostTotal
-		stored.Usage.TotalCost = &totalCostTotal
+		stored.Batch.Usage.InputCost = &inputCostTotal
+		stored.Batch.Usage.OutputCost = &outputCostTotal
+		stored.Batch.Usage.TotalCost = &totalCostTotal
 	}
 
 	return true
@@ -1837,6 +1908,7 @@ func mergeStoredBatchFromUpstream(stored, upstream *core.BatchResponse) {
 		for key, value := range preservedGatewayMetadata {
 			stored.Metadata[key] = value
 		}
+		stored.Metadata = sanitizePublicBatchMetadata(stored.Metadata)
 	}
 }
 
@@ -1863,11 +1935,7 @@ func handleError(c *echo.Context, err error) error {
 	}
 
 	// Fallback for unexpected errors
-	auditlog.EnrichEntryWithError(c, "internal_error", "an unexpected error occurred")
-	return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-		"error": map[string]interface{}{
-			"type":    "internal_error",
-			"message": "an unexpected error occurred",
-		},
-	})
+	gatewayErr = core.NewProviderError("", http.StatusInternalServerError, "an unexpected error occurred", err)
+	auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message)
+	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 }

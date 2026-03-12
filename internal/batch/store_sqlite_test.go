@@ -22,17 +22,19 @@ func TestSQLiteStoreLifecycle(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	b := &core.BatchResponse{
-		ID:        "batch-sql-1",
-		Object:    "batch",
-		Status:    "completed",
-		CreatedAt: 123,
-		RequestCounts: core.BatchRequestCounts{
-			Total:     1,
-			Completed: 1,
-		},
-		Results: []core.BatchResultItem{
-			{Index: 0, StatusCode: 200, URL: "/v1/chat/completions"},
+	b := &StoredBatch{
+		Batch: &core.BatchResponse{
+			ID:        "batch-sql-1",
+			Object:    "batch",
+			Status:    "completed",
+			CreatedAt: 123,
+			RequestCounts: core.BatchRequestCounts{
+				Total:     1,
+				Completed: 1,
+			},
+			Results: []core.BatchResultItem{
+				{Index: 0, StatusCode: 200, URL: "/v1/chat/completions"},
+			},
 		},
 	}
 
@@ -40,30 +42,36 @@ func TestSQLiteStoreLifecycle(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	got, err := store.Get(ctx, b.ID)
+	got, err := store.Get(ctx, b.Batch.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.ID != b.ID {
-		t.Fatalf("id = %q, want %q", got.ID, b.ID)
+	if got.Batch == nil {
+		t.Fatal("got.Batch = nil")
 	}
-	if got.RequestCounts.Total != 1 {
-		t.Fatalf("request_counts.total = %d, want 1", got.RequestCounts.Total)
+	if got.Batch.ID != b.Batch.ID {
+		t.Fatalf("id = %q, want %q", got.Batch.ID, b.Batch.ID)
 	}
-	if len(got.Results) != 1 {
-		t.Fatalf("results len = %d, want 1", len(got.Results))
+	if got.Batch.RequestCounts.Total != 1 {
+		t.Fatalf("request_counts.total = %d, want 1", got.Batch.RequestCounts.Total)
+	}
+	if len(got.Batch.Results) != 1 {
+		t.Fatalf("results len = %d, want 1", len(got.Batch.Results))
 	}
 
-	got.Status = "cancelled"
+	got.Batch.Status = "cancelled"
 	if err := store.Update(ctx, got); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 
-	got2, err := store.Get(ctx, b.ID)
+	got2, err := store.Get(ctx, b.Batch.ID)
 	if err != nil {
 		t.Fatalf("get after update: %v", err)
 	}
-	if got2.Status != "cancelled" {
-		t.Fatalf("status = %q, want cancelled", got2.Status)
+	if got2.Batch == nil {
+		t.Fatal("got2.Batch = nil")
+	}
+	if got2.Batch.Status != "cancelled" {
+		t.Fatalf("status = %q, want cancelled", got2.Batch.Status)
 	}
 }

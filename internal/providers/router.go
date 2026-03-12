@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"strings"
 
 	"gomodel/internal/core"
 )
@@ -26,6 +28,10 @@ type providerTypeRegistry interface {
 
 type initializedLookup interface {
 	IsInitialized() bool
+}
+
+func registryUnavailableError(err error) error {
+	return core.NewProviderError("", http.StatusServiceUnavailable, err.Error(), err)
 }
 
 // NewRouter creates a new provider router with a model lookup.
@@ -52,7 +58,7 @@ func (r *Router) checkReady() error {
 // resolveProvider validates readiness, parses the model selector, and finds the target provider.
 func (r *Router) resolveProvider(model, provider string) (core.Provider, core.ModelSelector, error) {
 	if err := r.checkReady(); err != nil {
-		return nil, core.ModelSelector{}, err
+		return nil, core.ModelSelector{}, registryUnavailableError(err)
 	}
 	selector, err := core.ParseModelSelector(model, provider)
 	if err != nil {
@@ -61,7 +67,7 @@ func (r *Router) resolveProvider(model, provider string) (core.Provider, core.Mo
 	lookupModel := selector.QualifiedModel()
 	p := r.lookup.GetProvider(lookupModel)
 	if p == nil {
-		return nil, core.ModelSelector{}, fmt.Errorf("no provider found for model: %s", lookupModel)
+		return nil, core.ModelSelector{}, core.NewNotFoundError("model not found: " + lookupModel)
 	}
 	return p, selector, nil
 }
@@ -71,14 +77,14 @@ func (r *Router) resolveProviderType(providerType string) (core.Provider, error)
 		if !initialized.IsInitialized() {
 			if err := r.checkReady(); err != nil {
 				if errors.Is(err, ErrRegistryNotInitialized) {
-					return nil, core.NewProviderError("", 0, err.Error(), err)
+					return nil, registryUnavailableError(err)
 				}
 				return nil, err
 			}
 		}
 	} else if err := r.checkReady(); err != nil {
 		if errors.Is(err, ErrRegistryNotInitialized) {
-			return nil, core.NewProviderError("", 0, err.Error(), err)
+			return nil, registryUnavailableError(err)
 		}
 		return nil, err
 	}
@@ -293,7 +299,7 @@ func (r *Router) StreamChatCompletion(ctx context.Context, req *core.ChatRequest
 // Returns ErrRegistryNotInitialized if the lookup has no models loaded.
 func (r *Router) ListModels(_ context.Context) (*core.ModelsResponse, error) {
 	if err := r.checkReady(); err != nil {
-		return nil, err
+		return nil, registryUnavailableError(err)
 	}
 	models := r.lookup.ListModels()
 	return &core.ModelsResponse{
@@ -395,6 +401,24 @@ func (r *Router) CreateBatch(ctx context.Context, providerType string, req *core
 	return stampProvider(resp, providerType), err
 }
 
+// CreateBatchWithHints routes native batch creation and returns any provider
+// batch-result shaping hints that need gateway persistence.
+func (r *Router) CreateBatchWithHints(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, map[string]string, error) {
+	type createBatchWithHintsResult struct {
+		resp  *core.BatchResponse
+		hints map[string]string
+	}
+	result, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (createBatchWithHintsResult, error) {
+		if hinted, ok := bp.(core.BatchCreateHintAwareProvider); ok {
+			resp, hints, err := hinted.CreateBatchWithHints(ctx, req)
+			return createBatchWithHintsResult{resp: resp, hints: hints}, err
+		}
+		resp, err := bp.CreateBatch(ctx, req)
+		return createBatchWithHintsResult{resp: resp}, err
+	})
+	return stampProvider(result.resp, providerType), result.hints, err
+}
+
 // GetBatch routes native batch lookup to a provider type.
 func (r *Router) GetBatch(ctx context.Context, providerType, id string) (*core.BatchResponse, error) {
 	resp, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResponse, error) {
@@ -432,6 +456,34 @@ func (r *Router) GetBatchResults(ctx context.Context, providerType, id string) (
 	return routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResultsResponse, error) {
 		return bp.GetBatchResults(ctx, id)
 	})
+}
+
+// GetBatchResultsWithHints routes native batch results lookup with persisted
+// per-item endpoint hints when the provider supports them.
+func (r *Router) GetBatchResultsWithHints(ctx context.Context, providerType, id string, endpointByCustomID map[string]string) (*core.BatchResultsResponse, error) {
+	return routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResultsResponse, error) {
+		if hinted, ok := bp.(core.BatchResultHintAwareProvider); ok && len(endpointByCustomID) > 0 {
+			return hinted.GetBatchResultsWithHints(ctx, id, endpointByCustomID)
+		}
+		return bp.GetBatchResults(ctx, id)
+	})
+}
+
+// ClearBatchResultHints clears transient provider-side batch result hints once
+// they have been persisted by the gateway.
+func (r *Router) ClearBatchResultHints(providerType, batchID string) {
+	if strings.TrimSpace(batchID) == "" {
+		return
+	}
+	bp, err := r.resolveNativeBatchProvider(providerType)
+	if err != nil {
+		return
+	}
+	hinted, ok := bp.(core.BatchResultHintAwareProvider)
+	if !ok {
+		return
+	}
+	hinted.ClearBatchResultHints(batchID)
 }
 
 // CreateFile routes file upload to a provider type.

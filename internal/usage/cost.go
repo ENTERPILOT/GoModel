@@ -20,7 +20,7 @@ type CostResult struct {
 type costSide int
 
 const (
-	sideInput  costSide = iota
+	sideInput costSide = iota
 	sideOutput
 )
 
@@ -34,33 +34,35 @@ const (
 
 // tokenCostMapping maps a RawData key to a pricing field and cost side.
 type tokenCostMapping struct {
-	rawDataKey   string
-	pricingField func(p *core.ModelPricing) *float64
-	side         costSide
-	unit         costUnit
+	rawDataKey     string
+	pricingField   func(p *core.ModelPricing) *float64
+	side           costSide
+	unit           costUnit
+	includedInBase bool
 }
 
 // providerMappings defines the per-provider RawData key to pricing field mappings.
 var providerMappings = map[string][]tokenCostMapping{
 	"openai": {
-		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
-		{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
-		{rawDataKey: "reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok},
-		{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok},
-		{rawDataKey: "prompt_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioInputPerMtok }, side: sideInput, unit: unitPerMtok},
-		{rawDataKey: "completion_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioOutputPerMtok }, side: sideOutput, unit: unitPerMtok},
+		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "prompt_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "completion_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	},
 	"anthropic": {
 		{rawDataKey: "cache_read_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
 		{rawDataKey: "cache_creation_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok},
 	},
 	"gemini": {
-		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
-		{rawDataKey: "thought_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok},
+		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "thought_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	},
 	"xai": {
-		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
-		{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
+		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+		// xAI reports reasoning tokens separately from completion_tokens.
 		{rawDataKey: "reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok},
 		{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok},
 		{rawDataKey: "image_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.InputPerImage }, side: sideInput, unit: unitPerItem},
@@ -143,12 +145,19 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 			}
 			appliedFields[rate] = true
 
+			effectiveRate := *rate
+			if m.includedInBase && m.unit == unitPerMtok {
+				if baseRate := baseRateForSide(pricing, m.side); baseRate != nil {
+					effectiveRate -= *baseRate
+				}
+			}
+
 			var cost float64
 			switch m.unit {
 			case unitPerMtok:
-				cost = float64(count) * *rate / 1_000_000
+				cost = float64(count) * effectiveRate / 1_000_000
 			case unitPerItem:
-				cost = float64(count) * *rate
+				cost = float64(count) * effectiveRate
 			}
 
 			switch m.side {
@@ -202,6 +211,20 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 	result.Caveat = strings.Join(caveats, "; ")
 
 	return result
+}
+
+func baseRateForSide(pricing *core.ModelPricing, side costSide) *float64 {
+	if pricing == nil {
+		return nil
+	}
+	switch side {
+	case sideInput:
+		return pricing.InputPerMtok
+	case sideOutput:
+		return pricing.OutputPerMtok
+	default:
+		return nil
+	}
 }
 
 // extractInt extracts an integer value from a map, handling float64, int, and int64 types.

@@ -47,11 +47,11 @@ func TestCalculateGranularCost_OpenAI_CachedAndReasoning(t *testing.T) {
 	}
 	result := CalculateGranularCost(500_000, 300_000, rawData, "openai", pricing)
 
-	// Input: 500k * 2.50/1M + 200k * 1.25/1M = 1.25 + 0.25 = 1.50
-	assertCostNear(t, "InputCost", result.InputCost, 1.50)
-	// Output: 300k * 10.0/1M + 100k * 15.0/1M = 3.0 + 1.5 = 4.5
-	assertCostNear(t, "OutputCost", result.OutputCost, 4.5)
-	assertCostNear(t, "TotalCost", result.TotalCost, 6.0)
+	// Input: 500k * 2.50/1M + 200k * (1.25-2.50)/1M = 1.25 - 0.25 = 1.00
+	assertCostNear(t, "InputCost", result.InputCost, 1.00)
+	// Output: 300k * 10.0/1M + 100k * (15.0-10.0)/1M = 3.0 + 0.5 = 3.5
+	assertCostNear(t, "OutputCost", result.OutputCost, 3.5)
+	assertCostNear(t, "TotalCost", result.TotalCost, 4.5)
 	if result.Caveat != "" {
 		t.Fatalf("expected empty caveat, got %q", result.Caveat)
 	}
@@ -59,9 +59,9 @@ func TestCalculateGranularCost_OpenAI_CachedAndReasoning(t *testing.T) {
 
 func TestCalculateGranularCost_OpenAI_AudioTokens(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:      ptr(2.50),
-		OutputPerMtok:     ptr(10.0),
-		AudioInputPerMtok: ptr(100.0),
+		InputPerMtok:       ptr(2.50),
+		OutputPerMtok:      ptr(10.0),
+		AudioInputPerMtok:  ptr(100.0),
 		AudioOutputPerMtok: ptr(200.0),
 	}
 	rawData := map[string]any{
@@ -70,10 +70,10 @@ func TestCalculateGranularCost_OpenAI_AudioTokens(t *testing.T) {
 	}
 	result := CalculateGranularCost(100_000, 80_000, rawData, "openai", pricing)
 
-	// Input: 100k * 2.50/1M + 50k * 100/1M = 0.25 + 5.0 = 5.25
-	assertCostNear(t, "InputCost", result.InputCost, 5.25)
-	// Output: 80k * 10/1M + 30k * 200/1M = 0.80 + 6.0 = 6.80
-	assertCostNear(t, "OutputCost", result.OutputCost, 6.80)
+	// Input: 100k * 2.50/1M + 50k * (100-2.50)/1M = 0.25 + 4.875 = 5.125
+	assertCostNear(t, "InputCost", result.InputCost, 5.125)
+	// Output: 80k * 10/1M + 30k * (200-10)/1M = 0.80 + 5.70 = 6.50
+	assertCostNear(t, "OutputCost", result.OutputCost, 6.50)
 }
 
 func TestCalculateGranularCost_Anthropic_CacheTokens(t *testing.T) {
@@ -103,15 +103,15 @@ func TestCalculateGranularCost_Gemini_ThoughtTokens(t *testing.T) {
 		ReasoningOutputPerMtok: ptr(10.0),
 	}
 	rawData := map[string]any{
-		"cached_tokens": 50_000,
+		"cached_tokens":  50_000,
 		"thought_tokens": int(75_000),
 	}
 	result := CalculateGranularCost(100_000, 200_000, rawData, "gemini", pricing)
 
-	// Input: 100k * 1.25/1M + 50k * 0.3125/1M = 0.125 + 0.015625 = 0.140625
-	assertCostNear(t, "InputCost", result.InputCost, 0.140625)
-	// Output: 200k * 5.0/1M + 75k * 10.0/1M = 1.0 + 0.75 = 1.75
-	assertCostNear(t, "OutputCost", result.OutputCost, 1.75)
+	// Input: 100k * 1.25/1M + 50k * (0.3125-1.25)/1M = 0.125 - 0.046875 = 0.078125
+	assertCostNear(t, "InputCost", result.InputCost, 0.078125)
+	// Output: 200k * 5.0/1M + 75k * (10.0-5.0)/1M = 1.0 + 0.375 = 1.375
+	assertCostNear(t, "OutputCost", result.OutputCost, 1.375)
 }
 
 func TestCalculateGranularCost_XAI_ImageTokens(t *testing.T) {
@@ -145,7 +145,7 @@ func TestCalculateGranularCost_NilPricingFieldNoCaveat(t *testing.T) {
 	}
 	// Base costs should still be calculated correctly without the adjustment
 	assertCostNear(t, "InputCost", result.InputCost, 1.25)  // 500k * 2.50/1M
-	assertCostNear(t, "OutputCost", result.OutputCost, 3.0)  // 300k * 10.0/1M
+	assertCostNear(t, "OutputCost", result.OutputCost, 3.0) // 300k * 10.0/1M
 }
 
 func TestCalculateGranularCost_UnmappedTokenField(t *testing.T) {
@@ -279,18 +279,40 @@ func TestCalculateGranularCost_XAI_PrefixedKeys(t *testing.T) {
 		ReasoningOutputPerMtok: ptr(15.0),
 	}
 	rawData := map[string]any{
-		"prompt_cached_tokens":          200_000,
-		"completion_reasoning_tokens":   100_000,
+		"prompt_cached_tokens":        200_000,
+		"completion_reasoning_tokens": 100_000,
 	}
 	result := CalculateGranularCost(500_000, 300_000, rawData, "xai", pricing)
 
-	// Input: 500k * 2.0/1M + 200k * 0.50/1M = 1.0 + 0.10 = 1.10
-	assertCostNear(t, "InputCost", result.InputCost, 1.10)
+	// Input: 500k * 2.0/1M + 200k * (0.50-2.0)/1M = 1.0 - 0.30 = 0.70
+	assertCostNear(t, "InputCost", result.InputCost, 0.70)
+	// xAI reports reasoning tokens separately from completion_tokens, so they are charged in addition.
 	// Output: 300k * 10.0/1M + 100k * 15.0/1M = 3.0 + 1.5 = 4.5
 	assertCostNear(t, "OutputCost", result.OutputCost, 4.5)
 	if result.Caveat != "" {
 		t.Fatalf("expected no caveat for xAI prefixed keys, got %q", result.Caveat)
 	}
+}
+
+func TestCalculateGranularCost_XAI_ReasoningTokensAreAdditionalOutput(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:           ptr(0.3),
+		OutputPerMtok:          ptr(0.5),
+		CachedInputPerMtok:     ptr(0.075),
+		ReasoningOutputPerMtok: ptr(1.5),
+	}
+	rawData := map[string]any{
+		"prompt_cached_tokens":        4,
+		"completion_reasoning_tokens": 270,
+	}
+	result := CalculateGranularCost(12, 1, rawData, "xai", pricing)
+
+	// Mirrors the live xAI chat shape: reasoning tokens are separate from completion_tokens.
+	// Input: 12 * 0.3/1M + 4 * (0.075-0.3)/1M = 0.0000036 - 0.0000009 = 0.0000027
+	assertCostNear(t, "InputCost", result.InputCost, 0.0000027)
+	// Output: 1 * 0.5/1M + 270 * 1.5/1M = 0.0000005 + 0.000405 = 0.0004055
+	assertCostNear(t, "OutputCost", result.OutputCost, 0.0004055)
+	assertCostNear(t, "TotalCost", result.TotalCost, 0.0004082)
 }
 
 func TestCalculateGranularCost_InformationalFieldsNoCaveat(t *testing.T) {
@@ -309,7 +331,7 @@ func TestCalculateGranularCost_InformationalFieldsNoCaveat(t *testing.T) {
 	if result.Caveat != "" {
 		t.Fatalf("expected no caveat for informational fields, got %q", result.Caveat)
 	}
-	assertCostNear(t, "InputCost", result.InputCost, 0.25)  // 100k * 2.50/1M
+	assertCostNear(t, "InputCost", result.InputCost, 0.25)   // 100k * 2.50/1M
 	assertCostNear(t, "OutputCost", result.OutputCost, 0.50) // 50k * 10.0/1M
 }
 
@@ -321,9 +343,9 @@ func TestCalculateGranularCost_ReasoningModelNoCaveat(t *testing.T) {
 		// No CachedInputPerMtok or ReasoningOutputPerMtok — base rate covers all
 	}
 	rawData := map[string]any{
-		"prompt_cached_tokens":          0,
-		"prompt_text_tokens":            500,
-		"completion_reasoning_tokens":   1200,
+		"prompt_cached_tokens":        0,
+		"prompt_text_tokens":          500,
+		"completion_reasoning_tokens": 1200,
 	}
 	result := CalculateGranularCost(500, 2000, rawData, "openai", pricing)
 

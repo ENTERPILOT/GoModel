@@ -1063,6 +1063,115 @@ func TestCircuitBreaker_HalfOpenProbeResolvesOnClientError(t *testing.T) {
 	}
 }
 
+func TestCircuitBreaker_RateLimitDoesNotOpenCircuit(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limit exceeded"}}`))
+	}))
+	defer server.Close()
+
+	config := DefaultConfig("test", server.URL)
+	config.Retry.MaxRetries = 0
+	config.CircuitBreaker = goconfig.CircuitBreakerConfig{
+		FailureThreshold: 1,
+		SuccessThreshold: 1,
+		Timeout:          time.Second,
+	}
+	client := New(config, nil)
+
+	for i := 0; i < 2; i++ {
+		err := client.Do(context.Background(), Request{
+			Method:   http.MethodGet,
+			Endpoint: "/test",
+		}, nil)
+		if err == nil {
+			t.Fatalf("attempt %d: expected rate limit error", i+1)
+		}
+
+		var gatewayErr *core.GatewayError
+		if !errors.As(err, &gatewayErr) {
+			t.Fatalf("attempt %d: expected GatewayError, got %T", i+1, err)
+		}
+		if gatewayErr.StatusCode != http.StatusTooManyRequests {
+			t.Fatalf("attempt %d: status = %d, want %d", i+1, gatewayErr.StatusCode, http.StatusTooManyRequests)
+		}
+	}
+
+	if state := client.circuitBreaker.State(); state != "closed" {
+		t.Fatalf("expected circuit to remain closed after rate limits, got %q", state)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 2 {
+		t.Fatalf("expected both requests to reach upstream, got %d attempts", got)
+	}
+}
+
+func TestCircuitBreaker_HalfOpenProbeReopensOnRateLimit(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limit exceeded"}}`))
+	}))
+	defer server.Close()
+
+	config := DefaultConfig("test", server.URL)
+	config.Retry.MaxRetries = 0
+	config.CircuitBreaker = goconfig.CircuitBreakerConfig{
+		FailureThreshold: 1,
+		SuccessThreshold: 1,
+		Timeout:          20 * time.Millisecond,
+	}
+	client := New(config, nil)
+
+	client.circuitBreaker.mu.Lock()
+	client.circuitBreaker.state = circuitOpen
+	client.circuitBreaker.failures = client.circuitBreaker.failureThreshold
+	client.circuitBreaker.successes = 0
+	client.circuitBreaker.lastFailure = time.Now().Add(-client.circuitBreaker.timeout - time.Millisecond)
+	client.circuitBreaker.halfOpenAllowed = true
+	client.circuitBreaker.mu.Unlock()
+
+	err := client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected rate limit error from half-open probe")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d", gatewayErr.StatusCode, http.StatusTooManyRequests)
+	}
+	if state := client.circuitBreaker.State(); state != "open" {
+		t.Fatalf("expected circuit to reopen after rate-limited probe, got %q", state)
+	}
+
+	err = client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected circuit breaker rejection after rate-limited half-open probe")
+	}
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if !strings.Contains(gatewayErr.Message, "circuit breaker is open") {
+		t.Fatalf("expected circuit breaker error after rate-limited half-open probe, got %s", gatewayErr.Message)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("expected follow-up request to be blocked without another upstream attempt, got %d attempts", got)
+	}
+}
+
 func TestCircuitBreaker_State(t *testing.T) {
 	cb := newCircuitBreaker(3, 2, time.Minute)
 

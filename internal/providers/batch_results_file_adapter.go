@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -57,15 +58,24 @@ func FetchBatchResultsFromOutputFile(ctx context.Context, client *llmclient.Clie
 		return nil, core.NewProviderError(providerName, http.StatusBadGateway, "provider batch response missing output file id", nil)
 	}
 
-	fileRaw, err := client.DoRaw(ctx, llmclient.Request{
+	fileResp, err := client.DoPassthrough(ctx, llmclient.Request{
 		Method:   http.MethodGet,
 		Endpoint: "/files/" + url.PathEscape(outputFileID) + "/content",
 	})
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = fileResp.Body.Close() }()
 
-	items, err := parseBatchOutputFile(fileRaw.Body, endpoint, providerName)
+	if fileResp.StatusCode != http.StatusOK {
+		body, readErr := io.ReadAll(fileResp.Body)
+		if readErr != nil {
+			body = []byte("failed to read error response")
+		}
+		return nil, core.ParseProviderError(providerName, fileResp.StatusCode, body, nil)
+	}
+
+	items, err := parseBatchOutputFile(fileResp.Body, endpoint, providerName)
 	if err != nil {
 		return nil, core.NewProviderError(providerName, http.StatusBadGateway, "failed to parse batch output file", err)
 	}
@@ -98,8 +108,8 @@ func isPendingBatchStatus(status string) bool {
 	}
 }
 
-func parseBatchOutputFile(raw []byte, fallbackURL, providerName string) ([]core.BatchResultItem, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
+func parseBatchOutputFile(raw io.Reader, fallbackURL, providerName string) ([]core.BatchResultItem, error) {
+	scanner := bufio.NewScanner(raw)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
 	results := make([]core.BatchResultItem, 0)

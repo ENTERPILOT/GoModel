@@ -142,7 +142,11 @@ func (m *mockProvider) Passthrough(_ context.Context, req *core.PassthroughReque
 
 type mockBatchProvider struct {
 	mockProvider
-	listBatchesResp *core.BatchListResponse
+	listBatchesResp    *core.BatchListResponse
+	hintedBatchResults *core.BatchResultsResponse
+	capturedBatchHints map[string]string
+	capturedBatchID    string
+	clearedBatchHintID string
 }
 
 func (m *mockBatchProvider) CreateBatch(_ context.Context, _ *core.BatchRequest) (*core.BatchResponse, error) {
@@ -166,6 +170,24 @@ func (m *mockBatchProvider) CancelBatch(_ context.Context, _ string) (*core.Batc
 
 func (m *mockBatchProvider) GetBatchResults(_ context.Context, _ string) (*core.BatchResultsResponse, error) {
 	return &core.BatchResultsResponse{Object: "list", BatchID: "provider-batch-1"}, nil
+}
+
+func (m *mockBatchProvider) GetBatchResultsWithHints(_ context.Context, batchID string, endpointByCustomID map[string]string) (*core.BatchResultsResponse, error) {
+	m.capturedBatchID = batchID
+	if len(endpointByCustomID) > 0 {
+		m.capturedBatchHints = make(map[string]string, len(endpointByCustomID))
+		for customID, endpoint := range endpointByCustomID {
+			m.capturedBatchHints[customID] = endpoint
+		}
+	}
+	if m.hintedBatchResults != nil {
+		return m.hintedBatchResults, nil
+	}
+	return m.GetBatchResults(context.Background(), "")
+}
+
+func (m *mockBatchProvider) ClearBatchResultHints(batchID string) {
+	m.clearedBatchHintID = batchID
 }
 
 func (m *mockBatchProvider) CreateFile(_ context.Context, req *core.FileCreateRequest) (*core.FileObject, error) {
@@ -238,12 +260,26 @@ func TestRouterEmptyLookup(t *testing.T) {
 		if !errors.Is(err, ErrRegistryNotInitialized) {
 			t.Errorf("expected ErrRegistryNotInitialized, got: %v", err)
 		}
+		var gwErr *core.GatewayError
+		if !errors.As(err, &gwErr) {
+			t.Fatalf("expected GatewayError, got %T: %v", err, err)
+		}
+		if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
+		}
 	})
 
 	t.Run("StreamChatCompletion returns error", func(t *testing.T) {
 		_, err := router.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "any"})
 		if !errors.Is(err, ErrRegistryNotInitialized) {
 			t.Errorf("expected ErrRegistryNotInitialized, got: %v", err)
+		}
+		var gwErr *core.GatewayError
+		if !errors.As(err, &gwErr) {
+			t.Fatalf("expected GatewayError, got %T: %v", err, err)
+		}
+		if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
 		}
 	})
 
@@ -252,6 +288,13 @@ func TestRouterEmptyLookup(t *testing.T) {
 		if !errors.Is(err, ErrRegistryNotInitialized) {
 			t.Errorf("expected ErrRegistryNotInitialized, got: %v", err)
 		}
+		var gwErr *core.GatewayError
+		if !errors.As(err, &gwErr) {
+			t.Fatalf("expected GatewayError, got %T: %v", err, err)
+		}
+		if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
+		}
 	})
 
 	t.Run("Responses returns error", func(t *testing.T) {
@@ -259,12 +302,26 @@ func TestRouterEmptyLookup(t *testing.T) {
 		if !errors.Is(err, ErrRegistryNotInitialized) {
 			t.Errorf("expected ErrRegistryNotInitialized, got: %v", err)
 		}
+		var gwErr *core.GatewayError
+		if !errors.As(err, &gwErr) {
+			t.Fatalf("expected GatewayError, got %T: %v", err, err)
+		}
+		if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
+		}
 	})
 
 	t.Run("StreamResponses returns error", func(t *testing.T) {
 		_, err := router.StreamResponses(context.Background(), &core.ResponsesRequest{Model: "any"})
 		if !errors.Is(err, ErrRegistryNotInitialized) {
 			t.Errorf("expected ErrRegistryNotInitialized, got: %v", err)
+		}
+		var gwErr *core.GatewayError
+		if !errors.As(err, &gwErr) {
+			t.Fatalf("expected GatewayError, got %T: %v", err, err)
+		}
+		if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
 		}
 	})
 }
@@ -330,6 +387,13 @@ func TestRouterChatCompletion(t *testing.T) {
 			if tt.wantError {
 				if err == nil {
 					t.Error("expected error, got nil")
+				}
+				var gwErr *core.GatewayError
+				if !errors.As(err, &gwErr) {
+					t.Fatalf("expected GatewayError, got %T: %v", err, err)
+				}
+				if gwErr.HTTPStatusCode() != http.StatusNotFound {
+					t.Fatalf("expected 404 status, got %d", gwErr.HTTPStatusCode())
 				}
 				return
 			}
@@ -634,6 +698,42 @@ func TestRouterListBatchesSetsProviderOnItems(t *testing.T) {
 	}
 }
 
+func TestRouterGetBatchResultsWithHintsUsesHintAwareProvider(t *testing.T) {
+	provider := &mockBatchProvider{
+		hintedBatchResults: &core.BatchResultsResponse{
+			Object:  "list",
+			BatchID: "provider-batch-1",
+			Data: []core.BatchResultItem{
+				{Index: 0, URL: "/v1/responses"},
+			},
+		},
+	}
+	lookup := newMockLookup()
+	lookup.addModel("claude-sonnet", provider, "anthropic")
+
+	router, _ := NewRouter(lookup)
+	resp, err := router.GetBatchResultsWithHints(context.Background(), "anthropic", "provider-batch-1", map[string]string{
+		"resp-1": "/v1/responses",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || len(resp.Data) != 1 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if got := provider.capturedBatchHints["resp-1"]; got != "/v1/responses" {
+		t.Fatalf("capturedBatchHints[resp-1] = %q, want /v1/responses", got)
+	}
+	if provider.capturedBatchID != "provider-batch-1" {
+		t.Fatalf("capturedBatchID = %q, want provider-batch-1", provider.capturedBatchID)
+	}
+
+	router.ClearBatchResultHints("anthropic", "provider-batch-1")
+	if provider.clearedBatchHintID != "provider-batch-1" {
+		t.Fatalf("clearedBatchHintID = %q, want provider-batch-1", provider.clearedBatchHintID)
+	}
+}
+
 func TestRouterEmbeddings(t *testing.T) {
 	expectedResp := &core.EmbeddingResponse{
 		Object:   "list",
@@ -700,6 +800,13 @@ func TestRouterEmbeddings_EmptyLookup(t *testing.T) {
 	_, err := router.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "any"})
 	if !errors.Is(err, ErrRegistryNotInitialized) {
 		t.Errorf("expected ErrRegistryNotInitialized, got: %v", err)
+	}
+	var gwErr *core.GatewayError
+	if !errors.As(err, &gwErr) {
+		t.Fatalf("expected GatewayError, got %T: %v", err, err)
+	}
+	if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
 	}
 }
 
@@ -834,6 +941,9 @@ func TestRouterPassthrough_ErrorCases(t *testing.T) {
 		var gwErr *core.GatewayError
 		if !errors.As(err, &gwErr) {
 			t.Fatalf("expected GatewayError, got %T: %v", err, err)
+		}
+		if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
 		}
 	})
 }

@@ -29,6 +29,8 @@ type GatewayError struct {
 	Message    string    `json:"message"`
 	StatusCode int       `json:"status_code"`
 	Provider   string    `json:"provider,omitempty"`
+	Param      *string   `json:"param"`
+	Code       *string   `json:"code"`
 	// Original error for debugging (not exposed to clients)
 	Err error `json:"-"`
 }
@@ -70,12 +72,36 @@ func (e *GatewayError) HTTPStatusCode() int {
 
 // ToJSON converts the error to a JSON-compatible map
 func (e *GatewayError) ToJSON() map[string]interface{} {
+	var param interface{}
+	if e.Param != nil {
+		param = *e.Param
+	}
+
+	var code interface{}
+	if e.Code != nil {
+		code = *e.Code
+	}
+
 	return map[string]interface{}{
 		"error": map[string]interface{}{
 			"type":    e.Type,
 			"message": e.Message,
+			"param":   param,
+			"code":    code,
 		},
 	}
+}
+
+// WithParam annotates the error with the offending parameter name.
+func (e *GatewayError) WithParam(param string) *GatewayError {
+	e.Param = &param
+	return e
+}
+
+// WithCode annotates the error with a machine-readable error code.
+func (e *GatewayError) WithCode(code string) *GatewayError {
+	e.Code = &code
+	return e
 }
 
 // NewProviderError creates a new provider error (upstream 5xx)
@@ -141,6 +167,7 @@ func ParseProviderError(provider string, statusCode int, body []byte, originalEr
 			Message string `json:"message"`
 			Type    string `json:"type"`
 			Code    string `json:"code"`
+			Param   string `json:"param"`
 		} `json:"error"`
 	}
 
@@ -150,27 +177,55 @@ func ParseProviderError(provider string, statusCode int, body []byte, originalEr
 	}
 
 	// Determine error type based on status code
+	var gatewayErr *GatewayError
 	switch {
-	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
-		return NewAuthenticationError(provider, message)
+	case statusCode == http.StatusUnauthorized:
+		gatewayErr = &GatewayError{
+			Type:       ErrorTypeAuthentication,
+			Message:    message,
+			StatusCode: http.StatusUnauthorized,
+			Provider:   provider,
+			Err:        originalErr,
+		}
+	case statusCode == http.StatusForbidden:
+		gatewayErr = &GatewayError{
+			Type:       ErrorTypeAuthentication,
+			Message:    message,
+			StatusCode: http.StatusForbidden,
+			Provider:   provider,
+			Err:        originalErr,
+		}
 	case statusCode == http.StatusTooManyRequests:
-		return NewRateLimitError(provider, message)
+		gatewayErr = &GatewayError{
+			Type:       ErrorTypeRateLimit,
+			Message:    message,
+			StatusCode: http.StatusTooManyRequests,
+			Provider:   provider,
+			Err:        originalErr,
+		}
 	case statusCode == http.StatusNotFound:
 		// 404 - model or resource not found
-		err := NewNotFoundError(message)
-		err.Provider = provider
-		err.Err = originalErr
-		return err
+		gatewayErr = NewNotFoundError(message)
+		gatewayErr.Provider = provider
+		gatewayErr.Err = originalErr
 	case statusCode >= 400 && statusCode < 500:
 		// Client errors from provider - mark as invalid request and preserve both provider info and original status code
-		err := NewInvalidRequestErrorWithStatus(statusCode, message, originalErr)
-		err.Provider = provider
-		return err
+		gatewayErr = NewInvalidRequestErrorWithStatus(statusCode, message, originalErr)
+		gatewayErr.Provider = provider
 	case statusCode >= 500:
 		// Server errors from provider - preserve the original status code (500, 503, 504, etc.)
-		return NewProviderError(provider, statusCode, message, originalErr)
+		gatewayErr = NewProviderError(provider, statusCode, message, originalErr)
 	default:
 		// For any other status codes (2xx, 3xx, etc.), treat as provider error with Bad Gateway
-		return NewProviderError(provider, http.StatusBadGateway, message, originalErr)
+		gatewayErr = NewProviderError(provider, http.StatusBadGateway, message, originalErr)
 	}
+
+	if errorResponse.Error.Param != "" {
+		gatewayErr = gatewayErr.WithParam(errorResponse.Error.Param)
+	}
+	if errorResponse.Error.Code != "" {
+		gatewayErr = gatewayErr.WithCode(errorResponse.Error.Code)
+	}
+
+	return gatewayErr
 }

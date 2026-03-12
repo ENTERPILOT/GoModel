@@ -230,11 +230,24 @@ func (c *Client) recordCircuitBreakerCompletion(statusCode int, err error) {
 		c.circuitBreaker.RecordFailure()
 		return
 	}
-	if c.isRetryable(statusCode) || statusCode >= http.StatusInternalServerError {
+	if statusCode == http.StatusTooManyRequests {
+		if c.circuitBreaker.IsHalfOpen() {
+			c.circuitBreaker.RecordFailure()
+		}
+		return
+	}
+	if c.shouldTripCircuitBreaker(statusCode) {
 		c.circuitBreaker.RecordFailure()
 		return
 	}
 	c.circuitBreaker.RecordSuccess()
+}
+
+func (c *Client) shouldTripCircuitBreaker(statusCode int) bool {
+	if statusCode == http.StatusTooManyRequests {
+		return false
+	}
+	return c.isRetryable(statusCode) || statusCode >= http.StatusInternalServerError
 }
 
 func (c *Client) maxAttempts() int {
@@ -772,4 +785,10 @@ func (cb *circuitBreaker) State() string {
 		return "half-open"
 	}
 	return "unknown"
+}
+
+func (cb *circuitBreaker) IsHalfOpen() bool {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return cb.state == circuitHalfOpen
 }

@@ -163,13 +163,23 @@ type mockProvider struct {
 	supportedModels   []string
 	providerTypes     map[string]string
 
-	batchCreateResponse *core.BatchResponse
-	batchGetResponse    *core.BatchResponse
-	batchCancelResponse *core.BatchResponse
-	batchResults        *core.BatchResultsResponse
-	batchResultsErr     error
-	batchErr            error
-	capturedBatchReq    *core.BatchRequest
+	batchCreateResponse        *core.BatchResponse
+	batchCreateHints           map[string]string
+	batchGetResponse           *core.BatchResponse
+	batchCancelResponse        *core.BatchResponse
+	batchResults               *core.BatchResultsResponse
+	batchResultsHinted         *core.BatchResultsResponse
+	batchResultsErr            error
+	batchErr                   error
+	capturedBatchReq           *core.BatchRequest
+	capturedBatchCtx           context.Context
+	capturedBatchProvider      string
+	capturedBatchHints         map[string]string
+	capturedBatchHintsCtx      context.Context
+	capturedBatchHintsProvider string
+	capturedBatchHintsBatchID  string
+	clearedBatchHintProvider   string
+	clearedBatchHintID         string
 
 	fileCreateResponse  *core.FileObject
 	fileGetResponse     *core.FileObject
@@ -310,6 +320,23 @@ func (m *mockProvider) CreateBatch(_ context.Context, _ string, req *core.BatchR
 	return m.batchCreateResponse, nil
 }
 
+func (m *mockProvider) CreateBatchWithHints(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, map[string]string, error) {
+	m.capturedBatchCtx = ctx
+	m.capturedBatchProvider = providerType
+	resp, err := m.CreateBatch(ctx, providerType, req)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(m.batchCreateHints) == 0 {
+		return resp, nil, nil
+	}
+	hints := make(map[string]string, len(m.batchCreateHints))
+	for customID, endpoint := range m.batchCreateHints {
+		hints[customID] = endpoint
+	}
+	return resp, hints, nil
+}
+
 func (m *mockProvider) GetBatch(_ context.Context, _ string, _ string) (*core.BatchResponse, error) {
 	if m.batchErr != nil {
 		return nil, m.batchErr
@@ -358,6 +385,27 @@ func (m *mockProvider) GetBatchResults(_ context.Context, _ string, _ string) (*
 			{Index: 0, StatusCode: 200},
 		},
 	}, nil
+}
+
+func (m *mockProvider) GetBatchResultsWithHints(ctx context.Context, providerType string, batchID string, endpointByCustomID map[string]string) (*core.BatchResultsResponse, error) {
+	m.capturedBatchHintsCtx = ctx
+	m.capturedBatchHintsProvider = providerType
+	m.capturedBatchHintsBatchID = batchID
+	if len(endpointByCustomID) > 0 {
+		m.capturedBatchHints = make(map[string]string, len(endpointByCustomID))
+		for customID, endpoint := range endpointByCustomID {
+			m.capturedBatchHints[customID] = endpoint
+		}
+	}
+	if m.batchResultsHinted != nil {
+		return m.batchResultsHinted, nil
+	}
+	return m.GetBatchResults(context.Background(), "", "")
+}
+
+func (m *mockProvider) ClearBatchResultHints(providerType string, batchID string) {
+	m.clearedBatchHintProvider = providerType
+	m.clearedBatchHintID = batchID
 }
 
 func (m *mockProvider) CreateFile(_ context.Context, providerType string, req *core.FileCreateRequest) (*core.FileObject, error) {
@@ -1609,9 +1657,11 @@ func TestHandleError_RateLimitError(t *testing.T) {
 }
 
 func TestHandleError_InvalidRequestError(t *testing.T) {
+	param := "model"
+	code := "model_not_found"
 	mock := &mockProvider{
 		supportedModels: []string{"gpt-4o-mini"},
-		err:             core.NewInvalidRequestError("invalid parameters", nil),
+		err:             core.NewInvalidRequestError("invalid parameters", nil).WithParam(param).WithCode(code),
 	}
 
 	e := echo.New()
@@ -1632,12 +1682,27 @@ func TestHandleError_InvalidRequestError(t *testing.T) {
 		t.Errorf("expected status 400, got %d", rec.Code)
 	}
 
-	body := rec.Body.String()
-	if !strings.Contains(body, "invalid_request_error") {
-		t.Errorf("response should contain error type, got: %s", body)
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
 	}
-	if !strings.Contains(body, "invalid parameters") {
-		t.Errorf("response should contain error message, got: %s", body)
+
+	errorBody, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error body = %#v, want object", body["error"])
+	}
+
+	if errorBody["type"] != "invalid_request_error" {
+		t.Errorf("error.type = %v, want invalid_request_error", errorBody["type"])
+	}
+	if errorBody["message"] != "invalid parameters" {
+		t.Errorf("error.message = %v, want invalid parameters", errorBody["message"])
+	}
+	if errorBody["param"] != param {
+		t.Errorf("error.param = %v, want %v", errorBody["param"], param)
+	}
+	if errorBody["code"] != code {
+		t.Errorf("error.code = %v, want %v", errorBody["code"], code)
 	}
 }
 
@@ -1734,6 +1799,54 @@ func TestHandleError_StreamingError(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "rate_limit_error") {
 		t.Errorf("response should contain error type, got: %s", body)
+	}
+}
+
+func TestHandleError_UnexpectedErrorUsesOpenAISchema(t *testing.T) {
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini"},
+		err:             errors.New("boom"),
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+
+	reqBody := `{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler.ChatCompletion(c)
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", rec.Code)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	errorBody, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error body = %#v, want object", body["error"])
+	}
+
+	if errorBody["type"] != "provider_error" {
+		t.Errorf("error.type = %v, want provider_error", errorBody["type"])
+	}
+	if errorBody["message"] != "an unexpected error occurred" {
+		t.Errorf("error.message = %v, want unexpected error message", errorBody["message"])
+	}
+	if value, ok := errorBody["param"]; !ok || value != nil {
+		t.Errorf("error.param = %v, want nil", value)
+	}
+	if value, ok := errorBody["code"]; !ok || value != nil {
+		t.Errorf("error.code = %v, want nil", value)
 	}
 }
 
@@ -2294,6 +2407,105 @@ func TestBatches_LifecycleEndpoints(t *testing.T) {
 	}
 	if cancelRec.Code != http.StatusOK {
 		t.Fatalf("cancel status = %d, want 200", cancelRec.Code)
+	}
+}
+
+func TestBatchLifecyclePersistsAndUsesInternalEndpointHints(t *testing.T) {
+	type ctxKey string
+
+	mock := &mockProvider{
+		supportedModels: []string{"claude-sonnet-4-5-20250929"},
+		providerTypes: map[string]string{
+			"claude-sonnet-4-5-20250929": "anthropic",
+		},
+		batchCreateResponse: &core.BatchResponse{
+			ID:               "provider-batch-1",
+			Object:           "batch",
+			Status:           "in_progress",
+			CreatedAt:        1000,
+			RequestCounts:    core.BatchRequestCounts{Total: 1},
+			CompletionWindow: "24h",
+		},
+		batchCreateHints: map[string]string{
+			"resp-1": "/v1/responses",
+		},
+		batchResultsHinted: &core.BatchResultsResponse{
+			Object:  "list",
+			BatchID: "provider-batch-1",
+			Data: []core.BatchResultItem{
+				{Index: 0, CustomID: "resp-1", URL: "/v1/responses", StatusCode: http.StatusOK},
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+
+	createBody := `{
+	  "endpoint":"/v1/responses",
+	  "requests":[{"custom_id":"resp-1","method":"POST","body":{"model":"claude-sonnet-4-5-20250929","input":"hi"}}]
+	}`
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(createBody))
+	createReq = createReq.WithContext(context.WithValue(createReq.Context(), ctxKey("phase"), "create"))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	createCtx := e.NewContext(createReq, createRec)
+	if err := handler.Batches(createCtx); err != nil {
+		t.Fatalf("create handler returned error: %v", err)
+	}
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create status = %d, want 200", createRec.Code)
+	}
+	if strings.Contains(createRec.Body.String(), "request_endpoint_by_custom_id") {
+		t.Fatalf("create response leaked internal hints: %s", createRec.Body.String())
+	}
+	if mock.capturedBatchProvider != "anthropic" {
+		t.Fatalf("capturedBatchProvider = %q, want anthropic", mock.capturedBatchProvider)
+	}
+	if got := core.GetRequestID(mock.capturedBatchCtx); got == "" {
+		t.Fatal("expected request ID on create batch provider context")
+	}
+	if got := mock.capturedBatchCtx.Value(ctxKey("phase")); got != "create" {
+		t.Fatalf("capturedBatchCtx phase = %#v, want create", got)
+	}
+	if mock.clearedBatchHintProvider != "anthropic" {
+		t.Fatalf("clearedBatchHintProvider = %q, want anthropic", mock.clearedBatchHintProvider)
+	}
+	if mock.clearedBatchHintID != "provider-batch-1" {
+		t.Fatalf("clearedBatchHintID = %q, want provider-batch-1", mock.clearedBatchHintID)
+	}
+
+	var created core.BatchResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	resReq := httptest.NewRequest(http.MethodGet, "/v1/batches/"+created.ID+"/results", nil)
+	resReq = resReq.WithContext(context.WithValue(resReq.Context(), ctxKey("phase"), "results"))
+	resRec := httptest.NewRecorder()
+	resCtx := e.NewContext(resReq, resRec)
+	resCtx.SetPath("/v1/batches/:id/results")
+	setPathParam(resCtx, "id", created.ID)
+	if err := handler.BatchResults(resCtx); err != nil {
+		t.Fatalf("results handler returned error: %v", err)
+	}
+	if resRec.Code != http.StatusOK {
+		t.Fatalf("results status = %d, want 200", resRec.Code)
+	}
+	if got := mock.capturedBatchHints["resp-1"]; got != "/v1/responses" {
+		t.Fatalf("capturedBatchHints[resp-1] = %q, want /v1/responses", got)
+	}
+	if mock.capturedBatchHintsProvider != "anthropic" {
+		t.Fatalf("capturedBatchHintsProvider = %q, want anthropic", mock.capturedBatchHintsProvider)
+	}
+	if mock.capturedBatchHintsBatchID != "provider-batch-1" {
+		t.Fatalf("capturedBatchHintsBatchID = %q, want provider-batch-1", mock.capturedBatchHintsBatchID)
+	}
+	if got := core.GetRequestID(mock.capturedBatchHintsCtx); got == "" {
+		t.Fatal("expected request ID on batch results provider context")
+	}
+	if got := mock.capturedBatchHintsCtx.Value(ctxKey("phase")); got != "results" {
+		t.Fatalf("capturedBatchHintsCtx phase = %#v, want results", got)
 	}
 }
 
@@ -2880,6 +3092,41 @@ func TestGetDeleteAndContentFile(t *testing.T) {
 	}
 	if !strings.Contains(contentRec.Body.String(), "\"ok\":true") {
 		t.Fatalf("unexpected content body: %s", contentRec.Body.String())
+	}
+}
+
+func TestGetFileContent_TypedNilResponseReturnsBadGateway(t *testing.T) {
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini"},
+		providerTypes: map[string]string{
+			"gpt-4o-mini": "openai",
+		},
+		fileContentByProv: map[string]*core.FileContentResponse{
+			"openai": nil,
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/files/file_1/content?provider=openai", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/v1/files/:id/content")
+	setPathParam(c, "id", "file_1")
+
+	if err := handler.GetFileContent(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "provider_error") {
+		t.Fatalf("expected provider_error body, got: %s", body)
+	}
+	if !strings.Contains(body, "provider returned empty file content response") {
+		t.Fatalf("expected empty file content response message, got: %s", body)
 	}
 }
 

@@ -90,10 +90,9 @@ func (p *Provider) SetBaseURL(url string) {
 	p.client.SetBaseURL(url)
 }
 
-func (p *Provider) setBatchResultEndpoints(batchID string, endpoints map[string]string) {
-	batchID = strings.TrimSpace(batchID)
-	if batchID == "" || len(endpoints) == 0 {
-		return
+func cloneBatchResultEndpoints(endpoints map[string]string) map[string]string {
+	if len(endpoints) == 0 {
+		return nil
 	}
 	cloned := make(map[string]string, len(endpoints))
 	for customID, endpoint := range endpoints {
@@ -105,6 +104,18 @@ func (p *Provider) setBatchResultEndpoints(batchID string, endpoints map[string]
 		cloned[customID] = endpoint
 	}
 	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
+}
+
+func (p *Provider) setBatchResultEndpoints(batchID string, endpoints map[string]string) {
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" || len(endpoints) == 0 {
+		return
+	}
+	cloned := cloneBatchResultEndpoints(endpoints)
+	if len(cloned) == 0 {
 		return
 	}
 	p.batchEndpointsMu.Lock()
@@ -112,6 +123,18 @@ func (p *Provider) setBatchResultEndpoints(batchID string, endpoints map[string]
 		p.batchResultEndpoints = make(map[string]map[string]string)
 	}
 	p.batchResultEndpoints[batchID] = cloned
+	p.batchEndpointsMu.Unlock()
+}
+
+func (p *Provider) clearBatchResultEndpoints(batchID string) {
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" {
+		return
+	}
+	p.batchEndpointsMu.Lock()
+	if p.batchResultEndpoints != nil {
+		delete(p.batchResultEndpoints, batchID)
+	}
 	p.batchEndpointsMu.Unlock()
 }
 
@@ -458,6 +481,8 @@ type streamConverter struct {
 	msgID             string
 	nextToolCallIndex int
 	toolCalls         map[int]*streamToolCallState
+	usage             anthropicUsage
+	hasUsage          bool
 	buffer            []byte
 	closed            bool
 	emittedToolCalls  bool
@@ -482,16 +507,98 @@ func newStreamConverter(body io.ReadCloser, model string) *streamConverter {
 	}
 }
 
-func (sc *streamConverter) Read(p []byte) (n int, err error) {
-	if sc.closed {
-		return 0, io.EOF
+func malformedAnthropicStreamError(err error) error {
+	return core.NewProviderError("anthropic", http.StatusBadGateway, "failed to decode anthropic stream event: "+err.Error(), err)
+}
+
+func consumeAnthropicSSELine(p []byte, line []byte, body io.ReadCloser, buffer *[]byte, convert func(*anthropicStreamEvent) string) (n int, handled bool, err error) {
+	line = bytes.TrimSpace(line)
+	if len(line) == 0 || bytes.HasPrefix(line, []byte("event:")) {
+		return 0, false, nil
+	}
+	if !bytes.HasPrefix(line, []byte("data:")) {
+		return 0, false, nil
 	}
 
+	data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+
+	var event anthropicStreamEvent
+	if err := json.Unmarshal(data, &event); err != nil {
+		_ = body.Close() //nolint:errcheck
+		return 0, false, malformedAnthropicStreamError(err)
+	}
+
+	chunk := convert(&event)
+	if chunk == "" {
+		return 0, false, nil
+	}
+
+	*buffer = append(*buffer, []byte(chunk)...)
+	n = copy(p, *buffer)
+	*buffer = (*buffer)[n:]
+	return n, true, nil
+}
+
+func mergeAnthropicUsage(dst *anthropicUsage, src *anthropicUsage) bool {
+	if dst == nil || src == nil {
+		return false
+	}
+
+	merged := false
+	if src.InputTokens != 0 {
+		dst.InputTokens = src.InputTokens
+		merged = true
+	}
+	if src.OutputTokens != 0 {
+		dst.OutputTokens = src.OutputTokens
+		merged = true
+	}
+	if src.CacheCreationInputTokens != 0 {
+		dst.CacheCreationInputTokens = src.CacheCreationInputTokens
+		merged = true
+	}
+	if src.CacheReadInputTokens != 0 {
+		dst.CacheReadInputTokens = src.CacheReadInputTokens
+		merged = true
+	}
+
+	return merged
+}
+
+func anthropicChatUsagePayload(usage *anthropicUsage) map[string]any {
+	if usage == nil {
+		return nil
+	}
+
+	return map[string]any{
+		"prompt_tokens":     usage.InputTokens,
+		"completion_tokens": usage.OutputTokens,
+		"total_tokens":      usage.InputTokens + usage.OutputTokens,
+	}
+}
+
+func anthropicResponsesUsagePayload(usage *anthropicUsage) map[string]any {
+	if usage == nil {
+		return nil
+	}
+
+	return map[string]any{
+		"input_tokens":  usage.InputTokens,
+		"output_tokens": usage.OutputTokens,
+		"total_tokens":  usage.InputTokens + usage.OutputTokens,
+	}
+}
+
+func (sc *streamConverter) Read(p []byte) (n int, err error) {
 	// If we have buffered data, return it first
 	if len(sc.buffer) > 0 {
 		n = copy(p, sc.buffer)
 		sc.buffer = sc.buffer[n:]
 		return n, nil
+	}
+
+	if sc.closed {
+		return 0, io.EOF
 	}
 
 	// Read the next SSE event from Anthropic
@@ -512,36 +619,15 @@ func (sc *streamConverter) Read(p []byte) (n int, err error) {
 			return 0, err
 		}
 
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
+		n, handled, err := consumeAnthropicSSELine(p, line, sc.body, &sc.buffer, sc.convertEvent)
+		if err != nil {
+			sc.closed = true
+			return 0, err
 		}
-
-		// Parse SSE line
-		if bytes.HasPrefix(line, []byte("event:")) {
-			continue // Skip event type lines
-		}
-
-		if bytes.HasPrefix(line, []byte("data:")) {
-			data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
-
-			var event anthropicStreamEvent
-			if err := json.Unmarshal(data, &event); err != nil {
+		if handled {
+			if n == 0 {
 				continue
 			}
-
-			// Convert Anthropic event to OpenAI format
-			openAIChunk := sc.convertEvent(&event)
-			if openAIChunk == "" {
-				continue
-			}
-
-			// Buffer the converted chunk
-			sc.buffer = append(sc.buffer, []byte(openAIChunk)...)
-
-			// Return as much as we can
-			n = copy(p, sc.buffer)
-			sc.buffer = sc.buffer[n:]
 			return n, nil
 		}
 	}
@@ -614,11 +700,7 @@ func (sc *streamConverter) formatChatChunk(delta map[string]any, finishReason an
 		},
 	}
 	if usage != nil {
-		chunk["usage"] = map[string]any{
-			"prompt_tokens":     usage.InputTokens,
-			"completion_tokens": usage.OutputTokens,
-			"total_tokens":      usage.InputTokens + usage.OutputTokens,
-		}
+		chunk["usage"] = anthropicChatUsagePayload(usage)
 	}
 
 	jsonData, err := json.Marshal(chunk)
@@ -635,6 +717,12 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 	case "message_start":
 		if event.Message != nil {
 			sc.msgID = event.Message.ID
+			if mergeAnthropicUsage(&sc.usage, &event.Message.Usage) {
+				sc.hasUsage = true
+			}
+		}
+		if mergeAnthropicUsage(&sc.usage, event.Usage) {
+			sc.hasUsage = true
 		}
 		return ""
 
@@ -753,13 +841,20 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 		return ""
 
 	case "message_delta":
+		if mergeAnthropicUsage(&sc.usage, event.Usage) {
+			sc.hasUsage = true
+		}
 		// Emit chunk if we have stop_reason or usage data
 		if (event.Delta != nil && event.Delta.StopReason != "") || event.Usage != nil {
 			var finishReason interface{}
 			if event.Delta != nil && event.Delta.StopReason != "" {
 				finishReason = sc.mapStreamStopReason(event.Delta.StopReason)
 			}
-			return sc.formatChatChunk(map[string]any{}, finishReason, event.Usage)
+			var usage *anthropicUsage
+			if sc.hasUsage {
+				usage = &sc.usage
+			}
+			return sc.formatChatChunk(map[string]any{}, finishReason, usage)
 		}
 
 	case "message_stop":
@@ -1001,6 +1096,7 @@ func buildAnthropicBatchCreateRequest(req *core.BatchRequest) (*anthropicBatchCr
 		Requests: make([]anthropicBatchRequest, 0, len(req.Requests)),
 	}
 	endpointByCustomID := make(map[string]string, len(req.Requests))
+	seenCustomIDs := make(map[string]int, len(req.Requests))
 
 	for i, item := range req.Requests {
 		decoded, err := core.DecodeKnownBatchItemRequest(req.Endpoint, item)
@@ -1017,6 +1113,13 @@ func buildAnthropicBatchCreateRequest(req *core.BatchRequest) (*anthropicBatchCr
 		if customID == "" {
 			customID = fmt.Sprintf("req-%d", i)
 		}
+		if previousIndex, exists := seenCustomIDs[customID]; exists {
+			return nil, nil, core.NewInvalidRequestError(
+				fmt.Sprintf("batch item %d: duplicate custom_id %q (already used by batch item %d)", i, customID, previousIndex),
+				nil,
+			)
+		}
+		seenCustomIDs[customID] = i
 		out.Requests = append(out.Requests, anthropicBatchRequest{
 			CustomID: customID,
 			Params:   *params,
@@ -1027,11 +1130,10 @@ func buildAnthropicBatchCreateRequest(req *core.BatchRequest) (*anthropicBatchCr
 	return out, endpointByCustomID, nil
 }
 
-// CreateBatch creates an Anthropic native message batch.
-func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, error) {
+func (p *Provider) createBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, map[string]string, error) {
 	anthropicReq, endpointByCustomID, err := buildAnthropicBatchCreateRequest(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var resp anthropicBatchResponse
@@ -1041,16 +1143,28 @@ func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*co
 		Body:     anthropicReq,
 	}, &resp)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	mapped := mapAnthropicBatchResponse(&resp)
 	if mapped == nil {
-		return nil, core.NewProviderError("anthropic", http.StatusBadGateway, "failed to map anthropic batch response", nil)
+		return nil, nil, core.NewProviderError("anthropic", http.StatusBadGateway, "failed to map anthropic batch response", nil)
 	}
 	mapped.ProviderBatchID = mapped.ID
 	p.setBatchResultEndpoints(mapped.ProviderBatchID, endpointByCustomID)
-	return mapped, nil
+	return mapped, cloneBatchResultEndpoints(endpointByCustomID), nil
+}
+
+// CreateBatch creates an Anthropic native message batch.
+func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, error) {
+	mapped, _, err := p.createBatch(ctx, req)
+	return mapped, err
+}
+
+// CreateBatchWithHints creates an Anthropic native message batch and returns
+// persisted per-item endpoint hints for later result shaping.
+func (p *Provider) CreateBatchWithHints(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, map[string]string, error) {
+	return p.createBatch(ctx, req)
 }
 
 // GetBatch retrieves an Anthropic native message batch.
@@ -1133,20 +1247,32 @@ func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchRespo
 	return mapped, nil
 }
 
-// GetBatchResults retrieves Anthropic native message batch results.
-func (p *Provider) GetBatchResults(ctx context.Context, id string) (*core.BatchResultsResponse, error) {
-	raw, err := p.client.DoRaw(ctx, llmclient.Request{
+func (p *Provider) getBatchResults(ctx context.Context, id string, endpointByCustomID map[string]string) (*core.BatchResultsResponse, error) {
+	resp, err := p.client.DoPassthrough(ctx, llmclient.Request{
 		Method:   http.MethodGet,
 		Endpoint: "/messages/batches/" + url.PathEscape(id) + "/results",
 	})
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = resp.Body.Close() }()
 
-	scanner := bufio.NewScanner(bytes.NewReader(raw.Body))
+	if resp.StatusCode != http.StatusOK {
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			body = []byte("failed to read error response")
+		}
+		return nil, core.ParseProviderError("anthropic", resp.StatusCode, body, nil)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
 	// Allow larger result lines than Scanner's default 64K.
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	endpointByCustomID := p.getBatchResultEndpoints(id)
+	if endpointByCustomID == nil {
+		endpointByCustomID = p.getBatchResultEndpoints(id)
+	} else {
+		endpointByCustomID = cloneBatchResultEndpoints(endpointByCustomID)
+	}
 
 	results := make([]core.BatchResultItem, 0)
 	index := 0
@@ -1232,6 +1358,23 @@ func (p *Provider) GetBatchResults(ctx context.Context, id string) (*core.BatchR
 	}, nil
 }
 
+// GetBatchResults retrieves Anthropic native message batch results.
+func (p *Provider) GetBatchResults(ctx context.Context, id string) (*core.BatchResultsResponse, error) {
+	return p.getBatchResults(ctx, id, nil)
+}
+
+// GetBatchResultsWithHints retrieves Anthropic native batch results using
+// persisted per-item endpoint hints instead of transient in-memory state.
+func (p *Provider) GetBatchResultsWithHints(ctx context.Context, id string, endpointByCustomID map[string]string) (*core.BatchResultsResponse, error) {
+	return p.getBatchResults(ctx, id, endpointByCustomID)
+}
+
+// ClearBatchResultHints clears transient per-batch endpoint hints once they
+// have been persisted by the gateway.
+func (p *Provider) ClearBatchResultHints(batchID string) {
+	p.clearBatchResultEndpoints(batchID)
+}
+
 // Embeddings returns an error because Anthropic does not natively support embeddings.
 // Voyage AI (Anthropic's recommended embedding provider) may be added in the future.
 func (p *Provider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
@@ -1271,7 +1414,8 @@ type responsesStreamConverter struct {
 	buffer          []byte
 	closed          bool
 	sentDone        bool
-	cachedUsage     *anthropicUsage // Stores usage from message_delta for inclusion in response.completed
+	usage           anthropicUsage
+	hasUsage        bool
 }
 
 func newResponsesStreamConverter(body io.ReadCloser, model string) *responsesStreamConverter {
@@ -1316,13 +1460,9 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 						"provider":   "anthropic",
 						"created_at": time.Now().Unix(),
 					}
-					// Include usage data if captured from message_delta
-					if sc.cachedUsage != nil {
-						responseData["usage"] = map[string]interface{}{
-							"input_tokens":  sc.cachedUsage.InputTokens,
-							"output_tokens": sc.cachedUsage.OutputTokens,
-							"total_tokens":  sc.cachedUsage.InputTokens + sc.cachedUsage.OutputTokens,
-						}
+					// Include merged usage data captured across message_start/message_delta.
+					if sc.hasUsage {
+						responseData["usage"] = anthropicResponsesUsagePayload(&sc.usage)
 					}
 					doneEvent := map[string]interface{}{
 						"type":     "response.completed",
@@ -1349,36 +1489,15 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 			return 0, err
 		}
 
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
+		n, handled, err := consumeAnthropicSSELine(p, line, sc.body, &sc.buffer, sc.convertEvent)
+		if err != nil {
+			sc.closed = true
+			return 0, err
 		}
-
-		// Parse SSE line
-		if bytes.HasPrefix(line, []byte("event:")) {
-			continue // Skip event type lines
-		}
-
-		if bytes.HasPrefix(line, []byte("data:")) {
-			data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
-
-			var event anthropicStreamEvent
-			if err := json.Unmarshal(data, &event); err != nil {
+		if handled {
+			if n == 0 {
 				continue
 			}
-
-			// Convert Anthropic event to Responses API format
-			responsesChunk := sc.convertEvent(&event)
-			if responsesChunk == "" {
-				continue
-			}
-
-			// Buffer the converted chunk
-			sc.buffer = append(sc.buffer, []byte(responsesChunk)...)
-
-			// Return as much as we can
-			n = copy(p, sc.buffer)
-			sc.buffer = sc.buffer[n:]
 			return n, nil
 		}
 	}
@@ -1418,6 +1537,14 @@ func (sc *responsesStreamConverter) newResponsesToolCallState(contentBlock *anth
 func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) string {
 	switch event.Type {
 	case "message_start":
+		if event.Message != nil {
+			if mergeAnthropicUsage(&sc.usage, &event.Message.Usage) {
+				sc.hasUsage = true
+			}
+		}
+		if mergeAnthropicUsage(&sc.usage, event.Usage) {
+			sc.hasUsage = true
+		}
 		// Send response.created event
 		createdEvent := map[string]interface{}{
 			"type": "response.created",
@@ -1501,8 +1628,8 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 
 	case "message_delta":
 		// Capture usage data for inclusion in response.completed
-		if event.Usage != nil {
-			sc.cachedUsage = event.Usage
+		if mergeAnthropicUsage(&sc.usage, event.Usage) {
+			sc.hasUsage = true
 		}
 		if !sc.output.AssistantReserved() && len(sc.toolCalls) == 0 {
 			sc.reserveAssistantMessageOutput()

@@ -96,6 +96,117 @@ func TestMessageMarshalJSON_ContentWinsOverContentNull(t *testing.T) {
 	}
 }
 
+func TestChatResponseJSON_PreservesSystemFingerprint(t *testing.T) {
+	payload := []byte(`{
+		"id":"chatcmpl-123",
+		"object":"chat.completion",
+		"created":1741723200,
+		"model":"gpt-4o-mini",
+		"provider":"openai",
+		"system_fingerprint":"fp_abc123",
+		"choices":[
+			{
+				"index":0,
+				"message":{"role":"assistant","content":"hello"},
+				"finish_reason":"stop"
+			}
+		],
+		"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+	}`)
+
+	var resp ChatResponse
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if resp.SystemFingerprint != "fp_abc123" {
+		t.Fatalf("SystemFingerprint = %q, want fp_abc123", resp.SystemFingerprint)
+	}
+
+	body, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if decoded["system_fingerprint"] != "fp_abc123" {
+		t.Fatalf("decoded system_fingerprint = %#v, want fp_abc123", decoded["system_fingerprint"])
+	}
+}
+
+func TestChatResponseJSON_PreservesChoiceLogprobs(t *testing.T) {
+	payload := []byte(`{
+		"id":"chatcmpl-123",
+		"object":"chat.completion",
+		"created":1741723200,
+		"model":"gpt-4o-mini",
+		"provider":"openai",
+		"choices":[
+			{
+				"index":0,
+				"message":{"role":"assistant","content":"hello"},
+				"finish_reason":"stop",
+				"logprobs":{
+					"content":[
+						{
+							"token":"hello",
+							"logprob":-0.1,
+							"top_logprobs":[{"token":"hello","logprob":-0.1}]
+						}
+					]
+				}
+			}
+		],
+		"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+	}`)
+
+	var resp ChatResponse
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if len(resp.Choices) != 1 {
+		t.Fatalf("len(Choices) = %d, want 1", len(resp.Choices))
+	}
+	if string(resp.Choices[0].Logprobs) == "" {
+		t.Fatal("Choices[0].Logprobs = empty, want preserved payload")
+	}
+
+	body, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	choices, ok := decoded["choices"].([]any)
+	if !ok || len(choices) != 1 {
+		t.Fatalf("decoded choices = %#v, want len=1", decoded["choices"])
+	}
+
+	choice, ok := choices[0].(map[string]any)
+	if !ok {
+		t.Fatalf("decoded choice = %#v, want object", choices[0])
+	}
+
+	logprobs, ok := choice["logprobs"].(map[string]any)
+	if !ok {
+		t.Fatalf("decoded logprobs = %#v, want object", choice["logprobs"])
+	}
+
+	content, ok := logprobs["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("decoded logprobs.content = %#v, want len=1", logprobs["content"])
+	}
+}
+
 func TestChatRequestWithStreaming_PreservesToolFields(t *testing.T) {
 	parallelToolCalls := false
 	req := &ChatRequest{

@@ -16,6 +16,7 @@
   "model": "o3-mini-2025-01-31",
   "object": "chat.completion",
   "provider": "",
+  "system_fingerprint": "fp_d48b29c73d",
   "usage": {
     "completion_tokens": 85,
     "completion_tokens_details": {

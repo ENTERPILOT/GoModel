@@ -85,13 +85,14 @@ type FunctionCall struct {
 
 // ChatResponse represents the chat completion response
 type ChatResponse struct {
-	ID       string   `json:"id"`
-	Object   string   `json:"object"`
-	Model    string   `json:"model"`
-	Provider string   `json:"provider"`
-	Choices  []Choice `json:"choices"`
-	Usage    Usage    `json:"usage"`
-	Created  int64    `json:"created"`
+	ID                string   `json:"id"`
+	Object            string   `json:"object"`
+	Model             string   `json:"model"`
+	Provider          string   `json:"provider"`
+	SystemFingerprint string   `json:"system_fingerprint,omitempty"`
+	Choices           []Choice `json:"choices"`
+	Usage             Usage    `json:"usage"`
+	Created           int64    `json:"created"`
 }
 
 // Choice represents a single completion choice
@@ -99,6 +100,7 @@ type Choice struct {
 	Message      ResponseMessage `json:"message"`
 	FinishReason string          `json:"finish_reason"`
 	Index        int             `json:"index"`
+	Logprobs     json.RawMessage `json:"logprobs,omitempty"`
 }
 
 // ResponseMessage represents a single assistant message in a chat response.

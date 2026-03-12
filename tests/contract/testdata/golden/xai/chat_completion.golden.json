@@ -16,6 +16,7 @@
   "model": "grok-3-mini",
   "object": "chat.completion",
   "provider": "",
+  "system_fingerprint": "fp_2a885414fb",
   "usage": {
     "completion_tokens": 35,
     "completion_tokens_details": {

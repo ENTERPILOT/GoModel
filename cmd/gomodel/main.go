@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -28,6 +29,43 @@ import (
 	"github.com/lmittmann/tint"
 	"golang.org/x/term"
 )
+
+type lifecycleApp interface {
+	Start(ctx context.Context, addr string) error
+	Shutdown(ctx context.Context) error
+}
+
+var shutdownTimeout = 30 * time.Second
+
+func shutdownApplication(application lifecycleApp, ctx context.Context) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- application.Shutdown(ctx)
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// startApplication calls lifecycleApp.Start and, if Start fails, attempts a
+// graceful shutdown via shutdownApplication using shutdownTimeout before
+// returning the original start error or a combined start/shutdown error.
+func startApplication(application lifecycleApp, addr string) error {
+	if err := application.Start(context.Background(), addr); err != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+
+		if shutdownErr := shutdownApplication(application, shutdownCtx); shutdownErr != nil {
+			return fmt.Errorf("server failed to start: %w", errors.Join(err, fmt.Errorf("shutdown after start failure: %w", shutdownErr)))
+		}
+		return err
+	}
+	return nil
+}
 
 // @title          GOModel API
 // @version        1.0
@@ -100,16 +138,16 @@ func main() {
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 		<-quit
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 
-		if err := application.Shutdown(ctx); err != nil {
+		if err := shutdownApplication(application, ctx); err != nil {
 			slog.Error("application shutdown error", "error", err)
 		}
 	}()
 
 	addr := ":" + result.Config.Server.Port
-	if err := application.Start(context.Background(), addr); err != nil {
+	if err := startApplication(application, addr); err != nil {
 		slog.Error("application failed", "error", err)
 		os.Exit(1)
 	}
