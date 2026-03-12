@@ -550,6 +550,11 @@ func TestParseProviderError_PreservesWrappedErrorsForAuthAndRateLimit(t *testing
 			wantType:   ErrorTypeAuthentication,
 		},
 		{
+			name:       "403 forbidden",
+			statusCode: http.StatusForbidden,
+			wantType:   ErrorTypeAuthentication,
+		},
+		{
 			name:       "429 rate limit",
 			statusCode: http.StatusTooManyRequests,
 			wantType:   ErrorTypeRateLimit,
