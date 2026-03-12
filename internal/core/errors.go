@@ -179,8 +179,16 @@ func ParseProviderError(provider string, statusCode int, body []byte, originalEr
 	// Determine error type based on status code
 	var gatewayErr *GatewayError
 	switch {
-	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
+	case statusCode == http.StatusUnauthorized:
 		gatewayErr = NewAuthenticationError(provider, message)
+	case statusCode == http.StatusForbidden:
+		gatewayErr = &GatewayError{
+			Type:       ErrorTypeAuthentication,
+			Message:    message,
+			StatusCode: http.StatusForbidden,
+			Provider:   provider,
+			Err:        originalErr,
+		}
 	case statusCode == http.StatusTooManyRequests:
 		gatewayErr = NewRateLimitError(provider, message)
 	case statusCode == http.StatusNotFound:

@@ -299,7 +299,7 @@ func TestParseProviderError(t *testing.T) {
 			statusCode:     http.StatusForbidden,
 			body:           []byte(`{"error": {"message": "Access denied"}}`),
 			expectedType:   ErrorTypeAuthentication,
-			expectedStatus: http.StatusUnauthorized,
+			expectedStatus: http.StatusForbidden,
 		},
 		{
 			name:           "429 rate limit",
@@ -556,7 +556,7 @@ func TestParseProviderError_SpecialStatusCodesOverride(t *testing.T) {
 			name:           "403 uses authentication error",
 			statusCode:     http.StatusForbidden,
 			expectedType:   ErrorTypeAuthentication,
-			expectedStatus: http.StatusUnauthorized, // Note: 403 is converted to 401
+			expectedStatus: http.StatusForbidden,
 		},
 		{
 			name:           "429 uses rate limit error",
