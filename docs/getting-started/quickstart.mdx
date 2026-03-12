@@ -13,6 +13,10 @@ admin visibility in one place.
 
 ```bash
 docker run --rm -p 8080:8080 \
+  -e LOGGING_ENABLED=true \
+  -e LOGGING_LOG_BODIES=true \
+  -e LOG_FORMAT=text \
+  -e LOGGING_LOG_HEADERS=true \
   -e GOMODEL_MASTER_KEY="change-me" \
   -e OPENAI_API_KEY="sk-..." \
   enterpilot/gomodel
