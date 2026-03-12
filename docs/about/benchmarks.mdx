@@ -70,6 +70,57 @@ Some useful reads from that March 5, 2026 run:
 At the highest tested concurrency, GOModel reached `52.75 req/s` versus
 LiteLLM at `35.81 req/s`.
 
+## Reproduce it yourself
+
+All the tooling used in the published benchmark is available in this repository.
+
+### Prerequisites
+
+- Go 1.22+
+- Python 3.10+ with `matplotlib` and `numpy`
+- `jq`, `curl`
+- A Groq API key (or any OpenAI-compatible provider — adjust the script)
+- `litellm[proxy]` (`pip install "litellm[proxy]"`)
+
+### Scripts
+
+The benchmark suite lives in [`docs/about/benchmark-tools/`](./benchmark-tools/):
+
+| File | Purpose |
+| --- | --- |
+| [`compare.sh`](./benchmark-tools/compare.sh) | Builds GoModel, starts both gateways, runs the full benchmark matrix, and writes a `REPORT.md` |
+| [`bench_main.go`](./benchmark-tools/bench_main.go) | Source for the `bench` CLI that sends requests and collects latency + process metrics |
+| [`plot_benchmark_charts.py`](./benchmark-tools/plot_benchmark_charts.py) | Generates per-metric charts and a combined dashboard from the JSON results |
+
+### Quick start
+
+```bash
+# 1. Clone GoModel and set up your .env with GROQ_API_KEY
+git clone https://github.com/enterpilot/gomodel.git
+cd gomodel
+echo "GROQ_API_KEY=gsk_..." > .env
+
+# 2. Run the full comparison (builds GoModel, starts LiteLLM, benchmarks both)
+bash docs/about/benchmark-tools/compare.sh
+
+# 3. Generate charts from the latest result
+pip install matplotlib numpy
+python3 docs/about/benchmark-tools/plot_benchmark_charts.py benchmark-results/<timestamp>
+```
+
+The script creates a timestamped directory under `benchmark-results/` containing
+JSON result files, gateway logs, and a `REPORT.md` with the results table.
+
+### Tuning
+
+You can override defaults via environment variables:
+
+```bash
+REQUESTS=100 CONCURRENCIES="1 4 8 16" MAX_TOKENS=16 bash docs/about/benchmark-tools/compare.sh
+```
+
+See the top of `compare.sh` for the full list of knobs.
+
 ## Why this page is short
 
 This page is intentionally shorter and more operational than the blog version.
