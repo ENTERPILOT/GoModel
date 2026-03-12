@@ -230,6 +230,12 @@ func (c *Client) recordCircuitBreakerCompletion(statusCode int, err error) {
 		c.circuitBreaker.RecordFailure()
 		return
 	}
+	if statusCode == http.StatusTooManyRequests {
+		if c.circuitBreaker.IsHalfOpen() {
+			c.circuitBreaker.RecordFailure()
+		}
+		return
+	}
 	if c.shouldTripCircuitBreaker(statusCode) {
 		c.circuitBreaker.RecordFailure()
 		return
@@ -779,4 +785,10 @@ func (cb *circuitBreaker) State() string {
 		return "half-open"
 	}
 	return "unknown"
+}
+
+func (cb *circuitBreaker) IsHalfOpen() bool {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return cb.state == circuitHalfOpen
 }

@@ -1108,7 +1108,7 @@ func TestCircuitBreaker_RateLimitDoesNotOpenCircuit(t *testing.T) {
 	}
 }
 
-func TestCircuitBreaker_HalfOpenProbeResolvesOnRateLimit(t *testing.T) {
+func TestCircuitBreaker_HalfOpenProbeReopensOnRateLimit(t *testing.T) {
 	var attempts int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1150,8 +1150,8 @@ func TestCircuitBreaker_HalfOpenProbeResolvesOnRateLimit(t *testing.T) {
 	if gatewayErr.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want %d", gatewayErr.StatusCode, http.StatusTooManyRequests)
 	}
-	if state := client.circuitBreaker.State(); state != "closed" {
-		t.Fatalf("expected circuit to close after rate-limited probe, got %q", state)
+	if state := client.circuitBreaker.State(); state != "open" {
+		t.Fatalf("expected circuit to reopen after rate-limited probe, got %q", state)
 	}
 
 	err = client.Do(context.Background(), Request{
@@ -1159,10 +1159,16 @@ func TestCircuitBreaker_HalfOpenProbeResolvesOnRateLimit(t *testing.T) {
 		Endpoint: "/test",
 	}, nil)
 	if err == nil {
-		t.Fatal("expected follow-up rate limit error")
+		t.Fatal("expected circuit breaker rejection after rate-limited half-open probe")
 	}
-	if got := atomic.LoadInt32(&attempts); got != 2 {
-		t.Fatalf("expected follow-up request to reach upstream, got %d attempts", got)
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if !strings.Contains(gatewayErr.Message, "circuit breaker is open") {
+		t.Fatalf("expected circuit breaker error after rate-limited half-open probe, got %s", gatewayErr.Message)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("expected follow-up request to be blocked without another upstream attempt, got %d attempts", got)
 	}
 }
 
