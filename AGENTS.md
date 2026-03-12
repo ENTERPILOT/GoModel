@@ -16,3 +16,8 @@ Follow Postel's Law: be conservative in what you send, liberal in what you accep
 Keep implementation explicit and maintainable over clever abstractions.
 
 Backward compatibility is not a primary constraint in the current development stage.
+
+## Quick Workflow
+
+1. Make small, focused changes.
+2. Run format/lint/tests relevant to the change.
