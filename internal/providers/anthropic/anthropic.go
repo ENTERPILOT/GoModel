@@ -1136,11 +1136,10 @@ func buildAnthropicBatchCreateRequest(req *core.BatchRequest) (*anthropicBatchCr
 	return out, endpointByCustomID, nil
 }
 
-// CreateBatch creates an Anthropic native message batch.
-func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, error) {
+func (p *Provider) createBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, map[string]string, error) {
 	anthropicReq, endpointByCustomID, err := buildAnthropicBatchCreateRequest(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var resp anthropicBatchResponse
@@ -1150,17 +1149,28 @@ func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*co
 		Body:     anthropicReq,
 	}, &resp)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	mapped := mapAnthropicBatchResponse(&resp)
 	if mapped == nil {
-		return nil, core.NewProviderError("anthropic", http.StatusBadGateway, "failed to map anthropic batch response", nil)
+		return nil, nil, core.NewProviderError("anthropic", http.StatusBadGateway, "failed to map anthropic batch response", nil)
 	}
 	mapped.ProviderBatchID = mapped.ID
-	mapped.RequestEndpointByCustomID = cloneBatchResultEndpoints(endpointByCustomID)
 	p.setBatchResultEndpoints(mapped.ProviderBatchID, endpointByCustomID)
-	return mapped, nil
+	return mapped, cloneBatchResultEndpoints(endpointByCustomID), nil
+}
+
+// CreateBatch creates an Anthropic native message batch.
+func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, error) {
+	mapped, _, err := p.createBatch(ctx, req)
+	return mapped, err
+}
+
+// CreateBatchWithHints creates an Anthropic native message batch and returns
+// persisted per-item endpoint hints for later result shaping.
+func (p *Provider) CreateBatchWithHints(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, map[string]string, error) {
+	return p.createBatch(ctx, req)
 }
 
 // GetBatch retrieves an Anthropic native message batch.

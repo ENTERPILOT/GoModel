@@ -8,8 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"gomodel/internal/core"
 )
 
 // PostgreSQLStore stores batches in PostgreSQL.
@@ -50,7 +48,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 }
 
 // Create inserts a new batch.
-func (s *PostgreSQLStore) Create(ctx context.Context, batch *core.BatchResponse) error {
+func (s *PostgreSQLStore) Create(ctx context.Context, batch *StoredBatch) error {
 	payload, err := serializeBatch(batch)
 	if err != nil {
 		return err
@@ -60,7 +58,7 @@ func (s *PostgreSQLStore) Create(ctx context.Context, batch *core.BatchResponse)
 	_, err = s.pool.Exec(ctx, `
 		INSERT INTO batches (id, created_at, updated_at, status, data)
 		VALUES ($1, $2, $3, $4, $5::jsonb)
-	`, batch.ID, batch.CreatedAt, updatedAt, batch.Status, payload)
+	`, batch.Batch.ID, batch.Batch.CreatedAt, updatedAt, batch.Batch.Status, payload)
 	if err != nil {
 		return fmt.Errorf("insert batch: %w", err)
 	}
@@ -68,7 +66,7 @@ func (s *PostgreSQLStore) Create(ctx context.Context, batch *core.BatchResponse)
 }
 
 // Get returns a batch by id.
-func (s *PostgreSQLStore) Get(ctx context.Context, id string) (*core.BatchResponse, error) {
+func (s *PostgreSQLStore) Get(ctx context.Context, id string) (*StoredBatch, error) {
 	var payload []byte
 	err := s.pool.QueryRow(ctx, "SELECT data FROM batches WHERE id = $1", id).Scan(&payload)
 	if err != nil {
@@ -86,7 +84,7 @@ func (s *PostgreSQLStore) Get(ctx context.Context, id string) (*core.BatchRespon
 }
 
 // List returns batches ordered by created_at desc, id desc.
-func (s *PostgreSQLStore) List(ctx context.Context, limit int, after string) ([]*core.BatchResponse, error) {
+func (s *PostgreSQLStore) List(ctx context.Context, limit int, after string) ([]*StoredBatch, error) {
 	limit = normalizeLimit(limit)
 
 	var rows pgx.Rows
@@ -127,7 +125,7 @@ func (s *PostgreSQLStore) List(ctx context.Context, limit int, after string) ([]
 	}
 	defer rows.Close()
 
-	items := make([]*core.BatchResponse, 0, limit)
+	items := make([]*StoredBatch, 0, limit)
 	for rows.Next() {
 		var payload []byte
 		if err := rows.Scan(&payload); err != nil {
@@ -147,7 +145,7 @@ func (s *PostgreSQLStore) List(ctx context.Context, limit int, after string) ([]
 }
 
 // Update updates a stored batch object.
-func (s *PostgreSQLStore) Update(ctx context.Context, batch *core.BatchResponse) error {
+func (s *PostgreSQLStore) Update(ctx context.Context, batch *StoredBatch) error {
 	payload, err := serializeBatch(batch)
 	if err != nil {
 		return err
@@ -158,7 +156,7 @@ func (s *PostgreSQLStore) Update(ctx context.Context, batch *core.BatchResponse)
 		UPDATE batches
 		SET updated_at = $1, status = $2, data = $3::jsonb
 		WHERE id = $4
-	`, updatedAt, batch.Status, payload, batch.ID)
+	`, updatedAt, batch.Batch.Status, payload, batch.Batch.ID)
 	if err != nil {
 		return fmt.Errorf("update batch: %w", err)
 	}

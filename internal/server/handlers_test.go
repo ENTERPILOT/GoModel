@@ -163,16 +163,23 @@ type mockProvider struct {
 	supportedModels   []string
 	providerTypes     map[string]string
 
-	batchCreateResponse *core.BatchResponse
-	batchGetResponse    *core.BatchResponse
-	batchCancelResponse *core.BatchResponse
-	batchResults        *core.BatchResultsResponse
-	batchResultsHinted  *core.BatchResultsResponse
-	batchResultsErr     error
-	batchErr            error
-	capturedBatchReq    *core.BatchRequest
-	capturedBatchHints  map[string]string
-	clearedBatchHintID  string
+	batchCreateResponse        *core.BatchResponse
+	batchCreateHints           map[string]string
+	batchGetResponse           *core.BatchResponse
+	batchCancelResponse        *core.BatchResponse
+	batchResults               *core.BatchResultsResponse
+	batchResultsHinted         *core.BatchResultsResponse
+	batchResultsErr            error
+	batchErr                   error
+	capturedBatchReq           *core.BatchRequest
+	capturedBatchCtx           context.Context
+	capturedBatchProvider      string
+	capturedBatchHints         map[string]string
+	capturedBatchHintsCtx      context.Context
+	capturedBatchHintsProvider string
+	capturedBatchHintsBatchID  string
+	clearedBatchHintProvider   string
+	clearedBatchHintID         string
 
 	fileCreateResponse  *core.FileObject
 	fileGetResponse     *core.FileObject
@@ -313,6 +320,23 @@ func (m *mockProvider) CreateBatch(_ context.Context, _ string, req *core.BatchR
 	return m.batchCreateResponse, nil
 }
 
+func (m *mockProvider) CreateBatchWithHints(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, map[string]string, error) {
+	m.capturedBatchCtx = ctx
+	m.capturedBatchProvider = providerType
+	resp, err := m.CreateBatch(ctx, providerType, req)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(m.batchCreateHints) == 0 {
+		return resp, nil, nil
+	}
+	hints := make(map[string]string, len(m.batchCreateHints))
+	for customID, endpoint := range m.batchCreateHints {
+		hints[customID] = endpoint
+	}
+	return resp, hints, nil
+}
+
 func (m *mockProvider) GetBatch(_ context.Context, _ string, _ string) (*core.BatchResponse, error) {
 	if m.batchErr != nil {
 		return nil, m.batchErr
@@ -363,7 +387,10 @@ func (m *mockProvider) GetBatchResults(_ context.Context, _ string, _ string) (*
 	}, nil
 }
 
-func (m *mockProvider) GetBatchResultsWithHints(_ context.Context, _ string, _ string, endpointByCustomID map[string]string) (*core.BatchResultsResponse, error) {
+func (m *mockProvider) GetBatchResultsWithHints(ctx context.Context, providerType string, batchID string, endpointByCustomID map[string]string) (*core.BatchResultsResponse, error) {
+	m.capturedBatchHintsCtx = ctx
+	m.capturedBatchHintsProvider = providerType
+	m.capturedBatchHintsBatchID = batchID
 	if len(endpointByCustomID) > 0 {
 		m.capturedBatchHints = make(map[string]string, len(endpointByCustomID))
 		for customID, endpoint := range endpointByCustomID {
@@ -376,7 +403,8 @@ func (m *mockProvider) GetBatchResultsWithHints(_ context.Context, _ string, _ s
 	return m.GetBatchResults(context.Background(), "", "")
 }
 
-func (m *mockProvider) ClearBatchResultHints(_ string, batchID string) {
+func (m *mockProvider) ClearBatchResultHints(providerType string, batchID string) {
+	m.clearedBatchHintProvider = providerType
 	m.clearedBatchHintID = batchID
 }
 
@@ -2383,6 +2411,8 @@ func TestBatches_LifecycleEndpoints(t *testing.T) {
 }
 
 func TestBatchLifecyclePersistsAndUsesInternalEndpointHints(t *testing.T) {
+	type ctxKey string
+
 	mock := &mockProvider{
 		supportedModels: []string{"claude-sonnet-4-5-20250929"},
 		providerTypes: map[string]string{
@@ -2395,9 +2425,9 @@ func TestBatchLifecyclePersistsAndUsesInternalEndpointHints(t *testing.T) {
 			CreatedAt:        1000,
 			RequestCounts:    core.BatchRequestCounts{Total: 1},
 			CompletionWindow: "24h",
-			RequestEndpointByCustomID: map[string]string{
-				"resp-1": "/v1/responses",
-			},
+		},
+		batchCreateHints: map[string]string{
+			"resp-1": "/v1/responses",
 		},
 		batchResultsHinted: &core.BatchResultsResponse{
 			Object:  "list",
@@ -2416,6 +2446,7 @@ func TestBatchLifecyclePersistsAndUsesInternalEndpointHints(t *testing.T) {
 	  "requests":[{"custom_id":"resp-1","method":"POST","body":{"model":"claude-sonnet-4-5-20250929","input":"hi"}}]
 	}`
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(createBody))
+	createReq = createReq.WithContext(context.WithValue(createReq.Context(), ctxKey("phase"), "create"))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	createCtx := e.NewContext(createReq, createRec)
@@ -2428,6 +2459,15 @@ func TestBatchLifecyclePersistsAndUsesInternalEndpointHints(t *testing.T) {
 	if strings.Contains(createRec.Body.String(), "request_endpoint_by_custom_id") {
 		t.Fatalf("create response leaked internal hints: %s", createRec.Body.String())
 	}
+	if mock.capturedBatchProvider != "anthropic" {
+		t.Fatalf("capturedBatchProvider = %q, want anthropic", mock.capturedBatchProvider)
+	}
+	if got := mock.capturedBatchCtx.Value(ctxKey("phase")); got != "create" {
+		t.Fatalf("capturedBatchCtx phase = %#v, want create", got)
+	}
+	if mock.clearedBatchHintProvider != "anthropic" {
+		t.Fatalf("clearedBatchHintProvider = %q, want anthropic", mock.clearedBatchHintProvider)
+	}
 	if mock.clearedBatchHintID != "provider-batch-1" {
 		t.Fatalf("clearedBatchHintID = %q, want provider-batch-1", mock.clearedBatchHintID)
 	}
@@ -2438,6 +2478,7 @@ func TestBatchLifecyclePersistsAndUsesInternalEndpointHints(t *testing.T) {
 	}
 
 	resReq := httptest.NewRequest(http.MethodGet, "/v1/batches/"+created.ID+"/results", nil)
+	resReq = resReq.WithContext(context.WithValue(resReq.Context(), ctxKey("phase"), "results"))
 	resRec := httptest.NewRecorder()
 	resCtx := e.NewContext(resReq, resRec)
 	resCtx.SetPath("/v1/batches/:id/results")
@@ -2450,6 +2491,15 @@ func TestBatchLifecyclePersistsAndUsesInternalEndpointHints(t *testing.T) {
 	}
 	if got := mock.capturedBatchHints["resp-1"]; got != "/v1/responses" {
 		t.Fatalf("capturedBatchHints[resp-1] = %q, want /v1/responses", got)
+	}
+	if mock.capturedBatchHintsProvider != "anthropic" {
+		t.Fatalf("capturedBatchHintsProvider = %q, want anthropic", mock.capturedBatchHintsProvider)
+	}
+	if mock.capturedBatchHintsBatchID != "provider-batch-1" {
+		t.Fatalf("capturedBatchHintsBatchID = %q, want provider-batch-1", mock.capturedBatchHintsBatchID)
+	}
+	if got := mock.capturedBatchHintsCtx.Value(ctxKey("phase")); got != "results" {
+		t.Fatalf("capturedBatchHintsCtx phase = %#v, want results", got)
 	}
 }
 

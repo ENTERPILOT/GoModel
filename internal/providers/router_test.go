@@ -145,6 +145,7 @@ type mockBatchProvider struct {
 	listBatchesResp    *core.BatchListResponse
 	hintedBatchResults *core.BatchResultsResponse
 	capturedBatchHints map[string]string
+	capturedBatchID    string
 	clearedBatchHintID string
 }
 
@@ -171,7 +172,8 @@ func (m *mockBatchProvider) GetBatchResults(_ context.Context, _ string) (*core.
 	return &core.BatchResultsResponse{Object: "list", BatchID: "provider-batch-1"}, nil
 }
 
-func (m *mockBatchProvider) GetBatchResultsWithHints(_ context.Context, _ string, endpointByCustomID map[string]string) (*core.BatchResultsResponse, error) {
+func (m *mockBatchProvider) GetBatchResultsWithHints(_ context.Context, batchID string, endpointByCustomID map[string]string) (*core.BatchResultsResponse, error) {
+	m.capturedBatchID = batchID
 	if len(endpointByCustomID) > 0 {
 		m.capturedBatchHints = make(map[string]string, len(endpointByCustomID))
 		for customID, endpoint := range endpointByCustomID {
@@ -721,6 +723,9 @@ func TestRouterGetBatchResultsWithHintsUsesHintAwareProvider(t *testing.T) {
 	}
 	if got := provider.capturedBatchHints["resp-1"]; got != "/v1/responses" {
 		t.Fatalf("capturedBatchHints[resp-1] = %q, want /v1/responses", got)
+	}
+	if provider.capturedBatchID != "provider-batch-1" {
+		t.Fatalf("capturedBatchID = %q, want provider-batch-1", provider.capturedBatchID)
 	}
 
 	router.ClearBatchResultHints("anthropic", "provider-batch-1")

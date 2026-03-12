@@ -13,12 +13,19 @@ import (
 // ErrNotFound indicates a requested batch was not found.
 var ErrNotFound = errors.New("batch not found")
 
+// StoredBatch keeps the public batch response separate from gateway-only
+// persistence hints that should never be exposed by API DTOs.
+type StoredBatch struct {
+	Batch                     *core.BatchResponse `json:"batch"`
+	RequestEndpointByCustomID map[string]string   `json:"request_endpoint_by_custom_id,omitempty"`
+}
+
 // Store defines persistence operations for batch lifecycle APIs.
 type Store interface {
-	Create(ctx context.Context, batch *core.BatchResponse) error
-	Get(ctx context.Context, id string) (*core.BatchResponse, error)
-	List(ctx context.Context, limit int, after string) ([]*core.BatchResponse, error)
-	Update(ctx context.Context, batch *core.BatchResponse) error
+	Create(ctx context.Context, batch *StoredBatch) error
+	Get(ctx context.Context, id string) (*StoredBatch, error)
+	List(ctx context.Context, limit int, after string) ([]*StoredBatch, error)
+	Update(ctx context.Context, batch *StoredBatch) error
 	Close() error
 }
 
@@ -33,7 +40,7 @@ func normalizeLimit(limit int) int {
 	}
 }
 
-func cloneBatch(src *core.BatchResponse) (*core.BatchResponse, error) {
+func cloneBatch(src *StoredBatch) (*StoredBatch, error) {
 	if src == nil {
 		return nil, fmt.Errorf("batch is nil")
 	}
@@ -41,18 +48,21 @@ func cloneBatch(src *core.BatchResponse) (*core.BatchResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal batch: %w", err)
 	}
-	var dst core.BatchResponse
+	var dst StoredBatch
 	if err := json.Unmarshal(b, &dst); err != nil {
 		return nil, fmt.Errorf("unmarshal batch: %w", err)
 	}
 	return &dst, nil
 }
 
-func serializeBatch(batch *core.BatchResponse) ([]byte, error) {
+func serializeBatch(batch *StoredBatch) ([]byte, error) {
 	if batch == nil {
 		return nil, fmt.Errorf("batch is nil")
 	}
-	if len(batch.ID) == 0 {
+	if batch.Batch == nil {
+		return nil, fmt.Errorf("batch payload is nil")
+	}
+	if len(batch.Batch.ID) == 0 {
 		return nil, fmt.Errorf("batch ID is empty")
 	}
 	b, err := json.Marshal(batch)
@@ -62,13 +72,19 @@ func serializeBatch(batch *core.BatchResponse) ([]byte, error) {
 	return b, nil
 }
 
-func deserializeBatch(raw []byte) (*core.BatchResponse, error) {
+func deserializeBatch(raw []byte) (*StoredBatch, error) {
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("empty batch payload")
 	}
-	var batch core.BatchResponse
-	if err := json.Unmarshal(raw, &batch); err != nil {
+
+	var stored StoredBatch
+	if err := json.Unmarshal(raw, &stored); err == nil && stored.Batch != nil && stored.Batch.ID != "" {
+		return &stored, nil
+	}
+
+	var legacy core.BatchResponse
+	if err := json.Unmarshal(raw, &legacy); err != nil {
 		return nil, fmt.Errorf("unmarshal batch: %w", err)
 	}
-	return &batch, nil
+	return &StoredBatch{Batch: &legacy}, nil
 }

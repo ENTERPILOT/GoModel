@@ -86,11 +86,6 @@ type BatchResponse struct {
 	RequestCounts    BatchRequestCounts `json:"request_counts"`
 	Metadata         map[string]string  `json:"metadata,omitempty"`
 
-	// Gateway-internal batch item endpoint hints persisted so providers can
-	// re-shape native results after process restarts without leaking them in
-	// API responses.
-	RequestEndpointByCustomID map[string]string `json:"request_endpoint_by_custom_id,omitempty" swaggerignore:"true"`
-
 	// Gateway extension: optional usage/result snapshots persisted by the gateway.
 	Usage   BatchUsageSummary `json:"usage"`
 	Results []BatchResultItem `json:"results,omitempty"`

@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"gomodel/internal/core"
 )
 
 // SQLiteStore stores batches in SQLite.
@@ -45,7 +43,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 }
 
 // Create inserts a new batch.
-func (s *SQLiteStore) Create(ctx context.Context, batch *core.BatchResponse) error {
+func (s *SQLiteStore) Create(ctx context.Context, batch *StoredBatch) error {
 	payload, err := serializeBatch(batch)
 	if err != nil {
 		return err
@@ -55,7 +53,7 @@ func (s *SQLiteStore) Create(ctx context.Context, batch *core.BatchResponse) err
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO batches (id, created_at, updated_at, status, data)
 		VALUES (?, ?, ?, ?, ?)
-	`, batch.ID, batch.CreatedAt, updatedAt, batch.Status, string(payload))
+	`, batch.Batch.ID, batch.Batch.CreatedAt, updatedAt, batch.Batch.Status, string(payload))
 	if err != nil {
 		return fmt.Errorf("insert batch: %w", err)
 	}
@@ -63,7 +61,7 @@ func (s *SQLiteStore) Create(ctx context.Context, batch *core.BatchResponse) err
 }
 
 // Get returns a batch by id.
-func (s *SQLiteStore) Get(ctx context.Context, id string) (*core.BatchResponse, error) {
+func (s *SQLiteStore) Get(ctx context.Context, id string) (*StoredBatch, error) {
 	var payload string
 	err := s.db.QueryRowContext(ctx, "SELECT data FROM batches WHERE id = ?", id).Scan(&payload)
 	if err != nil {
@@ -81,7 +79,7 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*core.BatchResponse, 
 }
 
 // List returns batches ordered by created_at desc, id desc.
-func (s *SQLiteStore) List(ctx context.Context, limit int, after string) ([]*core.BatchResponse, error) {
+func (s *SQLiteStore) List(ctx context.Context, limit int, after string) ([]*StoredBatch, error) {
 	limit = normalizeLimit(limit)
 
 	var rows *sql.Rows
@@ -116,7 +114,7 @@ func (s *SQLiteStore) List(ctx context.Context, limit int, after string) ([]*cor
 	}
 	defer rows.Close()
 
-	items := make([]*core.BatchResponse, 0, limit)
+	items := make([]*StoredBatch, 0, limit)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
@@ -136,7 +134,7 @@ func (s *SQLiteStore) List(ctx context.Context, limit int, after string) ([]*cor
 }
 
 // Update updates a stored batch object.
-func (s *SQLiteStore) Update(ctx context.Context, batch *core.BatchResponse) error {
+func (s *SQLiteStore) Update(ctx context.Context, batch *StoredBatch) error {
 	payload, err := serializeBatch(batch)
 	if err != nil {
 		return err
@@ -147,7 +145,7 @@ func (s *SQLiteStore) Update(ctx context.Context, batch *core.BatchResponse) err
 		UPDATE batches
 		SET updated_at = ?, status = ?, data = ?
 		WHERE id = ?
-	`, updatedAt, batch.Status, string(payload), batch.ID)
+	`, updatedAt, batch.Batch.Status, string(payload), batch.Batch.ID)
 	if err != nil {
 		return fmt.Errorf("update batch: %w", err)
 	}

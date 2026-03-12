@@ -401,6 +401,24 @@ func (r *Router) CreateBatch(ctx context.Context, providerType string, req *core
 	return stampProvider(resp, providerType), err
 }
 
+// CreateBatchWithHints routes native batch creation and returns any provider
+// batch-result shaping hints that need gateway persistence.
+func (r *Router) CreateBatchWithHints(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, map[string]string, error) {
+	type createBatchWithHintsResult struct {
+		resp  *core.BatchResponse
+		hints map[string]string
+	}
+	result, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (createBatchWithHintsResult, error) {
+		if hinted, ok := bp.(core.BatchCreateHintAwareProvider); ok {
+			resp, hints, err := hinted.CreateBatchWithHints(ctx, req)
+			return createBatchWithHintsResult{resp: resp, hints: hints}, err
+		}
+		resp, err := bp.CreateBatch(ctx, req)
+		return createBatchWithHintsResult{resp: resp}, err
+	})
+	return stampProvider(result.resp, providerType), result.hints, err
+}
+
 // GetBatch routes native batch lookup to a provider type.
 func (r *Router) GetBatch(ctx context.Context, providerType, id string) (*core.BatchResponse, error) {
 	resp, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResponse, error) {

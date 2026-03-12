@@ -5,27 +5,25 @@ import (
 	"fmt"
 	"sort"
 	"sync"
-
-	"gomodel/internal/core"
 )
 
 // MemoryStore keeps batches in process memory.
 // Data survives across requests but not process restarts.
 type MemoryStore struct {
 	mu    sync.RWMutex
-	items map[string]*core.BatchResponse
+	items map[string]*StoredBatch
 }
 
 // NewMemoryStore creates an empty in-memory batch store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		items: make(map[string]*core.BatchResponse),
+		items: make(map[string]*StoredBatch),
 	}
 }
 
 // Create stores a new batch.
-func (s *MemoryStore) Create(_ context.Context, batch *core.BatchResponse) error {
-	if batch == nil || batch.ID == "" {
+func (s *MemoryStore) Create(_ context.Context, batch *StoredBatch) error {
+	if batch == nil || batch.Batch == nil || batch.Batch.ID == "" {
 		return fmt.Errorf("batch id is required")
 	}
 
@@ -36,15 +34,15 @@ func (s *MemoryStore) Create(_ context.Context, batch *core.BatchResponse) error
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, exists := s.items[c.ID]; exists {
-		return fmt.Errorf("batch already exists: %s", c.ID)
+	if _, exists := s.items[c.Batch.ID]; exists {
+		return fmt.Errorf("batch already exists: %s", c.Batch.ID)
 	}
-	s.items[c.ID] = c
+	s.items[c.Batch.ID] = c
 	return nil
 }
 
 // Get retrieves one batch by id.
-func (s *MemoryStore) Get(_ context.Context, id string) (*core.BatchResponse, error) {
+func (s *MemoryStore) Get(_ context.Context, id string) (*StoredBatch, error) {
 	s.mu.RLock()
 	b, ok := s.items[id]
 	s.mu.RUnlock()
@@ -55,11 +53,11 @@ func (s *MemoryStore) Get(_ context.Context, id string) (*core.BatchResponse, er
 }
 
 // List returns batches ordered by created_at desc, id desc.
-func (s *MemoryStore) List(_ context.Context, limit int, after string) ([]*core.BatchResponse, error) {
+func (s *MemoryStore) List(_ context.Context, limit int, after string) ([]*StoredBatch, error) {
 	limit = normalizeLimit(limit)
 
 	s.mu.RLock()
-	all := make([]*core.BatchResponse, 0, len(s.items))
+	all := make([]*StoredBatch, 0, len(s.items))
 	for _, b := range s.items {
 		c, err := cloneBatch(b)
 		if err != nil {
@@ -71,17 +69,17 @@ func (s *MemoryStore) List(_ context.Context, limit int, after string) ([]*core.
 	s.mu.RUnlock()
 
 	sort.Slice(all, func(i, j int) bool {
-		if all[i].CreatedAt == all[j].CreatedAt {
-			return all[i].ID > all[j].ID
+		if all[i].Batch.CreatedAt == all[j].Batch.CreatedAt {
+			return all[i].Batch.ID > all[j].Batch.ID
 		}
-		return all[i].CreatedAt > all[j].CreatedAt
+		return all[i].Batch.CreatedAt > all[j].Batch.CreatedAt
 	})
 
 	start := 0
 	if after != "" {
 		idx := -1
 		for i := range all {
-			if all[i].ID == after {
+			if all[i].Batch.ID == after {
 				idx = i
 				break
 			}
@@ -93,7 +91,7 @@ func (s *MemoryStore) List(_ context.Context, limit int, after string) ([]*core.
 	}
 
 	if start >= len(all) {
-		return []*core.BatchResponse{}, nil
+		return []*StoredBatch{}, nil
 	}
 	end := start + limit
 	if end > len(all) {
@@ -103,8 +101,8 @@ func (s *MemoryStore) List(_ context.Context, limit int, after string) ([]*core.
 }
 
 // Update replaces an existing batch object.
-func (s *MemoryStore) Update(_ context.Context, batch *core.BatchResponse) error {
-	if batch == nil || batch.ID == "" {
+func (s *MemoryStore) Update(_ context.Context, batch *StoredBatch) error {
+	if batch == nil || batch.Batch == nil || batch.Batch.ID == "" {
 		return fmt.Errorf("batch id is required")
 	}
 	c, err := cloneBatch(batch)
@@ -114,10 +112,10 @@ func (s *MemoryStore) Update(_ context.Context, batch *core.BatchResponse) error
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, exists := s.items[c.ID]; !exists {
+	if _, exists := s.items[c.Batch.ID]; !exists {
 		return ErrNotFound
 	}
-	s.items[c.ID] = c
+	s.items[c.Batch.ID] = c
 	return nil
 }
 
