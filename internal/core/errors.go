@@ -180,7 +180,13 @@ func ParseProviderError(provider string, statusCode int, body []byte, originalEr
 	var gatewayErr *GatewayError
 	switch {
 	case statusCode == http.StatusUnauthorized:
-		gatewayErr = NewAuthenticationError(provider, message)
+		gatewayErr = &GatewayError{
+			Type:       ErrorTypeAuthentication,
+			Message:    message,
+			StatusCode: http.StatusUnauthorized,
+			Provider:   provider,
+			Err:        originalErr,
+		}
 	case statusCode == http.StatusForbidden:
 		gatewayErr = &GatewayError{
 			Type:       ErrorTypeAuthentication,
@@ -190,7 +196,13 @@ func ParseProviderError(provider string, statusCode int, body []byte, originalEr
 			Err:        originalErr,
 		}
 	case statusCode == http.StatusTooManyRequests:
-		gatewayErr = NewRateLimitError(provider, message)
+		gatewayErr = &GatewayError{
+			Type:       ErrorTypeRateLimit,
+			Message:    message,
+			StatusCode: http.StatusTooManyRequests,
+			Provider:   provider,
+			Err:        originalErr,
+		}
 	case statusCode == http.StatusNotFound:
 		// 404 - model or resource not found
 		gatewayErr = NewNotFoundError(message)

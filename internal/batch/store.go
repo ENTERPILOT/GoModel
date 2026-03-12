@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"gomodel/internal/core"
 )
@@ -13,11 +16,20 @@ import (
 // ErrNotFound indicates a requested batch was not found.
 var ErrNotFound = errors.New("batch not found")
 
+const (
+	// RequestIDMetadataKey is the legacy metadata key used to persist batch request IDs.
+	RequestIDMetadataKey = "request_id"
+	// UsageLoggedAtMetadataKey is the legacy metadata key used to mark logged batch usage.
+	UsageLoggedAtMetadataKey = "usage_logged_at"
+)
+
 // StoredBatch keeps the public batch response separate from gateway-only
 // persistence hints that should never be exposed by API DTOs.
 type StoredBatch struct {
 	Batch                     *core.BatchResponse `json:"batch"`
 	RequestEndpointByCustomID map[string]string   `json:"request_endpoint_by_custom_id,omitempty"`
+	RequestID                 string              `json:"request_id,omitempty"`
+	UsageLoggedAt             *time.Time          `json:"usage_logged_at,omitempty"`
 }
 
 // Store defines persistence operations for batch lifecycle APIs.
@@ -44,7 +56,8 @@ func cloneBatch(src *StoredBatch) (*StoredBatch, error) {
 	if src == nil {
 		return nil, fmt.Errorf("batch is nil")
 	}
-	b, err := json.Marshal(src)
+	normalized := normalizeStoredBatch(src)
+	b, err := json.Marshal(normalized)
 	if err != nil {
 		return nil, fmt.Errorf("marshal batch: %w", err)
 	}
@@ -59,13 +72,14 @@ func serializeBatch(batch *StoredBatch) ([]byte, error) {
 	if batch == nil {
 		return nil, fmt.Errorf("batch is nil")
 	}
-	if batch.Batch == nil {
+	normalized := normalizeStoredBatch(batch)
+	if normalized.Batch == nil {
 		return nil, fmt.Errorf("batch payload is nil")
 	}
-	if len(batch.Batch.ID) == 0 {
+	if len(normalized.Batch.ID) == 0 {
 		return nil, fmt.Errorf("batch ID is empty")
 	}
-	b, err := json.Marshal(batch)
+	b, err := json.Marshal(normalized)
 	if err != nil {
 		return nil, fmt.Errorf("marshal batch: %w", err)
 	}
@@ -79,12 +93,85 @@ func deserializeBatch(raw []byte) (*StoredBatch, error) {
 
 	var stored StoredBatch
 	if err := json.Unmarshal(raw, &stored); err == nil && stored.Batch != nil && stored.Batch.ID != "" {
-		return &stored, nil
+		return normalizeStoredBatch(&stored), nil
 	}
 
 	var legacy core.BatchResponse
 	if err := json.Unmarshal(raw, &legacy); err != nil {
 		return nil, fmt.Errorf("unmarshal batch: %w", err)
 	}
-	return &StoredBatch{Batch: &legacy}, nil
+	if legacy.ID == "" {
+		return nil, fmt.Errorf("legacy batch missing ID")
+	}
+	return normalizeStoredBatch(&StoredBatch{Batch: &legacy}), nil
+}
+
+func normalizeStoredBatch(src *StoredBatch) *StoredBatch {
+	if src == nil {
+		return nil
+	}
+
+	normalized := *src
+	if src.Batch == nil {
+		return &normalized
+	}
+
+	batchCopy := *src.Batch
+	batchCopy.Metadata, normalized.RequestID, normalized.UsageLoggedAt = splitGatewayBatchMetadata(
+		src.Batch.Metadata,
+		normalized.RequestID,
+		normalized.UsageLoggedAt,
+	)
+	normalized.Batch = &batchCopy
+	return &normalized
+}
+
+func splitGatewayBatchMetadata(metadata map[string]string, requestID string, usageLoggedAt *time.Time) (map[string]string, string, *time.Time) {
+	if len(metadata) == 0 {
+		return nil, strings.TrimSpace(requestID), usageLoggedAt
+	}
+
+	publicMetadata := make(map[string]string, len(metadata))
+	normalizedRequestID := strings.TrimSpace(requestID)
+	normalizedUsageLoggedAt := usageLoggedAt
+
+	for key, value := range metadata {
+		switch key {
+		case RequestIDMetadataKey:
+			if normalizedRequestID == "" {
+				normalizedRequestID = strings.TrimSpace(value)
+			}
+		case UsageLoggedAtMetadataKey:
+			if normalizedUsageLoggedAt == nil {
+				normalizedUsageLoggedAt = parseUsageLoggedAt(value)
+			}
+		default:
+			publicMetadata[key] = value
+		}
+	}
+
+	if len(publicMetadata) == 0 {
+		publicMetadata = nil
+	}
+
+	return publicMetadata, normalizedRequestID, normalizedUsageLoggedAt
+}
+
+func parseUsageLoggedAt(raw string) *time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	if unixSeconds, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		ts := time.Unix(unixSeconds, 0).UTC()
+		return &ts
+	}
+
+	if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		ts := parsed.UTC()
+		return &ts
+	}
+
+	return nil
 }

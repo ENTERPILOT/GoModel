@@ -2462,6 +2462,9 @@ func TestBatchLifecyclePersistsAndUsesInternalEndpointHints(t *testing.T) {
 	if mock.capturedBatchProvider != "anthropic" {
 		t.Fatalf("capturedBatchProvider = %q, want anthropic", mock.capturedBatchProvider)
 	}
+	if got := core.GetRequestID(mock.capturedBatchCtx); got == "" {
+		t.Fatal("expected request ID on create batch provider context")
+	}
 	if got := mock.capturedBatchCtx.Value(ctxKey("phase")); got != "create" {
 		t.Fatalf("capturedBatchCtx phase = %#v, want create", got)
 	}
@@ -2497,6 +2500,9 @@ func TestBatchLifecyclePersistsAndUsesInternalEndpointHints(t *testing.T) {
 	}
 	if mock.capturedBatchHintsBatchID != "provider-batch-1" {
 		t.Fatalf("capturedBatchHintsBatchID = %q, want provider-batch-1", mock.capturedBatchHintsBatchID)
+	}
+	if got := core.GetRequestID(mock.capturedBatchHintsCtx); got == "" {
+		t.Fatal("expected request ID on batch results provider context")
 	}
 	if got := mock.capturedBatchHintsCtx.Value(ctxKey("phase")); got != "results" {
 		t.Fatalf("capturedBatchHintsCtx phase = %#v, want results", got)

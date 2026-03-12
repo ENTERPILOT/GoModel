@@ -538,6 +538,39 @@ func TestParseProviderError_Preserves4xxStatusCodes(t *testing.T) {
 	}
 }
 
+func TestParseProviderError_PreservesWrappedErrorsForAuthAndRateLimit(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		wantType   ErrorType
+	}{
+		{
+			name:       "401 unauthorized",
+			statusCode: http.StatusUnauthorized,
+			wantType:   ErrorTypeAuthentication,
+		},
+		{
+			name:       "429 rate limit",
+			statusCode: http.StatusTooManyRequests,
+			wantType:   ErrorTypeRateLimit,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			originalErr := errors.New("upstream transport error")
+			err := ParseProviderError("openai", tt.statusCode, []byte(`{"error":{"message":"boom"}}`), originalErr)
+
+			if err.Type != tt.wantType {
+				t.Fatalf("Type = %v, want %v", err.Type, tt.wantType)
+			}
+			if !errors.Is(err, originalErr) {
+				t.Fatalf("expected wrapped original error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestParseProviderError_SpecialStatusCodesOverride(t *testing.T) {
 	// Verify that special status codes (401, 403, 429) still have their special handling
 	tests := []struct {

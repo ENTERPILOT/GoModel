@@ -2,14 +2,14 @@
 
 ## Purpose
 
-GoModel is a high-performance AI gateway in Go that routes requests to multiple AI model providers through a OpenAI-compatible API.
+GoModel is a high-performance AI gateway in Go that routes requests to multiple AI model providers through an OpenAI-compatible API.
 
 ## Core Principles
 
 Follow Postel's Law: be conservative in what you send, liberal in what you accept.
 
 - GOModel accepts client requests generously (e.g. `max_tokens` for any model) and adapts them to each provider's specific requirements before forwarding (e.g. translating `max_tokens` → `max_completion_tokens` for OpenAI reasoning models).
-- GOModel accepts provider's response liberally and pass it to the user in a conservative OpenAI-compatible shape.
+- GOModel accepts providers' responses liberally and passes them to the user in a conservative OpenAI-compatible shape.
 
 [The Twelve-Factor App](https://12factor.net/).
 

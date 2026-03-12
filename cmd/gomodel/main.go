@@ -51,6 +51,9 @@ func shutdownApplication(application lifecycleApp, ctx context.Context) error {
 	}
 }
 
+// startApplication calls lifecycleApp.Start and, if Start fails, attempts a
+// graceful shutdown via shutdownApplication using shutdownTimeout before
+// returning the original start error or a combined start/shutdown error.
 func startApplication(application lifecycleApp, addr string) error {
 	if err := application.Start(context.Background(), addr); err != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
