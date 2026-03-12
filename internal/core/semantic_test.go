@@ -27,6 +27,7 @@ func TestBuildSemanticEnvelope_OpenAICompat(t *testing.T) {
 	env := BuildSemanticEnvelope(frame)
 	if env == nil {
 		t.Fatal("BuildSemanticEnvelope() = nil")
+		return
 	}
 	if env.Dialect != "openai_compat" {
 		t.Fatalf("Dialect = %q, want openai_compat", env.Dialect)
@@ -54,6 +55,7 @@ func TestBuildSemanticEnvelope_InvalidJSONRemainsPartial(t *testing.T) {
 	env := BuildSemanticEnvelope(frame)
 	if env == nil {
 		t.Fatal("BuildSemanticEnvelope() = nil")
+		return
 	}
 	if env.Dialect != "openai_compat" {
 		t.Fatalf("Dialect = %q, want openai_compat", env.Dialect)
@@ -86,6 +88,7 @@ func TestBuildSemanticEnvelope_PassthroughRouteParams(t *testing.T) {
 	env := BuildSemanticEnvelope(frame)
 	if env == nil {
 		t.Fatal("BuildSemanticEnvelope() = nil")
+		return
 	}
 	if env.Dialect != "provider_passthrough" {
 		t.Fatalf("Dialect = %q, want provider_passthrough", env.Dialect)
@@ -113,6 +116,7 @@ func TestBuildSemanticEnvelope_PassthroughPathFallback(t *testing.T) {
 	env := BuildSemanticEnvelope(frame)
 	if env == nil {
 		t.Fatal("BuildSemanticEnvelope() = nil")
+		return
 	}
 	if env.SelectorHints.Provider != "anthropic" {
 		t.Fatalf("SelectorHints.Provider = %q, want anthropic", env.SelectorHints.Provider)
@@ -128,6 +132,7 @@ func TestBuildSemanticEnvelope_SkipsBodyParsingWhenIngressBodyWasNotCaptured(t *
 	env := BuildSemanticEnvelope(frame)
 	if env == nil {
 		t.Fatal("BuildSemanticEnvelope() = nil")
+		return
 	}
 	if env.JSONBodyParsed {
 		t.Fatal("JSONBodyParsed = true, want false")
@@ -156,6 +161,7 @@ func TestBuildSemanticEnvelope_FilesMetadata(t *testing.T) {
 	env := BuildSemanticEnvelope(frame)
 	if env == nil {
 		t.Fatal("BuildSemanticEnvelope() = nil")
+		return
 	}
 	if env.Operation != "files" {
 		t.Fatalf("Operation = %q, want files", env.Operation)
@@ -163,6 +169,7 @@ func TestBuildSemanticEnvelope_FilesMetadata(t *testing.T) {
 	req := env.CachedFileRequest()
 	if req == nil {
 		t.Fatal("FileRequest = nil")
+		return
 	}
 	if req.Action != FileActionContent {
 		t.Fatalf("FileRequest.Action = %q, want %q", req.Action, FileActionContent)
@@ -198,6 +205,7 @@ func TestBuildSemanticEnvelope_BatchesListMetadata(t *testing.T) {
 	env := BuildSemanticEnvelope(frame)
 	if env == nil {
 		t.Fatal("BuildSemanticEnvelope() = nil")
+		return
 	}
 	if env.Operation != "batches" {
 		t.Fatalf("Operation = %q, want batches", env.Operation)
@@ -205,6 +213,7 @@ func TestBuildSemanticEnvelope_BatchesListMetadata(t *testing.T) {
 	req := env.CachedBatchMetadata()
 	if req == nil {
 		t.Fatal("BatchMetadata = nil")
+		return
 	}
 	if req.Action != BatchActionList {
 		t.Fatalf("BatchMetadata.Action = %q, want %q", req.Action, BatchActionList)
@@ -223,6 +232,7 @@ func TestBuildSemanticEnvelope_BatchResultsMetadata(t *testing.T) {
 	env := BuildSemanticEnvelope(frame)
 	if env == nil {
 		t.Fatal("BuildSemanticEnvelope() = nil")
+		return
 	}
 	if env.Operation != "batches" {
 		t.Fatalf("Operation = %q, want batches", env.Operation)
@@ -230,6 +240,7 @@ func TestBuildSemanticEnvelope_BatchResultsMetadata(t *testing.T) {
 	req := env.CachedBatchMetadata()
 	if req == nil {
 		t.Fatal("BatchMetadata = nil")
+		return
 	}
 	if req.Action != BatchActionResults {
 		t.Fatalf("BatchMetadata.Action = %q, want %q", req.Action, BatchActionResults)

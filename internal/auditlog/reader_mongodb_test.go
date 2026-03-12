@@ -17,6 +17,7 @@ func TestSanitizeLogDataRedactsHeaders(t *testing.T) {
 	sanitized := sanitizeLogData(original)
 	if sanitized == nil {
 		t.Fatalf("sanitizeLogData returned nil")
+		return
 	}
 
 	if got := sanitized.RequestHeaders["Authorization"]; got != "[REDACTED]" {
