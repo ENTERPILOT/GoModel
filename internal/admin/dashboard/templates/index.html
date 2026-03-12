@@ -489,7 +489,7 @@
            @keydown.escape.window="conversationOpen && closeConversation()">
         <div class="conversation-drawer-header">
             <h3 id="interactions-drawer-title">Interactions</h3>
-            <button class="pagination-btn" x-ref="conversationCloseBtn" aria-label="Close interactions" @click="closeConversation()">Close</button>
+            <button type="button" class="pagination-btn" x-ref="conversationCloseBtn" aria-label="Close interactions" @click="closeConversation()">Close</button>
         </div>
 
         <div id="interactions-drawer-content">
@@ -513,7 +513,7 @@
                         </header>
                         <pre class="chat-content" x-show="msg.text && msg.role !== 'function_call' && msg.role !== 'function_result'" x-text="msg.text"></pre>
                         <footer class="chat-tool-calls" x-show="msg.toolCalls && msg.role !== 'function_call'">
-                            <template x-for="tc in (msg.toolCalls || [])" :key="tc.name">
+                            <template x-for="(tc, tcIdx) in (msg.toolCalls || [])" :key="tc.name + '-' + tcIdx">
                                 <div class="chat-tool-call">
                                     <span class="chat-tool-call-name" x-text="tc.name + '()'"></span>
                                 </div>

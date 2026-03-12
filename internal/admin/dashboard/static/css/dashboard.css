@@ -1458,6 +1458,11 @@ td.col-price {
     border-color: color-mix(in srgb, var(--success) 30%, var(--border));
 }
 
+.chat-function-note.is-anchor.role-function-call,
+.chat-function-note.is-anchor.role-function-result {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
 /* Collapsible function notes */
 .chat-function-note-details {
     width: 100%;

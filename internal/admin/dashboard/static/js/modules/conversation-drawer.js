@@ -145,6 +145,14 @@
                 const extractConversationErrorMessage = typeof h.extractConversationErrorMessage === 'function' ? h.extractConversationErrorMessage : () => '';
 
                 const sorted = [...entries].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                const callIdMap = {};
+                sorted.forEach((entry) => {
+                    const rb = entry.data && entry.data.request_body ? entry.data.request_body : null;
+                    const rsb = entry.data && entry.data.response_body ? entry.data.response_body : null;
+                    this._collectCallIds(callIdMap, rb, rsb);
+                });
+
                 const messages = [];
                 let idx = 0;
 
@@ -164,7 +172,8 @@
                             const role = (m.role || 'user').toLowerCase();
                             if (role === 'tool') {
                                 const text = extractText(m.content);
-                                if (text) messages.push(this._conversationMessage('function_result', text, ts, entry.id, isAnchor, ++idx, [], m.name || ''));
+                                const fnName = m.name || callIdMap[m.tool_call_id] || '';
+                                if (text) messages.push(this._conversationMessage('function_result', text, ts, entry.id, isAnchor, ++idx, [], fnName));
                                 return;
                             }
                             if (role === 'assistant') {
@@ -181,14 +190,21 @@
                     }
 
                     if (requestBody && requestBody.input !== undefined) {
-                        extractResponsesInputMessages(requestBody.input).forEach((m) => {
-                            if (m.text) messages.push(this._conversationMessage(m.role, m.text, ts, entry.id, isAnchor, ++idx));
-                        });
                         if (Array.isArray(requestBody.input)) {
                             requestBody.input.forEach((item) => {
-                                if (!item || typeof item !== 'object' || item.type !== 'function_call_output') return;
-                                const text = typeof item.output === 'string' ? item.output : extractText(item.output);
-                                if (text) messages.push(this._conversationMessage('function_result', text, ts, entry.id, isAnchor, ++idx, [], item.call_id || ''));
+                                if (!item || typeof item !== 'object') return;
+                                if (item.type === 'function_call_output') {
+                                    const text = typeof item.output === 'string' ? item.output : extractText(item.output);
+                                    if (text) messages.push(this._conversationMessage('function_result', text, ts, entry.id, isAnchor, ++idx, [], callIdMap[item.call_id] || ''));
+                                } else {
+                                    extractResponsesInputMessages(item).forEach((m) => {
+                                        if (m.text) messages.push(this._conversationMessage(m.role, m.text, ts, entry.id, isAnchor, ++idx));
+                                    });
+                                }
+                            });
+                        } else {
+                            extractResponsesInputMessages(requestBody.input).forEach((m) => {
+                                if (m.text) messages.push(this._conversationMessage(m.role, m.text, ts, entry.id, isAnchor, ++idx));
                             });
                         }
                     }
@@ -225,6 +241,49 @@
                 });
 
                 return messages;
+            },
+
+            _collectCallIds(map, requestBody, responseBody) {
+                if (requestBody && Array.isArray(requestBody.messages)) {
+                    requestBody.messages.forEach((m) => {
+                        if (!m || !Array.isArray(m.tool_calls)) return;
+                        m.tool_calls.forEach((tc) => {
+                            if (!tc) return;
+                            const id = tc.id || '';
+                            const fn = tc.function || tc;
+                            const name = fn.name || tc.name || '';
+                            if (id && name) map[id] = name;
+                        });
+                    });
+                }
+                if (requestBody && Array.isArray(requestBody.input)) {
+                    requestBody.input.forEach((item) => {
+                        if (!item || typeof item !== 'object' || item.type !== 'function_call') return;
+                        const id = item.id || item.call_id || '';
+                        const name = item.name || '';
+                        if (id && name) map[id] = name;
+                    });
+                }
+                if (responseBody && Array.isArray(responseBody.choices)) {
+                    const first = responseBody.choices[0];
+                    if (first && first.message && Array.isArray(first.message.tool_calls)) {
+                        first.message.tool_calls.forEach((tc) => {
+                            if (!tc) return;
+                            const id = tc.id || '';
+                            const fn = tc.function || tc;
+                            const name = fn.name || tc.name || '';
+                            if (id && name) map[id] = name;
+                        });
+                    }
+                }
+                if (responseBody && Array.isArray(responseBody.output)) {
+                    responseBody.output.forEach((item) => {
+                        if (!item || item.type !== 'function_call') return;
+                        const id = item.id || item.call_id || '';
+                        const name = item.name || '';
+                        if (id && name) map[id] = name;
+                    });
+                }
             },
 
             _extractToolCalls(toolCalls) {
