@@ -75,6 +75,7 @@
                 this.conversationAnchorID = entry.id;
                 this.conversationEntries = [];
                 this.conversationMessages = [];
+                document.body.classList.add('conversation-drawer-open');
                 requestAnimationFrame(() => this._focusConversationDrawer());
                 await this.fetchConversation(entry.id, requestToken);
             },
@@ -82,6 +83,7 @@
             closeConversation() {
                 this.conversationOpen = false;
                 this.conversationRequestToken++;
+                document.body.classList.remove('conversation-drawer-open');
                 const returnFocusEl = this.conversationReturnFocusEl;
                 this.conversationReturnFocusEl = null;
                 if (returnFocusEl && typeof returnFocusEl.focus === 'function' && document.contains(returnFocusEl)) {

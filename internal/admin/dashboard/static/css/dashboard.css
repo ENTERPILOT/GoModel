@@ -1281,6 +1281,10 @@ td.col-price {
     transform: translateX(0);
 }
 
+body.conversation-drawer-open {
+    overflow: hidden;
+}
+
 .conversation-drawer-header {
     display: flex;
     align-items: center;
@@ -1301,15 +1305,20 @@ td.col-price {
     font-family: 'SF Mono', Menlo, Consolas, monospace;
 }
 
+#interactions-drawer-content {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
 .conversation-drawer-footer {
+    flex-shrink: 0;
     border-top: 1px solid var(--border);
     padding: 10px 16px;
     background: var(--bg-surface);
 }
 
 .conversation-thread {
-    flex: 1;
-    overflow: auto;
     padding: 14px 16px 20px;
     display: flex;
     flex-direction: column;
