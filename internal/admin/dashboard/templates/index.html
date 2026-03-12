@@ -396,8 +396,8 @@
                             <span class="mono" x-text="formatDurationNs(entry.duration_ns)"></span>
                             <button class="audit-conversation-trigger"
                                     x-show="canShowConversation(entry)"
-                                    title="Open conversation"
-                                    aria-label="Open conversation"
+                                    title="Open interactions"
+                                    aria-label="Open interactions"
                                     @click.stop.prevent="openConversation(entry, $el.closest('details'), true, $el)">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M9 6l6 6-6 6"/>
@@ -484,27 +484,41 @@
            role="dialog"
            aria-modal="true"
            :aria-hidden="(!conversationOpen).toString()"
-           aria-labelledby="conversation-drawer-title"
-           aria-describedby="conversation-drawer-content"
+           aria-labelledby="interactions-drawer-title"
+           aria-describedby="interactions-drawer-content"
            @keydown.escape.window="conversationOpen && closeConversation()">
         <div class="conversation-drawer-header">
-            <h3 id="conversation-drawer-title">Conversation</h3>
-            <button class="pagination-btn" x-ref="conversationCloseBtn" aria-label="Close conversation" @click="closeConversation()">Close</button>
+            <h3 id="interactions-drawer-title">Interactions</h3>
+            <button type="button" class="pagination-btn" x-ref="conversationCloseBtn" aria-label="Close interactions" @click="closeConversation()">Close</button>
         </div>
 
-        <div id="conversation-drawer-content">
+        <div id="interactions-drawer-content">
             <div class="alert alert-warning" x-show="conversationError" x-text="conversationError"></div>
-            <p class="empty-state" x-show="conversationLoading">Loading conversation...</p>
-            <p class="empty-state" x-show="!conversationLoading && !conversationError && conversationMessages.length === 0">No conversation data available for this entry.</p>
+            <p class="empty-state" x-show="conversationLoading">Loading interactions...</p>
+            <p class="empty-state" x-show="!conversationLoading && !conversationError && conversationMessages.length === 0">No interaction data available for this entry.</p>
 
             <div class="conversation-thread" x-show="conversationMessages.length > 0">
                 <template x-for="msg in conversationMessages" :key="msg.uid">
-                    <article class="chat-message" :class="[msg.roleClass, msg.isAnchor ? 'is-anchor' : '']">
-                        <header class="chat-message-meta">
+                    <article :class="[msg.role === 'function_call' || msg.role === 'function_result' ? 'chat-function-note' : 'chat-message', msg.roleClass, msg.isAnchor ? 'is-anchor' : '']">
+                        <details class="chat-function-note-details" x-show="msg.role === 'function_call' || msg.role === 'function_result'">
+                            <summary class="chat-function-note-inner">
+                                <span class="chat-function-label" x-text="msg.roleLabel"></span>
+                                <span class="chat-function-detail" x-text="msg.role === 'function_call' ? (msg.toolCalls || []).map(tc => tc.name + '()').join(', ') : (msg.functionName ? msg.functionName + ': ' : '') + msg.text"></span>
+                            </summary>
+                            <pre class="chat-function-expanded" x-text="functionExpandedContent(msg)"></pre>
+                        </details>
+                        <header class="chat-message-meta" x-show="msg.role !== 'function_call' && msg.role !== 'function_result'">
                             <span class="chat-role" x-text="msg.roleLabel"></span>
                             <span class="mono chat-time" x-text="formatTimestamp(msg.timestamp)"></span>
                         </header>
-                        <pre class="chat-content" x-text="msg.text"></pre>
+                        <pre class="chat-content" x-show="msg.text && msg.role !== 'function_call' && msg.role !== 'function_result'" x-text="msg.text"></pre>
+                        <footer class="chat-tool-calls" x-show="msg.toolCalls && msg.role !== 'function_call'">
+                            <template x-for="(tc, tcIdx) in (msg.toolCalls || [])" :key="tc.name + '-' + tcIdx">
+                                <div class="chat-tool-call">
+                                    <span class="chat-tool-call-name" x-text="tc.name + '()'"></span>
+                                </div>
+                            </template>
+                        </footer>
                     </article>
                 </template>
             </div>
