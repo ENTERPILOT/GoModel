@@ -46,8 +46,8 @@ func RequestSnapshotCapture() echo.MiddlewareFunc {
 			)
 
 			ctx := core.WithRequestSnapshot(req.Context(), snapshot)
-			if semantics := core.DeriveRequestSemantics(snapshot); semantics != nil {
-				ctx = core.WithRequestSemantics(ctx, semantics)
+			if semantics := core.DeriveWhiteBoxPrompt(snapshot); semantics != nil {
+				ctx = core.WithWhiteBoxPrompt(ctx, semantics)
 			}
 			c.SetRequest(req.WithContext(ctx))
 

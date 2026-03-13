@@ -23,17 +23,17 @@ GOModel needs a model that preserves the original request faithfully while still
 
 ## Flow Diagram
 
-![RequestSnapshot and RequestSemantics request flow](assets/0002-ingress-frame-flow.svg)
+![RequestSnapshot and WhiteBoxPrompt request flow](assets/0002-ingress-frame-flow.svg)
 
 ## Decision
 
-Use `RequestSnapshot` and `RequestSemantics` for transport-bearing model and provider request routes such as `/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`, `/v1/batches*`, `/v1/files*`, and `/p/{provider}/{endpoint}`.
+Use `RequestSnapshot` and `WhiteBoxPrompt` for transport-bearing model and provider request routes such as `/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`, `/v1/batches*`, `/v1/files*`, and `/p/{provider}/{endpoint}`.
 
 Discovery routes such as `GET /v1/models` are out of scope.
 
 `RequestSnapshot` is always present.
 
-`RequestSemantics` is optional and best-effort. It may be rich, sparse, or absent, depending on how much the gateway understands about the route, content type, and request body.
+`WhiteBoxPrompt` is optional and best-effort. It may be rich, sparse, or absent, depending on how much the gateway understands about the route, content type, and request body.
 
 This gives GOModel one consistent ingress model across both `/v1/*` and `/p/*`.
 
@@ -62,9 +62,9 @@ Its job is to preserve what came over the wire so the gateway can:
 
 `RequestSnapshot` must not be mutated.
 
-## RequestSemantics
+## WhiteBoxPrompt
 
-`RequestSemantics` is the gateway's best-effort semantic extraction from the ingress frame.
+`WhiteBoxPrompt` is the gateway's best-effort semantic extraction from the ingress frame.
 
 It may contain:
 

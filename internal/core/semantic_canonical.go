@@ -10,7 +10,7 @@ import (
 type canonicalJSONSpec[T any] struct {
 	key         semanticCacheKey
 	newValue    func() T
-	afterDecode func(*RequestSemantics, T)
+	afterDecode func(*WhiteBoxPrompt, T)
 }
 
 type semanticSelectorCarrier interface {
@@ -19,7 +19,7 @@ type semanticSelectorCarrier interface {
 
 type canonicalOperationCodec struct {
 	key            semanticCacheKey
-	decode         func([]byte, *RequestSemantics) (any, error)
+	decode         func([]byte, *WhiteBoxPrompt) (any, error)
 	decodeUncached func([]byte) (any, error)
 }
 
@@ -32,10 +32,10 @@ func unmarshalCanonicalJSON[T any](body []byte, newValue func() T) (T, error) {
 	return req, nil
 }
 
-func newCanonicalOperationCodec[T any](key semanticCacheKey, newValue func() T, afterDecode func(*RequestSemantics, T)) canonicalOperationCodec {
+func newCanonicalOperationCodec[T any](key semanticCacheKey, newValue func() T, afterDecode func(*WhiteBoxPrompt, T)) canonicalOperationCodec {
 	return canonicalOperationCodec{
 		key: key,
-		decode: func(body []byte, env *RequestSemantics) (any, error) {
+		decode: func(body []byte, env *WhiteBoxPrompt) (any, error) {
 			return decodeCanonicalJSON(body, env, canonicalJSONSpec[T]{
 				key:         key,
 				newValue:    newValue,
@@ -49,17 +49,17 @@ func newCanonicalOperationCodec[T any](key semanticCacheKey, newValue func() T, 
 }
 
 var canonicalOperationCodecs = map[string]canonicalOperationCodec{
-	"chat_completions": newCanonicalOperationCodec(semanticChatRequestKey, func() *ChatRequest { return &ChatRequest{} }, func(env *RequestSemantics, req *ChatRequest) {
+	"chat_completions": newCanonicalOperationCodec(semanticChatRequestKey, func() *ChatRequest { return &ChatRequest{} }, func(env *WhiteBoxPrompt, req *ChatRequest) {
 		cacheSemanticSelectorHintsFromRequest(env, req)
 	}),
-	"responses": newCanonicalOperationCodec(semanticResponsesRequestKey, func() *ResponsesRequest { return &ResponsesRequest{} }, func(env *RequestSemantics, req *ResponsesRequest) {
+	"responses": newCanonicalOperationCodec(semanticResponsesRequestKey, func() *ResponsesRequest { return &ResponsesRequest{} }, func(env *WhiteBoxPrompt, req *ResponsesRequest) {
 		cacheSemanticSelectorHintsFromRequest(env, req)
 	}),
-	"embeddings": newCanonicalOperationCodec(semanticEmbeddingRequestKey, func() *EmbeddingRequest { return &EmbeddingRequest{} }, func(env *RequestSemantics, req *EmbeddingRequest) {
+	"embeddings": newCanonicalOperationCodec(semanticEmbeddingRequestKey, func() *EmbeddingRequest { return &EmbeddingRequest{} }, func(env *WhiteBoxPrompt, req *EmbeddingRequest) {
 		cacheSemanticSelectorHintsFromRequest(env, req)
 	}),
-	"batches": newCanonicalOperationCodec(semanticBatchRequestKey, func() *BatchRequest { return &BatchRequest{} }, func(env *RequestSemantics, req *BatchRequest) {
-		env.BodyParsedAsJSON = true
+	"batches": newCanonicalOperationCodec(semanticBatchRequestKey, func() *BatchRequest { return &BatchRequest{} }, func(env *WhiteBoxPrompt, req *BatchRequest) {
+		env.JSONBodyParsed = true
 	}),
 }
 
@@ -68,7 +68,7 @@ func canonicalOperationCodecFor(operation string) (canonicalOperationCodec, bool
 	return codec, ok
 }
 
-func decodeCanonicalOperation[T any](body []byte, env *RequestSemantics, operation string) (T, error) {
+func decodeCanonicalOperation[T any](body []byte, env *WhiteBoxPrompt, operation string) (T, error) {
 	codec, ok := canonicalOperationCodecFor(operation)
 	if !ok {
 		var zero T
@@ -88,22 +88,22 @@ func decodeCanonicalOperation[T any](body []byte, env *RequestSemantics, operati
 }
 
 // DecodeChatRequest decodes and caches the canonical chat request for a semantic envelope.
-func DecodeChatRequest(body []byte, env *RequestSemantics) (*ChatRequest, error) {
+func DecodeChatRequest(body []byte, env *WhiteBoxPrompt) (*ChatRequest, error) {
 	return decodeCanonicalOperation[*ChatRequest](body, env, "chat_completions")
 }
 
 // DecodeResponsesRequest decodes and caches the canonical responses request for a semantic envelope.
-func DecodeResponsesRequest(body []byte, env *RequestSemantics) (*ResponsesRequest, error) {
+func DecodeResponsesRequest(body []byte, env *WhiteBoxPrompt) (*ResponsesRequest, error) {
 	return decodeCanonicalOperation[*ResponsesRequest](body, env, "responses")
 }
 
 // DecodeEmbeddingRequest decodes and caches the canonical embeddings request for a semantic envelope.
-func DecodeEmbeddingRequest(body []byte, env *RequestSemantics) (*EmbeddingRequest, error) {
+func DecodeEmbeddingRequest(body []byte, env *WhiteBoxPrompt) (*EmbeddingRequest, error) {
 	return decodeCanonicalOperation[*EmbeddingRequest](body, env, "embeddings")
 }
 
 // DecodeBatchRequest decodes and caches the canonical batch request for a semantic envelope.
-func DecodeBatchRequest(body []byte, env *RequestSemantics) (*BatchRequest, error) {
+func DecodeBatchRequest(body []byte, env *WhiteBoxPrompt) (*BatchRequest, error) {
 	return decodeCanonicalOperation[*BatchRequest](body, env, "batches")
 }
 
@@ -116,11 +116,11 @@ func parseRouteLimit(limitRaw string) (int, error) {
 }
 
 func cachedRouteMetadata[T any](
-	env *RequestSemantics,
-	cached func(*RequestSemantics) *T,
+	env *WhiteBoxPrompt,
+	cached func(*WhiteBoxPrompt) *T,
 	build func() *T,
 	applyLimit func(*T) error,
-	store func(*RequestSemantics, *T),
+	store func(*WhiteBoxPrompt, *T),
 ) (*T, error) {
 	req := (*T)(nil)
 	if env != nil {
@@ -140,10 +140,10 @@ func cachedRouteMetadata[T any](
 }
 
 // BatchRouteMetadata returns sparse batch route semantics, caching them on the envelope when present.
-func BatchRouteMetadata(env *RequestSemantics, method, path string, routeParams map[string]string, queryParams map[string][]string) (*BatchRouteInfo, error) {
+func BatchRouteMetadata(env *WhiteBoxPrompt, method, path string, routeParams map[string]string, queryParams map[string][]string) (*BatchRouteInfo, error) {
 	return cachedRouteMetadata(
 		env,
-		func(env *RequestSemantics) *BatchRouteInfo {
+		func(env *WhiteBoxPrompt) *BatchRouteInfo {
 			return env.CachedBatchRouteInfo()
 		},
 		func() *BatchRouteInfo {
@@ -155,10 +155,10 @@ func BatchRouteMetadata(env *RequestSemantics, method, path string, routeParams 
 }
 
 // FileRouteMetadata returns sparse file route semantics, caching them on the envelope when present.
-func FileRouteMetadata(env *RequestSemantics, method, path string, routeParams map[string]string, queryParams map[string][]string) (*FileRouteInfo, error) {
+func FileRouteMetadata(env *WhiteBoxPrompt, method, path string, routeParams map[string]string, queryParams map[string][]string) (*FileRouteInfo, error) {
 	return cachedRouteMetadata(
 		env,
-		func(env *RequestSemantics) *FileRouteInfo {
+		func(env *WhiteBoxPrompt) *FileRouteInfo {
 			return env.CachedFileRouteInfo()
 		},
 		func() *FileRouteInfo {
@@ -172,10 +172,10 @@ func FileRouteMetadata(env *RequestSemantics, method, path string, routeParams m
 // NormalizeModelSelector canonicalizes model/provider selector inputs and keeps
 // semantic selector hints aligned with the normalized request state.
 //
-// This is the point where RoutingHints transition from raw ingress values
+// This is the point where RouteHints transition from raw ingress values
 // (which may still contain a qualified model string like "openai/gpt-5-mini")
 // to canonical model/provider fields.
-func NormalizeModelSelector(env *RequestSemantics, model, provider *string) error {
+func NormalizeModelSelector(env *WhiteBoxPrompt, model, provider *string) error {
 	if model == nil || provider == nil {
 		return NewInvalidRequestError("model selector targets are required", nil)
 	}
@@ -189,8 +189,8 @@ func NormalizeModelSelector(env *RequestSemantics, model, provider *string) erro
 	*provider = selector.Provider
 
 	if env != nil {
-		env.RoutingHints.Model = selector.Model
-		env.RoutingHints.Provider = selector.Provider
+		env.RouteHints.Model = selector.Model
+		env.RouteHints.Provider = selector.Provider
 	}
 	return nil
 }
@@ -199,11 +199,11 @@ func NormalizeModelSelector(env *RequestSemantics, model, provider *string) erro
 // resolved by canonicalOperationCodecFor for env, then extracts the model and
 // provider via semanticSelectorFromCanonicalRequest. It returns ok=false for a
 // nil env, missing codec, or decode failure.
-func DecodeCanonicalSelector(body []byte, env *RequestSemantics) (model, provider string, ok bool) {
+func DecodeCanonicalSelector(body []byte, env *WhiteBoxPrompt) (model, provider string, ok bool) {
 	if env == nil {
 		return "", "", false
 	}
-	codec, ok := canonicalOperationCodecFor(env.OperationKind)
+	codec, ok := canonicalOperationCodecFor(env.OperationType)
 	if !ok {
 		return "", "", false
 	}
@@ -214,7 +214,7 @@ func DecodeCanonicalSelector(body []byte, env *RequestSemantics) (model, provide
 	return semanticSelectorFromCanonicalRequest(req)
 }
 
-func decodeCanonicalJSON[T any](body []byte, env *RequestSemantics, spec canonicalJSONSpec[T]) (T, error) {
+func decodeCanonicalJSON[T any](body []byte, env *WhiteBoxPrompt, spec canonicalJSONSpec[T]) (T, error) {
 	if req, ok := cachedSemanticValue[T](env, spec.key); ok {
 		return req, nil
 	}
@@ -233,18 +233,18 @@ func decodeCanonicalJSON[T any](body []byte, env *RequestSemantics, spec canonic
 	return req, nil
 }
 
-func cacheSemanticSelectorHints(env *RequestSemantics, model, provider string) {
+func cacheSemanticSelectorHints(env *WhiteBoxPrompt, model, provider string) {
 	if env == nil {
 		return
 	}
-	env.BodyParsedAsJSON = true
-	env.RoutingHints.Model = model
-	if env.RoutingHints.Provider == "" {
-		env.RoutingHints.Provider = provider
+	env.JSONBodyParsed = true
+	env.RouteHints.Model = model
+	if env.RouteHints.Provider == "" {
+		env.RouteHints.Provider = provider
 	}
 }
 
-func cacheSemanticSelectorHintsFromRequest(env *RequestSemantics, req any) {
+func cacheSemanticSelectorHintsFromRequest(env *WhiteBoxPrompt, req any) {
 	model, provider, ok := semanticSelectorFromCanonicalRequest(req)
 	if !ok {
 		return

@@ -10,8 +10,8 @@ const (
 	requestIDKey contextKey = "request-id"
 	// requestSnapshotKey stores the immutable transport snapshot for the request.
 	requestSnapshotKey contextKey = "request-snapshot"
-	// requestSemanticsKey stores the best-effort semantic extraction for the request.
-	requestSemanticsKey contextKey = "request-semantics"
+	// whiteBoxPromptKey stores the best-effort semantic extraction for the request.
+	whiteBoxPromptKey contextKey = "white-box-prompt"
 )
 
 // WithRequestID returns a new context with the request ID attached.
@@ -45,16 +45,16 @@ func GetRequestSnapshot(ctx context.Context) *RequestSnapshot {
 	return nil
 }
 
-// WithRequestSemantics returns a new context with the request semantics attached.
-func WithRequestSemantics(ctx context.Context, semantics *RequestSemantics) context.Context {
-	return context.WithValue(ctx, requestSemanticsKey, semantics)
+// WithWhiteBoxPrompt returns a new context with the white-box prompt attached.
+func WithWhiteBoxPrompt(ctx context.Context, prompt *WhiteBoxPrompt) context.Context {
+	return context.WithValue(ctx, whiteBoxPromptKey, prompt)
 }
 
-// GetRequestSemantics retrieves the request semantics from the context.
-func GetRequestSemantics(ctx context.Context) *RequestSemantics {
-	if v := ctx.Value(requestSemanticsKey); v != nil {
-		if semantics, ok := v.(*RequestSemantics); ok {
-			return semantics
+// GetWhiteBoxPrompt retrieves the white-box prompt from the context.
+func GetWhiteBoxPrompt(ctx context.Context) *WhiteBoxPrompt {
+	if v := ctx.Value(whiteBoxPromptKey); v != nil {
+		if prompt, ok := v.(*WhiteBoxPrompt); ok {
+			return prompt
 		}
 	}
 	return nil

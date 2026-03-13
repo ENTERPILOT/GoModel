@@ -39,12 +39,12 @@ func TestRequestSnapshotCapture_SetsSnapshotAndSemantics(t *testing.T) {
 	c := e.NewContext(req, rec)
 
 	var capturedFrame *core.RequestSnapshot
-	var capturedEnv *core.RequestSemantics
+	var capturedEnv *core.WhiteBoxPrompt
 	var downstreamBody string
 
 	handler := RequestSnapshotCapture()(func(c *echo.Context) error {
 		capturedFrame = core.GetRequestSnapshot(c.Request().Context())
-		capturedEnv = core.GetRequestSemantics(c.Request().Context())
+		capturedEnv = core.GetWhiteBoxPrompt(c.Request().Context())
 		bodyBytes, err := io.ReadAll(c.Request().Body)
 		require.NoError(t, err)
 		downstreamBody = string(bodyBytes)
@@ -65,10 +65,10 @@ func TestRequestSnapshotCapture_SetsSnapshotAndSemantics(t *testing.T) {
 	assert.JSONEq(t, reqBody, downstreamBody)
 
 	require.NotNil(t, capturedEnv)
-	assert.Equal(t, "openai_compat", capturedEnv.RouteKind)
-	assert.Equal(t, "chat_completions", capturedEnv.OperationKind)
-	assert.Equal(t, "gpt-5-mini", capturedEnv.RoutingHints.Model)
-	assert.True(t, capturedEnv.BodyParsedAsJSON)
+	assert.Equal(t, "openai_compat", capturedEnv.RouteType)
+	assert.Equal(t, "chat_completions", capturedEnv.OperationType)
+	assert.Equal(t, "gpt-5-mini", capturedEnv.RouteHints.Model)
+	assert.True(t, capturedEnv.JSONBodyParsed)
 	assert.Nil(t, capturedEnv.CachedChatRequest())
 	assert.Nil(t, capturedEnv.CachedResponsesRequest())
 	assert.Nil(t, capturedEnv.CachedEmbeddingRequest())
@@ -88,11 +88,11 @@ func TestRequestSnapshotCapture_PreservesPassthroughRouteParams(t *testing.T) {
 	})
 
 	var capturedFrame *core.RequestSnapshot
-	var capturedEnv *core.RequestSemantics
+	var capturedEnv *core.WhiteBoxPrompt
 
 	handler := RequestSnapshotCapture()(func(c *echo.Context) error {
 		capturedFrame = core.GetRequestSnapshot(c.Request().Context())
-		capturedEnv = core.GetRequestSemantics(c.Request().Context())
+		capturedEnv = core.GetWhiteBoxPrompt(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	})
 
@@ -104,9 +104,9 @@ func TestRequestSnapshotCapture_PreservesPassthroughRouteParams(t *testing.T) {
 	assert.Equal(t, "responses", capturedFrame.GetRouteParams()["endpoint"])
 
 	require.NotNil(t, capturedEnv)
-	assert.Equal(t, "provider_passthrough", capturedEnv.RouteKind)
-	assert.Equal(t, "openai", capturedEnv.RoutingHints.Provider)
-	assert.Equal(t, "responses", capturedEnv.RoutingHints.Endpoint)
+	assert.Equal(t, "provider_passthrough", capturedEnv.RouteType)
+	assert.Equal(t, "openai", capturedEnv.RouteHints.Provider)
+	assert.Equal(t, "responses", capturedEnv.RouteHints.Endpoint)
 }
 
 func TestRequestSnapshotCapture_GeneratesRequestIDWhenMissing(t *testing.T) {
@@ -181,7 +181,7 @@ func TestModelValidation_UsesSemanticEnvelopeWithoutReadingBody(t *testing.T) {
 		nil,
 	)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	rec := httptest.NewRecorder()
@@ -238,11 +238,11 @@ func TestRequestSnapshotCapture_ManagesFilesWithoutReadingMultipartBody(t *testi
 	c := e.NewContext(req, rec)
 
 	var capturedFrame *core.RequestSnapshot
-	var capturedEnv *core.RequestSemantics
+	var capturedEnv *core.WhiteBoxPrompt
 
 	handler := RequestSnapshotCapture()(func(c *echo.Context) error {
 		capturedFrame = core.GetRequestSnapshot(c.Request().Context())
-		capturedEnv = core.GetRequestSemantics(c.Request().Context())
+		capturedEnv = core.GetWhiteBoxPrompt(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	})
 
@@ -256,6 +256,6 @@ func TestRequestSnapshotCapture_ManagesFilesWithoutReadingMultipartBody(t *testi
 	assert.False(t, capturedFrame.BodyNotCaptured)
 
 	require.NotNil(t, capturedEnv)
-	assert.Equal(t, "files", capturedEnv.OperationKind)
-	assert.False(t, capturedEnv.BodyParsedAsJSON)
+	assert.Equal(t, "files", capturedEnv.OperationType)
+	assert.False(t, capturedEnv.JSONBodyParsed)
 }

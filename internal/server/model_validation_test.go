@@ -320,11 +320,11 @@ func TestModelValidation_DoesNotReadLiveBodyWhenSelectorHintsAlreadyExist(t *tes
 
 	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", nil, false, "", nil)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, &core.RequestSemantics{
-		RouteKind:        "openai_compat",
-		OperationKind:      "chat_completions",
-		BodyParsedAsJSON: true,
-		RoutingHints: core.RoutingHints{
+	ctx = core.WithWhiteBoxPrompt(ctx, &core.WhiteBoxPrompt{
+		RouteType:        "openai_compat",
+		OperationType:      "chat_completions",
+		JSONBodyParsed: true,
+		RouteHints: core.RouteHints{
 			Model: "gpt-4o-mini",
 		},
 	})
@@ -368,7 +368,7 @@ func TestModelValidation_UsesIngressBodyForMissingSelectorHints(t *testing.T) {
 		nil,
 	)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	rec := httptest.NewRecorder()
@@ -418,12 +418,12 @@ func TestModelValidation_ResolvesProviderTypeFromOversizedLiveBody(t *testing.T)
 	}
 
 	e := echo.New()
-	var capturedEnv *core.RequestSemantics
+	var capturedEnv *core.WhiteBoxPrompt
 	var capturedProviderType string
 
 	middleware := ModelValidation(provider)
 	handler := middleware(func(c *echo.Context) error {
-		capturedEnv = core.GetRequestSemantics(c.Request().Context())
+		capturedEnv = core.GetWhiteBoxPrompt(c.Request().Context())
 		capturedProviderType = GetProviderType(c)
 		return c.String(http.StatusOK, "ok")
 	})
@@ -438,7 +438,7 @@ func TestModelValidation_ResolvesProviderTypeFromOversizedLiveBody(t *testing.T)
 
 	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", nil, true, "", nil)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	rec := httptest.NewRecorder()
@@ -459,11 +459,11 @@ func TestModelValidation_CachesCanonicalChatRequestFromIngressBody(t *testing.T)
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
 
 	e := echo.New()
-	var capturedEnv *core.RequestSemantics
+	var capturedEnv *core.WhiteBoxPrompt
 
 	middleware := ModelValidation(provider)
 	handler := middleware(func(c *echo.Context) error {
-		capturedEnv = core.GetRequestSemantics(c.Request().Context())
+		capturedEnv = core.GetWhiteBoxPrompt(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	})
 
@@ -489,7 +489,7 @@ func TestModelValidation_CachesCanonicalChatRequestFromIngressBody(t *testing.T)
 		nil,
 	)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	rec := httptest.NewRecorder()
@@ -509,11 +509,11 @@ func TestModelValidation_CachesCanonicalResponsesRequestFromIngressBody(t *testi
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
 
 	e := echo.New()
-	var capturedEnv *core.RequestSemantics
+	var capturedEnv *core.WhiteBoxPrompt
 
 	middleware := ModelValidation(provider)
 	handler := middleware(func(c *echo.Context) error {
-		capturedEnv = core.GetRequestSemantics(c.Request().Context())
+		capturedEnv = core.GetWhiteBoxPrompt(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	})
 
@@ -537,7 +537,7 @@ func TestModelValidation_CachesCanonicalResponsesRequestFromIngressBody(t *testi
 		nil,
 	)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	rec := httptest.NewRecorder()

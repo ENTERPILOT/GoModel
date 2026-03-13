@@ -8,19 +8,19 @@ import (
 	"strings"
 )
 
-// RoutingHints holds minimal routing-relevant request hints derived from the
+// RouteHints holds minimal routing-relevant request hints derived from the
 // transport snapshot.
 //
 // These hints are intentionally smaller than a full semantic interpretation.
 //
 // Lifecycle:
-//   - DeriveRequestSemantics seeds these values directly from transport/body data.
+//   - DeriveWhiteBoxPrompt seeds these values directly from transport/body data.
 //   - Canonical JSON decode may refine them from a cached request object.
 //   - NormalizeModelSelector canonicalizes model/provider values in place.
 //
 // Consumers that require canonical selector state should prefer a cached canonical
 // request or call NormalizeModelSelector before relying on these fields.
-type RoutingHints struct {
+type RouteHints struct {
 	Model    string
 	Provider string
 	Endpoint string
@@ -37,69 +37,69 @@ const (
 	semanticFileRequestKey      semanticCacheKey = "file_request"
 )
 
-// RequestSemantics is the gateway's best-effort semantic extraction from the
+// WhiteBoxPrompt is the gateway's best-effort semantic extraction from the
 // transport snapshot.
 // It may be partial and should not be treated as authoritative transport state.
 //
 // The semantics are populated incrementally:
-//   - transport seeds RouteKind/OperationKind plus sparse RoutingHints
+//   - transport seeds RouteType/OperationType plus sparse RouteHints
 //   - route-specific metadata may be cached on demand
-//   - canonical request decode may cache a parsed request and refine RoutingHints
+//   - canonical request decode may cache a parsed request and refine RouteHints
 //   - NormalizeModelSelector may rewrite selector hints into canonical form
-type RequestSemantics struct {
-	RouteKind    string
-	OperationKind string
-	RoutingHints RoutingHints
-	// BodyParsedAsJSON reports that the captured request body was parsed as JSON
+type WhiteBoxPrompt struct {
+	RouteType    string
+	OperationType string
+	RouteHints RouteHints
+	// JSONBodyParsed reports that the captured request body was parsed as JSON
 	// (for selector peeking and/or canonical request decode).
-	BodyParsedAsJSON bool
+	JSONBodyParsed bool
 
 	cache map[semanticCacheKey]any
 }
 
 // CachedChatRequest returns the cached canonical chat request, if present.
-func (env *RequestSemantics) CachedChatRequest() *ChatRequest {
+func (env *WhiteBoxPrompt) CachedChatRequest() *ChatRequest {
 	req, _ := cachedSemanticValue[*ChatRequest](env, semanticChatRequestKey)
 	return req
 }
 
 // CachedResponsesRequest returns the cached canonical responses request, if present.
-func (env *RequestSemantics) CachedResponsesRequest() *ResponsesRequest {
+func (env *WhiteBoxPrompt) CachedResponsesRequest() *ResponsesRequest {
 	req, _ := cachedSemanticValue[*ResponsesRequest](env, semanticResponsesRequestKey)
 	return req
 }
 
 // CachedEmbeddingRequest returns the cached canonical embeddings request, if present.
-func (env *RequestSemantics) CachedEmbeddingRequest() *EmbeddingRequest {
+func (env *WhiteBoxPrompt) CachedEmbeddingRequest() *EmbeddingRequest {
 	req, _ := cachedSemanticValue[*EmbeddingRequest](env, semanticEmbeddingRequestKey)
 	return req
 }
 
 // CachedBatchRequest returns the cached canonical batch create request, if present.
-func (env *RequestSemantics) CachedBatchRequest() *BatchRequest {
+func (env *WhiteBoxPrompt) CachedBatchRequest() *BatchRequest {
 	req, _ := cachedSemanticValue[*BatchRequest](env, semanticBatchRequestKey)
 	return req
 }
 
 // CachedBatchRouteInfo returns cached sparse batch route info, if present.
-func (env *RequestSemantics) CachedBatchRouteInfo() *BatchRouteInfo {
+func (env *WhiteBoxPrompt) CachedBatchRouteInfo() *BatchRouteInfo {
 	req, _ := cachedSemanticValue[*BatchRouteInfo](env, semanticBatchMetadataKey)
 	return req
 }
 
 // CachedFileRouteInfo returns cached sparse file route info, if present.
-func (env *RequestSemantics) CachedFileRouteInfo() *FileRouteInfo {
+func (env *WhiteBoxPrompt) CachedFileRouteInfo() *FileRouteInfo {
 	req, _ := cachedSemanticValue[*FileRouteInfo](env, semanticFileRequestKey)
 	return req
 }
 
 // CanonicalSelectorFromCachedRequest returns model/provider selector hints from
 // any cached canonical JSON request for the current operation kind.
-func (env *RequestSemantics) CanonicalSelectorFromCachedRequest() (model, provider string, ok bool) {
+func (env *WhiteBoxPrompt) CanonicalSelectorFromCachedRequest() (model, provider string, ok bool) {
 	if env == nil {
 		return "", "", false
 	}
-	codec, ok := canonicalOperationCodecFor(env.OperationKind)
+	codec, ok := canonicalOperationCodecFor(env.OperationType)
 	if !ok {
 		return "", "", false
 	}
@@ -110,7 +110,7 @@ func (env *RequestSemantics) CanonicalSelectorFromCachedRequest() (model, provid
 	return semanticSelectorFromCanonicalRequest(req)
 }
 
-func (env *RequestSemantics) cacheValue(key semanticCacheKey, value any) {
+func (env *WhiteBoxPrompt) cacheValue(key semanticCacheKey, value any) {
 	if env == nil || value == nil {
 		return
 	}
@@ -120,7 +120,7 @@ func (env *RequestSemantics) cacheValue(key semanticCacheKey, value any) {
 	env.cache[key] = value
 }
 
-func cachedSemanticValue[T any](env *RequestSemantics, key semanticCacheKey) (T, bool) {
+func cachedSemanticValue[T any](env *WhiteBoxPrompt, key semanticCacheKey) (T, bool) {
 	var zero T
 	if env == nil || env.cache == nil {
 		return zero, false
@@ -136,7 +136,7 @@ func cachedSemanticValue[T any](env *RequestSemantics, key semanticCacheKey) (T,
 	return typed, true
 }
 
-func cachedSemanticAny(env *RequestSemantics, key semanticCacheKey) (any, bool) {
+func cachedSemanticAny(env *WhiteBoxPrompt, key semanticCacheKey) (any, bool) {
 	if env == nil || env.cache == nil {
 		return nil, false
 	}
@@ -144,7 +144,7 @@ func cachedSemanticAny(env *RequestSemantics, key semanticCacheKey) (any, bool) 
 	return value, ok
 }
 
-func cacheBatchRouteMetadata(env *RequestSemantics, req *BatchRouteInfo) {
+func cacheBatchRouteMetadata(env *WhiteBoxPrompt, req *BatchRouteInfo) {
 	if env == nil || req == nil {
 		return
 	}
@@ -152,26 +152,26 @@ func cacheBatchRouteMetadata(env *RequestSemantics, req *BatchRouteInfo) {
 }
 
 // CacheFileRouteInfo stores sparse file route metadata on the request semantics.
-func CacheFileRouteInfo(env *RequestSemantics, req *FileRouteInfo) {
+func CacheFileRouteInfo(env *WhiteBoxPrompt, req *FileRouteInfo) {
 	if env == nil || req == nil {
 		return
 	}
 	env.cacheValue(semanticFileRequestKey, req)
-	if req.Provider != "" && env.RoutingHints.Provider == "" {
-		env.RoutingHints.Provider = req.Provider
+	if req.Provider != "" && env.RouteHints.Provider == "" {
+		env.RouteHints.Provider = req.Provider
 	}
 }
 
-// DeriveRequestSemantics derives best-effort request semantics from the captured
+// DeriveWhiteBoxPrompt derives best-effort request semantics from the captured
 // transport snapshot.
 // Unknown or invalid bodies are tolerated; the returned envelope may be partial.
-func DeriveRequestSemantics(snapshot *RequestSnapshot) *RequestSemantics {
+func DeriveWhiteBoxPrompt(snapshot *RequestSnapshot) *WhiteBoxPrompt {
 	if snapshot == nil {
 		return nil
 	}
 
-	env := &RequestSemantics{
-		RoutingHints: RoutingHints{
+	env := &WhiteBoxPrompt{
+		RouteHints: RouteHints{
 			Endpoint: snapshot.Path,
 		},
 	}
@@ -180,31 +180,31 @@ func DeriveRequestSemantics(snapshot *RequestSnapshot) *RequestSemantics {
 	if desc.Operation == "" {
 		return nil
 	}
-	env.RouteKind = desc.Dialect
-	env.OperationKind = desc.Operation
+	env.RouteType = desc.Dialect
+	env.OperationType = desc.Operation
 
-	if env.OperationKind == "files" {
+	if env.OperationType == "files" {
 		CacheFileRouteInfo(env, DeriveFileRouteInfoFromTransport(snapshot.Method, snapshot.Path, snapshot.routeParams, snapshot.queryParams))
 	}
-	if env.OperationKind == "batches" {
+	if env.OperationType == "batches" {
 		cacheBatchRouteMetadata(env, DeriveBatchRouteInfoFromTransport(snapshot.Method, snapshot.Path, snapshot.routeParams, snapshot.queryParams))
 	}
 
-	if env.RouteKind == "provider_passthrough" {
-		env.RoutingHints.Endpoint = ""
+	if env.RouteType == "provider_passthrough" {
+		env.RouteHints.Endpoint = ""
 		if provider := snapshot.routeParams["provider"]; provider != "" {
-			env.RoutingHints.Provider = provider
+			env.RouteHints.Provider = provider
 		}
 		if endpoint := snapshot.routeParams["endpoint"]; endpoint != "" {
-			env.RoutingHints.Endpoint = endpoint
+			env.RouteHints.Endpoint = endpoint
 		}
-		if env.RoutingHints.Provider == "" || env.RoutingHints.Endpoint == "" {
+		if env.RouteHints.Provider == "" || env.RouteHints.Endpoint == "" {
 			if provider, endpoint, ok := ParseProviderPassthroughPath(snapshot.Path); ok {
-				if env.RoutingHints.Provider == "" {
-					env.RoutingHints.Provider = provider
+				if env.RouteHints.Provider == "" {
+					env.RouteHints.Provider = provider
 				}
-				if env.RoutingHints.Endpoint == "" {
-					env.RoutingHints.Endpoint = endpoint
+				if env.RouteHints.Endpoint == "" {
+					env.RouteHints.Endpoint = endpoint
 				}
 			}
 		}
@@ -226,11 +226,11 @@ func DeriveRequestSemantics(snapshot *RequestSnapshot) *RequestSemantics {
 	if err := json.Unmarshal(trimmed, &selectors); err != nil {
 		return env
 	}
-	env.BodyParsedAsJSON = true
+	env.JSONBodyParsed = true
 
-	env.RoutingHints.Model = selectors.Model
-	if env.RoutingHints.Provider == "" {
-		env.RoutingHints.Provider = selectors.Provider
+	env.RouteHints.Model = selectors.Model
+	if env.RouteHints.Provider == "" {
+		env.RouteHints.Provider = selectors.Provider
 	}
 
 	return env

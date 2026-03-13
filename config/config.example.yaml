@@ -9,7 +9,7 @@ server:
   body_size_limit: "10M"
   enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
-  allowed_passthrough_providers: ["openai", "anthropic"] # providers allowed on /p/{provider}/...
+  enabled_passthrough_providers: ["openai", "anthropic"] # providers enabled on /p/{provider}/...
 
 cache:
   model:

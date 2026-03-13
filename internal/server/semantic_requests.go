@@ -6,9 +6,9 @@ import (
 	"gomodel/internal/core"
 )
 
-func ensureRequestSemantics(c *echo.Context) *core.RequestSemantics {
+func ensureWhiteBoxPrompt(c *echo.Context) *core.WhiteBoxPrompt {
 	ctx := c.Request().Context()
-	if semantics := core.GetRequestSemantics(ctx); semantics != nil {
+	if semantics := core.GetWhiteBoxPrompt(ctx); semantics != nil {
 		return semantics
 	}
 
@@ -17,17 +17,17 @@ func ensureRequestSemantics(c *echo.Context) *core.RequestSemantics {
 		return nil
 	}
 
-	semantics := core.DeriveRequestSemantics(snapshot)
+	semantics := core.DeriveWhiteBoxPrompt(snapshot)
 	if semantics == nil {
 		return nil
 	}
 
-	c.SetRequest(c.Request().WithContext(core.WithRequestSemantics(ctx, semantics)))
+	c.SetRequest(c.Request().WithContext(core.WithWhiteBoxPrompt(ctx, semantics)))
 	return semantics
 }
 
-func semanticJSONBody(c *echo.Context) ([]byte, *core.RequestSemantics, error) {
-	env := ensureRequestSemantics(c)
+func semanticJSONBody(c *echo.Context) ([]byte, *core.WhiteBoxPrompt, error) {
+	env := ensureWhiteBoxPrompt(c)
 	bodyBytes, err := requestBodyBytes(c)
 	if err != nil {
 		return nil, env, err
@@ -35,7 +35,7 @@ func semanticJSONBody(c *echo.Context) ([]byte, *core.RequestSemantics, error) {
 	return bodyBytes, env, nil
 }
 
-func canonicalJSONRequestFromSemantics[T any](c *echo.Context, decode func([]byte, *core.RequestSemantics) (T, error)) (T, error) {
+func canonicalJSONRequestFromSemantics[T any](c *echo.Context, decode func([]byte, *core.WhiteBoxPrompt) (T, error)) (T, error) {
 	bodyBytes, env, err := semanticJSONBody(c)
 	if err != nil {
 		var zero T
@@ -46,7 +46,7 @@ func canonicalJSONRequestFromSemantics[T any](c *echo.Context, decode func([]byt
 
 func batchRouteInfoFromSemantics(c *echo.Context) (*core.BatchRouteInfo, error) {
 	return core.BatchRouteMetadata(
-		ensureRequestSemantics(c),
+		ensureWhiteBoxPrompt(c),
 		c.Request().Method,
 		c.Request().URL.Path,
 		routeParamsMap(c.PathValues()),
@@ -55,7 +55,7 @@ func batchRouteInfoFromSemantics(c *echo.Context) (*core.BatchRouteInfo, error) 
 }
 
 func fileRouteInfoFromSemantics(c *echo.Context) (*core.FileRouteInfo, error) {
-	env := ensureRequestSemantics(c)
+	env := ensureWhiteBoxPrompt(c)
 	req, err := core.FileRouteMetadata(
 		env,
 		c.Request().Method,

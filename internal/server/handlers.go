@@ -28,7 +28,7 @@ var batchResultsPending404Providers = map[string]struct{}{
 	"anthropic": {},
 }
 
-var defaultAllowedPassthroughProviders = []string{"openai", "anthropic"}
+var defaultEnabledPassthroughProviders = []string{"openai", "anthropic"}
 
 // Handler holds the HTTP handlers
 type Handler struct {
@@ -38,7 +38,7 @@ type Handler struct {
 	pricingResolver               usage.PricingResolver
 	batchStore                    batchstore.Store
 	normalizePassthroughV1Prefix  bool
-	allowedPassthroughProviders map[string]struct{}
+	enabledPassthroughProviders map[string]struct{}
 }
 
 // NewHandler creates a new handler with the given routable provider (typically the Router)
@@ -50,7 +50,7 @@ func NewHandler(provider core.RoutableProvider, logger auditlog.LoggerInterface,
 		pricingResolver:               pricingResolver,
 		batchStore:                    batchstore.NewMemoryStore(),
 		normalizePassthroughV1Prefix:  true,
-		allowedPassthroughProviders: normalizeAllowedPassthroughProviders(defaultAllowedPassthroughProviders),
+		enabledPassthroughProviders: normalizeEnabledPassthroughProviders(defaultEnabledPassthroughProviders),
 	}
 }
 
@@ -63,8 +63,8 @@ func (h *Handler) SetBatchStore(store batchstore.Store) {
 	h.batchStore = store
 }
 
-func (h *Handler) setAllowedPassthroughProviders(providerTypes []string) {
-	h.allowedPassthroughProviders = normalizeAllowedPassthroughProviders(providerTypes)
+func (h *Handler) setEnabledPassthroughProviders(providerTypes []string) {
+	h.enabledPassthroughProviders = normalizeEnabledPassthroughProviders(providerTypes)
 }
 
 // handleStreamingResponse handles SSE streaming responses for both ChatCompletion and Responses endpoints.
@@ -229,19 +229,19 @@ func (h *Handler) logUsage(model, providerType string, extractFn func(*core.Mode
 }
 
 func resolveModelSelector(ctx context.Context, model, provider *string) error {
-	return core.NormalizeModelSelector(core.GetRequestSemantics(ctx), model, provider)
+	return core.NormalizeModelSelector(core.GetWhiteBoxPrompt(ctx), model, provider)
 }
 
-func isAllowedPassthroughProvider(providerType string, allowedPassthroughProviders map[string]struct{}) bool {
+func isEnabledPassthroughProvider(providerType string, enabledPassthroughProviders map[string]struct{}) bool {
 	providerType = strings.TrimSpace(providerType)
 	if providerType == "" {
 		return false
 	}
-	_, ok := allowedPassthroughProviders[providerType]
+	_, ok := enabledPassthroughProviders[providerType]
 	return ok
 }
 
-func normalizeAllowedPassthroughProviders(providerTypes []string) map[string]struct{} {
+func normalizeEnabledPassthroughProviders(providerTypes []string) map[string]struct{} {
 	allowed := make(map[string]struct{}, len(providerTypes))
 	for _, providerType := range providerTypes {
 		providerType = strings.TrimSpace(providerType)
@@ -253,9 +253,9 @@ func normalizeAllowedPassthroughProviders(providerTypes []string) map[string]str
 	return allowed
 }
 
-func (h *Handler) allowedPassthroughProviderNames() []string {
-	providers := make([]string, 0, len(h.allowedPassthroughProviders))
-	for providerType := range h.allowedPassthroughProviders {
+func (h *Handler) enabledPassthroughProviderNames() []string {
+	providers := make([]string, 0, len(h.enabledPassthroughProviders))
+	for providerType := range h.enabledPassthroughProviders {
 		providers = append(providers, providerType)
 	}
 	sort.Strings(providers)
@@ -263,12 +263,12 @@ func (h *Handler) allowedPassthroughProviderNames() []string {
 }
 
 func (h *Handler) unsupportedPassthroughProviderError(providerType string) error {
-	providers := h.allowedPassthroughProviderNames()
+	providers := h.enabledPassthroughProviderNames()
 	if len(providers) == 0 {
 		return core.NewInvalidRequestError("provider passthrough is not enabled for any providers", nil)
 	}
 	return core.NewInvalidRequestError(
-		fmt.Sprintf("provider passthrough for %q is not enabled; currently allowed providers: %s", strings.TrimSpace(providerType), strings.Join(providers, ", ")),
+		fmt.Sprintf("provider passthrough for %q is not enabled; currently enabled providers: %s", strings.TrimSpace(providerType), strings.Join(providers, ", ")),
 		nil,
 	)
 }
@@ -505,7 +505,7 @@ func (h *Handler) ProviderPassthrough(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	if !isAllowedPassthroughProvider(providerType, h.allowedPassthroughProviders) {
+	if !isEnabledPassthroughProvider(providerType, h.enabledPassthroughProviders) {
 		return handleError(c, h.unsupportedPassthroughProviderError(providerType))
 	}
 

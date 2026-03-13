@@ -39,7 +39,7 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_CachesChatRequest(t *testing.T
 		nil,
 	)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	c := e.NewContext(req, httptest.NewRecorder())
@@ -53,11 +53,11 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_CachesChatRequest(t *testing.T
 	require.Same(t, first, second)
 	require.NotNil(t, first.ExtraFields["response_format"])
 
-	env := core.GetRequestSemantics(c.Request().Context())
+	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
 	require.Same(t, first, env.CachedChatRequest())
-	assert.Equal(t, "gpt-5-mini", env.RoutingHints.Model)
-	assert.Equal(t, "openai", env.RoutingHints.Provider)
+	assert.Equal(t, "gpt-5-mini", env.RouteHints.Model)
+	assert.Equal(t, "openai", env.RouteHints.Provider)
 }
 
 func TestCanonicalJSONRequestFromSemanticEnvelope_CachesResponsesRequest(t *testing.T) {
@@ -82,7 +82,7 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_CachesResponsesRequest(t *test
 		nil,
 	)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	c := e.NewContext(req, httptest.NewRecorder())
@@ -100,10 +100,10 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_CachesResponsesRequest(t *test
 	require.Len(t, input, 1)
 	require.NotNil(t, input[0].ExtraFields["x_trace"])
 
-	env := core.GetRequestSemantics(c.Request().Context())
+	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
 	require.Same(t, first, env.CachedResponsesRequest())
-	assert.Equal(t, "gpt-5-mini", env.RoutingHints.Model)
+	assert.Equal(t, "gpt-5-mini", env.RouteHints.Model)
 }
 
 func TestCanonicalJSONRequestFromSemanticEnvelope_FallsBackToLiveBodyWhenIngressBodyMissing(t *testing.T) {
@@ -118,7 +118,7 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_FallsBackToLiveBodyWhenIngress
 
 	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/embeddings", nil, nil, nil, "application/json", nil, true, "", nil)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	c := e.NewContext(req, httptest.NewRecorder())
@@ -129,11 +129,11 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_FallsBackToLiveBodyWhenIngress
 	require.Equal(t, "openai", embeddingReq.Provider)
 	require.NotNil(t, embeddingReq.ExtraFields["x_meta"])
 
-	env := core.GetRequestSemantics(c.Request().Context())
+	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
 	require.Same(t, embeddingReq, env.CachedEmbeddingRequest())
-	assert.True(t, env.BodyParsedAsJSON)
-	assert.Equal(t, "text-embedding-3-large", env.RoutingHints.Model)
+	assert.True(t, env.JSONBodyParsed)
+	assert.Equal(t, "text-embedding-3-large", env.RouteHints.Model)
 }
 
 func TestCanonicalJSONRequestFromSemanticEnvelope_CachesBatchRequest(t *testing.T) {
@@ -164,7 +164,7 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_CachesBatchRequest(t *testing.
 		nil,
 	)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	c := e.NewContext(req, httptest.NewRecorder())
@@ -180,10 +180,10 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_CachesBatchRequest(t *testing.
 	require.Len(t, first.Requests, 1)
 	require.NotNil(t, first.Requests[0].ExtraFields["x_item_flag"])
 
-	env := core.GetRequestSemantics(c.Request().Context())
+	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
 	require.Same(t, first, env.CachedBatchRequest())
-	assert.True(t, env.BodyParsedAsJSON)
+	assert.True(t, env.JSONBodyParsed)
 }
 
 func TestBatchRequestMetadataFromSemanticEnvelope_CachesListMetadata(t *testing.T) {
@@ -206,7 +206,7 @@ func TestBatchRequestMetadataFromSemanticEnvelope_CachesListMetadata(t *testing.
 		nil,
 	)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	c := e.NewContext(req, httptest.NewRecorder())
@@ -222,7 +222,7 @@ func TestBatchRequestMetadataFromSemanticEnvelope_CachesListMetadata(t *testing.
 	assert.True(t, first.HasLimit)
 	assert.Equal(t, 5, first.Limit)
 
-	env := core.GetRequestSemantics(c.Request().Context())
+	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
 	require.Same(t, first, env.CachedBatchRouteInfo())
 }
@@ -246,7 +246,7 @@ func TestFileRequestFromSemanticEnvelope_InvalidLimitFromIngressReturnsError(t *
 		nil,
 	)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	c := e.NewContext(req, httptest.NewRecorder())
@@ -274,7 +274,7 @@ func TestFileRequestFromSemanticEnvelope_EnrichesCreateMetadata(t *testing.T) {
 
 	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/files", nil, nil, nil, writer.FormDataContentType(), nil, false, "", nil)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	c := e.NewContext(req, httptest.NewRecorder())
@@ -290,10 +290,10 @@ func TestFileRequestFromSemanticEnvelope_EnrichesCreateMetadata(t *testing.T) {
 	assert.Equal(t, "batch", first.Purpose)
 	assert.Equal(t, "requests.jsonl", first.Filename)
 
-	env := core.GetRequestSemantics(c.Request().Context())
+	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
 	require.Same(t, first, env.CachedFileRouteInfo())
-	assert.Equal(t, "openai", env.RoutingHints.Provider)
+	assert.Equal(t, "openai", env.RouteHints.Provider)
 }
 
 func TestFileRequestFromSemanticEnvelope_CachesListMetadata(t *testing.T) {
@@ -318,7 +318,7 @@ func TestFileRequestFromSemanticEnvelope_CachesListMetadata(t *testing.T) {
 		nil,
 	)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithRequestSemantics(ctx, core.DeriveRequestSemantics(frame))
+	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
 
 	c := e.NewContext(req, httptest.NewRecorder())

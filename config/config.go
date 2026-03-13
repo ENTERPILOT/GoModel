@@ -341,9 +341,9 @@ type ServerConfig struct {
 	// AllowPassthroughV1Alias allows /p/{provider}/v1/... style passthrough routes
 	// while keeping /p/{provider}/... as the canonical form. Default: true.
 	AllowPassthroughV1Alias bool `yaml:"allow_passthrough_v1_alias" env:"ALLOW_PASSTHROUGH_V1_ALIAS"`
-	// AllowedPassthroughProviders lists the provider types allowed on
+	// EnabledPassthroughProviders lists the provider types enabled on
 	// /p/{provider}/... passthrough routes. Default: ["openai", "anthropic"].
-	AllowedPassthroughProviders []string `yaml:"allowed_passthrough_providers" env:"ALLOWED_PASSTHROUGH_PROVIDERS"`
+	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
 }
 
 // MetricsConfig holds observability configuration for Prometheus metrics
@@ -409,7 +409,7 @@ func buildDefaultConfig() *Config {
 			SwaggerEnabled:               true,
 			EnablePassthroughRoutes: true,
 			AllowPassthroughV1Alias: true,
-			AllowedPassthroughProviders: []string{
+			EnabledPassthroughProviders: []string{
 				"openai",
 				"anthropic",
 			},

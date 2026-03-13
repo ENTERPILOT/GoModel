@@ -77,15 +77,15 @@ func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
 
 func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed bool, err error) {
 	ctx := c.Request().Context()
-	if env := core.GetRequestSemantics(ctx); env != nil {
+	if env := core.GetWhiteBoxPrompt(ctx); env != nil {
 		if model, provider, ok := cachedCanonicalSelectorHints(env); ok {
 			return model, provider, true, nil
 		}
 		if model, provider, ok := decodeCanonicalSelectorHintsForValidation(ctx, env); ok {
 			return model, provider, true, nil
 		}
-		if env.BodyParsedAsJSON || env.RoutingHints.Model != "" || env.RoutingHints.Provider != "" {
-			return env.RoutingHints.Model, env.RoutingHints.Provider, true, nil
+		if env.JSONBodyParsed || env.RouteHints.Model != "" || env.RouteHints.Provider != "" {
+			return env.RouteHints.Model, env.RouteHints.Provider, true, nil
 		}
 	}
 
@@ -93,7 +93,7 @@ func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed
 	if err != nil {
 		return "", "", false, err
 	}
-	if env := core.GetRequestSemantics(ctx); env != nil {
+	if env := core.GetWhiteBoxPrompt(ctx); env != nil {
 		if model, provider, ok := core.DecodeCanonicalSelector(bodyBytes, env); ok {
 			return model, provider, true, nil
 		}
@@ -109,11 +109,11 @@ func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed
 	return peek.Model, peek.Provider, true, nil
 }
 
-func cachedCanonicalSelectorHints(env *core.RequestSemantics) (model, provider string, ok bool) {
+func cachedCanonicalSelectorHints(env *core.WhiteBoxPrompt) (model, provider string, ok bool) {
 	return env.CanonicalSelectorFromCachedRequest()
 }
 
-func decodeCanonicalSelectorHintsForValidation(ctx context.Context, env *core.RequestSemantics) (model, provider string, ok bool) {
+func decodeCanonicalSelectorHintsForValidation(ctx context.Context, env *core.WhiteBoxPrompt) (model, provider string, ok bool) {
 	if env == nil {
 		return "", "", false
 	}
@@ -138,8 +138,8 @@ func isBatchOrFileRootOrSubresource(path string) bool {
 }
 
 func providerPassthroughType(c *echo.Context) (string, bool) {
-	if env := core.GetRequestSemantics(c.Request().Context()); env != nil && env.OperationKind == "provider_passthrough" {
-		providerType := strings.TrimSpace(env.RoutingHints.Provider)
+	if env := core.GetWhiteBoxPrompt(c.Request().Context()); env != nil && env.OperationType == "provider_passthrough" {
+		providerType := strings.TrimSpace(env.RouteHints.Provider)
 		if providerType != "" {
 			return providerType, true
 		}

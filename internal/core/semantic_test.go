@@ -24,25 +24,25 @@ func TestBuildSemanticEnvelope_OpenAICompat(t *testing.T) {
 		nil,
 	)
 
-	env := DeriveRequestSemantics(frame)
+	env := DeriveWhiteBoxPrompt(frame)
 	if env == nil {
-		t.Fatal("DeriveRequestSemantics() = nil")
+		t.Fatal("DeriveWhiteBoxPrompt() = nil")
 		return
 	}
-	if env.RouteKind != "openai_compat" {
-		t.Fatalf("RouteKind = %q, want openai_compat", env.RouteKind)
+	if env.RouteType != "openai_compat" {
+		t.Fatalf("RouteType = %q, want openai_compat", env.RouteType)
 	}
-	if env.OperationKind != "chat_completions" {
-		t.Fatalf("OperationKind = %q, want chat_completions", env.OperationKind)
+	if env.OperationType != "chat_completions" {
+		t.Fatalf("OperationType = %q, want chat_completions", env.OperationType)
 	}
-	if !env.BodyParsedAsJSON {
-		t.Fatal("BodyParsedAsJSON = false, want true")
+	if !env.JSONBodyParsed {
+		t.Fatal("JSONBodyParsed = false, want true")
 	}
-	if env.RoutingHints.Model != "gpt-5-mini" {
-		t.Fatalf("RoutingHints.Model = %q, want gpt-5-mini", env.RoutingHints.Model)
+	if env.RouteHints.Model != "gpt-5-mini" {
+		t.Fatalf("RouteHints.Model = %q, want gpt-5-mini", env.RouteHints.Model)
 	}
-	if env.RoutingHints.Provider != "openai" {
-		t.Fatalf("RoutingHints.Provider = %q, want openai", env.RoutingHints.Provider)
+	if env.RouteHints.Provider != "openai" {
+		t.Fatalf("RouteHints.Provider = %q, want openai", env.RouteHints.Provider)
 	}
 	if env.CachedChatRequest() != nil || env.CachedResponsesRequest() != nil || env.CachedEmbeddingRequest() != nil || env.CachedBatchRequest() != nil || env.CachedBatchRouteInfo() != nil || env.CachedFileRouteInfo() != nil {
 		t.Fatalf("canonical request payloads should be nil, got %+v", env)
@@ -52,22 +52,22 @@ func TestBuildSemanticEnvelope_OpenAICompat(t *testing.T) {
 func TestBuildSemanticEnvelope_InvalidJSONRemainsPartial(t *testing.T) {
 	frame := NewRequestSnapshot("POST", "/v1/responses", nil, nil, nil, "application/json", []byte(`{invalid}`), false, "", nil)
 
-	env := DeriveRequestSemantics(frame)
+	env := DeriveWhiteBoxPrompt(frame)
 	if env == nil {
-		t.Fatal("DeriveRequestSemantics() = nil")
+		t.Fatal("DeriveWhiteBoxPrompt() = nil")
 		return
 	}
-	if env.RouteKind != "openai_compat" {
-		t.Fatalf("RouteKind = %q, want openai_compat", env.RouteKind)
+	if env.RouteType != "openai_compat" {
+		t.Fatalf("RouteType = %q, want openai_compat", env.RouteType)
 	}
-	if env.OperationKind != "responses" {
-		t.Fatalf("OperationKind = %q, want responses", env.OperationKind)
+	if env.OperationType != "responses" {
+		t.Fatalf("OperationType = %q, want responses", env.OperationType)
 	}
-	if env.BodyParsedAsJSON {
-		t.Fatal("BodyParsedAsJSON = true, want false")
+	if env.JSONBodyParsed {
+		t.Fatal("JSONBodyParsed = true, want false")
 	}
-	if env.RoutingHints.Model != "" {
-		t.Fatalf("RoutingHints.Model = %q, want empty", env.RoutingHints.Model)
+	if env.RouteHints.Model != "" {
+		t.Fatalf("RouteHints.Model = %q, want empty", env.RouteHints.Model)
 	}
 }
 
@@ -85,25 +85,25 @@ func TestBuildSemanticEnvelope_PassthroughRouteParams(t *testing.T) {
 		nil,
 	)
 
-	env := DeriveRequestSemantics(frame)
+	env := DeriveWhiteBoxPrompt(frame)
 	if env == nil {
-		t.Fatal("DeriveRequestSemantics() = nil")
+		t.Fatal("DeriveWhiteBoxPrompt() = nil")
 		return
 	}
-	if env.RouteKind != "provider_passthrough" {
-		t.Fatalf("RouteKind = %q, want provider_passthrough", env.RouteKind)
+	if env.RouteType != "provider_passthrough" {
+		t.Fatalf("RouteType = %q, want provider_passthrough", env.RouteType)
 	}
-	if env.OperationKind != "provider_passthrough" {
-		t.Fatalf("OperationKind = %q, want provider_passthrough", env.OperationKind)
+	if env.OperationType != "provider_passthrough" {
+		t.Fatalf("OperationType = %q, want provider_passthrough", env.OperationType)
 	}
-	if env.RoutingHints.Provider != "openai" {
-		t.Fatalf("RoutingHints.Provider = %q, want openai", env.RoutingHints.Provider)
+	if env.RouteHints.Provider != "openai" {
+		t.Fatalf("RouteHints.Provider = %q, want openai", env.RouteHints.Provider)
 	}
-	if env.RoutingHints.Endpoint != "responses" {
-		t.Fatalf("RoutingHints.Endpoint = %q, want responses", env.RoutingHints.Endpoint)
+	if env.RouteHints.Endpoint != "responses" {
+		t.Fatalf("RouteHints.Endpoint = %q, want responses", env.RouteHints.Endpoint)
 	}
-	if env.RoutingHints.Model != "gpt-5-mini" {
-		t.Fatalf("RoutingHints.Model = %q, want gpt-5-mini", env.RoutingHints.Model)
+	if env.RouteHints.Model != "gpt-5-mini" {
+		t.Fatalf("RouteHints.Model = %q, want gpt-5-mini", env.RouteHints.Model)
 	}
 	if env.CachedChatRequest() != nil || env.CachedResponsesRequest() != nil || env.CachedEmbeddingRequest() != nil || env.CachedBatchRequest() != nil || env.CachedBatchRouteInfo() != nil || env.CachedFileRouteInfo() != nil {
 		t.Fatalf("canonical request payloads should be nil, got %+v", env)
@@ -113,32 +113,32 @@ func TestBuildSemanticEnvelope_PassthroughRouteParams(t *testing.T) {
 func TestBuildSemanticEnvelope_PassthroughPathFallback(t *testing.T) {
 	frame := NewRequestSnapshot("POST", "/p/anthropic/messages", nil, nil, nil, "", []byte(`{"model":"claude-sonnet-4-5"}`), false, "", nil)
 
-	env := DeriveRequestSemantics(frame)
+	env := DeriveWhiteBoxPrompt(frame)
 	if env == nil {
-		t.Fatal("DeriveRequestSemantics() = nil")
+		t.Fatal("DeriveWhiteBoxPrompt() = nil")
 		return
 	}
-	if env.RoutingHints.Provider != "anthropic" {
-		t.Fatalf("RoutingHints.Provider = %q, want anthropic", env.RoutingHints.Provider)
+	if env.RouteHints.Provider != "anthropic" {
+		t.Fatalf("RouteHints.Provider = %q, want anthropic", env.RouteHints.Provider)
 	}
-	if env.RoutingHints.Endpoint != "messages" {
-		t.Fatalf("RoutingHints.Endpoint = %q, want messages", env.RoutingHints.Endpoint)
+	if env.RouteHints.Endpoint != "messages" {
+		t.Fatalf("RouteHints.Endpoint = %q, want messages", env.RouteHints.Endpoint)
 	}
 }
 
 func TestBuildSemanticEnvelope_SkipsBodyParsingWhenIngressBodyWasNotCaptured(t *testing.T) {
 	frame := NewRequestSnapshot("POST", "/v1/chat/completions", nil, nil, nil, "", nil, true, "", nil)
 
-	env := DeriveRequestSemantics(frame)
+	env := DeriveWhiteBoxPrompt(frame)
 	if env == nil {
-		t.Fatal("DeriveRequestSemantics() = nil")
+		t.Fatal("DeriveWhiteBoxPrompt() = nil")
 		return
 	}
-	if env.BodyParsedAsJSON {
-		t.Fatal("BodyParsedAsJSON = true, want false")
+	if env.JSONBodyParsed {
+		t.Fatal("JSONBodyParsed = true, want false")
 	}
-	if env.RoutingHints.Model != "" {
-		t.Fatalf("RoutingHints.Model = %q, want empty", env.RoutingHints.Model)
+	if env.RouteHints.Model != "" {
+		t.Fatalf("RouteHints.Model = %q, want empty", env.RouteHints.Model)
 	}
 }
 
@@ -158,13 +158,13 @@ func TestBuildSemanticEnvelope_FilesMetadata(t *testing.T) {
 		nil,
 	)
 
-	env := DeriveRequestSemantics(frame)
+	env := DeriveWhiteBoxPrompt(frame)
 	if env == nil {
-		t.Fatal("DeriveRequestSemantics() = nil")
+		t.Fatal("DeriveWhiteBoxPrompt() = nil")
 		return
 	}
-	if env.OperationKind != "files" {
-		t.Fatalf("OperationKind = %q, want files", env.OperationKind)
+	if env.OperationType != "files" {
+		t.Fatalf("OperationType = %q, want files", env.OperationType)
 	}
 	req := env.CachedFileRouteInfo()
 	if req == nil {
@@ -180,8 +180,8 @@ func TestBuildSemanticEnvelope_FilesMetadata(t *testing.T) {
 	if req.Provider != "openai" {
 		t.Fatalf("FileRequest.Provider = %q, want openai", req.Provider)
 	}
-	if env.RoutingHints.Provider != "openai" {
-		t.Fatalf("RoutingHints.Provider = %q, want openai", env.RoutingHints.Provider)
+	if env.RouteHints.Provider != "openai" {
+		t.Fatalf("RouteHints.Provider = %q, want openai", env.RouteHints.Provider)
 	}
 }
 
@@ -202,13 +202,13 @@ func TestBuildSemanticEnvelope_BatchesListMetadata(t *testing.T) {
 		nil,
 	)
 
-	env := DeriveRequestSemantics(frame)
+	env := DeriveWhiteBoxPrompt(frame)
 	if env == nil {
-		t.Fatal("DeriveRequestSemantics() = nil")
+		t.Fatal("DeriveWhiteBoxPrompt() = nil")
 		return
 	}
-	if env.OperationKind != "batches" {
-		t.Fatalf("OperationKind = %q, want batches", env.OperationKind)
+	if env.OperationType != "batches" {
+		t.Fatalf("OperationType = %q, want batches", env.OperationType)
 	}
 	req := env.CachedBatchRouteInfo()
 	if req == nil {
@@ -229,13 +229,13 @@ func TestBuildSemanticEnvelope_BatchesListMetadata(t *testing.T) {
 func TestBuildSemanticEnvelope_BatchResultsMetadata(t *testing.T) {
 	frame := NewRequestSnapshot(http.MethodGet, "/v1/batches/batch_123/results", map[string]string{"id": "batch_123"}, nil, nil, "", nil, false, "", nil)
 
-	env := DeriveRequestSemantics(frame)
+	env := DeriveWhiteBoxPrompt(frame)
 	if env == nil {
-		t.Fatal("DeriveRequestSemantics() = nil")
+		t.Fatal("DeriveWhiteBoxPrompt() = nil")
 		return
 	}
-	if env.OperationKind != "batches" {
-		t.Fatalf("OperationKind = %q, want batches", env.OperationKind)
+	if env.OperationType != "batches" {
+		t.Fatalf("OperationType = %q, want batches", env.OperationType)
 	}
 	req := env.CachedBatchRouteInfo()
 	if req == nil {
