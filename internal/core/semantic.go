@@ -239,7 +239,7 @@ func DeriveWhiteBoxPrompt(snapshot *RequestSnapshot) *WhiteBoxPrompt {
 // DeriveFileRouteInfoFromTransport derives sparse file route info from transport metadata.
 func DeriveFileRouteInfoFromTransport(method, path string, routeParams map[string]string, queryParams map[string][]string) *FileRouteInfo {
 	req := &FileRouteInfo{
-		Action:   fileActionFromIngress(method, path),
+		Action:   fileActionFromTransport(method, path),
 		Provider: firstTransportValue(queryParams, "provider"),
 		Purpose:  firstTransportValue(queryParams, "purpose"),
 		After:    firstTransportValue(queryParams, "after"),
@@ -261,7 +261,7 @@ func DeriveFileRouteInfoFromTransport(method, path string, routeParams map[strin
 // DeriveBatchRouteInfoFromTransport derives sparse batch route info from transport metadata.
 func DeriveBatchRouteInfoFromTransport(method, path string, routeParams map[string]string, queryParams map[string][]string) *BatchRouteInfo {
 	req := &BatchRouteInfo{
-		Action:   batchActionFromIngress(method, path),
+		Action:   batchActionFromTransport(method, path),
 		BatchID:  batchIDFromTransport(path, routeParams),
 		After:    firstTransportValue(queryParams, "after"),
 		LimitRaw: firstTransportValue(queryParams, "limit"),
@@ -278,7 +278,7 @@ func DeriveBatchRouteInfoFromTransport(method, path string, routeParams map[stri
 	return req
 }
 
-func fileActionFromIngress(method, path string) string {
+func fileActionFromTransport(method, path string) string {
 	switch {
 	case path == "/v1/files" && method == http.MethodPost:
 		return FileActionCreate
@@ -308,7 +308,7 @@ func fileIDFromTransport(path string, routeParams map[string]string) string {
 	return strings.TrimSpace(parts[2])
 }
 
-func batchActionFromIngress(method, path string) string {
+func batchActionFromTransport(method, path string) string {
 	switch {
 	case path == "/v1/batches" && method == http.MethodPost:
 		return BatchActionCreate

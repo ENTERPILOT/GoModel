@@ -22,6 +22,17 @@ import (
 	"gomodel/internal/usage"
 )
 
+func withRequestSnapshotAndPrompt(req *http.Request, frame *core.RequestSnapshot) *http.Request {
+	if req == nil || frame == nil {
+		return req
+	}
+	ctx := core.WithRequestSnapshot(req.Context(), frame)
+	if prompt := core.DeriveWhiteBoxPrompt(frame); prompt != nil {
+		ctx = core.WithWhiteBoxPrompt(ctx, prompt)
+	}
+	return req.WithContext(ctx)
+}
+
 type chunkedReadCloser struct {
 	chunks [][]byte
 	index  int
@@ -802,9 +813,7 @@ func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
 		"req-ingress-1",
 		nil,
 	)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
+	req = withRequestSnapshotAndPrompt(req, frame)
 
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -876,9 +885,7 @@ func TestChatCompletion_NormalizesSemanticSelectorHints(t *testing.T) {
 		"",
 		nil,
 	)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
+	req = withRequestSnapshotAndPrompt(req, frame)
 
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -948,9 +955,7 @@ func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
 		"",
 		nil,
 	)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
+	req = withRequestSnapshotAndPrompt(req, frame)
 
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -1018,9 +1023,7 @@ func TestEmbeddings_UsesIngressFrameForDecoding(t *testing.T) {
 		"",
 		nil,
 	)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
+	req = withRequestSnapshotAndPrompt(req, frame)
 
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -1092,9 +1095,7 @@ func TestBatches_UsesIngressFrameForDecoding(t *testing.T) {
 		"",
 		nil,
 	)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
+	req = withRequestSnapshotAndPrompt(req, frame)
 
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -3008,9 +3009,7 @@ func TestCreateFile(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/files", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/files", nil, nil, nil, writer.FormDataContentType(), nil, false, "", nil)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
+	req = withRequestSnapshotAndPrompt(req, frame)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -3186,9 +3185,7 @@ func TestListFiles(t *testing.T) {
 		"",
 		nil,
 	)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
+	req = withRequestSnapshotAndPrompt(req, frame)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 

@@ -66,7 +66,9 @@ func fileRouteInfoFromSemantics(c *echo.Context) (*core.FileRouteInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	req = core.EnrichFileCreateRouteInfo(req, echoFileMultipartReader{ctx: c})
+	if req != nil && req.Action == core.FileActionCreate {
+		req = core.EnrichFileCreateRouteInfo(req, echoFileMultipartReader{ctx: c})
+	}
 	core.CacheFileRouteInfo(env, req)
 	return req, nil
 }

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestBuildSemanticEnvelope_OpenAICompat(t *testing.T) {
+func TestDeriveWhiteBoxPrompt_OpenAICompat(t *testing.T) {
 	frame := NewRequestSnapshot(
 		"POST",
 		"/v1/chat/completions",
@@ -49,7 +49,7 @@ func TestBuildSemanticEnvelope_OpenAICompat(t *testing.T) {
 	}
 }
 
-func TestBuildSemanticEnvelope_InvalidJSONRemainsPartial(t *testing.T) {
+func TestDeriveWhiteBoxPrompt_InvalidJSONRemainsPartial(t *testing.T) {
 	frame := NewRequestSnapshot("POST", "/v1/responses", nil, nil, nil, "application/json", []byte(`{invalid}`), false, "", nil)
 
 	env := DeriveWhiteBoxPrompt(frame)
@@ -71,7 +71,7 @@ func TestBuildSemanticEnvelope_InvalidJSONRemainsPartial(t *testing.T) {
 	}
 }
 
-func TestBuildSemanticEnvelope_PassthroughRouteParams(t *testing.T) {
+func TestDeriveWhiteBoxPrompt_PassthroughRouteParams(t *testing.T) {
 	frame := NewRequestSnapshot(
 		"POST",
 		"/p/openai/responses",
@@ -110,7 +110,7 @@ func TestBuildSemanticEnvelope_PassthroughRouteParams(t *testing.T) {
 	}
 }
 
-func TestBuildSemanticEnvelope_PassthroughPathFallback(t *testing.T) {
+func TestDeriveWhiteBoxPrompt_PassthroughPathFallback(t *testing.T) {
 	frame := NewRequestSnapshot("POST", "/p/anthropic/messages", nil, nil, nil, "", []byte(`{"model":"claude-sonnet-4-5"}`), false, "", nil)
 
 	env := DeriveWhiteBoxPrompt(frame)
@@ -126,7 +126,7 @@ func TestBuildSemanticEnvelope_PassthroughPathFallback(t *testing.T) {
 	}
 }
 
-func TestBuildSemanticEnvelope_SkipsBodyParsingWhenIngressBodyWasNotCaptured(t *testing.T) {
+func TestDeriveWhiteBoxPrompt_SkipsBodyParsingWhenIngressBodyWasNotCaptured(t *testing.T) {
 	frame := NewRequestSnapshot("POST", "/v1/chat/completions", nil, nil, nil, "", nil, true, "", nil)
 
 	env := DeriveWhiteBoxPrompt(frame)
@@ -142,7 +142,7 @@ func TestBuildSemanticEnvelope_SkipsBodyParsingWhenIngressBodyWasNotCaptured(t *
 	}
 }
 
-func TestBuildSemanticEnvelope_FilesMetadata(t *testing.T) {
+func TestDeriveWhiteBoxPrompt_FilesMetadata(t *testing.T) {
 	frame := NewRequestSnapshot(
 		"GET",
 		"/v1/files/file_123/content",
@@ -185,7 +185,7 @@ func TestBuildSemanticEnvelope_FilesMetadata(t *testing.T) {
 	}
 }
 
-func TestBuildSemanticEnvelope_BatchesListMetadata(t *testing.T) {
+func TestDeriveWhiteBoxPrompt_BatchesListMetadata(t *testing.T) {
 	frame := NewRequestSnapshot(
 		http.MethodGet,
 		"/v1/batches",
@@ -226,7 +226,7 @@ func TestBuildSemanticEnvelope_BatchesListMetadata(t *testing.T) {
 	}
 }
 
-func TestBuildSemanticEnvelope_BatchResultsMetadata(t *testing.T) {
+func TestDeriveWhiteBoxPrompt_BatchResultsMetadata(t *testing.T) {
 	frame := NewRequestSnapshot(http.MethodGet, "/v1/batches/batch_123/results", map[string]string{"id": "batch_123"}, nil, nil, "", nil, false, "", nil)
 
 	env := DeriveWhiteBoxPrompt(frame)

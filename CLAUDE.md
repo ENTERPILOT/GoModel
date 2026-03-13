@@ -86,7 +86,7 @@ Full reference: `.env.template` and `config/config.yaml`
 
 **Key config groups:**
 
-- **Server:** `PORT` (8080), `GOMODEL_MASTER_KEY` (empty = unsafe mode), `BODY_SIZE_LIMIT` ("10M")
+	- **Server:** `PORT` (8080), `GOMODEL_MASTER_KEY` (empty = unsafe mode), `BODY_SIZE_LIMIT` ("10M"), `ENABLE_PASSTHROUGH_ROUTES` (true: Enable provider-native passthrough routes under /p/{provider}/...), `ALLOW_PASSTHROUGH_V1_ALIAS` (true: Allow /p/{provider}/v1/... aliases while keeping /p/{provider}/... canonical), `ENABLED_PASSTHROUGH_PROVIDERS` (openai,anthropic: Comma-separated list of enabled passthrough providers)
 - **Storage:** `STORAGE_TYPE` (sqlite), `SQLITE_PATH` (data/gomodel.db), `POSTGRES_URL`, `MONGODB_URL`
 - **Audit logging:** `LOGGING_ENABLED` (false), `LOGGING_LOG_BODIES` (false), `LOGGING_LOG_HEADERS` (false), `LOGGING_RETENTION_DAYS` (30)
 - **Usage tracking:** `USAGE_ENABLED` (true), `ENFORCE_RETURNING_USAGE_DATA` (true), `USAGE_RETENTION_DAYS` (90)
