@@ -38,11 +38,14 @@ type ModelUsage struct {
 // Date holds the period label: YYYY-MM-DD for daily, YYYY-Www for weekly,
 // YYYY-MM for monthly, or YYYY for yearly intervals.
 type DailyUsage struct {
-	Date         string `json:"date"`
-	Requests     int    `json:"requests"`
-	InputTokens  int64  `json:"input_tokens"`
-	OutputTokens int64  `json:"output_tokens"`
-	TotalTokens  int64  `json:"total_tokens"`
+	Date         string   `json:"date"`
+	Requests     int      `json:"requests"`
+	InputTokens  int64    `json:"input_tokens"`
+	OutputTokens int64    `json:"output_tokens"`
+	TotalTokens  int64    `json:"total_tokens"`
+	InputCost    *float64 `json:"input_cost"`
+	OutputCost   *float64 `json:"output_cost"`
+	TotalCost    *float64 `json:"total_cost"`
 }
 
 // UsageLogParams specifies query parameters for paginated usage log retrieval.

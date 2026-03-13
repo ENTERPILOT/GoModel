@@ -22,6 +22,11 @@
     --chart-tooltip-bg: #1e1d1c;
     --chart-tooltip-border: #2a2826;
     --chart-tooltip-text: #e8e0d6;
+    --cal-level-0: #161b22;
+    --cal-level-1: #0e4429;
+    --cal-level-2: #006d32;
+    --cal-level-3: #26a641;
+    --cal-level-4: #39d353;
     color-scheme: dark;
 }
 
@@ -43,6 +48,11 @@
     --chart-tooltip-bg: #ffffff;
     --chart-tooltip-border: #e8e0d6;
     --chart-tooltip-text: #2d2519;
+    --cal-level-0: #ebedf0;
+    --cal-level-1: #9be9a8;
+    --cal-level-2: #40c463;
+    --cal-level-3: #30a14e;
+    --cal-level-4: #216e39;
     color-scheme: light;
 }
 
@@ -65,6 +75,11 @@
         --chart-tooltip-bg: #ffffff;
         --chart-tooltip-border: #e8e0d6;
         --chart-tooltip-text: #2d2519;
+        --cal-level-0: #ebedf0;
+        --cal-level-1: #9be9a8;
+        --cal-level-2: #40c463;
+        --cal-level-3: #30a14e;
+        --cal-level-4: #216e39;
         color-scheme: light;
     }
 }
@@ -1547,6 +1562,135 @@ body.conversation-drawer-open {
     cursor: default;
 }
 
+/* Contribution Calendar */
+.contribution-calendar-section {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-top: 24px;
+}
+
+.contribution-calendar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.contribution-calendar-header h3 {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.contribution-calendar-grid-wrapper {
+    display: flex;
+    gap: 8px;
+}
+
+.contribution-calendar-day-labels {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-top: 22px;
+}
+
+.contribution-calendar-day-labels span {
+    height: 13px;
+    font-size: 10px;
+    line-height: 13px;
+    color: var(--text-muted);
+    text-align: right;
+    min-width: 28px;
+}
+
+.contribution-calendar-scroll {
+    flex: 1;
+    overflow-x: auto;
+    min-width: 0;
+}
+
+.contribution-calendar-months {
+    display: grid;
+    grid-auto-columns: 15px;
+    grid-auto-flow: column;
+    gap: 2px;
+    margin-bottom: 6px;
+    height: 16px;
+}
+
+.contribution-calendar-month-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.contribution-calendar-grid {
+    display: flex;
+    gap: 2px;
+}
+
+.contribution-calendar-week {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.contribution-calendar-cell {
+    width: 13px;
+    height: 13px;
+    border-radius: 2px;
+    background: var(--cal-level-0);
+}
+
+.contribution-calendar-cell.level-1 { background: var(--cal-level-1); }
+.contribution-calendar-cell.level-2 { background: var(--cal-level-2); }
+.contribution-calendar-cell.level-3 { background: var(--cal-level-3); }
+.contribution-calendar-cell.level-4 { background: var(--cal-level-4); }
+.contribution-calendar-cell.empty { background: transparent; }
+
+.contribution-calendar-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 12px;
+}
+
+.contribution-calendar-summary {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.contribution-calendar-legend {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.contribution-calendar-legend .contribution-calendar-cell {
+    width: 11px;
+    height: 11px;
+    cursor: default;
+}
+
+.contribution-calendar-tooltip {
+    position: fixed;
+    z-index: 200;
+    background: var(--bg-surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    white-space: nowrap;
+    pointer-events: none;
+    transform: translateX(-50%);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .sidebar { width: 60px; }
@@ -1637,6 +1781,10 @@ body.conversation-drawer-open {
     .chat-message {
         max-width: 100%;
     }
+
+    /* Contribution calendar mobile */
+    .contribution-calendar-day-labels { display: none; }
+    .contribution-calendar-section { padding: 16px; }
 
     /* Date picker mobile */
     .date-picker-dropdown {

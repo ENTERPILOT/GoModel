@@ -51,6 +51,63 @@
         </div>
         <p class="empty-state" x-show="daily.length === 0 && !loading && !authError">No usage data yet.</p>
     </div>
+
+    <!-- Contribution Calendar -->
+    <div class="contribution-calendar-section">
+        <div class="contribution-calendar-header">
+            <h3>Activity</h3>
+            <div class="usage-mode-toggle">
+                <button class="usage-mode-btn" :class="{active: calendarMode==='tokens'}" @click="toggleCalendarMode('tokens')">Tokens</button>
+                <button class="usage-mode-btn" :class="{active: calendarMode==='costs'}" @click="toggleCalendarMode('costs')">Costs</button>
+            </div>
+        </div>
+        <div class="contribution-calendar-grid-wrapper">
+            <div class="contribution-calendar-day-labels">
+                <span></span>
+                <span>Mon</span>
+                <span></span>
+                <span>Wed</span>
+                <span></span>
+                <span>Fri</span>
+                <span></span>
+            </div>
+            <div class="contribution-calendar-scroll">
+                <div class="contribution-calendar-months">
+                    <template x-for="ml in calendarMonthLabels()" :key="ml.key">
+                        <span class="contribution-calendar-month-label" :style="'grid-column: ' + (ml.col + 1)" x-text="ml.label"></span>
+                    </template>
+                </div>
+                <div class="contribution-calendar-grid">
+                    <template x-for="(week, wi) in buildCalendarGrid()" :key="wi">
+                        <div class="contribution-calendar-week">
+                            <template x-for="(day, di) in week" :key="wi + '-' + di">
+                                <div class="contribution-calendar-cell"
+                                     :class="[day.empty ? 'empty' : 'level-' + day.level]"
+                                     @mouseenter="showCalendarTooltip($event, day)"
+                                     @mouseleave="hideCalendarTooltip()"></div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+        <div class="contribution-calendar-footer">
+            <span class="contribution-calendar-summary" x-text="calendarSummaryText()"></span>
+            <div class="contribution-calendar-legend">
+                <span>Less</span>
+                <div class="contribution-calendar-cell level-0"></div>
+                <div class="contribution-calendar-cell level-1"></div>
+                <div class="contribution-calendar-cell level-2"></div>
+                <div class="contribution-calendar-cell level-3"></div>
+                <div class="contribution-calendar-cell level-4"></div>
+                <span>More</span>
+            </div>
+        </div>
+    </div>
+    <div class="contribution-calendar-tooltip"
+         x-show="calendarTooltip.show"
+         x-text="calendarTooltip.text"
+         :style="'left: ' + calendarTooltip.x + 'px; top: ' + (calendarTooltip.y - 40) + 'px'"></div>
 </div>
 
 <!-- Usage Page -->

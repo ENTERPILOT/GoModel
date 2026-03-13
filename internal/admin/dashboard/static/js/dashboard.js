@@ -106,6 +106,7 @@ function dashboard() {
             });
 
             this.fetchAll();
+            this.fetchCalendarData();
         },
 
         toggleSidebar() {
@@ -315,6 +316,7 @@ function dashboard() {
         typeof dashboardUsageModule === 'function' ? dashboardUsageModule : null,
         typeof dashboardAuditListModule === 'function' ? dashboardAuditListModule : null,
         typeof dashboardConversationDrawerModule === 'function' ? dashboardConversationDrawerModule : null,
+        typeof dashboardContributionCalendarModule === 'function' ? dashboardContributionCalendarModule : null,
         typeof dashboardChartsModule === 'function' ? dashboardChartsModule : null
     ];
 

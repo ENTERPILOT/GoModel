@@ -323,6 +323,10 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 			{Key: "input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
 			{Key: "output_tokens", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
 			{Key: "total_tokens", Value: bson.D{{Key: "$sum", Value: "$total_tokens"}}},
+			{Key: "input_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$input_cost", 0}}}}}},
+			{Key: "output_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$output_cost", 0}}}}}},
+			{Key: "total_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", 0}}}}}},
+			{Key: "has_costs", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$total_cost", nil}}}, 1, 0}}}}}},
 		}}},
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
 	)
@@ -336,22 +340,32 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 	result := make([]DailyUsage, 0)
 	for cursor.Next(ctx) {
 		var row struct {
-			Date         string `bson:"_id"`
-			Requests     int    `bson:"requests"`
-			InputTokens  int64  `bson:"input_tokens"`
-			OutputTokens int64  `bson:"output_tokens"`
-			TotalTokens  int64  `bson:"total_tokens"`
+			Date         string  `bson:"_id"`
+			Requests     int     `bson:"requests"`
+			InputTokens  int64   `bson:"input_tokens"`
+			OutputTokens int64   `bson:"output_tokens"`
+			TotalTokens  int64   `bson:"total_tokens"`
+			InputCost    float64 `bson:"input_cost"`
+			OutputCost   float64 `bson:"output_cost"`
+			TotalCost    float64 `bson:"total_cost"`
+			HasCosts     int     `bson:"has_costs"`
 		}
 		if err := cursor.Decode(&row); err != nil {
 			return nil, fmt.Errorf("failed to decode daily usage row: %w", err)
 		}
-		result = append(result, DailyUsage{
+		d := DailyUsage{
 			Date:         row.Date,
 			Requests:     row.Requests,
 			InputTokens:  row.InputTokens,
 			OutputTokens: row.OutputTokens,
 			TotalTokens:  row.TotalTokens,
-		})
+		}
+		if row.HasCosts > 0 {
+			d.InputCost = &row.InputCost
+			d.OutputCost = &row.OutputCost
+			d.TotalCost = &row.TotalCost
+		}
+		result = append(result, d)
 	}
 
 	if err := cursor.Err(); err != nil {
