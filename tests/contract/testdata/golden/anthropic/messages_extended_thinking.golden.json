@@ -5,6 +5,7 @@
       "index": 0,
       "message": {
         "content": "To solve for x in the equation x + 5 = 12, I need to isolate x.\n\nI'll subtract 5 from both sides:\nx + 5 = 12\nx + 5 - 5 = 12 - 5\nx = 7\n\nLet me verify: 7 + 5 = 12 ✓\n\nTherefore, x = 7.",
+        "reasoning_content": "I need to solve for x in the equation x + 5 = 12.\n\nTo isolate x, I need to subtract 5 from both sides of the equation:\n\nx + 5 = 12\nx + 5 - 5 = 12 - 5\nx = 7\n\nLet me check: If x = 7, then x + 5 = 7 + 5 = 12 ✓\n\nSo x = 7.",
         "role": "assistant"
       }
     }
