@@ -10,6 +10,36 @@ import (
 // ErrNotFound indicates a requested alias was not found.
 var ErrNotFound = errors.New("alias not found")
 
+// ValidationError indicates invalid alias input or invalid alias state.
+type ValidationError struct {
+	Message string
+	Err     error
+}
+
+func (e *ValidationError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
+func (e *ValidationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func newValidationError(message string, err error) error {
+	return &ValidationError{Message: message, Err: err}
+}
+
+// IsValidationError reports whether err is a validation error.
+func IsValidationError(err error) bool {
+	var validationErr *ValidationError
+	return errors.As(err, &validationErr)
+}
+
 // Store defines persistence operations for aliases.
 type Store interface {
 	List(ctx context.Context) ([]Alias, error)
@@ -40,16 +70,16 @@ func normalizeAlias(alias Alias) (Alias, error) {
 	alias.Description = strings.TrimSpace(alias.Description)
 
 	if alias.Name == "" {
-		return Alias{}, fmt.Errorf("alias name is required")
+		return Alias{}, newValidationError("alias name is required", nil)
 	}
 	if strings.Contains(alias.Name, "/") {
-		return Alias{}, fmt.Errorf("alias name %q must be unqualified", alias.Name)
+		return Alias{}, newValidationError(fmt.Sprintf("alias name %q must be unqualified", alias.Name), nil)
 	}
 	if alias.TargetModel == "" {
-		return Alias{}, fmt.Errorf("target_model is required")
+		return Alias{}, newValidationError("target_model is required", nil)
 	}
 	if _, err := alias.TargetSelector(); err != nil {
-		return Alias{}, fmt.Errorf("invalid target selector: %w", err)
+		return Alias{}, newValidationError("invalid target selector: "+err.Error(), err)
 	}
 	return alias, nil
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -58,6 +59,21 @@ func (s *aliasTestStore) Delete(_ context.Context, name string) error {
 
 func (s *aliasTestStore) Close() error { return nil }
 
+type failingAliasStore struct {
+	listErr   error
+	getErr    error
+	upsertErr error
+	deleteErr error
+}
+
+func (s *failingAliasStore) List(_ context.Context) ([]aliases.Alias, error) { return nil, s.listErr }
+func (s *failingAliasStore) Get(_ context.Context, _ string) (*aliases.Alias, error) {
+	return nil, s.getErr
+}
+func (s *failingAliasStore) Upsert(_ context.Context, _ aliases.Alias) error { return s.upsertErr }
+func (s *failingAliasStore) Delete(_ context.Context, _ string) error        { return s.deleteErr }
+func (s *failingAliasStore) Close() error                                    { return nil }
+
 type aliasTestCatalog struct {
 	providerTypes map[string]string
 	models        map[string]core.Model
@@ -98,6 +114,20 @@ func newAliasHandler(t *testing.T, items ...aliases.Alias) *Handler {
 	catalog := newAliasTestCatalog()
 	catalog.add("gpt-4o", "openai")
 	service, err := aliases.NewService(newAliasTestStore(items...), catalog)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	return NewHandler(nil, nil, WithAliases(service))
+}
+
+func newAliasHandlerWithStore(t *testing.T, store aliases.Store) *Handler {
+	t.Helper()
+	catalog := newAliasTestCatalog()
+	catalog.add("gpt-4o", "openai")
+	service, err := aliases.NewService(store, catalog)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -193,5 +223,71 @@ func TestUpsertAliasAndDeleteAlias(t *testing.T) {
 	}
 	if deleteRec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204", deleteRec.Code)
+	}
+}
+
+func TestUpsertAliasReturns500OnStoreFailure(t *testing.T) {
+	h := newAliasHandlerWithStore(t, &failingAliasStore{
+		upsertErr: errors.New("disk full"),
+	})
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/aliases/smart", bytes.NewBufferString(`{"target_model":"gpt-4o"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPathValues(echo.PathValues{{Name: "name", Value: "smart"}})
+
+	if err := h.UpsertAlias(c); err != nil {
+		t.Fatalf("UpsertAlias() error = %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if !containsString(rec.Body.String(), "internal_error") {
+		t.Fatalf("body = %s, want internal_error", rec.Body.String())
+	}
+}
+
+func TestUpsertAliasReturns400OnValidationError(t *testing.T) {
+	h := newAliasHandler(t)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/aliases/smart", bytes.NewBufferString(`{"description":"missing target"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPathValues(echo.PathValues{{Name: "name", Value: "smart"}})
+
+	if err := h.UpsertAlias(c); err != nil {
+		t.Fatalf("UpsertAlias() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if !containsString(rec.Body.String(), "invalid_request_error") {
+		t.Fatalf("body = %s, want invalid_request_error", rec.Body.String())
+	}
+}
+
+func TestDeleteAliasReturns500OnStoreFailure(t *testing.T) {
+	h := newAliasHandlerWithStore(t, &failingAliasStore{
+		deleteErr: errors.New("disk full"),
+	})
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/aliases/smart", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPathValues(echo.PathValues{{Name: "name", Value: "smart"}})
+
+	if err := h.DeleteAlias(c); err != nil {
+		t.Fatalf("DeleteAlias() error = %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if !containsString(rec.Body.String(), "internal_error") {
+		t.Fatalf("body = %s, want internal_error", rec.Body.String())
 	}
 }

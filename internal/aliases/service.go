@@ -221,7 +221,7 @@ func (s *Service) Upsert(ctx context.Context, alias Alias) error {
 func (s *Service) Delete(ctx context.Context, name string) error {
 	name = normalizeName(name)
 	if name == "" {
-		return fmt.Errorf("alias name is required")
+		return newValidationError("alias name is required", nil)
 	}
 	if err := s.store.Delete(ctx, name); err != nil {
 		return fmt.Errorf("delete alias: %w", err)
@@ -235,21 +235,21 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 func (s *Service) validate(alias Alias) error {
 	target, err := alias.TargetSelector()
 	if err != nil {
-		return fmt.Errorf("invalid target selector: %w", err)
+		return newValidationError("invalid target selector: "+err.Error(), err)
 	}
 	if alias.Name == target.Model && target.Provider == "" {
-		return fmt.Errorf("alias %q cannot target itself", alias.Name)
+		return newValidationError(fmt.Sprintf("alias %q cannot target itself", alias.Name), nil)
 	}
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if target.Provider == "" {
 		if existing, ok := s.snapshot.aliases[target.Model]; ok && existing.Name != alias.Name {
-			return fmt.Errorf("alias target %q refers to another alias", target.Model)
+			return newValidationError(fmt.Sprintf("alias target %q refers to another alias", target.Model), nil)
 		}
 	}
 	if !s.catalog.Supports(target.QualifiedModel()) {
-		return fmt.Errorf("target model not found: %s", target.QualifiedModel())
+		return newValidationError("target model not found: "+target.QualifiedModel(), nil)
 	}
 	return nil
 }

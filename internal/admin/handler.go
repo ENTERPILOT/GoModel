@@ -523,6 +523,16 @@ func (h *Handler) aliasesUnavailableError() error {
 		WithCode("feature_unavailable")
 }
 
+func aliasWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if aliases.IsValidationError(err) {
+		return core.NewInvalidRequestError(err.Error(), err)
+	}
+	return err
+}
+
 // ListAliases handles GET /admin/api/v1/aliases
 func (h *Handler) ListAliases(c *echo.Context) error {
 	if h.aliases == nil {
@@ -563,7 +573,7 @@ func (h *Handler) UpsertAlias(c *echo.Context) error {
 		Description:    req.Description,
 		Enabled:        enabled,
 	}); err != nil {
-		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+		return handleError(c, aliasWriteError(err))
 	}
 
 	alias, ok := h.aliases.Get(name)
@@ -588,7 +598,7 @@ func (h *Handler) DeleteAlias(c *echo.Context) error {
 		if errors.Is(err, aliases.ErrNotFound) {
 			return handleError(c, core.NewNotFoundError("alias not found: "+name))
 		}
-		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+		return handleError(c, aliasWriteError(err))
 	}
 	return c.NoContent(http.StatusNoContent)
 }
