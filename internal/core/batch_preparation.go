@@ -73,11 +73,7 @@ func RewriteBatchSource(
 		return nil, NewInvalidRequestError("batch rewrite function is required", nil)
 	}
 
-	forward, err := cloneBatchRequest(req)
-	if err != nil {
-		return nil, NewInvalidRequestError("failed to clone batch request", err)
-	}
-
+	forward := cloneBatchRequest(req)
 	result := &BatchRewriteResult{Request: forward}
 	hints := map[string]string{}
 
@@ -304,16 +300,46 @@ func mergeBatchEndpointHints(dst, src map[string]string) {
 	}
 }
 
-func cloneBatchRequest(req *BatchRequest) (*BatchRequest, error) {
-	raw, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
+func cloneBatchRequest(req *BatchRequest) *BatchRequest {
+	if req == nil {
+		return nil
 	}
-	var cloned BatchRequest
-	if err := json.Unmarshal(raw, &cloned); err != nil {
-		return nil, err
+
+	cloned := &BatchRequest{
+		InputFileID:      req.InputFileID,
+		Endpoint:         req.Endpoint,
+		CompletionWindow: req.CompletionWindow,
+		Metadata:         cloneBatchStringMap(req.Metadata),
+		ExtraFields:      CloneRawJSONMap(req.ExtraFields),
 	}
-	return &cloned, nil
+	if req.Requests != nil {
+		cloned.Requests = make([]BatchRequestItem, len(req.Requests))
+		for i, item := range req.Requests {
+			cloned.Requests[i] = cloneBatchRequestItem(item)
+		}
+	}
+	return cloned
+}
+
+func cloneBatchRequestItem(item BatchRequestItem) BatchRequestItem {
+	return BatchRequestItem{
+		CustomID:    item.CustomID,
+		Method:      item.Method,
+		URL:         item.URL,
+		Body:        CloneRawJSON(item.Body),
+		ExtraFields: CloneRawJSONMap(item.ExtraFields),
+	}
+}
+
+func cloneBatchStringMap(src map[string]string) map[string]string {
+	if src == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(src))
+	for key, value := range src {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func jsonSemanticallyEqual(left, right []byte) bool {

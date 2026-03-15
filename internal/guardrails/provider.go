@@ -524,7 +524,7 @@ func mergeBatchHints(left, right map[string]string) map[string]string {
 		}
 		return merged
 	}
-	merged := make(map[string]string, len(left)+len(right))
+	merged := make(map[string]string, len(left))
 	for key, value := range left {
 		merged[key] = value
 	}
