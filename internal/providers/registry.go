@@ -446,7 +446,8 @@ func (r *ModelRegistry) GetProvider(model string) core.Provider {
 	return nil
 }
 
-// GetModel returns the model info for the given model, or nil if not found
+// GetModel returns the registry-backed model info for the given model, or nil if not found.
+// Callers must treat the returned data as read-only.
 func (r *ModelRegistry) GetModel(model string) *ModelInfo {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -467,15 +468,28 @@ func (r *ModelRegistry) GetModel(model string) *ModelInfo {
 	return nil
 }
 
-// LookupModel returns a defensive copy of the concrete model for the given selector.
+// LookupModel returns a shallow copy of the concrete model for the given selector.
 // Qualified selectors use the configured provider name prefix when present.
 func (r *ModelRegistry) LookupModel(model string) (*core.Model, bool) {
-	info := r.GetModel(model)
-	if info == nil {
-		return nil, false
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	providerName, modelID := splitModelSelector(model)
+	if providerName != "" {
+		if providerModels, ok := r.modelsByProvider[providerName]; ok {
+			if info, exists := providerModels[modelID]; exists {
+				cloned := info.Model
+				return &cloned, true
+			}
+		}
+		// Fall through: the slash may be part of the model ID
 	}
-	cloned := info.Model
-	return &cloned, true
+
+	if info, ok := r.models[model]; ok {
+		cloned := info.Model
+		return &cloned, true
+	}
+	return nil, false
 }
 
 // Supports returns true if the registry has a provider for the given model
@@ -768,8 +782,9 @@ func (r *ModelRegistry) SetModelList(list *modeldata.ModelList, raw json.RawMess
 
 // EnrichModels re-applies model list metadata to all currently registered models.
 // Call this after SetModelList to update existing models with the new metadata.
-// Holds the write lock for the entire operation to prevent races with concurrent
-// readers (e.g. ListModels) that may read Model.Metadata.
+// Holds the write lock for the entire operation and replaces published ModelInfo
+// entries instead of mutating them in place so concurrent readers can safely keep
+// using older snapshots after unlocking.
 func (r *ModelRegistry) EnrichModels() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -784,7 +799,15 @@ func (r *ModelRegistry) EnrichModels() {
 	}
 
 	accessor := &registryAccessor{models: r.models, providerTypes: providerTypes}
+	accessor.replacements = make(map[*ModelInfo]*ModelInfo, len(r.models))
 	modeldata.Enrich(accessor, r.modelList)
+	for _, providerModels := range r.modelsByProvider {
+		for modelID, info := range providerModels {
+			if replacement, ok := accessor.replacements[info]; ok {
+				providerModels[modelID] = replacement
+			}
+		}
+	}
 	r.invalidateSortedCaches()
 }
 
@@ -840,11 +863,13 @@ func (r *ModelRegistry) snapshotProviderTypes() map[core.Provider]string {
 }
 
 // registryAccessor implements modeldata.ModelInfoAccessor.
-// The models map may be either a snapshot (Initialize, LoadFromCache) or the live
-// registry map (EnrichModels, which holds the write lock for the entire operation).
+// The models map may be either an unpublished snapshot (Initialize, LoadFromCache)
+// or the live registry map (EnrichModels, which uses replacements to preserve
+// immutability of already-published ModelInfo values).
 type registryAccessor struct {
 	models        map[string]*ModelInfo
 	providerTypes map[core.Provider]string
+	replacements  map[*ModelInfo]*ModelInfo
 }
 
 func (a *registryAccessor) ModelIDs() []string {
@@ -865,6 +890,14 @@ func (a *registryAccessor) GetProviderType(modelID string) string {
 
 func (a *registryAccessor) SetMetadata(modelID string, meta *core.ModelMetadata) {
 	if info, ok := a.models[modelID]; ok {
+		if a.replacements != nil {
+			cloned := *info
+			cloned.Model.Metadata = meta
+			replacement := &cloned
+			a.models[modelID] = replacement
+			a.replacements[info] = replacement
+			return
+		}
 		info.Model.Metadata = meta
 	}
 }
