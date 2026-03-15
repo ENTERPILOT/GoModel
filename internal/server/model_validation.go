@@ -43,28 +43,19 @@ func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
 				return next(c)
 			}
 
-			model, providerHint, parsed, err := selectorHintsForValidation(c)
+			resolution, parsed, err := ensureRequestModelResolution(c, provider)
 			if err != nil {
-				return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+				return handleError(c, err)
 			}
-			if !parsed {
+			if !parsed || resolution == nil {
 				return next(c)
-			}
-			selector, err := core.ParseModelSelector(model, providerHint)
-			if err != nil {
-				return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 			}
 			if counted, ok := provider.(modelCountProvider); ok && counted.ModelCount() == 0 {
 				return handleError(c, core.NewProviderError("", 0, "model registry not initialized", nil))
 			}
 
-			if !provider.Supports(selector.QualifiedModel()) {
-				return handleError(c, core.NewInvalidRequestError("unsupported model: "+selector.QualifiedModel(), nil))
-			}
-
-			providerType := provider.GetProviderType(selector.QualifiedModel())
-			c.Set(string(providerTypeKey), providerType)
-			auditlog.EnrichEntry(c, selector.Model, providerType)
+			c.Set(string(providerTypeKey), resolution.ProviderType)
+			auditlog.EnrichEntry(c, auditModelName(resolution), resolution.ProviderType)
 
 			requestID := c.Request().Header.Get("X-Request-ID")
 			ctx := core.WithRequestID(c.Request().Context(), requestID)
@@ -154,6 +145,9 @@ func providerPassthroughType(c *echo.Context) (string, bool) {
 func GetProviderType(c *echo.Context) string {
 	if v, ok := c.Get(string(providerTypeKey)).(string); ok {
 		return v
+	}
+	if resolution := core.GetRequestModelResolution(c.Request().Context()); resolution != nil {
+		return resolution.ProviderType
 	}
 	return ""
 }

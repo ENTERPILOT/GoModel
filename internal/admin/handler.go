@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -551,9 +552,9 @@ func (h *Handler) UpsertAlias(c *echo.Context) error {
 		return handleError(c, h.aliasesUnavailableError())
 	}
 
-	name := strings.TrimSpace(c.Param("name"))
-	if name == "" {
-		return handleError(c, core.NewInvalidRequestError("alias name is required", nil))
+	name, err := decodeAliasPathName(c.Param("name"))
+	if err != nil {
+		return handleError(c, err)
 	}
 
 	var req upsertAliasRequest
@@ -589,9 +590,9 @@ func (h *Handler) DeleteAlias(c *echo.Context) error {
 		return handleError(c, h.aliasesUnavailableError())
 	}
 
-	name := strings.TrimSpace(c.Param("name"))
-	if name == "" {
-		return handleError(c, core.NewInvalidRequestError("alias name is required", nil))
+	name, err := decodeAliasPathName(c.Param("name"))
+	if err != nil {
+		return handleError(c, err)
 	}
 
 	if err := h.aliases.Delete(c.Request().Context(), name); err != nil {
@@ -601,4 +602,16 @@ func (h *Handler) DeleteAlias(c *echo.Context) error {
 		return handleError(c, aliasWriteError(err))
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+func decodeAliasPathName(raw string) (string, error) {
+	name, err := url.PathUnescape(strings.TrimSpace(raw))
+	if err != nil {
+		return "", core.NewInvalidRequestError("invalid alias name", err)
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", core.NewInvalidRequestError("alias name is required", nil)
+	}
+	return name, nil
 }

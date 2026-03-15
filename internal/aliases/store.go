@@ -3,7 +3,6 @@ package aliases
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 )
 
@@ -71,9 +70,6 @@ func normalizeAlias(alias Alias) (Alias, error) {
 
 	if alias.Name == "" {
 		return Alias{}, newValidationError("alias name is required", nil)
-	}
-	if strings.Contains(alias.Name, "/") {
-		return Alias{}, newValidationError(fmt.Sprintf("alias name %q must be unqualified", alias.Name), nil)
 	}
 	if alias.TargetModel == "" {
 		return Alias{}, newValidationError("target_model is required", nil)

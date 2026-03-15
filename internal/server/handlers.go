@@ -41,10 +41,6 @@ type Handler struct {
 	enabledPassthroughProviders  map[string]struct{}
 }
 
-type resolvedModelProvider interface {
-	ResolveModel(model, provider string) (core.ModelSelector, bool, error)
-}
-
 // NewHandler creates a new handler with the given routable provider (typically the Router)
 func NewHandler(provider core.RoutableProvider, logger auditlog.LoggerInterface, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver) *Handler {
 	return &Handler{
@@ -259,10 +255,6 @@ func cloneChatRequestForStreamUsage(req *core.ChatRequest) *core.ChatRequest {
 		cloned.StreamOptions = &streamOptions
 	}
 	return &cloned
-}
-
-func resolveModelSelector(ctx context.Context, model, provider *string) error {
-	return core.NormalizeModelSelector(core.GetWhiteBoxPrompt(ctx), model, provider)
 }
 
 func isEnabledPassthroughProvider(providerType string, enabledPassthroughProviders map[string]struct{}) bool {
@@ -584,7 +576,7 @@ func (h *Handler) ChatCompletion(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if err := resolveModelSelector(c.Request().Context(), &req.Model, &req.Provider); err != nil {
+	if err := applyRequestModelResolution(c, h.provider, &req.Model, &req.Provider); err != nil {
 		return handleError(c, err)
 	}
 
@@ -1054,7 +1046,7 @@ func (h *Handler) Responses(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if err := resolveModelSelector(c.Request().Context(), &req.Model, &req.Provider); err != nil {
+	if err := applyRequestModelResolution(c, h.provider, &req.Model, &req.Provider); err != nil {
 		return handleError(c, err)
 	}
 
@@ -1105,7 +1097,7 @@ func (h *Handler) Embeddings(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if err := resolveModelSelector(c.Request().Context(), &req.Model, &req.Provider); err != nil {
+	if err := applyRequestModelResolution(c, h.provider, &req.Model, &req.Provider); err != nil {
 		return handleError(c, err)
 	}
 

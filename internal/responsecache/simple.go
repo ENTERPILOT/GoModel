@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/cache"
+	"gomodel/internal/core"
 )
 
 var cacheablePaths = map[string]bool{
@@ -55,7 +56,7 @@ func (m *simpleCacheMiddleware) Middleware() echo.MiddlewareFunc {
 			if isStreamingRequest(path, body) {
 				return next(c)
 			}
-			key := hashRequest(path, body)
+			key := hashRequest(path, body, core.GetRequestModelResolution(c.Request().Context()))
 			ctx := c.Request().Context()
 			cached, err := m.store.Get(ctx, key)
 			if err != nil {
@@ -131,10 +132,14 @@ func isStreamingRequest(path string, body []byte) bool {
 	return p.Stream != nil && *p.Stream
 }
 
-func hashRequest(path string, body []byte) string {
+func hashRequest(path string, body []byte, resolution *core.RequestModelResolution) string {
 	h := sha256.New()
 	h.Write([]byte(path))
 	h.Write([]byte{0})
+	if resolution != nil {
+		h.Write([]byte(resolution.ResolvedQualifiedModel()))
+		h.Write([]byte{0})
+	}
 	h.Write(body)
 	return hex.EncodeToString(h.Sum(nil))
 }

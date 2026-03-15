@@ -162,3 +162,60 @@ func TestServiceUpsertRejectsAliasChainAndAllowsMasking(t *testing.T) {
 		t.Fatalf("masked model resolved to %q, want gpt-4o-mini", got)
 	}
 }
+
+func TestServiceSupportsQualifiedAliasNames(t *testing.T) {
+	catalog := newTestCatalog()
+	catalog.add("gpt-4o", "openai", core.Model{ID: "gpt-4o", Object: "model"})
+
+	service, err := NewService(newMemoryStore(Alias{Name: "openai/smart", TargetModel: "gpt-4o", Enabled: true}), catalog)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	resolution, ok, err := service.Resolve("openai/smart", "")
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("Resolve() ok = false, want true")
+	}
+	if resolution.Alias == nil || resolution.Alias.Name != "openai/smart" {
+		t.Fatalf("resolved alias = %#v, want openai/smart", resolution.Alias)
+	}
+	if got := resolution.Resolved.QualifiedModel(); got != "gpt-4o" {
+		t.Fatalf("resolved selector = %q, want gpt-4o", got)
+	}
+	if !service.Supports("openai/smart") {
+		t.Fatal("Supports(openai/smart) = false, want true")
+	}
+	if got := service.GetProviderType("openai/smart"); got != "openai" {
+		t.Fatalf("GetProviderType(openai/smart) = %q, want openai", got)
+	}
+}
+
+func TestServiceUpsertRejectsQualifiedAliasChainsAndSelfTargets(t *testing.T) {
+	catalog := newTestCatalog()
+	catalog.add("gpt-4o", "openai", core.Model{ID: "gpt-4o", Object: "model"})
+	catalog.add("gpt-4o-mini", "openai", core.Model{ID: "gpt-4o-mini", Object: "model"})
+
+	service, err := NewService(newMemoryStore(Alias{Name: "openai/front", TargetModel: "gpt-4o", Enabled: true}), catalog)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	err = service.Upsert(context.Background(), Alias{Name: "qualified-second", TargetModel: "front", TargetProvider: "openai", Enabled: true})
+	if err == nil || !strings.Contains(err.Error(), "refers to another alias") {
+		t.Fatalf("Upsert(qualified alias chain) error = %v, want alias-chain validation error", err)
+	}
+
+	err = service.Upsert(context.Background(), Alias{Name: "openai/self", TargetModel: "self", TargetProvider: "openai", Enabled: true})
+	if err == nil || !strings.Contains(err.Error(), "cannot target itself") {
+		t.Fatalf("Upsert(qualified self target) error = %v, want self-target validation error", err)
+	}
+}

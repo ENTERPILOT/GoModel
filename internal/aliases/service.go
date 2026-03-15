@@ -124,26 +124,22 @@ func (s *Service) ResolveSelector(selector core.ModelSelector) (Resolution, bool
 		return resolution, false
 	}
 
-	alias, ok := s.Get(selector.Model)
-	if !ok || !alias.Enabled {
+	aliasResolution, ok := s.resolveAlias(selector.QualifiedModel())
+	if !ok {
 		return resolution, false
 	}
-
-	target, err := alias.TargetSelector()
-	if err != nil {
-		return resolution, false
-	}
-	if !s.catalog.Supports(target.QualifiedModel()) {
-		return resolution, false
-	}
-
-	resolution.Resolved = target
-	resolution.Alias = alias
-	return resolution, true
+	aliasResolution.Requested = selector
+	return aliasResolution, true
 }
 
 // Resolve resolves raw model/provider inputs through the alias table.
 func (s *Service) Resolve(model, provider string) (Resolution, bool, error) {
+	if strings.TrimSpace(provider) == "" {
+		if resolution, ok := s.resolveAlias(model); ok {
+			return resolution, true, nil
+		}
+	}
+
 	selector, err := core.ParseModelSelector(model, provider)
 	if err != nil {
 		return Resolution{}, false, err
@@ -154,6 +150,10 @@ func (s *Service) Resolve(model, provider string) (Resolution, bool, error) {
 
 // Supports reports whether an alias currently resolves to a concrete model.
 func (s *Service) Supports(model string) bool {
+	if _, ok := s.resolveAlias(model); ok {
+		return true
+	}
+
 	selector, err := core.ParseModelSelector(model, "")
 	if err != nil {
 		return false
@@ -164,6 +164,10 @@ func (s *Service) Supports(model string) bool {
 
 // GetProviderType returns the resolved provider type for an alias, or empty if unresolved.
 func (s *Service) GetProviderType(model string) string {
+	if resolution, ok := s.resolveAlias(model); ok {
+		return strings.TrimSpace(s.catalog.GetProviderType(resolution.Resolved.QualifiedModel()))
+	}
+
 	selector, err := core.ParseModelSelector(model, "")
 	if err != nil {
 		return ""
@@ -237,21 +241,47 @@ func (s *Service) validate(alias Alias) error {
 	if err != nil {
 		return newValidationError("invalid target selector: "+err.Error(), err)
 	}
-	if alias.Name == target.Model && target.Provider == "" {
+	if alias.Name == target.QualifiedModel() {
 		return newValidationError(fmt.Sprintf("alias %q cannot target itself", alias.Name), nil)
 	}
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if target.Provider == "" {
-		if existing, ok := s.snapshot.aliases[target.Model]; ok && existing.Name != alias.Name {
-			return newValidationError(fmt.Sprintf("alias target %q refers to another alias", target.Model), nil)
-		}
+	if existing, ok := s.snapshot.aliases[target.QualifiedModel()]; ok && existing.Name != alias.Name {
+		return newValidationError(fmt.Sprintf("alias target %q refers to another alias", target.QualifiedModel()), nil)
 	}
 	if !s.catalog.Supports(target.QualifiedModel()) {
 		return newValidationError("target model not found: "+target.QualifiedModel(), nil)
 	}
 	return nil
+}
+
+func (s *Service) resolveAlias(name string) (Resolution, bool) {
+	name = normalizeName(name)
+	resolution := Resolution{
+		Requested: core.ModelSelector{Model: name},
+		Resolved:  core.ModelSelector{Model: name},
+	}
+	if name == "" {
+		return resolution, false
+	}
+
+	alias, ok := s.Get(name)
+	if !ok || !alias.Enabled {
+		return resolution, false
+	}
+
+	target, err := alias.TargetSelector()
+	if err != nil {
+		return resolution, false
+	}
+	if !s.catalog.Supports(target.QualifiedModel()) {
+		return resolution, false
+	}
+
+	resolution.Resolved = target
+	resolution.Alias = alias
+	return resolution, true
 }
 
 // StartBackgroundRefresh periodically reloads aliases from storage until stopped.

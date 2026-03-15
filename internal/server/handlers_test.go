@@ -1065,6 +1065,115 @@ func TestChatCompletion_NormalizesSemanticSelectorHints(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_ResolvesQualifiedMaskingAliasBeforeHandlerRouting(t *testing.T) {
+	catalog := aliasesTestCatalog{
+		supported: map[string]bool{
+			"anthropic/claude-opus-4-6": true,
+			"openai/gpt-5-nano":         true,
+		},
+		providerTypes: map[string]string{
+			"anthropic/claude-opus-4-6": "anthropic",
+			"openai/gpt-5-nano":         "openai",
+		},
+		models: map[string]core.Model{
+			"anthropic/claude-opus-4-6": {ID: "claude-opus-4-6", Object: "model"},
+			"openai/gpt-5-nano":         {ID: "gpt-5-nano", Object: "model"},
+		},
+	}
+
+	service, err := aliases.NewService(newAliasesTestStore(
+		aliases.Alias{Name: "anthropic/claude-opus-4-6", TargetModel: "gpt-5-nano", TargetProvider: "openai", Enabled: true},
+	), &catalog)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	inner := &capturingProvider{
+		mockProvider: mockProvider{
+			supportedModels: []string{"gpt-5-nano"},
+			providerTypes: map[string]string{
+				"openai/gpt-5-nano": "openai",
+			},
+			response: &core.ChatResponse{
+				ID:       "chatcmpl_alias_123",
+				Object:   "chat.completion",
+				Model:    "gpt-5-nano",
+				Provider: "openai",
+				Choices: []core.Choice{
+					{
+						Index:        0,
+						FinishReason: "stop",
+						Message: core.ResponseMessage{
+							Role:    "assistant",
+							Content: "ok",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	provider := aliases.NewProvider(inner, service)
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = &explodingReadCloser{}
+
+	frame := core.NewRequestSnapshot(
+		http.MethodPost,
+		"/v1/chat/completions",
+		nil,
+		nil,
+		nil,
+		"application/json",
+		[]byte(`{
+			"model":"anthropic/claude-opus-4-6",
+			"messages":[{"role":"user","content":"return json"}]
+		}`),
+		false,
+		"",
+		nil,
+	)
+	req = withRequestSnapshotAndPrompt(req, frame)
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err = handler.ChatCompletion(c)
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if inner.capturedChatReq == nil {
+		t.Fatal("expected chat request to be captured")
+	}
+	if inner.capturedChatReq.Model != "gpt-5-nano" {
+		t.Fatalf("captured model = %q, want gpt-5-nano", inner.capturedChatReq.Model)
+	}
+	if inner.capturedChatReq.Provider != "openai" {
+		t.Fatalf("captured provider = %q, want openai", inner.capturedChatReq.Provider)
+	}
+
+	resolution := core.GetRequestModelResolution(c.Request().Context())
+	if resolution == nil {
+		t.Fatal("expected request model resolution in context")
+	}
+	if !resolution.AliasApplied {
+		t.Fatal("expected alias resolution to be marked as applied")
+	}
+	if resolution.ResolvedQualifiedModel() != "openai/gpt-5-nano" {
+		t.Fatalf("resolved model = %q, want openai/gpt-5-nano", resolution.ResolvedQualifiedModel())
+	}
+}
+
 func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
 	provider := &capturingProvider{
 		mockProvider: mockProvider{

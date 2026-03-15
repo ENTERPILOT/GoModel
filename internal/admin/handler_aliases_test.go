@@ -226,6 +226,32 @@ func TestUpsertAliasAndDeleteAlias(t *testing.T) {
 	}
 }
 
+func TestUpsertAliasDecodesQualifiedAliasName(t *testing.T) {
+	h := newAliasHandler(t)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/aliases/openai%2Fsmart", bytes.NewBufferString(`{"target_model":"gpt-4o"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPathValues(echo.PathValues{{Name: "name", Value: "openai%2Fsmart"}})
+
+	if err := h.UpsertAlias(c); err != nil {
+		t.Fatalf("UpsertAlias() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var body aliases.Alias
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Name != "openai/smart" {
+		t.Fatalf("alias name = %q, want openai/smart", body.Name)
+	}
+}
+
 func TestUpsertAliasReturns500OnStoreFailure(t *testing.T) {
 	h := newAliasHandlerWithStore(t, &failingAliasStore{
 		upsertErr: errors.New("disk full"),

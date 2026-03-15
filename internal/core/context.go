@@ -12,6 +12,8 @@ const (
 	requestSnapshotKey contextKey = "request-snapshot"
 	// whiteBoxPromptKey stores the best-effort semantic extraction for the request.
 	whiteBoxPromptKey contextKey = "white-box-prompt"
+	// requestModelResolutionKey stores the resolved request selector chosen for execution.
+	requestModelResolutionKey contextKey = "request-model-resolution"
 
 	// enforceReturningUsageDataKey stores whether streaming requests should ask providers
 	// to include usage when the provider supports it.
@@ -59,6 +61,21 @@ func GetWhiteBoxPrompt(ctx context.Context) *WhiteBoxPrompt {
 	if v := ctx.Value(whiteBoxPromptKey); v != nil {
 		if prompt, ok := v.(*WhiteBoxPrompt); ok {
 			return prompt
+		}
+	}
+	return nil
+}
+
+// WithRequestModelResolution returns a new context with the resolved request selector attached.
+func WithRequestModelResolution(ctx context.Context, resolution *RequestModelResolution) context.Context {
+	return context.WithValue(ctx, requestModelResolutionKey, resolution)
+}
+
+// GetRequestModelResolution retrieves the resolved request selector from the context.
+func GetRequestModelResolution(ctx context.Context) *RequestModelResolution {
+	if v := ctx.Value(requestModelResolutionKey); v != nil {
+		if resolution, ok := v.(*RequestModelResolution); ok {
+			return resolution
 		}
 	}
 	return nil
