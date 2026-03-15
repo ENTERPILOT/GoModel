@@ -2,7 +2,6 @@ package aliases
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"sort"
@@ -15,6 +14,7 @@ import (
 type Provider struct {
 	inner   core.RoutableProvider
 	service *Service
+	options Options
 }
 
 type requestRewriteMode int
@@ -24,26 +24,37 @@ const (
 	rewriteForUpstream
 )
 
+// Options controls optional behavior of Provider.
+type Options struct {
+	// DisableTranslatedRequestProcessing lets explicit request planning own
+	// translated-route selector resolution while this wrapper still exposes
+	// alias inventory and batch preparation.
+	DisableTranslatedRequestProcessing bool
+	// DisableNativeBatchPreparation lets an explicit server-side batch
+	// preparer own alias rewriting for native batch requests.
+	DisableNativeBatchPreparation bool
+}
+
 // NewProvider creates an alias-aware provider wrapper.
 func NewProvider(inner core.RoutableProvider, service *Service) *Provider {
-	return &Provider{inner: inner, service: service}
+	return NewProviderWithOptions(inner, service, Options{})
+}
+
+// NewProviderWithOptions creates an alias-aware provider wrapper with explicit options.
+func NewProviderWithOptions(inner core.RoutableProvider, service *Service, options Options) *Provider {
+	return &Provider{inner: inner, service: service, options: options}
 }
 
 // ResolveModel resolves a model/provider pair through the alias table.
 func (p *Provider) ResolveModel(model, provider string) (core.ModelSelector, bool, error) {
-	if p.service == nil {
-		selector, err := core.ParseModelSelector(model, provider)
-		return selector, false, err
-	}
-	resolution, ok, err := p.service.Resolve(model, provider)
-	if err != nil {
-		return core.ModelSelector{}, false, err
-	}
-	return resolution.Resolved, ok, nil
+	return resolveAliasModel(p.service, model, provider)
 }
 
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	forward, err := p.rewriteChatRequest(req, rewriteForRouting)
+	if p.options.DisableTranslatedRequestProcessing {
+		return p.inner.ChatCompletion(ctx, req)
+	}
+	forward, err := rewriteAliasChatRequest(p.service, p.inner, req, rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +62,10 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 }
 
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	forward, err := p.rewriteChatRequest(req, rewriteForRouting)
+	if p.options.DisableTranslatedRequestProcessing {
+		return p.inner.StreamChatCompletion(ctx, req)
+	}
+	forward, err := rewriteAliasChatRequest(p.service, p.inner, req, rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +103,10 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 }
 
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	forward, err := p.rewriteResponsesRequest(req, rewriteForRouting)
+	if p.options.DisableTranslatedRequestProcessing {
+		return p.inner.Responses(ctx, req)
+	}
+	forward, err := rewriteAliasResponsesRequest(p.service, p.inner, req, rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +114,10 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 }
 
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	forward, err := p.rewriteResponsesRequest(req, rewriteForRouting)
+	if p.options.DisableTranslatedRequestProcessing {
+		return p.inner.StreamResponses(ctx, req)
+	}
+	forward, err := rewriteAliasResponsesRequest(p.service, p.inner, req, rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +125,10 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 }
 
 func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
-	forward, err := p.rewriteEmbeddingRequest(req, rewriteForRouting)
+	if p.options.DisableTranslatedRequestProcessing {
+		return p.inner.Embeddings(ctx, req)
+	}
+	forward, err := rewriteAliasEmbeddingRequest(p.service, p.inner, req, rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +172,10 @@ func (p *Provider) CreateBatch(ctx context.Context, providerType string, req *co
 	if err != nil {
 		return nil, err
 	}
-	result, err := p.rewriteBatchSource(ctx, providerType, req)
+	if p.options.DisableNativeBatchPreparation {
+		return native.CreateBatch(ctx, providerType, req)
+	}
+	result, err := rewriteAliasBatchSource(ctx, providerType, req, p.service, p.inner, p.batchFileTransport())
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +226,10 @@ func (p *Provider) CreateBatchWithHints(ctx context.Context, providerType string
 	if err != nil {
 		return nil, nil, err
 	}
-	result, err := p.rewriteBatchSource(ctx, providerType, req)
+	if p.options.DisableNativeBatchPreparation {
+		return hinted.CreateBatchWithHints(ctx, providerType, req)
+	}
+	result, err := rewriteAliasBatchSource(ctx, providerType, req, p.service, p.inner, p.batchFileTransport())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -278,91 +307,10 @@ func (p *Provider) Passthrough(ctx context.Context, providerType string, req *co
 	return passthrough.Passthrough(ctx, providerType, req)
 }
 
-func (p *Provider) rewriteChatRequest(req *core.ChatRequest, mode requestRewriteMode) (*core.ChatRequest, error) {
-	if req == nil {
-		return nil, nil
-	}
-	selector, err := p.resolveRoutableSelector(req.Model, req.Provider)
-	if err != nil {
-		return nil, err
-	}
-	forward := *req
-	forward.Model = selector.Model
-	forward.Provider = providerValueForMode(selector, mode)
-	return &forward, nil
-}
-
-func (p *Provider) rewriteResponsesRequest(req *core.ResponsesRequest, mode requestRewriteMode) (*core.ResponsesRequest, error) {
-	if req == nil {
-		return nil, nil
-	}
-	selector, err := p.resolveRoutableSelector(req.Model, req.Provider)
-	if err != nil {
-		return nil, err
-	}
-	forward := *req
-	forward.Model = selector.Model
-	forward.Provider = providerValueForMode(selector, mode)
-	return &forward, nil
-}
-
-func (p *Provider) rewriteEmbeddingRequest(req *core.EmbeddingRequest, mode requestRewriteMode) (*core.EmbeddingRequest, error) {
-	if req == nil {
-		return nil, nil
-	}
-	selector, err := p.resolveRoutableSelector(req.Model, req.Provider)
-	if err != nil {
-		return nil, err
-	}
-	forward := *req
-	forward.Model = selector.Model
-	forward.Provider = providerValueForMode(selector, mode)
-	return &forward, nil
-}
-
-func (p *Provider) rewriteBatchSource(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchRewriteResult, error) {
-	files, err := p.nativeFileRouter()
-	if err != nil {
-		files = nil
-	}
-	return core.RewriteBatchSource(ctx, providerType, req, files, []string{"chat_completions", "responses", "embeddings"}, p.rewriteBatchDecodedItem)
-}
-
-func (p *Provider) rewriteBatchDecodedItem(_ context.Context, _ core.BatchRequestItem, decoded *core.DecodedBatchItemRequest) (json.RawMessage, error) {
-	switch typed := decoded.Request.(type) {
-	case *core.ChatRequest:
-		modified, err := p.rewriteChatRequest(typed, rewriteForUpstream)
-		if err != nil {
-			return nil, err
-		}
-		body, err := json.Marshal(modified)
-		if err != nil {
-			return nil, core.NewInvalidRequestError("failed to encode batch item", err)
-		}
-		return body, nil
-	case *core.ResponsesRequest:
-		modified, err := p.rewriteResponsesRequest(typed, rewriteForUpstream)
-		if err != nil {
-			return nil, err
-		}
-		body, err := json.Marshal(modified)
-		if err != nil {
-			return nil, core.NewInvalidRequestError("failed to encode batch item", err)
-		}
-		return body, nil
-	case *core.EmbeddingRequest:
-		modified, err := p.rewriteEmbeddingRequest(typed, rewriteForUpstream)
-		if err != nil {
-			return nil, err
-		}
-		body, err := json.Marshal(modified)
-		if err != nil {
-			return nil, core.NewInvalidRequestError("failed to encode batch item", err)
-		}
-		return body, nil
-	default:
-		return nil, core.NewInvalidRequestError("unsupported batch item url: "+decoded.Endpoint, nil)
-	}
+// PrepareBatchRequest resolves aliases for batch subrequests without
+// submitting the native batch to the wrapped provider.
+func (p *Provider) PrepareBatchRequest(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchRewriteResult, error) {
+	return rewriteAliasBatchSource(ctx, providerType, req, p.service, p.inner, p.batchFileTransport())
 }
 
 func (p *Provider) recordBatchPreparation(ctx context.Context, original, rewritten *core.BatchRequest) {
@@ -426,33 +374,6 @@ func mergeBatchHints(left, right map[string]string) map[string]string {
 	return merged
 }
 
-func (p *Provider) resolveRequestSelector(model, provider string) (core.ModelSelector, error) {
-	selector, changed, err := p.ResolveModel(model, provider)
-	if err != nil {
-		return core.ModelSelector{}, err
-	}
-	if changed {
-		return selector, nil
-	}
-	return core.ParseModelSelector(model, provider)
-}
-
-func (p *Provider) resolveRoutableSelector(model, provider string) (core.ModelSelector, error) {
-	selector, err := p.resolveRequestSelector(model, provider)
-	if err != nil {
-		return core.ModelSelector{}, err
-	}
-
-	resolvedModel := strings.TrimSpace(selector.QualifiedModel())
-	if resolvedModel == "" {
-		return core.ModelSelector{}, core.NewInvalidRequestError("model is required", nil)
-	}
-	if !p.inner.Supports(resolvedModel) {
-		return core.ModelSelector{}, core.NewInvalidRequestError("unsupported model: "+resolvedModel, nil)
-	}
-	return selector, nil
-}
-
 func providerValueForMode(selector core.ModelSelector, mode requestRewriteMode) string {
 	if mode == rewriteForUpstream {
 		return ""
@@ -482,6 +403,14 @@ func (p *Provider) nativeFileRouter() (core.NativeFileRoutableProvider, error) {
 		return nil, core.NewInvalidRequestError("file routing is not supported by the current provider router", nil)
 	}
 	return files, nil
+}
+
+func (p *Provider) batchFileTransport() core.BatchFileTransport {
+	files, err := p.nativeFileRouter()
+	if err != nil {
+		return nil
+	}
+	return files
 }
 
 func (p *Provider) passthroughRouter() (core.RoutablePassthrough, error) {

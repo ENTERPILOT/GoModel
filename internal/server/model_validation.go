@@ -20,13 +20,20 @@ type modelCountProvider interface {
 // provider type, and any early model routing decision that downstream handlers
 // or middleware need to consume.
 func ExecutionPlanning(provider core.RoutableProvider) echo.MiddlewareFunc {
+	return ExecutionPlanningWithResolver(provider, nil)
+}
+
+// ExecutionPlanningWithResolver resolves request-scoped execution plans using
+// an explicit selector resolver when provided. This lets request planning own
+// alias policy instead of depending on provider decorators.
+func ExecutionPlanningWithResolver(provider core.RoutableProvider, resolver RequestModelResolver) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			path := c.Request().URL.Path
 			if !core.IsModelInteractionPath(path) {
 				return next(c)
 			}
-			plan, err := deriveExecutionPlan(c, provider)
+			plan, err := deriveExecutionPlan(c, provider, resolver)
 			if err != nil {
 				return handleError(c, err)
 			}
@@ -44,7 +51,7 @@ func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
 	return ExecutionPlanning(provider)
 }
 
-func deriveExecutionPlan(c *echo.Context, provider core.RoutableProvider) (*core.ExecutionPlan, error) {
+func deriveExecutionPlan(c *echo.Context, provider core.RoutableProvider, resolver RequestModelResolver) (*core.ExecutionPlan, error) {
 	if c == nil {
 		return nil, nil
 	}
@@ -82,7 +89,7 @@ func deriveExecutionPlan(c *echo.Context, provider core.RoutableProvider) (*core
 
 	case "chat_completions", "responses", "embeddings":
 		plan.Mode = core.ExecutionModeTranslated
-		resolution, parsed, err := ensureRequestModelResolution(c, provider)
+		resolution, parsed, err := ensureRequestModelResolution(c, provider, resolver)
 		if err != nil {
 			return nil, err
 		}

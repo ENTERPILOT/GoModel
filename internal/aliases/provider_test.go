@@ -222,6 +222,48 @@ func TestProviderMaskingAliasOverridesConcreteModelEntry(t *testing.T) {
 	}
 }
 
+func TestProviderCanDisableTranslatedRequestRewriting(t *testing.T) {
+	catalog := newTestCatalog()
+	catalog.add("gpt-4o", "openai", core.Model{ID: "gpt-4o", Object: "model", OwnedBy: "openai"})
+
+	service, err := NewService(newMemoryStore(Alias{Name: "smart", TargetModel: "gpt-4o", Enabled: true}), catalog)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	inner := newProviderMock()
+	inner.supported["gpt-4o"] = true
+	inner.providerType["gpt-4o"] = "openai"
+	inner.modelsResp = &core.ModelsResponse{Object: "list", Data: []core.Model{{ID: "gpt-4o", Object: "model"}}}
+
+	provider := NewProviderWithOptions(inner, service, Options{
+		DisableTranslatedRequestProcessing: true,
+	})
+
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "smart"}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if inner.chatReq == nil || inner.chatReq.Model != "smart" {
+		t.Fatalf("inner.chatReq = %#v, want unchanged alias model smart", inner.chatReq)
+	}
+	if !provider.Supports("smart") {
+		t.Fatal("Supports(smart) = false, want true")
+	}
+	if got := provider.GetProviderType("smart"); got != "openai" {
+		t.Fatalf("GetProviderType(smart) = %q, want openai", got)
+	}
+	selector, changed, err := provider.ResolveModel("smart", "")
+	if err != nil {
+		t.Fatalf("ResolveModel() error = %v", err)
+	}
+	if !changed || selector.QualifiedModel() != "gpt-4o" {
+		t.Fatalf("ResolveModel() = (%q, %v), want gpt-4o,true", selector.QualifiedModel(), changed)
+	}
+}
+
 func TestProviderRewritesBatchItemBodies(t *testing.T) {
 	catalog := newTestCatalog()
 	catalog.add("openai/gpt-4o", "openai", core.Model{ID: "gpt-4o", Object: "model"})

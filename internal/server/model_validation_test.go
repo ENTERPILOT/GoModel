@@ -733,3 +733,63 @@ func TestModelValidation_ResolvesQualifiedMaskingAliasBeforeProviderParsing(t *t
 		assert.Equal(t, "openai/gpt-5-nano", capturedPlan.ResolvedQualifiedModel())
 	}
 }
+
+func TestExecutionPlanningWithResolver_UsesExplicitAliasResolverWithoutProviderDecorator(t *testing.T) {
+	catalog := aliasesTestCatalog{
+		supported: map[string]bool{
+			"anthropic/claude-opus-4-6": true,
+			"openai/gpt-5-nano":         true,
+		},
+		providerTypes: map[string]string{
+			"anthropic/claude-opus-4-6": "anthropic",
+			"openai/gpt-5-nano":         "openai",
+		},
+		models: map[string]core.Model{
+			"anthropic/claude-opus-4-6": {ID: "claude-opus-4-6", Object: "model"},
+			"openai/gpt-5-nano":         {ID: "gpt-5-nano", Object: "model"},
+		},
+	}
+
+	service, err := aliases.NewService(newAliasesTestStore(
+		aliases.Alias{Name: "anthropic/claude-opus-4-6", TargetModel: "gpt-5-nano", TargetProvider: "openai", Enabled: true},
+	), &catalog)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	provider := &mockProvider{
+		supportedModels: []string{"gpt-5-nano"},
+		providerTypes: map[string]string{
+			"openai/gpt-5-nano": "openai",
+		},
+	}
+
+	e := echo.New()
+	var capturedPlan *core.ExecutionPlan
+
+	middleware := ExecutionPlanningWithResolver(provider, service)
+	handler := middleware(func(c *echo.Context) error {
+		capturedPlan = core.GetExecutionPlan(c.Request().Context())
+		return c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"anthropic/claude-opus-4-6","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err = handler(c)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	if assert.NotNil(t, capturedPlan) && assert.NotNil(t, capturedPlan.Resolution) {
+		assert.Equal(t, "openai", capturedPlan.ProviderType)
+		assert.True(t, capturedPlan.Resolution.AliasApplied)
+		assert.Equal(t, "anthropic/claude-opus-4-6", capturedPlan.RequestedQualifiedModel())
+		assert.Equal(t, "openai/gpt-5-nano", capturedPlan.ResolvedQualifiedModel())
+	}
+}

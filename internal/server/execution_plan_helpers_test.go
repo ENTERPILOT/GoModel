@@ -32,7 +32,7 @@ func TestEnsureTranslatedRequestPlan_CompletesPartialPlanFromDecodedSelector(t *
 	model := "gpt-4o-mini"
 	providerHint := ""
 
-	plan, err := ensureTranslatedRequestPlan(c, provider, &model, &providerHint)
+	plan, err := ensureTranslatedRequestPlan(c, provider, nil, &model, &providerHint)
 	require.NoError(t, err)
 	require.NotNil(t, plan)
 

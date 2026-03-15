@@ -33,6 +33,10 @@ var defaultEnabledPassthroughProviders = []string{"openai", "anthropic"}
 // Handler holds the HTTP handlers
 type Handler struct {
 	provider                     core.RoutableProvider
+	modelResolver                RequestModelResolver
+	translatedRequestPatcher     TranslatedRequestPatcher
+	batchRequestPreparer         BatchRequestPreparer
+	exposedModelLister           ExposedModelLister
 	logger                       auditlog.LoggerInterface
 	usageLogger                  usage.LoggerInterface
 	pricingResolver              usage.PricingResolver
@@ -43,8 +47,21 @@ type Handler struct {
 
 // NewHandler creates a new handler with the given routable provider (typically the Router)
 func NewHandler(provider core.RoutableProvider, logger auditlog.LoggerInterface, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver) *Handler {
+	return newHandler(provider, logger, usageLogger, pricingResolver, nil, nil)
+}
+
+func newHandler(
+	provider core.RoutableProvider,
+	logger auditlog.LoggerInterface,
+	usageLogger usage.LoggerInterface,
+	pricingResolver usage.PricingResolver,
+	modelResolver RequestModelResolver,
+	translatedRequestPatcher TranslatedRequestPatcher,
+) *Handler {
 	return &Handler{
 		provider:                     provider,
+		modelResolver:                modelResolver,
+		translatedRequestPatcher:     translatedRequestPatcher,
 		logger:                       logger,
 		usageLogger:                  usageLogger,
 		pricingResolver:              pricingResolver,
@@ -563,12 +580,18 @@ func (h *Handler) ChatCompletion(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	plan, err := ensureTranslatedRequestPlan(c, h.provider, &req.Model, &req.Provider)
+	plan, err := ensureTranslatedRequestPlan(c, h.provider, h.modelResolver, &req.Model, &req.Provider)
 	if err != nil {
 		return handleError(c, err)
 	}
 
 	ctx := c.Request().Context()
+	if h.translatedRequestPatcher != nil {
+		req, err = h.translatedRequestPatcher.PatchChatRequest(ctx, req)
+		if err != nil {
+			return handleError(c, err)
+		}
+	}
 	providerType := GetProviderType(c)
 	if plan != nil && strings.TrimSpace(plan.ProviderType) != "" {
 		providerType = plan.ProviderType
@@ -634,6 +657,9 @@ func (h *Handler) ListModels(c *echo.Context) error {
 	resp, err := h.provider.ListModels(ctx)
 	if err != nil {
 		return handleError(c, err)
+	}
+	if h.exposedModelLister != nil {
+		resp = mergeExposedModelsResponse(resp, h.exposedModelLister.ExposedModels())
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -1037,12 +1063,18 @@ func (h *Handler) Responses(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	plan, err := ensureTranslatedRequestPlan(c, h.provider, &req.Model, &req.Provider)
+	plan, err := ensureTranslatedRequestPlan(c, h.provider, h.modelResolver, &req.Model, &req.Provider)
 	if err != nil {
 		return handleError(c, err)
 	}
 
 	ctx := c.Request().Context()
+	if h.translatedRequestPatcher != nil {
+		req, err = h.translatedRequestPatcher.PatchResponsesRequest(ctx, req)
+		if err != nil {
+			return handleError(c, err)
+		}
+	}
 	providerType := GetProviderType(c)
 	if plan != nil && strings.TrimSpace(plan.ProviderType) != "" {
 		providerType = plan.ProviderType
@@ -1093,7 +1125,7 @@ func (h *Handler) Embeddings(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	plan, err := ensureTranslatedRequestPlan(c, h.provider, &req.Model, &req.Provider)
+	plan, err := ensureTranslatedRequestPlan(c, h.provider, h.modelResolver, &req.Model, &req.Provider)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -1148,22 +1180,39 @@ func (h *Handler) Batches(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("batch routing is not supported by the current provider router", nil))
 	}
 
-	providerType, err := determineBatchProviderType(h.provider, req)
+	providerType, err := determineBatchProviderType(h.provider, h.modelResolver, req)
 	if err != nil {
 		return handleError(c, err)
 	}
 	auditlog.EnrichEntry(c, "batch", providerType)
+
+	forward := req
+	var preparedHints map[string]string
+	if h.batchRequestPreparer != nil {
+		prepared, err := h.batchRequestPreparer.PrepareBatchRequest(ctx, providerType, req)
+		if err != nil {
+			return handleError(c, err)
+		}
+		if prepared != nil {
+			if prepared.Request != nil {
+				forward = prepared.Request
+			}
+			batchPreparation.RecordInputFileRewrite(prepared.OriginalInputFileID, prepared.RewrittenInputFileID)
+			preparedHints = prepared.RequestEndpointHints
+		}
+	}
 
 	var (
 		upstream *core.BatchResponse
 		hints    map[string]string
 	)
 	if hintedRouter, ok := h.provider.(core.NativeBatchHintRoutableProvider); ok {
-		upstream, hints, err = hintedRouter.CreateBatchWithHints(ctx, providerType, req)
+		upstream, hints, err = hintedRouter.CreateBatchWithHints(ctx, providerType, forward)
 	} else {
-		upstream, err = nativeRouter.CreateBatch(ctx, providerType, req)
+		upstream, err = nativeRouter.CreateBatch(ctx, providerType, forward)
 	}
 	if err != nil {
+		h.cleanupPreparedBatchInputFile(ctx, providerType, batchPreparation.RewrittenInputFileID)
 		return handleError(c, err)
 	}
 	if upstream == nil {
@@ -1201,9 +1250,10 @@ func (h *Handler) Batches(c *echo.Context) error {
 	resp.Metadata = sanitizePublicBatchMetadata(resp.Metadata)
 
 	if h.batchStore != nil {
+		mergedHints := mergeBatchRequestEndpointHints(preparedHints, hints)
 		stored := &batchstore.StoredBatch{
 			Batch:                     &resp,
-			RequestEndpointByCustomID: hints,
+			RequestEndpointByCustomID: mergedHints,
 			OriginalInputFileID:       batchPreparation.OriginalInputFileID,
 			RewrittenInputFileID:      batchPreparation.RewrittenInputFileID,
 			RequestID:                 requestID,
@@ -1211,7 +1261,7 @@ func (h *Handler) Batches(c *echo.Context) error {
 		if err := h.batchStore.Create(ctx, stored); err != nil {
 			return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "failed to persist batch", err))
 		}
-		if hintedRouter, ok := h.provider.(core.NativeBatchHintRoutableProvider); ok && len(hints) > 0 {
+		if hintedRouter, ok := h.provider.(core.NativeBatchHintRoutableProvider); ok && len(mergedHints) > 0 {
 			hintedRouter.ClearBatchResultHints(providerType, providerBatchID)
 		}
 	}
@@ -1219,7 +1269,7 @@ func (h *Handler) Batches(c *echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func determineBatchProviderType(provider core.RoutableProvider, req *core.BatchRequest) (string, error) {
+func determineBatchProviderType(provider core.RoutableProvider, resolver RequestModelResolver, req *core.BatchRequest) (string, error) {
 	if provider == nil {
 		return "", core.NewInvalidRequestError("provider is not configured", nil)
 	}
@@ -1240,10 +1290,17 @@ func determineBatchProviderType(provider core.RoutableProvider, req *core.BatchR
 	}
 
 	var providerType string
+	resolver = effectiveRequestModelResolver(provider, resolver)
 	for i, item := range req.Requests {
 		selector, err := core.BatchItemModelSelector(req.Endpoint, item)
 		if err != nil {
 			return "", core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
+		}
+		if resolver != nil {
+			selector, _, err = resolver.ResolveModel(selector.Model, selector.Provider)
+			if err != nil {
+				return "", core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
+			}
 		}
 		model := selector.QualifiedModel()
 		if model == "" {
@@ -1266,6 +1323,42 @@ func determineBatchProviderType(provider core.RoutableProvider, req *core.BatchR
 		return "", core.NewInvalidRequestError("unable to resolve provider for batch", nil)
 	}
 	return providerType, nil
+}
+
+func mergeBatchRequestEndpointHints(left, right map[string]string) map[string]string {
+	if len(left) == 0 {
+		if len(right) == 0 {
+			return nil
+		}
+		merged := make(map[string]string, len(right))
+		for key, value := range right {
+			merged[key] = value
+		}
+		return merged
+	}
+
+	merged := make(map[string]string, len(left))
+	for key, value := range left {
+		merged[key] = value
+	}
+	for key, value := range right {
+		merged[key] = value
+	}
+	return merged
+}
+
+func (h *Handler) cleanupPreparedBatchInputFile(ctx context.Context, providerType, fileID string) {
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return
+	}
+	files, ok := h.provider.(core.NativeFileRoutableProvider)
+	if !ok {
+		return
+	}
+	if _, err := files.DeleteFile(ctx, providerType, fileID); err != nil {
+		slog.Warn("failed to delete rewritten batch input file", "provider", providerType, "file_id", fileID, "error", err)
+	}
 }
 
 func (h *Handler) loadBatch(c *echo.Context, id string) (*batchstore.StoredBatch, error) {

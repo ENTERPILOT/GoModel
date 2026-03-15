@@ -11,6 +11,7 @@ import (
 func ensureTranslatedRequestPlan(
 	c *echo.Context,
 	provider core.RoutableProvider,
+	resolver RequestModelResolver,
 	model,
 	providerHint *string,
 ) (*core.ExecutionPlan, error) {
@@ -18,14 +19,14 @@ func ensureTranslatedRequestPlan(
 		return nil, core.NewInvalidRequestError("model selector targets are required", nil)
 	}
 
-	plan, err := ensureTranslatedExecutionPlan(c, provider)
+	plan, err := ensureTranslatedExecutionPlan(c, provider, resolver)
 	if err != nil {
 		return nil, err
 	}
 
 	resolution := translatedPlanResolution(plan)
 	if resolution == nil {
-		resolution, err = resolveAndStoreRequestModelResolution(c, provider, *model, *providerHint)
+		resolution, err = resolveAndStoreRequestModelResolution(c, provider, resolver, *model, *providerHint)
 		if err != nil {
 			return nil, err
 		}
@@ -37,12 +38,12 @@ func ensureTranslatedRequestPlan(
 	return plan, nil
 }
 
-func ensureTranslatedExecutionPlan(c *echo.Context, provider core.RoutableProvider) (*core.ExecutionPlan, error) {
+func ensureTranslatedExecutionPlan(c *echo.Context, provider core.RoutableProvider, resolver RequestModelResolver) (*core.ExecutionPlan, error) {
 	if plan := currentTranslatedExecutionPlan(c); plan != nil {
 		return plan, nil
 	}
 
-	plan, err := deriveExecutionPlan(c, provider)
+	plan, err := deriveExecutionPlan(c, provider, resolver)
 	if err != nil || plan == nil {
 		return plan, err
 	}

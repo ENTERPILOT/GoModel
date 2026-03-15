@@ -151,8 +151,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// Log configuration status
 	app.logStartupInfo()
 
-	// Build the provider chain: router optionally wrapped with guardrails
+	// Build runtime execution dependencies. Policy is passed explicitly into the
+	// server; the live provider dependency remains the bare router.
 	var provider core.RoutableProvider = app.providers.Router
+	var translatedRequestPatcher server.TranslatedRequestPatcher
+	var batchRequestPreparers []server.BatchRequestPreparer
 	if appCfg.Guardrails.Enabled {
 		pipeline, err := buildGuardrailsPipeline(appCfg.Guardrails)
 		if err != nil {
@@ -173,9 +176,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			return nil, fmt.Errorf("failed to build guardrails: %w", err)
 		}
 		if pipeline.Len() > 0 {
-			provider = guardrails.NewGuardedProviderWithOptions(provider, pipeline, guardrails.Options{
-				EnableForBatchProcessing: appCfg.Guardrails.EnableForBatchProcessing,
-			})
+			translatedRequestPatcher = guardrails.NewRequestPatcher(pipeline)
+			if appCfg.Guardrails.EnableForBatchProcessing {
+				batchRequestPreparers = append(batchRequestPreparers, guardrails.NewBatchPreparer(provider, pipeline))
+			}
 			slog.Info(
 				"guardrails enabled",
 				"count", pipeline.Len(),
@@ -184,8 +188,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		}
 	}
 	if app.aliases != nil && app.aliases.Service != nil {
-		provider = aliases.NewProvider(provider, app.aliases.Service)
+		batchRequestPreparers = append([]server.BatchRequestPreparer{
+			aliases.NewBatchPreparer(provider, app.aliases.Service),
+		}, batchRequestPreparers...)
 	}
+	batchRequestPreparer := server.ComposeBatchRequestPreparers(providerAsNativeFileRouter(provider), batchRequestPreparers...)
 
 	// Create server
 	allowPassthroughV1Alias := appCfg.Server.AllowPassthroughV1Alias
@@ -197,6 +204,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		AuditLogger:                 auditResult.Logger,
 		UsageLogger:                 usageResult.Logger,
 		PricingResolver:             providerResult.Registry,
+		ModelResolver:               app.aliases.Service,
+		TranslatedRequestPatcher:    translatedRequestPatcher,
+		BatchRequestPreparer:        batchRequestPreparer,
+		ExposedModelLister:          app.aliases.Service,
 		BatchStore:                  batchResult.Store,
 		LogOnlyModelInteractions:    appCfg.Logging.OnlyModelInteractions,
 		DisablePassthroughRoutes:    !appCfg.Server.EnablePassthroughRoutes,
@@ -285,6 +296,13 @@ func (a *App) UsageLogger() usage.LoggerInterface {
 		return nil
 	}
 	return a.usage.Logger
+}
+
+func providerAsNativeFileRouter(provider core.RoutableProvider) core.NativeFileRoutableProvider {
+	if fileRouter, ok := provider.(core.NativeFileRoutableProvider); ok {
+		return fileRouter
+	}
+	return nil
 }
 
 // Start starts the HTTP server on the given address.

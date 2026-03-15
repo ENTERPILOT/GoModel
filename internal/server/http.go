@@ -39,6 +39,10 @@ type Config struct {
 	AuditLogger                 auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
 	UsageLogger                 usage.LoggerInterface                  // Optional: Usage logger for token tracking
 	PricingResolver             usage.PricingResolver                  // Optional: Resolves pricing for cost calculation
+	ModelResolver               RequestModelResolver                   // Optional: explicit model resolver used during request planning
+	TranslatedRequestPatcher    TranslatedRequestPatcher               // Optional: request patcher for translated routes after planning
+	BatchRequestPreparer        BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
+	ExposedModelLister          ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
 	BatchStore                  batchstore.Store                       // Optional: Batch lifecycle persistence store
 	LogOnlyModelInteractions    bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes    bool                                   // Disable /p/{provider}/{endpoint} route registration
@@ -67,7 +71,18 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		pricingResolver = cfg.PricingResolver
 	}
 
-	handler := NewHandler(provider, auditLogger, usageLogger, pricingResolver)
+	var modelResolver RequestModelResolver
+	var translatedRequestPatcher TranslatedRequestPatcher
+	if cfg != nil {
+		modelResolver = cfg.ModelResolver
+		translatedRequestPatcher = cfg.TranslatedRequestPatcher
+	}
+
+	handler := newHandler(provider, auditLogger, usageLogger, pricingResolver, modelResolver, translatedRequestPatcher)
+	if cfg != nil {
+		handler.batchRequestPreparer = cfg.BatchRequestPreparer
+		handler.exposedModelLister = cfg.ExposedModelLister
+	}
 	if cfg != nil && cfg.EnabledPassthroughProviders != nil {
 		handler.setEnabledPassthroughProviders(cfg.EnabledPassthroughProviders)
 	}
@@ -179,7 +194,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	// Request planning (skips non-model paths via IsModelInteractionPath)
-	e.Use(ExecutionPlanning(provider))
+	e.Use(ExecutionPlanningWithResolver(provider, modelResolver))
 
 	if cfg != nil && cfg.ResponseCacheMiddleware != nil {
 		e.Use(cfg.ResponseCacheMiddleware.Middleware())

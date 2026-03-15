@@ -148,6 +148,18 @@ func (s *Service) Resolve(model, provider string) (Resolution, bool, error) {
 	return resolution, ok, nil
 }
 
+// ResolveModel resolves raw model/provider inputs and returns the concrete
+// selector chosen for execution. This allows alias policy to be consumed as an
+// explicit planning dependency without requiring the provider chain itself to
+// own alias behavior.
+func (s *Service) ResolveModel(model, provider string) (core.ModelSelector, bool, error) {
+	resolution, changed, err := s.Resolve(model, provider)
+	if err != nil {
+		return core.ModelSelector{}, false, err
+	}
+	return resolution.Resolved, changed, nil
+}
+
 // Supports reports whether an alias currently resolves to a concrete model.
 func (s *Service) Supports(model string) bool {
 	if _, ok := s.resolveAlias(model); ok {

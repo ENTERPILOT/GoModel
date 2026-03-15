@@ -24,6 +24,9 @@ type GuardedProvider struct {
 // Options controls optional behavior of GuardedProvider.
 type Options struct {
 	EnableForBatchProcessing bool
+	// DisableTranslatedRequestProcessing lets an explicit server-side executor own
+	// translated-route patching while this wrapper still handles batch rewriting.
+	DisableTranslatedRequestProcessing bool
 }
 
 // NewGuardedProvider creates a RoutableProvider that applies guardrails
@@ -71,7 +74,10 @@ func (g *GuardedProvider) NativeFileProviderTypes() []string {
 
 // ChatCompletion extracts messages, applies guardrails, then routes the request.
 func (g *GuardedProvider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	modified, err := g.processChat(ctx, req)
+	if g.options.DisableTranslatedRequestProcessing {
+		return g.inner.ChatCompletion(ctx, req)
+	}
+	modified, err := processGuardedChat(ctx, g.pipeline, req)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +86,10 @@ func (g *GuardedProvider) ChatCompletion(ctx context.Context, req *core.ChatRequ
 
 // StreamChatCompletion extracts messages, applies guardrails, then routes the streaming request.
 func (g *GuardedProvider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	modified, err := g.processChat(ctx, req)
+	if g.options.DisableTranslatedRequestProcessing {
+		return g.inner.StreamChatCompletion(ctx, req)
+	}
+	modified, err := processGuardedChat(ctx, g.pipeline, req)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +108,10 @@ func (g *GuardedProvider) Embeddings(ctx context.Context, req *core.EmbeddingReq
 
 // Responses extracts messages, applies guardrails, then routes the request.
 func (g *GuardedProvider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	modified, err := g.processResponses(ctx, req)
+	if g.options.DisableTranslatedRequestProcessing {
+		return g.inner.Responses(ctx, req)
+	}
+	modified, err := processGuardedResponses(ctx, g.pipeline, req)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +120,10 @@ func (g *GuardedProvider) Responses(ctx context.Context, req *core.ResponsesRequ
 
 // StreamResponses extracts messages, applies guardrails, then routes the streaming request.
 func (g *GuardedProvider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	modified, err := g.processResponses(ctx, req)
+	if g.options.DisableTranslatedRequestProcessing {
+		return g.inner.StreamResponses(ctx, req)
+	}
+	modified, err := processGuardedResponses(ctx, g.pipeline, req)
 	if err != nil {
 		return nil, err
 	}
@@ -139,48 +154,20 @@ func (g *GuardedProvider) nativeFileRouter() (core.NativeFileRoutableProvider, e
 	return fp, nil
 }
 
+func (g *GuardedProvider) batchFileTransport() core.BatchFileTransport {
+	files, err := g.nativeFileRouter()
+	if err != nil {
+		return nil
+	}
+	return files
+}
+
 func (g *GuardedProvider) passthroughRouter() (core.RoutablePassthrough, error) {
 	pp, ok := g.inner.(core.RoutablePassthrough)
 	if !ok {
 		return nil, core.NewInvalidRequestError("passthrough routing is not supported by the current provider router", nil)
 	}
 	return pp, nil
-}
-
-func (g *GuardedProvider) processBatchRequest(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchRewriteResult, error) {
-	files, err := g.nativeFileRouter()
-	if err != nil {
-		files = nil
-	}
-	return core.RewriteBatchSource(ctx, providerType, req, files, []string{"chat_completions", "responses"}, g.rewriteBatchDecodedItem)
-}
-
-func (g *GuardedProvider) rewriteBatchDecodedItem(ctx context.Context, item core.BatchRequestItem, decoded *core.DecodedBatchItemRequest) (json.RawMessage, error) {
-	itemBody := core.CloneRawJSON(item.Body)
-	return core.DispatchDecodedBatchItem(decoded, core.DecodedBatchItemHandlers[json.RawMessage]{
-		Chat: func(original *core.ChatRequest) (json.RawMessage, error) {
-			modified, err := g.processChat(ctx, original)
-			if err != nil {
-				return nil, err
-			}
-			body, err := rewriteGuardedChatBatchBody(itemBody, original, modified)
-			if err != nil {
-				return nil, core.NewInvalidRequestError("failed to encode guarded chat batch item", err)
-			}
-			return body, nil
-		},
-		Responses: func(original *core.ResponsesRequest) (json.RawMessage, error) {
-			modified, err := g.processResponses(ctx, original)
-			if err != nil {
-				return nil, err
-			}
-			body, err := rewriteGuardedResponsesBatchBody(itemBody, modified)
-			if err != nil {
-				return nil, core.NewInvalidRequestError("failed to encode guarded responses batch item", err)
-			}
-			return body, nil
-		},
-	})
 }
 
 func rewriteGuardedChatBatchBody(originalBody json.RawMessage, original *core.ChatRequest, modified *core.ChatRequest) (json.RawMessage, error) {
@@ -373,7 +360,7 @@ func (g *GuardedProvider) CreateBatch(ctx context.Context, providerType string, 
 		return bp.CreateBatch(ctx, providerType, req)
 	}
 
-	result, err := g.processBatchRequest(ctx, providerType, req)
+	result, err := processGuardedBatchRequest(ctx, providerType, req, g.pipeline, g.batchFileTransport())
 	if err != nil {
 		return nil, err
 	}
@@ -398,7 +385,7 @@ func (g *GuardedProvider) CreateBatchWithHints(ctx context.Context, providerType
 		return hinted.CreateBatchWithHints(ctx, providerType, req)
 	}
 
-	result, err := g.processBatchRequest(ctx, providerType, req)
+	result, err := processGuardedBatchRequest(ctx, providerType, req, g.pipeline, g.batchFileTransport())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -581,27 +568,22 @@ func (g *GuardedProvider) Passthrough(ctx context.Context, providerType string, 
 	return pp.Passthrough(ctx, providerType, req)
 }
 
-// processChat runs the pipeline for a ChatRequest via the message adapter.
-func (g *GuardedProvider) processChat(ctx context.Context, req *core.ChatRequest) (*core.ChatRequest, error) {
-	msgs, err := chatToMessages(req)
-	if err != nil {
-		return nil, err
-	}
-	modified, err := g.pipeline.Process(ctx, msgs)
-	if err != nil {
-		return nil, err
-	}
-	return applyMessagesToChatPreservingEnvelope(req, modified)
+// PatchChatRequest applies guardrails to a translated chat request without
+// delegating to the wrapped provider.
+func (g *GuardedProvider) PatchChatRequest(ctx context.Context, req *core.ChatRequest) (*core.ChatRequest, error) {
+	return processGuardedChat(ctx, g.pipeline, req)
 }
 
-// processResponses runs the pipeline for a ResponsesRequest via the message adapter.
-func (g *GuardedProvider) processResponses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
-	msgs := responsesToMessages(req)
-	modified, err := g.pipeline.Process(ctx, msgs)
-	if err != nil {
-		return nil, err
-	}
-	return applyMessagesToResponses(req, modified), nil
+// PatchResponsesRequest applies guardrails to a translated responses request
+// without delegating to the wrapped provider.
+func (g *GuardedProvider) PatchResponsesRequest(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
+	return processGuardedResponses(ctx, g.pipeline, req)
+}
+
+// PrepareBatchRequest applies guardrails to batch subrequests without
+// submitting the native batch to the wrapped provider.
+func (g *GuardedProvider) PrepareBatchRequest(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchRewriteResult, error) {
+	return processGuardedBatchRequest(ctx, providerType, req, g.pipeline, g.batchFileTransport())
 }
 
 // --- Adapters: concrete requests ↔ normalized []Message ---
