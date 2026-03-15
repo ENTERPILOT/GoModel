@@ -282,7 +282,7 @@ func (p *Provider) rewriteChatRequest(req *core.ChatRequest, mode requestRewrite
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := p.resolveRequestSelector(req.Model, req.Provider)
+	selector, err := p.resolveRoutableSelector(req.Model, req.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +296,7 @@ func (p *Provider) rewriteResponsesRequest(req *core.ResponsesRequest, mode requ
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := p.resolveRequestSelector(req.Model, req.Provider)
+	selector, err := p.resolveRoutableSelector(req.Model, req.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +310,7 @@ func (p *Provider) rewriteEmbeddingRequest(req *core.EmbeddingRequest, mode requ
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := p.resolveRequestSelector(req.Model, req.Provider)
+	selector, err := p.resolveRoutableSelector(req.Model, req.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -435,6 +435,22 @@ func (p *Provider) resolveRequestSelector(model, provider string) (core.ModelSel
 		return selector, nil
 	}
 	return core.ParseModelSelector(model, provider)
+}
+
+func (p *Provider) resolveRoutableSelector(model, provider string) (core.ModelSelector, error) {
+	selector, err := p.resolveRequestSelector(model, provider)
+	if err != nil {
+		return core.ModelSelector{}, err
+	}
+
+	resolvedModel := strings.TrimSpace(selector.QualifiedModel())
+	if resolvedModel == "" {
+		return core.ModelSelector{}, core.NewInvalidRequestError("model is required", nil)
+	}
+	if !p.inner.Supports(resolvedModel) {
+		return core.ModelSelector{}, core.NewInvalidRequestError("unsupported model: "+resolvedModel, nil)
+	}
+	return selector, nil
 }
 
 func providerValueForMode(selector core.ModelSelector, mode requestRewriteMode) string {

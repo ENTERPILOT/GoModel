@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"gomodel/internal/aliases"
+	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 )
 
@@ -409,6 +410,59 @@ func TestModelValidation_RegistryNotInitializedReturnsGatewayError(t *testing.T)
 	assert.False(t, handlerCalled)
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
 	assert.Contains(t, rec.Body.String(), "model registry not initialized")
+}
+
+func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t *testing.T) {
+	store := newAliasesTestStore(aliases.Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: false})
+	catalog := &aliasesTestCatalog{
+		supported: map[string]bool{
+			"openai/gpt-4o": true,
+		},
+		providerTypes: map[string]string{
+			"openai/gpt-4o": "openai",
+		},
+		models: map[string]core.Model{
+			"openai/gpt-4o": {ID: "gpt-4o", Object: "model"},
+		},
+	}
+	service, err := aliases.NewService(store, catalog)
+	require.NoError(t, err)
+	require.NoError(t, service.Refresh(context.Background()))
+
+	inner := &mockProvider{
+		supportedModels: []string{"gpt-4o"},
+		providerTypes: map[string]string{
+			"openai/gpt-4o": "openai",
+		},
+	}
+	provider := aliases.NewProvider(inner, service)
+
+	e := echo.New()
+	handlerCalled := false
+
+	middleware := ModelValidation(provider)
+	handler := middleware(func(c *echo.Context) error {
+		handlerCalled = true
+		return c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"smart","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+
+	err = handler(c)
+	require.NoError(t, err)
+
+	assert.False(t, handlerCalled)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "unsupported model: smart")
+	assert.Equal(t, "smart", entry.Model)
+	assert.Equal(t, "", entry.ResolvedModel)
+	assert.Equal(t, "", entry.Provider)
+	assert.Equal(t, "invalid_request_error", entry.ErrorType)
 }
 
 func TestModelValidation_ResolvesProviderTypeFromOversizedLiveBody(t *testing.T) {

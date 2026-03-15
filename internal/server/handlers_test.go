@@ -2543,6 +2543,10 @@ func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.
 	require.NoError(t, service.Refresh(context.Background()))
 
 	inner := &mockProvider{
+		supportedModels: []string{"gpt-4o"},
+		providerTypes: map[string]string{
+			"openai/gpt-4o": "openai",
+		},
 		fileContentResponse: &core.FileContentResponse{
 			ID:       "file_source",
 			Filename: "batch.jsonl",
@@ -2602,6 +2606,57 @@ func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.
 	require.Equal(t, "file_source", stored.Batch.InputFileID)
 	require.Equal(t, "file_source", stored.OriginalInputFileID)
 	require.Equal(t, "file_rewritten", stored.RewrittenInputFileID)
+}
+
+func TestBatches_InputFileRejectsDisabledAlias(t *testing.T) {
+	store := newAliasesTestStore(aliases.Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: false})
+	catalog := &aliasesTestCatalog{
+		supported: map[string]bool{
+			"openai/gpt-4o": true,
+		},
+		providerTypes: map[string]string{
+			"openai/gpt-4o": "openai",
+		},
+		models: map[string]core.Model{
+			"openai/gpt-4o": {ID: "gpt-4o", Object: "model"},
+		},
+	}
+	service, err := aliases.NewService(store, catalog)
+	require.NoError(t, err)
+	require.NoError(t, service.Refresh(context.Background()))
+
+	inner := &mockProvider{
+		supportedModels: []string{"gpt-4o"},
+		providerTypes: map[string]string{
+			"openai/gpt-4o": "openai",
+		},
+		fileContentResponse: &core.FileContentResponse{
+			ID:       "file_source",
+			Filename: "batch.jsonl",
+			Data:     []byte("{\"custom_id\":\"chat-1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"smart\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}}\n"),
+		},
+	}
+
+	provider := aliases.NewProvider(inner, service)
+	handler := NewHandler(provider, nil, nil, nil)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{
+	  "input_file_id":"file_source",
+	  "endpoint":"/v1/chat/completions",
+	  "completion_window":"24h",
+	  "metadata":{"provider":"openai"}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err = handler.Batches(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "unsupported model: smart")
+	require.Nil(t, inner.capturedBatchReq)
+	require.Empty(t, inner.capturedFileCreateReqs)
 }
 
 func TestGetBatch_PreservesClientInputFileIDAndCleansUpRewrittenFile(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 )
 
@@ -73,6 +74,7 @@ func ensureRequestModelResolution(c *echo.Context, provider core.RoutableProvide
 	if err != nil || !parsed {
 		return nil, parsed, err
 	}
+	enrichAuditEntryWithRequestedModel(c, model, providerHint)
 
 	resolution, err := resolveRequestModel(provider, model, providerHint)
 	if err != nil {
@@ -89,6 +91,7 @@ func applyRequestModelResolution(c *echo.Context, provider core.RoutableProvider
 
 	resolution := core.GetRequestModelResolution(c.Request().Context())
 	if resolution == nil {
+		enrichAuditEntryWithRequestedModel(c, *model, *providerHint)
 		var err error
 		resolution, err = resolveRequestModel(provider, *model, *providerHint)
 		if err != nil {
@@ -100,4 +103,19 @@ func applyRequestModelResolution(c *echo.Context, provider core.RoutableProvider
 	*model = resolution.ResolvedSelector.Model
 	*providerHint = resolution.ResolvedSelector.Provider
 	return nil
+}
+
+func enrichAuditEntryWithRequestedModel(c *echo.Context, model, providerHint string) {
+	if c == nil {
+		return
+	}
+	model = strings.TrimSpace(model)
+	providerHint = strings.TrimSpace(providerHint)
+	if model == "" {
+		return
+	}
+	auditlog.EnrichEntryWithResolution(c, &core.RequestModelResolution{
+		RequestedModel:    model,
+		RequestedProvider: providerHint,
+	})
 }

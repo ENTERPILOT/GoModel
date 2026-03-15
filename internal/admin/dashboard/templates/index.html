@@ -280,6 +280,10 @@
                 <textarea rows="3" class="alias-form-textarea" placeholder="Optional description" x-model="aliasForm.description"></textarea>
             </label>
 
+            <p class="alias-form-hint">
+                Aliases are not supported on pass-through endpoints.
+            </p>
+
             <label class="alias-checkbox">
                 <input type="checkbox" x-model="aliasForm.enabled">
                 <span>Alias is enabled</span>
