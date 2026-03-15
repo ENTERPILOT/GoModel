@@ -210,8 +210,8 @@
 <div x-show="page==='models'">
     <div class="page-header">
         <h2>Registered Models</h2>
-        <div class="model-count" x-show="models.length > 0">
-            <span x-text="modelFilter ? filteredModels.length + ' / ' + models.length : models.length"></span> models
+        <div class="model-count" x-show="displayModels.length > 0">
+            <span x-text="modelFilter ? filteredDisplayModels.length + ' / ' + displayModels.length : displayModels.length"></span> models
         </div>
     </div>
 
@@ -219,6 +219,11 @@
     <div class="alert alert-warning" x-show="authError">
         Authentication required. Enter your API key in the sidebar to view data.
     </div>
+    <div class="alert alert-warning" x-show="!aliasesAvailable && !authError">
+        Aliases feature is unavailable.
+    </div>
+    <div class="alert alert-warning" x-show="aliasError && !authError" x-text="aliasError"></div>
+    <div class="alert alert-success" x-show="aliasNotice" x-text="aliasNotice"></div>
 
     <!-- Category Tabs -->
     <div class="category-tabs" x-show="categories.length > 0">
@@ -231,32 +236,120 @@
     </div>
 
     <!-- Filter -->
-    <div class="table-toolbar" x-show="models.length > 0 || modelFilter">
-        <input type="text" placeholder="Filter by model, provider, or owner..." x-model="modelFilter" class="filter-input">
+    <div class="table-toolbar" x-show="displayModels.length > 0 || modelFilter || aliasesAvailable">
+        <div class="table-toolbar-main">
+            <input type="text" placeholder="Filter by provider/model, alias, or owner..." x-model="modelFilter" class="filter-input">
+        </div>
+        <div class="table-toolbar-actions">
+            <button type="button" class="pagination-btn pagination-btn-primary" x-show="aliasesAvailable" @click="openAliasCreate()">Create Alias</button>
+        </div>
+    </div>
+
+    <div class="model-alias-editor" x-show="aliasFormOpen">
+        <form class="alias-form" @submit.prevent="submitAliasForm()">
+            <div class="aliases-editor-header">
+                <div>
+                    <p class="alias-form-kicker" x-text="aliasFormMode === 'edit' ? 'Edit alias' : 'Create alias'"></p>
+                    <h3 x-text="aliasFormMode === 'edit' ? (aliasForm.name || aliasFormOriginalName) : 'New Alias'"></h3>
+                </div>
+                <button type="button" class="table-action-btn alias-close-btn" aria-label="Close alias editor" @click="closeAliasForm()">
+                    <span aria-hidden="true">X</span>
+                </button>
+            </div>
+
+            <div class="alias-form-grid">
+                <label class="alias-form-field">
+                    <span>Alias name</span>
+                    <input type="text" class="filter-input mono" placeholder="smart" x-model="aliasForm.name">
+                </label>
+
+                <label class="alias-form-field">
+                    <span>Target model</span>
+                    <input type="text" list="alias-model-options" class="filter-input mono" placeholder="openai/gpt-4o" x-model="aliasForm.target_model">
+                </label>
+            </div>
+
+            <datalist id="alias-model-options">
+                <template x-for="m in models" :key="qualifiedModelName(m)">
+                    <option :value="qualifiedModelName(m)" x-text="qualifiedModelName(m)"></option>
+                </template>
+            </datalist>
+
+            <label class="alias-form-field">
+                <span>Description</span>
+                <textarea rows="3" class="alias-form-textarea" placeholder="Optional description" x-model="aliasForm.description"></textarea>
+            </label>
+
+            <p class="alias-form-hint">
+                Aliases are not supported on pass-through endpoints.
+            </p>
+
+            <label class="alias-checkbox">
+                <input type="checkbox" x-model="aliasForm.enabled">
+                <span>Alias is enabled</span>
+            </label>
+
+            <p class="alias-form-hint" x-show="aliasFormMode === 'edit'">
+                Renaming an alias creates the new name first, then removes the old one.
+            </p>
+
+            <div class="alert alert-warning" x-show="aliasFormError" x-text="aliasFormError"></div>
+
+            <div class="alias-form-actions">
+                <button type="submit" class="pagination-btn pagination-btn-primary" :disabled="aliasSubmitting" x-text="aliasSubmitting ? 'Saving...' : (aliasFormMode === 'edit' ? 'Save Alias' : 'Create Alias')"></button>
+            </div>
+        </form>
     </div>
 
     <!-- Models Table: All / Text Generation -->
-    <div class="table-wrapper" x-show="(models.length > 0 || modelFilter) && (activeCategory === 'all' || activeCategory === 'text_generation')">
+    <div class="table-wrapper" x-show="(displayModels.length > 0 || modelFilter) && (activeCategory === 'all' || activeCategory === 'text_generation')">
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Model ID</th>
-                    <th>Provider</th>
+                    <th>Model</th>
                     <th>Modes</th>
-                    <th class="col-price">Input $/MTok</th>
-                    <th class="col-price">Output $/MTok</th>
+                    <th class="col-price">Input<br>$/MTok</th>
+                    <th class="col-price">Output<br>$/MTok</th>
                     <th class="col-price" x-show="activeCategory === 'text_generation'">Cached $/MTok</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                <template x-for="m in filteredModels" :key="m.model.id">
-                    <tr>
-                        <td class="mono" x-text="m.model.id"></td>
-                        <td><span class="provider-badge" x-text="m.provider_type"></span></td>
-                        <td x-text="(m.model.metadata?.modes ?? []).join(', ') || '-'"></td>
-                        <td class="col-price" x-text="formatPrice(m.model.metadata?.pricing?.input_per_mtok)"></td>
-                        <td class="col-price" x-text="formatPrice(m.model.metadata?.pricing?.output_per_mtok)"></td>
-                        <td class="col-price" x-show="activeCategory === 'text_generation'" x-text="formatPrice(m.model.metadata?.pricing?.cached_input_per_mtok)"></td>
+                <template x-for="row in filteredDisplayModels" :key="row.key">
+                    <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
+                        <td>
+                            <div class="model-name-cell">
+                                <div class="model-name-primary">
+                                    <span class="mono" x-text="row.display_name"></span>
+                                    <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
+                                </div>
+                                <div class="model-name-secondary" x-show="row.is_alias">
+                                    Targets <span class="mono" x-text="row.secondary_name"></span>
+                                </div>
+                                <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
+                                    Masked by alias to <span class="mono" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                                </div>
+                            </div>
+                        </td>
+                        <td x-text="(row.model.metadata?.modes ?? []).join(', ') || '-'"></td>
+                        <td class="col-price" x-text="formatPrice(row.model.metadata?.pricing?.input_per_mtok)"></td>
+                        <td class="col-price" x-text="formatPrice(row.model.metadata?.pricing?.output_per_mtok)"></td>
+                        <td class="col-price" x-show="activeCategory === 'text_generation'" x-text="formatPrice(row.model.metadata?.pricing?.cached_input_per_mtok)"></td>
+                        <td class="model-row-actions">
+                            <template x-if="row.is_alias">
+                                <div class="alias-actions-cell">
+                                    <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
+                                        <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                                        <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
+                                    </button>
+                                    <button type="button" class="table-action-btn" @click="openAliasEdit(row.alias)">Edit</button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger" :disabled="aliasDeletingName === row.alias.name" @click="deleteAlias(row.alias)" x-text="aliasDeletingName === row.alias.name ? 'Removing...' : 'Remove'"></button>
+                                </div>
+                            </template>
+                            <template x-if="!row.is_alias">
+                                <span class="model-row-actions-empty">—</span>
+                            </template>
+                        </td>
                     </tr>
                 </template>
             </tbody>
@@ -264,21 +357,48 @@
     </div>
 
     <!-- Models Table: Embeddings -->
-    <div class="table-wrapper" x-show="(models.length > 0 || modelFilter) && activeCategory === 'embedding'">
+    <div class="table-wrapper" x-show="(displayModels.length > 0 || modelFilter) && activeCategory === 'embedding'">
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Model ID</th>
-                    <th>Provider</th>
-                    <th class="col-price">Input $/MTok</th>
+                    <th>Model</th>
+                    <th class="col-price">Input<br>$/MTok</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                <template x-for="m in filteredModels" :key="m.model.id">
-                    <tr>
-                        <td class="mono" x-text="m.model.id"></td>
-                        <td><span class="provider-badge" x-text="m.provider_type"></span></td>
-                        <td class="col-price" x-text="formatPrice(m.model.metadata?.pricing?.input_per_mtok)"></td>
+                <template x-for="row in filteredDisplayModels" :key="row.key">
+                    <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
+                        <td>
+                            <div class="model-name-cell">
+                                <div class="model-name-primary">
+                                    <span class="mono" x-text="row.display_name"></span>
+                                    <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
+                                </div>
+                                <div class="model-name-secondary" x-show="row.is_alias">
+                                    Targets <span class="mono" x-text="row.secondary_name"></span>
+                                </div>
+                                <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
+                                    Masked by alias to <span class="mono" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="col-price" x-text="formatPrice(row.model.metadata?.pricing?.input_per_mtok)"></td>
+                        <td class="model-row-actions">
+                            <template x-if="row.is_alias">
+                                <div class="alias-actions-cell">
+                                    <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
+                                        <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                                        <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
+                                    </button>
+                                    <button type="button" class="table-action-btn" @click="openAliasEdit(row.alias)">Edit</button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger" :disabled="aliasDeletingName === row.alias.name" @click="deleteAlias(row.alias)" x-text="aliasDeletingName === row.alias.name ? 'Removing...' : 'Remove'"></button>
+                                </div>
+                            </template>
+                            <template x-if="!row.is_alias">
+                                <span class="model-row-actions-empty">—</span>
+                            </template>
+                        </td>
                     </tr>
                 </template>
             </tbody>
@@ -286,21 +406,48 @@
     </div>
 
     <!-- Models Table: Image -->
-    <div class="table-wrapper" x-show="(models.length > 0 || modelFilter) && activeCategory === 'image'">
+    <div class="table-wrapper" x-show="(displayModels.length > 0 || modelFilter) && activeCategory === 'image'">
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Model ID</th>
-                    <th>Provider</th>
+                    <th>Model</th>
                     <th class="col-price">$/Image</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                <template x-for="m in filteredModels" :key="m.model.id">
-                    <tr>
-                        <td class="mono" x-text="m.model.id"></td>
-                        <td><span class="provider-badge" x-text="m.provider_type"></span></td>
-                        <td class="col-price" x-text="formatPriceFine(m.model.metadata?.pricing?.per_image)"></td>
+                <template x-for="row in filteredDisplayModels" :key="row.key">
+                    <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
+                        <td>
+                            <div class="model-name-cell">
+                                <div class="model-name-primary">
+                                    <span class="mono" x-text="row.display_name"></span>
+                                    <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
+                                </div>
+                                <div class="model-name-secondary" x-show="row.is_alias">
+                                    Targets <span class="mono" x-text="row.secondary_name"></span>
+                                </div>
+                                <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
+                                    Masked by alias to <span class="mono" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_image)"></td>
+                        <td class="model-row-actions">
+                            <template x-if="row.is_alias">
+                                <div class="alias-actions-cell">
+                                    <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
+                                        <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                                        <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
+                                    </button>
+                                    <button type="button" class="table-action-btn" @click="openAliasEdit(row.alias)">Edit</button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger" :disabled="aliasDeletingName === row.alias.name" @click="deleteAlias(row.alias)" x-text="aliasDeletingName === row.alias.name ? 'Removing...' : 'Remove'"></button>
+                                </div>
+                            </template>
+                            <template x-if="!row.is_alias">
+                                <span class="model-row-actions-empty">—</span>
+                            </template>
+                        </td>
                     </tr>
                 </template>
             </tbody>
@@ -308,23 +455,50 @@
     </div>
 
     <!-- Models Table: Audio -->
-    <div class="table-wrapper" x-show="(models.length > 0 || modelFilter) && activeCategory === 'audio'">
+    <div class="table-wrapper" x-show="(displayModels.length > 0 || modelFilter) && activeCategory === 'audio'">
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Model ID</th>
-                    <th>Provider</th>
+                    <th>Model</th>
                     <th class="col-price">$/Second</th>
                     <th class="col-price">$/Character</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                <template x-for="m in filteredModels" :key="m.model.id">
-                    <tr>
-                        <td class="mono" x-text="m.model.id"></td>
-                        <td><span class="provider-badge" x-text="m.provider_type"></span></td>
-                        <td class="col-price" x-text="formatPriceFine(m.model.metadata?.pricing?.per_second_input)"></td>
-                        <td class="col-price" x-text="formatPriceFine(m.model.metadata?.pricing?.per_character_input)"></td>
+                <template x-for="row in filteredDisplayModels" :key="row.key">
+                    <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
+                        <td>
+                            <div class="model-name-cell">
+                                <div class="model-name-primary">
+                                    <span class="mono" x-text="row.display_name"></span>
+                                    <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
+                                </div>
+                                <div class="model-name-secondary" x-show="row.is_alias">
+                                    Targets <span class="mono" x-text="row.secondary_name"></span>
+                                </div>
+                                <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
+                                    Masked by alias to <span class="mono" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_second_input)"></td>
+                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_character_input)"></td>
+                        <td class="model-row-actions">
+                            <template x-if="row.is_alias">
+                                <div class="alias-actions-cell">
+                                    <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
+                                        <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                                        <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
+                                    </button>
+                                    <button type="button" class="table-action-btn" @click="openAliasEdit(row.alias)">Edit</button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger" :disabled="aliasDeletingName === row.alias.name" @click="deleteAlias(row.alias)" x-text="aliasDeletingName === row.alias.name ? 'Removing...' : 'Remove'"></button>
+                                </div>
+                            </template>
+                            <template x-if="!row.is_alias">
+                                <span class="model-row-actions-empty">—</span>
+                            </template>
+                        </td>
                     </tr>
                 </template>
             </tbody>
@@ -332,23 +506,50 @@
     </div>
 
     <!-- Models Table: Video -->
-    <div class="table-wrapper" x-show="(models.length > 0 || modelFilter) && activeCategory === 'video'">
+    <div class="table-wrapper" x-show="(displayModels.length > 0 || modelFilter) && activeCategory === 'video'">
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Model ID</th>
-                    <th>Provider</th>
+                    <th>Model</th>
                     <th class="col-price">$/Second (In)</th>
                     <th class="col-price">$/Second (Out)</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                <template x-for="m in filteredModels" :key="m.model.id">
-                    <tr>
-                        <td class="mono" x-text="m.model.id"></td>
-                        <td><span class="provider-badge" x-text="m.provider_type"></span></td>
-                        <td class="col-price" x-text="formatPriceFine(m.model.metadata?.pricing?.per_second_input)"></td>
-                        <td class="col-price" x-text="formatPriceFine(m.model.metadata?.pricing?.per_second_output)"></td>
+                <template x-for="row in filteredDisplayModels" :key="row.key">
+                    <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
+                        <td>
+                            <div class="model-name-cell">
+                                <div class="model-name-primary">
+                                    <span class="mono" x-text="row.display_name"></span>
+                                    <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
+                                </div>
+                                <div class="model-name-secondary" x-show="row.is_alias">
+                                    Targets <span class="mono" x-text="row.secondary_name"></span>
+                                </div>
+                                <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
+                                    Masked by alias to <span class="mono" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_second_input)"></td>
+                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_second_output)"></td>
+                        <td class="model-row-actions">
+                            <template x-if="row.is_alias">
+                                <div class="alias-actions-cell">
+                                    <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
+                                        <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                                        <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
+                                    </button>
+                                    <button type="button" class="table-action-btn" @click="openAliasEdit(row.alias)">Edit</button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger" :disabled="aliasDeletingName === row.alias.name" @click="deleteAlias(row.alias)" x-text="aliasDeletingName === row.alias.name ? 'Removing...' : 'Remove'"></button>
+                                </div>
+                            </template>
+                            <template x-if="!row.is_alias">
+                                <span class="model-row-actions-empty">—</span>
+                            </template>
+                        </td>
                     </tr>
                 </template>
             </tbody>
@@ -356,32 +557,59 @@
     </div>
 
     <!-- Models Table: Utility -->
-    <div class="table-wrapper" x-show="(models.length > 0 || modelFilter) && activeCategory === 'utility'">
+    <div class="table-wrapper" x-show="(displayModels.length > 0 || modelFilter) && activeCategory === 'utility'">
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Model ID</th>
-                    <th>Provider</th>
+                    <th>Model</th>
                     <th class="col-price">$/Page</th>
                     <th class="col-price">$/Request</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                <template x-for="m in filteredModels" :key="m.model.id">
-                    <tr>
-                        <td class="mono" x-text="m.model.id"></td>
-                        <td><span class="provider-badge" x-text="m.provider_type"></span></td>
-                        <td class="col-price" x-text="formatPriceFine(m.model.metadata?.pricing?.per_page)"></td>
-                        <td class="col-price" x-text="formatPriceFine(m.model.metadata?.pricing?.per_request)"></td>
+                <template x-for="row in filteredDisplayModels" :key="row.key">
+                    <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
+                        <td>
+                            <div class="model-name-cell">
+                                <div class="model-name-primary">
+                                    <span class="mono" x-text="row.display_name"></span>
+                                    <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
+                                </div>
+                                <div class="model-name-secondary" x-show="row.is_alias">
+                                    Targets <span class="mono" x-text="row.secondary_name"></span>
+                                </div>
+                                <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
+                                    Masked by alias to <span class="mono" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_page)"></td>
+                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_request)"></td>
+                        <td class="model-row-actions">
+                            <template x-if="row.is_alias">
+                                <div class="alias-actions-cell">
+                                    <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
+                                        <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                                        <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
+                                    </button>
+                                    <button type="button" class="table-action-btn" @click="openAliasEdit(row.alias)">Edit</button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger" :disabled="aliasDeletingName === row.alias.name" @click="deleteAlias(row.alias)" x-text="aliasDeletingName === row.alias.name ? 'Removing...' : 'Remove'"></button>
+                                </div>
+                            </template>
+                            <template x-if="!row.is_alias">
+                                <span class="model-row-actions-empty">—</span>
+                            </template>
+                        </td>
                     </tr>
                 </template>
             </tbody>
         </table>
     </div>
 
-    <p class="empty-state" x-show="models.length === 0 && !loading && !authError && !modelFilter && (activeCategory === 'all' || !activeCategory)">No models registered.</p>
-    <p class="empty-state" x-show="models.length === 0 && !loading && !authError && !modelFilter && activeCategory && activeCategory !== 'all'">No models in this category.</p>
-    <p class="empty-state" x-show="models.length > 0 && filteredModels.length === 0 && modelFilter">No models match your filter.</p>
+    <p class="empty-state" x-show="displayModels.length === 0 && !loading && !authError && !modelFilter && (activeCategory === 'all' || !activeCategory)">No models registered.</p>
+    <p class="empty-state" x-show="displayModels.length === 0 && !loading && !authError && !modelFilter && activeCategory && activeCategory !== 'all'">No models in this category.</p>
+    <p class="empty-state" x-show="displayModels.length > 0 && filteredDisplayModels.length === 0 && modelFilter">No models match your filter.</p>
 </div>
 
 <!-- Audit Logs Page -->
@@ -466,6 +694,8 @@
                         <div class="audit-entry-context">
                             <span class="provider-badge" x-text="entry.provider || '-'"></span>
                             <span class="provider-badge mono" x-text="entry.model || '-'"></span>
+                            <span class="provider-badge audit-alias-badge" x-show="entry.alias_used">alias</span>
+                            <span class="provider-badge mono" x-show="entry.alias_used && entry.resolved_model" x-text="'resolved: ' + entry.resolved_model"></span>
                             <span class="provider-badge mono" x-text="'request_id: ' + (entry.request_id || '-')"></span>
                             <span class="provider-badge mono" x-show="entry.client_ip" x-text="'ip: ' + entry.client_ip"></span>
                             <span class="provider-badge" x-show="entry.stream">stream</span>

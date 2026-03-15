@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"gomodel/internal/core"
@@ -28,6 +29,10 @@ type providerTypeRegistry interface {
 
 type initializedLookup interface {
 	IsInitialized() bool
+}
+
+type providerTypeLister interface {
+	ProviderTypes() []string
 }
 
 func registryUnavailableError(err error) error {
@@ -382,6 +387,47 @@ func (r *Router) providerByTypeRegistry(providerType string) core.Provider {
 		}
 	}
 	return r.providerByType(providerType)
+}
+
+func (r *Router) providerTypes() []string {
+	if typed, ok := r.lookup.(providerTypeLister); ok {
+		return typed.ProviderTypes()
+	}
+
+	seen := make(map[string]struct{})
+	result := make([]string, 0)
+	for _, model := range r.lookup.ListModels() {
+		providerType := strings.TrimSpace(r.lookup.GetProviderType(model.ID))
+		if providerType == "" {
+			continue
+		}
+		if _, exists := seen[providerType]; exists {
+			continue
+		}
+		seen[providerType] = struct{}{}
+		result = append(result, providerType)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// NativeFileProviderTypes returns the registered provider types that support
+// native file operations. This inventory is independent of the public model
+// catalog whenever the underlying lookup can expose provider types directly.
+func (r *Router) NativeFileProviderTypes() []string {
+	providerTypes := r.providerTypes()
+	result := make([]string, 0, len(providerTypes))
+	for _, providerType := range providerTypes {
+		provider := r.providerByTypeRegistry(providerType)
+		if provider == nil {
+			continue
+		}
+		if _, ok := provider.(core.NativeFileProvider); !ok {
+			continue
+		}
+		result = append(result, providerType)
+	}
+	return result
 }
 
 // Passthrough routes an opaque provider-native request by provider type.

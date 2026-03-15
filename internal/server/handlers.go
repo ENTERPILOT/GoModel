@@ -32,25 +32,25 @@ var defaultEnabledPassthroughProviders = []string{"openai", "anthropic"}
 
 // Handler holds the HTTP handlers
 type Handler struct {
-	provider                      core.RoutableProvider
-	logger                        auditlog.LoggerInterface
-	usageLogger                   usage.LoggerInterface
-	pricingResolver               usage.PricingResolver
-	batchStore                    batchstore.Store
-	normalizePassthroughV1Prefix  bool
-	enabledPassthroughProviders map[string]struct{}
+	provider                     core.RoutableProvider
+	logger                       auditlog.LoggerInterface
+	usageLogger                  usage.LoggerInterface
+	pricingResolver              usage.PricingResolver
+	batchStore                   batchstore.Store
+	normalizePassthroughV1Prefix bool
+	enabledPassthroughProviders  map[string]struct{}
 }
 
 // NewHandler creates a new handler with the given routable provider (typically the Router)
 func NewHandler(provider core.RoutableProvider, logger auditlog.LoggerInterface, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver) *Handler {
 	return &Handler{
-		provider:                      provider,
-		logger:                        logger,
-		usageLogger:                   usageLogger,
-		pricingResolver:               pricingResolver,
-		batchStore:                    batchstore.NewMemoryStore(),
-		normalizePassthroughV1Prefix:  true,
-		enabledPassthroughProviders: normalizeEnabledPassthroughProviders(defaultEnabledPassthroughProviders),
+		provider:                     provider,
+		logger:                       logger,
+		usageLogger:                  usageLogger,
+		pricingResolver:              pricingResolver,
+		batchStore:                   batchstore.NewMemoryStore(),
+		normalizePassthroughV1Prefix: true,
+		enabledPassthroughProviders:  normalizeEnabledPassthroughProviders(defaultEnabledPassthroughProviders),
 	}
 }
 
@@ -195,6 +195,19 @@ func requestContextWithRequestID(req *http.Request) (context.Context, string) {
 	return ctx, requestID
 }
 
+func (h *Handler) streamingUsageModel(model, provider string) (string, error) {
+	if resolver, ok := h.provider.(resolvedModelProvider); ok {
+		selector, _, err := resolver.ResolveModel(model, provider)
+		if err != nil {
+			return "", err
+		}
+		if selector.Model != "" {
+			return selector.Model, nil
+		}
+	}
+	return model, nil
+}
+
 func sanitizePublicBatchMetadata(metadata map[string]string) map[string]string {
 	if len(metadata) == 0 {
 		return nil
@@ -242,10 +255,6 @@ func cloneChatRequestForStreamUsage(req *core.ChatRequest) *core.ChatRequest {
 		cloned.StreamOptions = &streamOptions
 	}
 	return &cloned
-}
-
-func resolveModelSelector(ctx context.Context, model, provider *string) error {
-	return core.NormalizeModelSelector(core.GetWhiteBoxPrompt(ctx), model, provider)
 }
 
 func isEnabledPassthroughProvider(providerType string, enabledPassthroughProviders map[string]struct{}) bool {
@@ -567,7 +576,7 @@ func (h *Handler) ChatCompletion(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if err := resolveModelSelector(c.Request().Context(), &req.Model, &req.Provider); err != nil {
+	if err := applyRequestModelResolution(c, h.provider, &req.Model, &req.Provider); err != nil {
 		return handleError(c, err)
 	}
 
@@ -584,7 +593,11 @@ func (h *Handler) ChatCompletion(c *echo.Context) error {
 			}
 			streamReq.StreamOptions.IncludeUsage = true
 		}
-		return h.handleStreamingResponse(c, streamReq.Model, providerType, func() (io.ReadCloser, error) {
+		usageModel, err := h.streamingUsageModel(streamReq.Model, streamReq.Provider)
+		if err != nil {
+			return handleError(c, err)
+		}
+		return h.handleStreamingResponse(c, usageModel, providerType, func() (io.ReadCloser, error) {
 			return h.provider.StreamChatCompletion(ctx, streamReq)
 		})
 	}
@@ -644,28 +657,11 @@ func (h *Handler) nativeFileRouter() (core.NativeFileRoutableProvider, error) {
 }
 
 func (h *Handler) fileProviderTypes(ctx *echo.Context) ([]string, error) {
-	resp, err := h.provider.ListModels(ctx.Request().Context())
-	if err != nil {
-		return nil, err
+	typed, ok := h.provider.(core.NativeFileProviderTypeLister)
+	if !ok {
+		return nil, core.NewProviderError("", http.StatusInternalServerError, "file provider inventory is unavailable", nil)
 	}
-	if resp == nil {
-		return []string{}, nil
-	}
-	seen := make(map[string]struct{})
-	providers := make([]string, 0)
-	for _, model := range resp.Data {
-		providerType := strings.TrimSpace(h.provider.GetProviderType(model.ID))
-		if providerType == "" {
-			continue
-		}
-		if _, exists := seen[providerType]; exists {
-			continue
-		}
-		seen[providerType] = struct{}{}
-		providers = append(providers, providerType)
-	}
-	sort.Strings(providers)
-	return providers, nil
+	return typed.NativeFileProviderTypes(), nil
 }
 
 func (h *Handler) fileByID(
@@ -1050,7 +1046,7 @@ func (h *Handler) Responses(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if err := resolveModelSelector(c.Request().Context(), &req.Model, &req.Provider); err != nil {
+	if err := applyRequestModelResolution(c, h.provider, &req.Model, &req.Provider); err != nil {
 		return handleError(c, err)
 	}
 
@@ -1061,7 +1057,11 @@ func (h *Handler) Responses(c *echo.Context) error {
 		if h.shouldEnforceReturningUsageData() {
 			ctx = core.WithEnforceReturningUsageData(ctx, true)
 		}
-		return h.handleStreamingResponse(c, req.Model, providerType, func() (io.ReadCloser, error) {
+		usageModel, err := h.streamingUsageModel(req.Model, req.Provider)
+		if err != nil {
+			return handleError(c, err)
+		}
+		return h.handleStreamingResponse(c, usageModel, providerType, func() (io.ReadCloser, error) {
 			return h.provider.StreamResponses(ctx, req)
 		})
 	}
@@ -1097,7 +1097,7 @@ func (h *Handler) Embeddings(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if err := resolveModelSelector(c.Request().Context(), &req.Model, &req.Provider); err != nil {
+	if err := applyRequestModelResolution(c, h.provider, &req.Model, &req.Provider); err != nil {
 		return handleError(c, err)
 	}
 
@@ -1139,6 +1139,8 @@ func (h *Handler) Batches(c *echo.Context) error {
 	}
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
+	batchPreparation := &core.BatchPreparationMetadata{}
+	ctx = core.WithBatchPreparationMetadata(ctx, batchPreparation)
 
 	nativeRouter, ok := h.provider.(core.NativeBatchRoutableProvider)
 	if !ok {
@@ -1180,6 +1182,7 @@ func (h *Handler) Batches(c *echo.Context) error {
 	resp.ProviderBatchID = providerBatchID
 	resp.ID = "batch_" + uuid.NewString()
 	resp.Object = "batch"
+	resp.InputFileID = firstNonEmpty(req.InputFileID, batchPreparation.OriginalInputFileID, resp.InputFileID)
 	if resp.Endpoint == "" {
 		resp.Endpoint = core.NormalizeOperationPath(req.Endpoint)
 	}
@@ -1200,6 +1203,8 @@ func (h *Handler) Batches(c *echo.Context) error {
 		stored := &batchstore.StoredBatch{
 			Batch:                     &resp,
 			RequestEndpointByCustomID: hints,
+			OriginalInputFileID:       batchPreparation.OriginalInputFileID,
+			RewrittenInputFileID:      batchPreparation.RewrittenInputFileID,
 			RequestID:                 requestID,
 		}
 		if err := h.batchStore.Create(ctx, stored); err != nil {
@@ -1325,8 +1330,15 @@ func (h *Handler) GetBatch(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	updated := false
 	if latest != nil {
-		mergeStoredBatchFromUpstream(resp.Batch, latest)
+		mergeStoredBatchFromUpstream(resp, latest)
+		updated = true
+	}
+	if isTerminalBatchStatus(resp.Batch.Status) && h.cleanupStoredBatchRewrittenInputFile(ctx, resp) {
+		updated = true
+	}
+	if updated {
 		if err := h.batchStore.Update(c.Request().Context(), resp); err != nil && !errors.Is(err, batchstore.ErrNotFound) {
 			return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "failed to persist refreshed batch", err))
 		}
@@ -1455,7 +1467,10 @@ func (h *Handler) CancelBatch(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if latest != nil {
-		mergeStoredBatchFromUpstream(resp.Batch, latest)
+		mergeStoredBatchFromUpstream(resp, latest)
+	}
+	if isTerminalBatchStatus(resp.Batch.Status) {
+		h.cleanupStoredBatchRewrittenInputFile(ctx, resp)
 	}
 
 	if err := h.batchStore.Update(c.Request().Context(), resp); err != nil {
@@ -1524,7 +1539,7 @@ func (h *Handler) BatchResults(c *echo.Context) error {
 	if err != nil {
 		if isNativeBatchResultsPending(err) {
 			if latest, getErr := nativeRouter.GetBatch(ctx, stored.Batch.Provider, stored.Batch.ProviderBatchID); getErr == nil && latest != nil {
-				mergeStoredBatchFromUpstream(stored.Batch, latest)
+				mergeStoredBatchFromUpstream(stored, latest)
 				if updateErr := h.batchStore.Update(c.Request().Context(), stored); updateErr != nil && !errors.Is(updateErr, batchstore.ErrNotFound) {
 					slog.Warn(
 						"failed to update batch store after refreshing pending results",
@@ -1557,7 +1572,11 @@ func (h *Handler) BatchResults(c *echo.Context) error {
 	if len(result.Data) > 0 {
 		stored.Batch.Results = result.Data
 	}
-	if len(result.Data) > 0 || usageLogged {
+	cleanedRewrittenInput := false
+	if isTerminalBatchStatus(stored.Batch.Status) {
+		cleanedRewrittenInput = h.cleanupStoredBatchRewrittenInputFile(ctx, stored)
+	}
+	if len(result.Data) > 0 || usageLogged || cleanedRewrittenInput {
 		if updateErr := h.batchStore.Update(c.Request().Context(), stored); updateErr != nil {
 			slog.Warn(
 				"failed to update batch store after receiving batch results",
@@ -1893,30 +1912,48 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func mergeStoredBatchFromUpstream(stored, upstream *core.BatchResponse) {
-	if stored == nil || upstream == nil {
+func mergeStoredBatchFromUpstream(stored *batchstore.StoredBatch, upstream *core.BatchResponse) {
+	if stored == nil || stored.Batch == nil || upstream == nil {
 		return
 	}
 
-	stored.Status = upstream.Status
-	stored.Endpoint = upstream.Endpoint
-	stored.InputFileID = upstream.InputFileID
-	stored.CompletionWindow = upstream.CompletionWindow
-	stored.RequestCounts = upstream.RequestCounts
-	stored.Usage = upstream.Usage
-	stored.Results = upstream.Results
-	stored.InProgressAt = upstream.InProgressAt
-	stored.CompletedAt = upstream.CompletedAt
-	stored.FailedAt = upstream.FailedAt
-	stored.CancellingAt = upstream.CancellingAt
-	stored.CancelledAt = upstream.CancelledAt
+	stored.Batch.Status = firstNonEmpty(upstream.Status, stored.Batch.Status)
+	stored.Batch.Endpoint = firstNonEmpty(upstream.Endpoint, stored.Batch.Endpoint)
+	if strings.TrimSpace(stored.Batch.InputFileID) == "" {
+		stored.Batch.InputFileID = firstNonEmpty(stored.OriginalInputFileID, upstream.InputFileID)
+	}
+	stored.Batch.CompletionWindow = firstNonEmpty(upstream.CompletionWindow, stored.Batch.CompletionWindow)
+	if hasBatchRequestCounts(upstream.RequestCounts) {
+		stored.Batch.RequestCounts = upstream.RequestCounts
+	}
+	if hasBatchUsageSummary(upstream.Usage) {
+		stored.Batch.Usage = upstream.Usage
+	}
+	if len(upstream.Results) > 0 {
+		stored.Batch.Results = upstream.Results
+	}
+	if upstream.InProgressAt != nil {
+		stored.Batch.InProgressAt = upstream.InProgressAt
+	}
+	if upstream.CompletedAt != nil {
+		stored.Batch.CompletedAt = upstream.CompletedAt
+	}
+	if upstream.FailedAt != nil {
+		stored.Batch.FailedAt = upstream.FailedAt
+	}
+	if upstream.CancellingAt != nil {
+		stored.Batch.CancellingAt = upstream.CancellingAt
+	}
+	if upstream.CancelledAt != nil {
+		stored.Batch.CancelledAt = upstream.CancelledAt
+	}
 	if upstream.Metadata != nil {
-		if stored.Metadata == nil {
-			stored.Metadata = map[string]string{}
+		if stored.Batch.Metadata == nil {
+			stored.Batch.Metadata = map[string]string{}
 		}
 		preservedGatewayMetadata := map[string]string{}
 		for _, key := range []string{"provider", "provider_batch_id"} {
-			if value, exists := stored.Metadata[key]; exists {
+			if value, exists := stored.Batch.Metadata[key]; exists {
 				preservedGatewayMetadata[key] = value
 			}
 		}
@@ -1924,13 +1961,61 @@ func mergeStoredBatchFromUpstream(stored, upstream *core.BatchResponse) {
 			if _, preserve := preservedGatewayMetadata[key]; preserve {
 				continue
 			}
-			stored.Metadata[key] = value
+			stored.Batch.Metadata[key] = value
 		}
 		for key, value := range preservedGatewayMetadata {
-			stored.Metadata[key] = value
+			stored.Batch.Metadata[key] = value
 		}
-		stored.Metadata = sanitizePublicBatchMetadata(stored.Metadata)
+		stored.Batch.Metadata = sanitizePublicBatchMetadata(stored.Batch.Metadata)
 	}
+}
+
+func hasBatchRequestCounts(counts core.BatchRequestCounts) bool {
+	return counts.Total != 0 || counts.Completed != 0 || counts.Failed != 0
+}
+
+func hasBatchUsageSummary(usage core.BatchUsageSummary) bool {
+	return usage.InputTokens != 0 ||
+		usage.OutputTokens != 0 ||
+		usage.TotalTokens != 0 ||
+		usage.InputCost != nil ||
+		usage.OutputCost != nil ||
+		usage.TotalCost != nil
+}
+
+func isTerminalBatchStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed", "failed", "cancelled", "canceled", "expired":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *Handler) cleanupStoredBatchRewrittenInputFile(ctx context.Context, stored *batchstore.StoredBatch) bool {
+	if stored == nil || stored.Batch == nil {
+		return false
+	}
+	fileID := strings.TrimSpace(stored.RewrittenInputFileID)
+	if fileID == "" {
+		return false
+	}
+	nativeFiles, err := h.nativeFileRouter()
+	if err != nil {
+		return false
+	}
+	if _, err := nativeFiles.DeleteFile(ctx, stored.Batch.Provider, fileID); err != nil {
+		slog.Warn(
+			"failed to delete rewritten batch input file",
+			"batch_id", stored.Batch.ID,
+			"provider", stored.Batch.Provider,
+			"file_id", fileID,
+			"error", err,
+		)
+		return false
+	}
+	stored.RewrittenInputFileID = ""
+	return true
 }
 
 func isNativeBatchResultsPending(err error) bool {

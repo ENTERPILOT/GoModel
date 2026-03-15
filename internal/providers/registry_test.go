@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gomodel/internal/core"
+	"gomodel/internal/modeldata"
 )
 
 // registryMockProvider is a mock implementation of core.Provider for Registry testing.
@@ -217,6 +218,88 @@ func TestModelRegistry(t *testing.T) {
 		unknownInfo := registry.GetModel("unknown-model")
 		if unknownInfo != nil {
 			t.Errorf("expected nil for unknown model, got %+v", unknownInfo)
+		}
+	})
+
+	t.Run("EnrichModelsReplacesPublishedModelInfo", func(t *testing.T) {
+		registry := NewModelRegistry()
+
+		mock := &registryMockProvider{
+			name: "test-provider",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{
+						ID:      "test-model",
+						Object:  "model",
+						OwnedBy: "test-provider",
+					},
+				},
+			},
+		}
+		registry.RegisterProviderWithType(mock, "openai")
+		_ = registry.Initialize(context.Background())
+
+		before := registry.GetModel("test-model")
+		if before == nil {
+			t.Fatal("expected GetModel to return a published ModelInfo")
+		}
+		if before.Model.Metadata != nil {
+			t.Fatalf("expected initial metadata to be nil, got %#v", before.Model.Metadata)
+		}
+
+		raw := []byte(`{
+			"version": 1,
+			"updated_at": "2025-01-01T00:00:00Z",
+			"providers": {
+				"openai": {
+					"display_name": "OpenAI",
+					"api_type": "openai",
+					"supported_modes": ["chat"]
+				}
+			},
+			"models": {
+				"test-model": {
+					"display_name": "Test Model",
+					"modes": ["chat"]
+				}
+			},
+			"provider_models": {}
+		}`)
+		list, err := modeldata.Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+		registry.SetModelList(list, raw)
+		registry.EnrichModels()
+
+		if before.Model.Metadata != nil {
+			t.Fatalf("expected previously published ModelInfo to remain unchanged, got %#v", before.Model.Metadata)
+		}
+
+		after := registry.GetModel("test-model")
+		if after == nil {
+			t.Fatal("expected GetModel to return an enriched ModelInfo")
+		}
+		if after == before {
+			t.Fatal("expected EnrichModels to replace the published ModelInfo pointer")
+		}
+		if after.Model.Metadata == nil {
+			t.Fatal("expected enriched metadata to be present")
+		}
+		if after.Model.Metadata.DisplayName != "Test Model" {
+			t.Fatalf("registry display name = %q, want Test Model", after.Model.Metadata.DisplayName)
+		}
+
+		lookup, ok := registry.LookupModel("test-model")
+		if !ok || lookup == nil {
+			t.Fatal("expected LookupModel to return the enriched model")
+		}
+		if lookup.Metadata == nil {
+			t.Fatal("expected LookupModel metadata to be present")
+		}
+		if lookup.Metadata.DisplayName != "Test Model" {
+			t.Fatalf("lookup display name = %q, want Test Model", lookup.Metadata.DisplayName)
 		}
 	})
 

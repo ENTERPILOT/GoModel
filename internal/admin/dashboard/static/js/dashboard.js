@@ -184,6 +184,9 @@ function dashboard() {
             this.authError = false;
             this.needsAuth = false;
             const requests = [this.fetchUsage(), this.fetchModels(), this.fetchCategories()];
+            if (typeof this.fetchAliases === 'function') {
+                requests.push(this.fetchAliases());
+            }
             if (this.hasCalendarModule && typeof this.fetchCalendarData === 'function') {
                 requests.push(this.fetchCalendarData());
             }
@@ -322,6 +325,7 @@ function dashboard() {
         typeof dashboardDatePickerModule === 'function' ? dashboardDatePickerModule : null,
         typeof dashboardUsageModule === 'function' ? dashboardUsageModule : null,
         typeof dashboardAuditListModule === 'function' ? dashboardAuditListModule : null,
+        typeof dashboardAliasesModule === 'function' ? dashboardAliasesModule : null,
         typeof dashboardConversationDrawerModule === 'function' ? dashboardConversationDrawerModule : null,
         calendarModuleFactory,
         typeof dashboardChartsModule === 'function' ? dashboardChartsModule : null
@@ -329,6 +333,7 @@ function dashboard() {
 
     return moduleFactories.reduce((app, factory) => {
         if (!factory) return app;
-        return Object.assign(app, factory());
+        Object.defineProperties(app, Object.getOwnPropertyDescriptors(factory()));
+        return app;
     }, base);
 }

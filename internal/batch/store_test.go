@@ -39,6 +39,8 @@ func TestSerializeBatchPreservesRequestEndpointHints(t *testing.T) {
 			"resp-1": "/v1/responses",
 			"chat-1": "/v1/chat/completions",
 		},
+		OriginalInputFileID:  "file_original",
+		RewrittenInputFileID: "file_rewritten",
 	})
 	if err != nil {
 		t.Fatalf("serializeBatch() error = %v", err)
@@ -57,6 +59,12 @@ func TestSerializeBatchPreservesRequestEndpointHints(t *testing.T) {
 	if got := decoded.RequestEndpointByCustomID["chat-1"]; got != "/v1/chat/completions" {
 		t.Fatalf("RequestEndpointByCustomID[chat-1] = %q, want /v1/chat/completions", got)
 	}
+	if decoded.OriginalInputFileID != "file_original" {
+		t.Fatalf("OriginalInputFileID = %q, want file_original", decoded.OriginalInputFileID)
+	}
+	if decoded.RewrittenInputFileID != "file_rewritten" {
+		t.Fatalf("RewrittenInputFileID = %q, want file_rewritten", decoded.RewrittenInputFileID)
+	}
 }
 
 func TestSerializeBatchStripsGatewayOnlyMetadata(t *testing.T) {
@@ -65,9 +73,9 @@ func TestSerializeBatchStripsGatewayOnlyMetadata(t *testing.T) {
 		Batch: &core.BatchResponse{
 			ID: "batch_123",
 			Metadata: map[string]string{
-				"visible":                  "keep",
-				RequestIDMetadataKey:      "req_123",
-				UsageLoggedAtMetadataKey:  strconv.FormatInt(loggedAt.Unix(), 10),
+				"visible":                "keep",
+				RequestIDMetadataKey:     "req_123",
+				UsageLoggedAtMetadataKey: strconv.FormatInt(loggedAt.Unix(), 10),
 			},
 		},
 	})

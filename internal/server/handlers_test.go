@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +18,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
+	batchstore "gomodel/internal/batch"
 	"gomodel/internal/core"
 	provideradapter "gomodel/internal/providers"
 	"gomodel/internal/usage"
@@ -32,6 +35,76 @@ func withRequestSnapshotAndPrompt(req *http.Request, frame *core.RequestSnapshot
 		ctx = core.WithWhiteBoxPrompt(ctx, prompt)
 	}
 	return req.WithContext(ctx)
+}
+
+type aliasesTestStore struct {
+	aliases []aliases.Alias
+}
+
+func newAliasesTestStore(aliasesList ...aliases.Alias) *aliasesTestStore {
+	return &aliasesTestStore{aliases: append([]aliases.Alias(nil), aliasesList...)}
+}
+
+func (s *aliasesTestStore) List(_ context.Context) ([]aliases.Alias, error) {
+	return append([]aliases.Alias(nil), s.aliases...), nil
+}
+
+func (s *aliasesTestStore) Get(_ context.Context, name string) (*aliases.Alias, error) {
+	for _, alias := range s.aliases {
+		if alias.Name == name {
+			copy := alias
+			return &copy, nil
+		}
+	}
+	return nil, aliases.ErrNotFound
+}
+
+func (s *aliasesTestStore) Upsert(_ context.Context, alias aliases.Alias) error {
+	for i := range s.aliases {
+		if s.aliases[i].Name == alias.Name {
+			s.aliases[i] = alias
+			return nil
+		}
+	}
+	s.aliases = append(s.aliases, alias)
+	return nil
+}
+
+func (s *aliasesTestStore) Delete(_ context.Context, name string) error {
+	for i := range s.aliases {
+		if s.aliases[i].Name == name {
+			s.aliases = append(s.aliases[:i], s.aliases[i+1:]...)
+			return nil
+		}
+	}
+	return aliases.ErrNotFound
+}
+
+func (s *aliasesTestStore) Close() error {
+	return nil
+}
+
+type aliasesTestCatalog struct {
+	supported     map[string]bool
+	providerTypes map[string]string
+	models        map[string]core.Model
+}
+
+func (c *aliasesTestCatalog) Supports(model string) bool {
+	return c.supported[model]
+}
+
+func (c *aliasesTestCatalog) GetProviderType(model string) string {
+	return c.providerTypes[model]
+}
+
+func (c *aliasesTestCatalog) LookupModel(model string) (*core.Model, bool) {
+	entry, ok := c.models[model]
+	if !ok {
+		return nil, false
+	}
+	copy := entry
+	return &copy, true
 }
 
 type chunkedReadCloser struct {
@@ -193,16 +266,19 @@ type mockProvider struct {
 	clearedBatchHintProvider   string
 	clearedBatchHintID         string
 
-	fileCreateResponse  *core.FileObject
-	fileGetResponse     *core.FileObject
-	fileDeleteResponse  *core.FileDeleteResponse
-	fileListResponse    *core.FileListResponse
-	fileContentResponse *core.FileContentResponse
-	fileErr             error
-	fileListByProvider  map[string]*core.FileListResponse
-	fileErrByProvider   map[string]error
-	fileGetByProvider   map[string]*core.FileObject
-	fileContentByProv   map[string]*core.FileContentResponse
+	fileCreateResponse     *core.FileObject
+	fileCreateResponses    []*core.FileObject
+	capturedFileCreateReqs []*core.FileCreateRequest
+	capturedFileDeleteIDs  []string
+	fileGetResponse        *core.FileObject
+	fileDeleteResponse     *core.FileDeleteResponse
+	fileListResponse       *core.FileListResponse
+	fileContentResponse    *core.FileContentResponse
+	fileErr                error
+	fileListByProvider     map[string]*core.FileListResponse
+	fileErrByProvider      map[string]error
+	fileGetByProvider      map[string]*core.FileObject
+	fileContentByProv      map[string]*core.FileContentResponse
 
 	passthroughResponse     *core.PassthroughResponse
 	passthroughErr          error
@@ -258,6 +334,79 @@ func (m *mockProvider) GetProviderType(model string) string {
 		return "mock"
 	}
 	return ""
+}
+
+func (m *mockProvider) NativeFileProviderTypes() []string {
+	seen := make(map[string]struct{})
+	result := make([]string, 0, len(m.providerTypes))
+	for _, providerType := range m.providerTypes {
+		if providerType == "" {
+			continue
+		}
+		if _, exists := seen[providerType]; exists {
+			continue
+		}
+		seen[providerType] = struct{}{}
+		result = append(result, providerType)
+	}
+	sort.Strings(result)
+	return result
+}
+
+type providerWithoutFileInventory struct {
+	inner *mockProvider
+}
+
+func (p *providerWithoutFileInventory) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	return p.inner.ChatCompletion(ctx, req)
+}
+
+func (p *providerWithoutFileInventory) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	return p.inner.StreamChatCompletion(ctx, req)
+}
+
+func (p *providerWithoutFileInventory) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
+	return p.inner.ListModels(ctx)
+}
+
+func (p *providerWithoutFileInventory) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	return p.inner.Responses(ctx, req)
+}
+
+func (p *providerWithoutFileInventory) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
+	return p.inner.StreamResponses(ctx, req)
+}
+
+func (p *providerWithoutFileInventory) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	return p.inner.Embeddings(ctx, req)
+}
+
+func (p *providerWithoutFileInventory) Supports(model string) bool {
+	return p.inner.Supports(model)
+}
+
+func (p *providerWithoutFileInventory) GetProviderType(model string) string {
+	return p.inner.GetProviderType(model)
+}
+
+func (p *providerWithoutFileInventory) CreateFile(ctx context.Context, providerType string, req *core.FileCreateRequest) (*core.FileObject, error) {
+	return p.inner.CreateFile(ctx, providerType, req)
+}
+
+func (p *providerWithoutFileInventory) ListFiles(ctx context.Context, providerType, purpose string, limit int, after string) (*core.FileListResponse, error) {
+	return p.inner.ListFiles(ctx, providerType, purpose, limit, after)
+}
+
+func (p *providerWithoutFileInventory) GetFile(ctx context.Context, providerType, id string) (*core.FileObject, error) {
+	return p.inner.GetFile(ctx, providerType, id)
+}
+
+func (p *providerWithoutFileInventory) DeleteFile(ctx context.Context, providerType, id string) (*core.FileDeleteResponse, error) {
+	return p.inner.DeleteFile(ctx, providerType, id)
+}
+
+func (p *providerWithoutFileInventory) GetFileContent(ctx context.Context, providerType, id string) (*core.FileContentResponse, error) {
+	return p.inner.GetFileContent(ctx, providerType, id)
 }
 
 func (m *mockProvider) ChatCompletion(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
@@ -424,6 +573,14 @@ func (m *mockProvider) CreateFile(_ context.Context, providerType string, req *c
 	if m.fileErr != nil {
 		return nil, m.fileErr
 	}
+	copy := *req
+	copy.Content = append([]byte(nil), req.Content...)
+	m.capturedFileCreateReqs = append(m.capturedFileCreateReqs, &copy)
+	if len(m.fileCreateResponses) > 0 {
+		resp := m.fileCreateResponses[0]
+		m.fileCreateResponses = m.fileCreateResponses[1:]
+		return resp, nil
+	}
 	if m.fileCreateResponse != nil {
 		return m.fileCreateResponse, nil
 	}
@@ -508,6 +665,7 @@ func (m *mockProvider) DeleteFile(_ context.Context, providerType string, id str
 	if m.fileErr != nil {
 		return nil, m.fileErr
 	}
+	m.capturedFileDeleteIDs = append(m.capturedFileDeleteIDs, id)
 	if m.fileDeleteResponse != nil {
 		return m.fileDeleteResponse, nil
 	}
@@ -920,6 +1078,115 @@ func TestChatCompletion_NormalizesSemanticSelectorHints(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_ResolvesQualifiedMaskingAliasBeforeHandlerRouting(t *testing.T) {
+	catalog := aliasesTestCatalog{
+		supported: map[string]bool{
+			"anthropic/claude-opus-4-6": true,
+			"openai/gpt-5-nano":         true,
+		},
+		providerTypes: map[string]string{
+			"anthropic/claude-opus-4-6": "anthropic",
+			"openai/gpt-5-nano":         "openai",
+		},
+		models: map[string]core.Model{
+			"anthropic/claude-opus-4-6": {ID: "claude-opus-4-6", Object: "model"},
+			"openai/gpt-5-nano":         {ID: "gpt-5-nano", Object: "model"},
+		},
+	}
+
+	service, err := aliases.NewService(newAliasesTestStore(
+		aliases.Alias{Name: "anthropic/claude-opus-4-6", TargetModel: "gpt-5-nano", TargetProvider: "openai", Enabled: true},
+	), &catalog)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	inner := &capturingProvider{
+		mockProvider: mockProvider{
+			supportedModels: []string{"gpt-5-nano"},
+			providerTypes: map[string]string{
+				"openai/gpt-5-nano": "openai",
+			},
+			response: &core.ChatResponse{
+				ID:       "chatcmpl_alias_123",
+				Object:   "chat.completion",
+				Model:    "gpt-5-nano",
+				Provider: "openai",
+				Choices: []core.Choice{
+					{
+						Index:        0,
+						FinishReason: "stop",
+						Message: core.ResponseMessage{
+							Role:    "assistant",
+							Content: "ok",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	provider := aliases.NewProvider(inner, service)
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = &explodingReadCloser{}
+
+	frame := core.NewRequestSnapshot(
+		http.MethodPost,
+		"/v1/chat/completions",
+		nil,
+		nil,
+		nil,
+		"application/json",
+		[]byte(`{
+			"model":"anthropic/claude-opus-4-6",
+			"messages":[{"role":"user","content":"return json"}]
+		}`),
+		false,
+		"",
+		nil,
+	)
+	req = withRequestSnapshotAndPrompt(req, frame)
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err = handler.ChatCompletion(c)
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if inner.capturedChatReq == nil {
+		t.Fatal("expected chat request to be captured")
+	}
+	if inner.capturedChatReq.Model != "gpt-5-nano" {
+		t.Fatalf("captured model = %q, want gpt-5-nano", inner.capturedChatReq.Model)
+	}
+	if inner.capturedChatReq.Provider != "openai" {
+		t.Fatalf("captured provider = %q, want openai", inner.capturedChatReq.Provider)
+	}
+
+	resolution := core.GetRequestModelResolution(c.Request().Context())
+	if resolution == nil {
+		t.Fatal("expected request model resolution in context")
+	}
+	if !resolution.AliasApplied {
+		t.Fatal("expected alias resolution to be marked as applied")
+	}
+	if resolution.ResolvedQualifiedModel() != "openai/gpt-5-nano" {
+		t.Fatalf("resolved model = %q, want openai/gpt-5-nano", resolution.ResolvedQualifiedModel())
+	}
+}
+
 func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
 	provider := &capturingProvider{
 		mockProvider: mockProvider{
@@ -1156,12 +1423,12 @@ func TestGetBatch_UsesSemanticEnvelopeRouteMetadata(t *testing.T) {
 	createCtx := e.NewContext(createReq, createRec)
 	require.NoError(t, handler.Batches(createCtx))
 
-		var created core.BatchResponse
-		require.NoError(t, json.Unmarshal(createRec.Body.Bytes(), &created))
+	var created core.BatchResponse
+	require.NoError(t, json.Unmarshal(createRec.Body.Bytes(), &created))
 
-		getReq := httptest.NewRequest(http.MethodGet, "/v1/batches/wrong-id", nil)
-		frame := core.NewRequestSnapshot(http.MethodGet, "/v1/batches/"+created.ID, map[string]string{"id": created.ID}, nil, nil, "", nil, false, "", nil)
-		getReq = withRequestSnapshotAndPrompt(getReq, frame)
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/batches/wrong-id", nil)
+	frame := core.NewRequestSnapshot(http.MethodGet, "/v1/batches/"+created.ID, map[string]string{"id": created.ID}, nil, nil, "", nil, false, "", nil)
+	getReq = withRequestSnapshotAndPrompt(getReq, frame)
 
 	getRec := httptest.NewRecorder()
 	getCtx := e.NewContext(getReq, getRec)
@@ -1200,10 +1467,10 @@ func TestListBatches_UsesSemanticEnvelopeQueryMetadata(t *testing.T) {
 	createCtx := e.NewContext(createReq, createRec)
 	require.NoError(t, handler.Batches(createCtx))
 
-		listReq := httptest.NewRequest(http.MethodGet, "/v1/batches?limit=bad", nil)
-		frame := core.NewRequestSnapshot(
-			http.MethodGet,
-			"/v1/batches",
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/batches?limit=bad", nil)
+	frame := core.NewRequestSnapshot(
+		http.MethodGet,
+		"/v1/batches",
 		nil,
 		map[string][]string{
 			"limit": {"1"},
@@ -1212,10 +1479,10 @@ func TestListBatches_UsesSemanticEnvelopeQueryMetadata(t *testing.T) {
 		"",
 		nil,
 		false,
-			"",
-			nil,
-		)
-		listReq = withRequestSnapshotAndPrompt(listReq, frame)
+		"",
+		nil,
+	)
+	listReq = withRequestSnapshotAndPrompt(listReq, frame)
 
 	listRec := httptest.NewRecorder()
 	listCtx := e.NewContext(listReq, listRec)
@@ -2258,6 +2525,190 @@ func TestBatches_MixedProviderRejected(t *testing.T) {
 	}
 }
 
+func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.T) {
+	store := newAliasesTestStore(aliases.Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: true})
+	catalog := &aliasesTestCatalog{
+		supported: map[string]bool{
+			"openai/gpt-4o": true,
+		},
+		providerTypes: map[string]string{
+			"openai/gpt-4o": "openai",
+		},
+		models: map[string]core.Model{
+			"openai/gpt-4o": {ID: "gpt-4o", Object: "model"},
+		},
+	}
+	service, err := aliases.NewService(store, catalog)
+	require.NoError(t, err)
+	require.NoError(t, service.Refresh(context.Background()))
+
+	inner := &mockProvider{
+		supportedModels: []string{"gpt-4o"},
+		providerTypes: map[string]string{
+			"openai/gpt-4o": "openai",
+		},
+		fileContentResponse: &core.FileContentResponse{
+			ID:       "file_source",
+			Filename: "batch.jsonl",
+			Data:     []byte("{\"custom_id\":\"chat-1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"smart\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}}\n"),
+		},
+		fileCreateResponse: &core.FileObject{
+			ID:       "file_rewritten",
+			Object:   "file",
+			Filename: "batch.jsonl",
+			Purpose:  "batch",
+			Provider: "openai",
+		},
+		batchCreateResponse: &core.BatchResponse{
+			ID:          "provider-batch-1",
+			Object:      "batch",
+			Status:      "validating",
+			Endpoint:    "/v1/chat/completions",
+			CreatedAt:   1234567890,
+			InputFileID: "file_rewritten",
+			RequestCounts: core.BatchRequestCounts{
+				Total: 1,
+			},
+		},
+	}
+
+	provider := aliases.NewProvider(inner, service)
+	handler := NewHandler(provider, nil, nil, nil)
+	batchStore := batchstore.NewMemoryStore()
+	handler.SetBatchStore(batchStore)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{
+	  "input_file_id":"file_source",
+	  "endpoint":"/v1/chat/completions",
+	  "completion_window":"24h",
+	  "metadata":{"provider":"openai"}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err = handler.Batches(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, inner.capturedBatchReq)
+	require.Equal(t, "file_rewritten", inner.capturedBatchReq.InputFileID)
+	require.Len(t, inner.capturedFileCreateReqs, 1)
+	require.Contains(t, string(inner.capturedFileCreateReqs[0].Content), `"model":"gpt-4o"`)
+
+	var created core.BatchResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	require.Equal(t, "file_source", created.InputFileID)
+
+	stored, err := batchStore.Get(context.Background(), created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, "file_source", stored.Batch.InputFileID)
+	require.Equal(t, "file_source", stored.OriginalInputFileID)
+	require.Equal(t, "file_rewritten", stored.RewrittenInputFileID)
+}
+
+func TestBatches_InputFileRejectsDisabledAlias(t *testing.T) {
+	store := newAliasesTestStore(aliases.Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: false})
+	catalog := &aliasesTestCatalog{
+		supported: map[string]bool{
+			"openai/gpt-4o": true,
+		},
+		providerTypes: map[string]string{
+			"openai/gpt-4o": "openai",
+		},
+		models: map[string]core.Model{
+			"openai/gpt-4o": {ID: "gpt-4o", Object: "model"},
+		},
+	}
+	service, err := aliases.NewService(store, catalog)
+	require.NoError(t, err)
+	require.NoError(t, service.Refresh(context.Background()))
+
+	inner := &mockProvider{
+		supportedModels: []string{"gpt-4o"},
+		providerTypes: map[string]string{
+			"openai/gpt-4o": "openai",
+		},
+		fileContentResponse: &core.FileContentResponse{
+			ID:       "file_source",
+			Filename: "batch.jsonl",
+			Data:     []byte("{\"custom_id\":\"chat-1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"smart\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}}\n"),
+		},
+	}
+
+	provider := aliases.NewProvider(inner, service)
+	handler := NewHandler(provider, nil, nil, nil)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{
+	  "input_file_id":"file_source",
+	  "endpoint":"/v1/chat/completions",
+	  "completion_window":"24h",
+	  "metadata":{"provider":"openai"}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err = handler.Batches(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "unsupported model: smart")
+	require.Nil(t, inner.capturedBatchReq)
+	require.Empty(t, inner.capturedFileCreateReqs)
+}
+
+func TestGetBatch_PreservesClientInputFileIDAndCleansUpRewrittenFile(t *testing.T) {
+	provider := &mockProvider{
+		batchGetResponse: &core.BatchResponse{
+			ID:              "provider-batch-1",
+			Object:          "batch",
+			Status:          "completed",
+			InputFileID:     "file_hidden",
+			ProviderBatchID: "provider-batch-1",
+		},
+	}
+
+	handler := NewHandler(provider, nil, nil, nil)
+	store := batchstore.NewMemoryStore()
+	handler.SetBatchStore(store)
+	require.NoError(t, store.Create(context.Background(), &batchstore.StoredBatch{
+		Batch: &core.BatchResponse{
+			ID:              "batch_1",
+			Object:          "batch",
+			Provider:        "openai",
+			ProviderBatchID: "provider-batch-1",
+			Status:          "in_progress",
+			InputFileID:     "file_source",
+		},
+		OriginalInputFileID:  "file_source",
+		RewrittenInputFileID: "file_hidden",
+	}))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/v1/batches/batch_1", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/v1/batches/:id")
+	setPathParam(c, "id", "batch_1")
+
+	err := handler.GetBatch(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []string{"file_hidden"}, provider.capturedFileDeleteIDs)
+
+	var resp core.BatchResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "file_source", resp.InputFileID)
+	require.Equal(t, "completed", resp.Status)
+
+	stored, err := store.Get(context.Background(), "batch_1")
+	require.NoError(t, err)
+	require.Equal(t, "", stored.RewrittenInputFileID)
+	require.Equal(t, "file_source", stored.Batch.InputFileID)
+}
+
 func TestBatches_EmptyRequests(t *testing.T) {
 	e := echo.New()
 	handler := NewHandler(&mockProvider{}, nil, nil, nil)
@@ -2567,6 +3018,51 @@ func TestBatchResults_PendingReturnsConflict(t *testing.T) {
 	if !strings.Contains(resRec.Body.String(), "results are not ready yet") {
 		t.Fatalf("results body should describe pending state, got: %s", resRec.Body.String())
 	}
+}
+
+func TestBatchResults_DoesNotCleanupRewrittenFileBeforeTerminalStatus(t *testing.T) {
+	mock := &mockProvider{
+		batchResults: &core.BatchResultsResponse{
+			Object:  "list",
+			BatchID: "provider-batch-1",
+			Data: []core.BatchResultItem{
+				{Index: 0, StatusCode: 200, CustomID: "partial-1"},
+			},
+		},
+	}
+
+	handler := NewHandler(mock, nil, nil, nil)
+	store := batchstore.NewMemoryStore()
+	handler.SetBatchStore(store)
+	require.NoError(t, store.Create(context.Background(), &batchstore.StoredBatch{
+		Batch: &core.BatchResponse{
+			ID:              "batch_1",
+			Object:          "batch",
+			Provider:        "openai",
+			ProviderBatchID: "provider-batch-1",
+			Status:          "in_progress",
+			InputFileID:     "file_source",
+		},
+		OriginalInputFileID:  "file_source",
+		RewrittenInputFileID: "file_hidden",
+	}))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/v1/batches/batch_1/results", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/v1/batches/:id/results")
+	setPathParam(c, "id", "batch_1")
+
+	err := handler.BatchResults(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Empty(t, mock.capturedFileDeleteIDs)
+
+	stored, err := store.Get(context.Background(), "batch_1")
+	require.NoError(t, err)
+	require.Equal(t, "file_hidden", stored.RewrittenInputFileID)
+	require.Len(t, stored.Batch.Results, 1)
 }
 
 func TestBatchResults_LogsUsageOnce(t *testing.T) {
@@ -3463,19 +3959,145 @@ func TestGetFileWithoutProviderSkipsProviderErrors(t *testing.T) {
 	}
 }
 
-func TestMergeStoredBatchFromUpstreamPreservesGatewayMetadata(t *testing.T) {
-	stored := &core.BatchResponse{
-		ID:              "batch_1",
-		Provider:        "openai",
-		ProviderBatchID: "provider-batch-1",
-		Metadata: map[string]string{
-			"provider":          "openai",
-			"provider_batch_id": "provider-batch-1",
-			"existing":          "keep-me",
+func TestGetFileWithoutProviderUsesProviderInventoryWhenAliasMasksModel(t *testing.T) {
+	catalog := aliasesTestCatalog{
+		supported: map[string]bool{
+			"gpt-4o":         true,
+			"claude-3-haiku": true,
+		},
+		providerTypes: map[string]string{
+			"gpt-4o":         "openai",
+			"claude-3-haiku": "anthropic",
+		},
+		models: map[string]core.Model{
+			"gpt-4o":         {ID: "gpt-4o", Object: "model"},
+			"claude-3-haiku": {ID: "claude-3-haiku", Object: "model"},
 		},
 	}
+
+	service, err := aliases.NewService(newAliasesTestStore(
+		aliases.Alias{Name: "gpt-4o", TargetModel: "claude-3-haiku", Enabled: true},
+	), &catalog)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-4o", "claude-3-haiku"},
+		providerTypes: map[string]string{
+			"gpt-4o":         "openai",
+			"claude-3-haiku": "anthropic",
+		},
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-4o", Object: "model"},
+				{ID: "claude-3-haiku", Object: "model"},
+			},
+		},
+		fileErrByProvider: map[string]error{
+			"anthropic": core.NewNotFoundError(""),
+		},
+		fileGetByProvider: map[string]*core.FileObject{
+			"openai": {
+				ID:        "file_ok_1",
+				Object:    "file",
+				Bytes:     10,
+				CreatedAt: 1000,
+				Filename:  "a.jsonl",
+				Purpose:   "batch",
+				Provider:  "openai",
+			},
+		},
+	}
+
+	provider := aliases.NewProvider(mock, service)
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/files/file_ok_1", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/v1/files/:id")
+	setPathParam(c, "id", "file_ok_1")
+
+	if err := handler.GetFile(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "\"provider\":\"openai\"") {
+		t.Fatalf("unexpected response body: %s", rec.Body.String())
+	}
+}
+
+func TestGetFileWithoutProviderRequiresFileProviderInventory(t *testing.T) {
+	base := &mockProvider{
+		supportedModels: []string{"gpt-4o"},
+		providerTypes: map[string]string{
+			"gpt-4o": "openai",
+		},
+		fileGetByProvider: map[string]*core.FileObject{
+			"openai": {
+				ID:        "file_ok_1",
+				Object:    "file",
+				Bytes:     10,
+				CreatedAt: 1000,
+				Filename:  "a.jsonl",
+				Purpose:   "batch",
+				Provider:  "openai",
+			},
+		},
+	}
+
+	provider := &providerWithoutFileInventory{inner: base}
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/files/file_ok_1", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/v1/files/:id")
+	setPathParam(c, "id", "file_ok_1")
+
+	if err := handler.GetFile(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "provider_error") {
+		t.Fatalf("expected provider_error body, got: %s", body)
+	}
+	if !strings.Contains(body, "file provider inventory is unavailable") {
+		t.Fatalf("unexpected response body: %s", body)
+	}
+}
+
+func TestMergeStoredBatchFromUpstreamPreservesGatewayMetadata(t *testing.T) {
+	stored := &batchstore.StoredBatch{
+		Batch: &core.BatchResponse{
+			ID:              "batch_1",
+			Provider:        "openai",
+			ProviderBatchID: "provider-batch-1",
+			InputFileID:     "file_source",
+			Metadata: map[string]string{
+				"provider":          "openai",
+				"provider_batch_id": "provider-batch-1",
+				"existing":          "keep-me",
+			},
+		},
+		OriginalInputFileID:  "file_source",
+		RewrittenInputFileID: "file_hidden",
+	}
 	upstream := &core.BatchResponse{
-		Status: "completed",
+		Status:      "completed",
+		InputFileID: "file_hidden",
 		Metadata: map[string]string{
 			"provider":          "anthropic",
 			"provider_batch_id": "other-id",
@@ -3486,17 +4108,103 @@ func TestMergeStoredBatchFromUpstreamPreservesGatewayMetadata(t *testing.T) {
 
 	mergeStoredBatchFromUpstream(stored, upstream)
 
-	if stored.Metadata["provider"] != "openai" {
-		t.Fatalf("provider metadata overwritten: %q", stored.Metadata["provider"])
+	if stored.Batch.Metadata["provider"] != "openai" {
+		t.Fatalf("provider metadata overwritten: %q", stored.Batch.Metadata["provider"])
 	}
-	if stored.Metadata["provider_batch_id"] != "provider-batch-1" {
-		t.Fatalf("provider_batch_id metadata overwritten: %q", stored.Metadata["provider_batch_id"])
+	if stored.Batch.Metadata["provider_batch_id"] != "provider-batch-1" {
+		t.Fatalf("provider_batch_id metadata overwritten: %q", stored.Batch.Metadata["provider_batch_id"])
 	}
-	if stored.Metadata["existing"] != "upstream-overwrite" {
-		t.Fatalf("expected non-gateway key overwrite from upstream, got %q", stored.Metadata["existing"])
+	if stored.Batch.Metadata["existing"] != "upstream-overwrite" {
+		t.Fatalf("expected non-gateway key overwrite from upstream, got %q", stored.Batch.Metadata["existing"])
 	}
-	if stored.Metadata["new_key"] != "new-value" {
-		t.Fatalf("expected merged upstream key, got %q", stored.Metadata["new_key"])
+	if stored.Batch.Metadata["new_key"] != "new-value" {
+		t.Fatalf("expected merged upstream key, got %q", stored.Batch.Metadata["new_key"])
+	}
+	if stored.Batch.InputFileID != "file_source" {
+		t.Fatalf("input_file_id overwritten: %q", stored.Batch.InputFileID)
+	}
+}
+
+func TestMergeStoredBatchFromUpstreamPreservesExistingValuesOnSparseUpstream(t *testing.T) {
+	inProgressAt := int64(1001)
+	completedAt := int64(1002)
+	inputCost := 0.11
+	totalCost := 0.22
+
+	stored := &batchstore.StoredBatch{
+		Batch: &core.BatchResponse{
+			ID:               "batch_1",
+			Status:           "in_progress",
+			Endpoint:         "/v1/chat/completions",
+			InputFileID:      "file_source",
+			CompletionWindow: "24h",
+			RequestCounts: core.BatchRequestCounts{
+				Total:     10,
+				Completed: 4,
+				Failed:    1,
+			},
+			Usage: core.BatchUsageSummary{
+				InputTokens:  100,
+				OutputTokens: 50,
+				TotalTokens:  150,
+				InputCost:    &inputCost,
+				TotalCost:    &totalCost,
+			},
+			Results: []core.BatchResultItem{
+				{Index: 0, CustomID: "keep-me", StatusCode: 200},
+			},
+			InProgressAt: &inProgressAt,
+			CompletedAt:  &completedAt,
+			Metadata: map[string]string{
+				"provider": "openai",
+			},
+		},
+		OriginalInputFileID: "file_source",
+	}
+
+	upstream := &core.BatchResponse{
+		Status:        "",
+		Endpoint:      "",
+		InputFileID:   "",
+		RequestCounts: core.BatchRequestCounts{},
+		Usage:         core.BatchUsageSummary{},
+		Results:       nil,
+		Metadata: map[string]string{
+			"upstream_only": "value",
+		},
+	}
+
+	mergeStoredBatchFromUpstream(stored, upstream)
+
+	if got := stored.Batch.Status; got != "in_progress" {
+		t.Fatalf("Status = %q, want in_progress", got)
+	}
+	if got := stored.Batch.Endpoint; got != "/v1/chat/completions" {
+		t.Fatalf("Endpoint = %q, want /v1/chat/completions", got)
+	}
+	if got := stored.Batch.InputFileID; got != "file_source" {
+		t.Fatalf("InputFileID = %q, want file_source", got)
+	}
+	if got := stored.Batch.CompletionWindow; got != "24h" {
+		t.Fatalf("CompletionWindow = %q, want 24h", got)
+	}
+	if got := stored.Batch.RequestCounts; got != (core.BatchRequestCounts{Total: 10, Completed: 4, Failed: 1}) {
+		t.Fatalf("RequestCounts = %#v, want preserved counts", got)
+	}
+	if got := stored.Batch.Usage; got.InputTokens != 100 || got.OutputTokens != 50 || got.TotalTokens != 150 || got.InputCost == nil || *got.InputCost != inputCost || got.TotalCost == nil || *got.TotalCost != totalCost {
+		t.Fatalf("Usage = %#v, want preserved usage", got)
+	}
+	if len(stored.Batch.Results) != 1 || stored.Batch.Results[0].CustomID != "keep-me" {
+		t.Fatalf("Results = %#v, want preserved results", stored.Batch.Results)
+	}
+	if stored.Batch.InProgressAt == nil || *stored.Batch.InProgressAt != inProgressAt {
+		t.Fatalf("InProgressAt = %#v, want %d", stored.Batch.InProgressAt, inProgressAt)
+	}
+	if stored.Batch.CompletedAt == nil || *stored.Batch.CompletedAt != completedAt {
+		t.Fatalf("CompletedAt = %#v, want %d", stored.Batch.CompletedAt, completedAt)
+	}
+	if got := stored.Batch.Metadata["upstream_only"]; got != "value" {
+		t.Fatalf("metadata[upstream_only] = %q, want value", got)
 	}
 }
 

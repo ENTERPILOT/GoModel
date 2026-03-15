@@ -32,24 +32,24 @@ type Server struct {
 
 // Config holds server configuration options
 type Config struct {
-	MasterKey                              string                                 // Optional: Master key for authentication
-	MetricsEnabled                         bool                                   // Whether to expose Prometheus metrics endpoint
-	MetricsEndpoint                        string                                 // HTTP path for metrics endpoint (default: /metrics)
-	BodySizeLimit                          string                                 // Max request body size (e.g., "10M", "1024K")
-	AuditLogger                            auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
-	UsageLogger                            usage.LoggerInterface                  // Optional: Usage logger for token tracking
-	PricingResolver                        usage.PricingResolver                  // Optional: Resolves pricing for cost calculation
-	BatchStore                             batchstore.Store                       // Optional: Batch lifecycle persistence store
-	LogOnlyModelInteractions               bool                                   // Only log AI model endpoints (default: true)
-	DisablePassthroughRoutes      bool     // Disable /p/{provider}/{endpoint} route registration
-	EnabledPassthroughProviders   []string // Provider types enabled on /p/{provider}/... passthrough routes
-	AllowPassthroughV1Alias       *bool    // Allow /p/{provider}/v1/... aliases; nil defaults to true
-	AdminEndpointsEnabled                  bool                                   // Whether admin API endpoints are enabled
-	AdminUIEnabled                         bool                                   // Whether admin dashboard UI is enabled
-	AdminHandler                           *admin.Handler                         // Admin API handler (nil if disabled)
-	DashboardHandler                       *dashboard.Handler                     // Dashboard UI handler (nil if disabled)
-	SwaggerEnabled                         bool                                   // Whether to expose the Swagger UI at /swagger/index.html
-	ResponseCacheMiddleware                *responsecache.ResponseCacheMiddleware // Optional: response cache middleware for cacheable endpoints
+	MasterKey                   string                                 // Optional: Master key for authentication
+	MetricsEnabled              bool                                   // Whether to expose Prometheus metrics endpoint
+	MetricsEndpoint             string                                 // HTTP path for metrics endpoint (default: /metrics)
+	BodySizeLimit               string                                 // Max request body size (e.g., "10M", "1024K")
+	AuditLogger                 auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
+	UsageLogger                 usage.LoggerInterface                  // Optional: Usage logger for token tracking
+	PricingResolver             usage.PricingResolver                  // Optional: Resolves pricing for cost calculation
+	BatchStore                  batchstore.Store                       // Optional: Batch lifecycle persistence store
+	LogOnlyModelInteractions    bool                                   // Only log AI model endpoints (default: true)
+	DisablePassthroughRoutes    bool                                   // Disable /p/{provider}/{endpoint} route registration
+	EnabledPassthroughProviders []string                               // Provider types enabled on /p/{provider}/... passthrough routes
+	AllowPassthroughV1Alias     *bool                                  // Allow /p/{provider}/v1/... aliases; nil defaults to true
+	AdminEndpointsEnabled       bool                                   // Whether admin API endpoints are enabled
+	AdminUIEnabled              bool                                   // Whether admin dashboard UI is enabled
+	AdminHandler                *admin.Handler                         // Admin API handler (nil if disabled)
+	DashboardHandler            *dashboard.Handler                     // Dashboard UI handler (nil if disabled)
+	SwaggerEnabled              bool                                   // Whether to expose the Swagger UI at /swagger/index.html
+	ResponseCacheMiddleware     *responsecache.ResponseCacheMiddleware // Optional: response cache middleware for cacheable endpoints
 }
 
 // New creates a new HTTP server
@@ -230,6 +230,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		adminAPI.GET("/audit/conversation", cfg.AdminHandler.AuditConversation)
 		adminAPI.GET("/models", cfg.AdminHandler.ListModels)
 		adminAPI.GET("/models/categories", cfg.AdminHandler.ListCategories)
+		adminAPI.GET("/aliases", cfg.AdminHandler.ListAliases)
+		adminAPI.PUT("/aliases/:name", cfg.AdminHandler.UpsertAlias)
+		adminAPI.DELETE("/aliases/:name", cfg.AdminHandler.DeleteAlias)
 	}
 
 	// Admin dashboard UI routes (behind ADMIN_UI_ENABLED flag)

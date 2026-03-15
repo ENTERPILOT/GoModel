@@ -11,12 +11,12 @@ import (
 )
 
 // SQLite has a default limit of 999 bindable parameters per query (SQLITE_MAX_VARIABLE_NUMBER).
-// With 13 columns per log entry, we can safely insert up to 76 entries per batch (76 * 13 = 988).
+// With 15 columns per log entry, we can safely insert up to 66 entries per batch (66 * 15 = 990).
 // We chunk larger batches to avoid hitting this limit.
 const (
 	maxSQLiteParams    = 999
-	columnsPerEntry    = 13
-	maxEntriesPerBatch = maxSQLiteParams / columnsPerEntry // 76 entries
+	columnsPerEntry    = 15
+	maxEntriesPerBatch = maxSQLiteParams / columnsPerEntry // 66 entries
 )
 
 // SQLiteStore implements LogStore for SQLite databases.
@@ -42,7 +42,9 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 			timestamp DATETIME NOT NULL,
 			duration_ns INTEGER DEFAULT 0,
 			model TEXT,
+			resolved_model TEXT,
 			provider TEXT,
+			alias_used INTEGER DEFAULT 0,
 			status_code INTEGER DEFAULT 0,
 			request_id TEXT,
 			client_ip TEXT,
@@ -55,6 +57,18 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create audit_logs table: %w", err)
+	}
+
+	migrations := []string{
+		"ALTER TABLE audit_logs ADD COLUMN resolved_model TEXT",
+		"ALTER TABLE audit_logs ADD COLUMN alias_used INTEGER DEFAULT 0",
+	}
+	for _, migration := range migrations {
+		if _, err := db.Exec(migration); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column") {
+				return nil, fmt.Errorf("failed to run migration %q: %w", migration, err)
+			}
+		}
 	}
 
 	// Create indexes for common queries
@@ -110,7 +124,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 		values := make([]interface{}, 0, len(chunk)*columnsPerEntry)
 
 		for j, e := range chunk {
-			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 			dataJSON := marshalLogData(e.Data, e.ID)
 
@@ -118,6 +132,10 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 			streamInt := 0
 			if e.Stream {
 				streamInt = 1
+			}
+			aliasUsedInt := 0
+			if e.AliasUsed {
+				aliasUsedInt = 1
 			}
 
 			// Handle NULL for data field: nil becomes SQL NULL, non-nil becomes JSON string
@@ -131,7 +149,9 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 				e.Timestamp.UTC().Format(time.RFC3339Nano),
 				e.DurationNs,
 				e.Model,
+				e.ResolvedModel,
 				e.Provider,
+				aliasUsedInt,
 				e.StatusCode,
 				e.RequestID,
 				e.ClientIP,
@@ -143,7 +163,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 			)
 		}
 
-		query := `INSERT OR IGNORE INTO audit_logs (id, timestamp, duration_ns, model, provider, status_code,
+		query := `INSERT OR IGNORE INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, status_code,
 			request_id, client_ip, method, path, stream, error_type, data) VALUES ` +
 			strings.Join(placeholders, ",")
 

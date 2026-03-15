@@ -178,7 +178,7 @@ func TestSQLiteStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test with exactly maxEntriesPerBatch entries (62)
+	// Test with exactly maxEntriesPerBatch entries
 	numEntries := maxEntriesPerBatch
 	entries := make([]*LogEntry, numEntries)
 	for i := 0; i < numEntries; i++ {
@@ -201,7 +201,7 @@ func TestSQLiteStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 		t.Errorf("expected %d entries, got %d", numEntries, count)
 	}
 
-	// Test with maxEntriesPerBatch + 1 entries (63) - should require 2 batches
+	// Test with maxEntriesPerBatch + 1 entries - should require 2 batches
 	entries = make([]*LogEntry, maxEntriesPerBatch+1)
 	for i := 0; i <= maxEntriesPerBatch; i++ {
 		entries[i] = &LogEntry{
@@ -221,5 +221,56 @@ func TestSQLiteStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 	expectedTotal := numEntries + maxEntriesPerBatch + 1
 	if count != expectedTotal {
 		t.Errorf("expected %d entries, got %d", expectedTotal, count)
+	}
+}
+
+func TestSQLiteStore_WriteBatch_PersistsAliasFields(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	entry := &LogEntry{
+		ID:            "alias-entry",
+		Timestamp:     time.Now(),
+		Model:         "anthropic/claude-opus-4-6",
+		ResolvedModel: "openai/gpt-5-nano",
+		Provider:      "openai",
+		AliasUsed:     true,
+		StatusCode:    200,
+	}
+
+	if err := store.WriteBatch(ctx, []*LogEntry{entry}); err != nil {
+		t.Fatalf("WriteBatch failed: %v", err)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create reader: %v", err)
+	}
+
+	logEntry, err := reader.GetLogByID(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("GetLogByID failed: %v", err)
+	}
+	if logEntry == nil {
+		t.Fatal("expected log entry, got nil")
+	}
+	if logEntry.Model != entry.Model {
+		t.Fatalf("Model = %q, want %q", logEntry.Model, entry.Model)
+	}
+	if logEntry.ResolvedModel != entry.ResolvedModel {
+		t.Fatalf("ResolvedModel = %q, want %q", logEntry.ResolvedModel, entry.ResolvedModel)
+	}
+	if logEntry.Provider != entry.Provider {
+		t.Fatalf("Provider = %q, want %q", logEntry.Provider, entry.Provider)
+	}
+	if !logEntry.AliasUsed {
+		t.Fatal("AliasUsed = false, want true")
 	}
 }

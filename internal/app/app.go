@@ -13,6 +13,7 @@ import (
 	"gomodel/config"
 	"gomodel/internal/admin"
 	"gomodel/internal/admin/dashboard"
+	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
 	"gomodel/internal/batch"
 	"gomodel/internal/core"
@@ -32,6 +33,7 @@ type App struct {
 	audit     *auditlog.Result
 	usage     *usage.Result
 	batch     *batch.Result
+	aliases   *aliases.Result
 	server    *server.Server
 
 	shutdownMu sync.Mutex
@@ -126,6 +128,26 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	app.batch = batchResult
 
+	// Initialize aliases using shared storage when already available.
+	var aliasResult *aliases.Result
+	if auditResult.Storage != nil {
+		aliasResult, err = aliases.NewWithSharedStorage(ctx, appCfg, auditResult.Storage, providerResult.Registry)
+	} else if usageResult.Storage != nil {
+		aliasResult, err = aliases.NewWithSharedStorage(ctx, appCfg, usageResult.Storage, providerResult.Registry)
+	} else if batchResult.Storage != nil {
+		aliasResult, err = aliases.NewWithSharedStorage(ctx, appCfg, batchResult.Storage, providerResult.Registry)
+	} else {
+		aliasResult, err = aliases.New(ctx, appCfg, providerResult.Registry)
+	}
+	if err != nil {
+		closeErr := errors.Join(app.batch.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to initialize aliases: %w (also: close error: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to initialize aliases: %w", err)
+	}
+	app.aliases = aliasResult
+
 	// Log configuration status
 	app.logStartupInfo()
 
@@ -134,11 +156,17 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if appCfg.Guardrails.Enabled {
 		pipeline, err := buildGuardrailsPipeline(appCfg.Guardrails)
 		if err != nil {
-			var batchCloseErr error
+			var (
+				aliasCloseErr error
+				batchCloseErr error
+			)
+			if app.aliases != nil {
+				aliasCloseErr = app.aliases.Close()
+			}
 			if app.batch != nil {
 				batchCloseErr = app.batch.Close()
 			}
-			closeErr := errors.Join(batchCloseErr, app.usage.Close(), app.audit.Close(), app.providers.Close())
+			closeErr := errors.Join(aliasCloseErr, batchCloseErr, app.usage.Close(), app.audit.Close(), app.providers.Close())
 			if closeErr != nil {
 				return nil, fmt.Errorf("failed to build guardrails: %w (also: close error: %v)", err, closeErr)
 			}
@@ -155,23 +183,26 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			)
 		}
 	}
+	if app.aliases != nil && app.aliases.Service != nil {
+		provider = aliases.NewProvider(provider, app.aliases.Service)
+	}
 
 	// Create server
 	allowPassthroughV1Alias := appCfg.Server.AllowPassthroughV1Alias
 	serverCfg := &server.Config{
-		MasterKey:                              appCfg.Server.MasterKey,
-		MetricsEnabled:                         appCfg.Metrics.Enabled,
-		MetricsEndpoint:                        appCfg.Metrics.Endpoint,
-		BodySizeLimit:                          appCfg.Server.BodySizeLimit,
-		AuditLogger:                            auditResult.Logger,
-		UsageLogger:                            usageResult.Logger,
-		PricingResolver:                        providerResult.Registry,
-		BatchStore:                             batchResult.Store,
-		LogOnlyModelInteractions:               appCfg.Logging.OnlyModelInteractions,
-		DisablePassthroughRoutes:               !appCfg.Server.EnablePassthroughRoutes,
-		EnabledPassthroughProviders:            appCfg.Server.EnabledPassthroughProviders,
-		AllowPassthroughV1Alias:                &allowPassthroughV1Alias,
-		SwaggerEnabled:                         appCfg.Server.SwaggerEnabled,
+		MasterKey:                   appCfg.Server.MasterKey,
+		MetricsEnabled:              appCfg.Metrics.Enabled,
+		MetricsEndpoint:             appCfg.Metrics.Endpoint,
+		BodySizeLimit:               appCfg.Server.BodySizeLimit,
+		AuditLogger:                 auditResult.Logger,
+		UsageLogger:                 usageResult.Logger,
+		PricingResolver:             providerResult.Registry,
+		BatchStore:                  batchResult.Store,
+		LogOnlyModelInteractions:    appCfg.Logging.OnlyModelInteractions,
+		DisablePassthroughRoutes:    !appCfg.Server.EnablePassthroughRoutes,
+		EnabledPassthroughProviders: appCfg.Server.EnabledPassthroughProviders,
+		AllowPassthroughV1Alias:     &allowPassthroughV1Alias,
+		SwaggerEnabled:              appCfg.Server.SwaggerEnabled,
 	}
 
 	// Initialize admin API and dashboard (behind separate feature flags)
@@ -181,7 +212,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		adminCfg.UIEnabled = false
 	}
 	if adminCfg.EndpointsEnabled {
-		adminHandler, dashHandler, adminErr := initAdmin(auditResult.Storage, usageResult.Storage, providerResult.Registry, adminCfg.UIEnabled)
+		adminHandler, dashHandler, adminErr := initAdmin(auditResult.Storage, usageResult.Storage, providerResult.Registry, app.aliases.Service, adminCfg.UIEnabled)
 		if adminErr != nil {
 			slog.Warn("failed to initialize admin", "error", adminErr)
 		} else {
@@ -209,11 +240,17 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	rcm, err := responsecache.NewResponseCacheMiddleware(appCfg.Cache.Response)
 	if err != nil {
-		var batchCloseErr error
+		var (
+			aliasCloseErr error
+			batchCloseErr error
+		)
+		if app.aliases != nil {
+			aliasCloseErr = app.aliases.Close()
+		}
 		if app.batch != nil {
 			batchCloseErr = app.batch.Close()
 		}
-		closeErr := errors.Join(batchCloseErr, app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(aliasCloseErr, batchCloseErr, app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to initialize response cache: %w (also: close error: %v)", err, closeErr)
 		}
@@ -346,7 +383,15 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 3. Close batch store (flushes pending entries)
+	// 3. Close aliases subsystem.
+	if a.aliases != nil {
+		if err := a.aliases.Close(); err != nil {
+			slog.Error("aliases close error", "error", err)
+			errs = append(errs, fmt.Errorf("aliases close: %w", err))
+		}
+	}
+
+	// 4. Close batch store (flushes pending entries)
 	if a.batch != nil {
 		if err := a.batch.Close(); err != nil {
 			slog.Error("batch store close error", "error", err)
@@ -354,7 +399,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 4. Close usage tracking (flushes pending entries)
+	// 5. Close usage tracking (flushes pending entries)
 	if a.usage != nil {
 		if err := a.usage.Close(); err != nil {
 			slog.Error("usage logger close error", "error", err)
@@ -362,7 +407,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 5. Close audit logging (flushes pending logs)
+	// 6. Close audit logging (flushes pending logs)
 	if a.audit != nil {
 		if err := a.audit.Close(); err != nil {
 			slog.Error("audit logger close error", "error", err)
@@ -427,7 +472,7 @@ func (a *App) logStartupInfo() {
 
 // initAdmin creates the admin API handler and optionally the dashboard handler.
 // Returns nil dashboard handler if uiEnabled is false.
-func initAdmin(auditStorage, usageStorage storage.Storage, registry *providers.ModelRegistry, uiEnabled bool) (*admin.Handler, *dashboard.Handler, error) {
+func initAdmin(auditStorage, usageStorage storage.Storage, registry *providers.ModelRegistry, aliasService *aliases.Service, uiEnabled bool) (*admin.Handler, *dashboard.Handler, error) {
 	// Find a storage connection for reading usage data
 	var store storage.Storage
 	if auditStorage != nil {
@@ -457,7 +502,7 @@ func initAdmin(auditStorage, usageStorage storage.Storage, registry *providers.M
 		}
 	}
 
-	adminHandler := admin.NewHandler(reader, registry, admin.WithAuditReader(auditReader))
+	adminHandler := admin.NewHandler(reader, registry, admin.WithAuditReader(auditReader), admin.WithAliases(aliasService))
 
 	var dashHandler *dashboard.Handler
 	if uiEnabled {

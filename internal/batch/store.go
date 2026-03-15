@@ -28,6 +28,8 @@ const (
 type StoredBatch struct {
 	Batch                     *core.BatchResponse `json:"batch"`
 	RequestEndpointByCustomID map[string]string   `json:"request_endpoint_by_custom_id,omitempty"`
+	OriginalInputFileID       string              `json:"original_input_file_id,omitempty"`
+	RewrittenInputFileID      string              `json:"rewritten_input_file_id,omitempty"`
 	RequestID                 string              `json:"request_id,omitempty"`
 	UsageLoggedAt             *time.Time          `json:"usage_logged_at,omitempty"`
 }

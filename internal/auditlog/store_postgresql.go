@@ -36,7 +36,9 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 			timestamp TIMESTAMPTZ NOT NULL,
 			duration_ns BIGINT DEFAULT 0,
 			model TEXT,
+			resolved_model TEXT,
 			provider TEXT,
+			alias_used BOOLEAN DEFAULT FALSE,
 			status_code INTEGER DEFAULT 0,
 			request_id TEXT,
 			client_ip TEXT,
@@ -49,6 +51,16 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create audit_logs table: %w", err)
+	}
+
+	migrations := []string{
+		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resolved_model TEXT",
+		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS alias_used BOOLEAN DEFAULT FALSE",
+	}
+	for _, migration := range migrations {
+		if _, err := pool.Exec(ctx, migration); err != nil {
+			return nil, fmt.Errorf("failed to run migration %q: %w", migration, err)
+		}
 	}
 
 	// Create indexes for common queries
@@ -108,11 +120,11 @@ func (s *PostgreSQLStore) writeBatchSmall(ctx context.Context, entries []*LogEnt
 		dataJSON := marshalLogData(e.Data, e.ID)
 
 		_, err := s.pool.Exec(ctx, `
-			INSERT INTO audit_logs (id, timestamp, duration_ns, model, provider, status_code,
+			INSERT INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, status_code,
 				request_id, client_ip, method, path, stream, error_type, data)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 			ON CONFLICT (id) DO NOTHING
-		`, e.ID, e.Timestamp, e.DurationNs, e.Model, e.Provider, e.StatusCode,
+		`, e.ID, e.Timestamp, e.DurationNs, e.Model, e.ResolvedModel, e.Provider, e.AliasUsed, e.StatusCode,
 			e.RequestID, e.ClientIP, e.Method, e.Path, e.Stream, e.ErrorType, dataJSON)
 
 		if err != nil {
@@ -142,11 +154,11 @@ func (s *PostgreSQLStore) writeBatchLarge(ctx context.Context, entries []*LogEnt
 		dataJSON := marshalLogData(e.Data, e.ID)
 
 		_, err = tx.Exec(ctx, `
-			INSERT INTO audit_logs (id, timestamp, duration_ns, model, provider, status_code,
+			INSERT INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, status_code,
 				request_id, client_ip, method, path, stream, error_type, data)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 			ON CONFLICT (id) DO NOTHING
-		`, e.ID, e.Timestamp, e.DurationNs, e.Model, e.Provider, e.StatusCode,
+		`, e.ID, e.Timestamp, e.DurationNs, e.Model, e.ResolvedModel, e.Provider, e.AliasUsed, e.StatusCode,
 			e.RequestID, e.ClientIP, e.Method, e.Path, e.Stream, e.ErrorType, dataJSON)
 
 		if err != nil {

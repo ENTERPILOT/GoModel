@@ -38,9 +38,11 @@ type LogEntry struct {
 	DurationNs int64 `json:"duration_ns" bson:"duration_ns"`
 
 	// Core fields (indexed for queries)
-	Model      string `json:"model" bson:"model"`
-	Provider   string `json:"provider" bson:"provider"`
-	StatusCode int    `json:"status_code" bson:"status_code"`
+	Model         string `json:"model" bson:"model"`
+	ResolvedModel string `json:"resolved_model,omitempty" bson:"resolved_model,omitempty"`
+	Provider      string `json:"provider" bson:"provider"`
+	AliasUsed     bool   `json:"alias_used,omitempty" bson:"alias_used,omitempty"`
+	StatusCode    int    `json:"status_code" bson:"status_code"`
 
 	// Extracted fields for efficient filtering (indexed in relational DBs)
 	RequestID string `json:"request_id,omitempty" bson:"request_id,omitempty"`

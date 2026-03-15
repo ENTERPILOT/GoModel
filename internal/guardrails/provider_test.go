@@ -18,6 +18,11 @@ type mockRoutableProvider struct {
 	chatReq           *core.ChatRequest
 	responsesReq      *core.ResponsesRequest
 	batchReq          *core.BatchRequest
+	createBatchErr    error
+	fileContent       *core.FileContentResponse
+	fileCreates       []*core.FileCreateRequest
+	fileDeletes       []string
+	fileObject        *core.FileObject
 	passthroughReq    *core.PassthroughRequest
 	passthroughType   string
 }
@@ -66,6 +71,9 @@ func (m *mockRoutableProvider) Embeddings(_ context.Context, req *core.Embedding
 
 func (m *mockRoutableProvider) CreateBatch(_ context.Context, _ string, req *core.BatchRequest) (*core.BatchResponse, error) {
 	m.batchReq = req
+	if m.createBatchErr != nil {
+		return nil, m.createBatchErr
+	}
 	return &core.BatchResponse{ID: "batch_1", Object: "batch", Status: "in_progress"}, nil
 }
 
@@ -83,6 +91,47 @@ func (m *mockRoutableProvider) CancelBatch(_ context.Context, _, _ string) (*cor
 
 func (m *mockRoutableProvider) GetBatchResults(_ context.Context, _, _ string) (*core.BatchResultsResponse, error) {
 	return &core.BatchResultsResponse{Object: "list", BatchID: "batch_1"}, nil
+}
+
+func (m *mockRoutableProvider) CreateBatchWithHints(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, map[string]string, error) {
+	resp, err := m.CreateBatch(ctx, providerType, req)
+	return resp, map[string]string{"chat-1": "/v1/chat/completions"}, err
+}
+
+func (m *mockRoutableProvider) GetBatchResultsWithHints(_ context.Context, _, _ string, _ map[string]string) (*core.BatchResultsResponse, error) {
+	return &core.BatchResultsResponse{Object: "list", BatchID: "batch_1"}, nil
+}
+
+func (m *mockRoutableProvider) ClearBatchResultHints(_ string, _ string) {}
+
+func (m *mockRoutableProvider) CreateFile(_ context.Context, _ string, req *core.FileCreateRequest) (*core.FileObject, error) {
+	copy := *req
+	copy.Content = append([]byte(nil), req.Content...)
+	m.fileCreates = append(m.fileCreates, &copy)
+	if m.fileObject != nil {
+		return m.fileObject, nil
+	}
+	return &core.FileObject{ID: "file_rewritten", Object: "file", Filename: req.Filename, Purpose: req.Purpose}, nil
+}
+
+func (m *mockRoutableProvider) ListFiles(_ context.Context, _ string, _ string, _ int, _ string) (*core.FileListResponse, error) {
+	return &core.FileListResponse{Object: "list"}, nil
+}
+
+func (m *mockRoutableProvider) GetFile(_ context.Context, _ string, id string) (*core.FileObject, error) {
+	return &core.FileObject{ID: id, Object: "file"}, nil
+}
+
+func (m *mockRoutableProvider) DeleteFile(_ context.Context, _ string, id string) (*core.FileDeleteResponse, error) {
+	m.fileDeletes = append(m.fileDeletes, id)
+	return &core.FileDeleteResponse{ID: id, Object: "file", Deleted: true}, nil
+}
+
+func (m *mockRoutableProvider) GetFileContent(_ context.Context, _ string, id string) (*core.FileContentResponse, error) {
+	if m.fileContent != nil {
+		return m.fileContent, nil
+	}
+	return &core.FileContentResponse{ID: id, Filename: "batch.jsonl", Data: []byte("{}\n")}, nil
 }
 
 func (m *mockRoutableProvider) Passthrough(_ context.Context, providerType string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
@@ -1068,6 +1117,68 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled(t *testing.T) {
 	}
 	if len(chatReq.Messages) != 2 || chatReq.Messages[0].Role != "system" {
 		t.Fatalf("expected guarded batch chat request, got: %+v", chatReq.Messages)
+	}
+}
+
+func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_InputFile(t *testing.T) {
+	inner := &mockRoutableProvider{
+		fileContent: &core.FileContentResponse{
+			ID:       "file_source",
+			Filename: "batch.jsonl",
+			Data:     []byte("{\"custom_id\":\"chat-1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"gpt-4\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}}\n"),
+		},
+		fileObject: &core.FileObject{ID: "file_rewritten", Object: "file", Filename: "batch.jsonl", Purpose: "batch"},
+	}
+	pipeline := NewPipeline()
+	gr, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
+	pipeline.Add(gr, 0)
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+
+	_, err := guarded.CreateBatch(context.Background(), "mock", &core.BatchRequest{
+		InputFileID: "file_source",
+		Endpoint:    "/v1/chat/completions",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inner.batchReq == nil {
+		t.Fatal("expected delegated batch request")
+	}
+	if inner.batchReq.InputFileID != "file_rewritten" {
+		t.Fatalf("input_file_id = %q, want file_rewritten", inner.batchReq.InputFileID)
+	}
+	if len(inner.fileCreates) != 1 {
+		t.Fatalf("len(fileCreates) = %d, want 1", len(inner.fileCreates))
+	}
+	if got := string(inner.fileCreates[0].Content); !strings.Contains(got, "\"role\":\"system\"") {
+		t.Fatalf("rewritten file content = %s, want injected system message", got)
+	}
+}
+
+func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_InputFileCleansUpOnFailure(t *testing.T) {
+	inner := &mockRoutableProvider{
+		createBatchErr: context.Canceled,
+		fileContent: &core.FileContentResponse{
+			ID:       "file_source",
+			Filename: "batch.jsonl",
+			Data:     []byte("{\"custom_id\":\"chat-1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"gpt-4\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}}\n"),
+		},
+		fileObject: &core.FileObject{ID: "file_rewritten", Object: "file", Filename: "batch.jsonl", Purpose: "batch"},
+	}
+	pipeline := NewPipeline()
+	gr, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
+	pipeline.Add(gr, 0)
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+
+	_, err := guarded.CreateBatch(context.Background(), "mock", &core.BatchRequest{
+		InputFileID: "file_source",
+		Endpoint:    "/v1/chat/completions",
+	})
+	if err == nil {
+		t.Fatal("CreateBatch() error = nil, want non-nil")
+	}
+	if len(inner.fileDeletes) != 1 || inner.fileDeletes[0] != "file_rewritten" {
+		t.Fatalf("fileDeletes = %v, want [file_rewritten]", inner.fileDeletes)
 	}
 }
 

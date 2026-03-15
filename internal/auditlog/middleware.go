@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -72,19 +73,19 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				entry.Data.RequestHeaders = extractHeaders(req.Header)
 			}
 
-				// Capture request body if enabled
-				if cfg.LogBodies && req.Body != nil {
-					if snapshot := core.GetRequestSnapshot(req.Context()); snapshot != nil {
-						body := snapshot.CapturedBody()
-						switch {
-						case snapshot.BodyNotCaptured:
-							entry.Data.RequestBodyTooBigToHandle = true
-						case body != nil:
-							captureLoggedRequestBody(entry, body)
-						default:
-							captureRequestBodyForLogging(entry, req)
-						}
-					} else {
+			// Capture request body if enabled
+			if cfg.LogBodies && req.Body != nil {
+				if snapshot := core.GetRequestSnapshot(req.Context()); snapshot != nil {
+					body := snapshot.CapturedBody()
+					switch {
+					case snapshot.BodyNotCaptured:
+						entry.Data.RequestBodyTooBigToHandle = true
+					case body != nil:
+						captureLoggedRequestBody(entry, body)
+					default:
+						captureRequestBodyForLogging(entry, req)
+					}
+				} else {
 					captureRequestBodyForLogging(entry, req)
 				}
 			}
@@ -104,6 +105,8 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 
 			// Execute the handler
 			err := next(c)
+
+			applyRequestModelResolution(entry, c.Request().Context())
 
 			// Calculate duration
 			entry.DurationNs = time.Since(start).Nanoseconds()
@@ -151,6 +154,36 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			return err
 		}
 	}
+}
+
+func applyRequestModelResolution(entry *LogEntry, ctx context.Context) {
+	if entry == nil || ctx == nil {
+		return
+	}
+
+	resolution := core.GetRequestModelResolution(ctx)
+	if resolution == nil {
+		return
+	}
+
+	enrichEntryWithResolution(entry, resolution)
+}
+
+func enrichEntryWithResolution(entry *LogEntry, resolution *core.RequestModelResolution) {
+	if entry == nil || resolution == nil {
+		return
+	}
+
+	if requestedModel := resolution.RequestedQualifiedModel(); requestedModel != "" {
+		entry.Model = requestedModel
+	}
+	if resolvedModel := resolution.ResolvedQualifiedModel(); resolvedModel != "" {
+		entry.ResolvedModel = resolvedModel
+	}
+	if strings.TrimSpace(resolution.ProviderType) != "" {
+		entry.Provider = strings.TrimSpace(resolution.ProviderType)
+	}
+	entry.AliasUsed = resolution.AliasApplied
 }
 
 func captureRequestBodyForLogging(entry *LogEntry, req *http.Request) {
@@ -301,6 +334,22 @@ func EnrichEntry(c *echo.Context, model, provider string) {
 
 	entry.Model = model
 	entry.Provider = provider
+}
+
+// EnrichEntryWithResolution attaches resolved model and alias metadata to the live audit entry.
+// This is used before handler execution completes so streaming audit entries inherit the same data.
+func EnrichEntryWithResolution(c *echo.Context, resolution *core.RequestModelResolution) {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return
+	}
+
+	entry, ok := entryVal.(*LogEntry)
+	if !ok || entry == nil {
+		return
+	}
+
+	enrichEntryWithResolution(entry, resolution)
 }
 
 // EnrichEntryWithError adds error information to the log entry.

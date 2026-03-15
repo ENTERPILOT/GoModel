@@ -121,6 +121,29 @@ func TestStatic_ServesModuleJS(t *testing.T) {
 	}
 }
 
+func TestStatic_ServesAliasesModuleJS(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/static/js/modules/aliases.js", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.Static(c); err != nil {
+		t.Fatalf("Static() returned error: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if rec.Body.Len() == 0 {
+		t.Error("expected non-empty body for aliases module JS file")
+	}
+}
+
 func TestStatic_ServesFavicon(t *testing.T) {
 	h, err := New()
 	if err != nil {

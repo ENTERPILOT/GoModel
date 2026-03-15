@@ -86,6 +86,13 @@ type NativeFileRoutableProvider interface {
 	GetFileContent(ctx context.Context, providerType, id string) (*FileContentResponse, error)
 }
 
+// NativeFileProviderTypeLister exposes registered provider types that support
+// native file operations. This is an internal capability inventory and must not
+// depend on the public model catalog.
+type NativeFileProviderTypeLister interface {
+	NativeFileProviderTypes() []string
+}
+
 // RoutableProvider extends Provider with routing capability.
 // This is implemented by the Router which uses a model registry
 // to determine if a model is supported.
