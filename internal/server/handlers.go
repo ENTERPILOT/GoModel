@@ -665,32 +665,11 @@ func (h *Handler) nativeFileRouter() (core.NativeFileRoutableProvider, error) {
 }
 
 func (h *Handler) fileProviderTypes(ctx *echo.Context) ([]string, error) {
-	if typed, ok := h.provider.(core.NativeFileProviderTypeLister); ok {
-		return typed.NativeFileProviderTypes(), nil
+	typed, ok := h.provider.(core.NativeFileProviderTypeLister)
+	if !ok {
+		return nil, core.NewProviderError("", http.StatusInternalServerError, "file provider inventory is unavailable", nil)
 	}
-
-	resp, err := h.provider.ListModels(ctx.Request().Context())
-	if err != nil {
-		return nil, err
-	}
-	if resp == nil {
-		return []string{}, nil
-	}
-	seen := make(map[string]struct{})
-	providers := make([]string, 0)
-	for _, model := range resp.Data {
-		providerType := strings.TrimSpace(h.provider.GetProviderType(model.ID))
-		if providerType == "" {
-			continue
-		}
-		if _, exists := seen[providerType]; exists {
-			continue
-		}
-		seen[providerType] = struct{}{}
-		providers = append(providers, providerType)
-	}
-	sort.Strings(providers)
-	return providers, nil
+	return typed.NativeFileProviderTypes(), nil
 }
 
 func (h *Handler) fileByID(

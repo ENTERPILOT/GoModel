@@ -349,6 +349,62 @@ func (m *mockProvider) NativeFileProviderTypes() []string {
 	return result
 }
 
+type providerWithoutFileInventory struct {
+	inner *mockProvider
+}
+
+func (p *providerWithoutFileInventory) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	return p.inner.ChatCompletion(ctx, req)
+}
+
+func (p *providerWithoutFileInventory) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	return p.inner.StreamChatCompletion(ctx, req)
+}
+
+func (p *providerWithoutFileInventory) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
+	return p.inner.ListModels(ctx)
+}
+
+func (p *providerWithoutFileInventory) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	return p.inner.Responses(ctx, req)
+}
+
+func (p *providerWithoutFileInventory) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
+	return p.inner.StreamResponses(ctx, req)
+}
+
+func (p *providerWithoutFileInventory) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	return p.inner.Embeddings(ctx, req)
+}
+
+func (p *providerWithoutFileInventory) Supports(model string) bool {
+	return p.inner.Supports(model)
+}
+
+func (p *providerWithoutFileInventory) GetProviderType(model string) string {
+	return p.inner.GetProviderType(model)
+}
+
+func (p *providerWithoutFileInventory) CreateFile(ctx context.Context, providerType string, req *core.FileCreateRequest) (*core.FileObject, error) {
+	return p.inner.CreateFile(ctx, providerType, req)
+}
+
+func (p *providerWithoutFileInventory) ListFiles(ctx context.Context, providerType, purpose string, limit int, after string) (*core.FileListResponse, error) {
+	return p.inner.ListFiles(ctx, providerType, purpose, limit, after)
+}
+
+func (p *providerWithoutFileInventory) GetFile(ctx context.Context, providerType, id string) (*core.FileObject, error) {
+	return p.inner.GetFile(ctx, providerType, id)
+}
+
+func (p *providerWithoutFileInventory) DeleteFile(ctx context.Context, providerType, id string) (*core.FileDeleteResponse, error) {
+	return p.inner.DeleteFile(ctx, providerType, id)
+}
+
+func (p *providerWithoutFileInventory) GetFileContent(ctx context.Context, providerType, id string) (*core.FileContentResponse, error) {
+	return p.inner.GetFileContent(ctx, providerType, id)
+}
+
 func (m *mockProvider) ChatCompletion(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
 	if m.err != nil {
 		return nil, m.err
@@ -3625,6 +3681,50 @@ func TestGetFileWithoutProviderUsesProviderInventoryWhenAliasMasksModel(t *testi
 	}
 	if !strings.Contains(rec.Body.String(), "\"provider\":\"openai\"") {
 		t.Fatalf("unexpected response body: %s", rec.Body.String())
+	}
+}
+
+func TestGetFileWithoutProviderRequiresFileProviderInventory(t *testing.T) {
+	base := &mockProvider{
+		supportedModels: []string{"gpt-4o"},
+		providerTypes: map[string]string{
+			"gpt-4o": "openai",
+		},
+		fileGetByProvider: map[string]*core.FileObject{
+			"openai": {
+				ID:        "file_ok_1",
+				Object:    "file",
+				Bytes:     10,
+				CreatedAt: 1000,
+				Filename:  "a.jsonl",
+				Purpose:   "batch",
+				Provider:  "openai",
+			},
+		},
+	}
+
+	provider := &providerWithoutFileInventory{inner: base}
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/files/file_ok_1", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/v1/files/:id")
+	setPathParam(c, "id", "file_ok_1")
+
+	if err := handler.GetFile(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "provider_error") {
+		t.Fatalf("expected provider_error body, got: %s", body)
+	}
+	if !strings.Contains(body, "file provider inventory is unavailable") {
+		t.Fatalf("unexpected response body: %s", body)
 	}
 }
 
