@@ -18,6 +18,9 @@ func (r *RequestModelResolution) RequestedQualifiedModel() string {
 	if r.RequestedProvider == "" {
 		return r.RequestedModel
 	}
+	if selector, err := ParseModelSelector(r.RequestedModel, r.RequestedProvider); err == nil {
+		return selector.QualifiedModel()
+	}
 	return r.RequestedProvider + "/" + r.RequestedModel
 }
 

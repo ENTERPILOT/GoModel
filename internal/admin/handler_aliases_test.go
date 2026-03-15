@@ -252,6 +252,40 @@ func TestUpsertAliasDecodesQualifiedAliasName(t *testing.T) {
 	}
 }
 
+func TestUpsertAliasPreservesEnabledWhenOmitted(t *testing.T) {
+	h := newAliasHandler(t, aliases.Alias{
+		Name:        "smart",
+		TargetModel: "gpt-4o",
+		Description: "before",
+		Enabled:     false,
+	})
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/aliases/smart", bytes.NewBufferString(`{"target_model":"gpt-4o","description":"after"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPathValues(echo.PathValues{{Name: "name", Value: "smart"}})
+
+	if err := h.UpsertAlias(c); err != nil {
+		t.Fatalf("UpsertAlias() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var body aliases.Alias
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Enabled {
+		t.Fatalf("enabled = %v, want false", body.Enabled)
+	}
+	if body.Description != "after" {
+		t.Fatalf("description = %q, want after", body.Description)
+	}
+}
+
 func TestUpsertAliasReturns500OnStoreFailure(t *testing.T) {
 	h := newAliasHandlerWithStore(t, &failingAliasStore{
 		upsertErr: errors.New("disk full"),

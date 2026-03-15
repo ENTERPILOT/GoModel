@@ -384,7 +384,7 @@ func TestModelValidation_UsesIngressBodyForMissingSelectorHints(t *testing.T) {
 
 func TestModelValidation_RegistryNotInitializedReturnsGatewayError(t *testing.T) {
 	provider := &modelCountingValidationProvider{
-		mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini"}},
+		mockProvider: &mockProvider{},
 		modelCount:   0,
 	}
 

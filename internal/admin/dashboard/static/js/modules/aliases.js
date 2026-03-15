@@ -222,6 +222,7 @@
             },
 
             aliasTargetLabel(alias) {
+                if (!alias) return '\u2014';
                 if (alias.resolved_model) return alias.resolved_model;
                 if (alias.target_provider) return alias.target_provider + '/' + alias.target_model;
                 return alias.target_model || '\u2014';

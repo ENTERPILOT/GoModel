@@ -32,6 +32,9 @@ func resolveRequestModel(provider core.RoutableProvider, model, providerHint str
 	}
 
 	resolvedModel := resolvedSelector.QualifiedModel()
+	if counted, ok := provider.(modelCountProvider); ok && counted.ModelCount() == 0 {
+		return nil, core.NewProviderError("", 0, "model registry not initialized", nil)
+	}
 	if !provider.Supports(resolvedModel) {
 		return nil, core.NewInvalidRequestError("unsupported model: "+resolvedModel, nil)
 	}

@@ -563,6 +563,9 @@ func (h *Handler) UpsertAlias(c *echo.Context) error {
 	}
 
 	enabled := true
+	if existing, ok := h.aliases.Get(name); ok && existing != nil {
+		enabled = existing.Enabled
+	}
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
