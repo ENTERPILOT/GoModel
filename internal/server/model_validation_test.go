@@ -228,6 +228,42 @@ func TestModelValidation_SetsProviderType(t *testing.T) {
 	assert.Equal(t, "mock", capturedProviderType)
 }
 
+func TestModelValidation_StoresExecutionPlan(t *testing.T) {
+	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
+
+	e := echo.New()
+	var capturedPlan *core.ExecutionPlan
+
+	middleware := ModelValidation(provider)
+	handler := middleware(func(c *echo.Context) error {
+		capturedPlan = core.GetExecutionPlan(c.Request().Context())
+		return c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-ID", "plan-req-123")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler(c)
+	require.NoError(t, err)
+
+	if assert.NotNil(t, capturedPlan) {
+		assert.Equal(t, "plan-req-123", capturedPlan.RequestID)
+		assert.Equal(t, core.ExecutionModeTranslated, capturedPlan.Mode)
+		assert.Equal(t, "mock", capturedPlan.ProviderType)
+		assert.True(t, capturedPlan.Capabilities.SemanticExtraction)
+		assert.True(t, capturedPlan.Capabilities.AliasResolution)
+		assert.True(t, capturedPlan.Capabilities.ResponseCaching)
+		if assert.NotNil(t, capturedPlan.Resolution) {
+			assert.Equal(t, "gpt-4o-mini", capturedPlan.Resolution.RequestedModel)
+			assert.Equal(t, "gpt-4o-mini", capturedPlan.Resolution.ResolvedSelector.Model)
+		}
+	}
+}
+
 func TestModelValidation_SetsRequestIDInContext(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
 
@@ -611,18 +647,6 @@ func TestModelValidation_CachesCanonicalResponsesRequestFromIngressBody(t *testi
 	assert.NotNil(t, input[0].ExtraFields["x_trace"])
 }
 
-func TestModelCtx_ReturnsContextAndProviderType(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.Set(string(providerTypeKey), "openai")
-
-	ctx, pt := ModelCtx(c)
-	assert.NotNil(t, ctx)
-	assert.Equal(t, "openai", pt)
-}
-
 func TestGetProviderType_EmptyWhenNotSet(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -630,6 +654,18 @@ func TestGetProviderType_EmptyWhenNotSet(t *testing.T) {
 	c := e.NewContext(req, rec)
 
 	assert.Equal(t, "", GetProviderType(c))
+}
+
+func TestGetProviderType_UsesExecutionPlan(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+		ProviderType: "openai",
+	}))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	assert.Equal(t, "openai", GetProviderType(c))
 }
 
 func TestModelValidation_ResolvesQualifiedMaskingAliasBeforeProviderParsing(t *testing.T) {
@@ -670,13 +706,13 @@ func TestModelValidation_ResolvesQualifiedMaskingAliasBeforeProviderParsing(t *t
 	e := echo.New()
 	var (
 		capturedProviderType string
-		capturedResolution   *core.RequestModelResolution
+		capturedPlan         *core.ExecutionPlan
 	)
 
 	middleware := ModelValidation(provider)
 	handler := middleware(func(c *echo.Context) error {
 		capturedProviderType = GetProviderType(c)
-		capturedResolution = core.GetRequestModelResolution(c.Request().Context())
+		capturedPlan = core.GetExecutionPlan(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	})
 
@@ -691,9 +727,9 @@ func TestModelValidation_ResolvesQualifiedMaskingAliasBeforeProviderParsing(t *t
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "openai", capturedProviderType)
-	if assert.NotNil(t, capturedResolution) {
-		assert.True(t, capturedResolution.AliasApplied)
-		assert.Equal(t, "anthropic/claude-opus-4-6", capturedResolution.RequestedQualifiedModel())
-		assert.Equal(t, "openai/gpt-5-nano", capturedResolution.ResolvedQualifiedModel())
+	if assert.NotNil(t, capturedPlan) && assert.NotNil(t, capturedPlan.Resolution) {
+		assert.True(t, capturedPlan.Resolution.AliasApplied)
+		assert.Equal(t, "anthropic/claude-opus-4-6", capturedPlan.RequestedQualifiedModel())
+		assert.Equal(t, "openai/gpt-5-nano", capturedPlan.ResolvedQualifiedModel())
 	}
 }

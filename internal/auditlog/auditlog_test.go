@@ -413,18 +413,21 @@ func TestMiddleware_UsesIngressTooLargeFlagWithoutReadingStream(t *testing.T) {
 	}
 }
 
-func TestMiddleware_AppliesRequestModelResolution(t *testing.T) {
+func TestMiddleware_PrefersExecutionPlanOverLegacyResolution(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"anthropic/claude-opus-4-6"}`))
-	req = req.WithContext(core.WithRequestModelResolution(req.Context(), &core.RequestModelResolution{
-		RequestedModel:   "anthropic/claude-opus-4-6",
-		ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
-		ProviderType:     "openai",
-		AliasApplied:     true,
+	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+		ProviderType: "openai",
+		Resolution: &core.RequestModelResolution{
+			RequestedModel:   "anthropic/claude-opus-4-6",
+			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
+			ProviderType:     "openai",
+			AliasApplied:     true,
+		},
 	}))
 
 	rec := httptest.NewRecorder()
@@ -454,6 +457,43 @@ func TestMiddleware_AppliesRequestModelResolution(t *testing.T) {
 	}
 	if !entry.AliasUsed {
 		t.Fatal("AliasUsed = false, want true")
+	}
+}
+
+func TestMiddleware_DoesNotApplyModelMetadataWithoutExecutionPlan(t *testing.T) {
+	e := echo.New()
+	logger := &capturingLogger{
+		cfg: Config{Enabled: true},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"legacy-only"}`))
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		return c.NoContent(http.StatusNoContent)
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
+	}
+
+	entry := logger.entries[0]
+	if entry.Model != "" {
+		t.Fatalf("Model = %q, want empty", entry.Model)
+	}
+	if entry.ResolvedModel != "" {
+		t.Fatalf("ResolvedModel = %q, want empty", entry.ResolvedModel)
+	}
+	if entry.Provider != "" {
+		t.Fatalf("Provider = %q, want empty", entry.Provider)
+	}
+	if entry.AliasUsed {
+		t.Fatal("AliasUsed = true, want false")
 	}
 }
 

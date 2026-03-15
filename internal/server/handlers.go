@@ -195,19 +195,6 @@ func requestContextWithRequestID(req *http.Request) (context.Context, string) {
 	return ctx, requestID
 }
 
-func (h *Handler) streamingUsageModel(model, provider string) (string, error) {
-	if resolver, ok := h.provider.(resolvedModelProvider); ok {
-		selector, _, err := resolver.ResolveModel(model, provider)
-		if err != nil {
-			return "", err
-		}
-		if selector.Model != "" {
-			return selector.Model, nil
-		}
-	}
-	return model, nil
-}
-
 func sanitizePublicBatchMetadata(metadata map[string]string) map[string]string {
 	if len(metadata) == 0 {
 		return nil
@@ -576,13 +563,17 @@ func (h *Handler) ChatCompletion(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if err := applyRequestModelResolution(c, h.provider, &req.Model, &req.Provider); err != nil {
+	plan, err := ensureTranslatedRequestPlan(c, h.provider, &req.Model, &req.Provider)
+	if err != nil {
 		return handleError(c, err)
 	}
 
-	ctx, providerType := ModelCtx(c)
-	requestID := c.Request().Header.Get("X-Request-ID")
-	ctx = core.WithRequestID(ctx, requestID)
+	ctx := c.Request().Context()
+	providerType := GetProviderType(c)
+	if plan != nil && strings.TrimSpace(plan.ProviderType) != "" {
+		providerType = plan.ProviderType
+	}
+	requestID := requestIDFromContextOrHeader(c.Request())
 
 	if req.Stream {
 		streamReq := req
@@ -593,9 +584,9 @@ func (h *Handler) ChatCompletion(c *echo.Context) error {
 			}
 			streamReq.StreamOptions.IncludeUsage = true
 		}
-		usageModel, err := h.streamingUsageModel(streamReq.Model, streamReq.Provider)
-		if err != nil {
-			return handleError(c, err)
+		usageModel := streamReq.Model
+		if plan != nil && plan.Resolution != nil && strings.TrimSpace(plan.Resolution.ResolvedSelector.Model) != "" {
+			usageModel = plan.Resolution.ResolvedSelector.Model
 		}
 		return h.handleStreamingResponse(c, usageModel, providerType, func() (io.ReadCloser, error) {
 			return h.provider.StreamChatCompletion(ctx, streamReq)
@@ -1046,20 +1037,25 @@ func (h *Handler) Responses(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if err := applyRequestModelResolution(c, h.provider, &req.Model, &req.Provider); err != nil {
+	plan, err := ensureTranslatedRequestPlan(c, h.provider, &req.Model, &req.Provider)
+	if err != nil {
 		return handleError(c, err)
 	}
 
-	ctx, providerType := ModelCtx(c)
-	requestID := c.Request().Header.Get("X-Request-ID")
+	ctx := c.Request().Context()
+	providerType := GetProviderType(c)
+	if plan != nil && strings.TrimSpace(plan.ProviderType) != "" {
+		providerType = plan.ProviderType
+	}
+	requestID := requestIDFromContextOrHeader(c.Request())
 
 	if req.Stream {
 		if h.shouldEnforceReturningUsageData() {
 			ctx = core.WithEnforceReturningUsageData(ctx, true)
 		}
-		usageModel, err := h.streamingUsageModel(req.Model, req.Provider)
-		if err != nil {
-			return handleError(c, err)
+		usageModel := req.Model
+		if plan != nil && plan.Resolution != nil && strings.TrimSpace(plan.Resolution.ResolvedSelector.Model) != "" {
+			usageModel = plan.Resolution.ResolvedSelector.Model
 		}
 		return h.handleStreamingResponse(c, usageModel, providerType, func() (io.ReadCloser, error) {
 			return h.provider.StreamResponses(ctx, req)
@@ -1097,12 +1093,17 @@ func (h *Handler) Embeddings(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if err := applyRequestModelResolution(c, h.provider, &req.Model, &req.Provider); err != nil {
+	plan, err := ensureTranslatedRequestPlan(c, h.provider, &req.Model, &req.Provider)
+	if err != nil {
 		return handleError(c, err)
 	}
 
-	ctx, providerType := ModelCtx(c)
-	requestID := c.Request().Header.Get("X-Request-ID")
+	ctx := c.Request().Context()
+	providerType := GetProviderType(c)
+	if plan != nil && strings.TrimSpace(plan.ProviderType) != "" {
+		providerType = plan.ProviderType
+	}
+	requestID := requestIDFromContextOrHeader(c.Request())
 
 	resp, err := h.provider.Embeddings(ctx, req)
 	if err != nil {

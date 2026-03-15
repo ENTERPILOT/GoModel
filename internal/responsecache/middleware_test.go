@@ -89,15 +89,36 @@ func TestSimpleCacheMiddleware_DifferentBodyDifferentKey(t *testing.T) {
 func TestHashRequest_ResolvedModelChangesKey(t *testing.T) {
 	body := []byte(`{"model":"anthropic/claude-opus-4-6","messages":[{"role":"user","content":"hi"}]}`)
 
-	first := hashRequest("/v1/chat/completions", body, &core.RequestModelResolution{
-		ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
+	first := hashRequest("/v1/chat/completions", body, &core.ExecutionPlan{
+		Mode: core.ExecutionModeTranslated,
+		Resolution: &core.RequestModelResolution{
+			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
+		},
 	})
-	second := hashRequest("/v1/chat/completions", body, &core.RequestModelResolution{
-		ResolvedSelector: core.ModelSelector{Provider: "anthropic", Model: "claude-opus-4-6"},
+	second := hashRequest("/v1/chat/completions", body, &core.ExecutionPlan{
+		Mode: core.ExecutionModeTranslated,
+		Resolution: &core.RequestModelResolution{
+			ResolvedSelector: core.ModelSelector{Provider: "anthropic", Model: "claude-opus-4-6"},
+		},
 	})
 
 	if first == second {
 		t.Fatal("resolved model should affect cache key")
+	}
+}
+
+func TestHashRequest_ModeChangesKey(t *testing.T) {
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+
+	first := hashRequest("/v1/chat/completions", body, &core.ExecutionPlan{
+		Mode: core.ExecutionModeTranslated,
+	})
+	second := hashRequest("/v1/chat/completions", body, &core.ExecutionPlan{
+		Mode: core.ExecutionModePassthrough,
+	})
+
+	if first == second {
+		t.Fatal("execution mode should affect cache key")
 	}
 }
 

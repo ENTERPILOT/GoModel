@@ -12,8 +12,8 @@ const (
 	requestSnapshotKey contextKey = "request-snapshot"
 	// whiteBoxPromptKey stores the best-effort semantic extraction for the request.
 	whiteBoxPromptKey contextKey = "white-box-prompt"
-	// requestModelResolutionKey stores the resolved request selector chosen for execution.
-	requestModelResolutionKey contextKey = "request-model-resolution"
+	// executionPlanKey stores the request-scoped execution plan chosen for handling.
+	executionPlanKey contextKey = "execution-plan"
 	// batchPreparationMetadataKey stores request-scoped batch preprocessing metadata.
 	batchPreparationMetadataKey contextKey = "batch-preparation-metadata"
 
@@ -68,16 +68,16 @@ func GetWhiteBoxPrompt(ctx context.Context) *WhiteBoxPrompt {
 	return nil
 }
 
-// WithRequestModelResolution returns a new context with the resolved request selector attached.
-func WithRequestModelResolution(ctx context.Context, resolution *RequestModelResolution) context.Context {
-	return context.WithValue(ctx, requestModelResolutionKey, resolution)
+// WithExecutionPlan returns a new context with the execution plan attached.
+func WithExecutionPlan(ctx context.Context, plan *ExecutionPlan) context.Context {
+	return context.WithValue(ctx, executionPlanKey, plan)
 }
 
-// GetRequestModelResolution retrieves the resolved request selector from the context.
-func GetRequestModelResolution(ctx context.Context) *RequestModelResolution {
-	if v := ctx.Value(requestModelResolutionKey); v != nil {
-		if resolution, ok := v.(*RequestModelResolution); ok {
-			return resolution
+// GetExecutionPlan retrieves the execution plan from the context.
+func GetExecutionPlan(ctx context.Context) *ExecutionPlan {
+	if v := ctx.Value(executionPlanKey); v != nil {
+		if plan, ok := v.(*ExecutionPlan); ok {
+			return plan
 		}
 	}
 	return nil

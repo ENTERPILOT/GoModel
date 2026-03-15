@@ -54,7 +54,13 @@ func storeRequestModelResolution(c *echo.Context, resolution *core.RequestModelR
 		return
 	}
 
-	ctx := core.WithRequestModelResolution(c.Request().Context(), resolution)
+	ctx := c.Request().Context()
+	if plan := core.GetExecutionPlan(ctx); plan != nil {
+		cloned := *plan
+		cloned.ProviderType = resolution.ProviderType
+		cloned.Resolution = resolution
+		ctx = core.WithExecutionPlan(ctx, &cloned)
+	}
 	if env := core.GetWhiteBoxPrompt(ctx); env != nil {
 		env.RouteHints.Model = resolution.ResolvedSelector.Model
 		env.RouteHints.Provider = resolution.ResolvedSelector.Provider
@@ -66,7 +72,7 @@ func ensureRequestModelResolution(c *echo.Context, provider core.RoutableProvide
 	if c == nil {
 		return nil, false, nil
 	}
-	if resolution := core.GetRequestModelResolution(c.Request().Context()); resolution != nil {
+	if resolution := currentRequestModelResolution(c); resolution != nil {
 		return resolution, true, nil
 	}
 
@@ -74,35 +80,33 @@ func ensureRequestModelResolution(c *echo.Context, provider core.RoutableProvide
 	if err != nil || !parsed {
 		return nil, parsed, err
 	}
+	resolution, err := resolveAndStoreRequestModelResolution(c, provider, model, providerHint)
+	return resolution, true, err
+}
+
+func currentRequestModelResolution(c *echo.Context) *core.RequestModelResolution {
+	if c == nil {
+		return nil
+	}
+	if plan := core.GetExecutionPlan(c.Request().Context()); plan != nil {
+		return plan.Resolution
+	}
+	return nil
+}
+
+func resolveAndStoreRequestModelResolution(
+	c *echo.Context,
+	provider core.RoutableProvider,
+	model, providerHint string,
+) (*core.RequestModelResolution, error) {
 	enrichAuditEntryWithRequestedModel(c, model, providerHint)
 
 	resolution, err := resolveRequestModel(provider, model, providerHint)
 	if err != nil {
-		return nil, true, err
+		return nil, err
 	}
 	storeRequestModelResolution(c, resolution)
-	return resolution, true, nil
-}
-
-func applyRequestModelResolution(c *echo.Context, provider core.RoutableProvider, model, providerHint *string) error {
-	if model == nil || providerHint == nil {
-		return core.NewInvalidRequestError("model selector targets are required", nil)
-	}
-
-	resolution := core.GetRequestModelResolution(c.Request().Context())
-	if resolution == nil {
-		enrichAuditEntryWithRequestedModel(c, *model, *providerHint)
-		var err error
-		resolution, err = resolveRequestModel(provider, *model, *providerHint)
-		if err != nil {
-			return err
-		}
-		storeRequestModelResolution(c, resolution)
-	}
-
-	*model = resolution.ResolvedSelector.Model
-	*providerHint = resolution.ResolvedSelector.Provider
-	return nil
+	return resolution, nil
 }
 
 func enrichAuditEntryWithRequestedModel(c *echo.Context, model, providerHint string) {
@@ -114,8 +118,14 @@ func enrichAuditEntryWithRequestedModel(c *echo.Context, model, providerHint str
 	if model == "" {
 		return
 	}
-	auditlog.EnrichEntryWithResolution(c, &core.RequestModelResolution{
+	plan := &core.ExecutionPlan{}
+	if existing := core.GetExecutionPlan(c.Request().Context()); existing != nil {
+		cloned := *existing
+		plan = &cloned
+	}
+	plan.Resolution = &core.RequestModelResolution{
 		RequestedModel:    model,
 		RequestedProvider: providerHint,
-	})
+	}
+	auditlog.EnrichEntryWithExecutionPlan(c, plan)
 }

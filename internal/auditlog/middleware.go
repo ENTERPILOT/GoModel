@@ -106,7 +106,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			// Execute the handler
 			err := next(c)
 
-			applyRequestModelResolution(entry, c.Request().Context())
+			applyExecutionPlan(entry, c.Request().Context())
 
 			// Calculate duration
 			entry.DurationNs = time.Since(start).Nanoseconds()
@@ -156,34 +156,35 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 	}
 }
 
-func applyRequestModelResolution(entry *LogEntry, ctx context.Context) {
+func applyExecutionPlan(entry *LogEntry, ctx context.Context) {
 	if entry == nil || ctx == nil {
 		return
 	}
 
-	resolution := core.GetRequestModelResolution(ctx)
-	if resolution == nil {
-		return
+	if plan := core.GetExecutionPlan(ctx); plan != nil {
+		enrichEntryWithExecutionPlan(entry, plan)
 	}
-
-	enrichEntryWithResolution(entry, resolution)
 }
 
-func enrichEntryWithResolution(entry *LogEntry, resolution *core.RequestModelResolution) {
-	if entry == nil || resolution == nil {
+func enrichEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
+	if entry == nil || plan == nil {
 		return
 	}
 
-	if requestedModel := resolution.RequestedQualifiedModel(); requestedModel != "" {
+	if requestedModel := plan.RequestedQualifiedModel(); requestedModel != "" {
 		entry.Model = requestedModel
 	}
-	if resolvedModel := resolution.ResolvedQualifiedModel(); resolvedModel != "" {
+	if resolvedModel := plan.ResolvedQualifiedModel(); resolvedModel != "" {
 		entry.ResolvedModel = resolvedModel
 	}
-	if strings.TrimSpace(resolution.ProviderType) != "" {
-		entry.Provider = strings.TrimSpace(resolution.ProviderType)
+	if providerType := strings.TrimSpace(plan.ProviderType); providerType != "" {
+		entry.Provider = providerType
+	} else if plan.Resolution != nil && strings.TrimSpace(plan.Resolution.ProviderType) != "" {
+		entry.Provider = strings.TrimSpace(plan.Resolution.ProviderType)
 	}
-	entry.AliasUsed = resolution.AliasApplied
+	if plan.Resolution != nil {
+		entry.AliasUsed = plan.Resolution.AliasApplied
+	}
 }
 
 func captureRequestBodyForLogging(entry *LogEntry, req *http.Request) {
@@ -336,9 +337,10 @@ func EnrichEntry(c *echo.Context, model, provider string) {
 	entry.Provider = provider
 }
 
-// EnrichEntryWithResolution attaches resolved model and alias metadata to the live audit entry.
-// This is used before handler execution completes so streaming audit entries inherit the same data.
-func EnrichEntryWithResolution(c *echo.Context, resolution *core.RequestModelResolution) {
+// EnrichEntryWithExecutionPlan attaches execution-plan metadata to the live
+// audit entry. This is preferred over resolution-only enrichment once planning
+// has completed for the request.
+func EnrichEntryWithExecutionPlan(c *echo.Context, plan *core.ExecutionPlan) {
 	entryVal := c.Get(string(LogEntryKey))
 	if entryVal == nil {
 		return
@@ -349,7 +351,7 @@ func EnrichEntryWithResolution(c *echo.Context, resolution *core.RequestModelRes
 		return
 	}
 
-	enrichEntryWithResolution(entry, resolution)
+	enrichEntryWithExecutionPlan(entry, plan)
 }
 
 // EnrichEntryWithError adds error information to the log entry.

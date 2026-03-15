@@ -11,59 +11,103 @@ import (
 	"gomodel/internal/core"
 )
 
-type contextKey string
-
-const providerTypeKey contextKey = "providerType"
-
 type modelCountProvider interface {
 	ModelCount() int
 }
 
-// ModelValidation validates model-interaction requests, enriches audit metadata,
-// and propagates request-scoped values needed by downstream handlers.
-func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
+// ExecutionPlanning resolves the request-scoped execution plan for model-facing
+// routes. The plan centralizes endpoint capabilities, execution mode, resolved
+// provider type, and any early model routing decision that downstream handlers
+// or middleware need to consume.
+func ExecutionPlanning(provider core.RoutableProvider) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			path := c.Request().URL.Path
 			if !core.IsModelInteractionPath(path) {
 				return next(c)
 			}
-			if providerType, ok := providerPassthroughType(c); ok {
-				c.Set(string(providerTypeKey), providerType)
-				auditlog.EnrichEntry(c, "passthrough", providerType)
-				requestID := c.Request().Header.Get("X-Request-ID")
-				ctx := core.WithRequestID(c.Request().Context(), requestID)
-				c.SetRequest(c.Request().WithContext(ctx))
-				return next(c)
-			}
-			if isBatchOrFileRootOrSubresource(path) {
-				requestID := c.Request().Header.Get("X-Request-ID")
-				ctx := core.WithRequestID(c.Request().Context(), requestID)
-				c.SetRequest(c.Request().WithContext(ctx))
-				return next(c)
-			}
-
-			resolution, parsed, err := ensureRequestModelResolution(c, provider)
+			plan, err := deriveExecutionPlan(c, provider)
 			if err != nil {
 				return handleError(c, err)
 			}
-			if !parsed || resolution == nil {
-				return next(c)
+			if plan != nil {
+				storeExecutionPlan(c, plan)
 			}
-			if counted, ok := provider.(modelCountProvider); ok && counted.ModelCount() == 0 {
-				return handleError(c, core.NewProviderError("", 0, "model registry not initialized", nil))
-			}
-
-			c.Set(string(providerTypeKey), resolution.ProviderType)
-			auditlog.EnrichEntryWithResolution(c, resolution)
-
-			requestID := c.Request().Header.Get("X-Request-ID")
-			ctx := core.WithRequestID(c.Request().Context(), requestID)
-			c.SetRequest(c.Request().WithContext(ctx))
-
 			return next(c)
 		}
 	}
+}
+
+// ModelValidation is kept as a compatibility wrapper while the rest of the
+// server migrates to the explicit execution-plan terminology.
+func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
+	return ExecutionPlanning(provider)
+}
+
+func deriveExecutionPlan(c *echo.Context, provider core.RoutableProvider) (*core.ExecutionPlan, error) {
+	if c == nil {
+		return nil, nil
+	}
+
+	requestID := requestIDFromContextOrHeader(c.Request())
+	if requestID != "" && strings.TrimSpace(core.GetRequestID(c.Request().Context())) != requestID {
+		c.SetRequest(c.Request().WithContext(core.WithRequestID(c.Request().Context(), requestID)))
+	}
+
+	desc := core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path)
+	plan := &core.ExecutionPlan{
+		RequestID:    requestID,
+		Endpoint:     desc,
+		Capabilities: core.CapabilitiesForEndpoint(desc),
+	}
+
+	switch desc.Operation {
+	case "provider_passthrough":
+		providerType, ok := providerPassthroughType(c)
+		if !ok {
+			return nil, nil
+		}
+		plan.Mode = core.ExecutionModePassthrough
+		plan.ProviderType = providerType
+		auditlog.EnrichEntry(c, "passthrough", providerType)
+		return plan, nil
+
+	case "batches":
+		plan.Mode = core.ExecutionModeNativeBatch
+		return plan, nil
+
+	case "files":
+		plan.Mode = core.ExecutionModeNativeFile
+		return plan, nil
+
+	case "chat_completions", "responses", "embeddings":
+		plan.Mode = core.ExecutionModeTranslated
+		resolution, parsed, err := ensureRequestModelResolution(c, provider)
+		if err != nil {
+			return nil, err
+		}
+		if !parsed || resolution == nil {
+			return plan, nil
+		}
+		if counted, ok := provider.(modelCountProvider); ok && counted.ModelCount() == 0 {
+			return nil, core.NewProviderError("", 0, "model registry not initialized", nil)
+		}
+		plan.ProviderType = resolution.ProviderType
+		plan.Resolution = resolution
+		auditlog.EnrichEntryWithExecutionPlan(c, plan)
+		return plan, nil
+
+	default:
+		return nil, nil
+	}
+}
+
+func storeExecutionPlan(c *echo.Context, plan *core.ExecutionPlan) {
+	if c == nil || plan == nil {
+		return
+	}
+	ctx := core.WithExecutionPlan(c.Request().Context(), plan)
+	c.SetRequest(c.Request().WithContext(ctx))
 }
 
 func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed bool, err error) {
@@ -143,16 +187,10 @@ func providerPassthroughType(c *echo.Context) (string, bool) {
 
 // GetProviderType returns the provider type set by ModelValidation for this request.
 func GetProviderType(c *echo.Context) string {
-	if v, ok := c.Get(string(providerTypeKey)).(string); ok {
-		return v
-	}
-	if resolution := core.GetRequestModelResolution(c.Request().Context()); resolution != nil {
-		return resolution.ProviderType
+	if plan := core.GetExecutionPlan(c.Request().Context()); plan != nil {
+		if providerType := strings.TrimSpace(plan.ProviderType); providerType != "" {
+			return providerType
+		}
 	}
 	return ""
-}
-
-// ModelCtx returns the request context and resolved provider type.
-func ModelCtx(c *echo.Context) (context.Context, string) {
-	return c.Request().Context(), GetProviderType(c)
 }

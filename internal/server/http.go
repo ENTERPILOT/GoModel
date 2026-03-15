@@ -178,8 +178,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.Use(AuthMiddleware(cfg.MasterKey, authSkipPaths))
 	}
 
-	// Model validation (skips non-model paths via IsModelInteractionPath)
-	e.Use(ModelValidation(provider))
+	// Request planning (skips non-model paths via IsModelInteractionPath)
+	e.Use(ExecutionPlanning(provider))
 
 	if cfg != nil && cfg.ResponseCacheMiddleware != nil {
 		e.Use(cfg.ResponseCacheMiddleware.Middleware())

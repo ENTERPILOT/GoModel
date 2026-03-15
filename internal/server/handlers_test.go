@@ -1175,15 +1175,24 @@ func TestChatCompletion_ResolvesQualifiedMaskingAliasBeforeHandlerRouting(t *tes
 		t.Fatalf("captured provider = %q, want openai", inner.capturedChatReq.Provider)
 	}
 
-	resolution := core.GetRequestModelResolution(c.Request().Context())
-	if resolution == nil {
-		t.Fatal("expected request model resolution in context")
+	plan := core.GetExecutionPlan(c.Request().Context())
+	if plan == nil {
+		t.Fatal("expected execution plan in context")
 	}
-	if !resolution.AliasApplied {
+	if plan.Mode != core.ExecutionModeTranslated {
+		t.Fatalf("plan mode = %q, want %q", plan.Mode, core.ExecutionModeTranslated)
+	}
+	if plan.ProviderType != "openai" {
+		t.Fatalf("plan provider type = %q, want openai", plan.ProviderType)
+	}
+	if plan.Resolution == nil {
+		t.Fatal("expected plan resolution")
+	}
+	if !plan.Resolution.AliasApplied {
 		t.Fatal("expected alias resolution to be marked as applied")
 	}
-	if resolution.ResolvedQualifiedModel() != "openai/gpt-5-nano" {
-		t.Fatalf("resolved model = %q, want openai/gpt-5-nano", resolution.ResolvedQualifiedModel())
+	if plan.ResolvedQualifiedModel() != "openai/gpt-5-nano" {
+		t.Fatalf("plan resolved model = %q, want openai/gpt-5-nano", plan.ResolvedQualifiedModel())
 	}
 }
 
@@ -3353,7 +3362,6 @@ func TestStreamingResponses_ChatBackedProviderInjectsUsageWhenEnforced(t *testin
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.Set(string(providerTypeKey), "mock")
 
 	if err := handler.Responses(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -3401,7 +3409,6 @@ func TestStreamingResponses_ChatBackedProviderDoesNotInjectUsageWhenDisabled(t *
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.Set(string(providerTypeKey), "mock")
 
 	if err := handler.Responses(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -3438,7 +3445,6 @@ func TestStreamingResponses_NativeProviderRequestRemainsUnchanged(t *testing.T) 
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.Set(string(providerTypeKey), "mock")
 
 	if err := handler.Responses(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -3486,7 +3492,6 @@ func TestStreamingResponses_ChatBackedProviderWritesExactlyOneUsageEntry(t *test
 	req.Header.Set("X-Request-ID", "req-stream-responses-1")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.Set(string(providerTypeKey), "mock")
 
 	if err := handler.Responses(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)

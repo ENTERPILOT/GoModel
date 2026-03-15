@@ -56,7 +56,7 @@ func (m *simpleCacheMiddleware) Middleware() echo.MiddlewareFunc {
 			if isStreamingRequest(path, body) {
 				return next(c)
 			}
-			key := hashRequest(path, body, core.GetRequestModelResolution(c.Request().Context()))
+			key := hashRequest(path, body, core.GetExecutionPlan(c.Request().Context()))
 			ctx := c.Request().Context()
 			cached, err := m.store.Get(ctx, key)
 			if err != nil {
@@ -132,12 +132,16 @@ func isStreamingRequest(path string, body []byte) bool {
 	return p.Stream != nil && *p.Stream
 }
 
-func hashRequest(path string, body []byte, resolution *core.RequestModelResolution) string {
+func hashRequest(path string, body []byte, plan *core.ExecutionPlan) string {
 	h := sha256.New()
 	h.Write([]byte(path))
 	h.Write([]byte{0})
-	if resolution != nil {
-		h.Write([]byte(resolution.ResolvedQualifiedModel()))
+	if plan != nil {
+		h.Write([]byte(plan.Mode))
+		h.Write([]byte{0})
+		h.Write([]byte(plan.ProviderType))
+		h.Write([]byte{0})
+		h.Write([]byte(plan.ResolvedQualifiedModel()))
 		h.Write([]byte{0})
 	}
 	h.Write(body)
