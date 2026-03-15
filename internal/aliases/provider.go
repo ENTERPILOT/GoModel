@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"sort"
+	"strings"
 
 	"gomodel/internal/core"
 )
@@ -152,7 +154,13 @@ func (p *Provider) CreateBatch(ctx context.Context, providerType string, req *co
 		return nil, err
 	}
 	p.recordBatchPreparation(ctx, req, result.Request)
-	return native.CreateBatch(ctx, providerType, result.Request)
+	resp, err := native.CreateBatch(ctx, providerType, result.Request)
+	if err != nil {
+		p.cleanupBatchRewriteFile(ctx, providerType, result.RewrittenInputFileID)
+		return nil, err
+	}
+	p.cleanupSupersededBatchRewriteFile(ctx, providerType, result.RewrittenInputFileID)
+	return resp, nil
 }
 
 func (p *Provider) GetBatch(ctx context.Context, providerType, id string) (*core.BatchResponse, error) {
@@ -199,8 +207,10 @@ func (p *Provider) CreateBatchWithHints(ctx context.Context, providerType string
 	p.recordBatchPreparation(ctx, req, result.Request)
 	resp, hints, err := hinted.CreateBatchWithHints(ctx, providerType, result.Request)
 	if err != nil {
+		p.cleanupBatchRewriteFile(ctx, providerType, result.RewrittenInputFileID)
 		return nil, nil, err
 	}
+	p.cleanupSupersededBatchRewriteFile(ctx, providerType, result.RewrittenInputFileID)
 	return resp, mergeBatchHints(result.RequestEndpointHints, hints), nil
 }
 
@@ -364,6 +374,35 @@ func (p *Provider) recordBatchPreparation(ctx context.Context, original, rewritt
 		return
 	}
 	metadata.RecordInputFileRewrite(original.InputFileID, rewritten.InputFileID)
+}
+
+func (p *Provider) cleanupSupersededBatchRewriteFile(ctx context.Context, providerType, localRewrittenFileID string) {
+	localRewrittenFileID = strings.TrimSpace(localRewrittenFileID)
+	if localRewrittenFileID == "" {
+		return
+	}
+	metadata := core.GetBatchPreparationMetadata(ctx)
+	if metadata == nil {
+		return
+	}
+	if strings.TrimSpace(metadata.RewrittenInputFileID) == localRewrittenFileID {
+		return
+	}
+	p.cleanupBatchRewriteFile(ctx, providerType, localRewrittenFileID)
+}
+
+func (p *Provider) cleanupBatchRewriteFile(ctx context.Context, providerType, fileID string) {
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return
+	}
+	files, err := p.nativeFileRouter()
+	if err != nil {
+		return
+	}
+	if _, err := files.DeleteFile(ctx, providerType, fileID); err != nil {
+		slog.Warn("failed to delete rewritten batch input file", "provider", providerType, "file_id", fileID, "error", err)
+	}
 }
 
 func mergeBatchHints(left, right map[string]string) map[string]string {

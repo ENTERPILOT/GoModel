@@ -11,16 +11,18 @@ import (
 )
 
 type providerMock struct {
-	chatReq      *core.ChatRequest
-	responsesReq *core.ResponsesRequest
-	embeddingReq *core.EmbeddingRequest
-	batchReq     *core.BatchRequest
-	fileContent  *core.FileContentResponse
-	fileCreates  []*core.FileCreateRequest
-	fileObject   *core.FileObject
-	modelsResp   *core.ModelsResponse
-	supported    map[string]bool
-	providerType map[string]string
+	chatReq        *core.ChatRequest
+	responsesReq   *core.ResponsesRequest
+	embeddingReq   *core.EmbeddingRequest
+	batchReq       *core.BatchRequest
+	createBatchErr error
+	fileContent    *core.FileContentResponse
+	fileCreates    []*core.FileCreateRequest
+	fileDeletes    []string
+	fileObject     *core.FileObject
+	modelsResp     *core.ModelsResponse
+	supported      map[string]bool
+	providerType   map[string]string
 }
 
 func newProviderMock() *providerMock {
@@ -70,6 +72,9 @@ func (m *providerMock) GetProviderType(model string) string {
 
 func (m *providerMock) CreateBatch(_ context.Context, _ string, req *core.BatchRequest) (*core.BatchResponse, error) {
 	m.batchReq = req
+	if m.createBatchErr != nil {
+		return nil, m.createBatchErr
+	}
 	return &core.BatchResponse{ID: "batch_1", Object: "batch"}, nil
 }
 
@@ -108,6 +113,7 @@ func (m *providerMock) GetFile(_ context.Context, _ string, id string) (*core.Fi
 }
 
 func (m *providerMock) DeleteFile(_ context.Context, _ string, id string) (*core.FileDeleteResponse, error) {
+	m.fileDeletes = append(m.fileDeletes, id)
 	return &core.FileDeleteResponse{ID: id, Object: "file", Deleted: true}, nil
 }
 
@@ -332,5 +338,39 @@ func TestProviderBatchInputFileSkipsUploadWhenUnchanged(t *testing.T) {
 	}
 	if len(inner.fileCreates) != 0 {
 		t.Fatalf("len(fileCreates) = %d, want 0", len(inner.fileCreates))
+	}
+}
+
+func TestProviderDeletesRewrittenBatchInputFileOnCreateFailure(t *testing.T) {
+	catalog := newTestCatalog()
+	catalog.add("openai/gpt-4o", "openai", core.Model{ID: "gpt-4o", Object: "model"})
+
+	service, err := NewService(newMemoryStore(Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: true}), catalog)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	inner := newProviderMock()
+	inner.createBatchErr = context.Canceled
+	inner.fileContent = &core.FileContentResponse{
+		ID:       "file_source",
+		Filename: "batch.jsonl",
+		Data:     []byte("{\"custom_id\":\"1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"smart\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}}\n"),
+	}
+	inner.fileObject = &core.FileObject{ID: "file_rewritten", Object: "file", Filename: "batch.jsonl", Purpose: "batch"}
+	provider := NewProvider(inner, service)
+
+	_, err = provider.CreateBatch(context.Background(), "openai", &core.BatchRequest{
+		InputFileID: "file_source",
+		Endpoint:    "/v1/chat/completions",
+	})
+	if err == nil {
+		t.Fatal("CreateBatch() error = nil, want non-nil")
+	}
+	if len(inner.fileDeletes) != 1 || inner.fileDeletes[0] != "file_rewritten" {
+		t.Fatalf("fileDeletes = %v, want [file_rewritten]", inner.fileDeletes)
 	}
 }

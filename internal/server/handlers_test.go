@@ -267,7 +267,9 @@ type mockProvider struct {
 	clearedBatchHintID         string
 
 	fileCreateResponse     *core.FileObject
+	fileCreateResponses    []*core.FileObject
 	capturedFileCreateReqs []*core.FileCreateRequest
+	capturedFileDeleteIDs  []string
 	fileGetResponse        *core.FileObject
 	fileDeleteResponse     *core.FileDeleteResponse
 	fileListResponse       *core.FileListResponse
@@ -574,6 +576,11 @@ func (m *mockProvider) CreateFile(_ context.Context, providerType string, req *c
 	copy := *req
 	copy.Content = append([]byte(nil), req.Content...)
 	m.capturedFileCreateReqs = append(m.capturedFileCreateReqs, &copy)
+	if len(m.fileCreateResponses) > 0 {
+		resp := m.fileCreateResponses[0]
+		m.fileCreateResponses = m.fileCreateResponses[1:]
+		return resp, nil
+	}
 	if m.fileCreateResponse != nil {
 		return m.fileCreateResponse, nil
 	}
@@ -658,6 +665,7 @@ func (m *mockProvider) DeleteFile(_ context.Context, providerType string, id str
 	if m.fileErr != nil {
 		return nil, m.fileErr
 	}
+	m.capturedFileDeleteIDs = append(m.capturedFileDeleteIDs, id)
 	if m.fileDeleteResponse != nil {
 		return m.fileDeleteResponse, nil
 	}
@@ -2586,12 +2594,64 @@ func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.
 
 	var created core.BatchResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	require.Equal(t, "file_source", created.InputFileID)
 
 	stored, err := batchStore.Get(context.Background(), created.ID)
 	require.NoError(t, err)
 	require.NotNil(t, stored)
+	require.Equal(t, "file_source", stored.Batch.InputFileID)
 	require.Equal(t, "file_source", stored.OriginalInputFileID)
 	require.Equal(t, "file_rewritten", stored.RewrittenInputFileID)
+}
+
+func TestGetBatch_PreservesClientInputFileIDAndCleansUpRewrittenFile(t *testing.T) {
+	provider := &mockProvider{
+		batchGetResponse: &core.BatchResponse{
+			ID:              "provider-batch-1",
+			Object:          "batch",
+			Status:          "completed",
+			InputFileID:     "file_hidden",
+			ProviderBatchID: "provider-batch-1",
+		},
+	}
+
+	handler := NewHandler(provider, nil, nil, nil)
+	store := batchstore.NewMemoryStore()
+	handler.SetBatchStore(store)
+	require.NoError(t, store.Create(context.Background(), &batchstore.StoredBatch{
+		Batch: &core.BatchResponse{
+			ID:              "batch_1",
+			Object:          "batch",
+			Provider:        "openai",
+			ProviderBatchID: "provider-batch-1",
+			Status:          "in_progress",
+			InputFileID:     "file_source",
+		},
+		OriginalInputFileID:  "file_source",
+		RewrittenInputFileID: "file_hidden",
+	}))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/v1/batches/batch_1", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/v1/batches/:id")
+	setPathParam(c, "id", "batch_1")
+
+	err := handler.GetBatch(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []string{"file_hidden"}, provider.capturedFileDeleteIDs)
+
+	var resp core.BatchResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "file_source", resp.InputFileID)
+	require.Equal(t, "completed", resp.Status)
+
+	stored, err := store.Get(context.Background(), "batch_1")
+	require.NoError(t, err)
+	require.Equal(t, "", stored.RewrittenInputFileID)
+	require.Equal(t, "file_source", stored.Batch.InputFileID)
 }
 
 func TestBatches_EmptyRequests(t *testing.T) {
@@ -3920,18 +3980,24 @@ func TestGetFileWithoutProviderRequiresFileProviderInventory(t *testing.T) {
 }
 
 func TestMergeStoredBatchFromUpstreamPreservesGatewayMetadata(t *testing.T) {
-	stored := &core.BatchResponse{
-		ID:              "batch_1",
-		Provider:        "openai",
-		ProviderBatchID: "provider-batch-1",
-		Metadata: map[string]string{
-			"provider":          "openai",
-			"provider_batch_id": "provider-batch-1",
-			"existing":          "keep-me",
+	stored := &batchstore.StoredBatch{
+		Batch: &core.BatchResponse{
+			ID:              "batch_1",
+			Provider:        "openai",
+			ProviderBatchID: "provider-batch-1",
+			InputFileID:     "file_source",
+			Metadata: map[string]string{
+				"provider":          "openai",
+				"provider_batch_id": "provider-batch-1",
+				"existing":          "keep-me",
+			},
 		},
+		OriginalInputFileID:  "file_source",
+		RewrittenInputFileID: "file_hidden",
 	}
 	upstream := &core.BatchResponse{
-		Status: "completed",
+		Status:      "completed",
+		InputFileID: "file_hidden",
 		Metadata: map[string]string{
 			"provider":          "anthropic",
 			"provider_batch_id": "other-id",
@@ -3942,17 +4008,20 @@ func TestMergeStoredBatchFromUpstreamPreservesGatewayMetadata(t *testing.T) {
 
 	mergeStoredBatchFromUpstream(stored, upstream)
 
-	if stored.Metadata["provider"] != "openai" {
-		t.Fatalf("provider metadata overwritten: %q", stored.Metadata["provider"])
+	if stored.Batch.Metadata["provider"] != "openai" {
+		t.Fatalf("provider metadata overwritten: %q", stored.Batch.Metadata["provider"])
 	}
-	if stored.Metadata["provider_batch_id"] != "provider-batch-1" {
-		t.Fatalf("provider_batch_id metadata overwritten: %q", stored.Metadata["provider_batch_id"])
+	if stored.Batch.Metadata["provider_batch_id"] != "provider-batch-1" {
+		t.Fatalf("provider_batch_id metadata overwritten: %q", stored.Batch.Metadata["provider_batch_id"])
 	}
-	if stored.Metadata["existing"] != "upstream-overwrite" {
-		t.Fatalf("expected non-gateway key overwrite from upstream, got %q", stored.Metadata["existing"])
+	if stored.Batch.Metadata["existing"] != "upstream-overwrite" {
+		t.Fatalf("expected non-gateway key overwrite from upstream, got %q", stored.Batch.Metadata["existing"])
 	}
-	if stored.Metadata["new_key"] != "new-value" {
-		t.Fatalf("expected merged upstream key, got %q", stored.Metadata["new_key"])
+	if stored.Batch.Metadata["new_key"] != "new-value" {
+		t.Fatalf("expected merged upstream key, got %q", stored.Batch.Metadata["new_key"])
+	}
+	if stored.Batch.InputFileID != "file_source" {
+		t.Fatalf("input_file_id overwritten: %q", stored.Batch.InputFileID)
 	}
 }
 

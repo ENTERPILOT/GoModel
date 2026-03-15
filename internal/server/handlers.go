@@ -1182,6 +1182,7 @@ func (h *Handler) Batches(c *echo.Context) error {
 	resp.ProviderBatchID = providerBatchID
 	resp.ID = "batch_" + uuid.NewString()
 	resp.Object = "batch"
+	resp.InputFileID = firstNonEmpty(req.InputFileID, batchPreparation.OriginalInputFileID, resp.InputFileID)
 	if resp.Endpoint == "" {
 		resp.Endpoint = core.NormalizeOperationPath(req.Endpoint)
 	}
@@ -1329,8 +1330,15 @@ func (h *Handler) GetBatch(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	updated := false
 	if latest != nil {
-		mergeStoredBatchFromUpstream(resp.Batch, latest)
+		mergeStoredBatchFromUpstream(resp, latest)
+		updated = true
+	}
+	if isTerminalBatchStatus(resp.Batch.Status) && h.cleanupStoredBatchRewrittenInputFile(ctx, resp) {
+		updated = true
+	}
+	if updated {
 		if err := h.batchStore.Update(c.Request().Context(), resp); err != nil && !errors.Is(err, batchstore.ErrNotFound) {
 			return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "failed to persist refreshed batch", err))
 		}
@@ -1459,7 +1467,10 @@ func (h *Handler) CancelBatch(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if latest != nil {
-		mergeStoredBatchFromUpstream(resp.Batch, latest)
+		mergeStoredBatchFromUpstream(resp, latest)
+	}
+	if isTerminalBatchStatus(resp.Batch.Status) {
+		h.cleanupStoredBatchRewrittenInputFile(ctx, resp)
 	}
 
 	if err := h.batchStore.Update(c.Request().Context(), resp); err != nil {
@@ -1528,7 +1539,7 @@ func (h *Handler) BatchResults(c *echo.Context) error {
 	if err != nil {
 		if isNativeBatchResultsPending(err) {
 			if latest, getErr := nativeRouter.GetBatch(ctx, stored.Batch.Provider, stored.Batch.ProviderBatchID); getErr == nil && latest != nil {
-				mergeStoredBatchFromUpstream(stored.Batch, latest)
+				mergeStoredBatchFromUpstream(stored, latest)
 				if updateErr := h.batchStore.Update(c.Request().Context(), stored); updateErr != nil && !errors.Is(updateErr, batchstore.ErrNotFound) {
 					slog.Warn(
 						"failed to update batch store after refreshing pending results",
@@ -1561,7 +1572,8 @@ func (h *Handler) BatchResults(c *echo.Context) error {
 	if len(result.Data) > 0 {
 		stored.Batch.Results = result.Data
 	}
-	if len(result.Data) > 0 || usageLogged {
+	cleanedRewrittenInput := h.cleanupStoredBatchRewrittenInputFile(ctx, stored)
+	if len(result.Data) > 0 || usageLogged || cleanedRewrittenInput {
 		if updateErr := h.batchStore.Update(c.Request().Context(), stored); updateErr != nil {
 			slog.Warn(
 				"failed to update batch store after receiving batch results",
@@ -1897,30 +1909,32 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func mergeStoredBatchFromUpstream(stored, upstream *core.BatchResponse) {
-	if stored == nil || upstream == nil {
+func mergeStoredBatchFromUpstream(stored *batchstore.StoredBatch, upstream *core.BatchResponse) {
+	if stored == nil || stored.Batch == nil || upstream == nil {
 		return
 	}
 
-	stored.Status = upstream.Status
-	stored.Endpoint = upstream.Endpoint
-	stored.InputFileID = upstream.InputFileID
-	stored.CompletionWindow = upstream.CompletionWindow
-	stored.RequestCounts = upstream.RequestCounts
-	stored.Usage = upstream.Usage
-	stored.Results = upstream.Results
-	stored.InProgressAt = upstream.InProgressAt
-	stored.CompletedAt = upstream.CompletedAt
-	stored.FailedAt = upstream.FailedAt
-	stored.CancellingAt = upstream.CancellingAt
-	stored.CancelledAt = upstream.CancelledAt
+	stored.Batch.Status = upstream.Status
+	stored.Batch.Endpoint = upstream.Endpoint
+	if strings.TrimSpace(stored.Batch.InputFileID) == "" {
+		stored.Batch.InputFileID = firstNonEmpty(stored.OriginalInputFileID, upstream.InputFileID)
+	}
+	stored.Batch.CompletionWindow = upstream.CompletionWindow
+	stored.Batch.RequestCounts = upstream.RequestCounts
+	stored.Batch.Usage = upstream.Usage
+	stored.Batch.Results = upstream.Results
+	stored.Batch.InProgressAt = upstream.InProgressAt
+	stored.Batch.CompletedAt = upstream.CompletedAt
+	stored.Batch.FailedAt = upstream.FailedAt
+	stored.Batch.CancellingAt = upstream.CancellingAt
+	stored.Batch.CancelledAt = upstream.CancelledAt
 	if upstream.Metadata != nil {
-		if stored.Metadata == nil {
-			stored.Metadata = map[string]string{}
+		if stored.Batch.Metadata == nil {
+			stored.Batch.Metadata = map[string]string{}
 		}
 		preservedGatewayMetadata := map[string]string{}
 		for _, key := range []string{"provider", "provider_batch_id"} {
-			if value, exists := stored.Metadata[key]; exists {
+			if value, exists := stored.Batch.Metadata[key]; exists {
 				preservedGatewayMetadata[key] = value
 			}
 		}
@@ -1928,13 +1942,48 @@ func mergeStoredBatchFromUpstream(stored, upstream *core.BatchResponse) {
 			if _, preserve := preservedGatewayMetadata[key]; preserve {
 				continue
 			}
-			stored.Metadata[key] = value
+			stored.Batch.Metadata[key] = value
 		}
 		for key, value := range preservedGatewayMetadata {
-			stored.Metadata[key] = value
+			stored.Batch.Metadata[key] = value
 		}
-		stored.Metadata = sanitizePublicBatchMetadata(stored.Metadata)
+		stored.Batch.Metadata = sanitizePublicBatchMetadata(stored.Batch.Metadata)
 	}
+}
+
+func isTerminalBatchStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed", "failed", "cancelled", "canceled", "expired":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *Handler) cleanupStoredBatchRewrittenInputFile(ctx context.Context, stored *batchstore.StoredBatch) bool {
+	if stored == nil || stored.Batch == nil {
+		return false
+	}
+	fileID := strings.TrimSpace(stored.RewrittenInputFileID)
+	if fileID == "" {
+		return false
+	}
+	nativeFiles, err := h.nativeFileRouter()
+	if err != nil {
+		return false
+	}
+	if _, err := nativeFiles.DeleteFile(ctx, stored.Batch.Provider, fileID); err != nil {
+		slog.Warn(
+			"failed to delete rewritten batch input file",
+			"batch_id", stored.Batch.ID,
+			"provider", stored.Batch.Provider,
+			"file_id", fileID,
+			"error", err,
+		)
+		return false
+	}
+	stored.RewrittenInputFileID = ""
+	return true
 }
 
 func isNativeBatchResultsPending(err error) bool {
