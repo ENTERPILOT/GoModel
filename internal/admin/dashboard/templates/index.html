@@ -685,6 +685,8 @@
                         <div class="audit-entry-context">
                             <span class="provider-badge" x-text="entry.provider || '-'"></span>
                             <span class="provider-badge mono" x-text="entry.model || '-'"></span>
+                            <span class="provider-badge audit-alias-badge" x-show="entry.alias_used">alias</span>
+                            <span class="provider-badge mono" x-show="entry.alias_used && entry.resolved_model" x-text="'resolved: ' + entry.resolved_model"></span>
                             <span class="provider-badge mono" x-text="'request_id: ' + (entry.request_id || '-')"></span>
                             <span class="provider-badge mono" x-show="entry.client_ip" x-text="'ip: ' + entry.client_ip"></span>
                             <span class="provider-badge" x-show="entry.stream">stream</span>

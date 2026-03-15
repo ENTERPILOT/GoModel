@@ -55,7 +55,7 @@ func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
 			}
 
 			c.Set(string(providerTypeKey), resolution.ProviderType)
-			auditlog.EnrichEntry(c, auditModelName(resolution), resolution.ProviderType)
+			auditlog.EnrichEntryWithResolution(c, resolution)
 
 			requestID := c.Request().Header.Get("X-Request-ID")
 			ctx := core.WithRequestID(c.Request().Context(), requestID)

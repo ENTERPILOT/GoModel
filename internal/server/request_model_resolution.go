@@ -98,13 +98,3 @@ func applyRequestModelResolution(c *echo.Context, provider core.RoutableProvider
 	*providerHint = resolution.ResolvedSelector.Provider
 	return nil
 }
-
-func auditModelName(resolution *core.RequestModelResolution) string {
-	if resolution == nil {
-		return ""
-	}
-	if resolution.AliasApplied {
-		return resolution.RequestedQualifiedModel()
-	}
-	return resolution.ResolvedSelector.Model
-}

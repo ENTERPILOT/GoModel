@@ -119,17 +119,19 @@ func TestRedactHeaders(t *testing.T) {
 
 func TestLogEntryJSON(t *testing.T) {
 	entry := &LogEntry{
-		ID:         "test-id-123",
-		Timestamp:  time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
-		DurationNs: 1500000,
-		Model:      "gpt-4",
-		Provider:   "openai",
-		StatusCode: 200,
-		RequestID:  "req-123",
-		ClientIP:   "192.168.1.1",
-		Method:     "POST",
-		Path:       "/v1/chat/completions",
-		Stream:     false,
+		ID:            "test-id-123",
+		Timestamp:     time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
+		DurationNs:    1500000,
+		Model:         "friendly-alias",
+		ResolvedModel: "openai/gpt-4",
+		Provider:      "openai",
+		AliasUsed:     true,
+		StatusCode:    200,
+		RequestID:     "req-123",
+		ClientIP:      "192.168.1.1",
+		Method:        "POST",
+		Path:          "/v1/chat/completions",
+		Stream:        false,
 		Data: &LogData{
 			UserAgent: "test-agent",
 		},
@@ -156,6 +158,12 @@ func TestLogEntryJSON(t *testing.T) {
 	}
 	if decoded.Provider != entry.Provider {
 		t.Errorf("Provider mismatch: expected %q, got %q", entry.Provider, decoded.Provider)
+	}
+	if decoded.ResolvedModel != entry.ResolvedModel {
+		t.Errorf("ResolvedModel mismatch: expected %q, got %q", entry.ResolvedModel, decoded.ResolvedModel)
+	}
+	if decoded.AliasUsed != entry.AliasUsed {
+		t.Errorf("AliasUsed mismatch: expected %v, got %v", entry.AliasUsed, decoded.AliasUsed)
 	}
 	if decoded.StatusCode != entry.StatusCode {
 		t.Errorf("StatusCode mismatch: expected %d, got %d", entry.StatusCode, decoded.StatusCode)
@@ -405,6 +413,50 @@ func TestMiddleware_UsesIngressTooLargeFlagWithoutReadingStream(t *testing.T) {
 	}
 }
 
+func TestMiddleware_AppliesRequestModelResolution(t *testing.T) {
+	e := echo.New()
+	logger := &capturingLogger{
+		cfg: Config{Enabled: true},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"anthropic/claude-opus-4-6"}`))
+	req = req.WithContext(core.WithRequestModelResolution(req.Context(), &core.RequestModelResolution{
+		RequestedModel:   "anthropic/claude-opus-4-6",
+		ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
+		ProviderType:     "openai",
+		AliasApplied:     true,
+	}))
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		EnrichEntry(c, "placeholder", "placeholder")
+		return c.NoContent(http.StatusNoContent)
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
+	}
+
+	entry := logger.entries[0]
+	if entry.Model != "anthropic/claude-opus-4-6" {
+		t.Fatalf("Model = %q, want requested alias", entry.Model)
+	}
+	if entry.ResolvedModel != "openai/gpt-5-nano" {
+		t.Fatalf("ResolvedModel = %q, want openai/gpt-5-nano", entry.ResolvedModel)
+	}
+	if entry.Provider != "openai" {
+		t.Fatalf("Provider = %q, want openai", entry.Provider)
+	}
+	if !entry.AliasUsed {
+		t.Fatal("AliasUsed = false, want true")
+	}
+}
+
 func TestLoggerClose(t *testing.T) {
 	store := &mockStore{}
 	cfg := Config{
@@ -563,17 +615,19 @@ func TestCreateStreamEntry(t *testing.T) {
 
 	// Test with valid entry
 	baseEntry := &LogEntry{
-		ID:         "test-id",
-		Timestamp:  time.Now(),
-		DurationNs: 1000,
-		Model:      "gpt-4",
-		Provider:   "openai",
-		StatusCode: 200,
-		RequestID:  "req-123",
-		ClientIP:   "127.0.0.1",
-		Method:     "POST",
-		Path:       "/v1/chat/completions",
-		Stream:     false,
+		ID:            "test-id",
+		Timestamp:     time.Now(),
+		DurationNs:    1000,
+		Model:         "claude-opus-4-6",
+		ResolvedModel: "openai/gpt-5-nano",
+		Provider:      "openai",
+		AliasUsed:     true,
+		StatusCode:    200,
+		RequestID:     "req-123",
+		ClientIP:      "127.0.0.1",
+		Method:        "POST",
+		Path:          "/v1/chat/completions",
+		Stream:        false,
 		Data: &LogData{
 			UserAgent: "test",
 			RequestHeaders: map[string]string{
@@ -594,6 +648,12 @@ func TestCreateStreamEntry(t *testing.T) {
 	}
 	if streamEntry.Model != baseEntry.Model {
 		t.Errorf("Model mismatch")
+	}
+	if streamEntry.ResolvedModel != baseEntry.ResolvedModel {
+		t.Errorf("ResolvedModel mismatch")
+	}
+	if streamEntry.AliasUsed != baseEntry.AliasUsed {
+		t.Errorf("AliasUsed mismatch")
 	}
 	if !streamEntry.Stream {
 		t.Error("Stream should be true")

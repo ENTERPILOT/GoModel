@@ -17,36 +17,40 @@ type MongoDBReader struct {
 }
 
 type mongoLogRow struct {
-	ID         string    `bson:"_id"`
-	Timestamp  time.Time `bson:"timestamp"`
-	DurationNs int64     `bson:"duration_ns"`
-	Model      string    `bson:"model"`
-	Provider   string    `bson:"provider"`
-	StatusCode int       `bson:"status_code"`
-	RequestID  string    `bson:"request_id"`
-	ClientIP   string    `bson:"client_ip"`
-	Method     string    `bson:"method"`
-	Path       string    `bson:"path"`
-	Stream     bool      `bson:"stream"`
-	ErrorType  string    `bson:"error_type"`
-	Data       *LogData  `bson:"data"`
+	ID            string    `bson:"_id"`
+	Timestamp     time.Time `bson:"timestamp"`
+	DurationNs    int64     `bson:"duration_ns"`
+	Model         string    `bson:"model"`
+	ResolvedModel string    `bson:"resolved_model"`
+	Provider      string    `bson:"provider"`
+	AliasUsed     bool      `bson:"alias_used"`
+	StatusCode    int       `bson:"status_code"`
+	RequestID     string    `bson:"request_id"`
+	ClientIP      string    `bson:"client_ip"`
+	Method        string    `bson:"method"`
+	Path          string    `bson:"path"`
+	Stream        bool      `bson:"stream"`
+	ErrorType     string    `bson:"error_type"`
+	Data          *LogData  `bson:"data"`
 }
 
 func (r mongoLogRow) toLogEntry() *LogEntry {
 	return &LogEntry{
-		ID:         r.ID,
-		Timestamp:  r.Timestamp,
-		DurationNs: r.DurationNs,
-		Model:      r.Model,
-		Provider:   r.Provider,
-		StatusCode: r.StatusCode,
-		RequestID:  r.RequestID,
-		ClientIP:   r.ClientIP,
-		Method:     r.Method,
-		Path:       r.Path,
-		Stream:     r.Stream,
-		ErrorType:  r.ErrorType,
-		Data:       sanitizeLogData(r.Data),
+		ID:            r.ID,
+		Timestamp:     r.Timestamp,
+		DurationNs:    r.DurationNs,
+		Model:         r.Model,
+		ResolvedModel: r.ResolvedModel,
+		Provider:      r.Provider,
+		AliasUsed:     r.AliasUsed,
+		StatusCode:    r.StatusCode,
+		RequestID:     r.RequestID,
+		ClientIP:      r.ClientIP,
+		Method:        r.Method,
+		Path:          r.Path,
+		Stream:        r.Stream,
+		ErrorType:     r.ErrorType,
+		Data:          sanitizeLogData(r.Data),
 	}
 }
 

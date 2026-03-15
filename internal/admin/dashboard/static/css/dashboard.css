@@ -873,6 +873,12 @@ td.col-price {
     font-weight: 500;
 }
 
+.audit-alias-badge {
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+    border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+    color: var(--accent-strong);
+}
+
 .empty-state {
     text-align: center;
     color: var(--text-muted);
