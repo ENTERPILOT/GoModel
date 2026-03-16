@@ -33,6 +33,12 @@ func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {
 			wantOperation: "openai.embeddings",
 			wantAuditPath: "/v1/embeddings",
 		},
+		{
+			name:          "default uses normalized endpoint",
+			info:          &core.PassthroughRouteInfo{Provider: "openai", RawEndpoint: "v1/fine_tuning/jobs", NormalizedEndpoint: "fine_tuning/jobs"},
+			wantOperation: "",
+			wantAuditPath: "/p/openai/fine_tuning/jobs",
+		},
 	}
 
 	for _, tt := range tests {

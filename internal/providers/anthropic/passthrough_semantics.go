@@ -18,7 +18,8 @@ func (passthroughSemanticEnricher) Enrich(_ *core.RequestSnapshot, _ *core.White
 		return nil
 	}
 	enriched := *info
-	switch providers.PassthroughEndpointPath(info) {
+	normalizedEndpoint := strings.TrimLeft(strings.TrimSpace(providers.PassthroughEndpointPath(&enriched)), "/")
+	switch "/" + normalizedEndpoint {
 	case "/messages":
 		enriched.SemanticOperation = "anthropic.messages"
 		enriched.AuditPath = "/v1/messages"
@@ -26,8 +27,8 @@ func (passthroughSemanticEnricher) Enrich(_ *core.RequestSnapshot, _ *core.White
 		enriched.SemanticOperation = "anthropic.messages_batches"
 		enriched.AuditPath = "/v1/messages/batches"
 	default:
-		if strings.TrimSpace(enriched.AuditPath) == "" {
-			enriched.AuditPath = "/p/anthropic/" + strings.TrimLeft(strings.TrimSpace(info.RawEndpoint), "/")
+		if strings.TrimSpace(enriched.AuditPath) == "" && normalizedEndpoint != "" {
+			enriched.AuditPath = "/p/anthropic/" + normalizedEndpoint
 		}
 	}
 	return &enriched

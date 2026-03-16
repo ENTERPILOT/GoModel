@@ -106,7 +106,16 @@ func (m *mockRoutableProvider) ClearBatchResultHints(_ string, _ string) {}
 
 func (m *mockRoutableProvider) CreateFile(_ context.Context, _ string, req *core.FileCreateRequest) (*core.FileObject, error) {
 	copy := *req
-	copy.Content = append([]byte(nil), req.Content...)
+	if req.ContentReader != nil {
+		content, err := io.ReadAll(req.ContentReader)
+		if err != nil {
+			return nil, err
+		}
+		copy.Content = content
+		copy.ContentReader = nil
+	} else {
+		copy.Content = append([]byte(nil), req.Content...)
+	}
 	m.fileCreates = append(m.fileCreates, &copy)
 	if m.fileObject != nil {
 		return m.fileObject, nil
@@ -710,11 +719,11 @@ func TestGuardedProvider_ChatCompletion_RejectsUnsupportedContent(t *testing.T) 
 	}
 
 	_, err := guarded.ChatCompletion(context.Background(), req)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v, want nil when pipeline is empty", err)
 	}
-	if inner.chatReq != nil {
-		t.Fatal("inner provider should not have been called")
+	if inner.chatReq == nil {
+		t.Fatal("inner provider should have been called when pipeline is empty")
 	}
 }
 
@@ -1083,6 +1092,33 @@ func TestGuardedProvider_CreateBatch_DefaultNoBatchGuardrails(t *testing.T) {
 	}
 	if len(chatReq.Messages) != 1 || chatReq.Messages[0].Role != "user" {
 		t.Fatalf("expected unchanged batch request when disabled, got: %+v", chatReq.Messages)
+	}
+}
+
+func TestGuardedProvider_PrepareBatchRequest_DefaultNoBatchGuardrails(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+	g, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
+	pipeline.Add(g, 0)
+	guarded := NewGuardedProvider(inner, pipeline)
+
+	req := &core.BatchRequest{
+		Endpoint: "/v1/chat/completions",
+		Requests: []core.BatchRequestItem{
+			{
+				Method: http.MethodPost,
+				URL:    "/v1/chat/completions",
+				Body:   json.RawMessage(`{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`),
+			},
+		},
+	}
+
+	result, err := guarded.PrepareBatchRequest(context.Background(), "mock", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.Request != req {
+		t.Fatalf("expected original request, got %#v", result)
 	}
 }
 

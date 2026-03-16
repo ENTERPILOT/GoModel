@@ -583,6 +583,9 @@ func (g *GuardedProvider) PatchResponsesRequest(ctx context.Context, req *core.R
 // PrepareBatchRequest applies guardrails to batch subrequests without
 // submitting the native batch to the wrapped provider.
 func (g *GuardedProvider) PrepareBatchRequest(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchRewriteResult, error) {
+	if !g.options.EnableForBatchProcessing {
+		return &core.BatchRewriteResult{Request: req}, nil
+	}
 	return processGuardedBatchRequest(ctx, providerType, req, g.pipeline, g.batchFileTransport())
 }
 

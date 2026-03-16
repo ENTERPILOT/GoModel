@@ -3216,7 +3216,7 @@ func TestBuildAnthropicBatchCreateRequest_RejectsDuplicateCustomIDs(t *testing.T
 func TestConvertDecodedBatchItemToAnthropic_ResponsesUsesSharedSemanticTranslator(t *testing.T) {
 	decoded := &core.DecodedBatchItemRequest{
 		Endpoint:  "/v1/responses",
-		Operation: "responses",
+		Operation: core.OperationResponses,
 		Request: &core.ResponsesRequest{
 			Model:        "claude-sonnet-4-5-20250929",
 			Instructions: "Be helpful",
@@ -3253,7 +3253,7 @@ func TestConvertDecodedBatchItemToAnthropic_ResponsesUsesSharedSemanticTranslato
 func TestConvertDecodedBatchItemToAnthropic_RejectsStreaming(t *testing.T) {
 	decoded := &core.DecodedBatchItemRequest{
 		Endpoint:  "/v1/chat/completions",
-		Operation: "chat_completions",
+		Operation: core.OperationChatCompletions,
 		Request: &core.ChatRequest{
 			Model:  "claude-sonnet-4-5-20250929",
 			Stream: true,
@@ -3278,7 +3278,7 @@ func TestConvertDecodedBatchItemToAnthropic_RejectsStreaming(t *testing.T) {
 func TestConvertDecodedBatchItemToAnthropic_RejectsEmbeddings(t *testing.T) {
 	decoded := &core.DecodedBatchItemRequest{
 		Endpoint:  "/v1/embeddings",
-		Operation: "embeddings",
+		Operation: core.OperationEmbeddings,
 		Request: &core.EmbeddingRequest{
 			Model: "text-embedding-3-small",
 			Input: "Hello",

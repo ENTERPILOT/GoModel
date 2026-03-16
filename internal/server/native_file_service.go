@@ -2,7 +2,6 @@ package server
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -134,21 +133,15 @@ func (s *nativeFileService) CreateFile(c *echo.Context) error {
 		_ = file.Close()
 	}()
 
-	content, err := io.ReadAll(file)
-	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("failed to read uploaded file", err))
-	}
-
-	requestID := strings.TrimSpace(c.Request().Header.Get("X-Request-ID"))
-	ctx := core.WithRequestID(c.Request().Context(), requestID)
+	ctx, _ := requestContextWithRequestID(c.Request())
 	filename := strings.TrimSpace(fileReq.Filename)
 	if filename == "" {
 		filename = fileHeader.Filename
 	}
 	resp, err := nativeRouter.CreateFile(ctx, providerType, &core.FileCreateRequest{
-		Purpose:  purpose,
-		Filename: filename,
-		Content:  content,
+		Purpose:       purpose,
+		Filename:      filename,
+		ContentReader: file,
 	})
 	if err != nil {
 		return handleError(c, err)

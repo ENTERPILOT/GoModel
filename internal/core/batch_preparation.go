@@ -63,7 +63,7 @@ func RewriteBatchSource(
 	providerType string,
 	req *BatchRequest,
 	fileTransport BatchFileTransport,
-	operations []string,
+	operations []Operation,
 	rewrite BatchItemRewriteFunc,
 ) (*BatchRewriteResult, error) {
 	if req == nil {
@@ -104,7 +104,7 @@ func RewriteBatchSource(
 	return result, nil
 }
 
-func rewriteInlineBatchItems(ctx context.Context, req *BatchRequest, operations []string, rewrite BatchItemRewriteFunc) (map[string]string, error) {
+func rewriteInlineBatchItems(ctx context.Context, req *BatchRequest, operations []Operation, rewrite BatchItemRewriteFunc) (map[string]string, error) {
 	hints := map[string]string{}
 	for i := range req.Requests {
 		item := req.Requests[i]
@@ -135,7 +135,7 @@ func rewriteInputFileBatch(
 	providerType string,
 	req *BatchRequest,
 	fileTransport BatchFileTransport,
-	operations []string,
+	operations []Operation,
 	rewrite BatchItemRewriteFunc,
 ) (*BatchRewriteResult, error) {
 	resp, err := fileTransport.GetFileContent(ctx, providerType, req.InputFileID)
@@ -187,7 +187,7 @@ func rewriteBatchJSONLContent(
 	ctx context.Context,
 	defaultEndpoint string,
 	data []byte,
-	operations []string,
+	operations []Operation,
 	rewrite BatchItemRewriteFunc,
 ) ([]byte, map[string]string, bool, error) {
 	if len(data) == 0 {

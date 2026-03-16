@@ -27,6 +27,12 @@ func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {
 			wantOperation: "anthropic.messages_batches",
 			wantAuditPath: "/v1/messages/batches",
 		},
+		{
+			name:          "default uses normalized endpoint",
+			info:          &core.PassthroughRouteInfo{Provider: "anthropic", RawEndpoint: "v1/other", NormalizedEndpoint: "other"},
+			wantOperation: "",
+			wantAuditPath: "/p/anthropic/other",
+		},
 	}
 
 	for _, tt := range tests {

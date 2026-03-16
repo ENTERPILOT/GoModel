@@ -35,8 +35,8 @@ func resolveRequestModel(provider core.RoutableProvider, resolver RequestModelRe
 		err              error
 	)
 
-	if resolver := effectiveRequestModelResolver(provider, resolver); resolver != nil {
-		resolvedSelector, aliasApplied, err = resolver.ResolveModel(model, providerHint)
+	if effectiveResolver := effectiveRequestModelResolver(provider, resolver); effectiveResolver != nil {
+		resolvedSelector, aliasApplied, err = effectiveResolver.ResolveModel(model, providerHint)
 	} else {
 		resolvedSelector, err = core.ParseModelSelector(model, providerHint)
 	}

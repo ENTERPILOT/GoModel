@@ -191,10 +191,18 @@ func (m *mockBatchProvider) ClearBatchResultHints(batchID string) {
 }
 
 func (m *mockBatchProvider) CreateFile(_ context.Context, req *core.FileCreateRequest) (*core.FileObject, error) {
+	content := req.Content
+	if req.ContentReader != nil {
+		read, err := io.ReadAll(req.ContentReader)
+		if err != nil {
+			return nil, err
+		}
+		content = read
+	}
 	return &core.FileObject{
 		ID:        "file_1",
 		Object:    "file",
-		Bytes:     int64(len(req.Content)),
+		Bytes:     int64(len(content)),
 		CreatedAt: 1,
 		Filename:  req.Filename,
 		Purpose:   req.Purpose,

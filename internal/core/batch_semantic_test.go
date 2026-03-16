@@ -93,7 +93,7 @@ func TestDecodeKnownBatchItemRequest_NormalizesFullURLAndDecodesCanonicalRequest
 	if decoded.Endpoint != "/v1/responses" {
 		t.Fatalf("Endpoint = %q, want /v1/responses", decoded.Endpoint)
 	}
-	if decoded.Operation != "responses" {
+	if decoded.Operation != OperationResponses {
 		t.Fatalf("Operation = %q, want responses", decoded.Operation)
 	}
 	if decoded.ResponsesRequest() == nil {
@@ -111,7 +111,7 @@ func TestMaybeDecodeKnownBatchItemRequest_SkipsUnmatchedOperation(t *testing.T) 
 		Method: "POST",
 		URL:    "/v1/embeddings",
 		Body:   json.RawMessage(`{"model":"text-embedding-3-small","input":"hi"}`),
-	}, "chat_completions", "responses")
+	}, OperationChatCompletions, OperationResponses)
 	if err != nil {
 		t.Fatalf("MaybeDecodeKnownBatchItemRequest() error = %v, want nil", err)
 	}

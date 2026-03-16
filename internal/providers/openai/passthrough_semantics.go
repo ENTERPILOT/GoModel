@@ -18,7 +18,8 @@ func (passthroughSemanticEnricher) Enrich(_ *core.RequestSnapshot, _ *core.White
 		return nil
 	}
 	enriched := *info
-	switch providers.PassthroughEndpointPath(info) {
+	normalizedEndpoint := strings.TrimLeft(strings.TrimSpace(providers.PassthroughEndpointPath(&enriched)), "/")
+	switch "/" + normalizedEndpoint {
 	case "/chat/completions":
 		enriched.SemanticOperation = "openai.chat_completions"
 		enriched.AuditPath = "/v1/chat/completions"
@@ -29,8 +30,8 @@ func (passthroughSemanticEnricher) Enrich(_ *core.RequestSnapshot, _ *core.White
 		enriched.SemanticOperation = "openai.embeddings"
 		enriched.AuditPath = "/v1/embeddings"
 	default:
-		if strings.TrimSpace(enriched.AuditPath) == "" {
-			enriched.AuditPath = "/p/openai/" + strings.TrimLeft(strings.TrimSpace(info.RawEndpoint), "/")
+		if strings.TrimSpace(enriched.AuditPath) == "" && normalizedEndpoint != "" {
+			enriched.AuditPath = "/p/openai/" + normalizedEndpoint
 		}
 	}
 	return &enriched

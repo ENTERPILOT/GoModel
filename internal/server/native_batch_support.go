@@ -558,16 +558,30 @@ func (h *Handler) cleanupStoredBatchRewrittenInputFile(ctx context.Context, stor
 	return true
 }
 
-func isNativeBatchResultsPending(err error) bool {
+func isNativeBatchResultsPending(
+	ctx context.Context,
+	nativeRouter core.NativeBatchRoutableProvider,
+	providerType, providerBatchID string,
+	err error,
+) (bool, *core.BatchResponse) {
 	var gatewayErr *core.GatewayError
 	if !errors.As(err, &gatewayErr) {
-		return false
+		return false, nil
 	}
 	if gatewayErr.HTTPStatusCode() != http.StatusNotFound {
-		return false
+		return false, nil
 	}
 	// Some providers return 404 while native results are still being prepared.
 	// Extend batchResultsPending404Providers as more provider-specific behaviors are confirmed.
-	_, ok := batchResultsPending404Providers[strings.ToLower(strings.TrimSpace(gatewayErr.Provider))]
-	return ok
+	if _, ok := batchResultsPending404Providers[strings.ToLower(strings.TrimSpace(gatewayErr.Provider))]; !ok {
+		return false, nil
+	}
+	if nativeRouter == nil || strings.TrimSpace(providerType) == "" || strings.TrimSpace(providerBatchID) == "" {
+		return false, nil
+	}
+	latest, getErr := nativeRouter.GetBatch(ctx, providerType, providerBatchID)
+	if getErr != nil || latest == nil || isTerminalBatchStatus(latest.Status) {
+		return false, latest
+	}
+	return true, latest
 }

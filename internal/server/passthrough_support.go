@@ -229,6 +229,14 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 		_ = resp.Body.Close()
 	}()
 
+	if resp.StatusCode >= http.StatusBadRequest {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider passthrough error response", err))
+		}
+		return handleError(c, core.ParseProviderError(providerType, resp.StatusCode, body, nil))
+	}
+
 	copyPassthroughResponseHeaders(c.Response().Header(), http.Header(resp.Headers))
 
 	if isSSEContentType(resp.Headers) {

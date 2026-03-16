@@ -35,9 +35,11 @@ func PassthroughSemanticEnrichment(enrichers []core.PassthroughSemanticEnricher,
 				return next(c)
 			}
 
-			if normalized, err := normalizePassthroughEndpoint(info.RawEndpoint, allowPassthroughV1Alias); err == nil {
-				info.NormalizedEndpoint = normalized
+			normalized, err := normalizePassthroughEndpoint(info.RawEndpoint, allowPassthroughV1Alias)
+			if err != nil {
+				return next(c)
 			}
+			info.NormalizedEndpoint = normalized
 
 			if enricher := byProvider[strings.TrimSpace(info.Provider)]; enricher != nil {
 				if enriched := enricher.Enrich(core.GetRequestSnapshot(c.Request().Context()), env, info); enriched != nil {

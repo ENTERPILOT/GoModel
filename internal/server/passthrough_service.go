@@ -1,8 +1,6 @@
 package server
 
 import (
-	"strings"
-
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/auditlog"
@@ -30,14 +28,8 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 		return handleError(c, s.unsupportedPassthroughProviderError(providerType))
 	}
 
-	ctx := c.Request().Context()
-	requestID := strings.TrimSpace(c.Request().Header.Get("X-Request-ID"))
-	if requestID == "" {
-		requestID = strings.TrimSpace(core.GetRequestID(ctx))
-	}
-	if requestID != "" {
-		ctx = core.WithRequestID(ctx, requestID)
-	}
+	ctx, _ := requestContextWithRequestID(c.Request())
+	c.SetRequest(c.Request().WithContext(ctx))
 	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
 		Method:   c.Request().Method,
 		Endpoint: endpoint,

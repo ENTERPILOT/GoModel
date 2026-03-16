@@ -77,12 +77,11 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 		upstream, err = nativeRouter.CreateBatch(ctx, providerType, forward)
 	}
 	if err != nil {
-		if s.cleanupPreparedBatchInputFile != nil {
-			s.cleanupPreparedBatchInputFile(ctx, providerType, batchPreparation.RewrittenInputFileID)
-		}
+		s.rollbackPreparedBatch(ctx, providerType, batchPreparation, "")
 		return handleError(c, err)
 	}
 	if upstream == nil {
+		s.rollbackPreparedBatch(ctx, providerType, batchPreparation, "")
 		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty batch response", nil))
 	}
 
@@ -91,6 +90,7 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 		providerBatchID = upstream.ID
 	}
 	if providerBatchID == "" {
+		s.rollbackPreparedBatch(ctx, providerType, batchPreparation, "")
 		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider response missing batch id", nil))
 	}
 
@@ -126,6 +126,7 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 			RequestID:                 requestID,
 		}
 		if err := s.batchStore.Create(ctx, stored); err != nil {
+			s.rollbackPreparedBatch(ctx, providerType, batchPreparation, providerBatchID)
 			return handleError(c, core.NewProviderError("batch_store", http.StatusInternalServerError, "failed to persist batch", err))
 		}
 		if hintedRouter, ok := s.provider.(core.NativeBatchHintRoutableProvider); ok && len(mergedHints) > 0 {
@@ -134,6 +135,43 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, resp)
+}
+
+func (s *nativeBatchService) rollbackPreparedBatch(ctx context.Context, providerType string, batchPreparation *core.BatchPreparationMetadata, providerBatchID string) {
+	if batchPreparation != nil && s.cleanupPreparedBatchInputFile != nil {
+		s.cleanupPreparedBatchInputFile(ctx, providerType, batchPreparation.RewrittenInputFileID)
+	}
+	s.clearUpstreamBatchResultHints(providerType, providerBatchID)
+	s.cancelUpstreamBatch(ctx, providerType, providerBatchID)
+}
+
+func (s *nativeBatchService) clearUpstreamBatchResultHints(providerType, batchID string) {
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" {
+		return
+	}
+	if hintedRouter, ok := s.provider.(core.NativeBatchHintRoutableProvider); ok {
+		hintedRouter.ClearBatchResultHints(providerType, batchID)
+	}
+}
+
+func (s *nativeBatchService) cancelUpstreamBatch(ctx context.Context, providerType, batchID string) {
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" {
+		return
+	}
+	nativeRouter, ok := s.provider.(core.NativeBatchRoutableProvider)
+	if !ok {
+		return
+	}
+	if _, err := nativeRouter.CancelBatch(ctx, providerType, batchID); err != nil {
+		slog.Warn(
+			"failed to cancel upstream batch during rollback",
+			"provider", providerType,
+			"provider_batch_id", batchID,
+			"error", err,
+		)
+	}
 }
 
 func (s *nativeBatchService) GetBatch(c *echo.Context) error {
@@ -301,8 +339,8 @@ func (s *nativeBatchService) BatchResults(c *echo.Context) error {
 		upstream, err = nativeRouter.GetBatchResults(ctx, stored.Batch.Provider, stored.Batch.ProviderBatchID)
 	}
 	if err != nil {
-		if isNativeBatchResultsPending(err) {
-			if latest, getErr := nativeRouter.GetBatch(ctx, stored.Batch.Provider, stored.Batch.ProviderBatchID); getErr == nil && latest != nil {
+		if pending, latest := isNativeBatchResultsPending(ctx, nativeRouter, stored.Batch.Provider, stored.Batch.ProviderBatchID, err); pending {
+			if latest != nil {
 				mergeStoredBatchFromUpstream(stored, latest)
 				if updateErr := s.batchStore.Update(c.Request().Context(), stored); updateErr != nil && !errors.Is(updateErr, batchstore.ErrNotFound) {
 					slog.Warn(

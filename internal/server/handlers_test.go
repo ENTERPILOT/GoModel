@@ -255,6 +255,30 @@ func (p *batchRequestPreparerStub) PrepareBatchRequest(ctx context.Context, prov
 	return p.result, nil
 }
 
+type failingBatchStore struct {
+	createErr error
+}
+
+func (s *failingBatchStore) Create(context.Context, *batchstore.StoredBatch) error {
+	return s.createErr
+}
+
+func (s *failingBatchStore) Get(context.Context, string) (*batchstore.StoredBatch, error) {
+	return nil, batchstore.ErrNotFound
+}
+
+func (s *failingBatchStore) List(context.Context, int, string) ([]*batchstore.StoredBatch, error) {
+	return nil, nil
+}
+
+func (s *failingBatchStore) Update(context.Context, *batchstore.StoredBatch) error {
+	return batchstore.ErrNotFound
+}
+
+func (s *failingBatchStore) Close() error {
+	return nil
+}
+
 // mockProvider implements core.RoutableProvider for testing
 type mockProvider struct {
 	err               error
@@ -267,23 +291,25 @@ type mockProvider struct {
 	supportedModels   []string
 	providerTypes     map[string]string
 
-	batchCreateResponse        *core.BatchResponse
-	batchCreateHints           map[string]string
-	batchGetResponse           *core.BatchResponse
-	batchCancelResponse        *core.BatchResponse
-	batchResults               *core.BatchResultsResponse
-	batchResultsHinted         *core.BatchResultsResponse
-	batchResultsErr            error
-	batchErr                   error
-	capturedBatchReq           *core.BatchRequest
-	capturedBatchCtx           context.Context
-	capturedBatchProvider      string
-	capturedBatchHints         map[string]string
-	capturedBatchHintsCtx      context.Context
-	capturedBatchHintsProvider string
-	capturedBatchHintsBatchID  string
-	clearedBatchHintProvider   string
-	clearedBatchHintID         string
+	batchCreateResponse         *core.BatchResponse
+	batchCreateHints            map[string]string
+	batchGetResponse            *core.BatchResponse
+	batchCancelResponse         *core.BatchResponse
+	batchResults                *core.BatchResultsResponse
+	batchResultsHinted          *core.BatchResultsResponse
+	batchResultsErr             error
+	batchErr                    error
+	capturedBatchReq            *core.BatchRequest
+	capturedBatchCtx            context.Context
+	capturedBatchProvider       string
+	capturedBatchCancelProvider string
+	capturedBatchCancelID       string
+	capturedBatchHints          map[string]string
+	capturedBatchHintsCtx       context.Context
+	capturedBatchHintsProvider  string
+	capturedBatchHintsBatchID   string
+	clearedBatchHintProvider    string
+	clearedBatchHintID          string
 
 	fileCreateResponse     *core.FileObject
 	fileCreateResponses    []*core.FileObject
@@ -534,7 +560,9 @@ func (m *mockProvider) ListBatches(_ context.Context, _ string, _ int, _ string)
 	return &core.BatchListResponse{Object: "list"}, nil
 }
 
-func (m *mockProvider) CancelBatch(_ context.Context, _ string, _ string) (*core.BatchResponse, error) {
+func (m *mockProvider) CancelBatch(_ context.Context, providerType, batchID string) (*core.BatchResponse, error) {
+	m.capturedBatchCancelProvider = providerType
+	m.capturedBatchCancelID = batchID
 	if m.batchErr != nil {
 		return nil, m.batchErr
 	}
@@ -593,7 +621,16 @@ func (m *mockProvider) CreateFile(_ context.Context, providerType string, req *c
 		return nil, m.fileErr
 	}
 	copy := *req
-	copy.Content = append([]byte(nil), req.Content...)
+	if req.ContentReader != nil {
+		content, err := io.ReadAll(req.ContentReader)
+		if err != nil {
+			return nil, err
+		}
+		copy.Content = content
+		copy.ContentReader = nil
+	} else {
+		copy.Content = append([]byte(nil), req.Content...)
+	}
 	m.capturedFileCreateReqs = append(m.capturedFileCreateReqs, &copy)
 	if len(m.fileCreateResponses) > 0 {
 		resp := m.fileCreateResponses[0]
@@ -606,7 +643,7 @@ func (m *mockProvider) CreateFile(_ context.Context, providerType string, req *c
 	return &core.FileObject{
 		ID:        "file_mock_1",
 		Object:    "file",
-		Bytes:     int64(len(req.Content)),
+		Bytes:     int64(len(copy.Content)),
 		CreatedAt: 1000,
 		Filename:  req.Filename,
 		Purpose:   req.Purpose,
@@ -3222,6 +3259,55 @@ func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.
 	require.Equal(t, "file_rewritten", stored.RewrittenInputFileID)
 }
 
+func TestBatches_RollsBackPreparedInputAndUpstreamBatchWhenStoreCreateFails(t *testing.T) {
+	inner := &mockProvider{
+		batchCreateResponse: &core.BatchResponse{
+			ID:              "provider-batch-1",
+			ProviderBatchID: "provider-batch-1",
+			Object:          "batch",
+			Status:          "validating",
+			Endpoint:        "/v1/chat/completions",
+		},
+		batchCreateHints: map[string]string{"req-1": "/v1/responses"},
+	}
+
+	handler := NewHandler(inner, nil, nil, nil)
+	handler.batchRequestPreparer = &batchRequestPreparerStub{
+		result: &core.BatchRewriteResult{
+			Request: &core.BatchRequest{
+				InputFileID:      "file_rewritten",
+				Endpoint:         "/v1/chat/completions",
+				CompletionWindow: "24h",
+				Metadata:         map[string]string{"provider": "openai"},
+			},
+			OriginalInputFileID:  "file_source",
+			RewrittenInputFileID: "file_rewritten",
+			RequestEndpointHints: map[string]string{"req-1": "/v1/responses"},
+		},
+	}
+	handler.SetBatchStore(&failingBatchStore{createErr: errors.New("boom")})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{
+	  "input_file_id":"file_source",
+	  "endpoint":"/v1/chat/completions",
+	  "completion_window":"24h",
+	  "metadata":{"provider":"openai"}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler.Batches(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.Equal(t, []string{"file_rewritten"}, inner.capturedFileDeleteIDs)
+	require.Equal(t, "openai", inner.capturedBatchCancelProvider)
+	require.Equal(t, "provider-batch-1", inner.capturedBatchCancelID)
+	require.Equal(t, "openai", inner.clearedBatchHintProvider)
+	require.Equal(t, "provider-batch-1", inner.clearedBatchHintID)
+}
+
 func TestBatches_InputFileRejectsDisabledAlias(t *testing.T) {
 	store := newAliasesTestStore(aliases.Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: false})
 	catalog := &aliasesTestCatalog{
@@ -4901,6 +4987,73 @@ func TestProviderPassthrough_OpenAI(t *testing.T) {
 	}
 }
 
+func TestProviderPassthrough_PrefersContextRequestID(t *testing.T) {
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers: map[string][]string{
+				"Content-Type": {"application/json"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{}`))
+	req = req.WithContext(core.WithRequestID(req.Context(), "ctx_req_123"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-ID", "header_req_456")
+
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if provider.lastPassthroughReq == nil {
+		t.Fatal("lastPassthroughReq = nil")
+	}
+	if got := provider.lastPassthroughReq.Headers.Get("X-Request-ID"); got != "ctx_req_123" {
+		t.Fatalf("X-Request-ID = %q, want ctx_req_123", got)
+	}
+}
+
+func TestProviderPassthrough_NormalizesErrorResponse(t *testing.T) {
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusNotFound,
+			Headers: map[string][]string{
+				"Content-Type": {"application/json"},
+				"X-Upstream":   {"openai"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"error":{"message":"upstream missing","type":"invalid_request_error"}}`)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if got := rec.Header().Get("X-Upstream"); got != "" {
+		t.Fatalf("X-Upstream should not be forwarded on normalized errors, got %q", got)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"message":"upstream missing"`) || !strings.Contains(body, `"error"`) {
+		t.Fatalf("unexpected error body: %s", body)
+	}
+}
+
 func TestProviderPassthrough_OpenAIV1AliasNormalizesByDefault(t *testing.T) {
 	provider := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
@@ -5137,13 +5290,25 @@ func TestProviderPassthrough_UsesConfiguredSupportedProviders(t *testing.T) {
 }
 
 func TestIsNativeBatchResultsPending(t *testing.T) {
+	provider := &mockProvider{
+		batchGetResponse: &core.BatchResponse{ID: "provider-batch-1", Status: "in_progress"},
+	}
 	anthropicErr := core.NewProviderError("anthropic", http.StatusNotFound, "pending", nil)
-	if !isNativeBatchResultsPending(anthropicErr) {
+	pending, latest := isNativeBatchResultsPending(context.Background(), provider, "anthropic", "provider-batch-1", anthropicErr)
+	if !pending {
 		t.Fatal("expected anthropic 404 to be treated as pending")
+	}
+	if latest == nil || latest.Status != "in_progress" {
+		t.Fatalf("latest = %#v, want in_progress batch", latest)
 	}
 
 	openAIErr := core.NewProviderError("openai", http.StatusNotFound, "not found", nil)
-	if isNativeBatchResultsPending(openAIErr) {
+	if pending, _ := isNativeBatchResultsPending(context.Background(), provider, "openai", "provider-batch-1", openAIErr); pending {
 		t.Fatal("expected openai 404 not to be treated as pending")
+	}
+
+	provider.batchGetResponse = &core.BatchResponse{ID: "provider-batch-1", Status: "expired"}
+	if pending, _ := isNativeBatchResultsPending(context.Background(), provider, "anthropic", "provider-batch-1", anthropicErr); pending {
+		t.Fatal("expected terminal anthropic batch not to be treated as pending")
 	}
 }

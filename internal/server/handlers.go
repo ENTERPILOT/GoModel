@@ -295,9 +295,11 @@ func (h *Handler) GetFileContent(c *echo.Context) error {
 // @Tags         responses
 // @Accept       json
 // @Produce      json
+// @Produce      text/event-stream
 // @Security     BearerAuth
 // @Param        request  body      core.ResponsesRequest  true  "Responses API request"
 // @Success      200      {object}  core.ResponsesResponse
+// @Success      200      {string}  string  "SSE stream (text/event-stream) when stream=true"
 // @Failure      400      {object}  core.GatewayError
 // @Failure      401      {object}  core.GatewayError
 // @Failure      429      {object}  core.GatewayError

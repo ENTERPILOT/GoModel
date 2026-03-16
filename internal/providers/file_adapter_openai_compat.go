@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -64,7 +65,11 @@ func CreateOpenAICompatibleFile(ctx context.Context, client *llmclient.Client, r
 	if strings.TrimSpace(req.Purpose) == "" {
 		return nil, core.NewInvalidRequestError("purpose is required", nil)
 	}
-	if len(req.Content) == 0 {
+	content := req.ContentReader
+	if content == nil && len(req.Content) > 0 {
+		content = bytes.NewReader(req.Content)
+	}
+	if content == nil {
 		return nil, core.NewInvalidRequestError("file is required", nil)
 	}
 
@@ -73,27 +78,36 @@ func CreateOpenAICompatibleFile(ctx context.Context, client *llmclient.Client, r
 		filename = "upload.jsonl"
 	}
 
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-	if err := writer.WriteField("purpose", strings.TrimSpace(req.Purpose)); err != nil {
-		return nil, core.NewInvalidRequestError("failed to write purpose field", err)
-	}
-	part, err := writer.CreateFormFile("file", filename)
-	if err != nil {
-		return nil, core.NewInvalidRequestError("failed to create multipart file field", err)
-	}
-	if _, err := part.Write(req.Content); err != nil {
-		return nil, core.NewInvalidRequestError("failed to write file content", err)
-	}
-	if err := writer.Close(); err != nil {
-		return nil, core.NewInvalidRequestError("failed to finalize multipart payload", err)
-	}
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
+	go func() {
+		defer func() {
+			_ = pw.Close()
+		}()
+		if err := writer.WriteField("purpose", strings.TrimSpace(req.Purpose)); err != nil {
+			_ = pw.CloseWithError(core.NewInvalidRequestError("failed to write purpose field", err))
+			return
+		}
+		part, err := writer.CreateFormFile("file", filename)
+		if err != nil {
+			_ = pw.CloseWithError(core.NewInvalidRequestError("failed to create multipart file field", err))
+			return
+		}
+		if _, err := io.Copy(part, content); err != nil {
+			_ = pw.CloseWithError(core.NewInvalidRequestError("failed to stream file content", err))
+			return
+		}
+		if err := writer.Close(); err != nil {
+			_ = pw.CloseWithError(core.NewInvalidRequestError("failed to finalize multipart payload", err))
+			return
+		}
+	}()
 
 	var fileObj core.FileObject
 	if err := client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/files",
-		RawBody:  buf.Bytes(),
+		Method:        http.MethodPost,
+		Endpoint:      "/files",
+		RawBodyReader: pr,
 		Headers: http.Header{
 			"Content-Type": {writer.FormDataContentType()},
 		},

@@ -54,7 +54,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.ChatCompletion(ctx, req)
 	}
-	forward, err := rewriteAliasChatRequest(p.service, p.inner, req, rewriteForRouting)
+	forward, err := rewriteAliasChatRequest(p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.StreamChatCompletion(ctx, req)
 	}
-	forward, err := rewriteAliasChatRequest(p.service, p.inner, req, rewriteForRouting)
+	forward, err := rewriteAliasChatRequest(p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.Responses(ctx, req)
 	}
-	forward, err := rewriteAliasResponsesRequest(p.service, p.inner, req, rewriteForRouting)
+	forward, err := rewriteAliasResponsesRequest(p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.StreamResponses(ctx, req)
 	}
-	forward, err := rewriteAliasResponsesRequest(p.service, p.inner, req, rewriteForRouting)
+	forward, err := rewriteAliasResponsesRequest(p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.Embeddings(ctx, req)
 	}
-	forward, err := rewriteAliasEmbeddingRequest(p.service, p.inner, req, rewriteForRouting)
+	forward, err := rewriteAliasEmbeddingRequest(p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}

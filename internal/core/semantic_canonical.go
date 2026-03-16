@@ -48,29 +48,29 @@ func newCanonicalOperationCodec[T any](key semanticCacheKey, newValue func() T, 
 	}
 }
 
-var canonicalOperationCodecs = map[string]canonicalOperationCodec{
-	"chat_completions": newCanonicalOperationCodec(semanticChatRequestKey, func() *ChatRequest { return &ChatRequest{} }, func(env *WhiteBoxPrompt, req *ChatRequest) {
+var canonicalOperationCodecs = map[Operation]canonicalOperationCodec{
+	OperationChatCompletions: newCanonicalOperationCodec(semanticChatRequestKey, func() *ChatRequest { return &ChatRequest{} }, func(env *WhiteBoxPrompt, req *ChatRequest) {
 		cacheSemanticSelectorHintsFromRequest(env, req)
 		cacheSemanticStreamHint(env, req.Stream)
 	}),
-	"responses": newCanonicalOperationCodec(semanticResponsesRequestKey, func() *ResponsesRequest { return &ResponsesRequest{} }, func(env *WhiteBoxPrompt, req *ResponsesRequest) {
+	OperationResponses: newCanonicalOperationCodec(semanticResponsesRequestKey, func() *ResponsesRequest { return &ResponsesRequest{} }, func(env *WhiteBoxPrompt, req *ResponsesRequest) {
 		cacheSemanticSelectorHintsFromRequest(env, req)
 		cacheSemanticStreamHint(env, req.Stream)
 	}),
-	"embeddings": newCanonicalOperationCodec(semanticEmbeddingRequestKey, func() *EmbeddingRequest { return &EmbeddingRequest{} }, func(env *WhiteBoxPrompt, req *EmbeddingRequest) {
+	OperationEmbeddings: newCanonicalOperationCodec(semanticEmbeddingRequestKey, func() *EmbeddingRequest { return &EmbeddingRequest{} }, func(env *WhiteBoxPrompt, req *EmbeddingRequest) {
 		cacheSemanticSelectorHintsFromRequest(env, req)
 	}),
-	"batches": newCanonicalOperationCodec(semanticBatchRequestKey, func() *BatchRequest { return &BatchRequest{} }, func(env *WhiteBoxPrompt, req *BatchRequest) {
+	OperationBatches: newCanonicalOperationCodec(semanticBatchRequestKey, func() *BatchRequest { return &BatchRequest{} }, func(env *WhiteBoxPrompt, req *BatchRequest) {
 		env.JSONBodyParsed = true
 	}),
 }
 
-func canonicalOperationCodecFor(operation string) (canonicalOperationCodec, bool) {
+func canonicalOperationCodecFor(operation Operation) (canonicalOperationCodec, bool) {
 	codec, ok := canonicalOperationCodecs[operation]
 	return codec, ok
 }
 
-func decodeCanonicalOperation[T any](body []byte, env *WhiteBoxPrompt, operation string) (T, error) {
+func decodeCanonicalOperation[T any](body []byte, env *WhiteBoxPrompt, operation Operation) (T, error) {
 	codec, ok := canonicalOperationCodecFor(operation)
 	if !ok {
 		var zero T
@@ -91,22 +91,22 @@ func decodeCanonicalOperation[T any](body []byte, env *WhiteBoxPrompt, operation
 
 // DecodeChatRequest decodes and caches the canonical chat request for a semantic envelope.
 func DecodeChatRequest(body []byte, env *WhiteBoxPrompt) (*ChatRequest, error) {
-	return decodeCanonicalOperation[*ChatRequest](body, env, "chat_completions")
+	return decodeCanonicalOperation[*ChatRequest](body, env, OperationChatCompletions)
 }
 
 // DecodeResponsesRequest decodes and caches the canonical responses request for a semantic envelope.
 func DecodeResponsesRequest(body []byte, env *WhiteBoxPrompt) (*ResponsesRequest, error) {
-	return decodeCanonicalOperation[*ResponsesRequest](body, env, "responses")
+	return decodeCanonicalOperation[*ResponsesRequest](body, env, OperationResponses)
 }
 
 // DecodeEmbeddingRequest decodes and caches the canonical embeddings request for a semantic envelope.
 func DecodeEmbeddingRequest(body []byte, env *WhiteBoxPrompt) (*EmbeddingRequest, error) {
-	return decodeCanonicalOperation[*EmbeddingRequest](body, env, "embeddings")
+	return decodeCanonicalOperation[*EmbeddingRequest](body, env, OperationEmbeddings)
 }
 
 // DecodeBatchRequest decodes and caches the canonical batch request for a semantic envelope.
 func DecodeBatchRequest(body []byte, env *WhiteBoxPrompt) (*BatchRequest, error) {
-	return decodeCanonicalOperation[*BatchRequest](body, env, "batches")
+	return decodeCanonicalOperation[*BatchRequest](body, env, OperationBatches)
 }
 
 func parseRouteLimit(limitRaw string) (int, error) {
@@ -205,7 +205,7 @@ func DecodeCanonicalSelector(body []byte, env *WhiteBoxPrompt) (model, provider 
 	if env == nil {
 		return "", "", false
 	}
-	codec, ok := canonicalOperationCodecFor(env.OperationType)
+	codec, ok := canonicalOperationCodecFor(Operation(env.OperationType))
 	if !ok {
 		return "", "", false
 	}

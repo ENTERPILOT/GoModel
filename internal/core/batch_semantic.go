@@ -12,7 +12,7 @@ import (
 type DecodedBatchItemRequest struct {
 	Endpoint  string
 	Method    string
-	Operation string
+	Operation Operation
 	Request   any
 }
 
@@ -135,7 +135,7 @@ func ResolveBatchItemEndpoint(defaultEndpoint, itemURL string) string {
 // MaybeDecodeKnownBatchItemRequest selectively decodes a known JSON batch
 // subrequest only when it targets one of the requested operations. Non-POST,
 // body-less, or unmatched items are reported as not handled.
-func MaybeDecodeKnownBatchItemRequest(defaultEndpoint string, item BatchRequestItem, operations ...string) (*DecodedBatchItemRequest, bool, error) {
+func MaybeDecodeKnownBatchItemRequest(defaultEndpoint string, item BatchRequestItem, operations ...Operation) (*DecodedBatchItemRequest, bool, error) {
 	if len(item.Body) == 0 {
 		return nil, false, nil
 	}
@@ -152,7 +152,7 @@ func MaybeDecodeKnownBatchItemRequest(defaultEndpoint string, item BatchRequestI
 	if endpoint == "" {
 		return nil, false, nil
 	}
-	operation := string(DescribeEndpointPath(endpoint).Operation)
+	operation := DescribeEndpointPath(endpoint).Operation
 	if len(operations) > 0 && !slices.Contains(operations, operation) {
 		return nil, false, nil
 	}
@@ -185,7 +185,7 @@ func DecodeKnownBatchItemRequest(defaultEndpoint string, item BatchRequestItem) 
 	decoded := &DecodedBatchItemRequest{
 		Endpoint:  endpoint,
 		Method:    method,
-		Operation: string(DescribeEndpointPath(endpoint).Operation),
+		Operation: DescribeEndpointPath(endpoint).Operation,
 	}
 
 	codec, ok := canonicalOperationCodecFor(decoded.Operation)
@@ -194,7 +194,7 @@ func DecodeKnownBatchItemRequest(defaultEndpoint string, item BatchRequestItem) 
 	}
 	req, err := codec.decodeUncached(item.Body)
 	if err != nil {
-		return nil, fmt.Errorf("invalid %s request body: %w", strings.ReplaceAll(decoded.Operation, "_", " "), err)
+		return nil, fmt.Errorf("invalid %s request body: %w", strings.ReplaceAll(string(decoded.Operation), "_", " "), err)
 	}
 	decoded.Request = req
 	return decoded, nil

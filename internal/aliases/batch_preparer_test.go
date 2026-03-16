@@ -56,3 +56,40 @@ func TestBatchPreparerRewritesBatchInputFiles(t *testing.T) {
 		t.Fatalf("rewritten file content = %s, want concrete model", got)
 	}
 }
+
+func TestBatchPreparerRejectsAliasResolvedToDifferentProvider(t *testing.T) {
+	catalog := newTestCatalog()
+	catalog.add("anthropic/claude-3-7-sonnet", "anthropic", core.Model{ID: "claude-3-7-sonnet", Object: "model"})
+
+	service, err := NewService(newMemoryStore(Alias{Name: "smart", TargetModel: "claude-3-7-sonnet", TargetProvider: "anthropic", Enabled: true}), catalog)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	inner := newProviderMock()
+	inner.supported["anthropic/claude-3-7-sonnet"] = true
+	inner.providerType["anthropic/claude-3-7-sonnet"] = "anthropic"
+	inner.fileContent = &core.FileContentResponse{
+		ID:       "file_source",
+		Filename: "batch.jsonl",
+		Data:     []byte("{\"custom_id\":\"1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"smart\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}}\n"),
+	}
+
+	preparer := NewBatchPreparer(inner, service)
+	_, err = preparer.PrepareBatchRequest(context.Background(), "openai", &core.BatchRequest{
+		InputFileID: "file_source",
+		Endpoint:    "/v1/chat/completions",
+	})
+	if err == nil {
+		t.Fatal("PrepareBatchRequest() error = nil, want provider mismatch")
+	}
+	if !strings.Contains(err.Error(), `native batch supports a single provider per batch`) {
+		t.Fatalf("PrepareBatchRequest() error = %v, want mixed-provider validation error", err)
+	}
+	if len(inner.fileCreates) != 0 {
+		t.Fatalf("len(fileCreates) = %d, want 0", len(inner.fileCreates))
+	}
+}

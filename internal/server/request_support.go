@@ -33,6 +33,9 @@ func requestContextWithRequestID(req *http.Request) (context.Context, string) {
 		requestID = uuid.NewString()
 	}
 
+	if req.Header == nil {
+		req.Header = make(http.Header)
+	}
 	req.Header.Set("X-Request-ID", requestID)
 
 	ctx := req.Context()

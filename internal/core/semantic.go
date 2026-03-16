@@ -126,7 +126,7 @@ func (env *WhiteBoxPrompt) CanonicalSelectorFromCachedRequest() (model, provider
 	if env == nil {
 		return "", "", false
 	}
-	codec, ok := canonicalOperationCodecFor(env.OperationType)
+	codec, ok := canonicalOperationCodecFor(Operation(env.OperationType))
 	if !ok {
 		return "", "", false
 	}
@@ -263,13 +263,14 @@ func DeriveWhiteBoxPrompt(snapshot *RequestSnapshot) *WhiteBoxPrompt {
 	}
 	env.StreamRequested = selectors.Stream
 	if passthrough := env.CachedPassthroughRouteInfo(); passthrough != nil {
-		if passthrough.Provider == "" {
-			passthrough.Provider = selectors.Provider
+		cloned := *passthrough
+		if cloned.Provider == "" {
+			cloned.Provider = selectors.Provider
 		}
 		if selectors.Model != "" {
-			passthrough.Model = selectors.Model
+			cloned.Model = selectors.Model
 		}
-		CachePassthroughRouteInfo(env, passthrough)
+		CachePassthroughRouteInfo(env, &cloned)
 	}
 
 	return env

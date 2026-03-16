@@ -1,6 +1,9 @@
 package core
 
-import "strings"
+import (
+	"io"
+	"strings"
+)
 
 const (
 	// FileActionCreate represents POST /v1/files.
@@ -18,9 +21,10 @@ const (
 // FileCreateRequest represents an OpenAI-compatible file upload request.
 // The actual request is multipart/form-data; Content is not serialized.
 type FileCreateRequest struct {
-	Purpose  string `json:"purpose"`
-	Filename string `json:"filename,omitempty"`
-	Content  []byte `json:"-"`
+	Purpose       string    `json:"purpose"`
+	Filename      string    `json:"filename,omitempty"`
+	Content       []byte    `json:"-"`
+	ContentReader io.Reader `json:"-"`
 }
 
 // FileRouteInfo is sparse canonical metadata the gateway can derive for /v1/files* routes.

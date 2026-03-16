@@ -3,6 +3,7 @@ package aliases
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"gomodel/internal/core"
@@ -44,6 +45,11 @@ type aliasModelSupportChecker interface {
 	Supports(string) bool
 }
 
+type aliasModelProviderTypeChecker interface {
+	aliasModelSupportChecker
+	GetProviderType(string) string
+}
+
 func resolveAliasModel(service *Service, model, provider string) (core.ModelSelector, bool, error) {
 	if service == nil {
 		selector, err := core.ParseModelSelector(model, provider)
@@ -67,7 +73,7 @@ func resolveAliasRequestSelector(service *Service, model, provider string) (core
 	return core.ParseModelSelector(model, provider)
 }
 
-func resolveAliasRoutableSelector(service *Service, checker aliasModelSupportChecker, model, provider string) (core.ModelSelector, error) {
+func resolveAliasRoutableSelector(service *Service, checker aliasModelSupportChecker, model, provider, expectedProviderType string) (core.ModelSelector, error) {
 	selector, err := resolveAliasRequestSelector(service, model, provider)
 	if err != nil {
 		return core.ModelSelector{}, err
@@ -80,14 +86,43 @@ func resolveAliasRoutableSelector(service *Service, checker aliasModelSupportChe
 	if checker == nil || !checker.Supports(resolvedModel) {
 		return core.ModelSelector{}, core.NewInvalidRequestError("unsupported model: "+resolvedModel, nil)
 	}
+	if err := validateResolvedProviderType(checker, selector, expectedProviderType); err != nil {
+		return core.ModelSelector{}, err
+	}
 	return selector, nil
 }
 
-func rewriteAliasChatRequest(service *Service, checker aliasModelSupportChecker, req *core.ChatRequest, mode requestRewriteMode) (*core.ChatRequest, error) {
+func validateResolvedProviderType(checker aliasModelSupportChecker, selector core.ModelSelector, expectedProviderType string) error {
+	expectedProviderType = strings.TrimSpace(expectedProviderType)
+	if expectedProviderType == "" {
+		return nil
+	}
+
+	actualProviderType := strings.TrimSpace(selector.Provider)
+	if actualProviderType == "" {
+		if typed, ok := checker.(aliasModelProviderTypeChecker); ok {
+			actualProviderType = strings.TrimSpace(typed.GetProviderType(selector.QualifiedModel()))
+		}
+	}
+	if actualProviderType == "" || actualProviderType == expectedProviderType {
+		return nil
+	}
+	return core.NewInvalidRequestError(
+		fmt.Sprintf(
+			"native batch supports a single provider per batch; resolved model %q targets provider %q but batch provider is %q",
+			selector.QualifiedModel(),
+			actualProviderType,
+			expectedProviderType,
+		),
+		nil,
+	)
+}
+
+func rewriteAliasChatRequest(service *Service, checker aliasModelSupportChecker, req *core.ChatRequest, expectedProviderType string, mode requestRewriteMode) (*core.ChatRequest, error) {
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveAliasRoutableSelector(service, checker, req.Model, req.Provider)
+	selector, err := resolveAliasRoutableSelector(service, checker, req.Model, req.Provider, expectedProviderType)
 	if err != nil {
 		return nil, err
 	}
@@ -97,11 +132,11 @@ func rewriteAliasChatRequest(service *Service, checker aliasModelSupportChecker,
 	return &forward, nil
 }
 
-func rewriteAliasResponsesRequest(service *Service, checker aliasModelSupportChecker, req *core.ResponsesRequest, mode requestRewriteMode) (*core.ResponsesRequest, error) {
+func rewriteAliasResponsesRequest(service *Service, checker aliasModelSupportChecker, req *core.ResponsesRequest, expectedProviderType string, mode requestRewriteMode) (*core.ResponsesRequest, error) {
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveAliasRoutableSelector(service, checker, req.Model, req.Provider)
+	selector, err := resolveAliasRoutableSelector(service, checker, req.Model, req.Provider, expectedProviderType)
 	if err != nil {
 		return nil, err
 	}
@@ -111,11 +146,11 @@ func rewriteAliasResponsesRequest(service *Service, checker aliasModelSupportChe
 	return &forward, nil
 }
 
-func rewriteAliasEmbeddingRequest(service *Service, checker aliasModelSupportChecker, req *core.EmbeddingRequest, mode requestRewriteMode) (*core.EmbeddingRequest, error) {
+func rewriteAliasEmbeddingRequest(service *Service, checker aliasModelSupportChecker, req *core.EmbeddingRequest, expectedProviderType string, mode requestRewriteMode) (*core.EmbeddingRequest, error) {
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveAliasRoutableSelector(service, checker, req.Model, req.Provider)
+	selector, err := resolveAliasRoutableSelector(service, checker, req.Model, req.Provider, expectedProviderType)
 	if err != nil {
 		return nil, err
 	}
@@ -138,11 +173,11 @@ func rewriteAliasBatchSource(
 		providerType,
 		req,
 		fileTransport,
-		[]string{"chat_completions", "responses", "embeddings"},
+		[]core.Operation{core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings},
 		func(_ context.Context, _ core.BatchRequestItem, decoded *core.DecodedBatchItemRequest) (json.RawMessage, error) {
 			switch typed := decoded.Request.(type) {
 			case *core.ChatRequest:
-				modified, err := rewriteAliasChatRequest(service, checker, typed, rewriteForUpstream)
+				modified, err := rewriteAliasChatRequest(service, checker, typed, providerType, rewriteForUpstream)
 				if err != nil {
 					return nil, err
 				}
@@ -152,7 +187,7 @@ func rewriteAliasBatchSource(
 				}
 				return body, nil
 			case *core.ResponsesRequest:
-				modified, err := rewriteAliasResponsesRequest(service, checker, typed, rewriteForUpstream)
+				modified, err := rewriteAliasResponsesRequest(service, checker, typed, providerType, rewriteForUpstream)
 				if err != nil {
 					return nil, err
 				}
@@ -162,7 +197,7 @@ func rewriteAliasBatchSource(
 				}
 				return body, nil
 			case *core.EmbeddingRequest:
-				modified, err := rewriteAliasEmbeddingRequest(service, checker, typed, rewriteForUpstream)
+				modified, err := rewriteAliasEmbeddingRequest(service, checker, typed, providerType, rewriteForUpstream)
 				if err != nil {
 					return nil, err
 				}

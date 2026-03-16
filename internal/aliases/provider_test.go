@@ -96,7 +96,16 @@ func (m *providerMock) GetBatchResults(_ context.Context, _ string, _ string) (*
 
 func (m *providerMock) CreateFile(_ context.Context, _ string, req *core.FileCreateRequest) (*core.FileObject, error) {
 	copy := *req
-	copy.Content = append([]byte(nil), req.Content...)
+	if req.ContentReader != nil {
+		content, err := io.ReadAll(req.ContentReader)
+		if err != nil {
+			return nil, err
+		}
+		copy.Content = content
+		copy.ContentReader = nil
+	} else {
+		copy.Content = append([]byte(nil), req.Content...)
+	}
 	m.fileCreates = append(m.fileCreates, &copy)
 	if m.fileObject != nil {
 		return m.fileObject, nil

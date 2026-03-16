@@ -71,7 +71,7 @@ func processGuardedBatchRequest(
 		providerType,
 		req,
 		fileTransport,
-		[]string{"chat_completions", "responses"},
+		[]core.Operation{core.OperationChatCompletions, core.OperationResponses},
 		func(ctx context.Context, item core.BatchRequestItem, decoded *core.DecodedBatchItemRequest) (json.RawMessage, error) {
 			itemBody := core.CloneRawJSON(item.Body)
 			return core.DispatchDecodedBatchItem(decoded, core.DecodedBatchItemHandlers[json.RawMessage]{
@@ -103,15 +103,12 @@ func processGuardedBatchRequest(
 }
 
 func processGuardedChat(ctx context.Context, pipeline *Pipeline, req *core.ChatRequest) (*core.ChatRequest, error) {
-	if req == nil {
+	if pipeline == nil || pipeline.Len() == 0 || req == nil {
 		return req, nil
 	}
 	msgs, err := chatToMessages(req)
 	if err != nil {
 		return nil, err
-	}
-	if pipeline == nil || pipeline.Len() == 0 {
-		return req, nil
 	}
 	modified, err := pipeline.Process(ctx, msgs)
 	if err != nil {
