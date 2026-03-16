@@ -45,12 +45,6 @@ func ExecutionPlanningWithResolver(provider core.RoutableProvider, resolver Requ
 	}
 }
 
-// ModelValidation is kept as a compatibility wrapper while the rest of the
-// server migrates to the explicit execution-plan terminology.
-func ModelValidation(provider core.RoutableProvider) echo.MiddlewareFunc {
-	return ExecutionPlanning(provider)
-}
-
 func deriveExecutionPlan(c *echo.Context, provider core.RoutableProvider, resolver RequestModelResolver) (*core.ExecutionPlan, error) {
 	if c == nil {
 		return nil, nil
@@ -105,9 +99,6 @@ func deriveExecutionPlan(c *echo.Context, provider core.RoutableProvider, resolv
 		}
 		if !parsed || resolution == nil {
 			return plan, nil
-		}
-		if counted, ok := provider.(modelCountProvider); ok && counted.ModelCount() == 0 {
-			return nil, core.NewProviderError("", 0, "model registry not initialized", nil)
 		}
 		plan.ProviderType = resolution.ProviderType
 		plan.Resolution = resolution
@@ -242,7 +233,7 @@ func passthroughRouteInfo(c *echo.Context) *core.PassthroughRouteInfo {
 	}
 }
 
-// GetProviderType returns the provider type set by ModelValidation for this request.
+// GetProviderType returns the provider type captured in the execution plan for this request.
 func GetProviderType(c *echo.Context) string {
 	if plan := core.GetExecutionPlan(c.Request().Context()); plan != nil {
 		if providerType := strings.TrimSpace(plan.ProviderType); providerType != "" {

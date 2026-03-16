@@ -100,13 +100,12 @@ func (s *nativeFileService) CreateFile(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
-	providers, err := s.providerTypes()
-	if err != nil {
-		return handleError(c, err)
-	}
-
 	providerType := fileReq.Provider
 	if providerType == "" {
+		providers, err := s.providerTypes()
+		if err != nil {
+			return handleError(c, err)
+		}
 		if len(providers) == 1 {
 			providerType = providers[0]
 		} else if len(providers) == 0 {

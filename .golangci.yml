@@ -2,6 +2,11 @@ version: "2"
 linters:
   enable:
     - dupl
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
   settings:
     dupl:
       threshold: 100

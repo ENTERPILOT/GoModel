@@ -4401,6 +4401,60 @@ func TestCreateFile(t *testing.T) {
 	}
 }
 
+func TestCreateFileWithExplicitProviderDoesNotRequireProviderInventory(t *testing.T) {
+	base := &mockProvider{
+		fileCreateResponse: &core.FileObject{
+			ID:        "file_ok_1",
+			Object:    "file",
+			Bytes:     16,
+			CreatedAt: 1000,
+			Filename:  "requests.jsonl",
+			Purpose:   "batch",
+			Provider:  "openai",
+		},
+	}
+
+	provider := &providerWithoutFileInventory{inner: base}
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("purpose", "batch"); err != nil {
+		t.Fatalf("write purpose: %v", err)
+	}
+	if err := writer.WriteField("provider", "openai"); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+	part, err := writer.CreateFormFile("file", "requests.jsonl")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("{\"custom_id\":\"1\"}\n")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/files", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/files", nil, nil, nil, writer.FormDataContentType(), nil, false, "", nil)
+	req = withRequestSnapshotAndPrompt(req, frame)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.CreateFile(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if len(base.capturedFileCreateReqs) != 1 {
+		t.Fatalf("len(capturedFileCreateReqs) = %d, want 1", len(base.capturedFileCreateReqs))
+	}
+}
+
 func TestGetDeleteAndContentFile(t *testing.T) {
 	mock := &mockProvider{
 		supportedModels: []string{"gpt-4o-mini"},

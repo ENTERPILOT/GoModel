@@ -171,6 +171,9 @@ func enrichEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
 		return
 	}
 
+	if requestID := strings.TrimSpace(plan.RequestID); requestID != "" {
+		entry.RequestID = requestID
+	}
 	if requestedModel := plan.RequestedQualifiedModel(); requestedModel != "" {
 		entry.Model = requestedModel
 	}

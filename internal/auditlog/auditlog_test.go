@@ -460,6 +460,44 @@ func TestMiddleware_PrefersExecutionPlanOverLegacyResolution(t *testing.T) {
 	}
 }
 
+func TestMiddleware_UsesExecutionPlanRequestID(t *testing.T) {
+	e := echo.New()
+	logger := &capturingLogger{
+		cfg: Config{Enabled: true},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-nano"}`))
+	req.Header.Set("X-Request-ID", "header-req-id")
+	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+		RequestID:    "plan-req-id",
+		ProviderType: "openai",
+		Resolution: &core.RequestModelResolution{
+			RequestedModel:   "gpt-5-nano",
+			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
+			ProviderType:     "openai",
+		},
+	}))
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		return c.NoContent(http.StatusNoContent)
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
+	}
+
+	entry := logger.entries[0]
+	if entry.RequestID != "plan-req-id" {
+		t.Fatalf("RequestID = %q, want plan-req-id", entry.RequestID)
+	}
+}
+
 func TestMiddleware_DoesNotApplyModelMetadataWithoutExecutionPlan(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{
