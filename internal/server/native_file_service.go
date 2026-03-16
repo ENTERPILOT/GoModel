@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"sort"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -420,12 +419,6 @@ func nextMergedFile(
 	return &item, nil
 }
 
-func sortFilesDesc(items []core.FileObject) {
-	sort.Slice(items, func(i, j int) bool {
-		return fileSortsBefore(items[i], items[j])
-	})
-}
-
 func fileSortsBefore(left, right core.FileObject) bool {
 	if left.CreatedAt == right.CreatedAt {
 		if left.ID == right.ID {
@@ -434,20 +427,4 @@ func fileSortsBefore(left, right core.FileObject) bool {
 		return left.ID > right.ID
 	}
 	return left.CreatedAt > right.CreatedAt
-}
-
-func applyAfterCursor(items []core.FileObject, after string) ([]core.FileObject, error) {
-	after = strings.TrimSpace(after)
-	if after == "" {
-		return items, nil
-	}
-	for i := range items {
-		if items[i].ID == after {
-			if i+1 >= len(items) {
-				return []core.FileObject{}, nil
-			}
-			return items[i+1:], nil
-		}
-	}
-	return nil, core.NewNotFoundError("after cursor file not found: " + after)
 }
