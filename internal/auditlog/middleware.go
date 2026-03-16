@@ -177,6 +177,11 @@ func enrichEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
 	if resolvedModel := plan.ResolvedQualifiedModel(); resolvedModel != "" {
 		entry.ResolvedModel = resolvedModel
 	}
+	if plan.Mode == core.ExecutionModePassthrough && plan.Passthrough != nil {
+		if model := strings.TrimSpace(plan.Passthrough.Model); model != "" {
+			entry.Model = model
+		}
+	}
 	if providerType := strings.TrimSpace(plan.ProviderType); providerType != "" {
 		entry.Provider = providerType
 	} else if plan.Resolution != nil && strings.TrimSpace(plan.Resolution.ProviderType) != "" {

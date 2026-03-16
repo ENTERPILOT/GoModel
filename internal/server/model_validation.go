@@ -78,7 +78,7 @@ func deriveExecutionPlan(c *echo.Context, provider core.RoutableProvider, resolv
 		plan.Mode = core.ExecutionModePassthrough
 		plan.ProviderType = providerType
 		plan.Passthrough = passthrough
-		auditlog.EnrichEntry(c, "passthrough", providerType)
+		auditlog.EnrichEntryWithExecutionPlan(c, plan)
 		return plan, nil
 
 	case core.OperationBatches:

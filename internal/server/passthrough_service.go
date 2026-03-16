@@ -40,6 +40,11 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
-	auditlog.EnrichEntry(c, "passthrough", providerType)
+	plan := core.GetExecutionPlan(c.Request().Context())
+	if plan != nil {
+		auditlog.EnrichEntryWithExecutionPlan(c, plan)
+	} else {
+		auditlog.EnrichEntry(c, info.Model, providerType)
+	}
 	return s.proxyPassthroughResponse(c, providerType, endpoint, info, resp)
 }

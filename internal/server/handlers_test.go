@@ -5116,6 +5116,53 @@ func TestProviderPassthrough_AnthropicV1AliasNormalizesByDefault(t *testing.T) {
 	}
 }
 
+func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers: map[string][]string{
+				"Content-Type": {"application/json"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+		Mode:         core.ExecutionModePassthrough,
+		ProviderType: "openai",
+		Passthrough: &core.PassthroughRouteInfo{
+			Provider:           "openai",
+			RawEndpoint:        "chat/completions",
+			NormalizedEndpoint: "chat/completions",
+			Model:              "gpt-5-mini",
+			AuditPath:          "/v1/chat/completions",
+		},
+	}))
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	entry := &auditlog.LogEntry{}
+	c.Set(string(auditlog.LogEntryKey), entry)
+
+	if err := handler.ProviderPassthrough(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if entry.Model != "gpt-5-mini" {
+		t.Fatalf("audit entry model = %q, want gpt-5-mini", entry.Model)
+	}
+	if entry.Provider != "openai" {
+		t.Fatalf("audit entry provider = %q, want openai", entry.Provider)
+	}
+}
+
 func TestProviderPassthrough_V1AliasDisabledReturnsBadRequest(t *testing.T) {
 	provider := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{

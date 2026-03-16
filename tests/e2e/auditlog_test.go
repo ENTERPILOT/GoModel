@@ -613,6 +613,43 @@ func TestAuditLogErrorCapture(t *testing.T) {
 		entry := entries[0]
 		assert.Equal(t, http.StatusBadRequest, entry.StatusCode)
 		assert.Equal(t, "/v1/chat/completions", entry.Path)
+		assert.Equal(t, "unsupported-model-xyz", entry.Model)
+		assert.Equal(t, "invalid_request_error", entry.ErrorType)
+		assert.Equal(t, "", entry.Provider)
+	})
+
+	t.Run("logs unsupported passthrough provider requests", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := auditlog.Config{
+			Enabled:       true,
+			LogBodies:     true,
+			LogHeaders:    false,
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupAuditLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		payload := map[string]any{
+			"model": "gpt-4.1-nano",
+			"input": "Reply with exactly QA_INVALID_PROVIDER",
+		}
+		body, _ := json.Marshal(payload)
+		resp, err := http.Post(serverURL+"/p/unknown/responses", "application/json", bytes.NewReader(body))
+		require.NoError(t, err)
+		defer closeBody(resp)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+
+		entry := entries[0]
+		assert.Equal(t, http.StatusBadRequest, entry.StatusCode)
+		assert.Equal(t, "/p/unknown/responses", entry.Path)
+		assert.Equal(t, "gpt-4.1-nano", entry.Model)
+		assert.Equal(t, "unknown", entry.Provider)
+		assert.Equal(t, "invalid_request_error", entry.ErrorType)
 	})
 
 	t.Run("logs 405 for wrong HTTP method", func(t *testing.T) {

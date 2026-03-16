@@ -1,7 +1,7 @@
 # Release E2E Curl Matrix
 
-This file contains 60 end-to-end curl scenarios for release validation.
-All 60 scenarios below were executed during this run across these local gateways:
+This file contains 62 end-to-end curl scenarios for release validation.
+These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
 - `http://localhost:18081` - PostgreSQL-backed smoke gateway
@@ -605,4 +605,34 @@ Removes `qa-sonnet-thinking`.
 
 ```bash
 curl -sS -X DELETE -i "$BASE_URL/admin/api/v1/aliases/qa-sonnet-thinking"
+```
+
+## 11. Audit failure coverage
+
+### S61 Unsupported translated model is still written to audit log
+Checks that a rejected translated request is still visible in audit logs with the requested model and error type.
+
+```bash
+REQUEST_ID="qa-invalid-model-$(date +%s)"
+curl -sS -i "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQUEST_ID" \
+  -d '{"model":"does-not-exist-model","messages":[{"role":"user","content":"Reply with exactly QA_INVALID_MODEL"}],"max_tokens":20}' && echo
+sleep 6
+curl -sS "$BASE_URL/admin/api/v1/audit/log?request_id=$REQUEST_ID&limit=5" \
+  | jq '{total,entries:(.entries|map({request_id,path,model,resolved_model,provider,status_code,error_type}))}'
+```
+
+### S62 Unsupported passthrough provider is still written to audit log
+Checks that a rejected passthrough request is still visible in audit logs with the provider parsed from the path.
+
+```bash
+REQUEST_ID="qa-invalid-provider-$(date +%s)"
+curl -sS -i "$BASE_URL/p/not-a-real-provider/responses" \
+  -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQUEST_ID" \
+  -d '{"model":"gpt-4.1-nano","input":"Reply with exactly QA_INVALID_PROVIDER"}' && echo
+sleep 6
+curl -sS "$BASE_URL/admin/api/v1/audit/log?request_id=$REQUEST_ID&limit=5" \
+  | jq '{total,entries:(.entries|map({request_id,path,model,provider,status_code,error_type}))}'
 ```
