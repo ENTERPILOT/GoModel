@@ -172,15 +172,6 @@ func decodeCanonicalSelectorHintsForValidation(ctx context.Context, env *core.Wh
 	return core.DecodeCanonicalSelector(rawBody, env)
 }
 
-func isBatchOrFileRootOrSubresource(path string) bool {
-	switch core.DescribeEndpointPath(path).Operation {
-	case core.OperationBatches, core.OperationFiles:
-		return true
-	default:
-		return false
-	}
-}
-
 func providerPassthroughType(c *echo.Context) (string, bool) {
 	if info := passthroughRouteInfo(c); info != nil {
 		providerType := strings.TrimSpace(info.Provider)
