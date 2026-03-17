@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 
@@ -124,9 +123,6 @@ func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed
 		if model, provider, ok := cachedCanonicalSelectorHints(env); ok {
 			return model, provider, true, nil
 		}
-		if model, provider, ok := decodeCanonicalSelectorHintsForValidation(ctx, env); ok {
-			return model, provider, true, nil
-		}
 		if env.JSONBodyParsed || env.RouteHints.Model != "" || env.RouteHints.Provider != "" {
 			return env.RouteHints.Model, env.RouteHints.Provider, true, nil
 		}
@@ -154,21 +150,6 @@ func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed
 
 func cachedCanonicalSelectorHints(env *core.WhiteBoxPrompt) (model, provider string, ok bool) {
 	return env.CanonicalSelectorFromCachedRequest()
-}
-
-func decodeCanonicalSelectorHintsForValidation(ctx context.Context, env *core.WhiteBoxPrompt) (model, provider string, ok bool) {
-	if env == nil {
-		return "", "", false
-	}
-	snapshot := core.GetRequestSnapshot(ctx)
-	if snapshot == nil {
-		return "", "", false
-	}
-	rawBody := snapshot.CapturedBody()
-	if rawBody == nil {
-		return "", "", false
-	}
-	return core.DecodeCanonicalSelector(rawBody, env)
 }
 
 func providerPassthroughType(c *echo.Context) (string, bool) {

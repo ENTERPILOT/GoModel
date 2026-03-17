@@ -650,7 +650,7 @@ func TestModelValidation_ResolvesProviderTypeFromOversizedLiveBody(t *testing.T)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
-func TestModelValidation_CachesCanonicalChatRequestFromIngressBody(t *testing.T) {
+func TestModelValidation_DoesNotCacheCanonicalChatRequestWhenRouteHintsAlreadyExist(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
 
 	e := echo.New()
@@ -693,14 +693,12 @@ func TestModelValidation_CachesCanonicalChatRequestFromIngressBody(t *testing.T)
 	err := handler(c)
 	require.NoError(t, err)
 	require.NotNil(t, capturedEnv)
-	canonicalReq := capturedEnv.CachedChatRequest()
-	require.NotNil(t, canonicalReq)
-	assert.Equal(t, "gpt-4o-mini", canonicalReq.Model)
-	assert.Equal(t, "openai", canonicalReq.Provider)
-	assert.NotNil(t, canonicalReq.ExtraFields["response_format"])
+	assert.Nil(t, capturedEnv.CachedChatRequest())
+	assert.Equal(t, "gpt-4o-mini", capturedEnv.RouteHints.Model)
+	assert.Equal(t, "openai", capturedEnv.RouteHints.Provider)
 }
 
-func TestModelValidation_CachesCanonicalResponsesRequestFromIngressBody(t *testing.T) {
+func TestModelValidation_DoesNotCacheCanonicalResponsesRequestWhenRouteHintsAlreadyExist(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
 
 	e := echo.New()
@@ -741,13 +739,8 @@ func TestModelValidation_CachesCanonicalResponsesRequestFromIngressBody(t *testi
 	err := handler(c)
 	require.NoError(t, err)
 	require.NotNil(t, capturedEnv)
-	canonicalReq := capturedEnv.CachedResponsesRequest()
-	require.NotNil(t, canonicalReq)
-
-	input, ok := canonicalReq.Input.([]core.ResponsesInputElement)
-	require.True(t, ok)
-	require.Len(t, input, 1)
-	assert.NotNil(t, input[0].ExtraFields["x_trace"])
+	assert.Nil(t, capturedEnv.CachedResponsesRequest())
+	assert.Equal(t, "gpt-4o-mini", capturedEnv.RouteHints.Model)
 }
 
 func TestGetProviderType_EmptyWhenNotSet(t *testing.T) {
