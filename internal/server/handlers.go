@@ -94,6 +94,8 @@ func (h *Handler) passthrough() *passthroughService {
 	return &passthroughService{
 		provider:                     h.provider,
 		logger:                       h.logger,
+		usageLogger:                  h.usageLogger,
+		pricingResolver:              h.pricingResolver,
 		normalizePassthroughV1Prefix: h.normalizePassthroughV1Prefix,
 		enabledPassthroughProviders:  h.enabledPassthroughProviders,
 	}

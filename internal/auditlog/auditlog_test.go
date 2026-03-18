@@ -725,7 +725,6 @@ data: [DONE]
 		FlushInterval: 100 * time.Millisecond,
 	}
 	logger := NewLogger(store, cfg)
-	defer logger.Close()
 
 	entry := &LogEntry{
 		ID:        "test-entry",
@@ -750,9 +749,9 @@ data: [DONE]
 	if err := observedStream.Close(); err != nil {
 		t.Fatalf("failed to close stream: %v", err)
 	}
-
-	// Wait for async write
-	time.Sleep(200 * time.Millisecond)
+	if err := logger.Close(); err != nil {
+		t.Fatalf("failed to close logger: %v", err)
+	}
 
 	// Verify entry was logged
 	if len(store.getEntries()) != 1 {

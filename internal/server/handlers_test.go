@@ -5413,6 +5413,58 @@ func TestProviderPassthrough_AnthropicStream(t *testing.T) {
 	}
 }
 
+func TestProviderPassthrough_OpenAIStreamWritesUsageEntry(t *testing.T) {
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers: map[string][]string{
+				"Content-Type": {"text/event-stream"},
+			},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"id\":\"resp-123\",\"model\":\"gpt-5-mini\",\"usage\":{\"input_tokens\":7,\"output_tokens\":3,\"total_tokens\":10}}\n\n" +
+					"data: [DONE]\n\n",
+			)),
+		},
+	}
+	usageLog := &collectingUsageLogger{
+		config: usage.Config{Enabled: true},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, usageLog, nil)
+	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-ID", "req-pass-stream-usage")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(usageLog.entries) != 1 {
+		t.Fatalf("usage entries = %d, want 1", len(usageLog.entries))
+	}
+
+	entry := usageLog.entries[0]
+	if entry.Provider != "openai" {
+		t.Fatalf("Provider = %q, want openai", entry.Provider)
+	}
+	if entry.Endpoint != "/p/openai/responses" {
+		t.Fatalf("Endpoint = %q, want /p/openai/responses", entry.Endpoint)
+	}
+	if entry.Model != "gpt-5-mini" {
+		t.Fatalf("Model = %q, want gpt-5-mini", entry.Model)
+	}
+	if entry.TotalTokens != 10 {
+		t.Fatalf("TotalTokens = %d, want 10", entry.TotalTokens)
+	}
+	if entry.RequestID != "req-pass-stream-usage" {
+		t.Fatalf("RequestID = %q, want req-pass-stream-usage", entry.RequestID)
+	}
+}
+
 func TestPassthroughStreamAuditPath_NormalizesKnownEndpoints(t *testing.T) {
 	tests := []struct {
 		name        string

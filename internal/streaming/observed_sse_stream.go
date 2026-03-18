@@ -26,9 +26,10 @@ type Observer interface {
 // and fanning them out to observers.
 type ObservedSSEStream struct {
 	io.ReadCloser
-	observers []Observer
-	pending   []byte
-	closed    bool
+	observers  []Observer
+	pending    []byte
+	closed     bool
+	discarding bool
 }
 
 // NewObservedSSEStream returns the original stream when there are no observers.
@@ -75,34 +76,60 @@ func (s *ObservedSSEStream) Close() error {
 
 func (s *ObservedSSEStream) processChunk(data []byte) {
 	if len(s.pending) > 0 {
-		pending := s.pending
-		pendingLen := len(pending)
-		if pendingLen > maxPendingEventBytes {
-			pending = pending[pendingLen-maxPendingEventBytes:]
-			pendingLen = maxPendingEventBytes
+		idx, sepLen := nextEventBoundary(data)
+		if idx == -1 {
+			if len(data) > maxPendingEventBytes || len(s.pending) > maxPendingEventBytes-len(data) {
+				s.pending = nil
+				s.discarding = true
+				return
+			}
+
+			combinedLen := len(s.pending) + len(data)
+			combined := make([]byte, combinedLen)
+			copy(combined, s.pending)
+			copy(combined[len(s.pending):], data)
+			s.pending = combined
+			return
 		}
 
-		dataLen := len(data)
-		if dataLen > maxPendingEventBytes {
-			data = data[dataLen-maxPendingEventBytes:]
-			dataLen = maxPendingEventBytes
+		if idx > maxPendingEventBytes || len(s.pending) > maxPendingEventBytes-idx {
+			s.pending = nil
+			data = data[idx+sepLen:]
+		} else {
+			combinedLen := len(s.pending) + idx
+			event := make([]byte, combinedLen)
+			copy(event, s.pending)
+			copy(event[len(s.pending):], data[:idx])
+			s.pending = nil
+			s.processEvent(event)
+			data = data[idx+sepLen:]
 		}
-
-		combined := make([]byte, pendingLen+dataLen)
-		copy(combined, pending)
-		copy(combined[pendingLen:], data)
-		data = combined
-		s.pending = nil
 	}
 
-	for {
+	for len(data) > 0 {
+		if s.discarding {
+			idx, sepLen := nextEventBoundary(data)
+			if idx == -1 {
+				return
+			}
+			data = data[idx+sepLen:]
+			s.discarding = false
+			continue
+		}
+
 		idx, sepLen := nextEventBoundary(data)
 		if idx == -1 {
 			s.savePending(data)
 			return
 		}
 
-		s.processEvent(data[:idx])
+		if idx > maxPendingEventBytes {
+			data = data[idx+sepLen:]
+			continue
+		}
+		if idx > 0 {
+			s.processEvent(data[:idx])
+		}
 		data = data[idx+sepLen:]
 	}
 }
@@ -123,22 +150,29 @@ func (s *ObservedSSEStream) processBufferedEvents(data []byte) {
 
 func (s *ObservedSSEStream) processEvent(event []byte) {
 	lines := bytes.Split(event, []byte("\n"))
+	payloadLines := make([][]byte, 0, len(lines))
 	for _, line := range lines {
 		jsonData, ok := parseDataLine(line)
 		if !ok {
 			continue
 		}
-		if bytes.Equal(jsonData, donePayload) {
-			continue
-		}
+		payloadLines = append(payloadLines, jsonData)
+	}
+	if len(payloadLines) == 0 {
+		return
+	}
 
-		var payload map[string]interface{}
-		if err := json.Unmarshal(jsonData, &payload); err != nil {
-			continue
-		}
-		for _, observer := range s.observers {
-			observer.OnJSONEvent(payload)
-		}
+	jsonData := bytes.Join(payloadLines, []byte("\n"))
+	if bytes.Equal(jsonData, donePayload) {
+		return
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(jsonData, &payload); err != nil {
+		return
+	}
+	for _, observer := range s.observers {
+		observer.OnJSONEvent(payload)
 	}
 }
 
@@ -176,7 +210,9 @@ func (s *ObservedSSEStream) savePending(data []byte) {
 		return
 	}
 	if len(data) > maxPendingEventBytes {
-		data = data[len(data)-maxPendingEventBytes:]
+		s.pending = nil
+		s.discarding = true
+		return
 	}
 	s.pending = append(s.pending[:0], data...)
 }

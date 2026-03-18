@@ -8,13 +8,15 @@ import (
 )
 
 type trackingObserver struct {
-	eventCount int
-	lastID     string
-	closed     bool
+	eventCount  int
+	lastID      string
+	lastPayload map[string]interface{}
+	closed      bool
 }
 
 func (o *trackingObserver) OnJSONEvent(payload map[string]interface{}) {
 	o.eventCount++
+	o.lastPayload = payload
 	if id, _ := payload["id"].(string); id != "" {
 		o.lastID = id
 	}
@@ -86,7 +88,40 @@ func TestObservedSSEStream_ParsesFragmentedFinalEventOnClose(t *testing.T) {
 	}
 }
 
-func TestObservedSSEStream_CapsCombinedPendingData(t *testing.T) {
+func TestObservedSSEStream_ReassemblesMultilineDataEvent(t *testing.T) {
+	streamData := "data: {\"id\":\"chatcmpl-multiline\",\n" +
+		"data: \"usage\":{\"total_tokens\":3}}\n\n" +
+		"data: [DONE]\n\n"
+	observer := &trackingObserver{}
+	stream := NewObservedSSEStream(io.NopCloser(strings.NewReader(streamData)), observer)
+
+	data, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if string(data) != streamData {
+		t.Fatalf("stream passthrough mismatch")
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+
+	if observer.eventCount != 1 {
+		t.Fatalf("eventCount = %d, want 1", observer.eventCount)
+	}
+	if observer.lastID != "chatcmpl-multiline" {
+		t.Fatalf("lastID = %q, want chatcmpl-multiline", observer.lastID)
+	}
+	usage, ok := observer.lastPayload["usage"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("usage = %#v, want object", observer.lastPayload["usage"])
+	}
+	if got := usage["total_tokens"]; got != float64(3) {
+		t.Fatalf("usage.total_tokens = %#v, want 3", got)
+	}
+}
+
+func TestObservedSSEStream_DiscardsOversizedPendingDataWithoutTailCapping(t *testing.T) {
 	s := &ObservedSSEStream{
 		pending: bytes.Repeat([]byte("a"), maxPendingEventBytes),
 	}
@@ -94,11 +129,41 @@ func TestObservedSSEStream_CapsCombinedPendingData(t *testing.T) {
 
 	s.processChunk(data)
 
-	if got := len(s.pending); got != maxPendingEventBytes {
-		t.Fatalf("pending length = %d, want %d", got, maxPendingEventBytes)
+	if got := len(s.pending); got != 0 {
+		t.Fatalf("pending length = %d, want 0", got)
 	}
-	if !bytes.Equal(s.pending, data[len(data)-maxPendingEventBytes:]) {
-		t.Fatal("pending bytes do not match the capped suffix of the latest chunk")
+	if !s.discarding {
+		t.Fatal("discarding = false, want true")
+	}
+}
+
+func TestObservedSSEStream_DropsOversizedBufferedEventAndResumesWithinSameChunk(t *testing.T) {
+	observer := &trackingObserver{}
+	s := &ObservedSSEStream{
+		observers: []Observer{observer},
+		pending: append(
+			[]byte("data: {\"id\":\"too-big\",\"payload\":\""),
+			bytes.Repeat([]byte("a"), maxPendingEventBytes/2)...,
+		),
+	}
+	data := append(
+		append(
+			append(
+				bytes.Repeat([]byte("b"), maxPendingEventBytes/2+1),
+				[]byte("\"}\n\ndata: {\"id\":\"fresh\"}\n\n")...,
+			),
+			bytes.Repeat([]byte("c"), maxPendingEventBytes+1)...,
+		),
+		[]byte("ignored-trailer")...,
+	)
+
+	s.processChunk(data)
+
+	if observer.eventCount != 1 {
+		t.Fatalf("eventCount = %d, want 1", observer.eventCount)
+	}
+	if observer.lastID != "fresh" {
+		t.Fatalf("lastID = %q, want fresh", observer.lastID)
 	}
 }
 

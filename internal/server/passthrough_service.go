@@ -5,11 +5,14 @@ import (
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
+	"gomodel/internal/usage"
 )
 
 type passthroughService struct {
 	provider                     core.RoutableProvider
 	logger                       auditlog.LoggerInterface
+	usageLogger                  usage.LoggerInterface
+	pricingResolver              usage.PricingResolver
 	normalizePassthroughV1Prefix bool
 	enabledPassthroughProviders  map[string]struct{}
 }
