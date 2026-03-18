@@ -264,3 +264,38 @@ func TestRequestSnapshotCapture_ManagesFilesWithoutReadingMultipartBody(t *testi
 	assert.Equal(t, "files", capturedEnv.OperationType)
 	assert.False(t, capturedEnv.JSONBodyParsed)
 }
+
+func TestRequestBodyBytes_UsesSnapshotReadOnlyBodyView(t *testing.T) {
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Body = &explodingReadCloser{}
+	frame := core.NewRequestSnapshot(
+		http.MethodPost,
+		"/v1/chat/completions",
+		nil,
+		nil,
+		nil,
+		"application/json",
+		[]byte(`{"model":"gpt-4o-mini"}`),
+		false,
+		"req-body-bytes-123",
+		nil,
+	)
+	req = req.WithContext(core.WithRequestSnapshot(req.Context(), frame))
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	body, err := requestBodyBytes(c)
+	require.NoError(t, err)
+	require.NotNil(t, body)
+	assert.JSONEq(t, `{"model":"gpt-4o-mini"}`, string(body))
+
+	view := frame.CapturedBodyView()
+	require.NotNil(t, view)
+	require.NotEmpty(t, view)
+	if &body[0] != &view[0] {
+		t.Fatal("requestBodyBytes returned a cloned snapshot body, want shared read-only view")
+	}
+}

@@ -40,6 +40,9 @@ func TestNewRequestSnapshot_DefensivelyCopiesMutableFields(t *testing.T) {
 	if got := string(snapshot.CapturedBody()); got != `{"model":"gpt-5-mini"}` {
 		t.Fatalf("CapturedBody = %q, want original body", got)
 	}
+	if got := string(snapshot.CapturedBodyView()); got != `{"model":"gpt-5-mini"}` {
+		t.Fatalf("CapturedBodyView = %q, want original body", got)
+	}
 	if got := snapshot.GetTraceMetadata()["Traceparent"]; got != "trace-1" {
 		t.Fatalf("GetTraceMetadata Traceparent = %q, want trace-1", got)
 	}
@@ -48,5 +51,18 @@ func TestNewRequestSnapshot_DefensivelyCopiesMutableFields(t *testing.T) {
 	clonedHeaders["X-Test"][0] = "changed-again"
 	if got := snapshot.GetHeaders()["X-Test"][0]; got != "a" {
 		t.Fatalf("GetHeaders returned mutable state, got %q", got)
+	}
+
+	view := snapshot.CapturedBodyView()
+	if len(view) == 0 || len(snapshot.capturedBody) == 0 {
+		t.Fatal("captured body unexpectedly empty")
+	}
+	if &view[0] != &snapshot.capturedBody[0] {
+		t.Fatal("CapturedBodyView did not return the underlying snapshot bytes")
+	}
+
+	clonedBody := snapshot.CapturedBody()
+	if &clonedBody[0] == &snapshot.capturedBody[0] {
+		t.Fatal("CapturedBody returned underlying snapshot bytes, want defensive copy")
 	}
 }

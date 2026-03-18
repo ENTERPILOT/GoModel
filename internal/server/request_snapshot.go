@@ -150,7 +150,7 @@ func (c *combinedReadCloser) Close() error {
 
 func requestBodyBytes(c *echo.Context) ([]byte, error) {
 	if snapshot := core.GetRequestSnapshot(c.Request().Context()); snapshot != nil {
-		if body := snapshot.CapturedBody(); body != nil {
+		if body := snapshot.CapturedBodyView(); body != nil {
 			return body, nil
 		}
 	}

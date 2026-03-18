@@ -3,7 +3,7 @@ package core
 // RequestSnapshot is the transport-level capture of an inbound request. It
 // preserves the request as received at the HTTP boundary so later stages can
 // extract semantics without losing fidelity while keeping mutable state behind
-// defensive-copy accessors.
+// defensive-copy accessors by default.
 type RequestSnapshot struct {
 	// Method is the inbound HTTP method.
 	Method string
@@ -54,6 +54,15 @@ func (s *RequestSnapshot) CapturedBody() []byte {
 		return nil
 	}
 	return cloneBytes(s.capturedBody)
+}
+
+// CapturedBodyView returns the captured request body bytes without cloning.
+// Callers must treat the returned slice as read-only.
+func (s *RequestSnapshot) CapturedBodyView() []byte {
+	if s == nil {
+		return nil
+	}
+	return s.capturedBody
 }
 
 // GetRouteParams returns a defensive copy of the captured route parameters.
