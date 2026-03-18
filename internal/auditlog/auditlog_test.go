@@ -413,6 +413,54 @@ func TestMiddleware_UsesIngressTooLargeFlagWithoutReadingStream(t *testing.T) {
 	}
 }
 
+func TestMiddleware_SkipsStreamingResponseWriterCapture(t *testing.T) {
+	e := echo.New()
+	logger := &capturingLogger{
+		cfg: Config{Enabled: true, LogBodies: true},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4","stream":true}`))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	var capture *responseBodyCapture
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		var ok bool
+		capture, ok = c.Response().(*responseBodyCapture)
+		if !ok {
+			t.Fatalf("Response = %T, want *responseBodyCapture", c.Response())
+		}
+
+		MarkEntryAsStreaming(c, true)
+		EnrichEntryWithStream(c, true)
+		c.Response().Header().Set("Content-Type", "text/event-stream")
+		c.Response().WriteHeader(http.StatusOK)
+		if _, err := c.Response().Write([]byte("data: {\"id\":\"chatcmpl-test\"}\n\n")); err != nil {
+			return err
+		}
+		if _, err := c.Response().Write([]byte("data: [DONE]\n\n")); err != nil {
+			return err
+		}
+		return nil
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if capture == nil {
+		t.Fatal("capture = nil, want non-nil")
+	}
+	if capture.body.Len() != 0 {
+		t.Fatalf("captured body len = %d, want 0 for streaming response", capture.body.Len())
+	}
+	if capture.truncated {
+		t.Fatal("truncated = true, want false")
+	}
+	if len(logger.entries) != 0 {
+		t.Fatalf("len(entries) = %d, want 0 because streaming wrapper should own logging", len(logger.entries))
+	}
+}
+
 func TestMiddleware_PrefersExecutionPlanOverLegacyResolution(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{
@@ -1051,6 +1099,31 @@ func TestResponseBodyCapture_Write_MultipleChunksOverflow(t *testing.T) {
 	}
 	if capture.body.Len() != int(MaxBodyCapture) {
 		t.Errorf("expected buffer still at %d after third chunk, got %d", MaxBodyCapture, capture.body.Len())
+	}
+}
+
+func TestResponseBodyCapture_Write_SkipsWhenDisabled(t *testing.T) {
+	capture := &responseBodyCapture{
+		ResponseWriter: &discardWriter{},
+		body:           &bytes.Buffer{},
+		shouldCapture: func() bool {
+			return false
+		},
+	}
+
+	payload := []byte(`data: {"chunk":1}` + "\n\n")
+	n, err := capture.Write(payload)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != len(payload) {
+		t.Fatalf("written = %d, want %d", n, len(payload))
+	}
+	if capture.body.Len() != 0 {
+		t.Fatalf("captured body len = %d, want 0", capture.body.Len())
+	}
+	if capture.truncated {
+		t.Fatal("truncated = true, want false")
 	}
 }
 

@@ -99,6 +99,9 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				responseCapture = &responseBodyCapture{
 					ResponseWriter: c.Response(),
 					body:           &bytes.Buffer{},
+					shouldCapture: func() bool {
+						return shouldCaptureResponseBody(c)
+					},
 				}
 				c.SetResponse(responseCapture)
 			}
@@ -121,7 +124,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			}
 
 			// Capture response body if enabled
-			if cfg.LogBodies && responseCapture != nil && responseCapture.body.Len() > 0 {
+			if cfg.LogBodies && responseCapture != nil && shouldCaptureResponseBody(c) && responseCapture.body.Len() > 0 {
 				// Set truncation flag if response body exceeded limit
 				if responseCapture.truncated {
 					entry.Data.ResponseBodyTooBigToHandle = true
@@ -258,11 +261,15 @@ type responseBodyCapture struct {
 	http.ResponseWriter
 	body      *bytes.Buffer
 	truncated bool
+	// shouldCapture allows middleware to stop buffering once the request is
+	// known to be streaming. Streaming responses are handled by StreamLogWrapper.
+	shouldCapture func() bool
 }
 
 func (r *responseBodyCapture) Write(b []byte) (int, error) {
-	// Write to the capture buffer (limit to MaxBodyCapture to avoid memory issues)
-	if !r.truncated {
+	// Write to the capture buffer (limit to MaxBodyCapture to avoid memory issues).
+	// Streaming responses bypass this path once marked or identified as SSE.
+	if r.captureEnabled() && !r.truncated {
 		remaining := int(MaxBodyCapture) - r.body.Len()
 		if remaining > 0 {
 			if len(b) <= remaining {
@@ -277,6 +284,13 @@ func (r *responseBodyCapture) Write(b []byte) (int, error) {
 	}
 	// Write to the original response writer
 	return r.ResponseWriter.Write(b)
+}
+
+func (r *responseBodyCapture) captureEnabled() bool {
+	if r == nil || r.shouldCapture == nil {
+		return true
+	}
+	return r.shouldCapture()
 }
 
 // Flush implements http.Flusher. It delegates to the underlying ResponseWriter
@@ -300,6 +314,24 @@ func (r *responseBodyCapture) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 func (r *responseBodyCapture) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
+}
+
+func shouldCaptureResponseBody(c *echo.Context) bool {
+	if c == nil {
+		return true
+	}
+	if IsEntryMarkedAsStreaming(c) {
+		return false
+	}
+	return !isEventStreamContentType(c.Response().Header().Get("Content-Type"))
+}
+
+func isEventStreamContentType(contentType string) bool {
+	if contentType == "" {
+		return false
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	return mediaType == "text/event-stream"
 }
 
 // extractHeaders extracts headers from a map[string][]string (http.Header or echo headers),
