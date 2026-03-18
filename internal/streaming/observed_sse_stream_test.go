@@ -102,6 +102,29 @@ func TestObservedSSEStream_CapsCombinedPendingData(t *testing.T) {
 	}
 }
 
+func TestObservedSSEStream_DropsOversizedPendingPrefixBeforeCombining(t *testing.T) {
+	observer := &trackingObserver{}
+	s := &ObservedSSEStream{
+		observers: []Observer{observer},
+		pending: append(
+			[]byte("data: {\"id\":\"stale\"}\n\n"),
+			bytes.Repeat([]byte("x"), maxPendingEventBytes)...,
+		),
+	}
+
+	s.processChunk([]byte("\n\ndata: {\"id\":\"fresh\"}\n\n"))
+
+	if observer.eventCount != 1 {
+		t.Fatalf("eventCount = %d, want 1", observer.eventCount)
+	}
+	if observer.lastID != "fresh" {
+		t.Fatalf("lastID = %q, want fresh", observer.lastID)
+	}
+	if len(s.pending) != 0 {
+		t.Fatalf("pending length = %d, want 0", len(s.pending))
+	}
+}
+
 func TestObservedSSEStream_HandlesCRLFAndDataWithoutSpace(t *testing.T) {
 	streamData := "data:{\"id\":\"chatcmpl-1\"}\r\n\r\ndata: {\"id\":\"chatcmpl-2\"}\r\n\r\ndata:[DONE]\r\n\r\n"
 	observer := &trackingObserver{}

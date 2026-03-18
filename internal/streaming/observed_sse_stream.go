@@ -75,12 +75,22 @@ func (s *ObservedSSEStream) Close() error {
 
 func (s *ObservedSSEStream) processChunk(data []byte) {
 	if len(s.pending) > 0 {
-		if len(data) > maxPendingEventBytes {
-			data = data[len(data)-maxPendingEventBytes:]
+		pending := s.pending
+		pendingLen := len(pending)
+		if pendingLen > maxPendingEventBytes {
+			pending = pending[pendingLen-maxPendingEventBytes:]
+			pendingLen = maxPendingEventBytes
 		}
-		combined := make([]byte, len(s.pending)+len(data))
-		copy(combined, s.pending)
-		copy(combined[len(s.pending):], data)
+
+		dataLen := len(data)
+		if dataLen > maxPendingEventBytes {
+			data = data[dataLen-maxPendingEventBytes:]
+			dataLen = maxPendingEventBytes
+		}
+
+		combined := make([]byte, pendingLen+dataLen)
+		copy(combined, pending)
+		copy(combined[pendingLen:], data)
 		data = combined
 		s.pending = nil
 	}
