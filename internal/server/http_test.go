@@ -530,6 +530,73 @@ func TestSwaggerDocJson_ReturnsExpectedContent(t *testing.T) {
 	}
 }
 
+func TestPprofEndpoint_Enabled(t *testing.T) {
+	mock := &mockProvider{}
+	srv := New(mock, &Config{PprofEnabled: true})
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Types of profiles available:") {
+		t.Errorf("expected pprof index content, got: %s", body[:min(200, len(body))])
+	}
+	if !strings.Contains(body, "goroutine") {
+		t.Errorf("expected pprof index to list goroutine profile, got: %s", body[:min(200, len(body))])
+	}
+}
+
+func TestPprofEndpoint_Disabled(t *testing.T) {
+	mock := &mockProvider{}
+	srv := New(mock, &Config{PprofEnabled: false})
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", rec.Code)
+	}
+}
+
+func TestPprofEndpoint_NilConfig(t *testing.T) {
+	mock := &mockProvider{}
+	srv := New(mock, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", rec.Code)
+	}
+}
+
+func TestServerWithMasterKeyAndPprof(t *testing.T) {
+	mock := &mockProvider{}
+	srv := New(mock, &Config{
+		MasterKey:    "test-secret-key",
+		PprofEnabled: true,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200 for public pprof endpoint, got %d", rec.Code)
+	}
+}
+
 func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
 	mock := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
@@ -582,7 +649,7 @@ func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
 func TestProviderPassthroughRoute_DisabledRequiresAuthBefore404(t *testing.T) {
 	mock := &mockProvider{}
 	srv := New(mock, &Config{
-		MasterKey:                  "test-secret-key",
+		MasterKey:                "test-secret-key",
 		DisablePassthroughRoutes: true,
 	})
 

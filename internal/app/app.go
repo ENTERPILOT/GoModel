@@ -201,6 +201,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		MetricsEnabled:               appCfg.Metrics.Enabled,
 		MetricsEndpoint:              appCfg.Metrics.Endpoint,
 		BodySizeLimit:                appCfg.Server.BodySizeLimit,
+		PprofEnabled:                 appCfg.Server.PprofEnabled,
 		AuditLogger:                  auditResult.Logger,
 		UsageLogger:                  usageResult.Logger,
 		PricingResolver:              providerResult.Registry,
@@ -243,6 +244,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	if appCfg.Server.SwaggerEnabled {
 		slog.Info("swagger UI enabled", "path", "/swagger/index.html")
+	}
+	if appCfg.Server.PprofEnabled {
+		slog.Info("pprof enabled", "path", "/debug/pprof/")
 	}
 	if appCfg.Server.EnablePassthroughRoutes {
 		slog.Info("provider passthrough enabled", "path", "/p/{provider}/{endpoint}")

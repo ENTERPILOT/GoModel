@@ -321,3 +321,28 @@ func TestMetricsEndpointPathTraversal(t *testing.T) {
 		}
 	})
 }
+
+func TestPprofEndpoint_RequiresAuthWhenDisabled(t *testing.T) {
+	mock := &mockProvider{}
+	srv := New(mock, &Config{
+		MasterKey:    "secret-key",
+		PprofEnabled: false,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 before route resolution when pprof is disabled, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	req.Header.Set("Authorization", "Bearer secret-key")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected 404 after auth when pprof is disabled, got %d", rec.Code)
+	}
+}

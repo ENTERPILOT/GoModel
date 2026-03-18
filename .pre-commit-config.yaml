@@ -27,6 +27,12 @@ repos:
         language: system
         pass_filenames: false
         files: '(\.go$|^go\.(mod|sum)$)'
+      - id: perf-hotpath-guard
+        name: hot-path performance guard (alloc/byte thresholds)
+        entry: make perf-check
+        language: system
+        pass_filenames: false
+        files: '^(internal/(auditlog|core|providers|server|usage)/.*\.go|tests/perf/.*\.go|Makefile|\.github/workflows/test\.yml)$'
 
   # 3. High-Performance Go Linter (golangci-lint)
   - repo: https://github.com/golangci/golangci-lint

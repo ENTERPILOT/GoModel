@@ -1,4 +1,4 @@
-.PHONY: all build run clean tidy test test-e2e test-integration test-contract test-all lint lint-fix record-api swagger install-tools
+.PHONY: all build run clean tidy test test-e2e test-integration test-contract test-all lint lint-fix record-api swagger install-tools perf-check perf-bench
 
 all: build
 
@@ -49,6 +49,12 @@ test-contract:
 
 # Run all tests including e2e, integration, and contract tests
 test-all: test test-e2e test-integration test-contract
+
+perf-check:
+	go test -run '^TestHotPathPerfGuard$$' -count=1 -v ./tests/perf/...
+
+perf-bench:
+	go test -bench=. -benchmem ./tests/perf/...
 
 # Record API responses for contract tests
 # Usage: OPENAI_API_KEY=sk-xxx make record-api

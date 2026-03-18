@@ -7,6 +7,7 @@ server:
   port: "8080"
   master_key: "your-secret-key"
   body_size_limit: "10M"
+  pprof_enabled: false # expose /debug/pprof/* for local profiling only
   enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
   enabled_passthrough_providers: ["openai", "anthropic"] # providers enabled on /p/{provider}/...

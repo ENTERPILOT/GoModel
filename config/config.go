@@ -335,6 +335,7 @@ type ServerConfig struct {
 	MasterKey      string `yaml:"master_key" env:"GOMODEL_MASTER_KEY"`   // Optional: Master key for authentication
 	BodySizeLimit  string `yaml:"body_size_limit" env:"BODY_SIZE_LIMIT"` // Max request body size (e.g., "10M", "1024K")
 	SwaggerEnabled bool   `yaml:"swagger_enabled" env:"SWAGGER_ENABLED"` // Whether to expose the Swagger UI at /swagger/index.html
+	PprofEnabled   bool   `yaml:"pprof_enabled" env:"PPROF_ENABLED"`     // Whether to expose debug profiling routes at /debug/pprof/*
 	// EnablePassthroughRoutes exposes provider-native passthrough endpoints under
 	// /p/{provider}/{endpoint}. Default: true.
 	EnablePassthroughRoutes bool `yaml:"enable_passthrough_routes" env:"ENABLE_PASSTHROUGH_ROUTES"`
@@ -405,8 +406,9 @@ type ResilienceConfig struct {
 func buildDefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Port:                         "8080",
-			SwaggerEnabled:               true,
+			Port:                    "8080",
+			SwaggerEnabled:          true,
+			PprofEnabled:            false,
 			EnablePassthroughRoutes: true,
 			AllowPassthroughV1Alias: true,
 			EnabledPassthroughProviders: []string{

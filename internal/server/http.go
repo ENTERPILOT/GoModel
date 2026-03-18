@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	httppprof "net/http/pprof"
 	"path"
 	"strings"
 
@@ -36,6 +37,7 @@ type Config struct {
 	MetricsEnabled               bool                                   // Whether to expose Prometheus metrics endpoint
 	MetricsEndpoint              string                                 // HTTP path for metrics endpoint (default: /metrics)
 	BodySizeLimit                string                                 // Max request body size (e.g., "10M", "1024K")
+	PprofEnabled                 bool                                   // Whether to expose debug profiling routes at /debug/pprof/*
 	AuditLogger                  auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
 	UsageLogger                  usage.LoggerInterface                  // Optional: Usage logger for token tracking
 	PricingResolver              usage.PricingResolver                  // Optional: Resolves pricing for cost calculation
@@ -121,6 +123,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	if cfg != nil && cfg.SwaggerEnabled {
 		authSkipPaths = append(authSkipPaths, "/swagger/*")
+	}
+	if cfg != nil && cfg.PprofEnabled {
+		authSkipPaths = append(authSkipPaths, "/debug/pprof", "/debug/pprof/*")
 	}
 
 	// Global middleware stack (order matters)
@@ -213,6 +218,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.MetricsEnabled {
 		e.GET(metricsPath, echo.WrapHandler(promhttp.Handler()))
 	}
+	if cfg != nil && cfg.PprofEnabled {
+		registerPprofRoutes(e)
+	}
 
 	// API routes
 	if cfg == nil || !cfg.DisablePassthroughRoutes {
@@ -271,6 +279,19 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		handler:                 handler,
 		responseCacheMiddleware: rcm,
 	}
+}
+
+func registerPprofRoutes(e *echo.Echo) {
+	e.GET("/debug/pprof", echo.WrapHandler(http.HandlerFunc(httppprof.Index)))
+	e.GET("/debug/pprof/", echo.WrapHandler(http.HandlerFunc(httppprof.Index)))
+	e.GET("/debug/pprof/cmdline", echo.WrapHandler(http.HandlerFunc(httppprof.Cmdline)))
+	e.GET("/debug/pprof/profile", echo.WrapHandler(http.HandlerFunc(httppprof.Profile)))
+	e.GET("/debug/pprof/symbol", echo.WrapHandler(http.HandlerFunc(httppprof.Symbol)))
+	e.GET("/debug/pprof/trace", echo.WrapHandler(http.HandlerFunc(httppprof.Trace)))
+	e.GET("/debug/pprof/:profile", func(c *echo.Context) error {
+		httppprof.Handler(c.Param("profile")).ServeHTTP(c.Response(), c.Request())
+		return nil
+	})
 }
 
 func passthroughV1PrefixNormalizationEnabled(cfg *Config) bool {

@@ -189,6 +189,15 @@ func TestApplyEnvOverrides(t *testing.T) {
 			},
 		},
 		{
+			name:    "PPROF_ENABLED override",
+			envVars: map[string]string{"PPROF_ENABLED": "true"},
+			check: func(t *testing.T, cfg *Config) {
+				if !cfg.Server.PprofEnabled {
+					t.Error("Server.PprofEnabled should be true")
+				}
+			},
+		},
+		{
 			name:    "passthrough v1 normalization override",
 			envVars: map[string]string{"ALLOW_PASSTHROUGH_V1_ALIAS": "false"},
 			check: func(t *testing.T, cfg *Config) {

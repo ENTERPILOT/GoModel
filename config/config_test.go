@@ -26,7 +26,7 @@ func clearProviderEnvVars(t *testing.T) {
 func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"PORT", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "ENABLED_PASSTHROUGH_PROVIDERS",
+		"PORT", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "ENABLED_PASSTHROUGH_PROVIDERS",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"STORAGE_TYPE", "SQLITE_PATH", "POSTGRES_URL", "POSTGRES_MAX_CONNS",
@@ -66,6 +66,9 @@ func TestBuildDefaultConfig(t *testing.T) {
 
 	if cfg.Server.Port != "8080" {
 		t.Errorf("expected Server.Port=8080, got %s", cfg.Server.Port)
+	}
+	if cfg.Server.PprofEnabled {
+		t.Error("expected Server.PprofEnabled=false")
 	}
 	if !cfg.Server.EnablePassthroughRoutes {
 		t.Error("expected Server.EnablePassthroughRoutes=true")
@@ -182,6 +185,7 @@ func TestLoad_YAMLOverridesDefaults(t *testing.T) {
 		yaml := `
 server:
   port: "3000"
+  pprof_enabled: true
 cache:
   model:
     redis:
@@ -205,6 +209,9 @@ logging:
 
 		if cfg.Server.Port != "3000" {
 			t.Errorf("expected port 3000, got %s", cfg.Server.Port)
+		}
+		if !cfg.Server.PprofEnabled {
+			t.Error("expected Server.PprofEnabled=true from YAML")
 		}
 		if cfg.Cache.Model.Redis == nil {
 			t.Fatal("expected Cache.Model.Redis to be set")
