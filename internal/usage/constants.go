@@ -15,6 +15,7 @@ const (
 	UsageEntryKey contextKey = "usage_entry"
 
 	// UsageEntryStreamingKey is the context key for marking a request as streaming.
-	// When true, the middleware skips logging (StreamUsageWrapper handles it instead).
+	// When true, the middleware skips logging because streaming usage is handled
+	// by the shared SSE observer path.
 	UsageEntryStreamingKey contextKey = "usage_entry_streaming"
 )

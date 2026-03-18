@@ -6,10 +6,10 @@ import (
 	"sync"
 	"testing"
 
-	"gomodel/internal/core"
+	"gomodel/internal/streaming"
 )
 
-// trackingLogger tracks written entries for testing
+// trackingLogger tracks written entries for testing.
 type trackingLogger struct {
 	entries []*UsageEntry
 	mu      sync.Mutex
@@ -38,8 +38,7 @@ func (l *trackingLogger) getEntries() []*UsageEntry {
 	return result
 }
 
-func TestStreamUsageWrapper(t *testing.T) {
-	// OpenAI-style SSE stream with usage in final event
+func TestStreamUsageObserverChatCompletionStream(t *testing.T) {
 	streamData := `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
 
 data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}
@@ -48,31 +47,26 @@ data: [DONE]
 
 `
 	logger := &trackingLogger{enabled: true}
-	stream := io.NopCloser(strings.NewReader(streamData))
-	wrapper := NewStreamUsageWrapper(stream, logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
+	stream := streaming.NewObservedSSEStream(
+		io.NopCloser(strings.NewReader(streamData)),
+		NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil),
+	)
 
-	// Read all data
-	data, err := io.ReadAll(wrapper)
+	data, err := io.ReadAll(stream)
 	if err != nil {
 		t.Fatalf("ReadAll error: %v", err)
 	}
-
-	// Verify data passed through
 	if string(data) != streamData {
-		t.Errorf("data mismatch: got %d bytes, want %d bytes", len(data), len(streamData))
+		t.Fatalf("stream passthrough mismatch")
 	}
-
-	// Close wrapper to trigger usage extraction
-	if err := wrapper.Close(); err != nil {
+	if err := stream.Close(); err != nil {
 		t.Fatalf("Close error: %v", err)
 	}
 
-	// Verify usage was extracted
 	entries := logger.getEntries()
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(entries))
 	}
-
 	entry := entries[0]
 	if entry.InputTokens != 10 {
 		t.Errorf("InputTokens = %d, want 10", entry.InputTokens)
@@ -91,25 +85,30 @@ data: [DONE]
 	}
 }
 
-func TestStreamUsageWrapperWithExtendedUsage(t *testing.T) {
-	// OpenAI o-series with prompt_tokens_details and completion_tokens_details
-	streamData := `data: {"id":"chatcmpl-456","object":"chat.completion.chunk","model":"o1-preview","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150,"prompt_tokens_details":{"cached_tokens":20},"completion_tokens_details":{"reasoning_tokens":10}}}
-
-data: [DONE]
-
-`
+func TestStreamUsageObserverWithExtendedUsage(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
-	stream := io.NopCloser(strings.NewReader(streamData))
-	wrapper := NewStreamUsageWrapper(stream, logger, "o1-preview", "openai", "req-456", "/v1/chat/completions", nil)
-
-	_, _ = io.ReadAll(wrapper)
-	_ = wrapper.Close()
+	observer := NewStreamUsageObserver(logger, "o1-preview", "openai", "req-456", "/v1/chat/completions", nil)
+	observer.OnJSONEvent(map[string]interface{}{
+		"id":    "chatcmpl-456",
+		"model": "o1-preview",
+		"usage": map[string]interface{}{
+			"prompt_tokens":     float64(100),
+			"completion_tokens": float64(50),
+			"total_tokens":      float64(150),
+			"prompt_tokens_details": map[string]interface{}{
+				"cached_tokens": float64(20),
+			},
+			"completion_tokens_details": map[string]interface{}{
+				"reasoning_tokens": float64(10),
+			},
+		},
+	})
+	observer.OnStreamClose()
 
 	entries := logger.getEntries()
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(entries))
 	}
-
 	entry := entries[0]
 	if entry.InputTokens != 100 {
 		t.Errorf("InputTokens = %d, want 100", entry.InputTokens)
@@ -117,8 +116,6 @@ data: [DONE]
 	if entry.OutputTokens != 50 {
 		t.Errorf("OutputTokens = %d, want 50", entry.OutputTokens)
 	}
-
-	// Check extended data was captured
 	if entry.RawData == nil {
 		t.Fatal("expected RawData to be set")
 	}
@@ -130,118 +127,41 @@ data: [DONE]
 	}
 }
 
-func TestStreamUsageWrapperNoUsage(t *testing.T) {
-	// Stream without usage data
+func TestStreamUsageObserverNoUsage(t *testing.T) {
 	streamData := `data: {"id":"chatcmpl-789","object":"chat.completion.chunk","model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}]}
 
 data: [DONE]
 
 `
 	logger := &trackingLogger{enabled: true}
-	stream := io.NopCloser(strings.NewReader(streamData))
-	wrapper := NewStreamUsageWrapper(stream, logger, "gpt-4", "openai", "req-789", "/v1/chat/completions", nil)
+	stream := streaming.NewObservedSSEStream(
+		io.NopCloser(strings.NewReader(streamData)),
+		NewStreamUsageObserver(logger, "gpt-4", "openai", "req-789", "/v1/chat/completions", nil),
+	)
 
-	_, _ = io.ReadAll(wrapper)
-	_ = wrapper.Close()
+	_, _ = io.ReadAll(stream)
+	_ = stream.Close()
 
-	// Should not log anything if no usage found
 	entries := logger.getEntries()
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries (no usage), got %d", len(entries))
 	}
 }
 
-func TestStreamUsageWrapperDisabled(t *testing.T) {
-	streamData := `data: {"id":"chatcmpl-123","usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}
-
-data: [DONE]
-
-`
-	logger := &trackingLogger{enabled: false} // disabled
-	stream := io.NopCloser(strings.NewReader(streamData))
-	wrapper := NewStreamUsageWrapper(stream, logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
-
-	_, _ = io.ReadAll(wrapper)
-	_ = wrapper.Close()
-
-	// Should still log even when config says disabled (because Write() is called)
-	// The WrapStreamForUsage function is what should check enabled status
-	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Errorf("expected 1 entry, got %d", len(entries))
-	}
-}
-
-func TestWrapStreamForUsageDisabled(t *testing.T) {
-	streamData := "test data"
-	logger := &trackingLogger{enabled: false} // disabled
-	stream := io.NopCloser(strings.NewReader(streamData))
-
-	wrapped := WrapStreamForUsage(stream, logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
-
-	// When disabled, should return original stream (not wrapped)
-	// This is determined by checking if wrapped is the same as original
-	data, _ := io.ReadAll(wrapped)
-	if string(data) != streamData {
-		t.Errorf("data mismatch")
-	}
-}
-
-func TestWrapStreamForUsageNilLogger(t *testing.T) {
-	streamData := "test data"
-	stream := io.NopCloser(strings.NewReader(streamData))
-
-	wrapped := WrapStreamForUsage(stream, nil, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
-
-	// When nil logger, should return original stream
-	data, _ := io.ReadAll(wrapped)
-	if string(data) != streamData {
-		t.Errorf("data mismatch")
-	}
-}
-
-func TestIsModelInteractionPath(t *testing.T) {
-	tests := []struct {
-		path string
-		want bool
-	}{
-		{"/v1/chat/completions", true},
-		{"/v1/chat/completions?foo=bar", true},
-		{"/v1/responses", true},
-		{"/v1/responses/123", true},
-		{"/v1/models", false},
-		{"/health", false},
-		{"/metrics", false},
-		{"/admin", false},
-		{"/", false},
-		{"", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			got := core.IsModelInteractionPath(tt.path)
-			if got != tt.want {
-				t.Errorf("core.IsModelInteractionPath(%q) = %v, want %v", tt.path, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestStreamUsageWrapperDoubleClose(t *testing.T) {
-	streamData := `data: {"id":"chatcmpl-123","usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}
-
-data: [DONE]
-
-`
+func TestStreamUsageObserverDoubleClose(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
-	stream := io.NopCloser(strings.NewReader(streamData))
-	wrapper := NewStreamUsageWrapper(stream, logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
+	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
+	observer.OnJSONEvent(map[string]interface{}{
+		"id": "chatcmpl-123",
+		"usage": map[string]interface{}{
+			"prompt_tokens":     float64(10),
+			"completion_tokens": float64(5),
+			"total_tokens":      float64(15),
+		},
+	})
 
-	_, _ = io.ReadAll(wrapper)
-
-	// Close twice should not panic or double-log
-	_ = wrapper.Close()
-	_ = wrapper.Close()
+	observer.OnStreamClose()
+	observer.OnStreamClose()
 
 	entries := logger.getEntries()
 	if len(entries) != 1 {
@@ -249,8 +169,7 @@ data: [DONE]
 	}
 }
 
-func TestStreamUsageWrapperResponsesAPI(t *testing.T) {
-	// Responses API format with event: prefixes and response.completed containing nested response.usage
+func TestStreamUsageObserverResponsesAPI(t *testing.T) {
 	streamData := `event: response.created
 data: {"type":"response.created","response":{"id":"resp-123","object":"response","status":"in_progress","model":"gpt-5"}}
 
@@ -267,19 +186,19 @@ data: [DONE]
 
 `
 	logger := &trackingLogger{enabled: true}
-	stream := io.NopCloser(strings.NewReader(streamData))
-	wrapper := NewStreamUsageWrapper(stream, logger, "gpt-5", "openai", "req-resp-1", "/v1/responses", nil)
+	stream := streaming.NewObservedSSEStream(
+		io.NopCloser(strings.NewReader(streamData)),
+		NewStreamUsageObserver(logger, "gpt-5", "openai", "req-resp-1", "/v1/responses", nil),
+	)
 
-	data, err := io.ReadAll(wrapper)
+	data, err := io.ReadAll(stream)
 	if err != nil {
 		t.Fatalf("ReadAll error: %v", err)
 	}
-
 	if string(data) != streamData {
 		t.Errorf("data mismatch: got %d bytes, want %d bytes", len(data), len(streamData))
 	}
-
-	if err := wrapper.Close(); err != nil {
+	if err := stream.Close(); err != nil {
 		t.Fatalf("Close error: %v", err)
 	}
 
@@ -287,7 +206,6 @@ data: [DONE]
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(entries))
 	}
-
 	entry := entries[0]
 	if entry.InputTokens != 15 {
 		t.Errorf("InputTokens = %d, want 15", entry.InputTokens)
@@ -306,13 +224,8 @@ data: [DONE]
 	}
 }
 
-func TestStreamUsageWrapperLargeResponsesDone(t *testing.T) {
-	// Regression test: response.completed event >8KB should not lose usage data.
-	// The old rolling 8KB buffer would truncate the beginning of this event.
-
-	// Build a large output content to push the response.completed event well over 8KB
-	largeText := strings.Repeat("This is a long response from the model. ", 300) // ~12KB of text
-
+func TestStreamUsageObserverLargeResponsesDone(t *testing.T) {
+	largeText := strings.Repeat("This is a long response from the model. ", 300)
 	streamData := `event: response.created
 data: {"type":"response.created","response":{"id":"resp-large","object":"response","status":"in_progress","model":"gpt-5"}}
 
@@ -325,8 +238,6 @@ data: {"type":"response.completed","response":{"id":"resp-large","object":"respo
 data: [DONE]
 
 `
-
-	// Verify the response.completed event is actually >8KB
 	doneEventStart := strings.Index(streamData, `data: {"type":"response.completed"`)
 	doneEventEnd := strings.Index(streamData[doneEventStart:], "\n\n")
 	doneEventSize := doneEventEnd
@@ -335,19 +246,19 @@ data: [DONE]
 	}
 
 	logger := &trackingLogger{enabled: true}
-	stream := io.NopCloser(strings.NewReader(streamData))
-	wrapper := NewStreamUsageWrapper(stream, logger, "gpt-5", "openai", "req-large", "/v1/responses", nil)
+	stream := streaming.NewObservedSSEStream(
+		io.NopCloser(strings.NewReader(streamData)),
+		NewStreamUsageObserver(logger, "gpt-5", "openai", "req-large", "/v1/responses", nil),
+	)
 
-	data, err := io.ReadAll(wrapper)
+	data, err := io.ReadAll(stream)
 	if err != nil {
 		t.Fatalf("ReadAll error: %v", err)
 	}
-
 	if string(data) != streamData {
 		t.Errorf("data mismatch: got %d bytes, want %d bytes", len(data), len(streamData))
 	}
-
-	if err := wrapper.Close(); err != nil {
+	if err := stream.Close(); err != nil {
 		t.Fatalf("Close error: %v", err)
 	}
 
@@ -355,7 +266,6 @@ data: [DONE]
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d (usage was lost from large response.completed event)", len(entries))
 	}
-
 	entry := entries[0]
 	if entry.InputTokens != 100 {
 		t.Errorf("InputTokens = %d, want 100", entry.InputTokens)
@@ -371,22 +281,22 @@ data: [DONE]
 	}
 }
 
-func TestStreamUsageWrapperSmallReads(t *testing.T) {
-	// Fragmented reads (7-byte chunks) to verify cross-boundary event detection
+func TestStreamUsageObserverSmallReads(t *testing.T) {
 	streamData := `data: {"id":"chatcmpl-frag","object":"chat.completion.chunk","model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}
 
 data: [DONE]
 
 `
 	logger := &trackingLogger{enabled: true}
-	stream := io.NopCloser(strings.NewReader(streamData))
-	wrapper := NewStreamUsageWrapper(stream, logger, "gpt-4", "openai", "req-frag", "/v1/chat/completions", nil)
+	stream := streaming.NewObservedSSEStream(
+		io.NopCloser(strings.NewReader(streamData)),
+		NewStreamUsageObserver(logger, "gpt-4", "openai", "req-frag", "/v1/chat/completions", nil),
+	)
 
-	// Read in small chunks of 7 bytes
 	buf := make([]byte, 7)
 	var allData []byte
 	for {
-		n, err := wrapper.Read(buf)
+		n, err := stream.Read(buf)
 		if n > 0 {
 			allData = append(allData, buf[:n]...)
 		}
@@ -401,8 +311,7 @@ data: [DONE]
 	if string(allData) != streamData {
 		t.Errorf("data mismatch: got %d bytes, want %d bytes", len(allData), len(streamData))
 	}
-
-	if err := wrapper.Close(); err != nil {
+	if err := stream.Close(); err != nil {
 		t.Fatalf("Close error: %v", err)
 	}
 
@@ -410,7 +319,6 @@ data: [DONE]
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(entries))
 	}
-
 	entry := entries[0]
 	if entry.InputTokens != 5 {
 		t.Errorf("InputTokens = %d, want 5", entry.InputTokens)
