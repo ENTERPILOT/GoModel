@@ -10,6 +10,7 @@ import (
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
+	"gomodel/internal/streaming"
 	"gomodel/internal/usage"
 )
 
@@ -143,11 +144,17 @@ func (s *translatedInferenceService) handleStreamingResponse(c *echo.Context, mo
 	if streamEntry != nil {
 		streamEntry.StatusCode = http.StatusOK
 	}
-	wrappedStream := auditlog.WrapStreamForLogging(stream, s.logger, streamEntry, c.Request().URL.Path)
 
 	requestID := requestIDFromContextOrHeader(c.Request())
 	endpoint := c.Request().URL.Path
-	wrappedStream = usage.WrapStreamForUsage(wrappedStream, s.usageLogger, model, provider, requestID, endpoint, s.pricingResolver)
+	observers := make([]streaming.Observer, 0, 2)
+	if s.logger != nil && s.logger.Config().Enabled && streamEntry != nil {
+		observers = append(observers, auditlog.NewStreamLogObserver(s.logger, streamEntry, endpoint))
+	}
+	if s.usageLogger != nil && s.usageLogger.Config().Enabled {
+		observers = append(observers, usage.NewStreamUsageObserver(s.usageLogger, model, provider, requestID, endpoint, s.pricingResolver))
+	}
+	wrappedStream := streaming.NewObservedSSEStream(stream, observers...)
 
 	defer func() {
 		_ = wrappedStream.Close() //nolint:errcheck

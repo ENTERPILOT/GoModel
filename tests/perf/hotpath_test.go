@@ -16,6 +16,7 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/providers"
 	"gomodel/internal/server"
+	"gomodel/internal/streaming"
 	"gomodel/internal/usage"
 )
 
@@ -207,7 +208,7 @@ func BenchmarkOpenAIResponsesStreamConverter(b *testing.B) {
 	}
 }
 
-func BenchmarkStreamingAuditAndUsageWrappers(b *testing.B) {
+func BenchmarkSharedStreamingAuditAndUsageObservers(b *testing.B) {
 	auditLogger := benchAuditLogger{cfg: auditlog.Config{Enabled: true, LogBodies: true}}
 	usageLogger := benchUsageLogger{cfg: usage.Config{Enabled: true}}
 
@@ -224,20 +225,17 @@ func BenchmarkStreamingAuditAndUsageWrappers(b *testing.B) {
 			Data:      &auditlog.LogData{},
 		}
 
-		stream := auditlog.WrapStreamForLogging(
+		stream := streaming.NewObservedSSEStream(
 			io.NopCloser(strings.NewReader(sampleChatStream)),
-			auditLogger,
-			entry,
-			"/v1/chat/completions",
-		)
-		stream = usage.WrapStreamForUsage(
-			stream,
-			usageLogger,
-			"gpt-4o-mini",
-			"mock",
-			"req-bench",
-			"/v1/chat/completions",
-			nil,
+			auditlog.NewStreamLogObserver(auditLogger, entry, "/v1/chat/completions"),
+			usage.NewStreamUsageObserver(
+				usageLogger,
+				"gpt-4o-mini",
+				"mock",
+				"req-bench",
+				"/v1/chat/completions",
+				nil,
+			),
 		)
 
 		if _, err := io.Copy(io.Discard, stream); err != nil {
@@ -274,10 +272,10 @@ func TestHotPathPerfGuard(t *testing.T) {
 			maxBytes:  32 * 1024,
 		},
 		{
-			name:      "stacked_stream_audit_and_usage_wrappers",
-			bench:     BenchmarkStreamingAuditAndUsageWrappers,
-			maxAllocs: 340,
-			maxBytes:  20 * 1024,
+			name:      "shared_stream_audit_and_usage_observers",
+			bench:     BenchmarkSharedStreamingAuditAndUsageObservers,
+			maxAllocs: 240,
+			maxBytes:  14 * 1024,
 		},
 	}
 

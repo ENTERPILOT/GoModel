@@ -1,11 +1,10 @@
 package auditlog
 
 import (
-	"bytes"
-	"encoding/json"
 	"io"
 	"strings"
-	"time"
+
+	"gomodel/internal/streaming"
 )
 
 // Note: MaxContentCapture and LogEntryStreamingKey constants are defined in constants.go
@@ -35,230 +34,19 @@ type streamResponseBuilder struct {
 // for audit logging.
 type StreamLogWrapper struct {
 	io.ReadCloser
-	logger    LoggerInterface
-	entry     *LogEntry
-	builder   *streamResponseBuilder
-	logBodies bool
-	closed    bool
-	startTime time.Time
-	pending   []byte // pending partial SSE data between reads
 }
 
 // NewStreamLogWrapper creates a wrapper around a stream for audit logging.
 // When the stream is closed, it logs the accumulated entry.
 // The path parameter is used to detect whether this is a ChatCompletion or Responses API request.
 func NewStreamLogWrapper(stream io.ReadCloser, logger LoggerInterface, entry *LogEntry, path string) *StreamLogWrapper {
-	// Use entry's timestamp as start time for duration calculation
-	var startTime time.Time
-	if entry != nil {
-		startTime = entry.Timestamp
+	observer := NewStreamLogObserver(logger, entry, path)
+	if observer == nil {
+		return &StreamLogWrapper{ReadCloser: stream}
 	}
-
-	// Check if body logging is enabled
-	logBodies := false
-	if logger != nil {
-		logBodies = logger.Config().LogBodies
-	}
-
-	// Initialize builder if body logging is enabled
-	var builder *streamResponseBuilder
-	if logBodies {
-		builder = &streamResponseBuilder{
-			IsResponsesAPI: strings.HasPrefix(path, "/v1/responses"),
-		}
-	}
-
 	return &StreamLogWrapper{
-		ReadCloser: stream,
-		logger:     logger,
-		entry:      entry,
-		startTime:  startTime,
-		logBodies:  logBodies,
-		builder:    builder,
+		ReadCloser: streaming.NewObservedSSEStream(stream, observer),
 	}
-}
-
-// Read implements io.Reader and incrementally processes SSE chunks for audit capture.
-func (w *StreamLogWrapper) Read(p []byte) (n int, err error) {
-	n, err = w.ReadCloser.Read(p)
-	if n > 0 {
-		// Parse SSE events and accumulate content if body logging is enabled
-		if w.logBodies && w.builder != nil {
-			w.processSSEData(p[:n])
-		}
-	}
-	return n, err
-}
-
-// processSSEData parses SSE events from the data chunk and accumulates content
-func (w *StreamLogWrapper) processSSEData(data []byte) {
-	// Prepend any pending data from previous read
-	if len(w.pending) > 0 {
-		data = append(w.pending, data...)
-		w.pending = nil
-	}
-
-	// Split on double newline (SSE event separator)
-	for {
-		idx := bytes.Index(data, []byte("\n\n"))
-		if idx == -1 {
-			// No complete event, save as pending
-			if len(data) > 0 {
-				w.pending = make([]byte, len(data))
-				copy(w.pending, data)
-			}
-			return
-		}
-
-		event := data[:idx]
-		data = data[idx+2:]
-
-		w.processSSEEvent(event)
-	}
-}
-
-// processSSEEvent processes a single SSE event
-func (w *StreamLogWrapper) processSSEEvent(event []byte) {
-	// Find the data line
-	lines := bytes.Split(event, []byte("\n"))
-	for _, line := range lines {
-		if bytes.HasPrefix(line, []byte("data: ")) {
-			jsonData := bytes.TrimPrefix(line, []byte("data: "))
-			// Skip [DONE] marker
-			if bytes.Equal(jsonData, []byte("[DONE]")) {
-				continue
-			}
-			w.parseEventJSON(jsonData)
-		}
-	}
-}
-
-// parseEventJSON parses the JSON from an SSE event and accumulates data
-func (w *StreamLogWrapper) parseEventJSON(data []byte) {
-	var event map[string]interface{}
-	if err := json.Unmarshal(data, &event); err != nil {
-		return
-	}
-
-	if w.builder.IsResponsesAPI {
-		w.parseResponsesAPIEvent(event)
-	} else {
-		w.parseChatCompletionEvent(event)
-	}
-}
-
-// parseChatCompletionEvent extracts data from a ChatCompletion streaming chunk
-func (w *StreamLogWrapper) parseChatCompletionEvent(event map[string]interface{}) {
-	// Extract metadata from first event
-	if w.builder.ID == "" {
-		if id, ok := event["id"].(string); ok {
-			w.builder.ID = id
-		}
-		if model, ok := event["model"].(string); ok {
-			w.builder.Model = model
-		}
-		if created, ok := event["created"].(float64); ok {
-			w.builder.Created = int64(created)
-		}
-	}
-
-	// Extract delta content from choices
-	if choices, ok := event["choices"].([]interface{}); ok && len(choices) > 0 {
-		if choice, ok := choices[0].(map[string]interface{}); ok {
-			// Extract finish_reason
-			if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
-				w.builder.FinishReason = fr
-			}
-
-			// Extract delta
-			if delta, ok := choice["delta"].(map[string]interface{}); ok {
-				// Extract role (usually in first chunk)
-				if role, ok := delta["role"].(string); ok {
-					w.builder.Role = role
-				}
-				// Extract and accumulate content
-				if content, ok := delta["content"].(string); ok && content != "" {
-					if !w.builder.truncated && w.builder.contentLen < MaxContentCapture {
-						remaining := MaxContentCapture - w.builder.contentLen
-						if len(content) > remaining {
-							content = content[:remaining]
-							w.builder.truncated = true
-						}
-						w.builder.Content.WriteString(content)
-						w.builder.contentLen += len(content)
-					}
-				}
-			}
-		}
-	}
-}
-
-// parseResponsesAPIEvent extracts data from a Responses API streaming event
-func (w *StreamLogWrapper) parseResponsesAPIEvent(event map[string]interface{}) {
-	eventType, _ := event["type"].(string)
-
-	switch eventType {
-	case "response.created", "response.completed", "response.done":
-		// Extract response metadata
-		if resp, ok := event["response"].(map[string]interface{}); ok {
-			if id, ok := resp["id"].(string); ok {
-				w.builder.ResponseID = id
-			}
-			if status, ok := resp["status"].(string); ok {
-				w.builder.Status = status
-			}
-			if model, ok := resp["model"].(string); ok {
-				w.builder.Model = model
-			}
-			if createdAt, ok := resp["created_at"].(float64); ok {
-				w.builder.CreatedAt = int64(createdAt)
-			}
-		}
-
-	case "response.output_text.delta":
-		// Accumulate text delta
-		if delta, ok := event["delta"].(string); ok && delta != "" {
-			if !w.builder.truncated && w.builder.contentLen < MaxContentCapture {
-				remaining := MaxContentCapture - w.builder.contentLen
-				if len(delta) > remaining {
-					delta = delta[:remaining]
-					w.builder.truncated = true
-				}
-				w.builder.Content.WriteString(delta)
-				w.builder.contentLen += len(delta)
-			}
-		}
-	}
-}
-
-// Close implements io.Closer and logs the entry.
-func (w *StreamLogWrapper) Close() error {
-	if w.closed {
-		return nil
-	}
-	w.closed = true
-
-	// Calculate duration from start time
-	if w.entry != nil && !w.startTime.IsZero() {
-		w.entry.DurationNs = time.Since(w.startTime).Nanoseconds()
-	}
-
-	// Build and store reconstructed response body if enabled
-	if w.logBodies && w.builder != nil && w.entry != nil && w.entry.Data != nil {
-		if w.builder.IsResponsesAPI {
-			w.entry.Data.ResponseBody = w.builder.buildResponsesAPIResponse()
-		} else {
-			w.entry.Data.ResponseBody = w.builder.buildChatCompletionResponse()
-		}
-		w.entry.Data.ResponseBodyTooBigToHandle = w.builder.truncated
-	}
-
-	// Write log entry
-	if w.logger != nil && w.entry != nil {
-		w.logger.Write(w.entry)
-	}
-
-	return w.ReadCloser.Close()
 }
 
 // buildChatCompletionResponse constructs a ChatCompletion response from accumulated data
