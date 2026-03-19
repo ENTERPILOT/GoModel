@@ -209,6 +209,19 @@ func (r *erroringReadCloser) Close() error {
 	return nil
 }
 
+type closeCountingReadCloser struct {
+	io.ReadCloser
+	closes int
+}
+
+func (r *closeCountingReadCloser) Close() error {
+	r.closes++
+	if r.ReadCloser == nil {
+		return nil
+	}
+	return r.ReadCloser.Close()
+}
+
 func setPathParam(c *echo.Context, name, value string) {
 	c.SetPathValues(echo.PathValues{{Name: name, Value: value}})
 }
@@ -5410,6 +5423,43 @@ func TestProviderPassthrough_AnthropicStream(t *testing.T) {
 	}
 	if got := rec.Body.String(); !strings.Contains(got, "message_start") {
 		t.Fatalf("unexpected stream body: %q", got)
+	}
+}
+
+func TestProviderPassthrough_StreamWithoutObserversClosesUpstreamBodyOnce(t *testing.T) {
+	body := &closeCountingReadCloser{
+		ReadCloser: &chunkedReadCloser{
+			chunks: [][]byte{
+				[]byte("event: message_start\n"),
+				[]byte("data: {\"type\":\"message_start\"}\n\n"),
+			},
+		},
+	}
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers: map[string][]string{
+				"Content-Type": {"text/event-stream"},
+			},
+			Body: body,
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+
+	req := httptest.NewRequest(http.MethodPost, "/p/anthropic/messages", strings.NewReader(`{"model":"claude-sonnet-4-5"}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := &flushCountingRecorder{ResponseRecorder: httptest.NewRecorder()}
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if body.closes != 1 {
+		t.Fatalf("Close calls = %d, want 1", body.closes)
 	}
 }
 

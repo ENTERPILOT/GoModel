@@ -273,9 +273,11 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 			}
 		}
 		wrappedStream := streaming.NewObservedSSEStream(resp.Body, observers...)
-		defer func() {
-			_ = wrappedStream.Close()
-		}()
+		if len(observers) > 0 {
+			defer func() {
+				_ = wrappedStream.Close()
+			}()
+		}
 
 		c.Response().WriteHeader(resp.StatusCode)
 		if err := flushStream(c.Response(), wrappedStream); err != nil {
