@@ -41,10 +41,29 @@ snapshot:
   version_template: "{{ .Tag }}-next"
 
 changelog:
-  # Use GitHub's release notes generator (PR-based) instead of commit-based notes.
-  # This makes release entries cleaner and aligned with .github/release.yml categories.
-  use: github-native
-
-release:
-  footer: |
-    **Full Changelog**: https://github.com/ENTERPILOT/GOModel/compare/{{ .PreviousTag }}...{{ .Tag }}
+  sort: asc
+  groups:
+    - title: "Breaking Changes"
+      regexp: '^[a-z]+(\([^)]+\))?!:'
+      order: 0
+    - title: "Features"
+      regexp: '^feat(\([^)]+\))?:'
+      order: 1
+    - title: "Bug Fixes"
+      regexp: '^fix(\([^)]+\))?:'
+      order: 2
+    - title: "Performance"
+      regexp: '^perf(\([^)]+\))?:'
+      order: 3
+    - title: "Other Changes"
+      order: 999
+  filters:
+    exclude:
+      - '^docs(\([^)]+\))?:'
+      - '^test(\([^)]+\))?:'
+      - '^ci(\([^)]+\))?:'
+      - '^build(\([^)]+\))?:'
+      - '^chore(\([^)]+\))?:'
+      - '^refactor(\([^)]+\))?:'
+      - 'Merge pull request'
+      - 'Merge branch'

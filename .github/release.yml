@@ -1,31 +1,5 @@
 changelog:
-  exclude:
-    labels:
-      - release:skip
-      - release:internal
-      - skip-release-notes
   categories:
-    - title: Breaking Changes
+    - title: Changes
       labels:
-        - release:breaking
-    - title: Features
-      labels:
-        - release:feature
-    - title: Bug Fixes
-      labels:
-        - release:fix
-    - title: Performance
-      labels:
-        - release:performance
-    - title: Documentation
-      labels:
-        - release:docs
-    - title: Dependencies
-      labels:
-        - dependencies
-    - title: Maintenance
-      labels:
-        - release:maintenance
-    - title: Other Changes
-      labels:
-        - release:other
+        - "*"
