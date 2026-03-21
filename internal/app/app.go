@@ -589,6 +589,8 @@ func computeGuardrailsHashFromConfig(cfg config.GuardrailsConfig) string {
 		rules[i] = responsecache.GuardrailRuleDescriptor{
 			Name:    r.Name,
 			Type:    r.Type,
+			Order:   r.Order,
+			Mode:    r.SystemPrompt.Mode,
 			Content: r.SystemPrompt.Content,
 		}
 	}

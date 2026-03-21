@@ -2,6 +2,7 @@ package responsecache
 
 import (
 	"context"
+	"math"
 	"sync"
 	"time"
 )
@@ -115,18 +116,7 @@ func cosineSimilarity(a, b []float32) float32 {
 	if normA == 0 || normB == 0 {
 		return 0
 	}
-	return float32(dot / (sqrt64(normA) * sqrt64(normB)))
-}
-
-func sqrt64(x float64) float64 {
-	if x <= 0 {
-		return 0
-	}
-	z := x
-	for i := 0; i < 50; i++ {
-		z = (z + x/z) / 2
-	}
-	return z
+	return float32(dot / (math.Sqrt(normA) * math.Sqrt(normB)))
 }
 
 func sortVecResults(results []VecResult) {

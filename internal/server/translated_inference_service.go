@@ -53,7 +53,10 @@ func (s *translatedInferenceService) ChatCompletion(c *echo.Context) error {
 	}
 
 	if s.responseCache != nil && !req.Stream {
-		if body, marshalErr := marshalRequestBody(req); marshalErr == nil {
+		body, marshalErr := marshalRequestBody(req)
+		if marshalErr != nil {
+			slog.Debug("marshalRequestBody failed", "err", marshalErr)
+		} else {
 			return s.responseCache.HandleRequest(c, body, func() error {
 				return s.dispatchChatCompletion(c, req, plan)
 			})
@@ -110,7 +113,10 @@ func (s *translatedInferenceService) Responses(c *echo.Context) error {
 	}
 
 	if s.responseCache != nil && !req.Stream {
-		if body, marshalErr := marshalRequestBody(req); marshalErr == nil {
+		body, marshalErr := marshalRequestBody(req)
+		if marshalErr != nil {
+			slog.Debug("marshalRequestBody failed", "err", marshalErr)
+		} else {
 			return s.responseCache.HandleRequest(c, body, func() error {
 				return s.dispatchResponses(c, req, plan)
 			})

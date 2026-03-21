@@ -49,7 +49,7 @@ func NewResponseCacheMiddleware(cfg config.ResponseCacheConfig, rawProviders map
 	}
 
 	sem := cfg.Semantic
-	if semanticEnabled(&sem) {
+	if config.SemanticCacheActive(&sem) {
 		emb, err := embedding.NewEmbedder(sem.Embedder, rawProviders)
 		if err != nil {
 			return nil, err
@@ -69,11 +69,6 @@ func NewResponseCacheMiddleware(cfg config.ResponseCacheConfig, rawProviders map
 	}
 
 	return m, nil
-}
-
-// semanticEnabled reports whether the semantic cache layer has been explicitly enabled.
-func semanticEnabled(sem *config.SemanticCacheConfig) bool {
-	return sem != nil && sem.Enabled
 }
 
 // Middleware returns the Echo middleware function for the exact-match (simple) cache.

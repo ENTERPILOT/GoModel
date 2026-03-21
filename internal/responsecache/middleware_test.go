@@ -48,8 +48,8 @@ func TestSimpleCacheMiddleware_CacheHit(t *testing.T) {
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("second request: got status %d", rec2.Code)
 	}
-	if rec2.Header().Get("X-Cache") != "HIT" {
-		t.Fatalf("second request should have X-Cache=HIT, got %s", rec2.Header().Get("X-Cache"))
+	if rec2.Header().Get("X-Cache") != "HIT (exact)" {
+		t.Fatalf("second request should have X-Cache=HIT (exact), got %s", rec2.Header().Get("X-Cache"))
 	}
 	if !bytes.Contains(rec2.Body.Bytes(), []byte("cached")) {
 		t.Fatalf("cached response body missing expected content: %s", rec2.Body.String())

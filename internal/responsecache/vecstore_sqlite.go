@@ -24,8 +24,8 @@ const sqliteVecCleanupInterval = time.Hour
 //
 //	vec_items(key TEXT, embedding FLOAT[N], params_hash TEXT, response BLOB, expires_at INTEGER)
 //
-// expires_at is stored as Unix seconds. Search filters out expired rows at
-// read time. A background goroutine calls DeleteExpired every hour.
+// expires_at is stored as Unix seconds. Search excludes expired rows in SQL.
+// A background goroutine calls DeleteExpired every hour.
 type sqliteVecStore struct {
 	db     *sql.DB
 	stopCh chan struct{}
@@ -72,34 +72,28 @@ func (s *sqliteVecStore) Search(ctx context.Context, vec []float32, paramsHash s
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT key, embedding, response,
-		       vec_distance_cosine(embedding, ?) AS distance,
-		       expires_at
+		       vec_distance_cosine(embedding, ?) AS distance
 		FROM vec_items
 		WHERE params_hash = ?
+		  AND (expires_at = 0 OR expires_at >= ?)
 		ORDER BY distance ASC
 		LIMIT ?
-	`, serializeFloat32(vec), paramsHash, limit)
+	`, serializeFloat32(vec), paramsHash, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("vecstore sqlite: search: %w", err)
 	}
 	defer rows.Close()
 
 	var results []VecResult
-	var expiredKeys []string
 	for rows.Next() {
 		var (
-			key       string
-			embBlob   []byte
-			response  []byte
-			distance  float64
-			expiresAt int64
+			key      string
+			embBlob  []byte
+			response []byte
+			distance float64
 		)
-		if err := rows.Scan(&key, &embBlob, &response, &distance, &expiresAt); err != nil {
+		if err := rows.Scan(&key, &embBlob, &response, &distance); err != nil {
 			return nil, fmt.Errorf("vecstore sqlite: scan row: %w", err)
-		}
-		if expiresAt > 0 && expiresAt < now {
-			expiredKeys = append(expiredKeys, key)
-			continue
 		}
 		_ = embBlob
 		results = append(results, VecResult{
@@ -112,9 +106,6 @@ func (s *sqliteVecStore) Search(ctx context.Context, vec []float32, paramsHash s
 		return nil, fmt.Errorf("vecstore sqlite: rows: %w", err)
 	}
 
-	if len(expiredKeys) > 0 {
-		go s.deleteByKeys(expiredKeys)
-	}
 	return results, nil
 }
 
@@ -164,14 +155,6 @@ func (s *sqliteVecStore) cleanupLoop() {
 		case <-s.stopCh:
 			return
 		}
-	}
-}
-
-func (s *sqliteVecStore) deleteByKeys(keys []string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for _, key := range keys {
-		_, _ = s.db.ExecContext(ctx, `DELETE FROM vec_items WHERE key = ?`, key) //nolint:errcheck
 	}
 }
 

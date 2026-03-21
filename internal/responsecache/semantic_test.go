@@ -33,6 +33,7 @@ func newTestSemanticMiddleware(threshold float64, maxConvMessages int, excludeSy
 	store := NewMapVecStore()
 	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
 	cfg := config.SemanticCacheConfig{
+		Enabled:                 true,
 		SimilarityThreshold:     threshold,
 		TTL:                     3600,
 		MaxConversationMessages: maxConvMessages,
@@ -86,6 +87,7 @@ func TestSemanticCacheMiddleware_CacheMissOnLowScore(t *testing.T) {
 	emb := &mockEmbedder{}
 
 	m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
+		Enabled:                 true,
 		SimilarityThreshold:     0.99,
 		TTL:                     3600,
 		MaxConversationMessages: 10,
@@ -256,6 +258,7 @@ func TestSemanticCacheMiddleware_HeaderThresholdOverride(t *testing.T) {
 	emb := &mockEmbedder{}
 
 	m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
+		Enabled:                 true,
 		SimilarityThreshold:     0.99,
 		TTL:                     3600,
 		MaxConversationMessages: 10,
@@ -291,6 +294,7 @@ func TestSemanticCacheMiddleware_TTLExpiry(t *testing.T) {
 	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
 
 	m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
+		Enabled:                 true,
 		SimilarityThreshold:     0.90,
 		TTL:                     1,
 		MaxConversationMessages: 10,
@@ -334,8 +338,8 @@ func TestMapVecStore_DeleteExpiredOnlyRemovesExpired(t *testing.T) {
 
 func TestComputeGuardrailsHash_Stable(t *testing.T) {
 	rules := []GuardrailRuleDescriptor{
-		{Name: "safety", Type: "system_prompt", Content: "Be safe."},
-		{Name: "privacy", Type: "system_prompt", Content: "No PII."},
+		{Name: "safety", Type: "system_prompt", Order: 0, Mode: "", Content: "Be safe."},
+		{Name: "privacy", Type: "system_prompt", Order: 0, Mode: "", Content: "No PII."},
 	}
 	h1 := ComputeGuardrailsHash(rules)
 	h2 := ComputeGuardrailsHash(rules)
@@ -346,12 +350,12 @@ func TestComputeGuardrailsHash_Stable(t *testing.T) {
 
 func TestComputeGuardrailsHash_OrderIndependent(t *testing.T) {
 	rules1 := []GuardrailRuleDescriptor{
-		{Name: "safety", Type: "system_prompt", Content: "Be safe."},
-		{Name: "privacy", Type: "system_prompt", Content: "No PII."},
+		{Name: "safety", Type: "system_prompt", Order: 0, Mode: "", Content: "Be safe."},
+		{Name: "privacy", Type: "system_prompt", Order: 0, Mode: "", Content: "No PII."},
 	}
 	rules2 := []GuardrailRuleDescriptor{
-		{Name: "privacy", Type: "system_prompt", Content: "No PII."},
-		{Name: "safety", Type: "system_prompt", Content: "Be safe."},
+		{Name: "privacy", Type: "system_prompt", Order: 0, Mode: "", Content: "No PII."},
+		{Name: "safety", Type: "system_prompt", Order: 0, Mode: "", Content: "Be safe."},
 	}
 	if ComputeGuardrailsHash(rules1) != ComputeGuardrailsHash(rules2) {
 		t.Fatal("hash should be order-independent (rules are sorted)")
@@ -359,9 +363,29 @@ func TestComputeGuardrailsHash_OrderIndependent(t *testing.T) {
 }
 
 func TestComputeGuardrailsHash_ChangesOnContentChange(t *testing.T) {
-	v1 := []GuardrailRuleDescriptor{{Name: "safety", Type: "system_prompt", Content: "Be safe."}}
-	v2 := []GuardrailRuleDescriptor{{Name: "safety", Type: "system_prompt", Content: "Be very safe."}}
+	v1 := []GuardrailRuleDescriptor{{Name: "safety", Type: "system_prompt", Order: 0, Mode: "", Content: "Be safe."}}
+	v2 := []GuardrailRuleDescriptor{{Name: "safety", Type: "system_prompt", Order: 0, Mode: "", Content: "Be very safe."}}
 	if ComputeGuardrailsHash(v1) == ComputeGuardrailsHash(v2) {
 		t.Fatal("hash should change when rule content changes")
+	}
+}
+
+func TestComputeGuardrailsHash_ChangesOnRuleOrderOrMode(t *testing.T) {
+	base := []GuardrailRuleDescriptor{{Name: "safety", Type: "system_prompt", Order: 0, Mode: "inject", Content: "Be safe."}}
+	reordered := []GuardrailRuleDescriptor{{Name: "safety", Type: "system_prompt", Order: 1, Mode: "inject", Content: "Be safe."}}
+	mode := []GuardrailRuleDescriptor{{Name: "safety", Type: "system_prompt", Order: 0, Mode: "override", Content: "Be safe."}}
+	if ComputeGuardrailsHash(base) == ComputeGuardrailsHash(reordered) {
+		t.Fatal("hash should change when guardrail execution order changes")
+	}
+	if ComputeGuardrailsHash(base) == ComputeGuardrailsHash(mode) {
+		t.Fatal("hash should change when system_prompt mode changes")
+	}
+}
+
+func TestShouldSkipAllCache_CacheControlNoStore(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("Cache-Control", "private, no-store, max-age=0")
+	if !ShouldSkipAllCache(req) {
+		t.Fatal("expected ShouldSkipAllCache for Cache-Control: no-store")
 	}
 }

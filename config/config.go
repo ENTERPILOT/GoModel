@@ -377,7 +377,7 @@ func ValidateCacheConfig(c *CacheConfig) error {
 	}
 
 	sem := &c.Response.Semantic
-	if semanticCacheActive(sem) {
+	if SemanticCacheActive(sem) {
 		switch sem.VectorStore.Type {
 		case "sqlite-vec", "qdrant", "pgvector":
 		default:
@@ -393,15 +393,20 @@ func ValidateCacheConfig(c *CacheConfig) error {
 	return nil
 }
 
-// semanticCacheActive reports whether any semantic cache field has been set,
-// indicating the user intends to enable the semantic cache layer.
-func semanticCacheActive(sem *SemanticCacheConfig) bool {
-	return sem != nil && (sem.SimilarityThreshold != 0 ||
+// SemanticCacheActive reports whether the semantic response cache should be
+// validated and constructed. It requires enabled: true plus at least one
+// non-default tuning field or embedder/vector-store setting, matching
+// NewResponseCacheMiddleware in internal/responsecache.
+func SemanticCacheActive(sem *SemanticCacheConfig) bool {
+	if sem == nil || !sem.Enabled {
+		return false
+	}
+	return sem.SimilarityThreshold != 0 ||
 		sem.TTL != 0 ||
 		sem.MaxConversationMessages != 0 ||
 		sem.VectorStore.Type != "" ||
 		sem.VectorStore.SQLiteVec.Path != "" ||
-		sem.Embedder.Provider != "")
+		sem.Embedder.Provider != ""
 }
 
 // ServerConfig holds HTTP server configuration

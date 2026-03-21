@@ -12,9 +12,6 @@ func TestNewEmbedder_LocalDefault(t *testing.T) {
 	if err == nil {
 		t.Skip("ONNX Runtime not installed; local embedder test skipped")
 	}
-	if err.Error() == "" {
-		t.Fatal("expected error when ONNX Runtime is absent")
-	}
 }
 
 func TestNewEmbedder_UnknownProvider(t *testing.T) {

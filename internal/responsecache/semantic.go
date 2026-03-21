@@ -24,11 +24,6 @@ import (
 	"gomodel/internal/embedding"
 )
 
-// contextKeyType is a package-private type for context keys owned by responsecache.
-type contextKeyType string
-
-const contextKeyGuardrailsHash contextKeyType = "responsecache:guardrails-hash"
-
 // SemanticCacheMiddleware implements the vector-similarity response cache layer.
 // It is the second cache layer, consulted only after an exact-match miss.
 type semanticCacheMiddleware struct {
@@ -83,7 +78,12 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 		return next()
 	}
 
-	paramsHash := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx))
+	msgFp := conversationFingerprint(body, m.cfg.ExcludeSystemPrompt)
+	if msgFp == "" {
+		return next()
+	}
+	baseParams := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx))
+	paramsHash := sha256HexOf(baseParams + "\x00" + msgFp)
 
 	vec, err := m.embedder.Embed(ctx, embedText)
 	if err != nil {
@@ -189,6 +189,49 @@ func extractEmbedText(body []byte, excludeSystem bool) (text string, nonSystemCo
 		}
 	}
 	return lastUserText, nonSystemCount
+}
+
+// conversationFingerprint is a stable digest of message roles and raw content JSON
+// (plus embeddings-style "input") so multi-turn and multimodal requests cannot
+// collide when only the last user text matches.
+func conversationFingerprint(body []byte, excludeSystem bool) string {
+	var envelope struct {
+		Messages []json.RawMessage `json:"messages"`
+		Input    json.RawMessage   `json:"input"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return ""
+	}
+	if len(envelope.Messages) == 0 {
+		if len(envelope.Input) == 0 {
+			return ""
+		}
+		sum := sha256.Sum256(envelope.Input)
+		return hex.EncodeToString(sum[:])
+	}
+	h := sha256.New()
+	for _, rawMsg := range envelope.Messages {
+		var m struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		}
+		if err := json.Unmarshal(rawMsg, &m); err != nil {
+			sum := sha256.Sum256(rawMsg)
+			h.Write(sum[:])
+			h.Write([]byte{0})
+			continue
+		}
+		if m.Role == "system" && excludeSystem {
+			continue
+		}
+		h.Write([]byte(m.Role))
+		h.Write([]byte{0})
+		if len(m.Content) > 0 {
+			h.Write(m.Content)
+		}
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func extractTextFromContent(content any) string {
@@ -331,7 +374,7 @@ func sha256HexOf(s string) string {
 }
 
 // ComputeGuardrailsHash computes the guardrails_hash for a set of rule identifiers.
-// Each rule is represented as "name:type:content_hash". The combined seed is
+// Each rule is represented as "name:type:order:mode:content_hash". The combined seed is
 // sorted for stability, then passed through SHA-256.
 // Uses xxhash64 per-component and SHA-256 for the final hash to balance speed and
 // collision resistance.
@@ -342,7 +385,7 @@ func ComputeGuardrailsHash(rules []GuardrailRuleDescriptor) string {
 	seeds := make([]string, len(rules))
 	for i, r := range rules {
 		contentXX := xxhash.Sum64String(r.Content)
-		seeds[i] = fmt.Sprintf("%s:%s:%016x", r.Name, r.Type, contentXX)
+		seeds[i] = fmt.Sprintf("%s:%s:%d:%s:%016x", r.Name, r.Type, r.Order, r.Mode, contentXX)
 	}
 	sort.Strings(seeds)
 	combined := strings.Join(seeds, "|")
@@ -354,6 +397,8 @@ func ComputeGuardrailsHash(rules []GuardrailRuleDescriptor) string {
 type GuardrailRuleDescriptor struct {
 	Name    string
 	Type    string
+	Order   int
+	Mode    string
 	Content string
 }
 
@@ -380,9 +425,25 @@ func ShouldSkipExactCache(req *http.Request) bool {
 	return strings.EqualFold(req.Header.Get("X-Cache-Type"), CacheTypeSemantic)
 }
 
-// ShouldSkipAllCache reports whether X-Cache-Control: no-store is set.
+// ShouldSkipAllCache reports whether caching must be bypassed for this request
+// (X-Cache-Control: no-store or Cache-Control containing no-store), matching
+// shouldSkipSemanticCache / shouldSkipCache semantics for the no-store directive.
 func ShouldSkipAllCache(req *http.Request) bool {
-	return strings.EqualFold(req.Header.Get("X-Cache-Control"), "no-store")
+	if strings.EqualFold(req.Header.Get("X-Cache-Control"), "no-store") {
+		return true
+	}
+	cc := req.Header.Get("Cache-Control")
+	if cc == "" {
+		return false
+	}
+	directives := strings.Split(strings.ToLower(cc), ",")
+	for _, d := range directives {
+		d = strings.TrimSpace(d)
+		if d == "no-store" {
+			return true
+		}
+	}
+	return false
 }
 
 // IoReadAllBody reads and restores c.Request().Body, returning the raw bytes.

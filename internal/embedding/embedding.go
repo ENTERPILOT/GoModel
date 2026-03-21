@@ -8,11 +8,15 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	all_minilm "github.com/clems4ever/all-minilm-l6-v2-go/all_minilm_l6_v2"
 
 	"gomodel/config"
 )
+
+// defaultTimeout caps how long embedding HTTP calls may block the client.
+const defaultTimeout = 120 * time.Second
 
 // Embedder converts text into a float32 vector representation.
 type Embedder interface {
@@ -49,7 +53,7 @@ func NewEmbedder(cfg config.EmbedderConfig, rawProviders map[string]config.RawPr
 		baseURL:    baseURL,
 		apiKey:     raw.APIKey,
 		model:      model,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: defaultTimeout},
 	}, nil
 }
 
@@ -74,12 +78,25 @@ func newMiniLMEmbedder(runtimePath string) (*miniLMEmbedder, error) {
 	return &miniLMEmbedder{model: m}, nil
 }
 
-func (e *miniLMEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
-	vec, err := e.model.Compute(text, true)
-	if err != nil {
-		return nil, fmt.Errorf("embedding: MiniLM compute failed: %w", err)
+func (e *miniLMEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+	type result struct {
+		vec []float32
+		err error
 	}
-	return vec, nil
+	ch := make(chan result, 1)
+	go func() {
+		vec, err := e.model.Compute(text, true)
+		ch <- result{vec, err}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("embedding: MiniLM compute failed: %w", ctx.Err())
+	case r := <-ch:
+		if r.err != nil {
+			return nil, fmt.Errorf("embedding: MiniLM compute failed: %w", r.err)
+		}
+		return r.vec, nil
+	}
 }
 
 func (e *miniLMEmbedder) Close() error {
@@ -132,6 +149,9 @@ func (e *apiEmbedder) Embed(ctx context.Context, text string) ([]float32, error)
 	rawBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("embedding: read response body: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("embedding: API returned status %d: %s", resp.StatusCode, string(rawBody))
 	}
 	var parsed embeddingResponse
 	if err := json.Unmarshal(rawBody, &parsed); err != nil {

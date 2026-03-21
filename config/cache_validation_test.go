@@ -77,3 +77,46 @@ func TestValidateCacheConfig_RedisOnly(t *testing.T) {
 		t.Errorf("expected no error for valid redis config: %v", err)
 	}
 }
+
+func TestValidateCacheConfig_SemanticDisabledIgnoresInvalidVectorStore(t *testing.T) {
+	cfg := &CacheConfig{
+		Model: ModelCacheConfig{
+			Local: &LocalCacheConfig{CacheDir: ".cache"},
+			Redis: nil,
+		},
+		Response: ResponseCacheConfig{
+			Semantic: SemanticCacheConfig{
+				Enabled: false,
+				VectorStore: VectorStoreConfig{
+					Type: "qdrant",
+					// Intentionally missing URL — valid because semantic cache is off.
+				},
+			},
+		},
+	}
+	if err := ValidateCacheConfig(cfg); err != nil {
+		t.Fatalf("expected no error when semantic cache disabled: %v", err)
+	}
+}
+
+func TestValidateCacheConfig_SemanticEnabledRequiresQdrantURL(t *testing.T) {
+	cfg := &CacheConfig{
+		Model: ModelCacheConfig{
+			Local: &LocalCacheConfig{CacheDir: ".cache"},
+			Redis: nil,
+		},
+		Response: ResponseCacheConfig{
+			Semantic: SemanticCacheConfig{
+				Enabled:             true,
+				SimilarityThreshold: 0.9,
+				TTL:                 3600,
+				VectorStore: VectorStoreConfig{
+					Type: "qdrant",
+				},
+			},
+		},
+	}
+	if err := ValidateCacheConfig(cfg); err == nil {
+		t.Fatal("expected error when semantic enabled without qdrant URL")
+	}
+}
