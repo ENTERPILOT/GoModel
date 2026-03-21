@@ -4,8 +4,8 @@
 
 GOModel supports multiple configured providers.
 
-Some upstream model IDs also contain slashes, for example
-`google/gemini-xyz`.
+Some upstream model IDs from the OpenRouter provider also contain slashes, for
+example `google/gemini-xyz`.
 
 That creates one simple question:
 
@@ -26,7 +26,11 @@ Use two forms:
 If the request is:
 
 ```json
-{ "model": "gpt-5-nano" }
+{
+  ...
+  "model": "gpt-5-nano"
+  ...
+}
 ```
 
 then GOModel treats it as an unqualified model lookup.

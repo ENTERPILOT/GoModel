@@ -19,6 +19,8 @@ type mockModelLookup struct {
 	providerTypes map[string]string
 	modelList     []core.Model
 	publicModels  []core.Model
+	listCalls     int
+	publicCalls   int
 }
 
 func newMockLookup() *mockModelLookup {
@@ -52,10 +54,12 @@ func (m *mockModelLookup) GetProviderType(model string) string {
 }
 
 func (m *mockModelLookup) ListModels() []core.Model {
+	m.listCalls++
 	return m.modelList
 }
 
 func (m *mockModelLookup) ListPublicModels() []core.Model {
+	m.publicCalls++
 	return append([]core.Model(nil), m.publicModels...)
 }
 
@@ -574,6 +578,12 @@ func TestRouterListModels(t *testing.T) {
 	}
 	if resp.Object != "list" {
 		t.Errorf("expected object 'list', got %q", resp.Object)
+	}
+	if lookup.listCalls != 0 {
+		t.Fatalf("ListModels() called %d times, want 0 when publicModelLister is available", lookup.listCalls)
+	}
+	if lookup.publicCalls != 1 {
+		t.Fatalf("ListPublicModels() called %d times, want 1", lookup.publicCalls)
 	}
 	want := []core.Model{
 		{ID: "openai/gpt-4o", Object: "model", OwnedBy: "openai"},

@@ -310,9 +310,11 @@ func (r *Router) ListModels(_ context.Context) (*core.ModelsResponse, error) {
 	if err := r.checkReady(); err != nil {
 		return nil, registryUnavailableError(err)
 	}
-	models := r.lookup.ListModels()
+	var models []core.Model
 	if public, ok := r.lookup.(publicModelLister); ok {
 		models = public.ListPublicModels()
+	} else {
+		models = r.lookup.ListModels()
 	}
 	return &core.ModelsResponse{
 		Object: "list",
