@@ -84,7 +84,7 @@ func (m *simpleCacheMiddleware) TryHit(c *echo.Context, body []byte) (bool, erro
 	}
 	if len(cached) > 0 {
 		c.Response().Header().Set("Content-Type", "application/json")
-		c.Response().Header().Set("X-Cache", "HIT")
+		c.Response().Header().Set("X-Cache", "HIT (exact)")
 		c.Response().WriteHeader(http.StatusOK)
 		_, _ = c.Response().Write(cached)
 		slog.Info("response cache hit (exact)",
