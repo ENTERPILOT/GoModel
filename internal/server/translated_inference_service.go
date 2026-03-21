@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -27,43 +28,50 @@ type translatedInferenceService struct {
 	pricingResolver          usage.PricingResolver
 	responseCache            *responsecache.ResponseCacheMiddleware
 	guardrailsHash           string
+
+	// Pre-built handlers initialized via initHandlers.
+	chatCompletionHandler echo.HandlerFunc
+	responsesHandler      echo.HandlerFunc
+}
+
+func (s *translatedInferenceService) initHandlers() {
+	s.chatCompletionHandler = newTranslatedHandler(s,
+		core.DecodeChatRequest,
+		func(r *core.ChatRequest) (*string, *string) { return &r.Model, &r.Provider },
+		func(ctx context.Context, r *core.ChatRequest) (*core.ChatRequest, error) {
+			return s.translatedRequestPatcher.PatchChatRequest(ctx, r)
+		},
+		func(r *core.ChatRequest) bool { return r.Stream },
+		s.dispatchChatCompletion,
+	)
+	s.responsesHandler = newTranslatedHandler(s,
+		core.DecodeResponsesRequest,
+		func(r *core.ResponsesRequest) (*string, *string) { return &r.Model, &r.Provider },
+		func(ctx context.Context, r *core.ResponsesRequest) (*core.ResponsesRequest, error) {
+			return s.translatedRequestPatcher.PatchResponsesRequest(ctx, r)
+		},
+		func(r *core.ResponsesRequest) bool { return r.Stream },
+		s.dispatchResponses,
+	)
+}
+
+// newTranslatedHandler returns an echo.HandlerFunc that executes the
+// decode→plan→patch→dispatch pipeline for a translated inference endpoint.
+func newTranslatedHandler[R any](
+	s *translatedInferenceService,
+	decode func([]byte, *core.WhiteBoxPrompt) (R, error),
+	modelProvider func(R) (*string, *string),
+	patch func(context.Context, R) (R, error),
+	isStream func(R) bool,
+	dispatch func(*echo.Context, R, *core.ExecutionPlan) error,
+) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		return handleTranslatedInference(s, c, decode, modelProvider, patch, isStream, dispatch)
+	}
 }
 
 func (s *translatedInferenceService) ChatCompletion(c *echo.Context) error {
-	req, err := canonicalJSONRequestFromSemantics[*core.ChatRequest](c, core.DecodeChatRequest)
-	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
-	}
-	plan, err := ensureTranslatedRequestPlan(c, s.provider, s.modelResolver, &req.Model, &req.Provider)
-	if err != nil {
-		return handleError(c, err)
-	}
-
-	ctx := c.Request().Context()
-	if s.translatedRequestPatcher != nil {
-		req, err = s.translatedRequestPatcher.PatchChatRequest(ctx, req)
-		if err != nil {
-			return handleError(c, err)
-		}
-	}
-
-	if s.guardrailsHash != "" {
-		ctx = core.WithGuardrailsHash(ctx, s.guardrailsHash)
-		c.SetRequest(c.Request().WithContext(ctx))
-	}
-
-	if s.responseCache != nil && !req.Stream {
-		body, marshalErr := marshalRequestBody(req)
-		if marshalErr != nil {
-			slog.Debug("marshalRequestBody failed", "err", marshalErr)
-		} else {
-			return s.responseCache.HandleRequest(c, body, func() error {
-				return s.dispatchChatCompletion(c, req, plan)
-			})
-		}
-	}
-
-	return s.dispatchChatCompletion(c, req, plan)
+	return s.chatCompletionHandler(c)
 }
 
 func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req *core.ChatRequest, plan *core.ExecutionPlan) error {
@@ -90,40 +98,69 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 }
 
 func (s *translatedInferenceService) Responses(c *echo.Context) error {
-	req, err := canonicalJSONRequestFromSemantics[*core.ResponsesRequest](c, core.DecodeResponsesRequest)
+	return s.responsesHandler(c)
+}
+
+// handleTranslatedInference is the shared decode→plan→patch→dispatch pipeline
+// for ChatCompletion and Responses, parameterised over the request type.
+func handleTranslatedInference[R any](
+	s *translatedInferenceService,
+	c *echo.Context,
+	decode func([]byte, *core.WhiteBoxPrompt) (R, error),
+	modelProvider func(R) (*string, *string),
+	patch func(context.Context, R) (R, error),
+	isStream func(R) bool,
+	dispatch func(*echo.Context, R, *core.ExecutionPlan) error,
+) error {
+	req, err := canonicalJSONRequestFromSemantics(c, decode)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	plan, err := ensureTranslatedRequestPlan(c, s.provider, s.modelResolver, &req.Model, &req.Provider)
+	modelPtr, providerPtr := modelProvider(req)
+	plan, err := ensureTranslatedRequestPlan(c, s.provider, s.modelResolver, modelPtr, providerPtr)
 	if err != nil {
 		return handleError(c, err)
 	}
 
-	ctx := c.Request().Context()
 	if s.translatedRequestPatcher != nil {
-		req, err = s.translatedRequestPatcher.PatchResponsesRequest(ctx, req)
+		ctx := c.Request().Context()
+		req, err = patch(ctx, req)
 		if err != nil {
 			return handleError(c, err)
 		}
 	}
 
+	return handleWithCache(s, c, req, isStream(req), plan, dispatch)
+}
+
+// handleWithCache injects the guardrails hash into context, then either routes the
+// request through the dual-layer response cache (non-streaming) or calls dispatch
+// directly (streaming). R is the post-patch request type.
+func handleWithCache[R any](
+	s *translatedInferenceService,
+	c *echo.Context,
+	req R,
+	stream bool,
+	plan *core.ExecutionPlan,
+	dispatch func(*echo.Context, R, *core.ExecutionPlan) error,
+) error {
 	if s.guardrailsHash != "" {
-		ctx = core.WithGuardrailsHash(ctx, s.guardrailsHash)
+		ctx := core.WithGuardrailsHash(c.Request().Context(), s.guardrailsHash)
 		c.SetRequest(c.Request().WithContext(ctx))
 	}
 
-	if s.responseCache != nil && !req.Stream {
+	if s.responseCache != nil && !stream {
 		body, marshalErr := marshalRequestBody(req)
 		if marshalErr != nil {
 			slog.Debug("marshalRequestBody failed", "err", marshalErr)
 		} else {
 			return s.responseCache.HandleRequest(c, body, func() error {
-				return s.dispatchResponses(c, req, plan)
+				return dispatch(c, req, plan)
 			})
 		}
 	}
 
-	return s.dispatchResponses(c, req, plan)
+	return dispatch(c, req, plan)
 }
 
 func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *core.ResponsesRequest, plan *core.ExecutionPlan) error {

@@ -66,7 +66,7 @@ func (h *Handler) SetBatchStore(store batchstore.Store) {
 }
 
 func (h *Handler) translatedInference() *translatedInferenceService {
-	return &translatedInferenceService{
+	s := &translatedInferenceService{
 		provider:                 h.provider,
 		modelResolver:            h.modelResolver,
 		translatedRequestPatcher: h.translatedRequestPatcher,
@@ -76,6 +76,8 @@ func (h *Handler) translatedInference() *translatedInferenceService {
 		responseCache:            h.responseCache,
 		guardrailsHash:           h.guardrailsHash,
 	}
+	s.initHandlers()
+	return s
 }
 
 func (h *Handler) nativeBatch() *nativeBatchService {
