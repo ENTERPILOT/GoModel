@@ -437,6 +437,9 @@ func (r *ModelRegistry) GetProvider(model string) core.Provider {
 				return info.Provider
 			}
 		}
+		if r.hasConfiguredProviderNameLocked(providerName) {
+			return nil
+		}
 		// Fall through: the slash may be part of the model ID (e.g. "meta-llama/Meta-Llama-3-70B")
 	}
 
@@ -458,6 +461,9 @@ func (r *ModelRegistry) GetModel(model string) *ModelInfo {
 			if info, exists := providerModels[modelID]; exists {
 				return info
 			}
+		}
+		if r.hasConfiguredProviderNameLocked(providerName) {
+			return nil
 		}
 		// Fall through: the slash may be part of the model ID
 	}
@@ -482,6 +488,9 @@ func (r *ModelRegistry) LookupModel(model string) (*core.Model, bool) {
 				return &cloned, true
 			}
 		}
+		if r.hasConfiguredProviderNameLocked(providerName) {
+			return nil, false
+		}
 		// Fall through: the slash may be part of the model ID
 	}
 
@@ -503,6 +512,9 @@ func (r *ModelRegistry) Supports(model string) bool {
 			if _, exists := providerModels[modelID]; exists {
 				return true
 			}
+		}
+		if r.hasConfiguredProviderNameLocked(providerName) {
+			return false
 		}
 		// Fall through: the slash may be part of the model ID
 	}
@@ -583,6 +595,9 @@ func (r *ModelRegistry) GetProviderType(model string) string {
 				return r.providerTypes[info.Provider]
 			}
 		}
+		if r.hasConfiguredProviderNameLocked(providerName) {
+			return ""
+		}
 		// Fall through: the slash may be part of the model ID
 	}
 
@@ -661,6 +676,19 @@ func qualifyPublicModelID(providerName, modelID string) string {
 		return providerName
 	}
 	return providerName + "/" + modelID
+}
+
+func (r *ModelRegistry) hasConfiguredProviderNameLocked(providerName string) bool {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return false
+	}
+	for _, configuredName := range r.providerNames {
+		if configuredName == providerName {
+			return true
+		}
+	}
+	return false
 }
 
 // ModelWithProvider holds a model alongside its provider type string.

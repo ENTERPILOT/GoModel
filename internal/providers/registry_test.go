@@ -341,6 +341,83 @@ func TestModelRegistry(t *testing.T) {
 		}
 	})
 
+	t.Run("SlashModelFallsBackToRawModelWhenPrefixIsNotConfiguredProvider", func(t *testing.T) {
+		registry := NewModelRegistry()
+		openRouter := &registryMockProvider{
+			name:         "openrouter",
+			chatResponse: &core.ChatResponse{ID: "openrouter"},
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{ID: "google/gemini-xyz", Object: "model", OwnedBy: "openrouter"},
+				},
+			},
+		}
+		registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openai")
+		if err := registry.Initialize(context.Background()); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		router, err := NewRouter(registry)
+		if err != nil {
+			t.Fatalf("unexpected router error: %v", err)
+		}
+
+		resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "google/gemini-xyz"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.ID != "openrouter" {
+			t.Fatalf("resp.ID = %q, want openrouter", resp.ID)
+		}
+	})
+
+	t.Run("SlashModelDoesNotFallBackToRawModelWhenPrefixIsConfiguredProvider", func(t *testing.T) {
+		registry := NewModelRegistry()
+		google := &registryMockProvider{
+			name:         "google",
+			chatResponse: &core.ChatResponse{ID: "google"},
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{ID: "gemini-1.5-pro", Object: "model", OwnedBy: "google"},
+				},
+			},
+		}
+		openRouter := &registryMockProvider{
+			name:         "openrouter",
+			chatResponse: &core.ChatResponse{ID: "openrouter"},
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{ID: "google/gemini-xyz", Object: "model", OwnedBy: "openrouter"},
+				},
+			},
+		}
+		registry.RegisterProviderWithNameAndType(google, "google", "gemini")
+		registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openai")
+		if err := registry.Initialize(context.Background()); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		router, err := NewRouter(registry)
+		if err != nil {
+			t.Fatalf("unexpected router error: %v", err)
+		}
+
+		_, err = router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "google/gemini-xyz"})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		var gwErr *core.GatewayError
+		if !errors.As(err, &gwErr) {
+			t.Fatalf("expected GatewayError, got %T: %v", err, err)
+		}
+		if gwErr.HTTPStatusCode() != http.StatusNotFound {
+			t.Fatalf("expected 404 status, got %d", gwErr.HTTPStatusCode())
+		}
+	})
+
 	t.Run("AllProvidersFail", func(t *testing.T) {
 		registry := NewModelRegistry()
 		mock1 := &registryMockProvider{
