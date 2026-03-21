@@ -541,6 +541,64 @@ func TestListModelsWithProvider_IncludesProviderType(t *testing.T) {
 	}
 }
 
+func TestListPublicModels_UsesConfiguredProviderNamesAndIncludesDuplicates(t *testing.T) {
+	registry := NewModelRegistry()
+
+	openAI := &registryMockProvider{
+		name: "provider-openai",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-4o", Object: "model", OwnedBy: "openai"},
+			},
+		},
+	}
+	openRouter := &registryMockProvider{
+		name: "provider-openrouter",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-4o", Object: "model", OwnedBy: "openai"},
+			},
+		},
+	}
+	azure := &registryMockProvider{
+		name: "provider-azure",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-4o", Object: "model", OwnedBy: "openai"},
+			},
+		},
+	}
+
+	registry.RegisterProviderWithNameAndType(openAI, "openai", "openai")
+	registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openai")
+	registry.RegisterProviderWithNameAndType(azure, "azure-openai", "openai")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	models := registry.ListPublicModels()
+	if len(models) != 3 {
+		t.Fatalf("expected 3 public models, got %d", len(models))
+	}
+
+	want := []core.Model{
+		{ID: "azure-openai/gpt-4o", OwnedBy: "azure-openai"},
+		{ID: "openai/gpt-4o", OwnedBy: "openai"},
+		{ID: "openrouter/gpt-4o", OwnedBy: "openrouter"},
+	}
+	for i, model := range want {
+		if models[i].ID != model.ID {
+			t.Fatalf("models[%d].ID = %q, want %q", i, models[i].ID, model.ID)
+		}
+		if models[i].OwnedBy != model.OwnedBy {
+			t.Fatalf("models[%d].OwnedBy = %q, want %q", i, models[i].OwnedBy, model.OwnedBy)
+		}
+	}
+}
+
 // countingRegistryMockProvider wraps registryMockProvider and counts ListModels calls
 type countingRegistryMockProvider struct {
 	*registryMockProvider

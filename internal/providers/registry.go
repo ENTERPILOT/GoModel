@@ -539,6 +539,30 @@ func (r *ModelRegistry) ListModels() []core.Model {
 	return append([]core.Model(nil), models...)
 }
 
+// ListPublicModels returns all provider-backed models as public selectors in
+// providerName/modelID form, sorted by public model ID.
+func (r *ModelRegistry) ListPublicModels() []core.Model {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	total := 0
+	for _, models := range r.modelsByProvider {
+		total += len(models)
+	}
+
+	result := make([]core.Model, 0, total)
+	for providerName, models := range r.modelsByProvider {
+		for modelID, info := range models {
+			model := info.Model
+			model.ID = qualifyPublicModelID(providerName, modelID)
+			model.OwnedBy = providerName
+			result = append(result, model)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
 // ModelCount returns the number of registered models
 func (r *ModelRegistry) ModelCount() int {
 	r.mu.RLock()
@@ -625,6 +649,18 @@ func splitModelSelector(model string) (providerName, modelID string) {
 		return "", model
 	}
 	return providerName, modelID
+}
+
+func qualifyPublicModelID(providerName, modelID string) string {
+	providerName = strings.TrimSpace(providerName)
+	modelID = strings.TrimSpace(modelID)
+	if providerName == "" {
+		return modelID
+	}
+	if modelID == "" {
+		return providerName
+	}
+	return providerName + "/" + modelID
 }
 
 // ModelWithProvider holds a model alongside its provider type string.
