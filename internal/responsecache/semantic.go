@@ -214,8 +214,9 @@ func extractTextFromContent(content any) string {
 
 // computeParamsHash builds a stable SHA-256 hash of all output-shaping parameters.
 // This ensures semantically similar prompts with different parameters or guardrail
-// policies never share a cache entry.
-func computeParamsHash(body []byte, endpointType string, plan *core.ExecutionPlan, guardrailsHash string) string {
+// policies never share a cache entry. endpointPath is the raw URL path
+// (e.g. "/v1/chat/completions") and isolates entries across distinct endpoints.
+func computeParamsHash(body []byte, endpointPath string, plan *core.ExecutionPlan, guardrailsHash string) string {
 	var req struct {
 		Model          string           `json:"model"`
 		Temperature    *float64         `json:"temperature"`
@@ -230,7 +231,7 @@ func computeParamsHash(body []byte, endpointType string, plan *core.ExecutionPla
 	h := sha256.New()
 	h.Write([]byte(req.Model))
 	h.Write([]byte{0})
-	h.Write([]byte(endpointType))
+	h.Write([]byte(endpointPath))
 	h.Write([]byte{0})
 
 	if plan != nil {
