@@ -1,10 +1,10 @@
 package server
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/labstack/echo/v5"
+	"github.com/tidwall/gjson"
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
@@ -147,20 +147,38 @@ func cachedCanonicalSelectorHints(env *core.WhiteBoxPrompt) (model, provider str
 }
 
 func selectorHintsFromJSONGJSON(body []byte) (model, provider string, parsed bool) {
-	parsed = core.VisitTopLevelJSONObjectFields(body, func(key string, raw []byte) bool {
-		switch key {
-		case "model":
-			return json.Unmarshal(raw, &model) == nil
-		case "provider":
-			return json.Unmarshal(raw, &provider) == nil
-		default:
-			return true
-		}
-	})
-	if !parsed {
+	if !gjson.ValidBytes(body) {
 		return "", "", false
 	}
+
+	root := gjson.ParseBytes(body)
+	if !root.IsObject() {
+		return "", "", false
+	}
+
+	modelResult := root.Get("model")
+	if !selectorHintValueAllowed(modelResult) {
+		return "", "", false
+	}
+	providerResult := root.Get("provider")
+	if !selectorHintValueAllowed(providerResult) {
+		return "", "", false
+	}
+
+	if modelResult.Type == gjson.String {
+		model = modelResult.String()
+	}
+	if providerResult.Type == gjson.String {
+		provider = providerResult.String()
+	}
 	return model, provider, true
+}
+
+func selectorHintValueAllowed(result gjson.Result) bool {
+	if !result.Exists() {
+		return true
+	}
+	return result.Type == gjson.String || result.Type == gjson.Null
 }
 
 func providerPassthroughType(c *echo.Context) (string, bool) {

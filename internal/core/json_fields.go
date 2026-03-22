@@ -103,57 +103,6 @@ func extractUnknownJSONFields(data []byte, knownFields ...string) (UnknownJSONFi
 	return extractUnknownJSONFieldsObjectByScan(data, knownFields...)
 }
 
-// VisitTopLevelJSONObjectFields walks members of a top-level JSON object in
-// source order. The callback receives raw value slices that alias data.
-// Returning false from the callback aborts the walk and reports failure.
-func VisitTopLevelJSONObjectFields(data []byte, visit func(key string, raw []byte) bool) bool {
-	data = bytes.TrimSpace(data)
-	if len(data) == 0 || data[0] != '{' {
-		return false
-	}
-
-	i := skipJSONWhitespace(data, 1)
-	for i < len(data) {
-		if data[i] == '}' {
-			i = skipJSONWhitespace(data, i+1)
-			return i == len(data)
-		}
-
-		keyStart := i
-		keyEnd, err := scanJSONString(data, keyStart)
-		if err != nil {
-			return false
-		}
-		key, err := decodeJSONString(data[keyStart:keyEnd])
-		if err != nil {
-			return false
-		}
-
-		i = skipJSONWhitespace(data, keyEnd)
-		if i >= len(data) || data[i] != ':' {
-			return false
-		}
-		i = skipJSONWhitespace(data, i+1)
-
-		valueStart := i
-		valueEnd, err := scanJSONValue(data, valueStart)
-		if err != nil {
-			return false
-		}
-
-		if !visit(key, data[valueStart:valueEnd]) {
-			return false
-		}
-
-		i = skipJSONWhitespace(data, valueEnd)
-		if i < len(data) && data[i] == ',' {
-			i = skipJSONWhitespace(data, i+1)
-		}
-	}
-
-	return false
-}
-
 func marshalWithUnknownJSONFields(base any, extraFields UnknownJSONFields) ([]byte, error) {
 	baseBody, err := json.Marshal(base)
 	if err != nil {
