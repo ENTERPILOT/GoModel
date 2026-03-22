@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/tidwall/gjson"
 
 	"gomodel/internal/cache"
 	"gomodel/internal/core"
@@ -217,24 +216,16 @@ func isStreamingRequestGJSON(path string, body []byte) bool {
 	if path == "/v1/embeddings" {
 		return false
 	}
-	result := gjson.GetBytes(body, "stream")
-	if !result.Exists() || result.Type != gjson.True && result.Type != gjson.False {
+	var stream *bool
+	if !core.VisitTopLevelJSONObjectFields(body, func(key string, raw []byte) bool {
+		if key != "stream" {
+			return true
+		}
+		return json.Unmarshal(raw, &stream) == nil
+	}) {
 		return false
 	}
-	return result.Bool()
-}
-
-func isStreamingRequestStdlib(path string, body []byte) bool {
-	if path == "/v1/embeddings" {
-		return false
-	}
-	var p struct {
-		Stream *bool `json:"stream"`
-	}
-	if err := json.Unmarshal(body, &p); err != nil {
-		return false
-	}
-	return p.Stream != nil && *p.Stream
+	return stream != nil && *stream
 }
 
 func hashRequest(path string, body []byte, plan *core.ExecutionPlan) string {

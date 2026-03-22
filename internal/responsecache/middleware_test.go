@@ -3,6 +3,7 @@ package responsecache
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -347,6 +348,10 @@ func TestIsStreamingRequest(t *testing.T) {
 	}{
 		{"stream true compact", "/v1/chat/completions", `{"stream":true}`, true},
 		{"stream true with spaces", "/v1/chat/completions", `{"stream" : true}`, true},
+		{"duplicate stream uses last occurrence", "/v1/chat/completions", `{"stream":false,"stream":true}`, true},
+		{"duplicate stream last false", "/v1/chat/completions", `{"stream":true,"stream":false}`, false},
+		{"duplicate null stream clears prior value", "/v1/chat/completions", `{"stream":true,"stream":null}`, false},
+		{"duplicate invalid stream returns false", "/v1/chat/completions", `{"stream":true,"stream":"yes"}`, false},
 		{"stream false", "/v1/chat/completions", `{"stream":false}`, false},
 		{"stream absent", "/v1/chat/completions", `{"model":"gpt-4"}`, false},
 		{"embeddings path always false", "/v1/embeddings", `{"stream":true}`, false},
@@ -422,6 +427,19 @@ func BenchmarkRequestBodyForCacheSnapshot(b *testing.B) {
 			b.Fatalf("unexpected body result: cacheable=%v len=%d", cacheable, len(body))
 		}
 	}
+}
+
+func isStreamingRequestStdlib(path string, body []byte) bool {
+	if path == "/v1/embeddings" {
+		return false
+	}
+	var p struct {
+		Stream *bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &p); err != nil {
+		return false
+	}
+	return p.Stream != nil && *p.Stream
 }
 
 func TestSimpleCacheMiddleware_SkipsNoCache(t *testing.T) {

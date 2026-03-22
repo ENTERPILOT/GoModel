@@ -2,11 +2,10 @@ package core
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
-
-	"github.com/tidwall/gjson"
 )
 
 // RouteHints holds minimal routing-relevant request hints derived from the
@@ -303,52 +302,22 @@ func derivePassthroughRouteInfoFromTransport(snapshot *RequestSnapshot) *Passthr
 }
 
 func deriveSnapshotSelectorHintsGJSON(body []byte) (model, provider string, stream, parsed bool) {
-	if !gjson.ValidBytes(body) {
+	parsed = VisitTopLevelJSONObjectFields(body, func(key string, raw []byte) bool {
+		switch key {
+		case "model":
+			return json.Unmarshal(raw, &model) == nil
+		case "provider":
+			return json.Unmarshal(raw, &provider) == nil
+		case "stream":
+			return json.Unmarshal(raw, &stream) == nil
+		default:
+			return true
+		}
+	})
+	if !parsed {
 		return "", "", false, false
-	}
-
-	root := gjson.ParseBytes(body)
-	if !root.IsObject() {
-		return "", "", false, false
-	}
-
-	modelResult := root.Get("model")
-	if !snapshotSelectorStringAllowed(modelResult) {
-		return "", "", false, false
-	}
-	providerResult := root.Get("provider")
-	if !snapshotSelectorStringAllowed(providerResult) {
-		return "", "", false, false
-	}
-	streamResult := root.Get("stream")
-	if !snapshotSelectorBoolAllowed(streamResult) {
-		return "", "", false, false
-	}
-
-	if modelResult.Type == gjson.String {
-		model = modelResult.String()
-	}
-	if providerResult.Type == gjson.String {
-		provider = providerResult.String()
-	}
-	if streamResult.Type == gjson.True || streamResult.Type == gjson.False {
-		stream = streamResult.Bool()
 	}
 	return model, provider, stream, true
-}
-
-func snapshotSelectorStringAllowed(result gjson.Result) bool {
-	if !result.Exists() {
-		return true
-	}
-	return result.Type == gjson.String || result.Type == gjson.Null
-}
-
-func snapshotSelectorBoolAllowed(result gjson.Result) bool {
-	if !result.Exists() {
-		return true
-	}
-	return result.Type == gjson.True || result.Type == gjson.False || result.Type == gjson.Null
 }
 
 // DeriveFileRouteInfoFromTransport derives sparse file route info from transport metadata.

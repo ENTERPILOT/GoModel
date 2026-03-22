@@ -298,6 +298,10 @@ func TestDeriveSnapshotSelectorHintsGJSON_MatchesStdlibSemantics(t *testing.T) {
 		body string
 	}{
 		{name: "valid selector fields", body: `{"provider":"openai","model":"gpt-5-mini","stream":true}`},
+		{name: "duplicate selector fields use last occurrence", body: `{"model":"blocked","model":"gpt-5-mini","provider":"x","provider":"openai","stream":false,"stream":true}`},
+		{name: "duplicate null string keeps prior value and null stream clears prior value", body: `{"model":"gpt-5-mini","model":null,"provider":"openai","provider":null,"stream":true,"stream":null}`},
+		{name: "duplicate invalid selector field fails parse", body: `{"model":"gpt-5-mini","model":123}`},
+		{name: "duplicate invalid stream field fails parse", body: `{"stream":true,"stream":"yes"}`},
 		{name: "missing selector fields", body: `{"messages":[{"role":"user","content":"hi"}]}`},
 		{name: "null selector fields", body: `{"provider":null,"model":null,"stream":null}`},
 		{name: "invalid json", body: `not json`},

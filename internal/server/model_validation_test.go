@@ -778,6 +778,9 @@ func TestSelectorHintsFromJSONGJSON_MatchesStdlibSemantics(t *testing.T) {
 		body string
 	}{
 		{name: "model and provider strings", body: `{"provider":"openai","model":"gpt-4o-mini"}`},
+		{name: "duplicate selector fields use last occurrence", body: `{"provider":"openai","provider":"anthropic","model":"blocked","model":"gpt-4o-mini"}`},
+		{name: "duplicate null selector keeps prior string value", body: `{"provider":"openai","provider":null,"model":"gpt-4o-mini","model":null}`},
+		{name: "duplicate invalid selector field fails parse", body: `{"provider":"openai","provider":123}`},
 		{name: "model only", body: `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`},
 		{name: "null selector fields", body: `{"provider":null,"model":null}`},
 		{name: "missing selector fields", body: `{"messages":[{"role":"user","content":"hi"}]}`},
