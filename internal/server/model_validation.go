@@ -156,6 +156,10 @@ func selectorHintsFromJSONGJSON(body []byte) (model, provider string, parsed boo
 		return "", "", false
 	}
 
+	// gjson returns the first matching top-level field. That differs from
+	// encoding/json on duplicate keys, but the hot-path speedup is worth it here:
+	// duplicate selector keys are not expected from real clients, and we accept
+	// the first-match behavior to keep request planning fast.
 	modelResult := root.Get("model")
 	if !selectorHintValueAllowed(modelResult) {
 		return "", "", false

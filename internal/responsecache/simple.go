@@ -71,7 +71,7 @@ func (m *simpleCacheMiddleware) Middleware() echo.MiddlewareFunc {
 			}
 			body, cacheable, err := requestBodyForCache(c.Request())
 			if err != nil {
-				return err
+				return core.NewInvalidRequestError(err.Error(), err)
 			}
 			if !cacheable {
 				return next(c)
@@ -171,11 +171,11 @@ func shouldSkipCacheForExecutionPlan(plan *core.ExecutionPlan) bool {
 
 func requestBodyForCache(req *http.Request) ([]byte, bool, error) {
 	if snapshot := core.GetRequestSnapshot(req.Context()); snapshot != nil {
-		if body := snapshot.CapturedBodyView(); body != nil {
-			return body, true, nil
-		}
 		if snapshot.BodyNotCaptured {
 			return nil, false, nil
+		}
+		if body := snapshot.CapturedBodyView(); body != nil {
+			return body, true, nil
 		}
 	}
 	if req.Body == nil {
@@ -216,6 +216,9 @@ func isStreamingRequestGJSON(path string, body []byte) bool {
 	if path == "/v1/embeddings" {
 		return false
 	}
+	// gjson returns the first matching top-level field. That differs from
+	// encoding/json on duplicate keys, but the cache hot path favors the cheaper
+	// first-match check because duplicate stream fields are not expected.
 	result := gjson.GetBytes(body, "stream")
 	if !result.Exists() || result.Type != gjson.True && result.Type != gjson.False {
 		return false

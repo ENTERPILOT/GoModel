@@ -312,6 +312,10 @@ func deriveSnapshotSelectorHintsGJSON(body []byte) (model, provider string, stre
 		return "", "", false, false
 	}
 
+	// gjson returns the first matching top-level field. That differs from
+	// encoding/json on duplicate keys, but the hot-path speedup is worth it here:
+	// duplicate selector keys are not expected from real clients, and we accept
+	// the first-match behavior to keep ingress peeking cheap.
 	modelResult := root.Get("model")
 	if !snapshotSelectorStringAllowed(modelResult) {
 		return "", "", false, false
