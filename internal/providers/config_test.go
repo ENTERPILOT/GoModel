@@ -7,9 +7,6 @@ import (
 	"gomodel/config"
 )
 
-//go:fix inline
-func durPtr(v time.Duration) *time.Duration { return new(v) }
-
 var globalRetry = config.RetryConfig{
 	MaxRetries:     3,
 	InitialBackoff: 1 * time.Second,
@@ -86,8 +83,8 @@ func TestBuildProviderConfig_FullOverride(t *testing.T) {
 		Resilience: &config.RawResilienceConfig{
 			Retry: &config.RawRetryConfig{
 				MaxRetries:     new(7),
-				InitialBackoff: durPtr(500 * time.Millisecond),
-				MaxBackoff:     durPtr(10 * time.Second),
+				InitialBackoff: new(500 * time.Millisecond),
+				MaxBackoff:     new(10 * time.Second),
 				BackoffFactor:  new(1.5),
 				JitterFactor:   new(0.3),
 			},

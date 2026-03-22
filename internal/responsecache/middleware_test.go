@@ -323,7 +323,7 @@ func TestSimpleCacheMiddleware_BypassesCacheWhenBodyWasNotCaptured(t *testing.T)
 		return req.WithContext(core.WithRequestSnapshot(req.Context(), frame))
 	}
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, makeRequest())
 		if rec.Code != http.StatusOK {
@@ -586,10 +586,8 @@ func TestSimpleCacheMiddleware_LimitsConcurrentCacheWrites(t *testing.T) {
 	const requestCount = cacheWriteWorkerCount * 2
 
 	var reqWG sync.WaitGroup
-	for i := 0; i < requestCount; i++ {
-		reqWG.Add(1)
-		go func() {
-			defer reqWG.Done()
+	for range requestCount {
+		reqWG.Go(func() {
 			body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
 			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
@@ -598,10 +596,10 @@ func TestSimpleCacheMiddleware_LimitsConcurrentCacheWrites(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Errorf("expected 200, got %d", rec.Code)
 			}
-		}()
+		})
 	}
 
-	for i := 0; i < cacheWriteWorkerCount; i++ {
+	for i := range cacheWriteWorkerCount {
 		select {
 		case <-store.enterCh:
 		case <-time.After(2 * time.Second):
@@ -613,7 +611,7 @@ func TestSimpleCacheMiddleware_LimitsConcurrentCacheWrites(t *testing.T) {
 		t.Fatalf("expected at most %d concurrent cache writes, got %d", cacheWriteWorkerCount, got)
 	}
 
-	for i := 0; i < requestCount; i++ {
+	for range requestCount {
 		store.releaseCh <- struct{}{}
 	}
 	reqWG.Wait()

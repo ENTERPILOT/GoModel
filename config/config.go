@@ -572,7 +572,6 @@ func hasEnvDescendants(t reflect.Type) bool {
 		return false
 	}
 	for f := range t.Fields() {
-		f := f
 		if f.Tag.Get("env") != "" {
 			return true
 		}

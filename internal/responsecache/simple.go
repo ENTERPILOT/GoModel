@@ -132,9 +132,7 @@ func (m *simpleCacheMiddleware) close() error {
 
 func (m *simpleCacheMiddleware) startWorkers() {
 	for range cacheWriteWorkerCount {
-		m.workers.Add(1)
-		go func() {
-			defer m.workers.Done()
+		m.workers.Go(func() {
 			for job := range m.jobs {
 				storeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				err := m.store.Set(storeCtx, job.key, job.data, m.ttl)
@@ -144,7 +142,7 @@ func (m *simpleCacheMiddleware) startWorkers() {
 				}
 				m.wg.Done()
 			}
-		}()
+		})
 	}
 }
 
