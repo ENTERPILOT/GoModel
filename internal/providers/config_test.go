@@ -413,6 +413,42 @@ func TestApplyProviderEnvVars_BaseURLEnvWinsOverYAML(t *testing.T) {
 	}
 }
 
+func TestApplyProviderEnvVars_DefaultBaseReplacesPlaceholderYAMLBaseURL(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
+
+	raw := map[string]config.RawProviderConfig{
+		"openrouter": {Type: "openrouter", APIKey: "sk-yaml", BaseURL: "${OPENROUTER_BASE_URL}"},
+	}
+
+	got := applyProviderEnvVars(raw)
+
+	if got["openrouter"].BaseURL != openRouterDefaultBaseURL {
+		t.Fatalf("BaseURL = %q, want %q", got["openrouter"].BaseURL, openRouterDefaultBaseURL)
+	}
+}
+
+func TestApplyProviderEnvVars_PlaceholderBaseURLEnvFallsBackToDefault(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
+	t.Setenv("OPENROUTER_BASE_URL", "${OPENROUTER_BASE_URL}")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+
+	if got["openrouter"].BaseURL != openRouterDefaultBaseURL {
+		t.Fatalf("BaseURL = %q, want %q", got["openrouter"].BaseURL, openRouterDefaultBaseURL)
+	}
+}
+
+func TestApplyProviderEnvVars_DoesNotDiscoverAzureWithPlaceholderBaseURL(t *testing.T) {
+	t.Setenv("AZURE_API_KEY", "sk-azure")
+	t.Setenv("AZURE_API_BASE", "${AZURE_API_BASE}")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+
+	if _, exists := got["azure"]; exists {
+		t.Fatal("expected azure not to be discovered with placeholder AZURE_API_BASE")
+	}
+}
+
 func TestApplyProviderEnvVars_PreservesYAMLResilience(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-env-key")
 

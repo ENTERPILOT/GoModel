@@ -23,8 +23,9 @@ var Registration = providers.Registration{
 
 type Provider struct {
 	*openai.CompatibleProvider
-	resourceProvider *openai.CompatibleProvider
-	apiVersion       string
+	resourceProvider       *openai.CompatibleProvider
+	openAIResourceProvider *openai.CompatibleProvider
+	apiVersion             string
 }
 
 func New(apiKey string, opts providers.ProviderOptions) core.Provider {
@@ -36,8 +37,10 @@ func New(apiKey string, opts providers.ProviderOptions) core.Provider {
 	}
 	p.CompatibleProvider = openai.NewCompatibleProvider(apiKey, opts, cfg)
 	p.resourceProvider = openai.NewCompatibleProvider(apiKey, opts, cfg)
+	p.openAIResourceProvider = openai.NewCompatibleProvider(apiKey, opts, cfg)
 	p.SetRequestMutator(p.mutateRequest)
 	p.resourceProvider.SetRequestMutator(p.mutateRequest)
+	p.openAIResourceProvider.SetRequestMutator(p.mutateRequest)
 	return p
 }
 
@@ -50,14 +53,18 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 	}
 	p.CompatibleProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg)
 	p.resourceProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg)
+	p.openAIResourceProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg)
 	p.SetRequestMutator(p.mutateRequest)
 	p.resourceProvider.SetRequestMutator(p.mutateRequest)
+	p.openAIResourceProvider.SetRequestMutator(p.mutateRequest)
 	return p
 }
 
 func (p *Provider) SetBaseURL(baseURL string) {
+	resourceRoot := resourceRootBaseURL(baseURL)
 	p.CompatibleProvider.SetBaseURL(baseURL)
-	p.resourceProvider.SetBaseURL(resourceRootBaseURL(baseURL))
+	p.resourceProvider.SetBaseURL(resourceRoot)
+	p.openAIResourceProvider.SetBaseURL(resourceRoot + "/openai")
 }
 
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
@@ -144,6 +151,10 @@ func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchRespo
 		resp.ProviderBatchID = resp.ID
 	}
 	return &resp, nil
+}
+
+func (p *Provider) GetBatchResults(ctx context.Context, id string) (*core.BatchResultsResponse, error) {
+	return p.openAIResourceProvider.GetBatchResults(ctx, id)
 }
 
 func (p *Provider) SetAPIVersion(version string) {

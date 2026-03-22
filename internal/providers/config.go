@@ -60,7 +60,7 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig) map[string]co
 
 	for _, kp := range knownProviderEnvs {
 		apiKey := os.Getenv(kp.apiKeyEnv)
-		explicitBaseURL := os.Getenv(kp.baseURLEnv)
+		explicitBaseURL := normalizeResolvedBaseURL(os.Getenv(kp.baseURLEnv))
 		apiVersion := os.Getenv(kp.apiVersionEnv)
 		baseURL := explicitBaseURL
 		if baseURL == "" && apiKey != "" && kp.defaultBase != "" {
@@ -78,7 +78,7 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig) map[string]co
 			}
 			if explicitBaseURL != "" {
 				existing.BaseURL = baseURL
-			} else if existing.BaseURL == "" && apiKey != "" && kp.defaultBase != "" {
+			} else if normalizeResolvedBaseURL(existing.BaseURL) == "" && apiKey != "" && kp.defaultBase != "" {
 				existing.BaseURL = kp.defaultBase
 			}
 			if apiVersion != "" {
@@ -99,6 +99,22 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig) map[string]co
 	}
 
 	return result
+}
+
+func normalizeResolvedBaseURL(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if isUnresolvedEnvPlaceholder(trimmed) {
+		return ""
+	}
+	return trimmed
+}
+
+func isUnresolvedEnvPlaceholder(value string) bool {
+	if !strings.HasPrefix(value, "${") || !strings.HasSuffix(value, "}") || len(value) <= 3 {
+		return false
+	}
+	inner := value[2 : len(value)-1]
+	return inner != "" && !strings.ContainsAny(inner, "{}")
 }
 
 // filterEmptyProviders removes providers without valid credentials.

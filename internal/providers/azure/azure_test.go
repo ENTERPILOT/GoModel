@@ -369,3 +369,50 @@ func TestBatchEndpoints_UseAzureResourceRootForDeploymentScopedBaseURL(t *testin
 		})
 	}
 }
+
+func TestGetBatchResults_UsesAzureResourceRootForDeploymentScopedBaseURL(t *testing.T) {
+	var gotPaths []string
+	var gotVersions []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		gotVersions = append(gotVersions, r.URL.Query().Get("api-version"))
+
+		switch r.URL.Path {
+		case "/openai/batches/batch_1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"batch_1","status":"completed","output_file_id":"file_1","endpoint":"/v1/chat/completions"}`))
+		case "/openai/files/file_1/content":
+			w.Header().Set("Content-Type", "application/jsonl")
+			_, _ = w.Write([]byte(`{"custom_id":"ok-1","response":{"status_code":200,"url":"/v1/chat/completions","body":{"id":"resp-1","model":"gpt-4o-mini"}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/openai/deployments/gpt-4o")
+
+	resp, err := provider.GetBatchResults(context.Background(), "batch_1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.BatchID != "batch_1" {
+		t.Fatalf("BatchID = %q, want batch_1", resp.BatchID)
+	}
+	if len(gotPaths) != 2 {
+		t.Fatalf("saw %d requests, want 2", len(gotPaths))
+	}
+	if gotPaths[0] != "/openai/batches/batch_1" {
+		t.Fatalf("first path = %q, want /openai/batches/batch_1", gotPaths[0])
+	}
+	if gotPaths[1] != "/openai/files/file_1/content" {
+		t.Fatalf("second path = %q, want /openai/files/file_1/content", gotPaths[1])
+	}
+	for i, gotVersion := range gotVersions {
+		if gotVersion != defaultAPIVersion {
+			t.Fatalf("request %d api-version = %q, want %q", i, gotVersion, defaultAPIVersion)
+		}
+	}
+}
