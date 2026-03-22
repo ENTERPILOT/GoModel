@@ -262,8 +262,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			name:      "gateway_chat_completion_hot_path",
 			bench:     BenchmarkGatewayHotPathChatCompletion,
-			maxAllocs: 180,
-			maxBytes:  22 * 1024,
+			maxAllocs: 150,
+			maxBytes:  18 * 1024,
 		},
 		{
 			name:      "openai_responses_stream_converter",
@@ -274,8 +274,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			name:      "shared_stream_audit_and_usage_observers",
 			bench:     BenchmarkSharedStreamingAuditAndUsageObservers,
-			maxAllocs: 240,
-			maxBytes:  14 * 1024,
+			maxAllocs: 200,
+			maxBytes:  10 * 1024,
 		},
 	}
 
