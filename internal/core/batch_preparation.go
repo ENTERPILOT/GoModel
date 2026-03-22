@@ -310,7 +310,7 @@ func cloneBatchRequest(req *BatchRequest) *BatchRequest {
 		Endpoint:         req.Endpoint,
 		CompletionWindow: req.CompletionWindow,
 		Metadata:         cloneBatchStringMap(req.Metadata),
-		ExtraFields:      CloneRawJSONMap(req.ExtraFields),
+		ExtraFields:      CloneUnknownJSONFields(req.ExtraFields),
 	}
 	if req.Requests != nil {
 		cloned.Requests = make([]BatchRequestItem, len(req.Requests))
@@ -327,7 +327,7 @@ func cloneBatchRequestItem(item BatchRequestItem) BatchRequestItem {
 		Method:      item.Method,
 		URL:         item.URL,
 		Body:        CloneRawJSON(item.Body),
-		ExtraFields: CloneRawJSONMap(item.ExtraFields),
+		ExtraFields: CloneUnknownJSONFields(item.ExtraFields),
 	}
 }
 

@@ -27,7 +27,7 @@ func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	extraFields, err := extractUnknownJSONFieldsObject(data,
+	extraFields, err := extractUnknownJSONFields(data,
 		"model",
 		"provider",
 		"input",
@@ -81,7 +81,7 @@ func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 
 // MarshalJSON preserves dynamic input payloads while supporting Swagger-only schema fields.
 func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
-	return marshalWithUnknownJSONFieldsObject(struct {
+	return marshalWithUnknownJSONFields(struct {
 		Model             string            `json:"model"`
 		Provider          string            `json:"provider,omitempty"`
 		Input             any               `json:"input"`
@@ -178,7 +178,7 @@ func (e *ResponsesInputElement) UnmarshalJSON(data []byte) error {
 		knownFields = append(knownFields, "role", "status", "content")
 	}
 
-	extraFields, err := extractUnknownJSONFieldsObject(data, knownFields...)
+	extraFields, err := extractUnknownJSONFields(data, knownFields...)
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func (e *ResponsesInputElement) UnmarshalJSON(data []byte) error {
 func (e ResponsesInputElement) MarshalJSON() ([]byte, error) {
 	switch e.Type {
 	case "function_call":
-		return marshalWithUnknownJSONFieldsObject(struct {
+		return marshalWithUnknownJSONFields(struct {
 			Type      string `json:"type"`
 			CallID    string `json:"call_id,omitempty"`
 			Name      string `json:"name,omitempty"`
@@ -205,7 +205,7 @@ func (e ResponsesInputElement) MarshalJSON() ([]byte, error) {
 			Status:    e.Status,
 		}, e.ExtraFields)
 	case "function_call_output":
-		return marshalWithUnknownJSONFieldsObject(struct {
+		return marshalWithUnknownJSONFields(struct {
 			Type   string `json:"type"`
 			CallID string `json:"call_id,omitempty"`
 			Output string `json:"output,omitempty"`
@@ -223,7 +223,7 @@ func (e ResponsesInputElement) MarshalJSON() ([]byte, error) {
 			Content any    `json:"content"`
 			Status  string `json:"status,omitempty"`
 		}
-		return marshalWithUnknownJSONFieldsObject(msg{
+		return marshalWithUnknownJSONFields(msg{
 			Type:    e.Type,
 			Role:    e.Role,
 			Content: e.Content,

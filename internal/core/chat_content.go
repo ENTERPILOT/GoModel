@@ -46,7 +46,7 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		if p.Text == "" {
 			return nil, fmt.Errorf("text part is missing text")
 		}
-		return marshalWithUnknownJSONFieldsObject(struct {
+		return marshalWithUnknownJSONFields(struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		}{
@@ -57,7 +57,7 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		if p.ImageURL == nil || p.ImageURL.URL == "" {
 			return nil, fmt.Errorf("image_url part is missing image_url.url")
 		}
-		return marshalWithUnknownJSONFieldsObject(struct {
+		return marshalWithUnknownJSONFields(struct {
 			Type     string           `json:"type"`
 			ImageURL *ImageURLContent `json:"image_url"`
 		}{
@@ -68,7 +68,7 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		if p.InputAudio == nil || p.InputAudio.Data == "" || p.InputAudio.Format == "" {
 			return nil, fmt.Errorf("input_audio part is missing data or format")
 		}
-		return marshalWithUnknownJSONFieldsObject(struct {
+		return marshalWithUnknownJSONFields(struct {
 			Type       string             `json:"type"`
 			InputAudio *InputAudioContent `json:"input_audio"`
 		}{
@@ -112,7 +112,7 @@ func (c *ImageURLContent) UnmarshalJSON(data []byte) error {
 	if raw.URL == "" {
 		return fmt.Errorf("image_url part is missing image_url.url")
 	}
-	extraFields, err := extractUnknownJSONFieldsObject(trimmed,
+	extraFields, err := extractUnknownJSONFields(trimmed,
 		"url",
 		"detail",
 		"media_type",
@@ -132,7 +132,7 @@ func (c ImageURLContent) MarshalJSON() ([]byte, error) {
 	if c.URL == "" {
 		return nil, fmt.Errorf("image_url part is missing image_url.url")
 	}
-	return marshalWithUnknownJSONFieldsObject(struct {
+	return marshalWithUnknownJSONFields(struct {
 		URL       string `json:"url"`
 		Detail    string `json:"detail,omitempty"`
 		MediaType string `json:"media_type,omitempty"`
@@ -162,7 +162,7 @@ func (a *InputAudioContent) UnmarshalJSON(data []byte) error {
 	if raw.Data == "" || raw.Format == "" {
 		return fmt.Errorf("input_audio part is missing data or format")
 	}
-	extraFields, err := extractUnknownJSONFieldsObject(trimmed,
+	extraFields, err := extractUnknownJSONFields(trimmed,
 		"data",
 		"format",
 	)
@@ -180,7 +180,7 @@ func (a InputAudioContent) MarshalJSON() ([]byte, error) {
 	if a.Data == "" || a.Format == "" {
 		return nil, fmt.Errorf("input_audio part is missing data or format")
 	}
-	return marshalWithUnknownJSONFieldsObject(struct {
+	return marshalWithUnknownJSONFields(struct {
 		Data   string `json:"data"`
 		Format string `json:"format"`
 	}{
@@ -358,7 +358,7 @@ func unmarshalContentPart(data []byte) (ContentPart, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return ContentPart{}, err
 	}
-	extraFields, err := extractUnknownJSONFieldsObject(data,
+	extraFields, err := extractUnknownJSONFields(data,
 		"type",
 		"text",
 		"image_url",

@@ -263,12 +263,12 @@ type ModelsResponse struct {
 
 // EmbeddingRequest represents the incoming embeddings request (OpenAI-compatible).
 type EmbeddingRequest struct {
-	Model          string                     `json:"model"`
-	Provider       string                     `json:"provider,omitempty"`
-	Input          any                        `json:"input"`
-	EncodingFormat string                     `json:"encoding_format,omitempty"`
-	Dimensions     *int                       `json:"dimensions,omitempty"`
-	ExtraFields    map[string]json.RawMessage `json:"-" swaggerignore:"true"`
+	Model          string            `json:"model"`
+	Provider       string            `json:"provider,omitempty"`
+	Input          any               `json:"input"`
+	EncodingFormat string            `json:"encoding_format,omitempty"`
+	Dimensions     *int              `json:"dimensions,omitempty"`
+	ExtraFields    UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
 func (r *EmbeddingRequest) semanticSelector() (string, string) {

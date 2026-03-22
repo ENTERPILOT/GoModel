@@ -13,12 +13,12 @@ import "encoding/json"
 // Gateway extension:
 //   - requests (inline payloads for providers that support native inline batch bodies)
 type BatchRequest struct {
-	InputFileID      string                     `json:"input_file_id,omitempty"`
-	Endpoint         string                     `json:"endpoint,omitempty"`
-	CompletionWindow string                     `json:"completion_window,omitempty"`
-	Metadata         map[string]string          `json:"metadata,omitempty"`
-	Requests         []BatchRequestItem         `json:"requests,omitempty"`
-	ExtraFields      map[string]json.RawMessage `json:"-" swaggerignore:"true"`
+	InputFileID      string             `json:"input_file_id,omitempty"`
+	Endpoint         string             `json:"endpoint,omitempty"`
+	CompletionWindow string             `json:"completion_window,omitempty"`
+	Metadata         map[string]string  `json:"metadata,omitempty"`
+	Requests         []BatchRequestItem `json:"requests,omitempty"`
+	ExtraFields      UnknownJSONFields  `json:"-" swaggerignore:"true"`
 }
 
 const (
@@ -60,11 +60,11 @@ func (req *BatchRouteInfo) ensureParsedLimit() error {
 
 // BatchRequestItem represents one sub-request in an inline batch.
 type BatchRequestItem struct {
-	CustomID    string                     `json:"custom_id,omitempty"`
-	Method      string                     `json:"method,omitempty"`
-	URL         string                     `json:"url"`
-	Body        json.RawMessage            `json:"body" swaggertype:"object"`
-	ExtraFields map[string]json.RawMessage `json:"-" swaggerignore:"true"`
+	CustomID    string            `json:"custom_id,omitempty"`
+	Method      string            `json:"method,omitempty"`
+	URL         string            `json:"url"`
+	Body        json.RawMessage   `json:"body" swaggertype:"object"`
+	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
 // BatchResponse uses OpenAI-compatible batch fields and includes provider mapping plus optional cached results.

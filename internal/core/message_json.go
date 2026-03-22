@@ -17,7 +17,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	extraFields, err := extractUnknownJSONFieldsObject(data,
+	extraFields, err := extractUnknownJSONFields(data,
 		"role",
 		"content",
 		"tool_calls",
@@ -56,7 +56,7 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		}
 	}
 
-	return marshalWithUnknownJSONFieldsObject(struct {
+	return marshalWithUnknownJSONFields(struct {
 		Role       string     `json:"role"`
 		Content    any        `json:"content"`
 		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
@@ -81,7 +81,7 @@ func (m *ResponseMessage) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	extraFields, err := extractUnknownJSONFieldsObject(data,
+	extraFields, err := extractUnknownJSONFields(data,
 		"role",
 		"content",
 		"tool_calls",
@@ -111,7 +111,7 @@ func (m ResponseMessage) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 
-	return marshalWithUnknownJSONFieldsObject(struct {
+	return marshalWithUnknownJSONFields(struct {
 		Role      string     `json:"role"`
 		Content   any        `json:"content"`
 		ToolCalls []ToolCall `json:"tool_calls,omitempty"`
@@ -133,7 +133,7 @@ func (t *ToolCall) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	extraFields, err := extractUnknownJSONFieldsObject(data,
+	extraFields, err := extractUnknownJSONFields(data,
 		"id",
 		"type",
 		"function",
@@ -152,7 +152,7 @@ func (t *ToolCall) UnmarshalJSON(data []byte) error {
 // ToolCall.MarshalJSON marshals a ToolCall to JSON, including unknown JSON
 // members from ExtraFields.
 func (t ToolCall) MarshalJSON() ([]byte, error) {
-	return marshalWithUnknownJSONFieldsObject(struct {
+	return marshalWithUnknownJSONFields(struct {
 		ID       string       `json:"id"`
 		Type     string       `json:"type"`
 		Function FunctionCall `json:"function"`
@@ -173,7 +173,7 @@ func (f *FunctionCall) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	extraFields, err := extractUnknownJSONFieldsObject(data,
+	extraFields, err := extractUnknownJSONFields(data,
 		"name",
 		"arguments",
 	)
@@ -190,7 +190,7 @@ func (f *FunctionCall) UnmarshalJSON(data []byte) error {
 // FunctionCall.MarshalJSON marshals a FunctionCall to JSON, including unknown
 // JSON members from ExtraFields.
 func (f FunctionCall) MarshalJSON() ([]byte, error) {
-	return marshalWithUnknownJSONFieldsObject(struct {
+	return marshalWithUnknownJSONFields(struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	}{

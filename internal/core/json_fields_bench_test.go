@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 var benchmarkChatUnknownFieldsPayload = []byte(`{
 	"model":"gpt-5-mini",
@@ -47,7 +50,7 @@ var benchmarkResponsesUnknownFieldsPayload = []byte(`{
 func BenchmarkExtractUnknownJSONFieldsMap_Chat(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		fields, err := extractUnknownJSONFields(benchmarkChatUnknownFieldsPayload,
+		fields, err := extractUnknownJSONFieldsMapBaseline(benchmarkChatUnknownFieldsPayload,
 			"temperature",
 			"max_tokens",
 			"model",
@@ -72,7 +75,7 @@ func BenchmarkExtractUnknownJSONFieldsMap_Chat(b *testing.B) {
 func BenchmarkExtractUnknownJSONFieldsObject_Chat(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		fields, err := extractUnknownJSONFieldsObject(benchmarkChatUnknownFieldsPayload,
+		fields, err := extractUnknownJSONFields(benchmarkChatUnknownFieldsPayload,
 			"temperature",
 			"max_tokens",
 			"model",
@@ -97,7 +100,7 @@ func BenchmarkExtractUnknownJSONFieldsObject_Chat(b *testing.B) {
 func BenchmarkExtractUnknownJSONFieldsMap_Responses(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		fields, err := extractUnknownJSONFields(benchmarkResponsesUnknownFieldsPayload,
+		fields, err := extractUnknownJSONFieldsMapBaseline(benchmarkResponsesUnknownFieldsPayload,
 			"model",
 			"provider",
 			"input",
@@ -124,7 +127,7 @@ func BenchmarkExtractUnknownJSONFieldsMap_Responses(b *testing.B) {
 func BenchmarkExtractUnknownJSONFieldsObject_Responses(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		fields, err := extractUnknownJSONFieldsObject(benchmarkResponsesUnknownFieldsPayload,
+		fields, err := extractUnknownJSONFields(benchmarkResponsesUnknownFieldsPayload,
 			"model",
 			"provider",
 			"input",
@@ -149,6 +152,42 @@ func BenchmarkExtractUnknownJSONFieldsObject_Responses(b *testing.B) {
 }
 
 func BenchmarkMarshalUnknownJSONFieldsMap_Chat(b *testing.B) {
+	b.ReportAllocs()
+	extraFields, err := extractUnknownJSONFieldsMapBaseline(benchmarkChatUnknownFieldsPayload,
+		"temperature",
+		"max_tokens",
+		"model",
+		"provider",
+		"messages",
+		"tools",
+		"tool_choice",
+		"parallel_tool_calls",
+		"stream",
+		"stream_options",
+		"reasoning",
+	)
+	if err != nil {
+		b.Fatal(err)
+	}
+	base := struct {
+		Model  string `json:"model"`
+		Stream bool   `json:"stream,omitempty"`
+	}{
+		Model:  "gpt-5-mini",
+		Stream: true,
+	}
+	for b.Loop() {
+		body, err := marshalWithUnknownJSONFieldsMapBaseline(base, extraFields)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(body) == 0 {
+			b.Fatal("expected output")
+		}
+	}
+}
+
+func BenchmarkMarshalUnknownJSONFieldsObject_Chat(b *testing.B) {
 	b.ReportAllocs()
 	extraFields, err := extractUnknownJSONFields(benchmarkChatUnknownFieldsPayload,
 		"temperature",
@@ -184,38 +223,45 @@ func BenchmarkMarshalUnknownJSONFieldsMap_Chat(b *testing.B) {
 	}
 }
 
-func BenchmarkMarshalUnknownJSONFieldsObject_Chat(b *testing.B) {
-	b.ReportAllocs()
-	extraFields, err := extractUnknownJSONFieldsObject(benchmarkChatUnknownFieldsPayload,
-		"temperature",
-		"max_tokens",
-		"model",
-		"provider",
-		"messages",
-		"tools",
-		"tool_choice",
-		"parallel_tool_calls",
-		"stream",
-		"stream_options",
-		"reasoning",
-	)
+func extractUnknownJSONFieldsMapBaseline(data []byte, knownFields ...string) (map[string]json.RawMessage, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	for _, field := range knownFields {
+		delete(raw, field)
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	cloned := make(map[string]json.RawMessage, len(raw))
+	for key, value := range raw {
+		cloned[key] = CloneRawJSON(value)
+	}
+	return cloned, nil
+}
+
+func marshalWithUnknownJSONFieldsMapBaseline(base any, extraFields map[string]json.RawMessage) ([]byte, error) {
+	baseBody, err := json.Marshal(base)
 	if err != nil {
-		b.Fatal(err)
+		return nil, err
 	}
-	base := struct {
-		Model  string `json:"model"`
-		Stream bool   `json:"stream,omitempty"`
-	}{
-		Model:  "gpt-5-mini",
-		Stream: true,
+	if len(extraFields) == 0 {
+		return baseBody, nil
 	}
-	for b.Loop() {
-		body, err := marshalWithUnknownJSONFieldsObject(base, extraFields)
-		if err != nil {
-			b.Fatal(err)
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(baseBody, &raw); err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		raw = make(map[string]json.RawMessage)
+	}
+	for key, value := range extraFields {
+		if _, exists := raw[key]; exists {
+			continue
 		}
-		if len(body) == 0 {
-			b.Fatal("expected output")
-		}
+		raw[key] = CloneRawJSON(value)
 	}
+	return json.Marshal(raw)
 }

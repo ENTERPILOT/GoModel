@@ -434,7 +434,7 @@ func TestEmbeddingRequestJSON_PreservesUnknownFields(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	if req.ExtraFields["user"] == nil {
+	if req.ExtraFields.Lookup("user") == nil {
 		t.Fatalf("user missing from ExtraFields: %+v", req.ExtraFields)
 	}
 

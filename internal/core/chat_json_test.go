@@ -73,8 +73,8 @@ func TestChatRequestJSON_RoundTripPreservesUnknownFields(t *testing.T) {
 		t.Fatalf("Model = %q, want gpt-4o-mini", req.Model)
 	}
 	traceField := lookupUnknownField(t, req.ExtraFields, "x_trace")
-	if string(traceField) != string(wantExtra["x_trace"]) {
-		t.Fatalf("ExtraFields[x_trace] = %s, want %s", traceField, wantExtra["x_trace"])
+	if string(traceField) != string(wantExtra.Lookup("x_trace")) {
+		t.Fatalf("ExtraFields[x_trace] = %s, want %s", traceField, wantExtra.Lookup("x_trace"))
 	}
 	var topTrace map[string]any
 	if err := json.Unmarshal(traceField, &topTrace); err != nil {

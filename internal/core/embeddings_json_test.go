@@ -48,11 +48,13 @@ func TestEmbeddingRequestJSON_RoundTripPreservesUnknownFields(t *testing.T) {
 	if req.Dimensions == nil || *req.Dimensions != 256 {
 		t.Fatalf("Dimensions = %#v, want 256", req.Dimensions)
 	}
-	if string(req.ExtraFields["x_trace"]) != string(wantExtra["x_trace"]) {
-		t.Fatalf("ExtraFields[x_trace] = %s, want %s", req.ExtraFields["x_trace"], wantExtra["x_trace"])
+	traceField := lookupUnknownField(t, req.ExtraFields, "x_trace")
+	if string(traceField) != string(wantExtra.Lookup("x_trace")) {
+		t.Fatalf("ExtraFields[x_trace] = %s, want %s", traceField, wantExtra.Lookup("x_trace"))
 	}
-	if string(req.ExtraFields["x_mode"]) != string(wantExtra["x_mode"]) {
-		t.Fatalf("ExtraFields[x_mode] = %s, want %s", req.ExtraFields["x_mode"], wantExtra["x_mode"])
+	modeField := lookupUnknownField(t, req.ExtraFields, "x_mode")
+	if string(modeField) != string(wantExtra.Lookup("x_mode")) {
+		t.Fatalf("ExtraFields[x_mode] = %s, want %s", modeField, wantExtra.Lookup("x_mode"))
 	}
 
 	roundTrip, err := json.Marshal(req)

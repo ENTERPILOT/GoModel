@@ -19,14 +19,14 @@ func TestCloneBatchRequestDeepCopiesNestedFields(t *testing.T) {
 				Method:   "POST",
 				URL:      "/v1/chat/completions",
 				Body:     json.RawMessage(`{"model":"smart","messages":[{"role":"user","content":"hi"}]}`),
-				ExtraFields: map[string]json.RawMessage{
+				ExtraFields: UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 					"x_item": json.RawMessage(`{"trace":true}`),
-				},
+				}),
 			},
 		},
-		ExtraFields: map[string]json.RawMessage{
+		ExtraFields: UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"x_top": json.RawMessage(`{"debug":true}`),
-		},
+		}),
 	}
 
 	cloned := cloneBatchRequest(original)
@@ -37,9 +37,9 @@ func TestCloneBatchRequestDeepCopiesNestedFields(t *testing.T) {
 	cloned.Metadata["provider"] = "anthropic"
 	cloned.Requests[0].CustomID = "chat-2"
 	cloned.Requests[0].Body[10] = 'X'
-	itemExtra := cloned.Requests[0].ExtraFields["x_item"]
+	itemExtra := cloned.Requests[0].ExtraFields.Lookup("x_item")
 	itemExtra[9] = 'f'
-	topExtra := cloned.ExtraFields["x_top"]
+	topExtra := cloned.ExtraFields.Lookup("x_top")
 	topExtra[9] = 'f'
 
 	if got := original.Metadata["provider"]; got != "openai" {
@@ -51,10 +51,10 @@ func TestCloneBatchRequestDeepCopiesNestedFields(t *testing.T) {
 	if got := string(original.Requests[0].Body); got != `{"model":"smart","messages":[{"role":"user","content":"hi"}]}` {
 		t.Fatalf("original body mutated to %s", got)
 	}
-	if got := string(original.Requests[0].ExtraFields["x_item"]); got != `{"trace":true}` {
+	if got := string(original.Requests[0].ExtraFields.Lookup("x_item")); got != `{"trace":true}` {
 		t.Fatalf("original item extra mutated to %s", got)
 	}
-	if got := string(original.ExtraFields["x_top"]); got != `{"debug":true}` {
+	if got := string(original.ExtraFields.Lookup("x_top")); got != `{"debug":true}` {
 		t.Fatalf("original top extra mutated to %s", got)
 	}
 }

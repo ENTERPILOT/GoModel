@@ -1763,7 +1763,7 @@ func TestEmbeddings_UsesIngressFrameForDecoding(t *testing.T) {
 	if provider.capturedEmbeddingReq == nil {
 		t.Fatal("expected embeddings request to be captured")
 	}
-	if provider.capturedEmbeddingReq.ExtraFields["x_meta"] == nil {
+	if provider.capturedEmbeddingReq.ExtraFields.Lookup("x_meta") == nil {
 		t.Fatalf("x_meta missing from ExtraFields: %+v", provider.capturedEmbeddingReq.ExtraFields)
 	}
 
@@ -1835,13 +1835,13 @@ func TestBatches_UsesIngressFrameForDecoding(t *testing.T) {
 	if mock.capturedBatchReq == nil {
 		t.Fatal("expected batch request to be captured")
 	}
-	if mock.capturedBatchReq.ExtraFields["x_top"] == nil {
+	if mock.capturedBatchReq.ExtraFields.Lookup("x_top") == nil {
 		t.Fatalf("x_top missing from ExtraFields: %+v", mock.capturedBatchReq.ExtraFields)
 	}
 	if len(mock.capturedBatchReq.Requests) != 1 {
 		t.Fatalf("len(Requests) = %d, want 1", len(mock.capturedBatchReq.Requests))
 	}
-	if mock.capturedBatchReq.Requests[0].ExtraFields["x_item_flag"] == nil {
+	if mock.capturedBatchReq.Requests[0].ExtraFields.Lookup("x_item_flag") == nil {
 		t.Fatalf("x_item_flag missing from item ExtraFields: %+v", mock.capturedBatchReq.Requests[0].ExtraFields)
 	}
 
