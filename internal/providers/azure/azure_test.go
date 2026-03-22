@@ -239,3 +239,133 @@ func TestBatchEndpoints_UseAzureOpenAIPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestListModels_UsesAzureResourceRootForDeploymentScopedBaseURL(t *testing.T) {
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/openai/deployments/gpt-4o")
+
+	_, err := provider.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotPath != "/openai/models" {
+		t.Fatalf("path = %q, want /openai/models", gotPath)
+	}
+}
+
+func TestBatchEndpoints_UseAzureResourceRootForDeploymentScopedBaseURL(t *testing.T) {
+	tests := []struct {
+		name         string
+		call         func(*Provider) error
+		wantPath     string
+		wantMethod   string
+		responseBody string
+	}{
+		{
+			name: "create",
+			call: func(p *Provider) error {
+				_, err := p.CreateBatch(context.Background(), &core.BatchRequest{
+					InputFileID:      "file-123",
+					Endpoint:         "/v1/chat/completions",
+					CompletionWindow: "24h",
+				})
+				return err
+			},
+			wantPath:   "/openai/batches",
+			wantMethod: http.MethodPost,
+			responseBody: `{
+				"id":"batch_123",
+				"object":"batch",
+				"endpoint":"/v1/chat/completions",
+				"status":"validating",
+				"created_at":1677652288,
+				"request_counts":{"total":1,"completed":0,"failed":0}
+			}`,
+		},
+		{
+			name: "get",
+			call: func(p *Provider) error {
+				_, err := p.GetBatch(context.Background(), "batch_123")
+				return err
+			},
+			wantPath:   "/openai/batches/batch_123",
+			wantMethod: http.MethodGet,
+			responseBody: `{
+				"id":"batch_123",
+				"object":"batch",
+				"endpoint":"/v1/chat/completions",
+				"status":"validating",
+				"created_at":1677652288,
+				"request_counts":{"total":1,"completed":0,"failed":0}
+			}`,
+		},
+		{
+			name: "list",
+			call: func(p *Provider) error {
+				_, err := p.ListBatches(context.Background(), 10, "batch_122")
+				return err
+			},
+			wantPath:   "/openai/batches",
+			wantMethod: http.MethodGet,
+			responseBody: `{
+				"object":"list",
+				"data":[],
+				"has_more":false
+			}`,
+		},
+		{
+			name: "cancel",
+			call: func(p *Provider) error {
+				_, err := p.CancelBatch(context.Background(), "batch_123")
+				return err
+			},
+			wantPath:   "/openai/batches/batch_123/cancel",
+			wantMethod: http.MethodPost,
+			responseBody: `{
+				"id":"batch_123",
+				"object":"batch",
+				"endpoint":"/v1/chat/completions",
+				"status":"cancelling",
+				"created_at":1677652288,
+				"request_counts":{"total":1,"completed":0,"failed":0}
+			}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotPath string
+			var gotMethod string
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotMethod = r.Method
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.responseBody))
+			}))
+			defer server.Close()
+
+			provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+			provider.SetBaseURL(server.URL + "/openai/deployments/gpt-4o")
+
+			if err := tt.call(provider); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotPath != tt.wantPath {
+				t.Fatalf("path = %q, want %q", gotPath, tt.wantPath)
+			}
+			if gotMethod != tt.wantMethod {
+				t.Fatalf("method = %q, want %q", gotMethod, tt.wantMethod)
+			}
+		})
+	}
+}

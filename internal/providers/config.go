@@ -67,7 +67,7 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig) map[string]co
 			baseURL = kp.defaultBase
 		}
 
-		if apiKey == "" && baseURL == "" {
+		if apiKey == "" && baseURL == "" && apiVersion == "" {
 			continue
 		}
 
@@ -110,7 +110,7 @@ func filterEmptyProviders(raw map[string]config.RawProviderConfig) map[string]co
 			result[name] = p
 			continue
 		}
-		if name == "azure" && strings.TrimSpace(p.BaseURL) == "" {
+		if p.Type == "azure" && strings.TrimSpace(p.BaseURL) == "" {
 			continue
 		}
 		if p.APIKey != "" && !strings.Contains(p.APIKey, "${") {

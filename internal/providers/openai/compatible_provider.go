@@ -292,11 +292,11 @@ func (p *CompatibleProvider) CancelBatch(ctx context.Context, id string) (*core.
 }
 
 func (p *CompatibleProvider) GetBatchResults(ctx context.Context, id string) (*core.BatchResultsResponse, error) {
-	return providers.FetchBatchResultsFromOutputFile(ctx, p.client, p.providerName, id)
+	return providers.FetchBatchResultsFromOutputFileWithPreparer(ctx, p.client, p.providerName, id, p.prepareRequest)
 }
 
 func (p *CompatibleProvider) CreateFile(ctx context.Context, req *core.FileCreateRequest) (*core.FileObject, error) {
-	resp, err := providers.CreateOpenAICompatibleFile(ctx, p.client, req)
+	resp, err := providers.CreateOpenAICompatibleFileWithPreparer(ctx, p.client, req, p.prepareRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +305,7 @@ func (p *CompatibleProvider) CreateFile(ctx context.Context, req *core.FileCreat
 }
 
 func (p *CompatibleProvider) ListFiles(ctx context.Context, purpose string, limit int, after string) (*core.FileListResponse, error) {
-	resp, err := providers.ListOpenAICompatibleFiles(ctx, p.client, purpose, limit, after)
+	resp, err := providers.ListOpenAICompatibleFilesWithPreparer(ctx, p.client, purpose, limit, after, p.prepareRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +316,7 @@ func (p *CompatibleProvider) ListFiles(ctx context.Context, purpose string, limi
 }
 
 func (p *CompatibleProvider) GetFile(ctx context.Context, id string) (*core.FileObject, error) {
-	resp, err := providers.GetOpenAICompatibleFile(ctx, p.client, id)
+	resp, err := providers.GetOpenAICompatibleFileWithPreparer(ctx, p.client, id, p.prepareRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -325,9 +325,9 @@ func (p *CompatibleProvider) GetFile(ctx context.Context, id string) (*core.File
 }
 
 func (p *CompatibleProvider) DeleteFile(ctx context.Context, id string) (*core.FileDeleteResponse, error) {
-	return providers.DeleteOpenAICompatibleFile(ctx, p.client, id)
+	return providers.DeleteOpenAICompatibleFileWithPreparer(ctx, p.client, id, p.prepareRequest)
 }
 
 func (p *CompatibleProvider) GetFileContent(ctx context.Context, id string) (*core.FileContentResponse, error) {
-	return providers.GetOpenAICompatibleFileContent(ctx, p.client, id)
+	return providers.GetOpenAICompatibleFileContentWithPreparer(ctx, p.client, id, p.prepareRequest)
 }

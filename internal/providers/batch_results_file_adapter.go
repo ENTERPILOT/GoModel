@@ -31,6 +31,10 @@ type openAICompatibleBatchLine struct {
 
 // FetchBatchResultsFromOutputFile adapts OpenAI-compatible batch output files to gateway batch results.
 func FetchBatchResultsFromOutputFile(ctx context.Context, client *llmclient.Client, providerName, batchID string) (*core.BatchResultsResponse, error) {
+	return FetchBatchResultsFromOutputFileWithPreparer(ctx, client, providerName, batchID, nil)
+}
+
+func FetchBatchResultsFromOutputFileWithPreparer(ctx context.Context, client *llmclient.Client, providerName, batchID string, prepare openAICompatibleRequestPreparer) (*core.BatchResultsResponse, error) {
 	if strings.TrimSpace(batchID) == "" {
 		return nil, core.NewInvalidRequestError("batch id is required", nil)
 	}
@@ -38,10 +42,10 @@ func FetchBatchResultsFromOutputFile(ctx context.Context, client *llmclient.Clie
 		return nil, core.NewInvalidRequestError("provider client is not configured", nil)
 	}
 
-	batchRaw, err := client.DoRaw(ctx, llmclient.Request{
+	batchRaw, err := client.DoRaw(ctx, prepareOpenAICompatibleRequest(prepare, llmclient.Request{
 		Method:   http.MethodGet,
 		Endpoint: "/batches/" + url.PathEscape(batchID),
-	})
+	}))
 	if err != nil {
 		return nil, err
 	}
@@ -58,10 +62,10 @@ func FetchBatchResultsFromOutputFile(ctx context.Context, client *llmclient.Clie
 		return nil, core.NewProviderError(providerName, http.StatusBadGateway, "provider batch response missing output file id", nil)
 	}
 
-	fileResp, err := client.DoPassthrough(ctx, llmclient.Request{
+	fileResp, err := client.DoPassthrough(ctx, prepareOpenAICompatibleRequest(prepare, llmclient.Request{
 		Method:   http.MethodGet,
 		Endpoint: "/files/" + url.PathEscape(outputFileID) + "/content",
-	})
+	}))
 	if err != nil {
 		return nil, err
 	}

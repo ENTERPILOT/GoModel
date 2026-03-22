@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
@@ -22,34 +23,46 @@ var Registration = providers.Registration{
 
 type Provider struct {
 	*openai.CompatibleProvider
-	apiVersion string
+	resourceProvider *openai.CompatibleProvider
+	apiVersion       string
 }
 
 func New(apiKey string, opts providers.ProviderOptions) core.Provider {
 	p := &Provider{apiVersion: defaultAPIVersion}
-	p.CompatibleProvider = openai.NewCompatibleProvider(apiKey, opts, openai.CompatibleProviderConfig{
+	cfg := openai.CompatibleProviderConfig{
 		ProviderName:   "azure",
 		DefaultBaseURL: "https://example.invalid",
 		SetHeaders:     setHeaders,
-	})
+	}
+	p.CompatibleProvider = openai.NewCompatibleProvider(apiKey, opts, cfg)
+	p.resourceProvider = openai.NewCompatibleProvider(apiKey, opts, cfg)
 	p.SetRequestMutator(p.mutateRequest)
+	p.resourceProvider.SetRequestMutator(p.mutateRequest)
 	return p
 }
 
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	p := &Provider{apiVersion: defaultAPIVersion}
-	p.CompatibleProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
+	cfg := openai.CompatibleProviderConfig{
 		ProviderName:   "azure",
 		DefaultBaseURL: "https://example.invalid",
 		SetHeaders:     setHeaders,
-	})
+	}
+	p.CompatibleProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg)
+	p.resourceProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg)
 	p.SetRequestMutator(p.mutateRequest)
+	p.resourceProvider.SetRequestMutator(p.mutateRequest)
 	return p
+}
+
+func (p *Provider) SetBaseURL(baseURL string) {
+	p.CompatibleProvider.SetBaseURL(baseURL)
+	p.resourceProvider.SetBaseURL(resourceRootBaseURL(baseURL))
 }
 
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	var resp core.ModelsResponse
-	if err := p.Do(ctx, llmclient.Request{
+	if err := p.resourceProvider.Do(ctx, llmclient.Request{
 		Method:   http.MethodGet,
 		Endpoint: "/openai/models",
 	}, &resp); err != nil {
@@ -63,7 +76,7 @@ func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*co
 		return nil, core.NewInvalidRequestError("batch request is required", nil)
 	}
 	var resp core.BatchResponse
-	if err := p.Do(ctx, llmclient.Request{
+	if err := p.resourceProvider.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/openai/batches",
 		Body:     req,
@@ -78,7 +91,7 @@ func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*co
 
 func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
 	var resp core.BatchResponse
-	if err := p.Do(ctx, llmclient.Request{
+	if err := p.resourceProvider.Do(ctx, llmclient.Request{
 		Method:   http.MethodGet,
 		Endpoint: "/openai/batches/" + url.PathEscape(id),
 	}, &resp); err != nil {
@@ -105,7 +118,7 @@ func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*c
 	}
 
 	var resp core.BatchListResponse
-	if err := p.Do(ctx, llmclient.Request{
+	if err := p.resourceProvider.Do(ctx, llmclient.Request{
 		Method:   http.MethodGet,
 		Endpoint: endpoint,
 	}, &resp); err != nil {
@@ -121,7 +134,7 @@ func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*c
 
 func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
 	var resp core.BatchResponse
-	if err := p.Do(ctx, llmclient.Request{
+	if err := p.resourceProvider.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/openai/batches/" + url.PathEscape(id) + "/cancel",
 	}, &resp); err != nil {
@@ -168,4 +181,26 @@ func isValidClientRequestID(id string) bool {
 		}
 	}
 	return true
+}
+
+func resourceRootBaseURL(baseURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	}
+
+	path := strings.TrimRight(parsed.Path, "/")
+	for _, marker := range []string{"/openai/deployments/", "/deployments/"} {
+		if idx := strings.Index(path, marker); idx >= 0 {
+			path = path[:idx]
+			break
+		}
+	}
+
+	parsed.Path = path
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+
+	return strings.TrimRight(parsed.String(), "/")
 }

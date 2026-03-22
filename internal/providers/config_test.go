@@ -253,6 +253,18 @@ func TestFilterEmptyProviders_EmptyMap(t *testing.T) {
 	}
 }
 
+func TestFilterEmptyProviders_RemovesAzureByTypeWithoutBaseURL(t *testing.T) {
+	raw := map[string]config.RawProviderConfig{
+		"my-azure": {Type: "azure", APIKey: "sk-azure"},
+	}
+
+	got := filterEmptyProviders(raw)
+
+	if _, exists := got["my-azure"]; exists {
+		t.Fatal("expected azure provider without base URL to be removed regardless of map key")
+	}
+}
+
 // --- applyProviderEnvVars ---
 
 func TestApplyProviderEnvVars_DiscoversFromAPIKey(t *testing.T) {
@@ -340,6 +352,25 @@ func TestApplyProviderEnvVars_AzureAPIVersionEnvWins(t *testing.T) {
 	}
 	if p.APIVersion != "2025-04-01-preview" {
 		t.Errorf("APIVersion = %q, want 2025-04-01-preview", p.APIVersion)
+	}
+}
+
+func TestApplyProviderEnvVars_AzureAPIVersionEnvWinsWithoutOtherAzureEnvVars(t *testing.T) {
+	t.Setenv("AZURE_API_VERSION", "2025-04-01-preview")
+
+	raw := map[string]config.RawProviderConfig{
+		"azure": {
+			Type:       "azure",
+			APIKey:     "sk-yaml-azure",
+			BaseURL:    "https://example-resource.openai.azure.com/openai/deployments/gpt-4o",
+			APIVersion: "2024-10-21",
+		},
+	}
+
+	got := applyProviderEnvVars(raw)
+
+	if got["azure"].APIVersion != "2025-04-01-preview" {
+		t.Fatalf("APIVersion = %q, want 2025-04-01-preview", got["azure"].APIVersion)
 	}
 }
 
