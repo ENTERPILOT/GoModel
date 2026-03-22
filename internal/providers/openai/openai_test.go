@@ -414,27 +414,27 @@ func TestChatCompletion_PreservesMultimodalContent(t *testing.T) {
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var req map[string]interface{}
+		var req map[string]any
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
 
-		messages, ok := req["messages"].([]interface{})
+		messages, ok := req["messages"].([]any)
 		if !ok || len(messages) != 1 {
 			t.Fatalf("messages = %#v, want single message", req["messages"])
 		}
-		message, ok := messages[0].(map[string]interface{})
+		message, ok := messages[0].(map[string]any)
 		if !ok {
 			t.Fatalf("message type = %T", messages[0])
 		}
-		content, ok := message["content"].([]interface{})
+		content, ok := message["content"].([]any)
 		if !ok {
 			t.Fatalf("content type = %T, want []interface{}", message["content"])
 		}
 		if len(content) != 2 {
 			t.Fatalf("len(content) = %d, want 2", len(content))
 		}
-		second, ok := content[1].(map[string]interface{})
+		second, ok := content[1].(map[string]any)
 		if !ok {
 			t.Fatalf("second part type = %T", content[1])
 		}
@@ -1163,13 +1163,13 @@ func TestResponsesWithArrayInput(t *testing.T) {
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var req map[string]interface{}
+		var req map[string]any
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
 
 		// Verify input is an array
-		input, ok := req["input"].([]interface{})
+		input, ok := req["input"].([]any)
 		if !ok {
 			t.Fatal("input should be an array")
 		}
@@ -1203,12 +1203,12 @@ func TestResponsesWithArrayInput(t *testing.T) {
 
 	req := &core.ResponsesRequest{
 		Model: "gpt-4o",
-		Input: []interface{}{
-			map[string]interface{}{
+		Input: []any{
+			map[string]any{
 				"role":    "user",
 				"content": "Hello",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"role":    "assistant",
 				"content": "Hi there!",
 			},
@@ -1481,7 +1481,7 @@ func TestChatCompletion_ReasoningModel_AdaptsParameters(t *testing.T) {
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(body, &raw); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
@@ -1545,7 +1545,7 @@ func TestChatCompletion_NonReasoningModel_PassesMaxTokens(t *testing.T) {
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(body, &raw); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
@@ -1607,21 +1607,21 @@ func TestChatCompletion_NonReasoningModel_PreservesToolConfiguration(t *testing.
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(body, &raw); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
 
-		tools, ok := raw["tools"].([]interface{})
+		tools, ok := raw["tools"].([]any)
 		if !ok || len(tools) != 1 {
 			t.Fatalf("tools = %#v, want one tool", raw["tools"])
 		}
 
-		toolChoice, ok := raw["tool_choice"].(map[string]interface{})
+		toolChoice, ok := raw["tool_choice"].(map[string]any)
 		if !ok {
 			t.Fatalf("tool_choice = %#v, want object", raw["tool_choice"])
 		}
-		function, ok := toolChoice["function"].(map[string]interface{})
+		function, ok := toolChoice["function"].(map[string]any)
 		if !ok || function["name"] != "lookup_weather" {
 			t.Fatalf("tool_choice.function = %#v, want lookup_weather", toolChoice["function"])
 		}
@@ -1692,7 +1692,7 @@ func TestStreamChatCompletion_ReasoningModel_AdaptsParameters(t *testing.T) {
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(body, &raw); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
@@ -1753,21 +1753,21 @@ func TestChatCompletion_ReasoningModel_PreservesToolConfiguration(t *testing.T) 
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(body, &raw); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
 
-		tools, ok := raw["tools"].([]interface{})
+		tools, ok := raw["tools"].([]any)
 		if !ok || len(tools) != 1 {
 			t.Fatalf("tools = %#v, want one tool", raw["tools"])
 		}
 
-		toolChoice, ok := raw["tool_choice"].(map[string]interface{})
+		toolChoice, ok := raw["tool_choice"].(map[string]any)
 		if !ok {
 			t.Fatalf("tool_choice = %#v, want object", raw["tool_choice"])
 		}
-		function, ok := toolChoice["function"].(map[string]interface{})
+		function, ok := toolChoice["function"].(map[string]any)
 		if !ok || function["name"] != "lookup_weather" {
 			t.Fatalf("tool_choice.function = %#v, want lookup_weather", toolChoice["function"])
 		}

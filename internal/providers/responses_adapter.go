@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"strings"
 
 	"github.com/google/uuid"
@@ -141,27 +142,25 @@ func cloneStringAnyMap(src map[string]any) map[string]any {
 		return nil
 	}
 	dst := make(map[string]any, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
+	maps.Copy(dst, src)
 	return dst
 }
 
 // ConvertResponsesInputToMessages converts a Responses API input payload into Chat API messages.
-func ConvertResponsesInputToMessages(input interface{}) ([]core.Message, error) {
+func ConvertResponsesInputToMessages(input any) ([]core.Message, error) {
 	switch in := input.(type) {
 	case string:
 		return []core.Message{{Role: "user", Content: in}}, nil
 	case []map[string]any:
-		items := make([]interface{}, 0, len(in))
+		items := make([]any, 0, len(in))
 		for _, item := range in {
 			items = append(items, item)
 		}
 		return convertResponsesInputItems(items)
-	case []interface{}:
+	case []any:
 		return convertResponsesInputItems(in)
 	case []core.ResponsesInputElement:
-		items := make([]interface{}, 0, len(in))
+		items := make([]any, 0, len(in))
 		for _, item := range in {
 			items = append(items, item)
 		}
@@ -173,7 +172,7 @@ func ConvertResponsesInputToMessages(input interface{}) ([]core.Message, error) 
 	}
 }
 
-func convertResponsesInputItems(items []interface{}) ([]core.Message, error) {
+func convertResponsesInputItems(items []any) ([]core.Message, error) {
 	messages := make([]core.Message, 0, len(items))
 	var pendingAssistant *core.Message
 
@@ -216,11 +215,11 @@ func convertResponsesInputItems(items []interface{}) ([]core.Message, error) {
 	return messages, nil
 }
 
-func convertResponsesInputItem(item interface{}, index int) (core.Message, string, error) {
+func convertResponsesInputItem(item any, index int) (core.Message, string, error) {
 	switch typed := item.(type) {
 	case core.ResponsesInputElement:
 		return convertResponsesInputElement(typed, index)
-	case map[string]interface{}:
+	case map[string]any:
 		return convertResponsesInputMap(typed, index)
 	default:
 		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: expected object", index), nil)
@@ -286,7 +285,7 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 	}
 }
 
-func convertResponsesInputMap(item map[string]interface{}, index int) (core.Message, string, error) {
+func convertResponsesInputMap(item map[string]any, index int) (core.Message, string, error) {
 	itemType, _ := item["type"].(string)
 	switch itemType {
 	case "function_call":
@@ -405,17 +404,17 @@ func isAssistantToolCallOnlyMessage(msg core.Message) bool {
 // ConvertResponsesContentToChatContent maps Responses input content to Chat content.
 // Text-only arrays are flattened to strings for broader provider compatibility.
 // Any non-text part preserves the array form so multimodal payloads survive routing.
-func ConvertResponsesContentToChatContent(content interface{}) (any, bool) {
+func ConvertResponsesContentToChatContent(content any) (any, bool) {
 	switch c := content.(type) {
 	case string:
 		return c, true
 	case []map[string]any:
-		items := make([]interface{}, 0, len(c))
+		items := make([]any, 0, len(c))
 		for _, item := range c {
 			items = append(items, item)
 		}
 		return convertResponsesContentParts(items)
-	case []interface{}:
+	case []any:
 		return convertResponsesContentParts(c)
 	case []core.ContentPart:
 		parts := make([]core.ContentPart, 0, len(c))
@@ -438,11 +437,11 @@ func ConvertResponsesContentToChatContent(content interface{}) (any, bool) {
 	}
 }
 
-func convertResponsesContentParts(parts []interface{}) (any, bool) {
+func convertResponsesContentParts(parts []any) (any, bool) {
 	typedParts := make([]core.ContentPart, 0, len(parts))
 
 	for _, part := range parts {
-		partMap, ok := part.(map[string]interface{})
+		partMap, ok := part.(map[string]any)
 		if !ok {
 			return nil, false
 		}
@@ -578,7 +577,7 @@ func canFlattenResponsesPartsToText(parts []core.ContentPart) bool {
 	return true
 }
 
-func normalizeResponsesImageURLForChat(value interface{}) (*core.ImageURLContent, bool) {
+func normalizeResponsesImageURLForChat(value any) (*core.ImageURLContent, bool) {
 	switch v := value.(type) {
 	case string:
 		url := strings.TrimSpace(v)
@@ -597,7 +596,7 @@ func normalizeResponsesImageURLForChat(value interface{}) (*core.ImageURLContent
 			MediaType:   strings.TrimSpace(v["media_type"]),
 			ExtraFields: rawJSONMapFromUnknownStringKeys(v, "url", "detail", "media_type"),
 		}, true
-	case map[string]interface{}:
+	case map[string]any:
 		url, _ := v["url"].(string)
 		url = strings.TrimSpace(url)
 		if url == "" {
@@ -616,7 +615,7 @@ func normalizeResponsesImageURLForChat(value interface{}) (*core.ImageURLContent
 	}
 }
 
-func normalizeResponsesInputAudioForChat(value interface{}) (*core.InputAudioContent, bool) {
+func normalizeResponsesInputAudioForChat(value any) (*core.InputAudioContent, bool) {
 	switch v := value.(type) {
 	case map[string]string:
 		data := strings.TrimSpace(v["data"])
@@ -629,7 +628,7 @@ func normalizeResponsesInputAudioForChat(value interface{}) (*core.InputAudioCon
 			Format:      format,
 			ExtraFields: rawJSONMapFromUnknownStringKeys(v, "data", "format"),
 		}, true
-	case map[string]interface{}:
+	case map[string]any:
 		data, _ := v["data"].(string)
 		format, _ := v["format"].(string)
 		data = strings.TrimSpace(data)
@@ -670,7 +669,7 @@ func cloneResponsesContentPart(part core.ContentPart) core.ContentPart {
 	return cloned
 }
 
-func rawJSONMapFromUnknownKeys(src map[string]interface{}, knownKeys ...string) map[string]json.RawMessage {
+func rawJSONMapFromUnknownKeys(src map[string]any, knownKeys ...string) map[string]json.RawMessage {
 	if len(src) == 0 {
 		return nil
 	}
@@ -701,14 +700,14 @@ func rawJSONMapFromUnknownStringKeys(src map[string]string, knownKeys ...string)
 		return nil
 	}
 
-	converted := make(map[string]interface{}, len(src))
+	converted := make(map[string]any, len(src))
 	for key, value := range src {
 		converted[key] = value
 	}
 	return rawJSONMapFromUnknownKeys(converted, knownKeys...)
 }
 
-func firstNonEmptyString(item map[string]interface{}, keys ...string) string {
+func firstNonEmptyString(item map[string]any, keys ...string) string {
 	for _, key := range keys {
 		value, _ := item[key].(string)
 		if strings.TrimSpace(value) != "" {
@@ -718,7 +717,7 @@ func firstNonEmptyString(item map[string]interface{}, keys ...string) string {
 	return ""
 }
 
-func stringifyResponsesInputValue(value interface{}) string {
+func stringifyResponsesInputValue(value any) string {
 	encoded, err := stringifyResponsesInputValueWithError(value)
 	if err != nil {
 		return ""
@@ -726,7 +725,7 @@ func stringifyResponsesInputValue(value interface{}) string {
 	return encoded
 }
 
-func stringifyResponsesInputValueWithError(value interface{}) (string, error) {
+func stringifyResponsesInputValueWithError(value any) (string, error) {
 	switch v := value.(type) {
 	case nil:
 		return "", nil
@@ -742,7 +741,7 @@ func stringifyResponsesInputValueWithError(value interface{}) (string, error) {
 }
 
 // ExtractContentFromInput extracts text content from responses input.
-func ExtractContentFromInput(content interface{}) string {
+func ExtractContentFromInput(content any) string {
 	switch c := content.(type) {
 	case string:
 		return c
@@ -756,10 +755,10 @@ func ExtractContentFromInput(content interface{}) string {
 		return strings.Join(texts, " ")
 	case []map[string]any:
 		return extractTextFromMapSlice(c)
-	case []interface{}:
+	case []any:
 		texts := make([]string, 0, len(c))
 		for _, part := range c {
-			if partMap, ok := part.(map[string]interface{}); ok {
+			if partMap, ok := part.(map[string]any); ok {
 				if text := extractTextFromInputMap(partMap); text != "" {
 					texts = append(texts, text)
 				}
@@ -823,7 +822,7 @@ func buildResponsesMessageContent(content any) []core.ResponsesContentItem {
 		}
 	case []core.ContentPart:
 		return buildResponsesContentItemsFromParts(c)
-	case []interface{}:
+	case []any:
 		parts, ok := core.NormalizeContentParts(c)
 		if !ok {
 			return nil

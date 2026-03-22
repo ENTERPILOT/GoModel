@@ -28,7 +28,7 @@ func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, 
 	}
 }
 
-func (o *StreamUsageObserver) OnJSONEvent(chunk map[string]interface{}) {
+func (o *StreamUsageObserver) OnJSONEvent(chunk map[string]any) {
 	entry := o.extractUsageFromEvent(chunk)
 	if entry != nil {
 		o.cachedEntry = entry
@@ -45,7 +45,7 @@ func (o *StreamUsageObserver) OnStreamClose() {
 	}
 }
 
-func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]interface{}) *UsageEntry {
+func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *UsageEntry {
 	providerID, _ := chunk["id"].(string)
 
 	model := o.model
@@ -56,7 +56,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]interface{}
 	usageRaw, ok := chunk["usage"]
 	if !ok {
 		if eventType, _ := chunk["type"].(string); eventType == "response.completed" || eventType == "response.done" {
-			if response, respOK := chunk["response"].(map[string]interface{}); respOK {
+			if response, respOK := chunk["response"].(map[string]any); respOK {
 				usageRaw, ok = response["usage"]
 				if id, idOK := response["id"].(string); idOK && id != "" {
 					providerID = id
@@ -71,7 +71,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]interface{}
 		return nil
 	}
 
-	usageMap, ok := usageRaw.(map[string]interface{})
+	usageMap, ok := usageRaw.(map[string]any)
 	if !ok {
 		return nil
 	}
@@ -101,14 +101,14 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]interface{}
 		}
 	}
 
-	if details, ok := usageMap["prompt_tokens_details"].(map[string]interface{}); ok {
+	if details, ok := usageMap["prompt_tokens_details"].(map[string]any); ok {
 		for k, v := range details {
 			if fv, ok := v.(float64); ok && fv > 0 {
 				rawData["prompt_"+k] = int(fv)
 			}
 		}
 	}
-	if details, ok := usageMap["completion_tokens_details"].(map[string]interface{}); ok {
+	if details, ok := usageMap["completion_tokens_details"].(map[string]any); ok {
 		for k, v := range details {
 			if fv, ok := v.(float64); ok && fv > 0 {
 				rawData["completion_"+k] = int(fv)

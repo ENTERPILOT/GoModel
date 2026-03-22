@@ -241,7 +241,7 @@ func NormalizeMessageContent(content any) (any, error) {
 			parts[i] = normalized
 		}
 		return parts, nil
-	case []interface{}:
+	case []any:
 		parts := make([]ContentPart, len(c))
 		for i, part := range c {
 			normalized, err := normalizeContentPartValue(part)
@@ -264,7 +264,7 @@ func ExtractTextContent(content any) string {
 		return c
 	case []ContentPart:
 		return joinTextParts(partsText(c))
-	case []interface{}:
+	case []any:
 		return joinTextParts(interfacePartsText(c))
 	default:
 		return ""
@@ -276,7 +276,7 @@ func HasStructuredContent(content any) bool {
 	switch c := content.(type) {
 	case []ContentPart:
 		return len(c) > 0
-	case []interface{}:
+	case []any:
 		return len(c) > 0
 	default:
 		return false
@@ -330,10 +330,10 @@ func partsText(parts []ContentPart) []string {
 	return texts
 }
 
-func interfacePartsText(parts []interface{}) []string {
+func interfacePartsText(parts []any) []string {
 	texts := make([]string, 0, len(parts))
 	for _, part := range parts {
-		partMap, ok := part.(map[string]interface{})
+		partMap, ok := part.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -450,14 +450,14 @@ func normalizeContentPartValue(part any) (ContentPart, error) {
 	switch v := part.(type) {
 	case ContentPart:
 		return normalizeTypedContentPart(v)
-	case map[string]interface{}:
+	case map[string]any:
 		return normalizeContentPartMap(v)
 	default:
 		return ContentPart{}, fmt.Errorf("content part must be an object")
 	}
 }
 
-func normalizeContentPartMap(partMap map[string]interface{}) (ContentPart, error) {
+func normalizeContentPartMap(partMap map[string]any) (ContentPart, error) {
 	rawPart, err := json.Marshal(partMap)
 	if err != nil {
 		return ContentPart{}, fmt.Errorf("content part must be an object")

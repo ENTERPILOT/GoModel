@@ -464,13 +464,13 @@ func TestResponsesWithArrayInput(t *testing.T) {
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var req map[string]interface{}
+		var req map[string]any
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
 
 		// Verify messages array exists (converted from input)
-		messages, ok := req["messages"].([]interface{})
+		messages, ok := req["messages"].([]any)
 		if !ok {
 			t.Fatal("messages should be an array")
 		}
@@ -507,12 +507,12 @@ func TestResponsesWithArrayInput(t *testing.T) {
 
 	req := &core.ResponsesRequest{
 		Model: "llama-3.3-70b-versatile",
-		Input: []interface{}{
-			map[string]interface{}{
+		Input: []any{
+			map[string]any{
 				"role":    "user",
 				"content": "Hello",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"role":    "assistant",
 				"content": "Hi there!",
 			},

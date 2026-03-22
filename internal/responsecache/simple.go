@@ -87,15 +87,13 @@ func (m *simpleCacheMiddleware) Middleware() echo.MiddlewareFunc {
 			}
 			if capture.status == http.StatusOK && capture.body.Len() > 0 {
 				data := bytes.Clone(capture.body.Bytes())
-				m.wg.Add(1)
-				go func() {
-					defer m.wg.Done()
+				m.wg.Go(func() {
 					storeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 					if err := m.store.Set(storeCtx, key, data, m.ttl); err != nil {
 						slog.Warn("response cache write failed", "key", key, "err", err)
 					}
-				}()
+				})
 			}
 			return nil
 		}
@@ -117,8 +115,8 @@ func shouldSkipCache(req *http.Request) bool {
 	if cc == "" {
 		return false
 	}
-	directives := strings.Split(strings.ToLower(cc), ",")
-	for _, d := range directives {
+	directives := strings.SplitSeq(strings.ToLower(cc), ",")
+	for d := range directives {
 		d = strings.TrimSpace(d)
 		if d == "no-cache" || d == "no-store" {
 			return true

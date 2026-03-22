@@ -132,7 +132,7 @@ func TestGatewayError_ToJSON(t *testing.T) {
 
 	result := err.ToJSON()
 
-	errorData, ok := result["error"].(map[string]interface{})
+	errorData, ok := result["error"].(map[string]any)
 	if !ok {
 		t.Fatal("ToJSON() should return map with 'error' key")
 	}
@@ -161,7 +161,7 @@ func TestGatewayError_ToJSON_DefaultsParamAndCodeToNull(t *testing.T) {
 	}
 
 	result := err.ToJSON()
-	errorData := result["error"].(map[string]interface{})
+	errorData := result["error"].(map[string]any)
 
 	if value, ok := errorData["param"]; !ok || value != nil {
 		t.Fatalf("ToJSON() param = %v, want nil", value)
@@ -348,8 +348,8 @@ func TestParseProviderError(t *testing.T) {
 			body:           []byte(`{"error": {"message": "Model not found", "type": "not_found", "param": "model", "code": "model_not_found"}}`),
 			expectedType:   ErrorTypeInvalidRequest,
 			expectedStatus: http.StatusBadRequest,
-			expectedParam:  ptr("model"),
-			expectedCode:   ptr("model_not_found"),
+			expectedParam:  new("model"),
+			expectedCode:   new("model_not_found"),
 		},
 	}
 
@@ -382,10 +382,6 @@ func TestParseProviderError(t *testing.T) {
 			}
 		})
 	}
-}
-
-func ptr(value string) *string {
-	return &value
 }
 
 func equalStringPointers(a, b *string) bool {

@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"maps"
 	"strings"
 	"time"
 
@@ -102,9 +103,7 @@ func cloneRawData(src map[string]any) map[string]any {
 		return nil
 	}
 	dst := make(map[string]any, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
+	maps.Copy(dst, src)
 	return dst
 }
 

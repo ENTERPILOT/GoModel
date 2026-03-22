@@ -9,9 +9,9 @@ import "encoding/json"
 // can round-trip extensions; Swagger ignores ExtraFields, and typed fields
 // should be preferred when available.
 type ResponsesRequest struct {
-	Model    string      `json:"model"`
-	Provider string      `json:"provider,omitempty"`
-	Input    interface{} `json:"input"` // string or []ResponsesInputElement — see docs for array form
+	Model    string `json:"model"`
+	Provider string `json:"provider,omitempty"`
+	Input    any    `json:"input"` // string or []ResponsesInputElement — see docs for array form
 	//nolint:govet // Intentional duplicate json tag for Swagger docs: input is string OR []ResponsesInputElement.
 	InputSchema       []ResponsesInputElement    `json:"input,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"`
 	Instructions      string                     `json:"instructions,omitempty"`
@@ -56,9 +56,9 @@ type ResponsesInputElement struct {
 	Type string `json:"type,omitempty"` // "message", "function_call", "function_call_output"
 
 	// Message fields (type="" or "message")
-	Role    string      `json:"role,omitempty"`
-	Status  string      `json:"status,omitempty"`
-	Content interface{} `json:"content,omitempty"` // Can be string or []ContentPart
+	Role    string `json:"role,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Content any    `json:"content,omitempty"` // Can be string or []ContentPart
 	//nolint:govet // Intentional duplicate json tag for Swagger docs: content is string OR []ContentPart.
 	ContentSchema []ContentPart `json:"content,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"`
 

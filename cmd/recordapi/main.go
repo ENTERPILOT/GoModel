@@ -63,12 +63,12 @@ var providerConfigs = map[string]struct {
 var endpointConfigs = map[string]struct {
 	path        string
 	method      string
-	requestBody map[string]interface{}
+	requestBody map[string]any
 }{
 	"chat": {
 		path:   "/v1/chat/completions",
 		method: http.MethodPost,
-		requestBody: map[string]interface{}{
+		requestBody: map[string]any{
 			"model": "gpt-4o-mini",
 			"messages": []map[string]string{
 				{"role": "user", "content": "Say 'Hello, World!' and nothing else."},
@@ -79,7 +79,7 @@ var endpointConfigs = map[string]struct {
 	"chat_stream": {
 		path:   "/v1/chat/completions",
 		method: http.MethodPost,
-		requestBody: map[string]interface{}{
+		requestBody: map[string]any{
 			"model": "gpt-4o-mini",
 			"messages": []map[string]string{
 				{"role": "user", "content": "Say 'Hello, World!' and nothing else."},
@@ -95,7 +95,7 @@ var endpointConfigs = map[string]struct {
 	"responses": {
 		path:   "/v1/responses",
 		method: http.MethodPost,
-		requestBody: map[string]interface{}{
+		requestBody: map[string]any{
 			"model": "gpt-4o-mini",
 			"input": "Say 'Hello, World!' and nothing else.",
 		},
@@ -103,7 +103,7 @@ var endpointConfigs = map[string]struct {
 	"responses_stream": {
 		path:   "/v1/responses",
 		method: http.MethodPost,
-		requestBody: map[string]interface{}{
+		requestBody: map[string]any{
 			"model":  "gpt-4o-mini",
 			"input":  "Say 'Hello, World!' and nothing else.",
 			"stream": true,
@@ -275,7 +275,7 @@ func main() {
 	fmt.Printf("Response saved to %s\n", *output)
 
 	// Print response summary
-	var respMap map[string]interface{}
+	var respMap map[string]any
 	if err := json.Unmarshal(body, &respMap); err == nil {
 		if id, ok := respMap["id"].(string); ok {
 			fmt.Printf("Response ID: %s\n", id)
@@ -287,8 +287,8 @@ func main() {
 }
 
 // adjustForAnthropic converts OpenAI-style request to Anthropic format
-func adjustForAnthropic(req map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
+func adjustForAnthropic(req map[string]any) map[string]any {
+	result := make(map[string]any)
 
 	// Copy model
 	if model, ok := req["model"].(string); ok {

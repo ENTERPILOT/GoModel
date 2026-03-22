@@ -617,11 +617,11 @@ data: {"type":"message_stop"}
 			continue
 		}
 
-		choices, ok := event.Payload["choices"].([]interface{})
+		choices, ok := event.Payload["choices"].([]any)
 		if !ok || len(choices) == 0 {
 			continue
 		}
-		choice, ok := choices[0].(map[string]interface{})
+		choice, ok := choices[0].(map[string]any)
 		if !ok {
 			continue
 		}
@@ -630,19 +630,19 @@ data: {"type":"message_stop"}
 			foundFinish = true
 		}
 
-		delta, ok := choice["delta"].(map[string]interface{})
+		delta, ok := choice["delta"].(map[string]any)
 		if !ok {
 			continue
 		}
-		toolCalls, ok := delta["tool_calls"].([]interface{})
+		toolCalls, ok := delta["tool_calls"].([]any)
 		if !ok || len(toolCalls) == 0 {
 			continue
 		}
-		toolCall, ok := toolCalls[0].(map[string]interface{})
+		toolCall, ok := toolCalls[0].(map[string]any)
 		if !ok {
 			continue
 		}
-		function, _ := toolCall["function"].(map[string]interface{})
+		function, _ := toolCall["function"].(map[string]any)
 
 		if toolCall["id"] == "toolu_123" && function["name"] == "lookup_weather" {
 			foundToolStart = true
@@ -719,24 +719,24 @@ data: {"type":"message_stop"}
 		if event.Done {
 			continue
 		}
-		choices, ok := event.Payload["choices"].([]interface{})
+		choices, ok := event.Payload["choices"].([]any)
 		if !ok || len(choices) == 0 {
 			continue
 		}
-		choice, ok := choices[0].(map[string]interface{})
+		choice, ok := choices[0].(map[string]any)
 		if !ok {
 			continue
 		}
 		if finishReason, _ := choice["finish_reason"].(string); finishReason == "tool_calls" {
 			foundFinish = true
 		}
-		delta, _ := choice["delta"].(map[string]interface{})
-		toolCalls, _ := delta["tool_calls"].([]interface{})
+		delta, _ := choice["delta"].(map[string]any)
+		toolCalls, _ := delta["tool_calls"].([]any)
 		if len(toolCalls) == 0 {
 			continue
 		}
-		toolCall, _ := toolCalls[0].(map[string]interface{})
-		function, _ := toolCall["function"].(map[string]interface{})
+		toolCall, _ := toolCalls[0].(map[string]any)
+		function, _ := toolCall["function"].(map[string]any)
 		if toolCall["id"] == "toolu_123" && function["name"] == "lookup_weather" && function["arguments"] == "{}" {
 			foundToolCall = true
 		}
@@ -794,11 +794,11 @@ data: {"type":"message_stop"}
 			continue
 		}
 
-		choices, ok := event.Payload["choices"].([]interface{})
+		choices, ok := event.Payload["choices"].([]any)
 		if !ok || len(choices) == 0 {
 			continue
 		}
-		choice, ok := choices[0].(map[string]interface{})
+		choice, ok := choices[0].(map[string]any)
 		if !ok {
 			continue
 		}
@@ -806,7 +806,7 @@ data: {"type":"message_stop"}
 			t.Fatalf("finish_reason = %#v, want %q", choice["finish_reason"], "tool_use")
 		}
 
-		delta, _ := choice["delta"].(map[string]interface{})
+		delta, _ := choice["delta"].(map[string]any)
 		if _, ok := delta["tool_calls"]; ok {
 			t.Fatalf("did not expect tool_calls in malformed stream fallback, got %#v", delta["tool_calls"])
 		}
@@ -873,7 +873,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 
 type testSSEEvent struct {
 	Name    string
-	Payload map[string]interface{}
+	Payload map[string]any
 	Done    bool
 }
 
@@ -889,8 +889,8 @@ func parseTestSSEEvents(t *testing.T, raw string) []testSSEEvent {
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "event:") {
-			currentEventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		if after, ok := strings.CutPrefix(line, "event:"); ok {
+			currentEventName = strings.TrimSpace(after)
 			continue
 		}
 		if !strings.HasPrefix(line, "data:") {
@@ -904,7 +904,7 @@ func parseTestSSEEvents(t *testing.T, raw string) []testSSEEvent {
 			continue
 		}
 
-		var payload map[string]interface{}
+		var payload map[string]any
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
 			t.Fatalf("failed to unmarshal SSE payload %q: %v", data, err)
 		}
@@ -2280,12 +2280,12 @@ func TestResponsesWithArrayInput(t *testing.T) {
 
 	req := &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
-		Input: []interface{}{
-			map[string]interface{}{
+		Input: []any{
+			map[string]any{
 				"role":    "user",
 				"content": "Hello",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"role":    "assistant",
 				"content": "Hi there!",
 			},
@@ -2614,7 +2614,7 @@ data: {"type":"message_stop"}
 		}
 		switch event.Name {
 		case "response.output_item.added":
-			item, _ := event.Payload["item"].(map[string]interface{})
+			item, _ := event.Payload["item"].(map[string]any)
 			if item["type"] == "message" && item["role"] == "assistant" && event.Payload["output_index"] == float64(0) {
 				foundAssistantAdded = true
 			}
@@ -2622,7 +2622,7 @@ data: {"type":"message_stop"}
 				foundAdded = true
 			}
 		case "response.output_item.done":
-			item, _ := event.Payload["item"].(map[string]interface{})
+			item, _ := event.Payload["item"].(map[string]any)
 			if item["type"] == "message" && item["role"] == "assistant" && event.Payload["output_index"] == float64(0) {
 				foundAssistantDone = true
 			}
@@ -2723,7 +2723,7 @@ data: {"type":"message_stop"}
 		}
 		switch event.Name {
 		case "response.output_item.added":
-			item, _ := event.Payload["item"].(map[string]interface{})
+			item, _ := event.Payload["item"].(map[string]any)
 			if item["type"] == "function_call" && item["arguments"] == "{}" {
 				foundAdded = true
 			}
@@ -2884,15 +2884,15 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 			name: "array input with content parts",
 			input: &core.ResponsesRequest{
 				Model: "claude-sonnet-4-5-20250929",
-				Input: []interface{}{
-					map[string]interface{}{
+				Input: []any{
+					map[string]any{
 						"role": "user",
-						"content": []interface{}{
-							map[string]interface{}{
+						"content": []any{
+							map[string]any{
 								"type": "text",
 								"text": "Hello",
 							},
-							map[string]interface{}{
+							map[string]any{
 								"type": "text",
 								"text": "World",
 							},
@@ -2944,17 +2944,17 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 			name: "with function call loop input items",
 			input: &core.ResponsesRequest{
 				Model: "claude-sonnet-4-5-20250929",
-				Input: []interface{}{
-					map[string]interface{}{
+				Input: []any{
+					map[string]any{
 						"type":      "function_call",
 						"call_id":   "call_123",
 						"name":      "lookup_weather",
 						"arguments": `{"city":"Warsaw"}`,
 					},
-					map[string]interface{}{
+					map[string]any{
 						"type":    "function_call_output",
 						"call_id": "call_123",
-						"output":  map[string]interface{}{"temperature_c": 21},
+						"output":  map[string]any{"temperature_c": 21},
 					},
 				},
 			},
@@ -2999,8 +2999,8 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 func TestConvertResponsesRequestToAnthropic_InvalidToolArguments(t *testing.T) {
 	_, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
-		Input: []interface{}{
-			map[string]interface{}{
+		Input: []any{
+			map[string]any{
 				"type":      "function_call",
 				"call_id":   "call_123",
 				"name":      "lookup_weather",
@@ -3026,8 +3026,8 @@ func TestConvertResponsesRequestToAnthropic_InvalidToolArguments(t *testing.T) {
 func TestConvertResponsesRequestToAnthropic_RejectsTrailingToolArgumentContent(t *testing.T) {
 	_, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
-		Input: []interface{}{
-			map[string]interface{}{
+		Input: []any{
+			map[string]any{
 				"type":      "function_call",
 				"call_id":   "call_123",
 				"name":      "lookup_weather",
@@ -3474,21 +3474,21 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			name:              "reasoning nil - no thinking",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         nil,
-			maxTokens:         intPtr(1000),
+			maxTokens:         new(1000),
 			expectedMaxTokens: 1000,
 		},
 		{
 			name:              "empty effort - no thinking",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: ""},
-			maxTokens:         intPtr(1000),
+			maxTokens:         new(1000),
 			expectedMaxTokens: 1000,
 		},
 		{
 			name:              "legacy model - low effort",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: "low"},
-			maxTokens:         intPtr(10000),
+			maxTokens:         new(10000),
 			expectedThinkType: "enabled",
 			expectedBudget:    5000,
 			expectedMaxTokens: 10000,
@@ -3498,7 +3498,7 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			name:              "legacy model - medium effort",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: "medium"},
-			maxTokens:         intPtr(15000),
+			maxTokens:         new(15000),
 			expectedThinkType: "enabled",
 			expectedBudget:    10000,
 			expectedMaxTokens: 15000,
@@ -3508,7 +3508,7 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			name:              "legacy model - high effort",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: "high"},
-			maxTokens:         intPtr(25000),
+			maxTokens:         new(25000),
 			expectedThinkType: "enabled",
 			expectedBudget:    20000,
 			expectedMaxTokens: 25000,
@@ -3518,7 +3518,7 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			name:              "legacy model - invalid effort defaults to low",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: "invalid"},
-			maxTokens:         intPtr(10000),
+			maxTokens:         new(10000),
 			expectedThinkType: "enabled",
 			expectedBudget:    5000,
 			expectedMaxTokens: 10000,
@@ -3528,7 +3528,7 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			name:              "legacy model - bumps max_tokens when too low",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: "high"},
-			maxTokens:         intPtr(1000),
+			maxTokens:         new(1000),
 			expectedThinkType: "enabled",
 			expectedBudget:    20000,
 			expectedMaxTokens: 21024,
@@ -3538,7 +3538,7 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			name:              "legacy model - removes temperature",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: "medium"},
-			maxTokens:         intPtr(15000),
+			maxTokens:         new(15000),
 			setTemperature:    true,
 			expectedThinkType: "enabled",
 			expectedBudget:    10000,
@@ -3549,19 +3549,19 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			name:              "legacy model - preserves temperature=1.0 with reasoning",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: "medium"},
-			maxTokens:         intPtr(15000),
+			maxTokens:         new(15000),
 			setTemperatureOne: true,
 			expectedThinkType: "enabled",
 			expectedBudget:    10000,
 			expectedMaxTokens: 15000,
 			expectNilTemp:     false,
-			expectedTemp:      float64Ptr(1.0),
+			expectedTemp:      new(1.0),
 		},
 		{
 			name:              "4.6 model - adaptive thinking with high effort",
 			model:             "claude-opus-4-6",
 			reasoning:         &core.Reasoning{Effort: "high"},
-			maxTokens:         intPtr(4096),
+			maxTokens:         new(4096),
 			expectedThinkType: "adaptive",
 			expectedEffort:    "high",
 			expectedMaxTokens: 4096,
@@ -3571,7 +3571,7 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			name:              "4.6 model - adaptive thinking with low effort",
 			model:             "claude-sonnet-4-6-20260301",
 			reasoning:         &core.Reasoning{Effort: "low"},
-			maxTokens:         intPtr(4096),
+			maxTokens:         new(4096),
 			expectedThinkType: "adaptive",
 			expectedEffort:    "low",
 			expectedMaxTokens: 4096,
@@ -3581,7 +3581,7 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			name:              "4.6 model - does not bump max_tokens",
 			model:             "claude-opus-4-6",
 			reasoning:         &core.Reasoning{Effort: "high"},
-			maxTokens:         intPtr(1000),
+			maxTokens:         new(1000),
 			expectedThinkType: "adaptive",
 			expectedEffort:    "high",
 			expectedMaxTokens: 1000,
@@ -3591,7 +3591,7 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			name:              "4.6 model - removes temperature",
 			model:             "claude-opus-4-6",
 			reasoning:         &core.Reasoning{Effort: "medium"},
-			maxTokens:         intPtr(4096),
+			maxTokens:         new(4096),
 			setTemperature:    true,
 			expectedThinkType: "adaptive",
 			expectedEffort:    "medium",
@@ -3602,7 +3602,7 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			name:              "4.6 model - invalid effort normalizes to low",
 			model:             "claude-opus-4-6",
 			reasoning:         &core.Reasoning{Effort: "extreme"},
-			maxTokens:         intPtr(4096),
+			maxTokens:         new(4096),
 			expectedThinkType: "adaptive",
 			expectedEffort:    "low",
 			expectedMaxTokens: 4096,
@@ -3695,21 +3695,21 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			name:              "no reasoning",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         nil,
-			maxOutputTokens:   intPtr(1000),
+			maxOutputTokens:   new(1000),
 			expectedMaxTokens: 1000,
 		},
 		{
 			name:              "empty effort",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: ""},
-			maxOutputTokens:   intPtr(1000),
+			maxOutputTokens:   new(1000),
 			expectedMaxTokens: 1000,
 		},
 		{
 			name:              "legacy model - low effort bumps max tokens",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: "low"},
-			maxOutputTokens:   intPtr(1000),
+			maxOutputTokens:   new(1000),
 			expectedThinkType: "enabled",
 			expectedBudget:    5000,
 			expectedMaxTokens: 6024,
@@ -3719,7 +3719,7 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			name:              "legacy model - high effort with sufficient tokens",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: "high"},
-			maxOutputTokens:   intPtr(25000),
+			maxOutputTokens:   new(25000),
 			expectedThinkType: "enabled",
 			expectedBudget:    20000,
 			expectedMaxTokens: 25000,
@@ -3729,7 +3729,7 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			name:              "legacy model - removes temperature",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: "medium"},
-			maxOutputTokens:   intPtr(15000),
+			maxOutputTokens:   new(15000),
 			setTemperature:    true,
 			expectedThinkType: "enabled",
 			expectedBudget:    10000,
@@ -3740,7 +3740,7 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			name:              "4.6 model - adaptive thinking",
 			model:             "claude-opus-4-6",
 			reasoning:         &core.Reasoning{Effort: "high"},
-			maxOutputTokens:   intPtr(4096),
+			maxOutputTokens:   new(4096),
 			expectedThinkType: "adaptive",
 			expectedEffort:    "high",
 			expectedMaxTokens: 4096,
@@ -3750,7 +3750,7 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			name:              "4.6 model - does not bump max_tokens",
 			model:             "claude-opus-4-6",
 			reasoning:         &core.Reasoning{Effort: "high"},
-			maxOutputTokens:   intPtr(1000),
+			maxOutputTokens:   new(1000),
 			expectedThinkType: "adaptive",
 			expectedEffort:    "high",
 			expectedMaxTokens: 1000,
@@ -3760,7 +3760,7 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			name:              "4.6 model - removes temperature",
 			model:             "claude-opus-4-6",
 			reasoning:         &core.Reasoning{Effort: "medium"},
-			maxOutputTokens:   intPtr(4096),
+			maxOutputTokens:   new(4096),
 			setTemperature:    true,
 			expectedThinkType: "adaptive",
 			expectedEffort:    "medium",
@@ -3771,7 +3771,7 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			name:              "4.6 model - invalid effort normalizes to low",
 			model:             "claude-opus-4-6",
 			reasoning:         &core.Reasoning{Effort: "extreme"},
-			maxOutputTokens:   intPtr(4096),
+			maxOutputTokens:   new(4096),
 			expectedThinkType: "adaptive",
 			expectedEffort:    "low",
 			expectedMaxTokens: 4096,
@@ -4150,20 +4150,20 @@ func TestConvertToAnthropicRequest_RejectsInvalidRemoteImageURLs(t *testing.T) {
 func TestConvertResponsesRequestToAnthropic_RejectsInvalidInputItems(t *testing.T) {
 	tests := []struct {
 		name  string
-		input []interface{}
+		input []any
 	}{
 		{
 			name: "non-object item",
-			input: []interface{}{
+			input: []any{
 				"bad-item",
 			},
 		},
 		{
 			name: "missing role",
-			input: []interface{}{
-				map[string]interface{}{
-					"content": []interface{}{
-						map[string]interface{}{
+			input: []any{
+				map[string]any{
+					"content": []any{
+						map[string]any{
 							"type": "input_text",
 							"text": "hello",
 						},
@@ -4173,11 +4173,11 @@ func TestConvertResponsesRequestToAnthropic_RejectsInvalidInputItems(t *testing.
 		},
 		{
 			name: "invalid content",
-			input: []interface{}{
-				map[string]interface{}{
+			input: []any{
+				map[string]any{
 					"role": "user",
-					"content": []interface{}{
-						map[string]interface{}{
+					"content": []any{
+						map[string]any{
 							"type": "unknown",
 						},
 					},
@@ -4218,8 +4218,8 @@ func TestConvertResponsesRequestToAnthropic_RejectsUnsupportedInputType(t *testi
 func TestConvertResponsesRequestToAnthropic_TrimsRoleBeforeAppend(t *testing.T) {
 	req, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
-		Input: []interface{}{
-			map[string]interface{}{
+		Input: []any{
+			map[string]any{
 				"role":    "  user  ",
 				"content": "hello",
 			},
@@ -4305,17 +4305,17 @@ func TestConvertResponsesRequestToAnthropic_TypedInputPromotesSystemRole(t *test
 func TestConvertResponsesRequestToAnthropic_PreservesMultimodalImageInput(t *testing.T) {
 	req, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
-		Input: []interface{}{
-			map[string]interface{}{
+		Input: []any{
+			map[string]any{
 				"role": "user",
-				"content": []interface{}{
-					map[string]interface{}{
+				"content": []any{
+					map[string]any{
 						"type": "input_text",
 						"text": "Describe the image.",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"type": "input_image",
-						"image_url": map[string]interface{}{
+						"image_url": map[string]any{
 							"url": "data:image/png;base64,ZmFrZQ==",
 						},
 					},
@@ -4428,14 +4428,6 @@ func TestConvertToAnthropicRequest_NormalizesInputTextType(t *testing.T) {
 	if blocks[1].Text != "Second part." {
 		t.Errorf("blocks[1].Text = %q, want \"Second part.\"", blocks[1].Text)
 	}
-}
-
-func intPtr(i int) *int {
-	return &i
-}
-
-func float64Ptr(f float64) *float64 {
-	return &f
 }
 
 func TestPassthrough(t *testing.T) {

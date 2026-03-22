@@ -87,7 +87,7 @@ func TestMessageMarshalJSON_ContentWinsOverContentNull(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v, want nil", err)
 	}
 
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}

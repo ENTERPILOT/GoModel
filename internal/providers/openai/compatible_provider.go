@@ -83,7 +83,7 @@ func (p *CompatibleProvider) prepareRequest(req llmclient.Request) llmclient.Req
 	return req
 }
 
-func (p *CompatibleProvider) Do(ctx context.Context, req llmclient.Request, result interface{}) error {
+func (p *CompatibleProvider) Do(ctx context.Context, req llmclient.Request, result any) error {
 	return p.client.Do(ctx, p.prepareRequest(req), result)
 }
 

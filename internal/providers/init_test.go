@@ -44,7 +44,7 @@ func TestInitResultClose_IsIdempotentAndConcurrentSafe(t *testing.T) {
 	errs := make(chan error, goroutines)
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
 			errs <- result.Close()

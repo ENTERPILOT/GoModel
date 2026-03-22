@@ -1,6 +1,7 @@
 package auditlog
 
 import (
+	"maps"
 	"strings"
 )
 
@@ -28,16 +29,16 @@ type streamResponseBuilder struct {
 }
 
 // buildChatCompletionResponse constructs a ChatCompletion response from accumulated data
-func (b *streamResponseBuilder) buildChatCompletionResponse() map[string]interface{} {
-	return map[string]interface{}{
+func (b *streamResponseBuilder) buildChatCompletionResponse() map[string]any {
+	return map[string]any{
 		"id":      b.ID,
 		"object":  "chat.completion",
 		"model":   b.Model,
 		"created": b.Created,
-		"choices": []map[string]interface{}{
+		"choices": []map[string]any{
 			{
 				"index": 0,
-				"message": map[string]interface{}{
+				"message": map[string]any{
 					"role":    b.Role,
 					"content": b.Content.String(),
 				},
@@ -48,18 +49,18 @@ func (b *streamResponseBuilder) buildChatCompletionResponse() map[string]interfa
 }
 
 // buildResponsesAPIResponse constructs a Responses API response from accumulated data
-func (b *streamResponseBuilder) buildResponsesAPIResponse() map[string]interface{} {
-	return map[string]interface{}{
+func (b *streamResponseBuilder) buildResponsesAPIResponse() map[string]any {
+	return map[string]any{
 		"id":         b.ResponseID,
 		"object":     "response",
 		"model":      b.Model,
 		"created_at": b.CreatedAt,
 		"status":     b.Status,
-		"output": []map[string]interface{}{
+		"output": []map[string]any{
 			{
 				"type": "message",
 				"role": "assistant",
-				"content": []map[string]interface{}{
+				"content": []map[string]any{
 					{
 						"type": "output_text",
 						"text": b.Content.String(),
@@ -117,15 +118,13 @@ func copyMap(m map[string]string) map[string]string {
 		return nil
 	}
 	result := make(map[string]string, len(m))
-	for k, v := range m {
-		result[k] = v
-	}
+	maps.Copy(result, m)
 	return result
 }
 
 // GetStreamEntryFromContext retrieves the log entry from Echo context for streaming.
 // This allows handlers to get the entry for wrapping streams.
-func GetStreamEntryFromContext(c interface{ Get(string) interface{} }) *LogEntry {
+func GetStreamEntryFromContext(c interface{ Get(string) any }) *LogEntry {
 	entryVal := c.Get(string(LogEntryKey))
 	if entryVal == nil {
 		return nil
@@ -141,12 +140,12 @@ func GetStreamEntryFromContext(c interface{ Get(string) interface{} }) *LogEntry
 
 // MarkEntryAsStreaming marks the entry as a streaming request so the middleware
 // knows not to log it (the stream observer path will handle logging).
-func MarkEntryAsStreaming(c interface{ Set(string, interface{}) }, isStreaming bool) {
+func MarkEntryAsStreaming(c interface{ Set(string, any) }, isStreaming bool) {
 	c.Set(string(LogEntryStreamingKey), isStreaming)
 }
 
 // IsEntryMarkedAsStreaming checks if the entry is marked as streaming.
-func IsEntryMarkedAsStreaming(c interface{ Get(string) interface{} }) bool {
+func IsEntryMarkedAsStreaming(c interface{ Get(string) any }) bool {
 	val := c.Get(string(LogEntryStreamingKey))
 	if val == nil {
 		return false

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"maps"
 	"strings"
 
 	"gomodel/internal/core"
@@ -544,18 +545,12 @@ func mergeBatchHints(left, right map[string]string) map[string]string {
 			return nil
 		}
 		merged := make(map[string]string, len(right))
-		for key, value := range right {
-			merged[key] = value
-		}
+		maps.Copy(merged, right)
 		return merged
 	}
 	merged := make(map[string]string, len(left))
-	for key, value := range left {
-		merged[key] = value
-	}
-	for key, value := range right {
-		merged[key] = value
-	}
+	maps.Copy(merged, left)
+	maps.Copy(merged, right)
 	return merged
 }
 
@@ -673,10 +668,7 @@ func applyMessagesToChatPreservingEnvelope(req *core.ChatRequest, msgs []Message
 }
 
 func tailMatchedSystemOffsets(originalSystemCount, modifiedSystemCount int) (matchStart, originalStart int) {
-	matched := originalSystemCount
-	if modifiedSystemCount < matched {
-		matched = modifiedSystemCount
-	}
+	matched := min(modifiedSystemCount, originalSystemCount)
 	return modifiedSystemCount - matched, originalSystemCount - matched
 }
 

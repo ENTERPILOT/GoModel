@@ -79,8 +79,8 @@ type LogData struct {
 	// Optional bodies (when LOGGING_LOG_BODIES=true)
 	// Stored as interface{} so MongoDB serializes as native BSON documents (queryable/readable)
 	// instead of BSON Binary (base64 in Compass)
-	RequestBody  interface{} `json:"request_body,omitempty" bson:"request_body,omitempty"`
-	ResponseBody interface{} `json:"response_body,omitempty" bson:"response_body,omitempty"`
+	RequestBody  any `json:"request_body,omitempty" bson:"request_body,omitempty"`
+	ResponseBody any `json:"response_body,omitempty" bson:"response_body,omitempty"`
 
 	// Body capture status flags (set when body exceeds 1MB limit)
 	RequestBodyTooBigToHandle  bool `json:"request_body_too_big_to_handle,omitempty" bson:"request_body_too_big_to_handle,omitempty"`

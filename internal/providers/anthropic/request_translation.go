@@ -530,8 +530,7 @@ func validateAnthropicToolChoice(toolChoice *anthropicToolChoice, tools []anthro
 }
 
 func prefixAnthropicBatchItemError(index int, err error) error {
-	var gatewayErr *core.GatewayError
-	if errors.As(err, &gatewayErr) {
+	if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
 		prefixed := *gatewayErr
 		prefixed.Message = fmt.Sprintf("batch item %d: %s", index, gatewayErr.Message)
 		return &prefixed

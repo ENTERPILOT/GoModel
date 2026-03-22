@@ -86,7 +86,7 @@ func TestResponsesRequestUnmarshalJSON_PreservesToolCallingControls(t *testing.T
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	toolChoice, ok := req.ToolChoice.(map[string]interface{})
+	toolChoice, ok := req.ToolChoice.(map[string]any)
 	if !ok {
 		t.Fatalf("ToolChoice = %#v, want object", req.ToolChoice)
 	}
@@ -101,11 +101,11 @@ func TestResponsesRequestUnmarshalJSON_PreservesToolCallingControls(t *testing.T
 func TestResponsesRequestMarshalJSON_PreservesInput(t *testing.T) {
 	body, err := json.Marshal(ResponsesRequest{
 		Model: "gpt-4o-mini",
-		Input: []interface{}{
-			map[string]interface{}{
+		Input: []any{
+			map[string]any{
 				"role": "user",
-				"content": []interface{}{
-					map[string]interface{}{
+				"content": []any{
+					map[string]any{
 						"type": "input_text",
 						"text": "hello",
 					},
@@ -117,7 +117,7 @@ func TestResponsesRequestMarshalJSON_PreservesInput(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
@@ -126,12 +126,12 @@ func TestResponsesRequestMarshalJSON_PreservesInput(t *testing.T) {
 		t.Fatalf("marshal output missing input: %s", string(body))
 	}
 
-	input, ok := inputRaw.([]interface{})
+	input, ok := inputRaw.([]any)
 	if !ok || len(input) != 1 {
 		t.Fatalf("decoded input = %#v, want []interface{} len=1", inputRaw)
 	}
 
-	firstMsg, ok := input[0].(map[string]interface{})
+	firstMsg, ok := input[0].(map[string]any)
 	if !ok {
 		t.Fatalf("first input item = %#v, want object", input[0])
 	}
@@ -143,12 +143,12 @@ func TestResponsesRequestMarshalJSON_PreservesInput(t *testing.T) {
 	if !ok {
 		t.Fatalf("first input missing content: %#v", firstMsg)
 	}
-	content, ok := contentRaw.([]interface{})
+	content, ok := contentRaw.([]any)
 	if !ok || len(content) != 1 {
 		t.Fatalf("first input content = %#v, want []interface{} len=1", contentRaw)
 	}
 
-	firstPart, ok := content[0].(map[string]interface{})
+	firstPart, ok := content[0].(map[string]any)
 	if !ok {
 		t.Fatalf("first content part = %#v, want object", content[0])
 	}
@@ -177,12 +177,12 @@ func TestResponsesRequestMarshalJSON_PreservesToolCallingControls(t *testing.T) 
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	toolChoice, ok := decoded["tool_choice"].(map[string]interface{})
+	toolChoice, ok := decoded["tool_choice"].(map[string]any)
 	if !ok {
 		t.Fatalf("decoded tool_choice = %#v, want object", decoded["tool_choice"])
 	}
@@ -209,17 +209,17 @@ func TestResponsesRequestMarshalJSON_PreservesTypedInputElementContent(t *testin
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	input, ok := decoded["input"].([]interface{})
+	input, ok := decoded["input"].([]any)
 	if !ok || len(input) != 1 {
 		t.Fatalf("decoded input = %#v, want []interface{} len=1", decoded["input"])
 	}
 
-	first, ok := input[0].(map[string]interface{})
+	first, ok := input[0].(map[string]any)
 	if !ok {
 		t.Fatalf("decoded first input item = %#v, want object", input[0])
 	}
@@ -464,7 +464,7 @@ func TestResponsesInputElementMarshalJSON_FunctionCall(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
@@ -499,7 +499,7 @@ func TestResponsesInputElementMarshalJSON_FunctionCallOutput(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}

@@ -11,13 +11,13 @@ func TestExtractStringField(t *testing.T) {
 
 	tests := []struct {
 		name string
-		v    interface{}
+		v    any
 		key  string
 		want string
 	}{
 		{
 			name: "map payload",
-			v: map[string]interface{}{
+			v: map[string]any{
 				"id": " resp_1 ",
 			},
 			key:  "id",
@@ -58,7 +58,6 @@ func TestExtractStringField(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			if got := extractStringField(tc.v, tc.key); got != tc.want {

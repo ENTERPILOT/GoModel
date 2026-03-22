@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -123,12 +125,8 @@ func (r *ModelRegistry) Initialize(ctx context.Context) error {
 	r.mu.RLock()
 	providerTypes := make(map[core.Provider]string, len(r.providerTypes))
 	providerNames := make(map[core.Provider]string, len(r.providerNames))
-	for p, t := range r.providerTypes {
-		providerTypes[p] = t
-	}
-	for p, n := range r.providerNames {
-		providerNames[p] = n
-	}
+	maps.Copy(providerTypes, r.providerTypes)
+	maps.Copy(providerNames, r.providerNames)
 	r.mu.RUnlock()
 
 	for _, provider := range providers {
@@ -318,14 +316,10 @@ func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 	modelsByProvider := make(map[string]map[string]*ModelInfo, len(r.modelsByProvider))
 	for providerName, models := range r.modelsByProvider {
 		modelsByProvider[providerName] = make(map[string]*ModelInfo, len(models))
-		for modelID, info := range models {
-			modelsByProvider[providerName][modelID] = info
-		}
+		maps.Copy(modelsByProvider[providerName], models)
 	}
 	providerTypes := make(map[core.Provider]string, len(r.providerTypes))
-	for k, v := range r.providerTypes {
-		providerTypes[k] = v
-	}
+	maps.Copy(providerTypes, r.providerTypes)
 	modelListRaw := r.modelListRaw
 	r.mu.RUnlock()
 
@@ -808,12 +802,7 @@ func (r *ModelRegistry) ListModelsWithProviderByCategory(category core.ModelCate
 
 // hasCategory returns true if the category slice contains the target category.
 func hasCategory(cats []core.ModelCategory, target core.ModelCategory) bool {
-	for _, c := range cats {
-		if c == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(cats, target)
 }
 
 // CategoryCount holds a model category and the number of models in it.
@@ -902,9 +891,7 @@ func (r *ModelRegistry) EnrichModels() {
 	}
 
 	providerTypes := make(map[core.Provider]string, len(r.providerTypes))
-	for k, v := range r.providerTypes {
-		providerTypes[k] = v
-	}
+	maps.Copy(providerTypes, r.providerTypes)
 
 	accessor := &registryAccessor{models: r.models, providerTypes: providerTypes}
 	accessor.replacements = make(map[*ModelInfo]*ModelInfo, len(r.models))
@@ -964,9 +951,7 @@ func (r *ModelRegistry) snapshotProviderTypes() map[core.Provider]string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	m := make(map[core.Provider]string, len(r.providerTypes))
-	for k, v := range r.providerTypes {
-		m[k] = v
-	}
+	maps.Copy(m, r.providerTypes)
 	return m
 }
 

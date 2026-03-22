@@ -108,15 +108,12 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 
 	// Process entries in chunks to stay within SQLite's parameter limit
 	for i := 0; i < len(entries); i += maxEntriesPerBatch {
-		end := i + maxEntriesPerBatch
-		if end > len(entries) {
-			end = len(entries)
-		}
+		end := min(i+maxEntriesPerBatch, len(entries))
 		chunk := entries[i:end]
 
 		// Build batch insert query for this chunk
 		placeholders := make([]string, len(chunk))
-		values := make([]interface{}, 0, len(chunk)*columnsPerUsageEntry)
+		values := make([]any, 0, len(chunk)*columnsPerUsageEntry)
 
 		for j, e := range chunk {
 			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -124,7 +121,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 			rawDataJSON := marshalRawData(e.RawData, e.ID)
 
 			// Handle NULL for raw_data field
-			var rawDataValue interface{}
+			var rawDataValue any
 			if rawDataJSON != nil {
 				rawDataValue = string(rawDataJSON)
 			}

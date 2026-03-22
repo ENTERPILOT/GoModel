@@ -7,10 +7,8 @@ import (
 	"gomodel/config"
 )
 
-// ptr helpers
-func intPtr(v int) *int                     { return &v }
-func durPtr(v time.Duration) *time.Duration { return &v }
-func f64Ptr(v float64) *float64             { return &v }
+//go:fix inline
+func durPtr(v time.Duration) *time.Duration { return new(v) }
 
 var globalRetry = config.RetryConfig{
 	MaxRetries:     3,
@@ -64,7 +62,7 @@ func TestBuildProviderConfig_PartialOverride(t *testing.T) {
 		APIKey: "sk-ant",
 		Resilience: &config.RawResilienceConfig{
 			Retry: &config.RawRetryConfig{
-				MaxRetries: intPtr(10),
+				MaxRetries: new(10),
 			},
 		},
 	}
@@ -87,11 +85,11 @@ func TestBuildProviderConfig_FullOverride(t *testing.T) {
 		APIKey: "sk-gem",
 		Resilience: &config.RawResilienceConfig{
 			Retry: &config.RawRetryConfig{
-				MaxRetries:     intPtr(7),
+				MaxRetries:     new(7),
 				InitialBackoff: durPtr(500 * time.Millisecond),
 				MaxBackoff:     durPtr(10 * time.Second),
-				BackoffFactor:  f64Ptr(1.5),
-				JitterFactor:   f64Ptr(0.3),
+				BackoffFactor:  new(1.5),
+				JitterFactor:   new(0.3),
 			},
 		},
 	}
@@ -121,7 +119,7 @@ func TestBuildProviderConfig_ZeroValueOverride(t *testing.T) {
 		APIKey: "sk-groq",
 		Resilience: &config.RawResilienceConfig{
 			Retry: &config.RawRetryConfig{
-				MaxRetries: intPtr(0),
+				MaxRetries: new(0),
 			},
 		},
 	}

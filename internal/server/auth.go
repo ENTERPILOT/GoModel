@@ -36,8 +36,8 @@ func AuthMiddleware(masterKey string, skipPaths []string) echo.MiddlewareFunc {
 			// Get Authorization header
 			authHeader := c.Request().Header.Get("Authorization")
 			if authHeader == "" {
-				return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-					"error": map[string]interface{}{
+				return c.JSON(http.StatusUnauthorized, map[string]any{
+					"error": map[string]any{
 						"type":    "authentication_error",
 						"message": "missing authorization header",
 					},
@@ -47,8 +47,8 @@ func AuthMiddleware(masterKey string, skipPaths []string) echo.MiddlewareFunc {
 			// Extract Bearer token
 			const prefix = "Bearer "
 			if !strings.HasPrefix(authHeader, prefix) {
-				return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-					"error": map[string]interface{}{
+				return c.JSON(http.StatusUnauthorized, map[string]any{
+					"error": map[string]any{
 						"type":    "authentication_error",
 						"message": "invalid authorization header format, expected 'Bearer <token>'",
 					},
@@ -57,8 +57,8 @@ func AuthMiddleware(masterKey string, skipPaths []string) echo.MiddlewareFunc {
 
 			token := strings.TrimPrefix(authHeader, prefix)
 			if subtle.ConstantTimeCompare([]byte(token), []byte(masterKey)) != 1 {
-				return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-					"error": map[string]interface{}{
+				return c.JSON(http.StatusUnauthorized, map[string]any{
+					"error": map[string]any{
 						"type":    "authentication_error",
 						"message": "invalid master key",
 					},

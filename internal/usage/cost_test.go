@@ -7,8 +7,6 @@ import (
 	"gomodel/internal/core"
 )
 
-func ptr(f float64) *float64 { return &f }
-
 func TestCalculateGranularCost_NilPricing(t *testing.T) {
 	result := CalculateGranularCost(100, 50, nil, "openai", nil)
 	if result.InputCost != nil || result.OutputCost != nil || result.TotalCost != nil {
@@ -21,8 +19,8 @@ func TestCalculateGranularCost_NilPricing(t *testing.T) {
 
 func TestCalculateGranularCost_BaseOnly(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:  ptr(3.0),
-		OutputPerMtok: ptr(15.0),
+		InputPerMtok:  new(3.0),
+		OutputPerMtok: new(15.0),
 	}
 	result := CalculateGranularCost(1_000_000, 500_000, nil, "openai", pricing)
 
@@ -36,10 +34,10 @@ func TestCalculateGranularCost_BaseOnly(t *testing.T) {
 
 func TestCalculateGranularCost_OpenAI_CachedAndReasoning(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:           ptr(2.50),
-		OutputPerMtok:          ptr(10.0),
-		CachedInputPerMtok:     ptr(1.25),
-		ReasoningOutputPerMtok: ptr(15.0),
+		InputPerMtok:           new(2.50),
+		OutputPerMtok:          new(10.0),
+		CachedInputPerMtok:     new(1.25),
+		ReasoningOutputPerMtok: new(15.0),
 	}
 	rawData := map[string]any{
 		"cached_tokens":    200_000,
@@ -59,10 +57,10 @@ func TestCalculateGranularCost_OpenAI_CachedAndReasoning(t *testing.T) {
 
 func TestCalculateGranularCost_OpenAI_AudioTokens(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:       ptr(2.50),
-		OutputPerMtok:      ptr(10.0),
-		AudioInputPerMtok:  ptr(100.0),
-		AudioOutputPerMtok: ptr(200.0),
+		InputPerMtok:       new(2.50),
+		OutputPerMtok:      new(10.0),
+		AudioInputPerMtok:  new(100.0),
+		AudioOutputPerMtok: new(200.0),
 	}
 	rawData := map[string]any{
 		"prompt_audio_tokens":     50_000,
@@ -78,10 +76,10 @@ func TestCalculateGranularCost_OpenAI_AudioTokens(t *testing.T) {
 
 func TestCalculateGranularCost_Anthropic_CacheTokens(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:       ptr(3.0),
-		OutputPerMtok:      ptr(15.0),
-		CachedInputPerMtok: ptr(0.30),
-		CacheWritePerMtok:  ptr(3.75),
+		InputPerMtok:       new(3.0),
+		OutputPerMtok:      new(15.0),
+		CachedInputPerMtok: new(0.30),
+		CacheWritePerMtok:  new(3.75),
 	}
 	rawData := map[string]any{
 		"cache_read_input_tokens":     int64(100_000),
@@ -97,10 +95,10 @@ func TestCalculateGranularCost_Anthropic_CacheTokens(t *testing.T) {
 
 func TestCalculateGranularCost_Gemini_ThoughtTokens(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:           ptr(1.25),
-		OutputPerMtok:          ptr(5.0),
-		CachedInputPerMtok:     ptr(0.3125),
-		ReasoningOutputPerMtok: ptr(10.0),
+		InputPerMtok:           new(1.25),
+		OutputPerMtok:          new(5.0),
+		CachedInputPerMtok:     new(0.3125),
+		ReasoningOutputPerMtok: new(10.0),
 	}
 	rawData := map[string]any{
 		"cached_tokens":  50_000,
@@ -116,9 +114,9 @@ func TestCalculateGranularCost_Gemini_ThoughtTokens(t *testing.T) {
 
 func TestCalculateGranularCost_XAI_ImageTokens(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:  ptr(2.0),
-		OutputPerMtok: ptr(10.0),
-		InputPerImage: ptr(0.05), // $0.05 per image
+		InputPerMtok:  new(2.0),
+		OutputPerMtok: new(10.0),
+		InputPerImage: new(0.05), // $0.05 per image
 	}
 	rawData := map[string]any{
 		"image_tokens": 3,
@@ -131,8 +129,8 @@ func TestCalculateGranularCost_XAI_ImageTokens(t *testing.T) {
 
 func TestCalculateGranularCost_NilPricingFieldNoCaveat(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:  ptr(2.50),
-		OutputPerMtok: ptr(10.0),
+		InputPerMtok:  new(2.50),
+		OutputPerMtok: new(10.0),
 		// CachedInputPerMtok is nil — base rate already covers cached tokens
 	}
 	rawData := map[string]any{
@@ -150,8 +148,8 @@ func TestCalculateGranularCost_NilPricingFieldNoCaveat(t *testing.T) {
 
 func TestCalculateGranularCost_UnmappedTokenField(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:  ptr(2.50),
-		OutputPerMtok: ptr(10.0),
+		InputPerMtok:  new(2.50),
+		OutputPerMtok: new(10.0),
 	}
 	rawData := map[string]any{
 		"some_new_tokens": 100,
@@ -168,9 +166,9 @@ func TestCalculateGranularCost_UnmappedTokenField(t *testing.T) {
 
 func TestCalculateGranularCost_PerRequestFee(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:  ptr(0.0),
-		OutputPerMtok: ptr(0.0),
-		PerRequest:    ptr(0.01),
+		InputPerMtok:  new(0.0),
+		OutputPerMtok: new(0.0),
+		PerRequest:    new(0.01),
 	}
 	result := CalculateGranularCost(100, 50, nil, "openai", pricing)
 
@@ -180,8 +178,8 @@ func TestCalculateGranularCost_PerRequestFee(t *testing.T) {
 
 func TestCalculateGranularCost_UnknownProvider(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:  ptr(1.0),
-		OutputPerMtok: ptr(2.0),
+		InputPerMtok:  new(1.0),
+		OutputPerMtok: new(2.0),
 	}
 	rawData := map[string]any{
 		"custom_tokens": 100,
@@ -199,8 +197,8 @@ func TestCalculateGranularCost_UnknownProvider(t *testing.T) {
 
 func TestCalculateGranularCost_ZeroTokenRawData(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:  ptr(2.50),
-		OutputPerMtok: ptr(10.0),
+		InputPerMtok:  new(2.50),
+		OutputPerMtok: new(10.0),
 	}
 	rawData := map[string]any{
 		"cached_tokens": 0,
@@ -214,8 +212,8 @@ func TestCalculateGranularCost_ZeroTokenRawData(t *testing.T) {
 
 func TestCalculateGranularCost_NonTokenField(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:  ptr(2.50),
-		OutputPerMtok: ptr(10.0),
+		InputPerMtok:  new(2.50),
+		OutputPerMtok: new(10.0),
 	}
 	rawData := map[string]any{
 		"some_flag": true,
@@ -273,10 +271,10 @@ func TestIsTokenField(t *testing.T) {
 
 func TestCalculateGranularCost_XAI_PrefixedKeys(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:           ptr(2.0),
-		OutputPerMtok:          ptr(10.0),
-		CachedInputPerMtok:     ptr(0.50),
-		ReasoningOutputPerMtok: ptr(15.0),
+		InputPerMtok:           new(2.0),
+		OutputPerMtok:          new(10.0),
+		CachedInputPerMtok:     new(0.50),
+		ReasoningOutputPerMtok: new(15.0),
 	}
 	rawData := map[string]any{
 		"prompt_cached_tokens":        200_000,
@@ -296,10 +294,10 @@ func TestCalculateGranularCost_XAI_PrefixedKeys(t *testing.T) {
 
 func TestCalculateGranularCost_XAI_ReasoningTokensAreAdditionalOutput(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:           ptr(0.3),
-		OutputPerMtok:          ptr(0.5),
-		CachedInputPerMtok:     ptr(0.075),
-		ReasoningOutputPerMtok: ptr(1.5),
+		InputPerMtok:           new(0.3),
+		OutputPerMtok:          new(0.5),
+		CachedInputPerMtok:     new(0.075),
+		ReasoningOutputPerMtok: new(1.5),
 	}
 	rawData := map[string]any{
 		"prompt_cached_tokens":        4,
@@ -317,8 +315,8 @@ func TestCalculateGranularCost_XAI_ReasoningTokensAreAdditionalOutput(t *testing
 
 func TestCalculateGranularCost_InformationalFieldsNoCaveat(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:  ptr(2.50),
-		OutputPerMtok: ptr(10.0),
+		InputPerMtok:  new(2.50),
+		OutputPerMtok: new(10.0),
 	}
 	rawData := map[string]any{
 		"prompt_text_tokens":                    80_000,
@@ -338,8 +336,8 @@ func TestCalculateGranularCost_InformationalFieldsNoCaveat(t *testing.T) {
 func TestCalculateGranularCost_ReasoningModelNoCaveat(t *testing.T) {
 	// Simulates the exact RawData produced by buildRawUsageFromDetails for o3-mini / grok-3-mini
 	pricing := &core.ModelPricing{
-		InputPerMtok:  ptr(1.10),
-		OutputPerMtok: ptr(4.40),
+		InputPerMtok:  new(1.10),
+		OutputPerMtok: new(4.40),
 		// No CachedInputPerMtok or ReasoningOutputPerMtok — base rate covers all
 	}
 	rawData := map[string]any{
@@ -360,7 +358,7 @@ func TestCalculateGranularCost_ReasoningModelNoCaveat(t *testing.T) {
 
 func TestCalculateGranularCost_InputOnlyPricing(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok: ptr(3.0),
+		InputPerMtok: new(3.0),
 		// OutputPerMtok is nil — no output pricing
 	}
 	result := CalculateGranularCost(1_000_000, 500_000, nil, "openai", pricing)
@@ -376,7 +374,7 @@ func TestCalculateGranularCost_InputOnlyPricing(t *testing.T) {
 func TestCalculateGranularCost_OutputOnlyPricing(t *testing.T) {
 	pricing := &core.ModelPricing{
 		// InputPerMtok is nil — no input pricing
-		OutputPerMtok: ptr(15.0),
+		OutputPerMtok: new(15.0),
 	}
 	result := CalculateGranularCost(1_000_000, 500_000, nil, "openai", pricing)
 

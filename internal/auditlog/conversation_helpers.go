@@ -100,9 +100,9 @@ func extractPreviousResponseID(entry *LogEntry) string {
 	return extractStringField(entry.Data.RequestBody, "previous_response_id")
 }
 
-func extractStringField(v interface{}, key string) string {
+func extractStringField(v any, key string) string {
 	switch obj := v.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		return extractTrimmedString(obj[key])
 	case bson.M:
 		return extractTrimmedString(obj[key])
@@ -118,7 +118,7 @@ func extractStringField(v interface{}, key string) string {
 	}
 }
 
-func extractTrimmedString(raw interface{}) string {
+func extractTrimmedString(raw any) string {
 	if raw == nil {
 		return ""
 	}

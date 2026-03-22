@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -141,13 +142,12 @@ func parseDateRangeParams(c *echo.Context) (usage.UsageQueryParams, error) {
 // handleError converts errors to appropriate HTTP responses, matching the
 // format used by the main API handlers in the server package.
 func handleError(c *echo.Context, err error) error {
-	var gatewayErr *core.GatewayError
-	if errors.As(err, &gatewayErr) {
+	if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
 		return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 	}
 
-	return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-		"error": map[string]interface{}{
+	return c.JSON(http.StatusInternalServerError, map[string]any{
+		"error": map[string]any{
 			"type":    "internal_error",
 			"message": "an unexpected error occurred",
 		},
@@ -487,12 +487,7 @@ func (h *Handler) ListModels(c *echo.Context) error {
 
 // isValidCategory returns true if cat is a recognized model category.
 func isValidCategory(cat core.ModelCategory) bool {
-	for _, c := range core.AllCategories() {
-		if c == cat {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(core.AllCategories(), cat)
 }
 
 // ListCategories handles GET /admin/api/v1/models/categories

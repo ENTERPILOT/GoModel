@@ -421,7 +421,7 @@ func buildDefaultConfig() *Config {
 			Model: ModelCacheConfig{
 				RefreshInterval: 3600,
 				ModelList: ModelListConfig{
-					URL: "https://raw.githubusercontent.com/ENTERPILOT/ai-model-list/refs/heads/main/models.json",
+					URL: "https://raw.githubusercontent.com/ENTERPILOT/ai-model-list/refs/heads/main/models.min.json",
 				},
 				Local: nil,
 				Redis: nil,
@@ -571,13 +571,13 @@ func hasEnvDescendants(t reflect.Type) bool {
 	if t.Kind() != reflect.Struct {
 		return false
 	}
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
+	for f := range t.Fields() {
+		f := f
 		if f.Tag.Get("env") != "" {
 			return true
 		}
 		ft := f.Type
-		if ft.Kind() == reflect.Ptr {
+		if ft.Kind() == reflect.Pointer {
 			ft = ft.Elem()
 		}
 		if ft.Kind() == reflect.Struct && hasEnvDescendants(ft) {
@@ -602,7 +602,7 @@ func applyEnvOverridesValue(v reflect.Value) error {
 			}
 			continue
 		}
-		if field.Type.Kind() == reflect.Ptr {
+		if field.Type.Kind() == reflect.Pointer {
 			if fieldVal.IsNil() {
 				// Only allocate if the pointed-to struct has env-tagged descendants;
 				// otherwise leave it nil so optional config sections stay absent.
@@ -662,7 +662,7 @@ func applyEnvOverridesValue(v reflect.Value) error {
 			}
 			fieldVal.SetInt(int64(n))
 		case reflect.Int64:
-			if field.Type == reflect.TypeOf(time.Duration(0)) {
+			if field.Type == reflect.TypeFor[time.Duration]() {
 				// time.Duration is represented as int64; accept Go duration strings (e.g. "1s", "500ms").
 				d, err := time.ParseDuration(envVal)
 				if err != nil {
@@ -696,9 +696,9 @@ func expandString(s string) string {
 		varname := key
 		defaultValue := ""
 		hasDefault := false
-		if idx := strings.Index(key, ":-"); idx >= 0 {
-			varname = key[:idx]
-			defaultValue = key[idx+2:]
+		if before, after, ok := strings.Cut(key, ":-"); ok {
+			varname = before
+			defaultValue = after
 			hasDefault = true
 		}
 		value := os.Getenv(varname)

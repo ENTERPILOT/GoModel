@@ -140,7 +140,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				}
 
 				// Parse JSON to interface{} for native BSON storage in MongoDB
-				var parsed interface{}
+				var parsed any
 				if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
 					entry.Data.ResponseBody = parsed
 				} else {
@@ -233,7 +233,7 @@ func captureLoggedRequestBody(entry *LogEntry, bodyBytes []byte) {
 	}
 
 	// Parse JSON to interface{} for native BSON storage in MongoDB
-	var parsed interface{}
+	var parsed any
 	if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
 		entry.Data.RequestBody = parsed
 		return

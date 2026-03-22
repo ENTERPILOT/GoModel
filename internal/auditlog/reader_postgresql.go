@@ -81,7 +81,7 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 	dataQuery := fmt.Sprintf(`SELECT id, timestamp, duration_ns, model, resolved_model, provider, alias_used, status_code, request_id,
 		client_ip, method, path, stream, error_type, data
 		FROM audit_logs%s ORDER BY timestamp DESC LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
-	dataArgs := append(append([]interface{}(nil), args...), limit, offset)
+	dataArgs := append(append([]any(nil), args...), limit, offset)
 
 	rows, err := r.pool.Query(ctx, dataQuery, dataArgs...)
 	if err != nil {
@@ -151,7 +151,7 @@ func (r *PostgreSQLReader) GetConversation(ctx context.Context, logID string, li
 	return buildConversationThread(ctx, logID, limit, r.GetLogByID, r.findByResponseID, r.findByPreviousResponseID)
 }
 
-func pgDateRangeConditions(params QueryParams, argIdx int) (conditions []string, args []interface{}, nextIdx int) {
+func pgDateRangeConditions(params QueryParams, argIdx int) (conditions []string, args []any, nextIdx int) {
 	nextIdx = argIdx
 	if !params.StartDate.IsZero() {
 		conditions = append(conditions, fmt.Sprintf("timestamp >= $%d", nextIdx))
@@ -205,7 +205,7 @@ func (r *PostgreSQLReader) findByPreviousResponseID(ctx context.Context, previou
 }
 
 func scanPostgreSQLLogEntry(rows interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }) (*LogEntry, error) {
 	var e LogEntry
 	var dataJSON *string

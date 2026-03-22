@@ -35,8 +35,8 @@ func newValidationError(message string, err error) error {
 
 // IsValidationError reports whether err is a validation error.
 func IsValidationError(err error) bool {
-	var validationErr *ValidationError
-	return errors.As(err, &validationErr)
+	_, ok := errors.AsType[*ValidationError](err)
+	return ok
 }
 
 // Store defines persistence operations for aliases.

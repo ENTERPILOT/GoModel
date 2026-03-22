@@ -248,7 +248,7 @@ func TestUsageSummary_WithPersistedCosts(t *testing.T) {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestUsageSummary_NilCosts(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}

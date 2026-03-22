@@ -1,5 +1,7 @@
 package core
 
+import "maps"
+
 // RequestSnapshot is the transport-level capture of an inbound request. It
 // preserves the request as received at the HTTP boundary so later stages can
 // extract semantics without losing fidelity while keeping mutable state behind
@@ -111,9 +113,7 @@ func cloneStringMap(src map[string]string) map[string]string {
 		return nil
 	}
 	dst := make(map[string]string, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
+	maps.Copy(dst, src)
 	return dst
 }
 

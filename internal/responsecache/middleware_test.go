@@ -135,7 +135,7 @@ func TestSimpleCacheMiddleware_SkipsStreaming(t *testing.T) {
 	})
 
 	body := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
@@ -171,7 +171,7 @@ func TestSimpleCacheMiddleware_SkipsPartialTranslatedPlan(t *testing.T) {
 	})
 
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
@@ -253,7 +253,7 @@ func TestSimpleCacheMiddleware_NonCacheablePath(t *testing.T) {
 	})
 
 	body := []byte(`{}`)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req := httptest.NewRequest(http.MethodPost, "/v1/models", bytes.NewReader(body))
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)

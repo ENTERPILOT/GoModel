@@ -458,7 +458,7 @@ func TestModelRegistry(t *testing.T) {
 		registry.RegisterProvider(mock)
 		_ = registry.Initialize(context.Background())
 
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			models := registry.ListModels()
 			if len(models) != 3 {
 				t.Fatalf("expected 3 models, got %d", len(models))

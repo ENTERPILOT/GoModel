@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -151,9 +152,7 @@ func (p *Provider) getBatchResultEndpoints(batchID string) map[string]string {
 		return nil
 	}
 	cloned := make(map[string]string, len(endpoints))
-	for customID, endpoint := range endpoints {
-		cloned[customID] = endpoint
-	}
+	maps.Copy(cloned, endpoints)
 	return cloned
 }
 
@@ -880,7 +879,7 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 		}
 		// Emit chunk if we have stop_reason or usage data
 		if (event.Delta != nil && event.Delta.StopReason != "") || event.Usage != nil {
-			var finishReason interface{}
+			var finishReason any
 			if event.Delta != nil && event.Delta.StopReason != "" {
 				finishReason = sc.mapStreamStopReason(event.Delta.StopReason)
 			}
@@ -1516,7 +1515,7 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 				if !sc.sentDone {
 					sc.sentDone = true
 					prefix := sc.output.CompleteAssistantOutput(0)
-					responseData := map[string]interface{}{
+					responseData := map[string]any{
 						"id":         sc.responseID,
 						"object":     "response",
 						"status":     "completed",
@@ -1528,7 +1527,7 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 					if sc.hasUsage {
 						responseData["usage"] = anthropicResponsesUsagePayload(&sc.usage)
 					}
-					doneEvent := map[string]interface{}{
+					doneEvent := map[string]any{
 						"type":     "response.completed",
 						"response": responseData,
 					}
@@ -1610,9 +1609,9 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 			sc.hasUsage = true
 		}
 		// Send response.created event
-		createdEvent := map[string]interface{}{
+		createdEvent := map[string]any{
 			"type": "response.created",
-			"response": map[string]interface{}{
+			"response": map[string]any{
 				"id":         sc.responseID,
 				"object":     "response",
 				"status":     "in_progress",
@@ -1661,7 +1660,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 				sc.reserveAssistantMessageOutput()
 				prefix := sc.output.StartAssistantOutput(0)
 				sc.output.AppendAssistantText(event.Delta.Text)
-				deltaEvent := map[string]interface{}{
+				deltaEvent := map[string]any{
 					"type":  "response.output_text.delta",
 					"delta": event.Delta.Text,
 				}

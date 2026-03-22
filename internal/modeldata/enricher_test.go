@@ -24,9 +24,11 @@ func newMockAccessor(models map[string]string) *mockAccessor {
 	return a
 }
 
-func (a *mockAccessor) ModelIDs() []string                                  { return a.ids }
-func (a *mockAccessor) GetProviderType(modelID string) string               { return a.providerTypes[modelID] }
-func (a *mockAccessor) SetMetadata(modelID string, meta *core.ModelMetadata) { a.metadata[modelID] = meta }
+func (a *mockAccessor) ModelIDs() []string                    { return a.ids }
+func (a *mockAccessor) GetProviderType(modelID string) string { return a.providerTypes[modelID] }
+func (a *mockAccessor) SetMetadata(modelID string, meta *core.ModelMetadata) {
+	a.metadata[modelID] = meta
+}
 
 func TestEnrich_MatchedAndUnmatched(t *testing.T) {
 	list := &ModelList{
@@ -34,11 +36,11 @@ func TestEnrich_MatchedAndUnmatched(t *testing.T) {
 			"gpt-4o": {
 				DisplayName:   "GPT-4o",
 				Modes:         []string{"chat"},
-				ContextWindow: ptr(128000),
+				ContextWindow: new(128000),
 				Pricing: &core.ModelPricing{
 					Currency:      "USD",
-					InputPerMtok:  ptr(2.50),
-					OutputPerMtok: ptr(10.00),
+					InputPerMtok:  new(2.50),
+					OutputPerMtok: new(10.00),
 				},
 			},
 		},
@@ -92,18 +94,18 @@ func TestEnrich_ReverseCustomModelIDLookup(t *testing.T) {
 			"gpt-4o": {
 				DisplayName:   "GPT-4o",
 				Modes:         []string{"chat"},
-				ContextWindow: ptr(128000),
+				ContextWindow: new(128000),
 				Pricing: &core.ModelPricing{
 					Currency:      "USD",
-					InputPerMtok:  ptr(2.50),
-					OutputPerMtok: ptr(10.00),
+					InputPerMtok:  new(2.50),
+					OutputPerMtok: new(10.00),
 				},
 			},
 		},
 		ProviderModels: map[string]ProviderModelEntry{
 			"openai/gpt-4o": {
 				ModelRef:      "gpt-4o",
-				CustomModelID: ptr("gpt-4o-2024-08-06"),
+				CustomModelID: new("gpt-4o-2024-08-06"),
 				Enabled:       true,
 			},
 		},
@@ -135,14 +137,14 @@ func TestEnrich_ProviderModelOverride(t *testing.T) {
 			"gpt-4o": {
 				DisplayName:   "GPT-4o",
 				Modes:         []string{"chat"},
-				ContextWindow: ptr(128000),
+				ContextWindow: new(128000),
 			},
 		},
 		ProviderModels: map[string]ProviderModelEntry{
 			"azure/gpt-4o": {
 				ModelRef:      "gpt-4o",
 				Enabled:       true,
-				ContextWindow: ptr(64000),
+				ContextWindow: new(64000),
 			},
 		},
 	}

@@ -181,7 +181,7 @@ func buildUsageInsert(entries []*UsageEntry) (string, []any) {
 			builder.WriteString(", ")
 		}
 		builder.WriteByte('(')
-		for col := 0; col < usageInsertColumnCount; col++ {
+		for col := range usageInsertColumnCount {
 			if col > 0 {
 				builder.WriteString(", ")
 			}

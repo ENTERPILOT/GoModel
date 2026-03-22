@@ -19,7 +19,7 @@ var (
 // Observer receives parsed JSON SSE payloads in stream order.
 // Implementations must treat the payload as read-only.
 type Observer interface {
-	OnJSONEvent(payload map[string]interface{})
+	OnJSONEvent(payload map[string]any)
 	OnStreamClose()
 }
 
@@ -182,7 +182,7 @@ func (s *ObservedSSEStream) processEvent(event []byte) {
 		return
 	}
 
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.Unmarshal(jsonData, &payload); err != nil {
 		return
 	}
@@ -258,10 +258,7 @@ func nextJoinedEventBoundary(prefix, data []byte) (idx int, sepLen int) {
 
 func nextBoundaryAcrossJoin(prefix, data []byte) (idx int, sepLen int) {
 	idx = -1
-	start := len(prefix) - maxBoundaryTailBytes
-	if start < 0 {
-		start = 0
-	}
+	start := max(len(prefix)-maxBoundaryTailBytes, 0)
 
 	for offset := start; offset < len(prefix); offset++ {
 		for _, boundary := range [][]byte{lfEventBoundary, crlfEventBoundary} {
@@ -319,10 +316,7 @@ func joinedSuffix(prefix, data []byte, n int) []byte {
 		return append([]byte(nil), data[len(data)-n:]...)
 	}
 
-	needPrefix := n - len(data)
-	if needPrefix > len(prefix) {
-		needPrefix = len(prefix)
-	}
+	needPrefix := min(n-len(data), len(prefix))
 
 	result := make([]byte, needPrefix+len(data))
 	copy(result, prefix[len(prefix)-needPrefix:])

@@ -243,13 +243,13 @@ func (s *nativeFileService) GetFileContent(c *echo.Context) error {
 }
 
 func isNotFoundGatewayError(err error) bool {
-	var gatewayErr *core.GatewayError
-	return errors.As(err, &gatewayErr) && gatewayErr.HTTPStatusCode() == http.StatusNotFound
+	gatewayErr, ok := errors.AsType[*core.GatewayError](err)
+	return ok && gatewayErr.HTTPStatusCode() == http.StatusNotFound
 }
 
 func isUnsupportedNativeFilesError(err error) bool {
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
+	gatewayErr, ok := errors.AsType[*core.GatewayError](err)
+	if !ok {
 		return false
 	}
 	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {

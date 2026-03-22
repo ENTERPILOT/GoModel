@@ -10,11 +10,11 @@ import (
 type trackingObserver struct {
 	eventCount  int
 	lastID      string
-	lastPayload map[string]interface{}
+	lastPayload map[string]any
 	closed      bool
 }
 
-func (o *trackingObserver) OnJSONEvent(payload map[string]interface{}) {
+func (o *trackingObserver) OnJSONEvent(payload map[string]any) {
 	o.eventCount++
 	o.lastPayload = payload
 	if id, _ := payload["id"].(string); id != "" {
@@ -112,7 +112,7 @@ func TestObservedSSEStream_ReassemblesMultilineDataEvent(t *testing.T) {
 	if observer.lastID != "chatcmpl-multiline" {
 		t.Fatalf("lastID = %q, want chatcmpl-multiline", observer.lastID)
 	}
-	usage, ok := observer.lastPayload["usage"].(map[string]interface{})
+	usage, ok := observer.lastPayload["usage"].(map[string]any)
 	if !ok {
 		t.Fatalf("usage = %#v, want object", observer.lastPayload["usage"])
 	}

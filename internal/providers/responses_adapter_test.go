@@ -105,7 +105,7 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 				StreamOptions:     &core.StreamOptions{IncludeUsage: includeUsage},
 				Tools:             []map[string]any{{"type": "function", "function": map[string]any{"name": "lookup_weather"}}},
 				ToolChoice:        map[string]any{"type": "function", "function": map[string]any{"name": "lookup_weather"}},
-				ParallelToolCalls: boolPtr(false),
+				ParallelToolCalls: new(false),
 			},
 			checkFn: func(t *testing.T, req *core.ChatRequest) {
 				if len(req.Messages) != 2 || req.Messages[0].Role != "system" {
@@ -220,17 +220,17 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 			name: "function call loop items",
 			input: &core.ResponsesRequest{
 				Model: "test-model",
-				Input: []interface{}{
-					map[string]interface{}{
+				Input: []any{
+					map[string]any{
 						"type":      "function_call",
 						"call_id":   "call_123",
 						"name":      "lookup_weather",
 						"arguments": `{"city":"Warsaw"}`,
 					},
-					map[string]interface{}{
+					map[string]any{
 						"type":    "function_call_output",
 						"call_id": "call_123",
-						"output":  map[string]interface{}{"temperature_c": 21},
+						"output":  map[string]any{"temperature_c": 21},
 					},
 				},
 			},
@@ -279,16 +279,16 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 			name: "assistant text merges with later function call item",
 			input: &core.ResponsesRequest{
 				Model: "test-model",
-				Input: []interface{}{
-					map[string]interface{}{
+				Input: []any{
+					map[string]any{
 						"type":   "message",
 						"role":   "assistant",
 						"status": "completed",
-						"content": []map[string]interface{}{
+						"content": []map[string]any{
 							{"type": "output_text", "text": "I'll check that for you."},
 						},
 					},
-					map[string]interface{}{
+					map[string]any{
 						"type":      "function_call",
 						"call_id":   "call_123",
 						"name":      "lookup_weather",
@@ -312,17 +312,17 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 			name: "assistant structured content merges with later function call item",
 			input: &core.ResponsesRequest{
 				Model: "test-model",
-				Input: []interface{}{
-					map[string]interface{}{
+				Input: []any{
+					map[string]any{
 						"type":   "message",
 						"role":   "assistant",
 						"status": "completed",
-						"content": []map[string]interface{}{
+						"content": []map[string]any{
 							{"type": "output_text", "text": "I'll check that for you."},
-							{"type": "input_image", "image_url": map[string]interface{}{"url": "https://example.com/image.png"}},
+							{"type": "input_image", "image_url": map[string]any{"url": "https://example.com/image.png"}},
 						},
 					},
-					map[string]interface{}{
+					map[string]any{
 						"type":      "function_call",
 						"call_id":   "call_123",
 						"name":      "lookup_weather",
@@ -350,11 +350,11 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 			name: "invalid content fails",
 			input: &core.ResponsesRequest{
 				Model: "test-model",
-				Input: []interface{}{
-					map[string]interface{}{
+				Input: []any{
+					map[string]any{
 						"role": "user",
-						"content": []interface{}{
-							map[string]interface{}{"type": "unknown"},
+						"content": []any{
+							map[string]any{"type": "unknown"},
 						},
 					},
 				},
@@ -444,14 +444,14 @@ func TestConvertResponsesRequestToChat_RejectsWhitespaceOnlyMediaFields(t *testi
 		},
 		{
 			name: "map input audio",
-			input: []interface{}{
-				map[string]interface{}{
+			input: []any{
+				map[string]any{
 					"type": "message",
 					"role": "user",
-					"content": []map[string]interface{}{
+					"content": []map[string]any{
 						{
 							"type":        "input_audio",
-							"input_audio": map[string]interface{}{"data": "  ", "format": "wav"},
+							"input_audio": map[string]any{"data": "  ", "format": "wav"},
 						},
 					},
 				},
@@ -527,25 +527,25 @@ func TestConvertResponsesRequestToChat_PreservesOpaqueExtras(t *testing.T) {
 func TestConvertResponsesRequestToChat_PreservesUnknownMapFields(t *testing.T) {
 	req := &core.ResponsesRequest{
 		Model: "test-model",
-		Input: []interface{}{
-			map[string]interface{}{
+		Input: []any{
+			map[string]any{
 				"type":      "function_call",
 				"call_id":   "call_123",
 				"name":      "lookup_weather",
 				"arguments": `{"city":"Warsaw"}`,
-				"x_trace":   map[string]interface{}{"attempt": 2},
+				"x_trace":   map[string]any{"attempt": 2},
 			},
-			map[string]interface{}{
+			map[string]any{
 				"type":    "message",
 				"role":    "user",
-				"content": []map[string]interface{}{{"type": "output_text", "text": "hello", "cache_control": map[string]interface{}{"type": "ephemeral"}}},
+				"content": []map[string]any{{"type": "output_text", "text": "hello", "cache_control": map[string]any{"type": "ephemeral"}}},
 				"x_meta":  "keep-me",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"type": "message",
 				"role": "user",
-				"content": []interface{}{
-					map[string]interface{}{
+				"content": []any{
+					map[string]any{
 						"type": "input_image",
 						"image_url": map[string]string{
 							"url":        "https://example.com/image.png",
@@ -554,7 +554,7 @@ func TestConvertResponsesRequestToChat_PreservesUnknownMapFields(t *testing.T) {
 							"x_nested":   "keep-image",
 						},
 					},
-					map[string]interface{}{
+					map[string]any{
 						"type": "input_audio",
 						"input_audio": map[string]string{
 							"data":     "aGVsbG8=",
@@ -735,8 +735,8 @@ func TestConvertChatResponseToResponses_PreservesStructuredAssistantContent(t *t
 func TestConvertResponsesRequestToChat_RejectsNonSerializableFunctionCallOutputMap(t *testing.T) {
 	_, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{
 		Model: "test-model",
-		Input: []interface{}{
-			map[string]interface{}{
+		Input: []any{
+			map[string]any{
 				"type":    "function_call_output",
 				"call_id": "call_123",
 				"output":  math.Inf(1),
@@ -754,7 +754,7 @@ func TestConvertResponsesRequestToChat_RejectsNonSerializableFunctionCallOutputM
 func TestExtractContentFromInput(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    any
 		expected string
 	}{
 		{name: "string input", input: "Hello world", expected: "Hello world"},
@@ -765,7 +765,7 @@ func TestExtractContentFromInput(t *testing.T) {
 					"type": "message",
 					"content": []map[string]any{
 						{"type": "output_text", "text": "Hello"},
-						{"type": "wrapper", "content": []interface{}{map[string]any{"type": "output_text", "text": "world"}}},
+						{"type": "wrapper", "content": []any{map[string]any{"type": "output_text", "text": "world"}}},
 					},
 				},
 			},
@@ -867,8 +867,4 @@ func TestStreamResponsesViaChat_DoesNotInjectUsageWhenPolicyDisabled(t *testing.
 	if provider.capturedReq.StreamOptions != nil {
 		t.Fatalf("captured StreamOptions = %+v, want nil", provider.capturedReq.StreamOptions)
 	}
-}
-
-func boolPtr(v bool) *bool {
-	return &v
 }

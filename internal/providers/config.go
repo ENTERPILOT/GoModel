@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"maps"
 	"os"
 	"strings"
 
@@ -54,9 +55,7 @@ func resolveProviders(raw map[string]config.RawProviderConfig, global config.Res
 // Env var values always win over YAML values for the same provider name.
 func applyProviderEnvVars(raw map[string]config.RawProviderConfig) map[string]config.RawProviderConfig {
 	result := make(map[string]config.RawProviderConfig, len(raw))
-	for k, v := range raw {
-		result[k] = v
-	}
+	maps.Copy(result, raw)
 
 	for _, kp := range knownProviderEnvs {
 		apiKey := os.Getenv(kp.apiKeyEnv)

@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -374,12 +376,7 @@ func (m *mockProvider) Supports(model string) bool {
 	if err == nil {
 		model = selector.Model
 	}
-	for _, supported := range m.supportedModels {
-		if model == supported {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.supportedModels, model)
 }
 
 func (m *mockProvider) GetProviderType(model string) string {
@@ -560,9 +557,7 @@ func (m *mockProvider) CreateBatchWithHints(ctx context.Context, providerType st
 		return resp, nil, nil
 	}
 	hints := make(map[string]string, len(m.batchCreateHints))
-	for customID, endpoint := range m.batchCreateHints {
-		hints[customID] = endpoint
-	}
+	maps.Copy(hints, m.batchCreateHints)
 	return resp, hints, nil
 }
 
@@ -624,9 +619,7 @@ func (m *mockProvider) GetBatchResultsWithHints(ctx context.Context, providerTyp
 	m.capturedBatchHintsBatchID = batchID
 	if len(endpointByCustomID) > 0 {
 		m.capturedBatchHints = make(map[string]string, len(endpointByCustomID))
-		for customID, endpoint := range endpointByCustomID {
-			m.capturedBatchHints[customID] = endpoint
-		}
+		maps.Copy(m.capturedBatchHints, endpointByCustomID)
 	}
 	if m.batchResultsHinted != nil {
 		return m.batchResultsHinted, nil

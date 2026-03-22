@@ -107,7 +107,7 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 	dataQuery := `SELECT id, request_id, provider_id, timestamp, model, provider, endpoint,
 		input_tokens, output_tokens, total_tokens, COALESCE(input_cost, 0), COALESCE(output_cost, 0), COALESCE(total_cost, 0), raw_data, COALESCE(costs_calculation_caveat, '')
 		FROM usage` + where + ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`
-	dataArgs := append(append([]interface{}(nil), args...), limit, offset)
+	dataArgs := append(append([]any(nil), args...), limit, offset)
 
 	rows, err := r.db.QueryContext(ctx, dataQuery, dataArgs...)
 	if err != nil {
@@ -159,7 +159,7 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 
 // sqliteDateRangeConditions returns WHERE conditions and args for a date range.
 // Dates are formatted as "2006-01-02" strings for SQLite text comparison.
-func sqliteDateRangeConditions(params UsageQueryParams) (conditions []string, args []interface{}) {
+func sqliteDateRangeConditions(params UsageQueryParams) (conditions []string, args []any) {
 	if !params.StartDate.IsZero() {
 		conditions = append(conditions, "timestamp >= ?")
 		args = append(args, params.StartDate.UTC().Format("2006-01-02"))
