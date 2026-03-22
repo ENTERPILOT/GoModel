@@ -19,6 +19,13 @@ import (
 
 type explodingValidationReadCloser struct{}
 
+var benchmarkSelectorValidationBody = []byte(`{
+	"provider":"openai",
+	"model":"gpt-4o-mini",
+	"messages":[{"role":"user","content":"hi"}],
+	"response_format":{"type":"json_schema"}
+}`)
+
 type modelCountingValidationProvider struct {
 	*mockProvider
 	modelCount int
@@ -762,6 +769,54 @@ func TestGetProviderType_UsesExecutionPlan(t *testing.T) {
 	c := e.NewContext(req, rec)
 
 	assert.Equal(t, "openai", GetProviderType(c))
+}
+
+func TestSelectorHintsFromJSONGJSON_MatchesStdlibSemantics(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "model and provider strings", body: `{"provider":"openai","model":"gpt-4o-mini"}`},
+		{name: "model only", body: `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`},
+		{name: "null selector fields", body: `{"provider":null,"model":null}`},
+		{name: "missing selector fields", body: `{"messages":[{"role":"user","content":"hi"}]}`},
+		{name: "invalid json", body: `not json`},
+		{name: "array root", body: `[]`},
+		{name: "numeric model", body: `{"model":123}`},
+		{name: "numeric provider", body: `{"provider":123}`},
+		{name: "mixed valid and invalid selector", body: `{"model":"gpt-4o-mini","provider":123}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wantModel, wantProvider, wantParsed := selectorHintsFromJSONStdlib([]byte(tt.body))
+			gotModel, gotProvider, gotParsed := selectorHintsFromJSONGJSON([]byte(tt.body))
+
+			assert.Equal(t, wantModel, gotModel)
+			assert.Equal(t, wantProvider, gotProvider)
+			assert.Equal(t, wantParsed, gotParsed)
+		})
+	}
+}
+
+func BenchmarkSelectorHintsFromJSONStdlib(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		model, provider, parsed := selectorHintsFromJSONStdlib(benchmarkSelectorValidationBody)
+		if !parsed || model != "gpt-4o-mini" || provider != "openai" {
+			b.Fatalf("unexpected selector hints: parsed=%v model=%q provider=%q", parsed, model, provider)
+		}
+	}
+}
+
+func BenchmarkSelectorHintsFromJSONGJSON(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		model, provider, parsed := selectorHintsFromJSONGJSON(benchmarkSelectorValidationBody)
+		if !parsed || model != "gpt-4o-mini" || provider != "openai" {
+			b.Fatalf("unexpected selector hints: parsed=%v model=%q provider=%q", parsed, model, provider)
+		}
+	}
 }
 
 func TestModelValidation_ResolvesQualifiedMaskingAliasBeforeProviderParsing(t *testing.T) {

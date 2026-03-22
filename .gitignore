@@ -28,3 +28,6 @@
 
 # Claude Code local settings (user-specific)
 /.claude/settings.local.json
+
+# Local git worktrees
+/.worktrees/

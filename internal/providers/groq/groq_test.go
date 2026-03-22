@@ -545,21 +545,21 @@ func TestResponses_PreservesOpaqueFieldsThroughChatAdapter(t *testing.T) {
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("failed to unmarshal chat request: %v", err)
 		}
-		if req.ExtraFields["response_format"] == nil {
-			t.Fatalf("response_format missing after responses-to-chat conversion: %+v", req.ExtraFields)
+		if req.ExtraFields.Lookup("response_format") == nil {
+			t.Fatal("response_format missing after responses-to-chat conversion")
 		}
 		if len(req.Messages) != 1 {
 			t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
 		}
-		if req.Messages[0].ExtraFields["x_message_hint"] == nil {
-			t.Fatalf("message extras missing after conversion: %+v", req.Messages[0].ExtraFields)
+		if req.Messages[0].ExtraFields.Lookup("x_message_hint") == nil {
+			t.Fatal("message extras missing after conversion")
 		}
 		parts, ok := req.Messages[0].Content.([]core.ContentPart)
 		if !ok {
 			t.Fatalf("Messages[0].Content type = %T, want []core.ContentPart", req.Messages[0].Content)
 		}
-		if parts[0].ExtraFields["cache_control"] == nil {
-			t.Fatalf("content part extras missing after conversion: %+v", parts[0].ExtraFields)
+		if parts[0].ExtraFields.Lookup("cache_control") == nil {
+			t.Fatal("content part extras missing after conversion")
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -597,19 +597,19 @@ func TestResponses_PreservesOpaqueFieldsThroughChatAdapter(t *testing.T) {
 					{
 						Type: "input_text",
 						Text: "Hello",
-						ExtraFields: map[string]json.RawMessage{
+						ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 							"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
-						},
+						}),
 					},
 				},
-				ExtraFields: map[string]json.RawMessage{
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 					"x_message_hint": json.RawMessage(`true`),
-				},
+				}),
 			},
 		},
-		ExtraFields: map[string]json.RawMessage{
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"response_format": json.RawMessage(`{"type":"json_schema"}`),
-		},
+		}),
 	}
 
 	if _, err := provider.Responses(context.Background(), req); err != nil {

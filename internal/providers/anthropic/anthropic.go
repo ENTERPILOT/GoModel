@@ -428,9 +428,9 @@ func convertFromAnthropicResponse(resp *anthropicResponse) *core.ChatResponse {
 	if thinking != "" {
 		raw, err := json.Marshal(thinking)
 		if err == nil {
-			msg.ExtraFields = map[string]json.RawMessage{
+			msg.ExtraFields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 				"reasoning_content": raw,
-			}
+			})
 		}
 	}
 

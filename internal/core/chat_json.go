@@ -20,7 +20,7 @@ func (r *ChatRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	extraFields, err := extractUnknownJSONFields(data,
+	extraFields, err := extractUnknownJSONFieldsObject(data,
 		"temperature",
 		"max_tokens",
 		"model",
@@ -67,7 +67,7 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 		Reasoning         *Reasoning       `json:"reasoning,omitempty"`
 	}
 
-	return marshalWithUnknownJSONFields(chatRequestAlias{
+	return marshalWithUnknownJSONFieldsObject(chatRequestAlias{
 		Temperature:       r.Temperature,
 		MaxTokens:         r.MaxTokens,
 		Model:             r.Model,

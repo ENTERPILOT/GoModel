@@ -938,8 +938,8 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 	if provider.capturedChatReq == nil {
 		t.Fatal("expected chat request to be captured")
 	}
-	if provider.capturedChatReq.ExtraFields["response_format"] == nil {
-		t.Fatalf("response_format missing from ExtraFields: %+v", provider.capturedChatReq.ExtraFields)
+	if provider.capturedChatReq.ExtraFields.Lookup("response_format") == nil {
+		t.Fatal("response_format missing from ExtraFields")
 	}
 
 	body, err := json.Marshal(provider.capturedChatReq)
@@ -995,8 +995,8 @@ func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 	if provider.capturedChatReq == nil {
 		t.Fatal("expected chat request to be captured")
 	}
-	if provider.capturedChatReq.Messages[0].ExtraFields["name"] == nil {
-		t.Fatalf("message.name missing from ExtraFields: %+v", provider.capturedChatReq.Messages[0].ExtraFields)
+	if provider.capturedChatReq.Messages[0].ExtraFields.Lookup("name") == nil {
+		t.Fatal("message.name missing from ExtraFields")
 	}
 
 	body, err := json.Marshal(provider.capturedChatReq)
@@ -1079,8 +1079,8 @@ func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
 	if provider.capturedChatReq == nil {
 		t.Fatal("expected chat request to be captured")
 	}
-	if provider.capturedChatReq.ExtraFields["response_format"] == nil {
-		t.Fatalf("response_format missing from ExtraFields: %+v", provider.capturedChatReq.ExtraFields)
+	if provider.capturedChatReq.ExtraFields.Lookup("response_format") == nil {
+		t.Fatal("response_format missing from ExtraFields")
 	}
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
@@ -1699,8 +1699,8 @@ func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
 	if !ok || len(input) != 1 {
 		t.Fatalf("captured input = %#v, want []ResponsesInputElement len=1", provider.capturedResponsesReq.Input)
 	}
-	if input[0].ExtraFields["x_trace"] == nil {
-		t.Fatalf("input[0].x_trace missing from ExtraFields: %+v", input[0].ExtraFields)
+	if input[0].ExtraFields.Lookup("x_trace") == nil {
+		t.Fatal("input[0].x_trace missing from ExtraFields")
 	}
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
@@ -4289,8 +4289,8 @@ func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
 	if !ok || len(input) != 1 {
 		t.Fatalf("captured input = %#v, want []ResponsesInputElement len=1", provider.capturedResponsesReq.Input)
 	}
-	if input[0].ExtraFields["x_trace"] == nil {
-		t.Fatalf("input[0].x_trace missing from ExtraFields: %+v", input[0].ExtraFields)
+	if input[0].ExtraFields.Lookup("x_trace") == nil {
+		t.Fatal("input[0].x_trace missing from ExtraFields")
 	}
 
 	body, err := json.Marshal(provider.capturedResponsesReq)

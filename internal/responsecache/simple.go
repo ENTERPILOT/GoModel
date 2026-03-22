@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/tidwall/gjson"
 
 	"gomodel/internal/cache"
 	"gomodel/internal/core"
@@ -128,6 +129,21 @@ func shouldSkipCache(req *http.Request) bool {
 }
 
 func isStreamingRequest(path string, body []byte) bool {
+	return isStreamingRequestGJSON(path, body)
+}
+
+func isStreamingRequestGJSON(path string, body []byte) bool {
+	if path == "/v1/embeddings" {
+		return false
+	}
+	result := gjson.GetBytes(body, "stream")
+	if !result.Exists() || result.Type != gjson.True && result.Type != gjson.False {
+		return false
+	}
+	return result.Bool()
+}
+
+func isStreamingRequestStdlib(path string, body []byte) bool {
 	if path == "/v1/embeddings" {
 		return false
 	}

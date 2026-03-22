@@ -852,9 +852,9 @@ func cloneToolCalls(toolCalls []core.ToolCall) []core.ToolCall {
 			Function: core.FunctionCall{
 				Name:        toolCall.Function.Name,
 				Arguments:   toolCall.Function.Arguments,
-				ExtraFields: core.CloneRawJSONMap(toolCall.Function.ExtraFields),
+				ExtraFields: core.CloneUnknownJSONFields(toolCall.Function.ExtraFields),
 			},
-			ExtraFields: core.CloneRawJSONMap(toolCall.ExtraFields),
+			ExtraFields: core.CloneUnknownJSONFields(toolCall.ExtraFields),
 		}
 	}
 	return cloned
@@ -867,7 +867,7 @@ func cloneChatMessageEnvelope(message core.Message) core.Message {
 		ContentNull: message.ContentNull,
 		Content:     cloneMessageContent(message.Content),
 		ToolCalls:   cloneToolCalls(message.ToolCalls),
-		ExtraFields: core.CloneRawJSONMap(message.ExtraFields),
+		ExtraFields: core.CloneUnknownJSONFields(message.ExtraFields),
 	}
 }
 
@@ -903,21 +903,21 @@ func cloneContentPart(part core.ContentPart) core.ContentPart {
 	cloned := core.ContentPart{
 		Type:        part.Type,
 		Text:        part.Text,
-		ExtraFields: core.CloneRawJSONMap(part.ExtraFields),
+		ExtraFields: core.CloneUnknownJSONFields(part.ExtraFields),
 	}
 	if part.ImageURL != nil {
 		cloned.ImageURL = &core.ImageURLContent{
 			URL:         part.ImageURL.URL,
 			Detail:      part.ImageURL.Detail,
 			MediaType:   part.ImageURL.MediaType,
-			ExtraFields: core.CloneRawJSONMap(part.ImageURL.ExtraFields),
+			ExtraFields: core.CloneUnknownJSONFields(part.ImageURL.ExtraFields),
 		}
 	}
 	if part.InputAudio != nil {
 		cloned.InputAudio = &core.InputAudioContent{
 			Data:        part.InputAudio.Data,
 			Format:      part.InputAudio.Format,
-			ExtraFields: core.CloneRawJSONMap(part.InputAudio.ExtraFields),
+			ExtraFields: core.CloneUnknownJSONFields(part.InputAudio.ExtraFields),
 		}
 	}
 	return cloned

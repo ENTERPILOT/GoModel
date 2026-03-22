@@ -15,6 +15,8 @@ import (
 	"gomodel/internal/core"
 )
 
+var benchmarkStreamingBody = []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+
 func TestSimpleCacheMiddleware_CacheHit(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()
@@ -209,6 +211,24 @@ func TestIsStreamingRequest(t *testing.T) {
 				t.Errorf("isStreamingRequest(%q, %q) = %v, want %v", tt.path, tt.body, got, tt.want)
 			}
 		})
+	}
+}
+
+func BenchmarkIsStreamingRequestStdlib(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if !isStreamingRequestStdlib("/v1/chat/completions", benchmarkStreamingBody) {
+			b.Fatal("expected streaming request")
+		}
+	}
+}
+
+func BenchmarkIsStreamingRequestGJSON(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if !isStreamingRequestGJSON("/v1/chat/completions", benchmarkStreamingBody) {
+			b.Fatal("expected streaming request")
+		}
 	}
 }
 

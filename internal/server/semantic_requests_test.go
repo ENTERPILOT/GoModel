@@ -51,7 +51,7 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_CachesChatRequest(t *testing.T
 	require.NoError(t, err)
 
 	require.Same(t, first, second)
-	require.NotNil(t, first.ExtraFields["response_format"])
+	require.NotNil(t, first.ExtraFields.Lookup("response_format"))
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
@@ -98,7 +98,7 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_CachesResponsesRequest(t *test
 	input, ok := first.Input.([]core.ResponsesInputElement)
 	require.True(t, ok)
 	require.Len(t, input, 1)
-	require.NotNil(t, input[0].ExtraFields["x_trace"])
+	require.NotNil(t, input[0].ExtraFields.Lookup("x_trace"))
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
