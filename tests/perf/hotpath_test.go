@@ -3,6 +3,7 @@ package perf
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -247,6 +248,40 @@ func BenchmarkSharedStreamingAuditAndUsageObservers(b *testing.B) {
 	}
 }
 
+func TestFormatPerfGuardResult(t *testing.T) {
+	result := testing.BenchmarkResult{
+		N:         1,
+		T:         2 * time.Microsecond,
+		MemAllocs: 114,
+		MemBytes:  13654,
+	}
+
+	got := formatPerfGuardResult("gateway_chat_completion_hot_path", result, 150, 18*1024)
+
+	for _, want := range []string{
+		"gateway_chat_completion_hot_path",
+		"ns/op=",
+		"allocs/op=114/150",
+		"bytes/op=13654/18432",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatPerfGuardResult() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func formatPerfGuardResult(name string, result testing.BenchmarkResult, maxAllocs, maxBytes int64) string {
+	return fmt.Sprintf(
+		"%s: ns/op=%d allocs/op=%d/%d bytes/op=%d/%d",
+		name,
+		result.NsPerOp(),
+		result.AllocsPerOp(),
+		maxAllocs,
+		result.AllocedBytesPerOp(),
+		maxBytes,
+	)
+}
+
 func TestHotPathPerfGuard(t *testing.T) {
 	t.Helper()
 
@@ -283,6 +318,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			result := testing.Benchmark(tc.bench)
+			t.Log(formatPerfGuardResult(tc.name, result, tc.maxAllocs, tc.maxBytes))
 
 			if got := result.AllocsPerOp(); got > tc.maxAllocs {
 				t.Fatalf("allocs/op = %d, want <= %d", got, tc.maxAllocs)
