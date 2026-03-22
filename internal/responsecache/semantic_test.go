@@ -82,6 +82,77 @@ func TestSemanticCacheMiddleware_CacheHit(t *testing.T) {
 	}
 }
 
+func TestSemanticCacheMiddleware_ParaphraseFinalUserSharesNamespace(t *testing.T) {
+	m, store, emb := newTestSemanticMiddleware(0.90, 10, false)
+	emb.vector = []float32{1, 0, 0}
+
+	body1 := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"What is 2+2?"}]}`)
+	body2 := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"What's two plus two?"}]}`)
+
+	serveSemanticRequest(t, m, body1, "")
+	m.wg.Wait()
+	if store.Len() != 1 {
+		t.Fatalf("expected 1 entry, got %d", store.Len())
+	}
+
+	rec := serveSemanticRequest(t, m, body2, "")
+	if rec.Header().Get("X-Cache") != "HIT (semantic)" {
+		t.Fatalf("paraphrased last user text should share params namespace, got X-Cache=%q", rec.Header().Get("X-Cache"))
+	}
+}
+
+func TestSemanticCacheMiddleware_MultiTurnParaphraseLastUserHit(t *testing.T) {
+	m, store, emb := newTestSemanticMiddleware(0.90, 10, false)
+	emb.vector = []float32{1, 0, 0}
+
+	body1 := []byte(`{"model":"gpt-4","messages":[
+		{"role":"user","content":"Remember the number 7."},
+		{"role":"assistant","content":"OK."},
+		{"role":"user","content":"What is 2+2?"}
+	]}`)
+	body2 := []byte(`{"model":"gpt-4","messages":[
+		{"role":"user","content":"Remember the number 7."},
+		{"role":"assistant","content":"OK."},
+		{"role":"user","content":"What's two plus two?"}
+	]}`)
+
+	serveSemanticRequest(t, m, body1, "")
+	m.wg.Wait()
+	if store.Len() != 1 {
+		t.Fatalf("expected 1 entry, got %d", store.Len())
+	}
+
+	rec := serveSemanticRequest(t, m, body2, "")
+	if rec.Header().Get("X-Cache") != "HIT (semantic)" {
+		t.Fatalf("multi-turn paraphrase of final user should hit, got X-Cache=%q", rec.Header().Get("X-Cache"))
+	}
+}
+
+func TestSemanticCacheMiddleware_MultimodalAttachmentIsolatesNamespace(t *testing.T) {
+	m, store, emb := newTestSemanticMiddleware(0.90, 10, false)
+	emb.vector = []float32{1, 0, 0}
+
+	body1 := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":[
+		{"type":"text","text":"describe the image"},
+		{"type":"image_url","image_url":{"url":"https://example.com/a.png"}}
+	]}]}`)
+	body2 := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":[
+		{"type":"text","text":"describe the image"},
+		{"type":"image_url","image_url":{"url":"https://example.com/b.png"}}
+	]}]}`)
+
+	serveSemanticRequest(t, m, body1, "")
+	m.wg.Wait()
+	if store.Len() != 1 {
+		t.Fatalf("expected 1 entry, got %d", store.Len())
+	}
+
+	rec := serveSemanticRequest(t, m, body2, "")
+	if rec.Header().Get("X-Cache") == "HIT (semantic)" {
+		t.Fatal("different non-text attachment should not share semantic namespace")
+	}
+}
+
 func TestSemanticCacheMiddleware_CacheMissOnLowScore(t *testing.T) {
 	store := NewMapVecStore()
 	emb := &mockEmbedder{}

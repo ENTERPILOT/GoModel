@@ -3,6 +3,7 @@ package server
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/labstack/echo/v5"
 
@@ -28,6 +29,9 @@ type Handler struct {
 	enabledPassthroughProviders  map[string]struct{}
 	responseCache                *responsecache.ResponseCacheMiddleware
 	guardrailsHash               string
+
+	translatedSvc     *translatedInferenceService // snapshot of handler fields at first use; server.New sets cache/hash before traffic
+	translatedSvcOnce sync.Once
 }
 
 // NewHandler creates a new handler with the given routable provider (typically the Router)
@@ -66,18 +70,21 @@ func (h *Handler) SetBatchStore(store batchstore.Store) {
 }
 
 func (h *Handler) translatedInference() *translatedInferenceService {
-	s := &translatedInferenceService{
-		provider:                 h.provider,
-		modelResolver:            h.modelResolver,
-		translatedRequestPatcher: h.translatedRequestPatcher,
-		logger:                   h.logger,
-		usageLogger:              h.usageLogger,
-		pricingResolver:          h.pricingResolver,
-		responseCache:            h.responseCache,
-		guardrailsHash:           h.guardrailsHash,
-	}
-	s.initHandlers()
-	return s
+	h.translatedSvcOnce.Do(func() {
+		s := &translatedInferenceService{
+			provider:                 h.provider,
+			modelResolver:            h.modelResolver,
+			translatedRequestPatcher: h.translatedRequestPatcher,
+			logger:                   h.logger,
+			usageLogger:              h.usageLogger,
+			pricingResolver:          h.pricingResolver,
+			responseCache:            h.responseCache,
+			guardrailsHash:           h.guardrailsHash,
+		}
+		s.initHandlers()
+		h.translatedSvc = s
+	})
+	return h.translatedSvc
 }
 
 func (h *Handler) nativeBatch() *nativeBatchService {

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"io"
 	"log/slog"
 	"net/http"
@@ -27,17 +28,20 @@ import (
 // SemanticCacheMiddleware implements the vector-similarity response cache layer.
 // It is the second cache layer, consulted only after an exact-match miss.
 type semanticCacheMiddleware struct {
-	embedder  embedding.Embedder
-	store     VecStore
-	cfg       config.SemanticCacheConfig
-	wg        sync.WaitGroup
+	embedder         embedding.Embedder
+	store            VecStore
+	cfg              config.SemanticCacheConfig
+	embedderIdentity string
+	wg               sync.WaitGroup
 }
 
 func newSemanticCacheMiddleware(emb embedding.Embedder, store VecStore, cfg config.SemanticCacheConfig) *semanticCacheMiddleware {
+	e := cfg.Embedder
 	return &semanticCacheMiddleware{
-		embedder: emb,
-		store:    store,
-		cfg:      cfg,
+		embedder:         emb,
+		store:            store,
+		cfg:              cfg,
+		embedderIdentity: e.Provider + "\x00" + e.Model + "\x00" + e.ModelPath,
 	}
 }
 
@@ -78,11 +82,11 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 		return next()
 	}
 
-	msgFp := conversationFingerprint(body, m.cfg.ExcludeSystemPrompt)
-	if msgFp == "" {
+	msgFp, fpOK := conversationInvariantFingerprint(body, m.cfg.ExcludeSystemPrompt)
+	if !fpOK {
 		return next()
 	}
-	baseParams := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx))
+	baseParams := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx), m.embedderIdentity)
 	paramsHash := sha256HexOf(baseParams + "\x00" + msgFp)
 
 	vec, err := m.embedder.Embed(ctx, embedText)
@@ -191,47 +195,118 @@ func extractEmbedText(body []byte, excludeSystem bool) (text string, nonSystemCo
 	return lastUserText, nonSystemCount
 }
 
-// conversationFingerprint is a stable digest of message roles and raw content JSON
-// (plus embeddings-style "input") so multi-turn and multimodal requests cannot
-// collide when only the last user text matches.
-func conversationFingerprint(body []byte, excludeSystem bool) string {
+// conversationInvariantFingerprint hashes structural cache context: every message's
+// role and raw content except the last user turn, where only non-text parts (e.g.
+// image_url) are included so paraphrases of the final user text share a namespace.
+// Embeddings-style bodies with only "input" return an empty fingerprint (ok=true)
+// because wording is represented solely by the vector. ok is false if the JSON
+// envelope cannot be parsed or neither messages nor input is present.
+func conversationInvariantFingerprint(body []byte, excludeSystem bool) (fingerprint string, ok bool) {
 	var envelope struct {
 		Messages []json.RawMessage `json:"messages"`
 		Input    json.RawMessage   `json:"input"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return ""
+		return "", false
 	}
 	if len(envelope.Messages) == 0 {
 		if len(envelope.Input) == 0 {
-			return ""
+			return "", false
 		}
-		sum := sha256.Sum256(envelope.Input)
-		return hex.EncodeToString(sum[:])
+		return "", true
 	}
-	h := sha256.New()
+
+	type msgPart struct {
+		role        string
+		content     json.RawMessage
+		unparseable bool
+		rawMsg      json.RawMessage
+	}
+	var included []msgPart
 	for _, rawMsg := range envelope.Messages {
 		var m struct {
 			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 		}
 		if err := json.Unmarshal(rawMsg, &m); err != nil {
-			sum := sha256.Sum256(rawMsg)
-			h.Write(sum[:])
-			h.Write([]byte{0})
+			var roleOnly struct {
+				Role string `json:"role"`
+			}
+			_ = json.Unmarshal(rawMsg, &roleOnly)
+			if roleOnly.Role == "system" && excludeSystem {
+				continue
+			}
+			included = append(included, msgPart{role: roleOnly.Role, unparseable: true, rawMsg: rawMsg})
 			continue
 		}
 		if m.Role == "system" && excludeSystem {
 			continue
 		}
-		h.Write([]byte(m.Role))
+		included = append(included, msgPart{role: m.Role, content: m.Content})
+	}
+
+	lastUser := -1
+	for i := len(included) - 1; i >= 0; i-- {
+		if included[i].role == "user" {
+			lastUser = i
+			break
+		}
+	}
+
+	h := sha256.New()
+	for i, p := range included {
+		h.Write([]byte(p.role))
 		h.Write([]byte{0})
-		if len(m.Content) > 0 {
-			h.Write(m.Content)
+		if p.unparseable {
+			sum := sha256.Sum256(p.rawMsg)
+			h.Write(sum[:])
+			h.Write([]byte{0})
+			continue
+		}
+		if i == lastUser && lastUser >= 0 {
+			writeNonTextUserContentFingerprint(h, p.content)
+		} else if len(p.content) > 0 {
+			h.Write(p.content)
 		}
 		h.Write([]byte{0})
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	return hex.EncodeToString(h.Sum(nil)), true
+}
+
+func writeNonTextUserContentFingerprint(h hash.Hash, content json.RawMessage) {
+	if len(bytes.TrimSpace(content)) == 0 {
+		return
+	}
+	var s string
+	if json.Unmarshal(content, &s) == nil {
+		return
+	}
+	var parts []json.RawMessage
+	if json.Unmarshal(content, &parts) != nil {
+		_, _ = h.Write(content)
+		return
+	}
+	for _, p := range parts {
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(p, &obj) != nil {
+			_, _ = h.Write(p)
+			_, _ = h.Write([]byte{0})
+			continue
+		}
+		tBytes, hasType := obj["type"]
+		if !hasType {
+			_, _ = h.Write(p)
+			_, _ = h.Write([]byte{0})
+			continue
+		}
+		var typeStr string
+		_ = json.Unmarshal(tBytes, &typeStr)
+		if typeStr == "text" {
+			continue
+		}
+		_, _ = h.Write(p)
+		_, _ = h.Write([]byte{0})
+	}
 }
 
 func extractTextFromContent(content any) string {
@@ -259,7 +334,7 @@ func extractTextFromContent(content any) string {
 // This ensures semantically similar prompts with different parameters or guardrail
 // policies never share a cache entry. endpointPath is the raw URL path
 // (e.g. "/v1/chat/completions") and isolates entries across distinct endpoints.
-func computeParamsHash(body []byte, endpointPath string, plan *core.ExecutionPlan, guardrailsHash string) string {
+func computeParamsHash(body []byte, endpointPath string, plan *core.ExecutionPlan, guardrailsHash, embedderIdentity string) string {
 	var req struct {
 		Model          string           `json:"model"`
 		Temperature    *float64         `json:"temperature"`
@@ -316,6 +391,8 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.ExecutionPla
 	h.Write([]byte{0})
 
 	h.Write([]byte(guardrailsHash))
+	h.Write([]byte{0})
+	h.Write([]byte(embedderIdentity))
 
 	return hex.EncodeToString(h.Sum(nil))
 }

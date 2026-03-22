@@ -22,7 +22,10 @@ const sqliteVecCleanupInterval = time.Hour
 //
 // Schema:
 //
-//	vec_items(key TEXT, embedding FLOAT[N], params_hash TEXT, response BLOB, expires_at INTEGER)
+//	vec_items(key TEXT, embedding BLOB, params_hash TEXT, response BLOB, expires_at INTEGER)
+//
+// Uniqueness on (key, params_hash) matches semantic-cache lookup (filter by params_hash, row by key).
+// Indexes: unique (key, params_hash); composite (params_hash, expires_at) for Search; expires_at for cleanup.
 //
 // expires_at is stored as Unix seconds. Search excludes expired rows in SQL.
 // A background goroutine calls DeleteExpired every hour.
@@ -47,19 +50,28 @@ func newSQLiteVecStore(path string) (*sqliteVecStore, error) {
 	}
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS vec_items (
-			key        TEXT    NOT NULL,
-			embedding  BLOB    NOT NULL,
-			params_hash TEXT   NOT NULL,
-			response   BLOB    NOT NULL,
-			expires_at INTEGER NOT NULL
+			key         TEXT    NOT NULL,
+			embedding   BLOB    NOT NULL,
+			params_hash TEXT    NOT NULL,
+			response    BLOB    NOT NULL,
+			expires_at  INTEGER NOT NULL
 		)
 	`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("vecstore sqlite: create table: %w", err)
 	}
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_vec_items_expires ON vec_items(expires_at)`); err != nil {
+	// Enforces uniqueness on (key, params_hash) for INSERT ... ON CONFLICT and upgrades pre-constraint DBs.
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vec_items_key_params ON vec_items (key, params_hash)`); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("vecstore sqlite: create index: %w", err)
+		return nil, fmt.Errorf("vecstore sqlite: create unique index key_params: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_vec_items_params_expires ON vec_items (params_hash, expires_at)`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("vecstore sqlite: create index params_expires: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_vec_items_expires ON vec_items (expires_at)`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("vecstore sqlite: create index expires: %w", err)
 	}
 	s := &sqliteVecStore{db: db, stopCh: make(chan struct{})}
 	s.wg.Add(1)
@@ -117,6 +129,10 @@ func (s *sqliteVecStore) Insert(ctx context.Context, key string, vec []float32, 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO vec_items (key, embedding, params_hash, response, expires_at)
 		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (key, params_hash) DO UPDATE SET
+			embedding = excluded.embedding,
+			response = excluded.response,
+			expires_at = excluded.expires_at
 	`, key, serializeFloat32(vec), paramsHash, response, expiresAt)
 	if err != nil {
 		return fmt.Errorf("vecstore sqlite: insert: %w", err)

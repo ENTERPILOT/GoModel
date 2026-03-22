@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"reflect"
 	"regexp"
@@ -388,6 +389,13 @@ func ValidateCacheConfig(c *CacheConfig) error {
 		}
 		if sem.VectorStore.Type == "pgvector" && sem.VectorStore.PGVector.URL == "" {
 			return fmt.Errorf("cache.response.semantic.vector_store.pgvector.url: required when using pgvector")
+		}
+		st := sem.SimilarityThreshold
+		if math.IsNaN(st) || math.IsInf(st, 0) || st <= 0 || st > 1 {
+			return fmt.Errorf("cache.response.semantic.similarity_threshold: must be greater than 0 and at most 1 (yaml: similarity_threshold, env: SEMANTIC_CACHE_THRESHOLD); got %v", st)
+		}
+		if sem.TTL < 0 {
+			return fmt.Errorf("cache.response.semantic.ttl: must be >= 0 (yaml: ttl, env: SEMANTIC_CACHE_TTL); got %d", sem.TTL)
 		}
 	}
 	return nil

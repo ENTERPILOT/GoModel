@@ -2,6 +2,7 @@ package responsecache
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -95,12 +96,6 @@ func (m *ResponseCacheMiddleware) HandleRequest(c *echo.Context, body []byte, ne
 		return next()
 	}
 
-import (
-	"log/slog"
-	"strings"
-	"time"
-)
-
 	skipExact := ShouldSkipExactCache(c.Request())
 	skipSemantic := m.semantic == nil || strings.EqualFold(c.Request().Header.Get("X-Cache-Type"), CacheTypeExact)
 
@@ -149,4 +144,3 @@ func NewResponseCacheMiddlewareWithStore(store cache.Store, ttl time.Duration) *
 		simple: newSimpleCacheMiddleware(store, ttl),
 	}
 }
-
