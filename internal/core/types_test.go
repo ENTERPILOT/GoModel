@@ -282,8 +282,8 @@ func TestChatRequestJSON_PreservesUnknownFields(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	if req.ExtraFields["response_format"] == nil {
-		t.Fatalf("response_format missing from ExtraFields: %+v", req.ExtraFields)
+	if req.ExtraFields.Lookup("response_format") == nil {
+		t.Fatalf("response_format missing from ExtraFields")
 	}
 
 	body, err := json.Marshal(req)
@@ -346,24 +346,24 @@ func TestChatRequestJSON_PreservesUnknownNestedFields(t *testing.T) {
 	if len(req.Messages) != 2 {
 		t.Fatalf("len(Messages) = %d, want 2", len(req.Messages))
 	}
-	if req.Messages[0].ExtraFields["name"] == nil {
-		t.Fatalf("message[0].name missing from ExtraFields: %+v", req.Messages[0].ExtraFields)
+	if req.Messages[0].ExtraFields.Lookup("name") == nil {
+		t.Fatalf("message[0].name missing from ExtraFields")
 	}
 	parts, ok := req.Messages[0].Content.([]ContentPart)
 	if !ok || len(parts) != 1 {
 		t.Fatalf("message[0].content = %#v, want []ContentPart len=1", req.Messages[0].Content)
 	}
-	if parts[0].ExtraFields["cache_control"] == nil {
-		t.Fatalf("content part cache_control missing from ExtraFields: %+v", parts[0].ExtraFields)
+	if parts[0].ExtraFields.Lookup("cache_control") == nil {
+		t.Fatalf("content part cache_control missing from ExtraFields")
 	}
 	if len(req.Messages[1].ToolCalls) != 1 {
 		t.Fatalf("len(message[1].ToolCalls) = %d, want 1", len(req.Messages[1].ToolCalls))
 	}
-	if req.Messages[1].ToolCalls[0].ExtraFields["vendor_data"] == nil {
-		t.Fatalf("tool_call vendor_data missing from ExtraFields: %+v", req.Messages[1].ToolCalls[0].ExtraFields)
+	if req.Messages[1].ToolCalls[0].ExtraFields.Lookup("vendor_data") == nil {
+		t.Fatalf("tool_call vendor_data missing from ExtraFields")
 	}
-	if req.Messages[1].ToolCalls[0].Function.ExtraFields["strict"] == nil {
-		t.Fatalf("function strict missing from ExtraFields: %+v", req.Messages[1].ToolCalls[0].Function.ExtraFields)
+	if req.Messages[1].ToolCalls[0].Function.ExtraFields.Lookup("strict") == nil {
+		t.Fatalf("function strict missing from ExtraFields")
 	}
 
 	body, err := json.Marshal(req)
@@ -434,7 +434,7 @@ func TestEmbeddingRequestJSON_PreservesUnknownFields(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	if req.ExtraFields["user"] == nil {
+	if req.ExtraFields.Lookup("user") == nil {
 		t.Fatalf("user missing from ExtraFields: %+v", req.ExtraFields)
 	}
 

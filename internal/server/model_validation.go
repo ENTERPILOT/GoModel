@@ -1,10 +1,10 @@
 package server
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/labstack/echo/v5"
+	"github.com/tidwall/gjson"
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
@@ -138,18 +138,51 @@ func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed
 		}
 	}
 
-	var peek struct {
-		Model    string `json:"model"`
-		Provider string `json:"provider"`
-	}
-	if err := json.Unmarshal(bodyBytes, &peek); err != nil {
-		return "", "", false, nil
-	}
-	return peek.Model, peek.Provider, true, nil
+	model, provider, ok := selectorHintsFromJSONGJSON(bodyBytes)
+	return model, provider, ok, nil
 }
 
 func cachedCanonicalSelectorHints(env *core.WhiteBoxPrompt) (model, provider string, ok bool) {
 	return env.CanonicalSelectorFromCachedRequest()
+}
+
+func selectorHintsFromJSONGJSON(body []byte) (model, provider string, parsed bool) {
+	if !gjson.ValidBytes(body) {
+		return "", "", false
+	}
+
+	root := gjson.ParseBytes(body)
+	if !root.IsObject() {
+		return "", "", false
+	}
+
+	// gjson returns the first matching top-level field. That differs from
+	// encoding/json on duplicate keys, but the hot-path speedup is worth it here:
+	// duplicate selector keys are not expected from real clients, and we accept
+	// the first-match behavior to keep request planning fast.
+	modelResult := root.Get("model")
+	if !selectorHintValueAllowed(modelResult) {
+		return "", "", false
+	}
+	providerResult := root.Get("provider")
+	if !selectorHintValueAllowed(providerResult) {
+		return "", "", false
+	}
+
+	if modelResult.Type == gjson.String {
+		model = modelResult.String()
+	}
+	if providerResult.Type == gjson.String {
+		provider = providerResult.String()
+	}
+	return model, provider, true
+}
+
+func selectorHintValueAllowed(result gjson.Result) bool {
+	if !result.Exists() {
+		return true
+	}
+	return result.Type == gjson.String || result.Type == gjson.Null
 }
 
 func providerPassthroughType(c *echo.Context) (string, bool) {

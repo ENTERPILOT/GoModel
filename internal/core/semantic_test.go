@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+var benchmarkSemanticSelectorBody = []byte(`{
+	"model":"gpt-5-mini",
+	"provider":"openai",
+	"stream":true,
+	"messages":[{"role":"user","content":"hello"}],
+	"response_format":{"type":"json_schema"}
+}`)
+
 func TestDeriveWhiteBoxPrompt_OpenAICompat(t *testing.T) {
 	frame := NewRequestSnapshot(
 		"POST",
@@ -280,5 +288,49 @@ func TestDeriveWhiteBoxPrompt_BatchResultsMetadata(t *testing.T) {
 	}
 	if req.BatchID != "batch_123" {
 		t.Fatalf("BatchMetadata.BatchID = %q, want batch_123", req.BatchID)
+	}
+}
+
+func TestDeriveSnapshotSelectorHintsGJSON_MatchesStdlibSemantics(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		wantModel    string
+		wantProvider string
+		wantStream   bool
+		wantParsed   bool
+	}{
+		{name: "valid selector fields", body: `{"provider":"openai","model":"gpt-5-mini","stream":true}`, wantModel: "gpt-5-mini", wantProvider: "openai", wantStream: true, wantParsed: true},
+		{name: "duplicate selector fields use first occurrence", body: `{"model":"blocked","model":"gpt-5-mini","provider":"x","provider":"openai","stream":false,"stream":true}`, wantModel: "blocked", wantProvider: "x", wantStream: false, wantParsed: true},
+		{name: "duplicate null string keeps first value and null stream keeps first bool", body: `{"model":"gpt-5-mini","model":null,"provider":"openai","provider":null,"stream":true,"stream":null}`, wantModel: "gpt-5-mini", wantProvider: "openai", wantStream: true, wantParsed: true},
+		{name: "duplicate invalid selector field keeps first value", body: `{"model":"gpt-5-mini","model":123}`, wantModel: "gpt-5-mini", wantParsed: true},
+		{name: "duplicate invalid stream field keeps first value", body: `{"stream":true,"stream":"yes"}`, wantStream: true, wantParsed: true},
+		{name: "missing selector fields", body: `{"messages":[{"role":"user","content":"hi"}]}`, wantParsed: true},
+		{name: "null selector fields", body: `{"provider":null,"model":null,"stream":null}`, wantParsed: true},
+		{name: "invalid json", body: `not json`, wantParsed: false},
+		{name: "array root", body: `[]`, wantParsed: false},
+		{name: "numeric model", body: `{"model":123}`, wantParsed: false},
+		{name: "numeric provider", body: `{"provider":123}`, wantParsed: false},
+		{name: "string stream", body: `{"stream":"true"}`, wantParsed: false},
+		{name: "mixed valid and invalid", body: `{"model":"gpt-5-mini","provider":"openai","stream":"true"}`, wantParsed: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotModel, gotProvider, gotStream, gotParsed := deriveSnapshotSelectorHintsGJSON([]byte(tt.body))
+			if tt.wantModel != gotModel || tt.wantProvider != gotProvider || tt.wantStream != gotStream || tt.wantParsed != gotParsed {
+				t.Fatalf("gjson mismatch: want (%q, %q, %v, %v), got (%q, %q, %v, %v)", tt.wantModel, tt.wantProvider, tt.wantStream, tt.wantParsed, gotModel, gotProvider, gotStream, gotParsed)
+			}
+		})
+	}
+}
+
+func BenchmarkDeriveSnapshotSelectorHintsGJSON(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		model, provider, stream, parsed := deriveSnapshotSelectorHintsGJSON(benchmarkSemanticSelectorBody)
+		if !parsed || model != "gpt-5-mini" || provider != "openai" || !stream {
+			b.Fatalf("unexpected selector hints: parsed=%v model=%q provider=%q stream=%v", parsed, model, provider, stream)
+		}
 	}
 }

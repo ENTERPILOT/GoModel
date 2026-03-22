@@ -546,7 +546,7 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 		Messages: []core.Message{
 			{Role: "user", Content: "Return JSON."},
 		},
-		ExtraFields: map[string]json.RawMessage{
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"response_format": json.RawMessage(`{
 				"type":"json_schema",
 				"json_schema":{
@@ -554,7 +554,7 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 					"schema":{"type":"object","properties":{"answer":{"type":"string"}}}
 				}
 			}`),
-		},
+		}),
 	}
 
 	resp, err := provider.ChatCompletion(context.Background(), req)
@@ -627,8 +627,8 @@ func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 		Messages: []core.Message{
 			{
 				Role:        "user",
-				Content:     []core.ContentPart{{Type: "text", Text: "hello", ExtraFields: map[string]json.RawMessage{"cache_control": json.RawMessage(`{"type":"ephemeral"}`)}}},
-				ExtraFields: map[string]json.RawMessage{"name": json.RawMessage(`"alice"`)},
+				Content:     []core.ContentPart{{Type: "text", Text: "hello", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"cache_control": json.RawMessage(`{"type":"ephemeral"}`)})}},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"name": json.RawMessage(`"alice"`)}),
 			},
 		},
 	}
@@ -703,7 +703,7 @@ func TestChatCompletion_PreservesUnknownTopLevelFieldsForOSeries(t *testing.T) {
 		Messages: []core.Message{
 			{Role: "user", Content: "Return JSON."},
 		},
-		ExtraFields: map[string]json.RawMessage{
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"response_format": json.RawMessage(`{
 				"type":"json_schema",
 				"json_schema":{
@@ -711,7 +711,7 @@ func TestChatCompletion_PreservesUnknownTopLevelFieldsForOSeries(t *testing.T) {
 					"schema":{"type":"object","properties":{"answer":{"type":"string"}}}
 				}
 			}`),
-		},
+		}),
 	}
 
 	resp, err := provider.ChatCompletion(context.Background(), req)
@@ -731,9 +731,9 @@ func TestChatCompletion_OSeriesMarshalErrorReturnsInvalidRequest(t *testing.T) {
 		Messages: []core.Message{
 			{Role: "user", Content: "hello"},
 		},
-		ExtraFields: map[string]json.RawMessage{
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"x_invalid": json.RawMessage(`{`),
-		},
+		}),
 	})
 	if err == nil {
 		t.Fatal("expected error")
@@ -1280,7 +1280,7 @@ func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
 				Type:        "message",
 				Role:        "user",
 				Content:     "Hello",
-				ExtraFields: map[string]json.RawMessage{"x_trace": json.RawMessage(`{"id":"trace-1"}`)},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_trace": json.RawMessage(`{"id":"trace-1"}`)}),
 			},
 		},
 	}

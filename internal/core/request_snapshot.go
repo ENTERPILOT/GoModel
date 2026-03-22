@@ -36,6 +36,21 @@ type RequestSnapshot struct {
 // NewRequestSnapshot constructs a RequestSnapshot and defensively copies its
 // mutable map and byte-slice inputs.
 func NewRequestSnapshot(method, path string, routeParams map[string]string, queryParams, headers map[string][]string, contentType string, capturedBody []byte, bodyNotCaptured bool, requestID string, traceMetadata map[string]string) *RequestSnapshot {
+	return newRequestSnapshot(method, path, routeParams, queryParams, headers, contentType, capturedBody, bodyNotCaptured, requestID, traceMetadata, true)
+}
+
+// NewRequestSnapshotWithOwnedBody constructs a RequestSnapshot that takes
+// ownership of capturedBody without cloning it. Callers must ensure the slice
+// will not be mutated after passing it here.
+func NewRequestSnapshotWithOwnedBody(method, path string, routeParams map[string]string, queryParams, headers map[string][]string, contentType string, capturedBody []byte, bodyNotCaptured bool, requestID string, traceMetadata map[string]string) *RequestSnapshot {
+	return newRequestSnapshot(method, path, routeParams, queryParams, headers, contentType, capturedBody, bodyNotCaptured, requestID, traceMetadata, false)
+}
+
+func newRequestSnapshot(method, path string, routeParams map[string]string, queryParams, headers map[string][]string, contentType string, capturedBody []byte, bodyNotCaptured bool, requestID string, traceMetadata map[string]string, cloneBody bool) *RequestSnapshot {
+	body := capturedBody
+	if cloneBody {
+		body = cloneBytes(capturedBody)
+	}
 	return &RequestSnapshot{
 		Method:          method,
 		Path:            path,
@@ -43,7 +58,7 @@ func NewRequestSnapshot(method, path string, routeParams map[string]string, quer
 		queryParams:     cloneMultiMap(queryParams),
 		headers:         cloneMultiMap(headers),
 		ContentType:     contentType,
-		capturedBody:    cloneBytes(capturedBody),
+		capturedBody:    body,
 		BodyNotCaptured: bodyNotCaptured,
 		RequestID:       requestID,
 		traceMetadata:   cloneStringMap(traceMetadata),

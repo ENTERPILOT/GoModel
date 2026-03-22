@@ -270,8 +270,8 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 				if got := req.Messages[0].Content; got != `{"temperature_c":21}` {
 					t.Fatalf("Content = %#v, want serialized object", got)
 				}
-				if req.Messages[0].ExtraFields["x_meta"] == nil {
-					t.Fatalf("tool result extra missing: %+v", req.Messages[0].ExtraFields)
+				if req.Messages[0].ExtraFields.Lookup("x_meta") == nil {
+					t.Fatal("tool result extra missing")
 				}
 			},
 		},
@@ -396,13 +396,13 @@ func TestConvertResponsesRequestToChat_DoesNotMergeAssistantMessagesWithExtraFie
 				Type:        "message",
 				Role:        "assistant",
 				Content:     "first",
-				ExtraFields: map[string]json.RawMessage{"x_first": json.RawMessage(`true`)},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_first": json.RawMessage(`true`)}),
 			},
 			{
 				Type:        "message",
 				Role:        "assistant",
 				Content:     "second",
-				ExtraFields: map[string]json.RawMessage{"x_second": json.RawMessage(`true`)},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_second": json.RawMessage(`true`)}),
 			},
 		},
 	}
@@ -414,11 +414,11 @@ func TestConvertResponsesRequestToChat_DoesNotMergeAssistantMessagesWithExtraFie
 	if len(chatReq.Messages) != 2 {
 		t.Fatalf("len(Messages) = %d, want 2", len(chatReq.Messages))
 	}
-	if chatReq.Messages[0].ExtraFields["x_first"] == nil {
-		t.Fatalf("first assistant extra missing: %+v", chatReq.Messages[0].ExtraFields)
+	if chatReq.Messages[0].ExtraFields.Lookup("x_first") == nil {
+		t.Fatal("first assistant extra missing")
 	}
-	if chatReq.Messages[1].ExtraFields["x_second"] == nil {
-		t.Fatalf("second assistant extra missing: %+v", chatReq.Messages[1].ExtraFields)
+	if chatReq.Messages[1].ExtraFields.Lookup("x_second") == nil {
+		t.Fatal("second assistant extra missing")
 	}
 }
 
@@ -485,19 +485,19 @@ func TestConvertResponsesRequestToChat_PreservesOpaqueExtras(t *testing.T) {
 					{
 						Type: "input_text",
 						Text: "Describe this",
-						ExtraFields: map[string]json.RawMessage{
+						ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 							"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
-						},
+						}),
 					},
 				},
-				ExtraFields: map[string]json.RawMessage{
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 					"x_message_hint": json.RawMessage(`true`),
-				},
+				}),
 			},
 		},
-		ExtraFields: map[string]json.RawMessage{
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"response_format": json.RawMessage(`{"type":"json_schema"}`),
-		},
+		}),
 	}
 
 	chatReq, err := ConvertResponsesRequestToChat(req)
@@ -505,22 +505,22 @@ func TestConvertResponsesRequestToChat_PreservesOpaqueExtras(t *testing.T) {
 		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
 	}
 
-	if chatReq.ExtraFields["response_format"] == nil {
-		t.Fatalf("response_format missing from chat request extras: %+v", chatReq.ExtraFields)
+	if chatReq.ExtraFields.Lookup("response_format") == nil {
+		t.Fatal("response_format missing from chat request extras")
 	}
 	if len(chatReq.Messages) != 1 {
 		t.Fatalf("len(Messages) = %d, want 1", len(chatReq.Messages))
 	}
-	if chatReq.Messages[0].ExtraFields["x_message_hint"] == nil {
-		t.Fatalf("message extra missing after conversion: %+v", chatReq.Messages[0].ExtraFields)
+	if chatReq.Messages[0].ExtraFields.Lookup("x_message_hint") == nil {
+		t.Fatal("message extra missing after conversion")
 	}
 
 	parts, ok := chatReq.Messages[0].Content.([]core.ContentPart)
 	if !ok {
 		t.Fatalf("Messages[0].Content type = %T, want []core.ContentPart to preserve part extras", chatReq.Messages[0].Content)
 	}
-	if parts[0].ExtraFields["cache_control"] == nil {
-		t.Fatalf("content part extra missing after conversion: %+v", parts[0].ExtraFields)
+	if parts[0].ExtraFields.Lookup("cache_control") == nil {
+		t.Fatal("content part extra missing after conversion")
 	}
 }
 
@@ -577,29 +577,29 @@ func TestConvertResponsesRequestToChat_PreservesUnknownMapFields(t *testing.T) {
 	if len(chatReq.Messages[0].ToolCalls) != 1 {
 		t.Fatalf("len(Messages[0].ToolCalls) = %d, want 1", len(chatReq.Messages[0].ToolCalls))
 	}
-	if chatReq.Messages[0].ToolCalls[0].ExtraFields["x_trace"] == nil {
-		t.Fatalf("tool_call extra missing after conversion: %+v", chatReq.Messages[0].ToolCalls[0].ExtraFields)
+	if chatReq.Messages[0].ToolCalls[0].ExtraFields.Lookup("x_trace") == nil {
+		t.Fatal("tool_call extra missing after conversion")
 	}
-	if chatReq.Messages[1].ExtraFields["x_meta"] == nil {
-		t.Fatalf("message extra missing after map conversion: %+v", chatReq.Messages[1].ExtraFields)
+	if chatReq.Messages[1].ExtraFields.Lookup("x_meta") == nil {
+		t.Fatal("message extra missing after map conversion")
 	}
 
 	parts, ok := chatReq.Messages[1].Content.([]core.ContentPart)
 	if !ok {
 		t.Fatalf("Messages[1].Content type = %T, want []core.ContentPart to preserve mapped text-part extras", chatReq.Messages[1].Content)
 	}
-	if parts[0].ExtraFields["cache_control"] == nil {
-		t.Fatalf("mapped content part extra missing after conversion: %+v", parts[0].ExtraFields)
+	if parts[0].ExtraFields.Lookup("cache_control") == nil {
+		t.Fatal("mapped content part extra missing after conversion")
 	}
 
 	multimodalParts, ok := chatReq.Messages[2].Content.([]core.ContentPart)
 	if !ok || len(multimodalParts) != 2 {
 		t.Fatalf("Messages[2].Content = %#v, want []core.ContentPart len=2", chatReq.Messages[2].Content)
 	}
-	if multimodalParts[0].ImageURL == nil || multimodalParts[0].ImageURL.ExtraFields["x_nested"] == nil {
+	if multimodalParts[0].ImageURL == nil || multimodalParts[0].ImageURL.ExtraFields.Lookup("x_nested") == nil {
 		t.Fatalf("image_url extra missing after map[string]string conversion: %+v", multimodalParts[0].ImageURL)
 	}
-	if multimodalParts[1].InputAudio == nil || multimodalParts[1].InputAudio.ExtraFields["x_nested"] == nil {
+	if multimodalParts[1].InputAudio == nil || multimodalParts[1].InputAudio.ExtraFields.Lookup("x_nested") == nil {
 		t.Fatalf("input_audio extra missing after map[string]string conversion: %+v", multimodalParts[1].InputAudio)
 	}
 }
@@ -680,7 +680,7 @@ func TestConvertChatResponseToResponses_PreservesStructuredAssistantContent(t *t
 							Type: "image_url",
 							ImageURL: &core.ImageURLContent{
 								URL:         "https://example.com/result.png",
-								ExtraFields: map[string]json.RawMessage{"x_image": json.RawMessage(`true`)},
+								ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_image": json.RawMessage(`true`)}),
 							},
 						},
 						{
@@ -688,7 +688,7 @@ func TestConvertChatResponseToResponses_PreservesStructuredAssistantContent(t *t
 							InputAudio: &core.InputAudioContent{
 								Data:        "YWJj",
 								Format:      "wav",
-								ExtraFields: map[string]json.RawMessage{"x_audio": json.RawMessage(`true`)},
+								ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_audio": json.RawMessage(`true`)}),
 							},
 						},
 					},
@@ -718,7 +718,7 @@ func TestConvertChatResponseToResponses_PreservesStructuredAssistantContent(t *t
 	if result.Output[0].Content[1].ImageURL == nil || result.Output[0].Content[1].ImageURL.URL != "https://example.com/result.png" {
 		t.Fatalf("unexpected preserved image content item: %+v", result.Output[0].Content[1])
 	}
-	if result.Output[0].Content[1].ImageURL.ExtraFields["x_image"] == nil {
+	if result.Output[0].Content[1].ImageURL.ExtraFields.Lookup("x_image") == nil {
 		t.Fatalf("image extra missing after conversion: %+v", result.Output[0].Content[1].ImageURL)
 	}
 	if result.Output[0].Content[2].Type != "input_audio" {
@@ -727,7 +727,7 @@ func TestConvertChatResponseToResponses_PreservesStructuredAssistantContent(t *t
 	if result.Output[0].Content[2].InputAudio == nil || result.Output[0].Content[2].InputAudio.Format != "wav" {
 		t.Fatalf("unexpected preserved audio content item: %+v", result.Output[0].Content[2])
 	}
-	if result.Output[0].Content[2].InputAudio.ExtraFields["x_audio"] == nil {
+	if result.Output[0].Content[2].InputAudio.ExtraFields.Lookup("x_audio") == nil {
 		t.Fatalf("audio extra missing after conversion: %+v", result.Output[0].Content[2].InputAudio)
 	}
 }

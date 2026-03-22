@@ -9,26 +9,26 @@ import (
 
 // ContentPart represents a single OpenAI-compatible multimodal chat content part.
 type ContentPart struct {
-	Type        string                     `json:"type"`
-	Text        string                     `json:"text,omitempty"`
-	ImageURL    *ImageURLContent           `json:"image_url,omitempty"`
-	InputAudio  *InputAudioContent         `json:"input_audio,omitempty"`
-	ExtraFields map[string]json.RawMessage `json:"-" swaggerignore:"true"`
+	Type        string             `json:"type"`
+	Text        string             `json:"text,omitempty"`
+	ImageURL    *ImageURLContent   `json:"image_url,omitempty"`
+	InputAudio  *InputAudioContent `json:"input_audio,omitempty"`
+	ExtraFields UnknownJSONFields  `json:"-" swaggerignore:"true"`
 }
 
 // ImageURLContent contains an image reference for image_url parts.
 type ImageURLContent struct {
-	URL         string                     `json:"url"`
-	Detail      string                     `json:"detail,omitempty"`
-	MediaType   string                     `json:"media_type,omitempty"`
-	ExtraFields map[string]json.RawMessage `json:"-" swaggerignore:"true"`
+	URL         string            `json:"url"`
+	Detail      string            `json:"detail,omitempty"`
+	MediaType   string            `json:"media_type,omitempty"`
+	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
 // InputAudioContent contains inline audio payload metadata.
 type InputAudioContent struct {
-	Data        string                     `json:"data"`
-	Format      string                     `json:"format"`
-	ExtraFields map[string]json.RawMessage `json:"-" swaggerignore:"true"`
+	Data        string            `json:"data"`
+	Format      string            `json:"format"`
+	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
 func (p *ContentPart) UnmarshalJSON(data []byte) error {
@@ -97,7 +97,7 @@ func (c *ImageURLContent) UnmarshalJSON(data []byte) error {
 		c.URL = url
 		c.Detail = ""
 		c.MediaType = ""
-		c.ExtraFields = nil
+		c.ExtraFields = UnknownJSONFields{}
 		return nil
 	}
 
@@ -412,7 +412,7 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 		return ContentPart{
 			Type:        "text",
 			Text:        part.Text,
-			ExtraFields: CloneRawJSONMap(part.ExtraFields),
+			ExtraFields: CloneUnknownJSONFields(part.ExtraFields),
 		}, nil
 	case "image_url", "input_image":
 		if part.ImageURL == nil || part.ImageURL.URL == "" {
@@ -424,9 +424,9 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 				URL:         part.ImageURL.URL,
 				Detail:      part.ImageURL.Detail,
 				MediaType:   part.ImageURL.MediaType,
-				ExtraFields: CloneRawJSONMap(part.ImageURL.ExtraFields),
+				ExtraFields: CloneUnknownJSONFields(part.ImageURL.ExtraFields),
 			},
-			ExtraFields: CloneRawJSONMap(part.ExtraFields),
+			ExtraFields: CloneUnknownJSONFields(part.ExtraFields),
 		}, nil
 	case "input_audio":
 		if part.InputAudio == nil || part.InputAudio.Data == "" || part.InputAudio.Format == "" {
@@ -437,9 +437,9 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 			InputAudio: &InputAudioContent{
 				Data:        part.InputAudio.Data,
 				Format:      part.InputAudio.Format,
-				ExtraFields: CloneRawJSONMap(part.InputAudio.ExtraFields),
+				ExtraFields: CloneUnknownJSONFields(part.InputAudio.ExtraFields),
 			},
-			ExtraFields: CloneRawJSONMap(part.ExtraFields),
+			ExtraFields: CloneUnknownJSONFields(part.ExtraFields),
 		}, nil
 	default:
 		return ContentPart{}, fmt.Errorf("unsupported content part type %q", part.Type)

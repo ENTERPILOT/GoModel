@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/tidwall/gjson"
 
 	"gomodel/internal/cache"
 	"gomodel/internal/core"
@@ -25,14 +25,35 @@ var cacheablePaths = map[string]bool{
 	"/v1/embeddings":       true,
 }
 
+const (
+	cacheWriteWorkerCount = 8
+	cacheWriteQueueSize   = 256
+)
+
+type cacheWriteJob struct {
+	key  string
+	data []byte
+}
+
 type simpleCacheMiddleware struct {
 	store cache.Store
 	ttl   time.Duration
 	wg    sync.WaitGroup
+	jobs  chan cacheWriteJob
+
+	workers sync.WaitGroup
+	mu      sync.RWMutex
+	closed  bool
 }
 
 func newSimpleCacheMiddleware(store cache.Store, ttl time.Duration) *simpleCacheMiddleware {
-	return &simpleCacheMiddleware{store: store, ttl: ttl}
+	m := &simpleCacheMiddleware{
+		store: store,
+		ttl:   ttl,
+		jobs:  make(chan cacheWriteJob, cacheWriteQueueSize),
+	}
+	m.startWorkers()
+	return m
 }
 
 func (m *simpleCacheMiddleware) Middleware() echo.MiddlewareFunc {
@@ -48,11 +69,13 @@ func (m *simpleCacheMiddleware) Middleware() echo.MiddlewareFunc {
 			if shouldSkipCache(c.Request()) {
 				return next(c)
 			}
-			body, err := io.ReadAll(c.Request().Body)
+			body, cacheable, err := requestBodyForCache(c.Request())
 			if err != nil {
-				return err
+				return core.NewInvalidRequestError(err.Error(), err)
 			}
-			c.Request().Body = io.NopCloser(bytes.NewReader(body))
+			if !cacheable {
+				return next(c)
+			}
 			if isStreamingRequest(path, body) {
 				return next(c)
 			}
@@ -87,13 +110,7 @@ func (m *simpleCacheMiddleware) Middleware() echo.MiddlewareFunc {
 			}
 			if capture.status == http.StatusOK && capture.body.Len() > 0 {
 				data := bytes.Clone(capture.body.Bytes())
-				m.wg.Go(func() {
-					storeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer cancel()
-					if err := m.store.Set(storeCtx, key, data, m.ttl); err != nil {
-						slog.Warn("response cache write failed", "key", key, "err", err)
-					}
-				})
+				m.enqueueWrite(cacheWriteJob{key: key, data: data})
 			}
 			return nil
 		}
@@ -102,12 +119,81 @@ func (m *simpleCacheMiddleware) Middleware() echo.MiddlewareFunc {
 
 // close waits for all in-flight cache writes to complete, then closes the store.
 func (m *simpleCacheMiddleware) close() error {
+	m.mu.Lock()
+	if !m.closed {
+		m.closed = true
+		close(m.jobs)
+	}
+	m.mu.Unlock()
+	m.workers.Wait()
 	m.wg.Wait()
 	return m.store.Close()
 }
 
+func (m *simpleCacheMiddleware) startWorkers() {
+	for range cacheWriteWorkerCount {
+		m.workers.Add(1)
+		go func() {
+			defer m.workers.Done()
+			for job := range m.jobs {
+				storeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				err := m.store.Set(storeCtx, job.key, job.data, m.ttl)
+				cancel()
+				if err != nil {
+					slog.Warn("response cache write failed", "key", job.key, "err", err)
+				}
+				m.wg.Done()
+			}
+		}()
+	}
+}
+
+func (m *simpleCacheMiddleware) enqueueWrite(job cacheWriteJob) {
+	m.mu.RLock()
+	if m.closed {
+		m.mu.RUnlock()
+		return
+	}
+	// Hold the read lock across Add+send so Close cannot observe this write as
+	// untracked. If the non-blocking send misses, roll back the Add before
+	// releasing the lock and logging the dropped write.
+	m.wg.Add(1)
+	select {
+	case m.jobs <- job:
+		m.mu.RUnlock()
+	default:
+		m.wg.Done()
+		m.mu.RUnlock()
+		slog.Warn("response cache write queue full", "key", job.key)
+	}
+}
+
 func shouldSkipCacheForExecutionPlan(plan *core.ExecutionPlan) bool {
 	return plan != nil && plan.Mode == core.ExecutionModeTranslated && plan.Resolution == nil
+}
+
+func requestBodyForCache(req *http.Request) ([]byte, bool, error) {
+	if snapshot := core.GetRequestSnapshot(req.Context()); snapshot != nil {
+		if snapshot.BodyNotCaptured {
+			return nil, false, nil
+		}
+		if body := snapshot.CapturedBodyView(); body != nil {
+			return body, true, nil
+		}
+	}
+	if req.Body == nil {
+		return []byte{}, true, nil
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, false, err
+	}
+	if body == nil {
+		body = []byte{}
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	return body, true, nil
 }
 
 func shouldSkipCache(req *http.Request) bool {
@@ -126,16 +212,21 @@ func shouldSkipCache(req *http.Request) bool {
 }
 
 func isStreamingRequest(path string, body []byte) bool {
+	return isStreamingRequestGJSON(path, body)
+}
+
+func isStreamingRequestGJSON(path string, body []byte) bool {
 	if path == "/v1/embeddings" {
 		return false
 	}
-	var p struct {
-		Stream *bool `json:"stream"`
-	}
-	if err := json.Unmarshal(body, &p); err != nil {
+	// gjson returns the first matching top-level field. That differs from
+	// encoding/json on duplicate keys, but the cache hot path favors the cheaper
+	// first-match check because duplicate stream fields are not expected.
+	result := gjson.GetBytes(body, "stream")
+	if !result.Exists() || (result.Type != gjson.True && result.Type != gjson.False) {
 		return false
 	}
-	return p.Stream != nil && *p.Stream
+	return result.Bool()
 }
 
 func hashRequest(path string, body []byte, plan *core.ExecutionPlan) string {

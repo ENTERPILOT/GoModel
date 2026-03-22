@@ -3,6 +3,7 @@ package perf
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -247,6 +248,40 @@ func BenchmarkSharedStreamingAuditAndUsageObservers(b *testing.B) {
 	}
 }
 
+func TestFormatPerfGuardResult(t *testing.T) {
+	result := testing.BenchmarkResult{
+		N:         1,
+		T:         2 * time.Microsecond,
+		MemAllocs: 114,
+		MemBytes:  13654,
+	}
+
+	got := formatPerfGuardResult("gateway_chat_completion_hot_path", result, 150, 18*1024)
+
+	for _, want := range []string{
+		"gateway_chat_completion_hot_path",
+		"ns/op=",
+		"allocs/op=114/150",
+		"bytes/op=13654/18432",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatPerfGuardResult() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func formatPerfGuardResult(name string, result testing.BenchmarkResult, maxAllocs, maxBytes int64) string {
+	return fmt.Sprintf(
+		"%s: ns/op=%d allocs/op=%d/%d bytes/op=%d/%d",
+		name,
+		result.NsPerOp(),
+		result.AllocsPerOp(),
+		maxAllocs,
+		result.AllocedBytesPerOp(),
+		maxBytes,
+	)
+}
+
 func TestHotPathPerfGuard(t *testing.T) {
 	t.Helper()
 
@@ -262,26 +297,27 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			name:      "gateway_chat_completion_hot_path",
 			bench:     BenchmarkGatewayHotPathChatCompletion,
-			maxAllocs: 180,
-			maxBytes:  22 * 1024,
+			maxAllocs: 130,
+			maxBytes:  16 * 1024,
 		},
 		{
 			name:      "openai_responses_stream_converter",
 			bench:     BenchmarkOpenAIResponsesStreamConverter,
-			maxAllocs: 360,
-			maxBytes:  32 * 1024,
+			maxAllocs: 320,
+			maxBytes:  28 * 1024,
 		},
 		{
 			name:      "shared_stream_audit_and_usage_observers",
 			bench:     BenchmarkSharedStreamingAuditAndUsageObservers,
-			maxAllocs: 240,
-			maxBytes:  14 * 1024,
+			maxAllocs: 175,
+			maxBytes:  9 * 1024,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			result := testing.Benchmark(tc.bench)
+			t.Log(formatPerfGuardResult(tc.name, result, tc.maxAllocs, tc.maxBytes))
 
 			if got := result.AllocsPerOp(); got > tc.maxAllocs {
 				t.Fatalf("allocs/op = %d, want <= %d", got, tc.maxAllocs)

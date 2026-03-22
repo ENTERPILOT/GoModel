@@ -258,11 +258,11 @@ func TestResponsesRequestJSON_PreservesUnknownNestedFields(t *testing.T) {
 	if !ok || len(input) != 2 {
 		t.Fatalf("Input = %#v, want []ResponsesInputElement len=2", req.Input)
 	}
-	if input[0].ExtraFields["x_trace"] == nil {
-		t.Fatalf("input[0].x_trace missing from ExtraFields: %+v", input[0].ExtraFields)
+	if input[0].ExtraFields.Lookup("x_trace") == nil {
+		t.Fatal("input[0].x_trace missing from ExtraFields")
 	}
-	if input[1].ExtraFields["strict"] == nil {
-		t.Fatalf("input[1].strict missing from ExtraFields: %+v", input[1].ExtraFields)
+	if input[1].ExtraFields.Lookup("strict") == nil {
+		t.Fatal("input[1].strict missing from ExtraFields")
 	}
 
 	body, err := json.Marshal(req)
@@ -320,11 +320,11 @@ func TestResponsesRequestJSON_PreservesVariantSpecificUnknownFields(t *testing.T
 	if !ok || len(input) != 2 {
 		t.Fatalf("Input = %#v, want []ResponsesInputElement len=2", req.Input)
 	}
-	if input[0].ExtraFields["id"] == nil {
-		t.Fatalf("message id missing from ExtraFields: %+v", input[0].ExtraFields)
+	if input[0].ExtraFields.Lookup("id") == nil {
+		t.Fatal("message id missing from ExtraFields")
 	}
-	if input[1].ExtraFields["name"] == nil {
-		t.Fatalf("function_call_output name missing from ExtraFields: %+v", input[1].ExtraFields)
+	if input[1].ExtraFields.Lookup("name") == nil {
+		t.Fatal("function_call_output name missing from ExtraFields")
 	}
 
 	body, err := json.Marshal(req)
@@ -362,8 +362,8 @@ func TestResponsesRequestJSON_PreservesUnknownFields(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	if req.ExtraFields["text"] == nil {
-		t.Fatalf("text missing from ExtraFields: %+v", req.ExtraFields)
+	if req.ExtraFields.Lookup("text") == nil {
+		t.Fatal("text missing from ExtraFields")
 	}
 
 	body, err := json.Marshal(req)
