@@ -1,0 +1,47 @@
+server:
+  port: "8081"
+  master_key: ""
+  body_size_limit: "10M"
+  swagger_enabled: false
+  pprof_enabled: false
+  enable_passthrough_routes: false
+
+cache:
+  model:
+    refresh_interval: 86400
+    local:
+      cache_dir: "/tmp/gomodel-bench-cache"
+
+storage:
+  type: "sqlite"
+  sqlite:
+    path: "/tmp/gomodel-bench.db"
+
+logging:
+  enabled: false
+
+usage:
+  enabled: false
+
+metrics:
+  enabled: false
+
+admin:
+  endpoints_enabled: false
+  ui_enabled: false
+
+http:
+  timeout: 60
+  response_header_timeout: 60
+
+resilience:
+  retry:
+    max_retries: 0
+  circuit_breaker:
+    failure_threshold: 999
+
+providers:
+  openai:
+    type: openai
+    api_key: "sk-bench-test-key"
+    base_url: "http://localhost:9999/v1"

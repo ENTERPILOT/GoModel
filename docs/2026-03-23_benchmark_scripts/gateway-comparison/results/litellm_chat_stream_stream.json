@@ -1,0 +1,29 @@
+{
+  "avg_chunks": 33,
+  "concurrency": 50,
+  "endpoint": "chat",
+  "errors": 0,
+  "requests": 1000,
+  "rps": 386.123065239884,
+  "successful": 1000,
+  "total_latency": {
+    "max_us": 267368,
+    "min_us": 28290,
+    "p50_us": 121229.5,
+    "p95_us": 215527.69999999998,
+    "p99_us": 240676.16
+  },
+  "ttfb": {
+    "max_us": 267362,
+    "min_us": 28274,
+    "p50_us": 121215,
+    "p95_us": 215521.69999999995,
+    "p99_us": 240650.31999999998
+  },
+  "wall_time_ms": 2589,
+  "resources": {
+    "peak_rss_mb": 313.8,
+    "avg_rss_mb": 313.8,
+    "avg_cpu_pct": 0.0
+  }
+}

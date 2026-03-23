@@ -1,0 +1,29 @@
+{
+  "avg_chunks": 37,
+  "concurrency": 50,
+  "endpoint": "responses",
+  "errors": 0,
+  "requests": 1000,
+  "rps": 1682.8405169938496,
+  "successful": 1000,
+  "total_latency": {
+    "max_us": 50307,
+    "min_us": 15633,
+    "p50_us": 29159,
+    "p95_us": 35634.6,
+    "p99_us": 42393.169999999984
+  },
+  "ttfb": {
+    "max_us": 50306,
+    "min_us": 15629,
+    "p50_us": 29157.5,
+    "p95_us": 35633.35,
+    "p99_us": 42391.16999999999
+  },
+  "wall_time_ms": 594,
+  "resources": {
+    "peak_rss_mb": 313.8,
+    "avg_rss_mb": 313.8,
+    "avg_cpu_pct": 0.0
+  }
+}
