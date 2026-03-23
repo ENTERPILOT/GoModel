@@ -46,6 +46,9 @@ func (s *translatedInferenceService) ChatCompletion(c *echo.Context) error {
 	requestID := requestIDFromContextOrHeader(c.Request())
 
 	if req.Stream {
+		if handled, err := s.tryFastPathStreamingChatPassthrough(c, plan, req); handled {
+			return err
+		}
 		return s.handleStreamingResponse(c, usageModel, providerType, func() (io.ReadCloser, error) {
 			return s.provider.StreamChatCompletion(ctx, streamReq)
 		})
@@ -102,6 +105,97 @@ func (s *translatedInferenceService) Responses(c *echo.Context) error {
 	})
 
 	return c.JSON(http.StatusOK, resp)
+}
+
+func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo.Context, plan *core.ExecutionPlan, req *core.ChatRequest) (bool, error) {
+	if !s.canFastPathStreamingChatPassthrough(plan, req) {
+		return false, nil
+	}
+
+	passthroughProvider, ok := s.provider.(core.RoutablePassthrough)
+	if !ok {
+		return false, nil
+	}
+
+	ctx, _ := requestContextWithRequestID(c.Request())
+	c.SetRequest(c.Request().WithContext(ctx))
+
+	const endpoint = "/chat/completions"
+	providerType := strings.TrimSpace(plan.ProviderType)
+	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
+		Method:   c.Request().Method,
+		Endpoint: endpoint,
+		Body:     c.Request().Body,
+		Headers:  buildPassthroughHeaders(ctx, c.Request().Header),
+	})
+	if err != nil {
+		return true, handleError(c, err)
+	}
+
+	info := &core.PassthroughRouteInfo{
+		Provider:    providerType,
+		RawEndpoint: strings.TrimPrefix(endpoint, "/"),
+		AuditPath:   c.Request().URL.Path,
+		Model:       resolvedModelFromPlan(plan, req.Model),
+	}
+	passthrough := passthroughService{
+		provider:        s.provider,
+		logger:          s.logger,
+		usageLogger:     s.usageLogger,
+		pricingResolver: s.pricingResolver,
+	}
+	return true, passthrough.proxyPassthroughResponse(c, providerType, endpoint, info, resp)
+}
+
+func (s *translatedInferenceService) canFastPathStreamingChatPassthrough(plan *core.ExecutionPlan, req *core.ChatRequest) bool {
+	if req == nil || !req.Stream {
+		return false
+	}
+	if s.translatedRequestPatcher != nil || s.shouldEnforceReturningUsageData() {
+		return false
+	}
+	if plan == nil || plan.Resolution == nil {
+		return false
+	}
+
+	providerType := strings.ToLower(strings.TrimSpace(plan.ProviderType))
+	switch providerType {
+	case "openai", "azure", "openrouter":
+	default:
+		return false
+	}
+
+	if translatedStreamingSelectorRewriteRequired(plan.Resolution) {
+		return false
+	}
+	if translatedStreamingChatBodyRewriteRequired(req) {
+		return false
+	}
+
+	return true
+}
+
+func translatedStreamingSelectorRewriteRequired(resolution *core.RequestModelResolution) bool {
+	if resolution == nil {
+		return true
+	}
+
+	requestedModel := strings.TrimSpace(resolution.RequestedModel)
+	requestedProvider := strings.TrimSpace(resolution.RequestedProvider)
+	resolvedModel := strings.TrimSpace(resolution.ResolvedSelector.Model)
+	resolvedProvider := strings.TrimSpace(resolution.ResolvedSelector.Provider)
+
+	return requestedModel != resolvedModel || requestedProvider != resolvedProvider
+}
+
+func translatedStreamingChatBodyRewriteRequired(req *core.ChatRequest) bool {
+	if req == nil {
+		return true
+	}
+
+	model := strings.ToLower(strings.TrimSpace(req.Model))
+	oSeries := len(model) >= 2 && model[0] == 'o' && model[1] >= '0' && model[1] <= '9'
+	return oSeries && (req.MaxTokens != nil || req.Temperature != nil)
 }
 
 func (s *translatedInferenceService) Embeddings(c *echo.Context) error {

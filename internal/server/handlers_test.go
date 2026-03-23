@@ -1991,6 +1991,106 @@ data: [DONE]
 	}
 }
 
+func TestChatCompletionStreaming_FastPathUsesPassthroughForOpenAICompatibleProviders(t *testing.T) {
+	streamData := "data: {\"id\":\"chatcmpl-123\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n"
+	reqBody := `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini"},
+		providerTypes: map[string]string{
+			"gpt-4o-mini": "openai",
+		},
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers: map[string][]string{
+				"Content-Type": {"text/event-stream"},
+			},
+			Body: io.NopCloser(strings.NewReader(streamData)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler.ChatCompletion(c)
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Fatalf("Content-Type = %q, want text/event-stream", got)
+	}
+	if got := rec.Body.String(); got != streamData {
+		t.Fatalf("stream body = %q, want %q", got, streamData)
+	}
+	if mock.lastPassthroughProvider != "openai" {
+		t.Fatalf("lastPassthroughProvider = %q, want openai", mock.lastPassthroughProvider)
+	}
+	if mock.lastPassthroughReq == nil {
+		t.Fatal("lastPassthroughReq = nil, want passthrough request")
+	}
+	if body := readPassthroughRequestBody(t, mock.lastPassthroughReq.Body); body != reqBody {
+		t.Fatalf("passthrough body = %q, want %q", body, reqBody)
+	}
+}
+
+func TestChatCompletionStreaming_FastPathSkipsQualifiedModelRewrite(t *testing.T) {
+	streamData := "data: {\"id\":\"chatcmpl-123\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n"
+	provider := &capturingProvider{
+		mockProvider: mockProvider{
+			supportedModels: []string{"gpt-4o-mini"},
+			providerTypes: map[string]string{
+				"gpt-4o-mini": "openai",
+			},
+			streamData: streamData,
+			passthroughResponse: &core.PassthroughResponse{
+				StatusCode: http.StatusOK,
+				Headers: map[string][]string{
+					"Content-Type": {"text/event-stream"},
+				},
+				Body: io.NopCloser(strings.NewReader("data: should-not-be-used\n\n")),
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	reqBody := `{"model":"openai/gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler.ChatCompletion(c)
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	if provider.lastPassthroughReq != nil {
+		t.Fatal("lastPassthroughReq != nil, want rewritten request to use StreamChatCompletion path")
+	}
+	if provider.capturedChatReq == nil {
+		t.Fatal("capturedChatReq = nil, want StreamChatCompletion request")
+	}
+	if provider.capturedChatReq.Model != "gpt-4o-mini" {
+		t.Fatalf("captured model = %q, want gpt-4o-mini", provider.capturedChatReq.Model)
+	}
+	if provider.capturedChatReq.Provider != "openai" {
+		t.Fatalf("captured provider = %q, want openai", provider.capturedChatReq.Provider)
+	}
+	if got := rec.Body.String(); got != streamData {
+		t.Fatalf("stream body = %q, want %q", got, streamData)
+	}
+}
+
 func TestHandleStreamingResponse_FlushesEachChunk(t *testing.T) {
 	e := echo.New()
 	handler := NewHandler(&mockProvider{}, nil, nil, nil)
@@ -4307,7 +4407,10 @@ func TestStreamingChatCompletion_InjectsStreamOptions(t *testing.T) {
 	provider := &capturingProvider{
 		mockProvider: mockProvider{
 			supportedModels: []string{"gpt-4o-mini"},
-			streamData:      streamData,
+			providerTypes: map[string]string{
+				"gpt-4o-mini": "openai",
+			},
+			streamData: streamData,
 		},
 	}
 
@@ -4335,6 +4438,10 @@ func TestStreamingChatCompletion_InjectsStreamOptions(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	if provider.lastPassthroughReq != nil {
+		t.Fatal("lastPassthroughReq != nil, want usage-enforced streaming to stay on translated stream path")
 	}
 
 	if provider.capturedChatReq.StreamOptions == nil {
