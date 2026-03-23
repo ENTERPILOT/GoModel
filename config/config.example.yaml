@@ -11,6 +11,10 @@ server:
   enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
   enabled_passthrough_providers: ["openai", "anthropic"] # providers enabled on /p/{provider}/...
+  experimental_forward_proxy_enabled: false # HTTP forward proxy for client traffic inspection (experimental)
+  experimental_forward_proxy_mitm_hosts: ["api.anthropic.com"] # HTTPS hosts to inspect; all others tunnel blindly
+  experimental_forward_proxy_ca_cert_file: "" # PEM CA cert used for MITM leaf cert generation
+  experimental_forward_proxy_ca_key_file: "" # PEM CA private key used for MITM leaf cert generation
 
 cache:
   model:

@@ -850,6 +850,94 @@ func TestCreateStreamEntry(t *testing.T) {
 	}
 }
 
+func TestStreamLogObserverAnthropicMessages(t *testing.T) {
+	store := &mockStore{}
+	cfg := Config{
+		Enabled:       true,
+		LogBodies:     true,
+		BufferSize:    10,
+		FlushInterval: 100 * time.Millisecond,
+	}
+	logger := NewLogger(store, cfg)
+
+	entry := &LogEntry{
+		ID:        "anthropic-stream-entry",
+		Timestamp: time.Now(),
+		Model:     "claude-sonnet-4-5",
+		Data:      &LogData{},
+	}
+
+	streamData := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[]}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}
+
+data: [DONE]
+
+`
+	stream := streaming.NewObservedSSEStream(
+		io.NopCloser(strings.NewReader(streamData)),
+		NewStreamLogObserver(logger, entry, "/v1/messages"),
+	)
+
+	if _, err := io.Copy(io.Discard, stream); err != nil {
+		t.Fatalf("failed to read stream: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("failed to close stream: %v", err)
+	}
+	if err := logger.Close(); err != nil {
+		t.Fatalf("failed to close logger: %v", err)
+	}
+
+	entries := store.getEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	logged := entries[0]
+	if logged.Data == nil {
+		t.Fatal("Data = nil")
+	}
+	body, ok := logged.Data.ResponseBody.(map[string]any)
+	if !ok {
+		t.Fatalf("ResponseBody = %#v, want map", logged.Data.ResponseBody)
+	}
+	if body["id"] != "msg_123" {
+		t.Fatalf("id = %#v, want msg_123", body["id"])
+	}
+	if body["model"] != "claude-sonnet-4-5" {
+		t.Fatalf("model = %#v, want claude-sonnet-4-5", body["model"])
+	}
+	if body["role"] != "assistant" {
+		t.Fatalf("role = %#v, want assistant", body["role"])
+	}
+	if body["stop_reason"] != "end_turn" {
+		t.Fatalf("stop_reason = %#v, want end_turn", body["stop_reason"])
+	}
+	content, ok := body["content"].([]map[string]any)
+	if ok {
+		if len(content) != 1 || content[0]["text"] != "Hello world" {
+			t.Fatalf("content = %#v, want Hello world", content)
+		}
+		return
+	}
+	contentAny, ok := body["content"].([]any)
+	if !ok || len(contentAny) != 1 {
+		t.Fatalf("content = %#v, want single text block", body["content"])
+	}
+	first, ok := contentAny[0].(map[string]any)
+	if !ok || first["text"] != "Hello world" {
+		t.Fatalf("content[0] = %#v, want Hello world", contentAny[0])
+	}
+}
+
 func TestHashAPIKey(t *testing.T) {
 	tests := []struct {
 		name       string

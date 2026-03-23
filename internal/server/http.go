@@ -28,6 +28,7 @@ import (
 type Server struct {
 	echo                    *echo.Echo
 	handler                 *Handler
+	root                    http.Handler
 	responseCacheMiddleware *responsecache.ResponseCacheMiddleware
 }
 
@@ -57,6 +58,7 @@ type Config struct {
 	DashboardHandler             *dashboard.Handler                     // Dashboard UI handler (nil if disabled)
 	SwaggerEnabled               bool                                   // Whether to expose the Swagger UI at /swagger/index.html
 	ResponseCacheMiddleware      *responsecache.ResponseCacheMiddleware // Optional: response cache middleware for cacheable endpoints
+	ExperimentalForwardProxy     *ForwardProxyConfig                    // Optional: experimental forward proxy wrapper
 }
 
 // New creates a new HTTP server
@@ -274,9 +276,23 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil {
 		rcm = cfg.ResponseCacheMiddleware
 	}
+	root := http.Handler(e)
+	if cfg != nil && cfg.ExperimentalForwardProxy != nil && cfg.ExperimentalForwardProxy.Enabled {
+		proxyCfg := *cfg.ExperimentalForwardProxy
+		proxyCfg.AuditLogger = auditLogger
+		proxyCfg.UsageLogger = usageLogger
+		proxyCfg.PricingResolver = pricingResolver
+		proxyHandler, err := NewForwardProxyHandler(root, &proxyCfg)
+		if err != nil {
+			slog.Error("failed to enable experimental forward proxy", "error", err)
+		} else {
+			root = proxyHandler
+		}
+	}
 	return &Server{
 		echo:                    e,
 		handler:                 handler,
+		root:                    root,
 		responseCacheMiddleware: rcm,
 	}
 }
@@ -307,7 +323,7 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 		Address:    addr,
 		HideBanner: true,
 	}
-	return sc.Start(ctx, s.echo)
+	return sc.Start(ctx, s.root)
 }
 
 // Shutdown releases server resources. The HTTP server itself is stopped by
@@ -322,7 +338,7 @@ func (s *Server) Shutdown(_ context.Context) error {
 
 // ServeHTTP implements the http.Handler interface, allowing Server to be used with httptest
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.echo.ServeHTTP(w, r)
+	s.root.ServeHTTP(w, r)
 }
 
 func parseBodySizeLimitBytes(limit string) int64 {

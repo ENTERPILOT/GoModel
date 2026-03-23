@@ -216,6 +216,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		EnabledPassthroughProviders:  appCfg.Server.EnabledPassthroughProviders,
 		AllowPassthroughV1Alias:      &allowPassthroughV1Alias,
 		SwaggerEnabled:               appCfg.Server.SwaggerEnabled,
+		ExperimentalForwardProxy: &server.ForwardProxyConfig{
+			Enabled:    appCfg.Server.ExperimentalForwardProxyEnabled,
+			MITMHosts:  appCfg.Server.ExperimentalForwardProxyMITMHosts,
+			CACertFile: appCfg.Server.ExperimentalForwardProxyCACertFile,
+			CAKeyFile:  appCfg.Server.ExperimentalForwardProxyCAKeyFile,
+		},
 	}
 
 	// Initialize admin API and dashboard (behind separate feature flags)
@@ -252,6 +258,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		slog.Info("provider passthrough enabled", "path", "/p/{provider}/{endpoint}")
 	} else {
 		slog.Info("provider passthrough disabled")
+	}
+	if appCfg.Server.ExperimentalForwardProxyEnabled {
+		slog.Info("experimental forward proxy enabled", "mitm_hosts", appCfg.Server.ExperimentalForwardProxyMITMHosts)
 	}
 
 	rcm, err := responsecache.NewResponseCacheMiddleware(appCfg.Cache.Response)

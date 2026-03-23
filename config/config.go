@@ -346,6 +346,18 @@ type ServerConfig struct {
 	// EnabledPassthroughProviders lists the provider types enabled on
 	// /p/{provider}/... passthrough routes. Default: ["openai", "anthropic"].
 	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
+	// ExperimentalForwardProxyEnabled enables an HTTP forward proxy entrypoint that can
+	// optionally MITM selected HTTPS hosts for traffic inspection. Default: false.
+	ExperimentalForwardProxyEnabled bool `yaml:"experimental_forward_proxy_enabled" env:"EXPERIMENTAL_FORWARD_PROXY_ENABLED"`
+	// ExperimentalForwardProxyMITMHosts lists the hosts whose HTTPS CONNECT traffic
+	// should be terminated and inspected. Other hosts are tunneled blindly.
+	ExperimentalForwardProxyMITMHosts []string `yaml:"experimental_forward_proxy_mitm_hosts" env:"EXPERIMENTAL_FORWARD_PROXY_MITM_HOSTS"`
+	// ExperimentalForwardProxyCACertFile points at the PEM-encoded CA certificate used
+	// to mint leaf certificates for inspected HTTPS hosts.
+	ExperimentalForwardProxyCACertFile string `yaml:"experimental_forward_proxy_ca_cert_file" env:"EXPERIMENTAL_FORWARD_PROXY_CA_CERT_FILE"`
+	// ExperimentalForwardProxyCAKeyFile points at the PEM-encoded CA private key used
+	// to mint leaf certificates for inspected HTTPS hosts.
+	ExperimentalForwardProxyCAKeyFile string `yaml:"experimental_forward_proxy_ca_key_file" env:"EXPERIMENTAL_FORWARD_PROXY_CA_KEY_FILE"`
 }
 
 // MetricsConfig holds observability configuration for Prometheus metrics
@@ -416,6 +428,7 @@ func buildDefaultConfig() *Config {
 				"openai",
 				"anthropic",
 			},
+			ExperimentalForwardProxyMITMHosts: []string{"api.anthropic.com"},
 		},
 		Cache: CacheConfig{
 			Model: ModelCacheConfig{

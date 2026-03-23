@@ -169,6 +169,8 @@ Key settings:
 | `ENABLE_PASSTHROUGH_ROUTES` | `true` | Enable provider-native passthrough routes under `/p/{provider}/...` |
 | `ALLOW_PASSTHROUGH_V1_ALIAS` | `true` | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |
 | `ENABLED_PASSTHROUGH_PROVIDERS` | `openai,anthropic` | Comma-separated list of enabled passthrough providers |
+| `EXPERIMENTAL_FORWARD_PROXY_ENABLED` | `false` | Enable the experimental HTTP forward proxy wrapper for client traffic inspection |
+| `EXPERIMENTAL_FORWARD_PROXY_MITM_HOSTS` | `api.anthropic.com` | Comma-separated HTTPS hosts to inspect; other CONNECT targets are tunneled blindly |
 | `CACHE_TYPE` | `local` | Cache backend (`local` or `redis`) |
 | `STORAGE_TYPE` | `sqlite` | Storage backend (`sqlite`, `postgresql`, `mongodb`) |
 | `METRICS_ENABLED` | `false` | Enable Prometheus metrics |
@@ -176,6 +178,8 @@ Key settings:
 | `GUARDRAILS_ENABLED` | `false` | Enable the configured guardrails pipeline |
 
 **Quick Start - Authentication:** By default `GOMODEL_MASTER_KEY` is unset. Without this key, API endpoints are unprotected and anyone can call them. This is insecure for production. **Strongly recommend** setting a strong secret before exposing the service. Add `GOMODEL_MASTER_KEY` to your `.env` or environment for production deployments.
+
+**Experimental forward proxy:** When `EXPERIMENTAL_FORWARD_PROXY_ENABLED=true`, GoModel can act as a local HTTP proxy for client traffic. To inspect HTTPS bodies, provide `EXPERIMENTAL_FORWARD_PROXY_CA_CERT_FILE` and `EXPERIMENTAL_FORWARD_PROXY_CA_KEY_FILE`, trust that CA in the client environment, and point the client at GoModel with `HTTP_PROXY` or `HTTPS_PROXY`. This mode is intended for local experiments and is not hardened as a general-purpose enterprise proxy. For Claude Code setup examples, see [`docs/guides/claude-code.mdx`](docs/guides/claude-code.mdx).
 
 ---
 
