@@ -1,6 +1,6 @@
 module gomodel
 
-go 1.25.1
+go 1.26.1
 
 require (
 	github.com/andybalholm/brotli v1.2.0
@@ -8,7 +8,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/clems4ever/all-minilm-l6-v2-go v0.0.9
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.8.0
+	github.com/jackc/pgx/v5 v5.9.1
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v5 v5.0.4
 	github.com/lmittmann/tint v1.1.3
@@ -21,6 +21,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/mongodb v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.41.0
+	github.com/tidwall/gjson v1.18.0
 	go.mongodb.org/mongo-driver/v2 v2.5.0
 	golang.org/x/term v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -105,6 +106,8 @@ require (
 	github.com/swaggo/files/v2 v2.0.2 // indirect
 	github.com/swaggo/swag/v2 v2.0.0-rc5 // indirect
 	github.com/tetratelabs/wazero v1.7.3 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/urfave/cli/v2 v2.27.5 // indirect

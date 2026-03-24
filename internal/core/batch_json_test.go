@@ -25,11 +25,11 @@ func TestBatchRequestJSON_PreservesUnknownFields(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	if req.ExtraFields["x_top"] == nil {
+	if req.ExtraFields.Lookup("x_top") == nil {
 		t.Fatalf("x_top missing from ExtraFields: %+v", req.ExtraFields)
 	}
 	var topExtra map[string]any
-	if err := json.Unmarshal(req.ExtraFields["x_top"], &topExtra); err != nil {
+	if err := json.Unmarshal(req.ExtraFields.Lookup("x_top"), &topExtra); err != nil {
 		t.Fatalf("failed to decode x_top: %v", err)
 	}
 	if topExtra["trace"] != "batch-1" || topExtra["mode"] != "strict" {
@@ -38,11 +38,11 @@ func TestBatchRequestJSON_PreservesUnknownFields(t *testing.T) {
 	if len(req.Requests) != 1 {
 		t.Fatalf("len(Requests) = %d, want 1", len(req.Requests))
 	}
-	if req.Requests[0].ExtraFields["x_item_flag"] == nil {
+	if req.Requests[0].ExtraFields.Lookup("x_item_flag") == nil {
 		t.Fatalf("x_item_flag missing from Requests[0].ExtraFields: %+v", req.Requests[0].ExtraFields)
 	}
 	var itemExtra map[string]any
-	if err := json.Unmarshal(req.Requests[0].ExtraFields["x_item_flag"], &itemExtra); err != nil {
+	if err := json.Unmarshal(req.Requests[0].ExtraFields.Lookup("x_item_flag"), &itemExtra); err != nil {
 		t.Fatalf("failed to decode x_item_flag: %v", err)
 	}
 	if itemExtra["enabled"] != true || itemExtra["label"] != "batch-item" {

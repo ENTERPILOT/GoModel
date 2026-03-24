@@ -102,7 +102,7 @@ func TestSQLiteStore_WriteBatch_Chunking(t *testing.T) {
 	// Using 150 entries to ensure we need at least 3 batches
 	numEntries := 150
 	entries := make([]*LogEntry, numEntries)
-	for i := 0; i < numEntries; i++ {
+	for i := range numEntries {
 		entries[i] = &LogEntry{
 			ID:         fmt.Sprintf("entry-%03d", i),
 			Timestamp:  time.Now(),
@@ -181,7 +181,7 @@ func TestSQLiteStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 	// Test with exactly maxEntriesPerBatch entries
 	numEntries := maxEntriesPerBatch
 	entries := make([]*LogEntry, numEntries)
-	for i := 0; i < numEntries; i++ {
+	for i := range numEntries {
 		entries[i] = &LogEntry{
 			ID:        fmt.Sprintf("exact-%03d", i),
 			Timestamp: time.Now(),

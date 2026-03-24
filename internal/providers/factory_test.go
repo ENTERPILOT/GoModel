@@ -18,6 +18,15 @@ type factoryMockProvider struct {
 	supportsFunc func(model string) bool
 }
 
+type factoryMockProviderWithAPIVersion struct {
+	factoryMockProvider
+	apiVersion string
+}
+
+func (m *factoryMockProviderWithAPIVersion) SetAPIVersion(v string) {
+	m.apiVersion = v
+}
+
 func (m *factoryMockProvider) Supports(model string) bool {
 	if m.supportsFunc != nil {
 		return m.supportsFunc(model)
@@ -235,6 +244,36 @@ func TestProviderFactory_Create_WithBaseURL(t *testing.T) {
 
 	if provider == nil {
 		t.Error("expected provider to be created, got nil")
+	}
+}
+
+func TestProviderFactory_Create_WithAPIVersion(t *testing.T) {
+	factory := NewProviderFactory()
+
+	mockProvider := &factoryMockProviderWithAPIVersion{}
+
+	factory.Add(Registration{
+		Type: "azure",
+		New: func(apiKey string, opts ProviderOptions) core.Provider {
+			return mockProvider
+		},
+	})
+
+	cfg := ProviderConfig{
+		Type:       "azure",
+		APIKey:     "test-key",
+		APIVersion: "2025-04-01-preview",
+	}
+
+	provider, err := factory.Create(cfg)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if provider == nil {
+		t.Fatal("expected provider to be created, got nil")
+	}
+	if mockProvider.apiVersion != "2025-04-01-preview" {
+		t.Fatalf("apiVersion = %q, want 2025-04-01-preview", mockProvider.apiVersion)
 	}
 }
 

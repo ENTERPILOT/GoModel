@@ -66,3 +66,51 @@ func TestNewRequestSnapshot_DefensivelyCopiesMutableFields(t *testing.T) {
 		t.Fatal("CapturedBody returned underlying snapshot bytes, want defensive copy")
 	}
 }
+
+func TestNewRequestSnapshotWithOwnedBody_TakesOwnershipOfCapturedBytes(t *testing.T) {
+	rawBody := []byte(`{"model":"gpt-5-mini"}`)
+
+	snapshot := NewRequestSnapshotWithOwnedBody(
+		"POST",
+		"/v1/chat/completions",
+		nil,
+		nil,
+		nil,
+		"application/json",
+		rawBody,
+		false,
+		"req-123",
+		nil,
+	)
+
+	view := snapshot.CapturedBodyView()
+	if len(view) == 0 {
+		t.Fatal("captured body unexpectedly empty")
+	}
+	if &view[0] != &rawBody[0] {
+		t.Fatal("snapshot did not take ownership of the captured body bytes")
+	}
+
+	clonedBody := snapshot.CapturedBody()
+	if &clonedBody[0] == &rawBody[0] {
+		t.Fatal("CapturedBody returned owned bytes directly, want defensive copy")
+	}
+}
+
+func BenchmarkNewRequestSnapshotClonedBody(b *testing.B) {
+	body := []byte(`{"model":"gpt-5-mini","messages":[{"role":"user","content":"hello world"}],"response_format":{"type":"json_schema"}}`)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = NewRequestSnapshot("POST", "/v1/chat/completions", nil, nil, nil, "application/json", body, false, "req-123", nil)
+	}
+}
+
+func BenchmarkNewRequestSnapshotWithOwnedBody(b *testing.B) {
+	body := []byte(`{"model":"gpt-5-mini","messages":[{"role":"user","content":"hello world"}],"response_format":{"type":"json_schema"}}`)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = NewRequestSnapshotWithOwnedBody("POST", "/v1/chat/completions", nil, nil, nil, "application/json", body, false, "req-123", nil)
+	}
+}

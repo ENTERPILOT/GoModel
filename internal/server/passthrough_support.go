@@ -132,7 +132,7 @@ func passthroughConnectionHeaders(headers http.Header) map[string]struct{} {
 			continue
 		}
 		for _, value := range values {
-			for _, token := range strings.Split(value, ",") {
+			for token := range strings.SplitSeq(value, ",") {
 				canonicalKey := http.CanonicalHeaderKey(strings.TrimSpace(token))
 				if canonicalKey == "" {
 					continue

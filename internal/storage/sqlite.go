@@ -65,11 +65,11 @@ func (s *sqliteStorage) SQLiteDB() *sql.DB {
 	return s.db
 }
 
-func (s *sqliteStorage) PostgreSQLPool() interface{} {
+func (s *sqliteStorage) PostgreSQLPool() any {
 	return nil
 }
 
-func (s *sqliteStorage) MongoDatabase() interface{} {
+func (s *sqliteStorage) MongoDatabase() any {
 	return nil
 }
 

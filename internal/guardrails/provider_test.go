@@ -484,11 +484,11 @@ func TestGuardedProvider_ChatCompletion_RewritesStructuredTextContentWithoutDrop
 	if inner.chatReq == nil || len(inner.chatReq.Messages) != 1 {
 		t.Fatalf("expected rewritten request, got %+v", inner.chatReq)
 	}
-	if inner.chatReq.Messages[0].ExtraFields["name"] == nil {
-		t.Fatalf("message name missing from ExtraFields: %+v", inner.chatReq.Messages[0].ExtraFields)
+	if inner.chatReq.Messages[0].ExtraFields.Lookup("name") == nil {
+		t.Fatal("message name missing from ExtraFields")
 	}
-	if inner.chatReq.Messages[0].ExtraFields["x_meta"] == nil {
-		t.Fatalf("message x_meta missing from ExtraFields: %+v", inner.chatReq.Messages[0].ExtraFields)
+	if inner.chatReq.Messages[0].ExtraFields.Lookup("x_meta") == nil {
+		t.Fatal("message x_meta missing from ExtraFields")
 	}
 	parts, ok := inner.chatReq.Messages[0].Content.([]core.ContentPart)
 	if !ok || len(parts) != 1 {
@@ -497,8 +497,8 @@ func TestGuardedProvider_ChatCompletion_RewritesStructuredTextContentWithoutDrop
 	if parts[0].Text != "hello [rewritten]" {
 		t.Fatalf("parts[0].Text = %q, want rewritten text", parts[0].Text)
 	}
-	if parts[0].ExtraFields["cache_control"] == nil {
-		t.Fatalf("cache_control missing from content part extra fields: %+v", parts[0].ExtraFields)
+	if parts[0].ExtraFields.Lookup("cache_control") == nil {
+		t.Fatal("cache_control missing from content part extra fields")
 	}
 
 	originalParts, ok := req.Messages[0].Content.([]core.ContentPart)
@@ -843,7 +843,7 @@ func TestApplyMessagesToChatPreservingEnvelope_TailMatchesExistingSystemMessages
 			{
 				Role:        "system",
 				Content:     "original system",
-				ExtraFields: map[string]json.RawMessage{"x_system": json.RawMessage(`true`)},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_system": json.RawMessage(`true`)}),
 			},
 			{Role: "user", Content: "hello"},
 		},
@@ -860,11 +860,11 @@ func TestApplyMessagesToChatPreservingEnvelope_TailMatchesExistingSystemMessages
 	if len(result.Messages) != 3 {
 		t.Fatalf("len(Messages) = %d, want 3", len(result.Messages))
 	}
-	if result.Messages[0].ExtraFields["x_system"] != nil {
-		t.Fatalf("prepended system message should not inherit original extras: %+v", result.Messages[0].ExtraFields)
+	if result.Messages[0].ExtraFields.Lookup("x_system") != nil {
+		t.Fatal("prepended system message should not inherit original extras")
 	}
-	if result.Messages[1].ExtraFields["x_system"] == nil {
-		t.Fatalf("tail-matched system message lost original extras: %+v", result.Messages[1].ExtraFields)
+	if result.Messages[1].ExtraFields.Lookup("x_system") == nil {
+		t.Fatal("tail-matched system message lost original extras")
 	}
 }
 
@@ -877,7 +877,7 @@ func TestPatchChatMessagesJSON_TailMatchesExistingSystemMessages(t *testing.T) {
 		{
 			Role:        "system",
 			Content:     "original system",
-			ExtraFields: map[string]json.RawMessage{"x_system": json.RawMessage(`true`)},
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_system": json.RawMessage(`true`)}),
 		},
 		{Role: "user", Content: "hello"},
 	}
@@ -886,7 +886,7 @@ func TestPatchChatMessagesJSON_TailMatchesExistingSystemMessages(t *testing.T) {
 		{
 			Role:        "system",
 			Content:     "rewritten original system",
-			ExtraFields: map[string]json.RawMessage{"x_system": json.RawMessage(`true`)},
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_system": json.RawMessage(`true`)}),
 		},
 		{Role: "user", Content: "hello"},
 	}

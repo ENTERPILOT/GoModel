@@ -222,12 +222,15 @@ function dashboard() {
                 const res = await fetch(url, { headers: this.headers() });
                 if (!this.handleFetchResponse(res, 'models')) {
                     this.models = [];
+                    if (typeof this.syncDisplayModels === 'function') this.syncDisplayModels();
                     return;
                 }
                 this.models = await res.json();
+                if (typeof this.syncDisplayModels === 'function') this.syncDisplayModels();
             } catch (e) {
                 console.error('Failed to fetch models:', e);
                 this.models = [];
+                if (typeof this.syncDisplayModels === 'function') this.syncDisplayModels();
             }
         },
 

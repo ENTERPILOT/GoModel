@@ -88,17 +88,17 @@ data: [DONE]
 func TestStreamUsageObserverWithExtendedUsage(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "o1-preview", "openai", "req-456", "/v1/chat/completions", nil)
-	observer.OnJSONEvent(map[string]interface{}{
+	observer.OnJSONEvent(map[string]any{
 		"id":    "chatcmpl-456",
 		"model": "o1-preview",
-		"usage": map[string]interface{}{
+		"usage": map[string]any{
 			"prompt_tokens":     float64(100),
 			"completion_tokens": float64(50),
 			"total_tokens":      float64(150),
-			"prompt_tokens_details": map[string]interface{}{
+			"prompt_tokens_details": map[string]any{
 				"cached_tokens": float64(20),
 			},
-			"completion_tokens_details": map[string]interface{}{
+			"completion_tokens_details": map[string]any{
 				"reasoning_tokens": float64(10),
 			},
 		},
@@ -151,9 +151,9 @@ data: [DONE]
 func TestStreamUsageObserverDoubleClose(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
-	observer.OnJSONEvent(map[string]interface{}{
+	observer.OnJSONEvent(map[string]any{
 		"id": "chatcmpl-123",
-		"usage": map[string]interface{}{
+		"usage": map[string]any{
 			"prompt_tokens":     float64(10),
 			"completion_tokens": float64(5),
 			"total_tokens":      float64(15),

@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -374,12 +376,7 @@ func (m *mockProvider) Supports(model string) bool {
 	if err == nil {
 		model = selector.Model
 	}
-	for _, supported := range m.supportedModels {
-		if model == supported {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.supportedModels, model)
 }
 
 func (m *mockProvider) GetProviderType(model string) string {
@@ -560,9 +557,7 @@ func (m *mockProvider) CreateBatchWithHints(ctx context.Context, providerType st
 		return resp, nil, nil
 	}
 	hints := make(map[string]string, len(m.batchCreateHints))
-	for customID, endpoint := range m.batchCreateHints {
-		hints[customID] = endpoint
-	}
+	maps.Copy(hints, m.batchCreateHints)
 	return resp, hints, nil
 }
 
@@ -624,9 +619,7 @@ func (m *mockProvider) GetBatchResultsWithHints(ctx context.Context, providerTyp
 	m.capturedBatchHintsBatchID = batchID
 	if len(endpointByCustomID) > 0 {
 		m.capturedBatchHints = make(map[string]string, len(endpointByCustomID))
-		for customID, endpoint := range endpointByCustomID {
-			m.capturedBatchHints[customID] = endpoint
-		}
+		maps.Copy(m.capturedBatchHints, endpointByCustomID)
 	}
 	if m.batchResultsHinted != nil {
 		return m.batchResultsHinted, nil
@@ -938,8 +931,8 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 	if provider.capturedChatReq == nil {
 		t.Fatal("expected chat request to be captured")
 	}
-	if provider.capturedChatReq.ExtraFields["response_format"] == nil {
-		t.Fatalf("response_format missing from ExtraFields: %+v", provider.capturedChatReq.ExtraFields)
+	if provider.capturedChatReq.ExtraFields.Lookup("response_format") == nil {
+		t.Fatal("response_format missing from ExtraFields")
 	}
 
 	body, err := json.Marshal(provider.capturedChatReq)
@@ -995,8 +988,8 @@ func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 	if provider.capturedChatReq == nil {
 		t.Fatal("expected chat request to be captured")
 	}
-	if provider.capturedChatReq.Messages[0].ExtraFields["name"] == nil {
-		t.Fatalf("message.name missing from ExtraFields: %+v", provider.capturedChatReq.Messages[0].ExtraFields)
+	if provider.capturedChatReq.Messages[0].ExtraFields.Lookup("name") == nil {
+		t.Fatal("message.name missing from ExtraFields")
 	}
 
 	body, err := json.Marshal(provider.capturedChatReq)
@@ -1079,8 +1072,8 @@ func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
 	if provider.capturedChatReq == nil {
 		t.Fatal("expected chat request to be captured")
 	}
-	if provider.capturedChatReq.ExtraFields["response_format"] == nil {
-		t.Fatalf("response_format missing from ExtraFields: %+v", provider.capturedChatReq.ExtraFields)
+	if provider.capturedChatReq.ExtraFields.Lookup("response_format") == nil {
+		t.Fatal("response_format missing from ExtraFields")
 	}
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
@@ -1699,8 +1692,8 @@ func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
 	if !ok || len(input) != 1 {
 		t.Fatalf("captured input = %#v, want []ResponsesInputElement len=1", provider.capturedResponsesReq.Input)
 	}
-	if input[0].ExtraFields["x_trace"] == nil {
-		t.Fatalf("input[0].x_trace missing from ExtraFields: %+v", input[0].ExtraFields)
+	if input[0].ExtraFields.Lookup("x_trace") == nil {
+		t.Fatal("input[0].x_trace missing from ExtraFields")
 	}
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
@@ -1763,7 +1756,7 @@ func TestEmbeddings_UsesIngressFrameForDecoding(t *testing.T) {
 	if provider.capturedEmbeddingReq == nil {
 		t.Fatal("expected embeddings request to be captured")
 	}
-	if provider.capturedEmbeddingReq.ExtraFields["x_meta"] == nil {
+	if provider.capturedEmbeddingReq.ExtraFields.Lookup("x_meta") == nil {
 		t.Fatalf("x_meta missing from ExtraFields: %+v", provider.capturedEmbeddingReq.ExtraFields)
 	}
 
@@ -1835,13 +1828,13 @@ func TestBatches_UsesIngressFrameForDecoding(t *testing.T) {
 	if mock.capturedBatchReq == nil {
 		t.Fatal("expected batch request to be captured")
 	}
-	if mock.capturedBatchReq.ExtraFields["x_top"] == nil {
+	if mock.capturedBatchReq.ExtraFields.Lookup("x_top") == nil {
 		t.Fatalf("x_top missing from ExtraFields: %+v", mock.capturedBatchReq.ExtraFields)
 	}
 	if len(mock.capturedBatchReq.Requests) != 1 {
 		t.Fatalf("len(Requests) = %d, want 1", len(mock.capturedBatchReq.Requests))
 	}
-	if mock.capturedBatchReq.Requests[0].ExtraFields["x_item_flag"] == nil {
+	if mock.capturedBatchReq.Requests[0].ExtraFields.Lookup("x_item_flag") == nil {
 		t.Fatalf("x_item_flag missing from item ExtraFields: %+v", mock.capturedBatchReq.Requests[0].ExtraFields)
 	}
 
@@ -4289,8 +4282,8 @@ func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
 	if !ok || len(input) != 1 {
 		t.Fatalf("captured input = %#v, want []ResponsesInputElement len=1", provider.capturedResponsesReq.Input)
 	}
-	if input[0].ExtraFields["x_trace"] == nil {
-		t.Fatalf("input[0].x_trace missing from ExtraFields: %+v", input[0].ExtraFields)
+	if input[0].ExtraFields.Lookup("x_trace") == nil {
+		t.Fatal("input[0].x_trace missing from ExtraFields")
 	}
 
 	body, err := json.Marshal(provider.capturedResponsesReq)

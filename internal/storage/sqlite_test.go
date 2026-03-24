@@ -35,7 +35,7 @@ func TestSQLiteConcurrentWriteSafety(t *testing.T) {
 	errs := make(chan error, goroutines*insertsPerGoroutine*2)
 
 	// Half the goroutines write to test_audit, half to test_usage — mirrors real workload.
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -43,7 +43,7 @@ func TestSQLiteConcurrentWriteSafety(t *testing.T) {
 			if id%2 == 1 {
 				table = "test_usage"
 			}
-			for j := 0; j < insertsPerGoroutine; j++ {
+			for j := range insertsPerGoroutine {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				_, err := db.ExecContext(ctx, fmt.Sprintf(`INSERT INTO %s (id, data) VALUES (?, ?)`, table),
 					fmt.Sprintf("%d-%d", id, j), "payload")

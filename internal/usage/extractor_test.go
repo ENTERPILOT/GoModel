@@ -341,12 +341,10 @@ func TestExtractFromResponsesResponse_WithDetails(t *testing.T) {
 	}
 }
 
-func f64Ptr(v float64) *float64 { return &v }
-
 func TestExtractFromChatResponse_WithPricing(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:  f64Ptr(3.0),  // $3 per million input tokens
-		OutputPerMtok: f64Ptr(15.0), // $15 per million output tokens
+		InputPerMtok:  new(3.0),  // $3 per million input tokens
+		OutputPerMtok: new(15.0), // $15 per million output tokens
 	}
 
 	resp := &core.ChatResponse{
@@ -391,8 +389,8 @@ func TestExtractFromChatResponse_WithPricing(t *testing.T) {
 
 func TestExtractFromResponsesResponse_WithPricing(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:  f64Ptr(2.5),
-		OutputPerMtok: f64Ptr(10.0),
+		InputPerMtok:  new(2.5),
+		OutputPerMtok: new(10.0),
 	}
 
 	resp := &core.ResponsesResponse{
@@ -484,10 +482,10 @@ func TestExtractFromSSEUsageEmptyRawData(t *testing.T) {
 
 func TestExtractFromChatResponse_WithBatchPricingEndpoint(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:       f64Ptr(4.0),
-		OutputPerMtok:      f64Ptr(8.0),
-		BatchInputPerMtok:  f64Ptr(1.0),
-		BatchOutputPerMtok: f64Ptr(2.0),
+		InputPerMtok:       new(4.0),
+		OutputPerMtok:      new(8.0),
+		BatchInputPerMtok:  new(1.0),
+		BatchOutputPerMtok: new(2.0),
 	}
 
 	resp := &core.ChatResponse{
@@ -521,10 +519,10 @@ func TestExtractFromChatResponse_WithBatchPricingEndpoint(t *testing.T) {
 
 func TestExtractFromChatResponse_WithBatchPricingSubpathEndpoint(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:       f64Ptr(4.0),
-		OutputPerMtok:      f64Ptr(8.0),
-		BatchInputPerMtok:  f64Ptr(1.0),
-		BatchOutputPerMtok: f64Ptr(2.0),
+		InputPerMtok:       new(4.0),
+		OutputPerMtok:      new(8.0),
+		BatchInputPerMtok:  new(1.0),
+		BatchOutputPerMtok: new(2.0),
 	}
 
 	resp := &core.ChatResponse{
@@ -558,8 +556,8 @@ func TestExtractFromChatResponse_WithBatchPricingSubpathEndpoint(t *testing.T) {
 
 func TestExtractFromEmbeddingResponse_WithBatchPricingEndpoint(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:      f64Ptr(3.0),
-		BatchInputPerMtok: f64Ptr(1.5),
+		InputPerMtok:      new(3.0),
+		BatchInputPerMtok: new(1.5),
 	}
 
 	resp := &core.EmbeddingResponse{
@@ -585,10 +583,10 @@ func TestExtractFromEmbeddingResponse_WithBatchPricingEndpoint(t *testing.T) {
 
 func TestExtractFromChatResponse_BatchPrefixOvermatchUsesStandardPricing(t *testing.T) {
 	pricing := &core.ModelPricing{
-		InputPerMtok:       f64Ptr(4.0),
-		OutputPerMtok:      f64Ptr(8.0),
-		BatchInputPerMtok:  f64Ptr(1.0),
-		BatchOutputPerMtok: f64Ptr(2.0),
+		InputPerMtok:       new(4.0),
+		OutputPerMtok:      new(8.0),
+		BatchInputPerMtok:  new(1.0),
+		BatchOutputPerMtok: new(2.0),
 	}
 
 	resp := &core.ChatResponse{

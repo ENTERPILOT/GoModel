@@ -115,7 +115,7 @@ func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*UsageEntry) er
 	}
 
 	// Convert entries to BSON documents
-	docs := make([]interface{}, len(entries))
+	docs := make([]any, len(entries))
 	for i, e := range entries {
 		docs[i] = e
 	}
@@ -125,8 +125,7 @@ func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*UsageEntry) er
 	_, err := s.collection.InsertMany(ctx, docs, opts)
 	if err != nil {
 		// Check if it's a bulk write error with some successes
-		var bulkErr *mongo.BulkWriteException
-		if errors.As(err, &bulkErr) {
+		if bulkErr, ok := errors.AsType[*mongo.BulkWriteException](err); ok {
 			failedCount := len(bulkErr.WriteErrors)
 			// Log for visibility
 			slog.Warn("partial usage insert failure",

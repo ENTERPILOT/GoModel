@@ -353,7 +353,7 @@ func TestModelRegistry(t *testing.T) {
 				},
 			},
 		}
-		registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openai")
+		registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
 		if err := registry.Initialize(context.Background()); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -395,7 +395,7 @@ func TestModelRegistry(t *testing.T) {
 			},
 		}
 		registry.RegisterProviderWithNameAndType(google, "google", "gemini")
-		registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openai")
+		registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
 		if err := registry.Initialize(context.Background()); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -458,7 +458,7 @@ func TestModelRegistry(t *testing.T) {
 		registry.RegisterProvider(mock)
 		_ = registry.Initialize(context.Background())
 
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			models := registry.ListModels()
 			if len(models) != 3 {
 				t.Fatalf("expected 3 models, got %d", len(models))
@@ -568,11 +568,11 @@ func TestListModelsWithProvider_Sorted(t *testing.T) {
 	if len(models) != 3 {
 		t.Fatalf("expected 3 models, got %d", len(models))
 	}
-	if models[0].Model.ID != "alpha-model" {
-		t.Errorf("expected first model alpha-model, got %s", models[0].Model.ID)
+	if models[0].Model.ID != "middle-model" {
+		t.Errorf("expected first model middle-model, got %s", models[0].Model.ID)
 	}
-	if models[1].Model.ID != "middle-model" {
-		t.Errorf("expected second model middle-model, got %s", models[1].Model.ID)
+	if models[1].Model.ID != "alpha-model" {
+		t.Errorf("expected second model alpha-model, got %s", models[1].Model.ID)
 	}
 	if models[2].Model.ID != "zebra-model" {
 		t.Errorf("expected third model zebra-model, got %s", models[2].Model.ID)
@@ -650,7 +650,7 @@ func TestListPublicModels_UsesConfiguredProviderNamesAndIncludesDuplicates(t *te
 	}
 
 	registry.RegisterProviderWithNameAndType(openAI, "openai", "openai")
-	registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openai")
+	registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
 	registry.RegisterProviderWithNameAndType(azure, "azure-openai", "openai")
 	if err := registry.Initialize(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -672,6 +672,66 @@ func TestListPublicModels_UsesConfiguredProviderNamesAndIncludesDuplicates(t *te
 		}
 		if models[i].OwnedBy != model.OwnedBy {
 			t.Fatalf("models[%d].OwnedBy = %q, want %q", i, models[i].OwnedBy, model.OwnedBy)
+		}
+	}
+}
+
+func TestListModelsWithProvider_UsesConfiguredProviderNamesAndIncludesDuplicates(t *testing.T) {
+	registry := NewModelRegistry()
+
+	openAI := &registryMockProvider{
+		name: "provider-openai",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-4o", Object: "model", OwnedBy: "openai"},
+			},
+		},
+	}
+	openRouter := &registryMockProvider{
+		name: "provider-openrouter",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-4o", Object: "model", OwnedBy: "openai"},
+				{ID: "openai/gpt-4o-mini", Object: "model", OwnedBy: "openai"},
+			},
+		},
+	}
+
+	registry.RegisterProviderWithNameAndType(openAI, "openai", "openai")
+	registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	models := registry.ListModelsWithProvider()
+	if len(models) != 3 {
+		t.Fatalf("expected 3 models, got %d", len(models))
+	}
+
+	want := []struct {
+		id           string
+		providerName string
+		providerType string
+		selector     string
+	}{
+		{id: "gpt-4o", providerName: "openai", providerType: "openai", selector: "openai/gpt-4o"},
+		{id: "gpt-4o", providerName: "openrouter", providerType: "openrouter", selector: "openrouter/gpt-4o"},
+		{id: "openai/gpt-4o-mini", providerName: "openrouter", providerType: "openrouter", selector: "openrouter/openai/gpt-4o-mini"},
+	}
+	for i, wantModel := range want {
+		if models[i].Model.ID != wantModel.id {
+			t.Fatalf("models[%d].Model.ID = %q, want %q", i, models[i].Model.ID, wantModel.id)
+		}
+		if models[i].ProviderName != wantModel.providerName {
+			t.Fatalf("models[%d].ProviderName = %q, want %q", i, models[i].ProviderName, wantModel.providerName)
+		}
+		if models[i].ProviderType != wantModel.providerType {
+			t.Fatalf("models[%d].ProviderType = %q, want %q", i, models[i].ProviderType, wantModel.providerType)
+		}
+		if models[i].Selector != wantModel.selector {
+			t.Fatalf("models[%d].Selector = %q, want %q", i, models[i].Selector, wantModel.selector)
 		}
 	}
 }
@@ -989,6 +1049,66 @@ func TestListModelsWithProviderByCategory(t *testing.T) {
 			t.Fatalf("expected 0 video models, got %d", len(models))
 		}
 	})
+}
+
+func TestGetCategoryCounts_CountsProviderBackedModels(t *testing.T) {
+	registry := NewModelRegistry()
+
+	openAI := &registryMockProvider{
+		name: "provider-openai",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{
+					ID:      "gpt-4o",
+					Object:  "model",
+					OwnedBy: "openai",
+					Metadata: &core.ModelMetadata{
+						Categories: []core.ModelCategory{core.CategoryTextGeneration},
+					},
+				},
+			},
+		},
+	}
+	openRouter := &registryMockProvider{
+		name: "provider-openrouter",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{
+					ID:      "gpt-4o",
+					Object:  "model",
+					OwnedBy: "openai",
+					Metadata: &core.ModelMetadata{
+						Categories: []core.ModelCategory{core.CategoryTextGeneration},
+					},
+				},
+			},
+		},
+	}
+
+	registry.RegisterProviderWithNameAndType(openAI, "openai", "openai")
+	registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	counts := registry.GetCategoryCounts()
+	var gotAll, gotTextGeneration int
+	for _, count := range counts {
+		switch count.Category {
+		case core.CategoryAll:
+			gotAll = count.Count
+		case core.CategoryTextGeneration:
+			gotTextGeneration = count.Count
+		}
+	}
+	if gotAll != 2 {
+		t.Fatalf("all count = %d, want 2", gotAll)
+	}
+	if gotTextGeneration != 2 {
+		t.Fatalf("text generation count = %d, want 2", gotTextGeneration)
+	}
 }
 
 func TestGetCategoryCounts(t *testing.T) {

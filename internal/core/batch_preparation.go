@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 )
@@ -270,8 +271,7 @@ func wrapBatchInputFileLineError(lineNo int, err error) error {
 	if err == nil {
 		return nil
 	}
-	var gatewayErr *GatewayError
-	if errors.As(err, &gatewayErr) {
+	if gatewayErr, ok := errors.AsType[*GatewayError](err); ok {
 		if gatewayErr.Type == ErrorTypeInvalidRequest {
 			return NewInvalidRequestError(fmt.Sprintf("batch input file line %d: %s", lineNo, gatewayErr.Message), err)
 		}
@@ -295,9 +295,7 @@ func mergeBatchEndpointHints(dst, src map[string]string) {
 	if len(src) == 0 {
 		return
 	}
-	for customID, endpoint := range src {
-		dst[customID] = endpoint
-	}
+	maps.Copy(dst, src)
 }
 
 func cloneBatchRequest(req *BatchRequest) *BatchRequest {
@@ -310,7 +308,7 @@ func cloneBatchRequest(req *BatchRequest) *BatchRequest {
 		Endpoint:         req.Endpoint,
 		CompletionWindow: req.CompletionWindow,
 		Metadata:         cloneBatchStringMap(req.Metadata),
-		ExtraFields:      CloneRawJSONMap(req.ExtraFields),
+		ExtraFields:      CloneUnknownJSONFields(req.ExtraFields),
 	}
 	if req.Requests != nil {
 		cloned.Requests = make([]BatchRequestItem, len(req.Requests))
@@ -327,7 +325,7 @@ func cloneBatchRequestItem(item BatchRequestItem) BatchRequestItem {
 		Method:      item.Method,
 		URL:         item.URL,
 		Body:        CloneRawJSON(item.Body),
-		ExtraFields: CloneRawJSONMap(item.ExtraFields),
+		ExtraFields: CloneUnknownJSONFields(item.ExtraFields),
 	}
 }
 
@@ -336,9 +334,7 @@ func cloneBatchStringMap(src map[string]string) map[string]string {
 		return nil
 	}
 	cloned := make(map[string]string, len(src))
-	for key, value := range src {
-		cloned[key] = value
-	}
+	maps.Copy(cloned, src)
 	return cloned
 }
 

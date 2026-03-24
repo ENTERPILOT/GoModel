@@ -2,10 +2,14 @@ package responsecache
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +18,57 @@ import (
 	"gomodel/internal/cache"
 	"gomodel/internal/core"
 )
+
+var benchmarkStreamingBody = []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+
+type explodingCacheReadCloser struct{}
+
+func (explodingCacheReadCloser) Read([]byte) (int, error) {
+	return 0, errors.New("live request body should not be read")
+}
+
+func (explodingCacheReadCloser) Close() error {
+	return nil
+}
+
+type concurrentTrackingStore struct {
+	current       atomic.Int32
+	maxConcurrent atomic.Int32
+	enterCh       chan struct{}
+	releaseCh     chan struct{}
+}
+
+func newConcurrentTrackingStore() *concurrentTrackingStore {
+	return &concurrentTrackingStore{
+		enterCh:   make(chan struct{}, 1024),
+		releaseCh: make(chan struct{}),
+	}
+}
+
+func (s *concurrentTrackingStore) Get(context.Context, string) ([]byte, error) {
+	return nil, nil
+}
+
+func (s *concurrentTrackingStore) Set(_ context.Context, _ string, _ []byte, _ time.Duration) error {
+	current := s.current.Add(1)
+	for {
+		max := s.maxConcurrent.Load()
+		if current <= max {
+			break
+		}
+		if s.maxConcurrent.CompareAndSwap(max, current) {
+			break
+		}
+	}
+	s.enterCh <- struct{}{}
+	<-s.releaseCh
+	s.current.Add(-1)
+	return nil
+}
+
+func (s *concurrentTrackingStore) Close() error {
+	return nil
+}
 
 func TestSimpleCacheMiddleware_CacheHit(t *testing.T) {
 	store := cache.NewMapStore()
@@ -135,7 +190,7 @@ func TestSimpleCacheMiddleware_SkipsStreaming(t *testing.T) {
 	})
 
 	body := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
@@ -171,7 +226,7 @@ func TestSimpleCacheMiddleware_SkipsPartialTranslatedPlan(t *testing.T) {
 	})
 
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
@@ -186,6 +241,159 @@ func TestSimpleCacheMiddleware_SkipsPartialTranslatedPlan(t *testing.T) {
 	}
 }
 
+func TestSimpleCacheMiddleware_UsesCapturedSnapshotBodyWithoutReadingLiveBody(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	e := echo.New()
+	e.Use(mw.Middleware())
+	callCount := 0
+	e.POST("/v1/chat/completions", func(c *echo.Context) error {
+		callCount++
+		return c.JSON(http.StatusOK, map[string]string{"result": "ok"})
+	})
+
+	makeRequest := func() *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = explodingCacheReadCloser{}
+		frame := core.NewRequestSnapshot(
+			http.MethodPost,
+			"/v1/chat/completions",
+			nil,
+			nil,
+			nil,
+			"application/json",
+			[]byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`),
+			false,
+			"",
+			nil,
+		)
+		return req.WithContext(core.WithRequestSnapshot(req.Context(), frame))
+	}
+
+	rec1 := httptest.NewRecorder()
+	e.ServeHTTP(rec1, makeRequest())
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first request: got status %d", rec1.Code)
+	}
+	mw.inner.wg.Wait()
+
+	rec2 := httptest.NewRecorder()
+	e.ServeHTTP(rec2, makeRequest())
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("second request: got status %d", rec2.Code)
+	}
+	if rec2.Header().Get("X-Cache") != "HIT" {
+		t.Fatalf("expected cache hit from snapshot body, got X-Cache=%q", rec2.Header().Get("X-Cache"))
+	}
+	if callCount != 1 {
+		t.Fatalf("expected second request to hit cache, handler called %d times", callCount)
+	}
+}
+
+func TestSimpleCacheMiddleware_BypassesCacheWhenBodyWasNotCaptured(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	e := echo.New()
+	e.Use(mw.Middleware())
+	callCount := 0
+	e.POST("/v1/chat/completions", func(c *echo.Context) error {
+		callCount++
+		return c.JSON(http.StatusOK, map[string]string{"result": "ok"})
+	})
+
+	makeRequest := func() *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = explodingCacheReadCloser{}
+		frame := core.NewRequestSnapshot(
+			http.MethodPost,
+			"/v1/chat/completions",
+			nil,
+			nil,
+			nil,
+			"application/json",
+			nil,
+			true,
+			"",
+			nil,
+		)
+		return req.WithContext(core.WithRequestSnapshot(req.Context(), frame))
+	}
+
+	for i := range 2 {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, makeRequest())
+		if rec.Code != http.StatusOK {
+			t.Fatalf("request %d: got status %d", i+1, rec.Code)
+		}
+		if got := rec.Header().Get("X-Cache"); got != "" {
+			t.Fatalf("expected uncaptured-body request to bypass cache, got X-Cache=%q", got)
+		}
+	}
+
+	if callCount != 2 {
+		t.Fatalf("expected uncaptured-body requests to bypass cache, handler called %d times", callCount)
+	}
+}
+
+func TestSimpleCacheMiddleware_BodyReadErrorReturnsGatewayError(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	e := echo.New()
+
+	handler := mw.Middleware()(func(c *echo.Context) error {
+		t.Fatal("handler should not be called when request body read fails")
+		return nil
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = explodingCacheReadCloser{}
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler(c)
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("handler error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("gateway error type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
+	}
+}
+
+func TestRequestBodyForCache_BodyNotCapturedTakesPrecedenceOverEmptySnapshotBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	frame := core.NewRequestSnapshot(
+		http.MethodPost,
+		"/v1/chat/completions",
+		nil,
+		nil,
+		nil,
+		"application/json",
+		[]byte{},
+		true,
+		"",
+		nil,
+	)
+	req = req.WithContext(core.WithRequestSnapshot(req.Context(), frame))
+
+	body, cacheable, err := requestBodyForCache(req)
+	if err != nil {
+		t.Fatalf("requestBodyForCache() error = %v", err)
+	}
+	if cacheable {
+		t.Fatalf("requestBodyForCache() cacheable = true, want false (body=%q)", body)
+	}
+	if body != nil {
+		t.Fatalf("requestBodyForCache() body = %q, want nil", body)
+	}
+}
+
 func TestIsStreamingRequest(t *testing.T) {
 	tests := []struct {
 		name string
@@ -195,6 +403,10 @@ func TestIsStreamingRequest(t *testing.T) {
 	}{
 		{"stream true compact", "/v1/chat/completions", `{"stream":true}`, true},
 		{"stream true with spaces", "/v1/chat/completions", `{"stream" : true}`, true},
+		{"duplicate stream keeps first occurrence", "/v1/chat/completions", `{"stream":false,"stream":true}`, false},
+		{"duplicate stream first true stays true", "/v1/chat/completions", `{"stream":true,"stream":false}`, true},
+		{"duplicate null stream keeps first value", "/v1/chat/completions", `{"stream":true,"stream":null}`, true},
+		{"duplicate invalid stream keeps first value", "/v1/chat/completions", `{"stream":true,"stream":"yes"}`, true},
 		{"stream false", "/v1/chat/completions", `{"stream":false}`, false},
 		{"stream absent", "/v1/chat/completions", `{"model":"gpt-4"}`, false},
 		{"embeddings path always false", "/v1/embeddings", `{"stream":true}`, false},
@@ -210,6 +422,79 @@ func TestIsStreamingRequest(t *testing.T) {
 			}
 		})
 	}
+}
+
+func BenchmarkIsStreamingRequestStdlib(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if !isStreamingRequestStdlib("/v1/chat/completions", benchmarkStreamingBody) {
+			b.Fatal("expected streaming request")
+		}
+	}
+}
+
+func BenchmarkIsStreamingRequestGJSON(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if !isStreamingRequestGJSON("/v1/chat/completions", benchmarkStreamingBody) {
+			b.Fatal("expected streaming request")
+		}
+	}
+}
+
+func BenchmarkRequestBodyForCacheLiveRead(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(benchmarkStreamingBody))
+		body, cacheable, err := requestBodyForCache(req)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if !cacheable || len(body) == 0 {
+			b.Fatalf("unexpected body result: cacheable=%v len=%d", cacheable, len(body))
+		}
+	}
+}
+
+func BenchmarkRequestBodyForCacheSnapshot(b *testing.B) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	frame := core.NewRequestSnapshot(
+		http.MethodPost,
+		"/v1/chat/completions",
+		nil,
+		nil,
+		nil,
+		"application/json",
+		benchmarkStreamingBody,
+		false,
+		"",
+		nil,
+	)
+	req = req.WithContext(core.WithRequestSnapshot(req.Context(), frame))
+
+	b.ReportAllocs()
+	for b.Loop() {
+		body, cacheable, err := requestBodyForCache(req)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if !cacheable || len(body) == 0 {
+			b.Fatalf("unexpected body result: cacheable=%v len=%d", cacheable, len(body))
+		}
+	}
+}
+
+func isStreamingRequestStdlib(path string, body []byte) bool {
+	if path == "/v1/embeddings" {
+		return false
+	}
+	var p struct {
+		Stream *bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &p); err != nil {
+		return false
+	}
+	return p.Stream != nil && *p.Stream
 }
 
 func TestSimpleCacheMiddleware_SkipsNoCache(t *testing.T) {
@@ -253,7 +538,7 @@ func TestSimpleCacheMiddleware_NonCacheablePath(t *testing.T) {
 	})
 
 	body := []byte(`{}`)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req := httptest.NewRequest(http.MethodPost, "/v1/models", bytes.NewReader(body))
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)
@@ -284,6 +569,52 @@ func TestSimpleCacheMiddleware_CloseWaitsForPendingWrites(t *testing.T) {
 	// Close must drain any in-flight write before closing the store.
 	// If Close races store.Close against the goroutine's Set, this will
 	// panic or produce a data race under -race.
+	if err := mw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestSimpleCacheMiddleware_LimitsConcurrentCacheWrites(t *testing.T) {
+	store := newConcurrentTrackingStore()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	e := echo.New()
+	e.Use(mw.Middleware())
+	e.POST("/v1/chat/completions", func(c *echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"result": "ok"})
+	})
+
+	const requestCount = cacheWriteWorkerCount * 2
+
+	var reqWG sync.WaitGroup
+	for range requestCount {
+		reqWG.Go(func() {
+			body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Errorf("expected 200, got %d", rec.Code)
+			}
+		})
+	}
+
+	for i := range cacheWriteWorkerCount {
+		select {
+		case <-store.enterCh:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for cache worker %d", i+1)
+		}
+	}
+
+	if got := store.maxConcurrent.Load(); got > cacheWriteWorkerCount {
+		t.Fatalf("expected at most %d concurrent cache writes, got %d", cacheWriteWorkerCount, got)
+	}
+
+	for range requestCount {
+		store.releaseCh <- struct{}{}
+	}
+	reqWG.Wait()
 	if err := mw.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}

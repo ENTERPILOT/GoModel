@@ -32,7 +32,7 @@ func RequestSnapshotCapture() echo.MiddlewareFunc {
 				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
 			}
 
-			snapshot := core.NewRequestSnapshot(
+			snapshot := core.NewRequestSnapshotWithOwnedBody(
 				req.Method,
 				req.URL.Path,
 				snapshotRouteParams(req.URL.Path, routeParamsMap(c.PathValues())),

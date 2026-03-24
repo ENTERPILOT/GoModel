@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -33,6 +34,246 @@ func TestNew_ReturnsProvider(t *testing.T) {
 
 	if provider == nil {
 		t.Error("provider should not be nil")
+	}
+}
+
+func TestNilRequests_ReturnInvalidRequestError(t *testing.T) {
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "chat completion",
+			call: func() error {
+				_, err := provider.ChatCompletion(context.Background(), nil)
+				return err
+			},
+		},
+		{
+			name: "stream chat completion",
+			call: func() error {
+				_, err := provider.StreamChatCompletion(context.Background(), nil)
+				return err
+			},
+		},
+		{
+			name: "responses",
+			call: func() error {
+				_, err := provider.Responses(context.Background(), nil)
+				return err
+			},
+		},
+		{
+			name: "stream responses",
+			call: func() error {
+				_, err := provider.StreamResponses(context.Background(), nil)
+				return err
+			},
+		},
+		{
+			name: "embeddings",
+			call: func() error {
+				_, err := provider.Embeddings(context.Background(), nil)
+				return err
+			},
+		},
+		{
+			name: "create batch",
+			call: func() error {
+				_, err := provider.CreateBatch(context.Background(), nil)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("unexpected panic: %v", r)
+				}
+			}()
+
+			err := tt.call()
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+
+			gatewayErr, ok := err.(*core.GatewayError)
+			if !ok {
+				t.Fatalf("error type = %T, want *core.GatewayError", err)
+			}
+			if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+				t.Fatalf("error type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
+			}
+		})
+	}
+}
+
+func TestCompatibleProvider_FileHelpersApplyRequestMutator(t *testing.T) {
+	mutate := func(req *llmclient.Request) {
+		if req.Headers == nil {
+			req.Headers = make(http.Header)
+		}
+		req.Headers.Set("X-Test-Mutated", "yes")
+
+		endpoint, err := url.Parse(req.Endpoint)
+		if err != nil {
+			t.Fatalf("unexpected parse error: %v", err)
+		}
+		query := endpoint.Query()
+		query.Set("mutated", "1")
+		endpoint.RawQuery = query.Encode()
+		req.Endpoint = endpoint.String()
+	}
+
+	tests := []struct {
+		name string
+		call func(*CompatibleProvider) error
+	}{
+		{
+			name: "create file",
+			call: func(p *CompatibleProvider) error {
+				_, err := p.CreateFile(context.Background(), &core.FileCreateRequest{
+					Purpose:  "batch",
+					Filename: "input.jsonl",
+					Content:  []byte(`{"custom_id":"req-1"}`),
+				})
+				return err
+			},
+		},
+		{
+			name: "list files",
+			call: func(p *CompatibleProvider) error {
+				_, err := p.ListFiles(context.Background(), "batch", 10, "file_122")
+				return err
+			},
+		},
+		{
+			name: "get file",
+			call: func(p *CompatibleProvider) error {
+				_, err := p.GetFile(context.Background(), "file_123")
+				return err
+			},
+		},
+		{
+			name: "delete file",
+			call: func(p *CompatibleProvider) error {
+				_, err := p.DeleteFile(context.Background(), "file_123")
+				return err
+			},
+		},
+		{
+			name: "get file content",
+			call: func(p *CompatibleProvider) error {
+				_, err := p.GetFileContent(context.Background(), "file_123")
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotMutatedHeader string
+			var gotMutatedQuery string
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMutatedHeader = r.Header.Get("X-Test-Mutated")
+				gotMutatedQuery = r.URL.Query().Get("mutated")
+				w.Header().Set("Content-Type", "application/json")
+
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/files":
+					_, _ = w.Write([]byte(`{"id":"file_123","object":"file","purpose":"batch"}`))
+				case r.Method == http.MethodGet && r.URL.Path == "/files":
+					_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+				case r.Method == http.MethodGet && r.URL.Path == "/files/file_123":
+					_, _ = w.Write([]byte(`{"id":"file_123","object":"file","purpose":"batch"}`))
+				case r.Method == http.MethodDelete && r.URL.Path == "/files/file_123":
+					_, _ = w.Write([]byte(`{"id":"file_123","object":"file.deleted","deleted":true}`))
+				case r.Method == http.MethodGet && r.URL.Path == "/files/file_123/content":
+					w.Header().Set("Content-Type", "application/octet-stream")
+					_, _ = w.Write([]byte("file-bytes"))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+
+			provider := NewCompatibleProviderWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{}, CompatibleProviderConfig{
+				ProviderName:   "test",
+				DefaultBaseURL: server.URL,
+			})
+			provider.SetRequestMutator(mutate)
+
+			if err := tt.call(provider); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotMutatedHeader != "yes" {
+				t.Fatalf("X-Test-Mutated = %q, want yes", gotMutatedHeader)
+			}
+			if gotMutatedQuery != "1" {
+				t.Fatalf("mutated query = %q, want 1", gotMutatedQuery)
+			}
+		})
+	}
+}
+
+func TestCompatibleProvider_GetBatchResultsAppliesRequestMutator(t *testing.T) {
+	mutate := func(req *llmclient.Request) {
+		if req.Headers == nil {
+			req.Headers = make(http.Header)
+		}
+		req.Headers.Set("X-Test-Mutated", "yes")
+
+		endpoint, err := url.Parse(req.Endpoint)
+		if err != nil {
+			t.Fatalf("unexpected parse error: %v", err)
+		}
+		query := endpoint.Query()
+		query.Set("mutated", "1")
+		endpoint.RawQuery = query.Encode()
+		req.Endpoint = endpoint.String()
+	}
+
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.Path+"?"+r.URL.RawQuery+"|"+r.Header.Get("X-Test-Mutated"))
+		switch r.URL.Path {
+		case "/batches/batch_1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"batch_1","status":"completed","output_file_id":"file_1","endpoint":"/v1/chat/completions"}`))
+		case "/files/file_1/content":
+			w.Header().Set("Content-Type", "application/jsonl")
+			_, _ = w.Write([]byte(`{"custom_id":"ok-1","response":{"status_code":200,"url":"/v1/chat/completions","body":{"id":"resp-1","model":"gpt-4o-mini"}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	provider := NewCompatibleProviderWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{}, CompatibleProviderConfig{
+		ProviderName:   "test",
+		DefaultBaseURL: server.URL,
+	})
+	provider.SetRequestMutator(mutate)
+
+	_, err := provider.GetBatchResults(context.Background(), "batch_1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("saw %d requests, want 2", len(seen))
+	}
+	for _, request := range seen {
+		if !strings.Contains(request, "mutated=1") {
+			t.Fatalf("request = %q, want mutated query", request)
+		}
+		if !strings.HasSuffix(request, "|yes") {
+			t.Fatalf("request = %q, want mutated header", request)
+		}
 	}
 }
 
@@ -173,27 +414,27 @@ func TestChatCompletion_PreservesMultimodalContent(t *testing.T) {
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var req map[string]interface{}
+		var req map[string]any
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
 
-		messages, ok := req["messages"].([]interface{})
+		messages, ok := req["messages"].([]any)
 		if !ok || len(messages) != 1 {
 			t.Fatalf("messages = %#v, want single message", req["messages"])
 		}
-		message, ok := messages[0].(map[string]interface{})
+		message, ok := messages[0].(map[string]any)
 		if !ok {
 			t.Fatalf("message type = %T", messages[0])
 		}
-		content, ok := message["content"].([]interface{})
+		content, ok := message["content"].([]any)
 		if !ok {
 			t.Fatalf("content type = %T, want []interface{}", message["content"])
 		}
 		if len(content) != 2 {
 			t.Fatalf("len(content) = %d, want 2", len(content))
 		}
-		second, ok := content[1].(map[string]interface{})
+		second, ok := content[1].(map[string]any)
 		if !ok {
 			t.Fatalf("second part type = %T", content[1])
 		}
@@ -305,7 +546,7 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 		Messages: []core.Message{
 			{Role: "user", Content: "Return JSON."},
 		},
-		ExtraFields: map[string]json.RawMessage{
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"response_format": json.RawMessage(`{
 				"type":"json_schema",
 				"json_schema":{
@@ -313,7 +554,7 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 					"schema":{"type":"object","properties":{"answer":{"type":"string"}}}
 				}
 			}`),
-		},
+		}),
 	}
 
 	resp, err := provider.ChatCompletion(context.Background(), req)
@@ -386,8 +627,8 @@ func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 		Messages: []core.Message{
 			{
 				Role:        "user",
-				Content:     []core.ContentPart{{Type: "text", Text: "hello", ExtraFields: map[string]json.RawMessage{"cache_control": json.RawMessage(`{"type":"ephemeral"}`)}}},
-				ExtraFields: map[string]json.RawMessage{"name": json.RawMessage(`"alice"`)},
+				Content:     []core.ContentPart{{Type: "text", Text: "hello", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"cache_control": json.RawMessage(`{"type":"ephemeral"}`)})}},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"name": json.RawMessage(`"alice"`)}),
 			},
 		},
 	}
@@ -462,7 +703,7 @@ func TestChatCompletion_PreservesUnknownTopLevelFieldsForOSeries(t *testing.T) {
 		Messages: []core.Message{
 			{Role: "user", Content: "Return JSON."},
 		},
-		ExtraFields: map[string]json.RawMessage{
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"response_format": json.RawMessage(`{
 				"type":"json_schema",
 				"json_schema":{
@@ -470,7 +711,7 @@ func TestChatCompletion_PreservesUnknownTopLevelFieldsForOSeries(t *testing.T) {
 					"schema":{"type":"object","properties":{"answer":{"type":"string"}}}
 				}
 			}`),
-		},
+		}),
 	}
 
 	resp, err := provider.ChatCompletion(context.Background(), req)
@@ -490,9 +731,9 @@ func TestChatCompletion_OSeriesMarshalErrorReturnsInvalidRequest(t *testing.T) {
 		Messages: []core.Message{
 			{Role: "user", Content: "hello"},
 		},
-		ExtraFields: map[string]json.RawMessage{
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"x_invalid": json.RawMessage(`{`),
-		},
+		}),
 	})
 	if err == nil {
 		t.Fatal("expected error")
@@ -922,13 +1163,13 @@ func TestResponsesWithArrayInput(t *testing.T) {
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var req map[string]interface{}
+		var req map[string]any
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
 
 		// Verify input is an array
-		input, ok := req["input"].([]interface{})
+		input, ok := req["input"].([]any)
 		if !ok {
 			t.Fatal("input should be an array")
 		}
@@ -962,12 +1203,12 @@ func TestResponsesWithArrayInput(t *testing.T) {
 
 	req := &core.ResponsesRequest{
 		Model: "gpt-4o",
-		Input: []interface{}{
-			map[string]interface{}{
+		Input: []any{
+			map[string]any{
 				"role":    "user",
 				"content": "Hello",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"role":    "assistant",
 				"content": "Hi there!",
 			},
@@ -1039,7 +1280,7 @@ func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
 				Type:        "message",
 				Role:        "user",
 				Content:     "Hello",
-				ExtraFields: map[string]json.RawMessage{"x_trace": json.RawMessage(`{"id":"trace-1"}`)},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_trace": json.RawMessage(`{"id":"trace-1"}`)}),
 			},
 		},
 	}
@@ -1240,7 +1481,7 @@ func TestChatCompletion_ReasoningModel_AdaptsParameters(t *testing.T) {
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(body, &raw); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
@@ -1304,7 +1545,7 @@ func TestChatCompletion_NonReasoningModel_PassesMaxTokens(t *testing.T) {
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(body, &raw); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
@@ -1366,21 +1607,21 @@ func TestChatCompletion_NonReasoningModel_PreservesToolConfiguration(t *testing.
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(body, &raw); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
 
-		tools, ok := raw["tools"].([]interface{})
+		tools, ok := raw["tools"].([]any)
 		if !ok || len(tools) != 1 {
 			t.Fatalf("tools = %#v, want one tool", raw["tools"])
 		}
 
-		toolChoice, ok := raw["tool_choice"].(map[string]interface{})
+		toolChoice, ok := raw["tool_choice"].(map[string]any)
 		if !ok {
 			t.Fatalf("tool_choice = %#v, want object", raw["tool_choice"])
 		}
-		function, ok := toolChoice["function"].(map[string]interface{})
+		function, ok := toolChoice["function"].(map[string]any)
 		if !ok || function["name"] != "lookup_weather" {
 			t.Fatalf("tool_choice.function = %#v, want lookup_weather", toolChoice["function"])
 		}
@@ -1451,7 +1692,7 @@ func TestStreamChatCompletion_ReasoningModel_AdaptsParameters(t *testing.T) {
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(body, &raw); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
@@ -1512,21 +1753,21 @@ func TestChatCompletion_ReasoningModel_PreservesToolConfiguration(t *testing.T) 
 			t.Fatalf("failed to read request body: %v", err)
 		}
 
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(body, &raw); err != nil {
 			t.Fatalf("failed to unmarshal request: %v", err)
 		}
 
-		tools, ok := raw["tools"].([]interface{})
+		tools, ok := raw["tools"].([]any)
 		if !ok || len(tools) != 1 {
 			t.Fatalf("tools = %#v, want one tool", raw["tools"])
 		}
 
-		toolChoice, ok := raw["tool_choice"].(map[string]interface{})
+		toolChoice, ok := raw["tool_choice"].(map[string]any)
 		if !ok {
 			t.Fatalf("tool_choice = %#v, want object", raw["tool_choice"])
 		}
-		function, ok := toolChoice["function"].(map[string]interface{})
+		function, ok := toolChoice["function"].(map[string]any)
 		if !ok || function["name"] != "lookup_weather" {
 			t.Fatalf("tool_choice.function = %#v, want lookup_weather", toolChoice["function"])
 		}

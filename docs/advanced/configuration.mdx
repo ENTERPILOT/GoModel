@@ -128,11 +128,15 @@ Set these to automatically register providers. No YAML configuration required.
 | `OPENAI_API_KEY`    | OpenAI                     |
 | `ANTHROPIC_API_KEY` | Anthropic                  |
 | `GEMINI_API_KEY`    | Google Gemini              |
+| `OPENROUTER_API_KEY` | OpenRouter                |
 | `XAI_API_KEY`       | xAI (Grok)                 |
 | `GROQ_API_KEY`      | Groq                       |
+| `AZURE_API_KEY`     | Azure OpenAI (`AZURE_API_BASE` also required) |
 | `OLLAMA_BASE_URL`   | Ollama (no API key needed) |
 
-You can also set a custom base URL for any provider using `<PROVIDER>_BASE_URL` (e.g., `OPENAI_BASE_URL`).
+Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Azure uses `AZURE_API_BASE` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`.
+
+For OpenRouter, GOModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
 
 ### 2. `.env` File
 
@@ -240,10 +244,11 @@ providers:
     base_url: "https://my-proxy.example.com/v1"
 
   # Add a second OpenAI-compatible endpoint
-  azure-openai:
-    type: openai
+  azure:
+    type: azure
     base_url: "https://my-resource.openai.azure.com/openai/deployments/gpt-4"
     api_key: "..."
+    api_version: "2024-10-21"
 
   # Restrict to specific models
   gemini:

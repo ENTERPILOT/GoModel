@@ -71,19 +71,19 @@ func (e *GatewayError) HTTPStatusCode() int {
 }
 
 // ToJSON converts the error to a JSON-compatible map
-func (e *GatewayError) ToJSON() map[string]interface{} {
-	var param interface{}
+func (e *GatewayError) ToJSON() map[string]any {
+	var param any
 	if e.Param != nil {
 		param = *e.Param
 	}
 
-	var code interface{}
+	var code any
 	if e.Code != nil {
 		code = *e.Code
 	}
 
-	return map[string]interface{}{
-		"error": map[string]interface{}{
+	return map[string]any{
+		"error": map[string]any{
 			"type":    e.Type,
 			"message": e.Message,
 			"param":   param,

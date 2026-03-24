@@ -79,7 +79,7 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 	dataQuery := `SELECT id, timestamp, duration_ns, model, resolved_model, provider, alias_used, status_code, request_id,
 		client_ip, method, path, stream, error_type, data
 		FROM audit_logs` + where + ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`
-	dataArgs := append(append([]interface{}(nil), args...), limit, offset)
+	dataArgs := append(append([]any(nil), args...), limit, offset)
 
 	rows, err := r.db.QueryContext(ctx, dataQuery, dataArgs...)
 	if err != nil {
@@ -230,7 +230,7 @@ func (r *SQLiteReader) GetConversation(ctx context.Context, logID string, limit 
 	}, nil
 }
 
-func sqliteDateRangeConditions(params QueryParams) (conditions []string, args []interface{}) {
+func sqliteDateRangeConditions(params QueryParams) (conditions []string, args []any) {
 	if !params.StartDate.IsZero() {
 		conditions = append(conditions, "timestamp >= ?")
 		args = append(args, params.StartDate.UTC().Format("2006-01-02"))

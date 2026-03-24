@@ -113,15 +113,12 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 
 	// Process entries in chunks to stay within SQLite's parameter limit
 	for i := 0; i < len(entries); i += maxEntriesPerBatch {
-		end := i + maxEntriesPerBatch
-		if end > len(entries) {
-			end = len(entries)
-		}
+		end := min(i+maxEntriesPerBatch, len(entries))
 		chunk := entries[i:end]
 
 		// Build batch insert query for this chunk
 		placeholders := make([]string, len(chunk))
-		values := make([]interface{}, 0, len(chunk)*columnsPerEntry)
+		values := make([]any, 0, len(chunk)*columnsPerEntry)
 
 		for j, e := range chunk {
 			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -139,7 +136,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 			}
 
 			// Handle NULL for data field: nil becomes SQL NULL, non-nil becomes JSON string
-			var dataValue interface{}
+			var dataValue any
 			if dataJSON != nil {
 				dataValue = string(dataJSON)
 			}

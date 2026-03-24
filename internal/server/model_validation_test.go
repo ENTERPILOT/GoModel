@@ -19,6 +19,13 @@ import (
 
 type explodingValidationReadCloser struct{}
 
+var benchmarkSelectorValidationBody = []byte(`{
+	"provider":"openai",
+	"model":"gpt-4o-mini",
+	"messages":[{"role":"user","content":"hi"}],
+	"response_format":{"type":"json_schema"}
+}`)
+
 type modelCountingValidationProvider struct {
 	*mockProvider
 	modelCount int
@@ -762,6 +769,48 @@ func TestGetProviderType_UsesExecutionPlan(t *testing.T) {
 	c := e.NewContext(req, rec)
 
 	assert.Equal(t, "openai", GetProviderType(c))
+}
+
+func TestSelectorHintsFromJSONGJSON_MatchesStdlibSemantics(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		wantModel    string
+		wantProvider string
+		wantParsed   bool
+	}{
+		{name: "model and provider strings", body: `{"provider":"openai","model":"gpt-4o-mini"}`, wantModel: "gpt-4o-mini", wantProvider: "openai", wantParsed: true},
+		{name: "duplicate selector fields use first occurrence", body: `{"provider":"openai","provider":"anthropic","model":"blocked","model":"gpt-4o-mini"}`, wantModel: "blocked", wantProvider: "openai", wantParsed: true},
+		{name: "duplicate null selector keeps first string value", body: `{"provider":"openai","provider":null,"model":"gpt-4o-mini","model":null}`, wantModel: "gpt-4o-mini", wantProvider: "openai", wantParsed: true},
+		{name: "duplicate invalid selector field keeps first value", body: `{"provider":"openai","provider":123}`, wantProvider: "openai", wantParsed: true},
+		{name: "model only", body: `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`, wantModel: "gpt-4o-mini", wantParsed: true},
+		{name: "null selector fields", body: `{"provider":null,"model":null}`, wantParsed: true},
+		{name: "missing selector fields", body: `{"messages":[{"role":"user","content":"hi"}]}`, wantParsed: true},
+		{name: "invalid json", body: `not json`, wantParsed: false},
+		{name: "array root", body: `[]`, wantParsed: false},
+		{name: "numeric model", body: `{"model":123}`, wantParsed: false},
+		{name: "numeric provider", body: `{"provider":123}`, wantParsed: false},
+		{name: "mixed valid and invalid selector", body: `{"model":"gpt-4o-mini","provider":123}`, wantParsed: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotModel, gotProvider, gotParsed := selectorHintsFromJSONGJSON([]byte(tt.body))
+			assert.Equal(t, tt.wantModel, gotModel)
+			assert.Equal(t, tt.wantProvider, gotProvider)
+			assert.Equal(t, tt.wantParsed, gotParsed)
+		})
+	}
+}
+
+func BenchmarkSelectorHintsFromJSONGJSON(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		model, provider, parsed := selectorHintsFromJSONGJSON(benchmarkSelectorValidationBody)
+		if !parsed || model != "gpt-4o-mini" || provider != "openai" {
+			b.Fatalf("unexpected selector hints: parsed=%v model=%q provider=%q", parsed, model, provider)
+		}
+	}
 }
 
 func TestModelValidation_ResolvesQualifiedMaskingAliasBeforeProviderParsing(t *testing.T) {

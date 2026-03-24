@@ -19,10 +19,12 @@ import (
 	"gomodel/internal/observability"
 	"gomodel/internal/providers"
 	"gomodel/internal/providers/anthropic"
+	"gomodel/internal/providers/azure"
 	"gomodel/internal/providers/gemini"
 	"gomodel/internal/providers/groq"
 	"gomodel/internal/providers/ollama"
 	"gomodel/internal/providers/openai"
+	"gomodel/internal/providers/openrouter"
 	"gomodel/internal/providers/xai"
 	"gomodel/internal/version"
 
@@ -118,6 +120,8 @@ func main() {
 	}
 
 	factory.Add(openai.Registration)
+	factory.Add(openrouter.Registration)
+	factory.Add(azure.Registration)
 	factory.Add(anthropic.Registration)
 	factory.Add(gemini.Registration)
 	factory.Add(groq.Registration)

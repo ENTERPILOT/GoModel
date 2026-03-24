@@ -8,6 +8,10 @@
 
 A high-performance AI gateway written in Go, providing a unified OpenAI-compatible API for multiple AI model providers, full-observability and more.
 
+<a href="docs/dashboard.gif">
+  <img src="docs/dashboard.gif" alt="Animated GOModel AI gateway dashboard showing usage analytics, token tracking, and estimated cost monitoring" width="100%">
+</a>
+
 ## Quick Start - Deploy the AI Gateway
 
 **Step 1:** Start GOModel
@@ -30,7 +34,11 @@ docker run --rm -p 8080:8080 \
   -e ANTHROPIC_API_KEY="your-anthropic-key" \
   -e GEMINI_API_KEY="your-gemini-key" \
   -e GROQ_API_KEY="your-groq-key" \
+  -e OPENROUTER_API_KEY="your-openrouter-key" \
   -e XAI_API_KEY="your-xai-key" \
+  -e AZURE_API_KEY="your-azure-key" \
+  -e AZURE_API_BASE="https://your-resource.openai.azure.com/openai/deployments/your-deployment" \
+  -e AZURE_API_VERSION="2024-10-21" \
   -e OLLAMA_BASE_URL="http://host.docker.internal:11434/v1" \
   enterpilot/gomodel
 ```
@@ -60,7 +68,9 @@ Example model identifiers are illustrative and subject to change; consult provid
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
 | Google Gemini | `GEMINI_API_KEY` | `gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| OpenRouter | `OPENROUTER_API_KEY` | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | xAI (Grok) | `XAI_API_KEY` | `grok-2` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Azure OpenAI | `AZURE_API_KEY` + `AZURE_API_BASE` (`AZURE_API_VERSION` optional) | `gpt-4o` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Ollama | `OLLAMA_BASE_URL` | `llama3.2` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
 
 ✅ Supported  ❌ Unsupported
@@ -71,7 +81,7 @@ Example model identifiers are illustrative and subject to change; consult provid
 
 ### Running from Source
 
-**Prerequisites:** Go 1.22+
+**Prerequisites:** Go 1.26+
 
 1. Create a `.env` file:
 

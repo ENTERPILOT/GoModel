@@ -61,9 +61,7 @@ func TestRegistry_Concurrency(t *testing.T) {
 	defer cancel()
 
 	// 1. Background Refresher (Writer)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -73,13 +71,11 @@ func TestRegistry_Concurrency(t *testing.T) {
 				time.Sleep(15 * time.Millisecond)
 			}
 		}
-	}()
+	})
 
 	// 2. Heavy Readers
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 50 {
+		wg.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -91,7 +87,7 @@ func TestRegistry_Concurrency(t *testing.T) {
 					time.Sleep(1 * time.Millisecond)
 				}
 			}
-		}()
+		})
 	}
 
 	// Let it run for 1 second

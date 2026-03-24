@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"net/http"
 	"strconv"
@@ -87,19 +88,13 @@ func mergeBatchRequestEndpointHints(left, right map[string]string) map[string]st
 			return nil
 		}
 		merged := make(map[string]string, len(right))
-		for key, value := range right {
-			merged[key] = value
-		}
+		maps.Copy(merged, right)
 		return merged
 	}
 
 	merged := make(map[string]string, len(left))
-	for key, value := range left {
-		merged[key] = value
-	}
-	for key, value := range right {
-		merged[key] = value
-	}
+	maps.Copy(merged, left)
+	maps.Copy(merged, right)
 	return merged
 }
 
@@ -503,9 +498,7 @@ func mergeStoredBatchFromUpstream(stored *batchstore.StoredBatch, upstream *core
 			}
 			stored.Batch.Metadata[key] = value
 		}
-		for key, value := range preservedGatewayMetadata {
-			stored.Batch.Metadata[key] = value
-		}
+		maps.Copy(stored.Batch.Metadata, preservedGatewayMetadata)
 		stored.Batch.Metadata = sanitizePublicBatchMetadata(stored.Batch.Metadata)
 	}
 }
@@ -564,8 +557,8 @@ func isNativeBatchResultsPending(
 	providerType, providerBatchID string,
 	err error,
 ) (bool, *core.BatchResponse) {
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
+	gatewayErr, ok := errors.AsType[*core.GatewayError](err)
+	if !ok {
 		return false, nil
 	}
 	if gatewayErr.HTTPStatusCode() != http.StatusNotFound {

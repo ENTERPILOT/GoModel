@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"maps"
 	"strings"
 
 	"gomodel/internal/core"
@@ -544,18 +545,12 @@ func mergeBatchHints(left, right map[string]string) map[string]string {
 			return nil
 		}
 		merged := make(map[string]string, len(right))
-		for key, value := range right {
-			merged[key] = value
-		}
+		maps.Copy(merged, right)
 		return merged
 	}
 	merged := make(map[string]string, len(left))
-	for key, value := range left {
-		merged[key] = value
-	}
-	for key, value := range right {
-		merged[key] = value
-	}
+	maps.Copy(merged, left)
+	maps.Copy(merged, right)
 	return merged
 }
 
@@ -673,10 +668,7 @@ func applyMessagesToChatPreservingEnvelope(req *core.ChatRequest, msgs []Message
 }
 
 func tailMatchedSystemOffsets(originalSystemCount, modifiedSystemCount int) (matchStart, originalStart int) {
-	matched := originalSystemCount
-	if modifiedSystemCount < matched {
-		matched = modifiedSystemCount
-	}
+	matched := min(modifiedSystemCount, originalSystemCount)
 	return modifiedSystemCount - matched, originalSystemCount - matched
 }
 
@@ -852,9 +844,9 @@ func cloneToolCalls(toolCalls []core.ToolCall) []core.ToolCall {
 			Function: core.FunctionCall{
 				Name:        toolCall.Function.Name,
 				Arguments:   toolCall.Function.Arguments,
-				ExtraFields: core.CloneRawJSONMap(toolCall.Function.ExtraFields),
+				ExtraFields: core.CloneUnknownJSONFields(toolCall.Function.ExtraFields),
 			},
-			ExtraFields: core.CloneRawJSONMap(toolCall.ExtraFields),
+			ExtraFields: core.CloneUnknownJSONFields(toolCall.ExtraFields),
 		}
 	}
 	return cloned
@@ -867,7 +859,7 @@ func cloneChatMessageEnvelope(message core.Message) core.Message {
 		ContentNull: message.ContentNull,
 		Content:     cloneMessageContent(message.Content),
 		ToolCalls:   cloneToolCalls(message.ToolCalls),
-		ExtraFields: core.CloneRawJSONMap(message.ExtraFields),
+		ExtraFields: core.CloneUnknownJSONFields(message.ExtraFields),
 	}
 }
 
@@ -903,21 +895,21 @@ func cloneContentPart(part core.ContentPart) core.ContentPart {
 	cloned := core.ContentPart{
 		Type:        part.Type,
 		Text:        part.Text,
-		ExtraFields: core.CloneRawJSONMap(part.ExtraFields),
+		ExtraFields: core.CloneUnknownJSONFields(part.ExtraFields),
 	}
 	if part.ImageURL != nil {
 		cloned.ImageURL = &core.ImageURLContent{
 			URL:         part.ImageURL.URL,
 			Detail:      part.ImageURL.Detail,
 			MediaType:   part.ImageURL.MediaType,
-			ExtraFields: core.CloneRawJSONMap(part.ImageURL.ExtraFields),
+			ExtraFields: core.CloneUnknownJSONFields(part.ImageURL.ExtraFields),
 		}
 	}
 	if part.InputAudio != nil {
 		cloned.InputAudio = &core.InputAudioContent{
 			Data:        part.InputAudio.Data,
 			Format:      part.InputAudio.Format,
-			ExtraFields: core.CloneRawJSONMap(part.InputAudio.ExtraFields),
+			ExtraFields: core.CloneUnknownJSONFields(part.InputAudio.ExtraFields),
 		}
 	}
 	return cloned

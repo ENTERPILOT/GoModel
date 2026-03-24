@@ -146,11 +146,18 @@ providers:
   #   base_url: "https://api.groq.com/openai/v1"
   #   api_key: "${GROQ_API_KEY}"
 
+  # Example: OpenRouter
+  # openrouter:
+  #   type: "openrouter"
+  #   base_url: "https://openrouter.ai/api/v1"
+  #   api_key: "${OPENROUTER_API_KEY}"
+
   # Example: Azure OpenAI
-  # azure-openai:
-  #   type: "openai"
-  #   base_url: "https://your-resource.openai.azure.com/openai/deployments/your-deployment"
-  #   api_key: "${AZURE_OPENAI_API_KEY}"
+  # azure:
+  #   type: "azure"
+  #   base_url: "${AZURE_API_BASE}"
+  #   api_key: "${AZURE_API_KEY}"
+  #   api_version: "2024-10-21"
 
   # Example: DeepSeek (OpenAI-compatible)
   # deepseek:

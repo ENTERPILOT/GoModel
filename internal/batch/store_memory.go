@@ -93,10 +93,7 @@ func (s *MemoryStore) List(_ context.Context, limit int, after string) ([]*Store
 	if start >= len(all) {
 		return []*StoredBatch{}, nil
 	}
-	end := start + limit
-	if end > len(all) {
-		end = len(all)
-	}
+	end := min(start+limit, len(all))
 	return all[start:end], nil
 }
 

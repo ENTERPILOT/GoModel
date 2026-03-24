@@ -110,7 +110,7 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 	dataQuery := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, endpoint,
 		input_tokens, output_tokens, total_tokens, COALESCE(input_cost, 0), COALESCE(output_cost, 0), COALESCE(total_cost, 0), raw_data, COALESCE(costs_calculation_caveat, '')
 		FROM "usage"%s ORDER BY timestamp DESC LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
-	dataArgs := append(append([]interface{}(nil), args...), limit, offset)
+	dataArgs := append(append([]any(nil), args...), limit, offset)
 
 	rows, err := r.pool.Query(ctx, dataQuery, dataArgs...)
 	if err != nil {
@@ -148,7 +148,7 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 
 // pgDateRangeConditions returns WHERE conditions and args for a date range.
 // argIdx is the starting $N placeholder index; nextIdx is the next available index.
-func pgDateRangeConditions(params UsageQueryParams, argIdx int) (conditions []string, args []interface{}, nextIdx int) {
+func pgDateRangeConditions(params UsageQueryParams, argIdx int) (conditions []string, args []any, nextIdx int) {
 	nextIdx = argIdx
 	if !params.StartDate.IsZero() {
 		conditions = append(conditions, fmt.Sprintf("timestamp >= $%d", nextIdx))

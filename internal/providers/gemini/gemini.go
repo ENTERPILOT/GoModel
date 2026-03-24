@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -263,13 +264,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 				}
 			}
 
-			supportsEmbed := false
-			for _, method := range gm.SupportedMethods {
-				if method == "embedContent" {
-					supportsEmbed = true
-					break
-				}
-			}
+			supportsEmbed := slices.Contains(gm.SupportedMethods, "embedContent")
 
 			isOpenAICompatModel := strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-")
 			if (supportsGenerate || supportsEmbed) && isOpenAICompatModel {

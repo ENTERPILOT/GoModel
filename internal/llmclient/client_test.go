@@ -49,7 +49,7 @@ func TestClient_Do_Success(t *testing.T) {
 }
 
 func TestClient_Do_WithRequestBody(t *testing.T) {
-	var receivedBody map[string]interface{}
+	var receivedBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Content-Type") != "application/json" {
@@ -745,7 +745,7 @@ func TestCircuitBreaker_OpensAfterFailures(t *testing.T) {
 	client := New(config, nil)
 
 	// Make requests until circuit opens
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		_ = client.Do(context.Background(), Request{
 			Method:   http.MethodGet,
 			Endpoint: "/test",
@@ -804,7 +804,7 @@ func TestCircuitBreaker_ClosesAfterTimeout(t *testing.T) {
 	client := New(config, nil)
 
 	// Trigger circuit breaker to open
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		_ = client.Do(context.Background(), Request{
 			Method:   http.MethodGet,
 			Endpoint: "/test",
@@ -887,16 +887,14 @@ func TestCircuitBreaker_HalfOpenPreventsThunderingHerd(t *testing.T) {
 	var wg sync.WaitGroup
 	results := make(chan error, 10)
 
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 			err := client.Do(context.Background(), Request{
 				Method:   http.MethodGet,
 				Endpoint: "/test",
 			}, nil)
 			results <- err
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -1082,7 +1080,7 @@ func TestCircuitBreaker_RateLimitDoesNotOpenCircuit(t *testing.T) {
 	}
 	client := New(config, nil)
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		err := client.Do(context.Background(), Request{
 			Method:   http.MethodGet,
 			Endpoint: "/test",
@@ -1180,7 +1178,7 @@ func TestCircuitBreaker_State(t *testing.T) {
 	}
 
 	// Record failures to open circuit
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		cb.RecordFailure()
 	}
 	if state := cb.State(); state != "open" {
@@ -1259,7 +1257,7 @@ func TestClient_SetBaseURL_Concurrent(t *testing.T) {
 	client := New(DefaultConfig("test", "https://original.com"), nil)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		wg.Add(2)
 		go func(i int) {
 			defer wg.Done()
@@ -1340,7 +1338,7 @@ func TestBackoffCalculation_WithJitter(t *testing.T) {
 	client := New(config, nil)
 
 	// With 50% jitter on 100ms base, result should be between 50ms and 150ms
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		result := client.calculateBackoff(1)
 		if result < 50*time.Millisecond || result > 150*time.Millisecond {
 			t.Errorf("backoff %v outside expected range [50ms, 150ms]", result)

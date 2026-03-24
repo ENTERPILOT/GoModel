@@ -155,8 +155,8 @@ func (c *Client) getBaseURL() string {
 type Request struct {
 	Method   string
 	Endpoint string
-	Body     interface{} // Will be JSON marshaled if not nil
-	RawBody  []byte      // Used as-is (e.g., multipart form bodies). Mutually exclusive with Body and RawBodyReader.
+	Body     any    // Will be JSON marshaled if not nil
+	RawBody  []byte // Used as-is (e.g., multipart form bodies). Mutually exclusive with Body and RawBodyReader.
 	// RawBodyReader streams the request body without buffering it in memory.
 	// It is intended for one-shot passthrough requests and is not replayable for retries.
 	RawBodyReader io.Reader
@@ -272,7 +272,7 @@ func (c *Client) waitForRetry(ctx context.Context, attempt int) error {
 }
 
 // Do executes a request with retries and circuit breaking, then unmarshals the response
-func (c *Client) Do(ctx context.Context, req Request, result interface{}) error {
+func (c *Client) Do(ctx context.Context, req Request, result any) error {
 	resp, err := c.DoRaw(ctx, req)
 	if err != nil {
 		return err
@@ -493,7 +493,7 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 }
 
 // extractModel attempts to extract the model name from a request body
-func extractModel(body interface{}) string {
+func extractModel(body any) string {
 	if body == nil {
 		return "unknown"
 	}

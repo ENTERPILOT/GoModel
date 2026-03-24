@@ -29,4 +29,5 @@
 # Claude Code local settings (user-specific)
 /.claude/settings.local.json
 
-.DS_Store
+# Local git worktrees
+/.worktrees/

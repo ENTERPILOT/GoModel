@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"gomodel/internal/core"
@@ -70,5 +71,55 @@ func TestFetchBatchResultsFromOutputFilePending(t *testing.T) {
 	}
 	if gwErr.HTTPStatusCode() != http.StatusConflict {
 		t.Fatalf("status = %d, want %d", gwErr.HTTPStatusCode(), http.StatusConflict)
+	}
+}
+
+func TestFetchBatchResultsFromOpenAICompatibleEndpoints_ReturnsProviderErrorOnNilBatchResponse(t *testing.T) {
+	tests := []struct {
+		name      string
+		response  *llmclient.Response
+		wantError string
+	}{
+		{
+			name:      "nil response",
+			response:  nil,
+			wantError: "provider returned empty batch response",
+		},
+		{
+			name:      "nil body",
+			response:  &llmclient.Response{StatusCode: http.StatusOK, Body: nil},
+			wantError: "provider returned empty batch response",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := fetchBatchResultsFromOpenAICompatibleEndpoints(
+				context.Background(),
+				"openai",
+				"batch_1",
+				"",
+				func(context.Context, llmclient.Request) (*llmclient.Response, error) {
+					return tt.response, nil
+				},
+				func(context.Context, llmclient.Request) (*http.Response, error) {
+					t.Fatal("unexpected passthrough call")
+					return nil, nil
+				},
+			)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			var gwErr *core.GatewayError
+			if !errors.As(err, &gwErr) {
+				t.Fatalf("expected GatewayError, got %T: %v", err, err)
+			}
+			if gwErr.Type != core.ErrorTypeProvider {
+				t.Fatalf("error type = %q, want %q", gwErr.Type, core.ErrorTypeProvider)
+			}
+			if !strings.Contains(gwErr.Message, tt.wantError) {
+				t.Fatalf("message = %q, want substring %q", gwErr.Message, tt.wantError)
+			}
+		})
 	}
 }

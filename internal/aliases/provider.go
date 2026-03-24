@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"maps"
 	"sort"
 	"strings"
 
@@ -362,18 +363,12 @@ func mergeBatchHints(left, right map[string]string) map[string]string {
 			return nil
 		}
 		merged := make(map[string]string, len(right))
-		for key, value := range right {
-			merged[key] = value
-		}
+		maps.Copy(merged, right)
 		return merged
 	}
 	merged := make(map[string]string, len(left))
-	for key, value := range left {
-		merged[key] = value
-	}
-	for key, value := range right {
-		merged[key] = value
-	}
+	maps.Copy(merged, left)
+	maps.Copy(merged, right)
 	return merged
 }
 

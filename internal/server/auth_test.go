@@ -39,21 +39,21 @@ func TestAuthMiddleware(t *testing.T) {
 			masterKey:      "secret-key-123",
 			authHeader:     "",
 			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   `{"error":{"message":"missing authorization header","type":"authentication_error"}}`,
+			expectedBody:   `{"error":{"message":"missing authorization header","type":"authentication_error","param":null,"code":null}}`,
 		},
 		{
 			name:           "invalid authorization format - denies request",
 			masterKey:      "secret-key-123",
 			authHeader:     "secret-key-123",
 			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   `{"error":{"message":"invalid authorization header format, expected 'Bearer \u003ctoken\u003e'","type":"authentication_error"}}`,
+			expectedBody:   `{"error":{"message":"invalid authorization header format, expected 'Bearer \u003ctoken\u003e'","type":"authentication_error","param":null,"code":null}}`,
 		},
 		{
 			name:           "invalid master key - denies request",
 			masterKey:      "secret-key-123",
 			authHeader:     "Bearer wrong-key",
 			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   `{"error":{"message":"invalid master key","type":"authentication_error"}}`,
+			expectedBody:   `{"error":{"message":"invalid master key","type":"authentication_error","param":null,"code":null}}`,
 		},
 		{
 			name:           "bearer prefix case sensitive - allows request",
@@ -67,7 +67,7 @@ func TestAuthMiddleware(t *testing.T) {
 			masterKey:      "secret-key-123",
 			authHeader:     "Bearer ",
 			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   `{"error":{"message":"invalid master key","type":"authentication_error"}}`,
+			expectedBody:   `{"error":{"message":"invalid master key","type":"authentication_error","param":null,"code":null}}`,
 		},
 	}
 

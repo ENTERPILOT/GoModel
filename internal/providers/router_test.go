@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -189,9 +190,7 @@ func (m *mockBatchProvider) GetBatchResultsWithHints(_ context.Context, batchID 
 	m.capturedBatchID = batchID
 	if len(endpointByCustomID) > 0 {
 		m.capturedBatchHints = make(map[string]string, len(endpointByCustomID))
-		for customID, endpoint := range endpointByCustomID {
-			m.capturedBatchHints[customID] = endpoint
-		}
+		maps.Copy(m.capturedBatchHints, endpointByCustomID)
 	}
 	if m.hintedBatchResults != nil {
 		return m.hintedBatchResults, nil

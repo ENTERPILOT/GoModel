@@ -69,12 +69,12 @@ type Storage interface {
 	// PostgreSQLPool returns the connection pool for PostgreSQL.
 	// Returns nil if not using PostgreSQL.
 	// The actual type is *pgxpool.Pool but we use interface{} to avoid import cycles.
-	PostgreSQLPool() interface{}
+	PostgreSQLPool() any
 
 	// MongoDatabase returns the MongoDB database.
 	// Returns nil if not using MongoDB.
 	// The actual type is *mongo.Database but we use interface{} to avoid import cycles.
-	MongoDatabase() interface{}
+	MongoDatabase() any
 
 	// Close releases all resources held by the storage.
 	Close() error

@@ -8,10 +8,11 @@ import (
 	"path"
 	"strings"
 
+	"gomodel/config"
+
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"gomodel/config"
 
 	"gomodel/internal/admin"
 	"gomodel/internal/admin/dashboard"
@@ -218,7 +219,16 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.GET(metricsPath, echo.WrapHandler(promhttp.Handler()))
 	}
 	if cfg != nil && cfg.PprofEnabled {
-		registerPprofRoutes(e)
+		e.GET("/debug/pprof", echo.WrapHandler(http.HandlerFunc(httppprof.Index)))
+		e.GET("/debug/pprof/", echo.WrapHandler(http.HandlerFunc(httppprof.Index)))
+		e.GET("/debug/pprof/cmdline", echo.WrapHandler(http.HandlerFunc(httppprof.Cmdline)))
+		e.GET("/debug/pprof/profile", echo.WrapHandler(http.HandlerFunc(httppprof.Profile)))
+		e.GET("/debug/pprof/symbol", echo.WrapHandler(http.HandlerFunc(httppprof.Symbol)))
+		e.GET("/debug/pprof/trace", echo.WrapHandler(http.HandlerFunc(httppprof.Trace)))
+		e.GET("/debug/pprof/:profile", func(c *echo.Context) error {
+			httppprof.Handler(c.Param("profile")).ServeHTTP(c.Response(), c.Request())
+			return nil
+		})
 	}
 
 	// API routes
@@ -278,19 +288,6 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		handler:                 handler,
 		responseCacheMiddleware: rcm,
 	}
-}
-
-func registerPprofRoutes(e *echo.Echo) {
-	e.GET("/debug/pprof", echo.WrapHandler(http.HandlerFunc(httppprof.Index)))
-	e.GET("/debug/pprof/", echo.WrapHandler(http.HandlerFunc(httppprof.Index)))
-	e.GET("/debug/pprof/cmdline", echo.WrapHandler(http.HandlerFunc(httppprof.Cmdline)))
-	e.GET("/debug/pprof/profile", echo.WrapHandler(http.HandlerFunc(httppprof.Profile)))
-	e.GET("/debug/pprof/symbol", echo.WrapHandler(http.HandlerFunc(httppprof.Symbol)))
-	e.GET("/debug/pprof/trace", echo.WrapHandler(http.HandlerFunc(httppprof.Trace)))
-	e.GET("/debug/pprof/:profile", func(c *echo.Context) error {
-		httppprof.Handler(c.Param("profile")).ServeHTTP(c.Response(), c.Request())
-		return nil
-	})
 }
 
 func passthroughV1PrefixNormalizationEnabled(cfg *Config) bool {

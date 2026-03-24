@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -123,12 +125,8 @@ func (r *ModelRegistry) Initialize(ctx context.Context) error {
 	r.mu.RLock()
 	providerTypes := make(map[core.Provider]string, len(r.providerTypes))
 	providerNames := make(map[core.Provider]string, len(r.providerNames))
-	for p, t := range r.providerTypes {
-		providerTypes[p] = t
-	}
-	for p, n := range r.providerNames {
-		providerNames[p] = n
-	}
+	maps.Copy(providerTypes, r.providerTypes)
+	maps.Copy(providerNames, r.providerNames)
 	r.mu.RUnlock()
 
 	for _, provider := range providers {
@@ -318,14 +316,10 @@ func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 	modelsByProvider := make(map[string]map[string]*ModelInfo, len(r.modelsByProvider))
 	for providerName, models := range r.modelsByProvider {
 		modelsByProvider[providerName] = make(map[string]*ModelInfo, len(models))
-		for modelID, info := range models {
-			modelsByProvider[providerName][modelID] = info
-		}
+		maps.Copy(modelsByProvider[providerName], models)
 	}
 	providerTypes := make(map[core.Provider]string, len(r.providerTypes))
-	for k, v := range r.providerTypes {
-		providerTypes[k] = v
-	}
+	maps.Copy(providerTypes, r.providerTypes)
 	modelListRaw := r.modelListRaw
 	r.mu.RUnlock()
 
@@ -691,13 +685,16 @@ func (r *ModelRegistry) hasConfiguredProviderNameLocked(providerName string) boo
 	return false
 }
 
-// ModelWithProvider holds a model alongside its provider type string.
+// ModelWithProvider holds a model alongside provider metadata and its public selector.
 type ModelWithProvider struct {
 	Model        core.Model `json:"model"`
 	ProviderType string     `json:"provider_type"`
+	ProviderName string     `json:"provider_name"`
+	Selector     string     `json:"selector"`
 }
 
-// ListModelsWithProvider returns all models with their provider types, sorted by model ID.
+// ListModelsWithProvider returns all provider-backed models with provider metadata,
+// sorted by public selector.
 // The sorted slice is cached and rebuilt only when the underlying models change.
 // Returns a defensive copy so callers cannot mutate the internal cache.
 func (r *ModelRegistry) ListModelsWithProvider() []ModelWithProvider {
@@ -714,14 +711,23 @@ func (r *ModelRegistry) ListModelsWithProvider() []ModelWithProvider {
 		return append([]ModelWithProvider(nil), r.sortedModelsWithProvider...)
 	}
 
-	result := make([]ModelWithProvider, 0, len(r.models))
-	for _, info := range r.models {
-		result = append(result, ModelWithProvider{
-			Model:        info.Model,
-			ProviderType: r.providerTypes[info.Provider],
-		})
+	total := 0
+	for _, providerModels := range r.modelsByProvider {
+		total += len(providerModels)
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Model.ID < result[j].Model.ID })
+
+	result := make([]ModelWithProvider, 0, total)
+	for providerName, providerModels := range r.modelsByProvider {
+		for modelID, info := range providerModels {
+			result = append(result, ModelWithProvider{
+				Model:        info.Model,
+				ProviderType: r.providerTypes[info.Provider],
+				ProviderName: providerName,
+				Selector:     qualifyPublicModelID(providerName, modelID),
+			})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Selector < result[j].Selector })
 
 	r.sortedModelsWithProvider = result
 	return append([]ModelWithProvider(nil), result...)
@@ -738,7 +744,8 @@ var cacheableCategories = map[core.ModelCategory]struct{}{
 	core.CategoryUtility:        {},
 }
 
-// ListModelsWithProviderByCategory returns models filtered by category, sorted by model ID.
+// ListModelsWithProviderByCategory returns provider-backed models filtered by
+// category, sorted by public selector.
 // If category is CategoryAll, returns all models (same as ListModelsWithProvider).
 // Results for known categories are cached and rebuilt only when the underlying models change.
 // Returns a defensive copy so callers cannot mutate the internal cache.
@@ -769,16 +776,20 @@ func (r *ModelRegistry) ListModelsWithProviderByCategory(category core.ModelCate
 	}
 
 	result := make([]ModelWithProvider, 0)
-	for _, info := range r.models {
-		if info.Model.Metadata == nil || !hasCategory(info.Model.Metadata.Categories, category) {
-			continue
+	for providerName, providerModels := range r.modelsByProvider {
+		for modelID, info := range providerModels {
+			if info.Model.Metadata == nil || !hasCategory(info.Model.Metadata.Categories, category) {
+				continue
+			}
+			result = append(result, ModelWithProvider{
+				Model:        info.Model,
+				ProviderType: r.providerTypes[info.Provider],
+				ProviderName: providerName,
+				Selector:     qualifyPublicModelID(providerName, modelID),
+			})
 		}
-		result = append(result, ModelWithProvider{
-			Model:        info.Model,
-			ProviderType: r.providerTypes[info.Provider],
-		})
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Model.ID < result[j].Model.ID })
+	sort.Slice(result, func(i, j int) bool { return result[i].Selector < result[j].Selector })
 
 	if cacheable {
 		if r.categoryCache == nil {
@@ -791,12 +802,7 @@ func (r *ModelRegistry) ListModelsWithProviderByCategory(category core.ModelCate
 
 // hasCategory returns true if the category slice contains the target category.
 func hasCategory(cats []core.ModelCategory, target core.ModelCategory) bool {
-	for _, c := range cats {
-		if c == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(cats, target)
 }
 
 // CategoryCount holds a model category and the number of models in it.
@@ -824,10 +830,14 @@ func (r *ModelRegistry) GetCategoryCounts() []CategoryCount {
 	defer r.mu.RUnlock()
 
 	counts := make(map[core.ModelCategory]int)
-	for _, info := range r.models {
-		if info.Model.Metadata != nil {
-			for _, cat := range info.Model.Metadata.Categories {
-				counts[cat]++
+	total := 0
+	for _, providerModels := range r.modelsByProvider {
+		for _, info := range providerModels {
+			total++
+			if info.Model.Metadata != nil {
+				for _, cat := range info.Model.Metadata.Categories {
+					counts[cat]++
+				}
 			}
 		}
 	}
@@ -837,7 +847,7 @@ func (r *ModelRegistry) GetCategoryCounts() []CategoryCount {
 	for _, cat := range allCategories {
 		count := counts[cat]
 		if cat == core.CategoryAll {
-			count = len(r.models)
+			count = total
 		}
 		displayName := categoryDisplayNames[cat]
 		if displayName == "" {
@@ -881,9 +891,7 @@ func (r *ModelRegistry) EnrichModels() {
 	}
 
 	providerTypes := make(map[core.Provider]string, len(r.providerTypes))
-	for k, v := range r.providerTypes {
-		providerTypes[k] = v
-	}
+	maps.Copy(providerTypes, r.providerTypes)
 
 	accessor := &registryAccessor{models: r.models, providerTypes: providerTypes}
 	accessor.replacements = make(map[*ModelInfo]*ModelInfo, len(r.models))
@@ -943,9 +951,7 @@ func (r *ModelRegistry) snapshotProviderTypes() map[core.Provider]string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	m := make(map[core.Provider]string, len(r.providerTypes))
-	for k, v := range r.providerTypes {
-		m[k] = v
-	}
+	maps.Copy(m, r.providerTypes)
 	return m
 }
 

@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func lookupUnknownField(t *testing.T, fields UnknownJSONFields, key string) json.RawMessage {
+	t.Helper()
+	raw := fields.Lookup(key)
+	if raw == nil {
+		t.Fatalf("unknown field %q missing", key)
+	}
+	return raw
+}
+
 func TestChatRequestJSON_RoundTripPreservesUnknownFields(t *testing.T) {
 	body := []byte(`{
 		"model":"gpt-4o-mini",
@@ -63,11 +72,12 @@ func TestChatRequestJSON_RoundTripPreservesUnknownFields(t *testing.T) {
 	if req.Model != "gpt-4o-mini" {
 		t.Fatalf("Model = %q, want gpt-4o-mini", req.Model)
 	}
-	if req.ExtraFields["x_trace"] == nil || string(req.ExtraFields["x_trace"]) != string(wantExtra["x_trace"]) {
-		t.Fatalf("ExtraFields[x_trace] = %s, want %s", req.ExtraFields["x_trace"], wantExtra["x_trace"])
+	traceField := lookupUnknownField(t, req.ExtraFields, "x_trace")
+	if string(traceField) != string(wantExtra.Lookup("x_trace")) {
+		t.Fatalf("ExtraFields[x_trace] = %s, want %s", traceField, wantExtra.Lookup("x_trace"))
 	}
 	var topTrace map[string]any
-	if err := json.Unmarshal(req.ExtraFields["x_trace"], &topTrace); err != nil {
+	if err := json.Unmarshal(traceField, &topTrace); err != nil {
 		t.Fatalf("failed to unmarshal x_trace: %v", err)
 	}
 	if topTrace["id"] != "trace-1" {
@@ -77,7 +87,7 @@ func TestChatRequestJSON_RoundTripPreservesUnknownFields(t *testing.T) {
 		t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
 	}
 	var messageMeta map[string]any
-	if err := json.Unmarshal(req.Messages[0].ExtraFields["x_message_meta"], &messageMeta); err != nil {
+	if err := json.Unmarshal(lookupUnknownField(t, req.Messages[0].ExtraFields, "x_message_meta"), &messageMeta); err != nil {
 		t.Fatalf("failed to unmarshal x_message_meta: %v", err)
 	}
 	if messageMeta["id"] != "msg-1" {
@@ -86,11 +96,11 @@ func TestChatRequestJSON_RoundTripPreservesUnknownFields(t *testing.T) {
 	if len(req.Messages[0].ToolCalls) != 1 {
 		t.Fatalf("len(ToolCalls) = %d, want 1", len(req.Messages[0].ToolCalls))
 	}
-	if string(req.Messages[0].ToolCalls[0].ExtraFields["x_tool_call"]) != "true" {
-		t.Fatalf("x_tool_call = %s, want true", req.Messages[0].ToolCalls[0].ExtraFields["x_tool_call"])
+	if got := lookupUnknownField(t, req.Messages[0].ToolCalls[0].ExtraFields, "x_tool_call"); string(got) != "true" {
+		t.Fatalf("x_tool_call = %s, want true", got)
 	}
 	var functionMeta map[string]any
-	if err := json.Unmarshal(req.Messages[0].ToolCalls[0].Function.ExtraFields["x_function_meta"], &functionMeta); err != nil {
+	if err := json.Unmarshal(lookupUnknownField(t, req.Messages[0].ToolCalls[0].Function.ExtraFields, "x_function_meta"), &functionMeta); err != nil {
 		t.Fatalf("failed to unmarshal x_function_meta: %v", err)
 	}
 	if functionMeta["strict"] != true {

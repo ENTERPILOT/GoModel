@@ -3,6 +3,7 @@
         return {
             aliases: [],
             aliasesAvailable: true,
+            displayModels: [],
             aliasLoading: false,
             aliasError: '',
             aliasFormError: '',
@@ -20,11 +21,12 @@
                 enabled: true
             },
 
-            get displayModels() {
+            buildDisplayModels() {
                 const rows = this.models.map((model) => ({
                     key: 'model:' + this.qualifiedModelName(model),
                     display_name: this.qualifiedModelName(model),
                     secondary_name: '',
+                    provider_name: model.provider_name || '',
                     provider_type: model.provider_type || '',
                     model: model.model,
                     is_alias: false,
@@ -49,7 +51,12 @@
                 }
 
                 for (const row of rows) {
-                    for (const key of this.modelIdentifierKeys(row.model && row.model.id, row.provider_type)) {
+                    for (const key of this.modelIdentifierKeys(
+                        row.model && row.model.id,
+                        row.provider_type,
+                        row.provider_name,
+                        row.display_name
+                    )) {
                         if (maskingAliases.has(key)) {
                             row.masking_alias = maskingAliases.get(key);
                             break;
@@ -67,6 +74,7 @@
                         key: 'alias:' + alias.name,
                         display_name: alias.name,
                         secondary_name: this.aliasTargetLabel(alias),
+                        provider_name: targetModel ? (targetModel.provider_name || '') : '',
                         provider_type: targetModel ? (targetModel.provider_type || alias.provider_type || '') : (alias.provider_type || ''),
                         model: targetModel ? targetModel.model : { id: alias.name, object: 'model' },
                         is_alias: true,
@@ -84,6 +92,10 @@
                     }
                     return String(a.display_name || '').localeCompare(String(b.display_name || ''));
                 });
+            },
+
+            syncDisplayModels() {
+                this.displayModels = this.buildDisplayModels();
             },
 
             get filteredDisplayModels() {
@@ -121,29 +133,44 @@
                     if (res.status === 503) {
                         this.aliasesAvailable = false;
                         this.aliases = [];
+                        this.syncDisplayModels();
                         return;
                     }
                     this.aliasesAvailable = true;
                     if (!this.handleFetchResponse(res, 'aliases')) {
                         this.aliases = [];
+                        this.syncDisplayModels();
                         return;
                     }
                     const payload = await res.json();
                     this.aliases = Array.isArray(payload) ? payload : [];
+                    this.syncDisplayModels();
                 } catch (e) {
                     console.error('Failed to fetch aliases:', e);
                     this.aliases = [];
                     this.aliasError = 'Unable to load aliases.';
+                    this.syncDisplayModels();
                 } finally {
                     this.aliasLoading = false;
                 }
             },
 
             qualifiedModelName(model) {
-                if (!model || !model.model || !model.model.id) {
+                if (!model) {
+                    return '';
+                }
+                const selector = String(model.selector || '').trim();
+                if (selector) {
+                    return selector;
+                }
+                if (!model.model || !model.model.id) {
                     return '';
                 }
                 const modelID = String(model.model.id || '').trim();
+                const providerName = String(model.provider_name || '').trim();
+                if (providerName) {
+                    return providerName + '/' + modelID;
+                }
                 const providerType = String(model.provider_type || '').trim();
                 if (!providerType || modelID.includes('/')) {
                     return modelID;
@@ -294,19 +321,29 @@
             modelKeys(model) {
                 return this.modelIdentifierKeys(
                     model && model.model ? model.model.id : '',
-                    model ? model.provider_type : ''
+                    model ? model.provider_type : '',
+                    model ? model.provider_name : '',
+                    model ? model.selector : ''
                 );
             },
 
-            modelIdentifierKeys(modelID, providerType) {
+            modelIdentifierKeys(modelID, providerType, providerName, selector) {
                 const keys = new Set();
                 const normalizedModelID = String(modelID || '').trim().toLowerCase();
                 const provider = String(providerType || '').trim().toLowerCase();
+                const providerLabel = String(providerName || '').trim().toLowerCase();
+                const normalizedSelector = String(selector || '').trim().toLowerCase();
+                if (normalizedSelector) {
+                    keys.add(normalizedSelector);
+                }
                 if (!normalizedModelID) {
                     return keys;
                 }
 
                 keys.add(normalizedModelID);
+                if (providerLabel) {
+                    keys.add(providerLabel + '/' + normalizedModelID);
+                }
                 if (provider && !normalizedModelID.includes('/')) {
                     keys.add(provider + '/' + normalizedModelID);
                 }

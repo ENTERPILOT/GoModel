@@ -51,7 +51,7 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_CachesChatRequest(t *testing.T
 	require.NoError(t, err)
 
 	require.Same(t, first, second)
-	require.NotNil(t, first.ExtraFields["response_format"])
+	require.NotNil(t, first.ExtraFields.Lookup("response_format"))
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
@@ -98,7 +98,7 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_CachesResponsesRequest(t *test
 	input, ok := first.Input.([]core.ResponsesInputElement)
 	require.True(t, ok)
 	require.Len(t, input, 1)
-	require.NotNil(t, input[0].ExtraFields["x_trace"])
+	require.NotNil(t, input[0].ExtraFields.Lookup("x_trace"))
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
@@ -127,7 +127,7 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_FallsBackToLiveBodyWhenIngress
 	require.NoError(t, err)
 	require.Equal(t, "text-embedding-3-large", embeddingReq.Model)
 	require.Equal(t, "openai", embeddingReq.Provider)
-	require.NotNil(t, embeddingReq.ExtraFields["x_meta"])
+	require.NotNil(t, embeddingReq.ExtraFields.Lookup("x_meta"))
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
@@ -176,9 +176,9 @@ func TestCanonicalJSONRequestFromSemanticEnvelope_CachesBatchRequest(t *testing.
 	require.NoError(t, err)
 
 	require.Same(t, first, second)
-	require.NotNil(t, first.ExtraFields["x_top"])
+	require.NotNil(t, first.ExtraFields.Lookup("x_top"))
 	require.Len(t, first.Requests, 1)
-	require.NotNil(t, first.Requests[0].ExtraFields["x_item_flag"])
+	require.NotNil(t, first.Requests[0].ExtraFields.Lookup("x_item_flag"))
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)

@@ -50,6 +50,12 @@ func TestIndex_ReturnsHTML(t *testing.T) {
 	if !strings.Contains(body, "audit logs") {
 		t.Errorf("expected audit logs navigation item in page HTML")
 	}
+	if !strings.Contains(body, `x-data="dashboard()"`) {
+		t.Errorf("expected alpine dashboard root in page HTML")
+	}
+	if strings.Contains(body, `x-init="init()"`) {
+		t.Errorf("expected dashboard HTML not to call init() explicitly")
+	}
 }
 
 func TestStatic_ServesCSS(t *testing.T) {

@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"maps"
 	"os"
 	"strings"
 
@@ -13,24 +14,32 @@ type ProviderConfig struct {
 	Type       string
 	APIKey     string
 	BaseURL    string
+	APIVersion string
 	Models     []string
 	Resilience config.ResilienceConfig
 }
 
+const openRouterDefaultBaseURL = "https://openrouter.ai/api/v1"
+
 // knownProviderEnvs maps well-known provider names to their environment variables.
 // This list is the authoritative source for provider auto-discovery from env vars.
 var knownProviderEnvs = []struct {
-	name         string
-	providerType string
-	apiKeyEnv    string
-	baseURLEnv   string
+	name          string
+	providerType  string
+	apiKeyEnv     string
+	baseURLEnv    string
+	apiVersionEnv string
+	defaultBase   string
+	requireBase   bool
 }{
-	{"openai", "openai", "OPENAI_API_KEY", "OPENAI_BASE_URL"},
-	{"anthropic", "anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"},
-	{"gemini", "gemini", "GEMINI_API_KEY", "GEMINI_BASE_URL"},
-	{"xai", "xai", "XAI_API_KEY", "XAI_BASE_URL"},
-	{"groq", "groq", "GROQ_API_KEY", "GROQ_BASE_URL"},
-	{"ollama", "ollama", "OLLAMA_API_KEY", "OLLAMA_BASE_URL"},
+	{"openai", "openai", "OPENAI_API_KEY", "OPENAI_BASE_URL", "", "", false},
+	{"anthropic", "anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "", "", false},
+	{"gemini", "gemini", "GEMINI_API_KEY", "GEMINI_BASE_URL", "", "", false},
+	{"xai", "xai", "XAI_API_KEY", "XAI_BASE_URL", "", "", false},
+	{"groq", "groq", "GROQ_API_KEY", "GROQ_BASE_URL", "", "", false},
+	{"openrouter", "openrouter", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "", openRouterDefaultBaseURL, false},
+	{"azure", "azure", "AZURE_API_KEY", "AZURE_API_BASE", "AZURE_API_VERSION", "", true},
+	{"ollama", "ollama", "OLLAMA_API_KEY", "OLLAMA_BASE_URL", "", "", false},
 }
 
 // resolveProviders applies env var overrides to the raw YAML provider map, filters
@@ -46,15 +55,18 @@ func resolveProviders(raw map[string]config.RawProviderConfig, global config.Res
 // Env var values always win over YAML values for the same provider name.
 func applyProviderEnvVars(raw map[string]config.RawProviderConfig) map[string]config.RawProviderConfig {
 	result := make(map[string]config.RawProviderConfig, len(raw))
-	for k, v := range raw {
-		result[k] = v
-	}
+	maps.Copy(result, raw)
 
 	for _, kp := range knownProviderEnvs {
 		apiKey := os.Getenv(kp.apiKeyEnv)
-		baseURL := os.Getenv(kp.baseURLEnv)
+		explicitBaseURL := normalizeResolvedBaseURL(os.Getenv(kp.baseURLEnv))
+		apiVersion := os.Getenv(kp.apiVersionEnv)
+		baseURL := explicitBaseURL
+		if baseURL == "" && apiKey != "" && kp.defaultBase != "" {
+			baseURL = kp.defaultBase
+		}
 
-		if apiKey == "" && baseURL == "" {
+		if apiKey == "" && baseURL == "" && apiVersion == "" {
 			continue
 		}
 
@@ -63,20 +75,45 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig) map[string]co
 			if apiKey != "" {
 				existing.APIKey = apiKey
 			}
-			if baseURL != "" {
+			if explicitBaseURL != "" {
 				existing.BaseURL = baseURL
+			} else if normalizeResolvedBaseURL(existing.BaseURL) == "" && apiKey != "" && kp.defaultBase != "" {
+				existing.BaseURL = kp.defaultBase
+			}
+			if apiVersion != "" {
+				existing.APIVersion = apiVersion
 			}
 			result[kp.name] = existing
 		} else {
+			if kp.requireBase && explicitBaseURL == "" {
+				continue
+			}
 			result[kp.name] = config.RawProviderConfig{
-				Type:    kp.providerType,
-				APIKey:  apiKey,
-				BaseURL: baseURL,
+				Type:       kp.providerType,
+				APIKey:     apiKey,
+				BaseURL:    baseURL,
+				APIVersion: apiVersion,
 			}
 		}
 	}
 
 	return result
+}
+
+func normalizeResolvedBaseURL(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if isUnresolvedEnvPlaceholder(trimmed) {
+		return ""
+	}
+	return trimmed
+}
+
+func isUnresolvedEnvPlaceholder(value string) bool {
+	if !strings.HasPrefix(value, "${") || !strings.HasSuffix(value, "}") || len(value) <= 3 {
+		return false
+	}
+	inner := value[2 : len(value)-1]
+	return inner != "" && !strings.ContainsAny(inner, "{}")
 }
 
 // filterEmptyProviders removes providers without valid credentials.
@@ -86,6 +123,9 @@ func filterEmptyProviders(raw map[string]config.RawProviderConfig) map[string]co
 	for name, p := range raw {
 		if p.Type == "ollama" {
 			result[name] = p
+			continue
+		}
+		if p.Type == "azure" && strings.TrimSpace(p.BaseURL) == "" {
 			continue
 		}
 		if p.APIKey != "" && !strings.Contains(p.APIKey, "${") {
@@ -112,6 +152,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		Type:       raw.Type,
 		APIKey:     raw.APIKey,
 		BaseURL:    raw.BaseURL,
+		APIVersion: raw.APIVersion,
 		Models:     raw.Models,
 		Resilience: global,
 	}

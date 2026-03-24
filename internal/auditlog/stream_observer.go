@@ -38,7 +38,7 @@ func NewStreamLogObserver(logger LoggerInterface, entry *LogEntry, path string) 
 	}
 }
 
-func (o *StreamLogObserver) OnJSONEvent(event map[string]interface{}) {
+func (o *StreamLogObserver) OnJSONEvent(event map[string]any) {
 	if !o.logBodies || o.builder == nil {
 		return
 	}
@@ -73,7 +73,7 @@ func (o *StreamLogObserver) OnStreamClose() {
 	}
 }
 
-func (o *StreamLogObserver) parseChatCompletionEvent(event map[string]interface{}) {
+func (o *StreamLogObserver) parseChatCompletionEvent(event map[string]any) {
 	if o.builder == nil {
 		return
 	}
@@ -90,13 +90,13 @@ func (o *StreamLogObserver) parseChatCompletionEvent(event map[string]interface{
 		}
 	}
 
-	if choices, ok := event["choices"].([]interface{}); ok && len(choices) > 0 {
-		if choice, ok := choices[0].(map[string]interface{}); ok {
+	if choices, ok := event["choices"].([]any); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]any); ok {
 			if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
 				o.builder.FinishReason = fr
 			}
 
-			if delta, ok := choice["delta"].(map[string]interface{}); ok {
+			if delta, ok := choice["delta"].(map[string]any); ok {
 				if role, ok := delta["role"].(string); ok {
 					o.builder.Role = role
 				}
@@ -108,7 +108,7 @@ func (o *StreamLogObserver) parseChatCompletionEvent(event map[string]interface{
 	}
 }
 
-func (o *StreamLogObserver) parseResponsesAPIEvent(event map[string]interface{}) {
+func (o *StreamLogObserver) parseResponsesAPIEvent(event map[string]any) {
 	if o.builder == nil {
 		return
 	}
@@ -116,7 +116,7 @@ func (o *StreamLogObserver) parseResponsesAPIEvent(event map[string]interface{})
 	eventType, _ := event["type"].(string)
 	switch eventType {
 	case "response.created", "response.completed", "response.done":
-		if resp, ok := event["response"].(map[string]interface{}); ok {
+		if resp, ok := event["response"].(map[string]any); ok {
 			if id, ok := resp["id"].(string); ok {
 				o.builder.ResponseID = id
 			}

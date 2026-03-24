@@ -6,8 +6,6 @@ import (
 	"gomodel/internal/core"
 )
 
-func ptr[T any](v T) *T { return &v }
-
 func TestResolve_NilList(t *testing.T) {
 	meta := Resolve(nil, "openai", "gpt-4o")
 	if meta != nil {
@@ -31,12 +29,12 @@ func TestResolve_DirectModelMatch(t *testing.T) {
 		Models: map[string]ModelEntry{
 			"gpt-4o": {
 				DisplayName:     "GPT-4o",
-				Description:     ptr("Flagship model"),
-				Family:          ptr("gpt-4o"),
+				Description:     new("Flagship model"),
+				Family:          new("gpt-4o"),
 				Modes:           []string{"chat"},
 				Tags:            []string{"flagship", "multimodal"},
-				ContextWindow:   ptr(128000),
-				MaxOutputTokens: ptr(16384),
+				ContextWindow:   new(128000),
+				MaxOutputTokens: new(16384),
 				Capabilities: map[string]bool{
 					"function_calling": true,
 					"streaming":        true,
@@ -44,8 +42,8 @@ func TestResolve_DirectModelMatch(t *testing.T) {
 				},
 				Pricing: &core.ModelPricing{
 					Currency:      "USD",
-					InputPerMtok:  ptr(2.50),
-					OutputPerMtok: ptr(10.00),
+					InputPerMtok:  new(2.50),
+					OutputPerMtok: new(10.00),
 				},
 			},
 		},
@@ -101,12 +99,12 @@ func TestResolve_ProviderModelOverride(t *testing.T) {
 			"gpt-4o": {
 				DisplayName:     "GPT-4o",
 				Modes:           []string{"chat"},
-				ContextWindow:   ptr(128000),
-				MaxOutputTokens: ptr(16384),
+				ContextWindow:   new(128000),
+				MaxOutputTokens: new(16384),
 				Pricing: &core.ModelPricing{
 					Currency:      "USD",
-					InputPerMtok:  ptr(2.50),
-					OutputPerMtok: ptr(10.00),
+					InputPerMtok:  new(2.50),
+					OutputPerMtok: new(10.00),
 				},
 			},
 		},
@@ -114,11 +112,11 @@ func TestResolve_ProviderModelOverride(t *testing.T) {
 			"azure/gpt-4o": {
 				ModelRef:      "gpt-4o",
 				Enabled:       true,
-				ContextWindow: ptr(64000),
+				ContextWindow: new(64000),
 				Pricing: &core.ModelPricing{
 					Currency:      "USD",
-					InputPerMtok:  ptr(5.00),
-					OutputPerMtok: ptr(15.00),
+					InputPerMtok:  new(5.00),
+					OutputPerMtok: new(15.00),
 				},
 			},
 		},
@@ -157,11 +155,11 @@ func TestResolve_ProviderModelWithoutBaseModel(t *testing.T) {
 			"custom/my-model": {
 				ModelRef:      "nonexistent",
 				Enabled:       true,
-				ContextWindow: ptr(32000),
+				ContextWindow: new(32000),
 				Pricing: &core.ModelPricing{
 					Currency:      "USD",
-					InputPerMtok:  ptr(1.00),
-					OutputPerMtok: ptr(2.00),
+					InputPerMtok:  new(1.00),
+					OutputPerMtok: new(2.00),
 				},
 			},
 		},
@@ -258,21 +256,21 @@ func TestResolve_ThreeLayerMerge(t *testing.T) {
 		Models: map[string]ModelEntry{
 			"claude-sonnet-4-20250514": {
 				DisplayName:     "Claude Sonnet 4",
-				Description:     ptr("Fast, intelligent model"),
-				Family:          ptr("claude-sonnet"),
+				Description:     new("Fast, intelligent model"),
+				Family:          new("claude-sonnet"),
 				Modes:           []string{"chat"},
 				Tags:            []string{"flagship"},
-				ContextWindow:   ptr(200000),
-				MaxOutputTokens: ptr(16384),
+				ContextWindow:   new(200000),
+				MaxOutputTokens: new(16384),
 				Capabilities: map[string]bool{
 					"function_calling": true,
 					"vision":           true,
 				},
 				Pricing: &core.ModelPricing{
 					Currency:           "USD",
-					InputPerMtok:       ptr(3.00),
-					OutputPerMtok:      ptr(15.00),
-					CachedInputPerMtok: ptr(0.30),
+					InputPerMtok:       new(3.00),
+					OutputPerMtok:      new(15.00),
+					CachedInputPerMtok: new(0.30),
 				},
 			},
 		},
@@ -280,12 +278,12 @@ func TestResolve_ThreeLayerMerge(t *testing.T) {
 			"bedrock/claude-sonnet-4-20250514": {
 				ModelRef:        "claude-sonnet-4-20250514",
 				Enabled:         true,
-				MaxOutputTokens: ptr(8192),
+				MaxOutputTokens: new(8192),
 				Pricing: &core.ModelPricing{
 					Currency:           "USD",
-					InputPerMtok:       ptr(3.00),
-					OutputPerMtok:      ptr(15.00),
-					CachedInputPerMtok: ptr(0.30),
+					InputPerMtok:       new(3.00),
+					OutputPerMtok:      new(15.00),
+					CachedInputPerMtok: new(0.30),
 				},
 			},
 		},
@@ -320,18 +318,18 @@ func TestResolve_ReverseCustomModelIDLookup(t *testing.T) {
 			"gpt-4o": {
 				DisplayName:   "GPT-4o",
 				Modes:         []string{"chat"},
-				ContextWindow: ptr(128000),
+				ContextWindow: new(128000),
 				Pricing: &core.ModelPricing{
 					Currency:      "USD",
-					InputPerMtok:  ptr(2.50),
-					OutputPerMtok: ptr(10.00),
+					InputPerMtok:  new(2.50),
+					OutputPerMtok: new(10.00),
 				},
 			},
 		},
 		ProviderModels: map[string]ProviderModelEntry{
 			"openai/gpt-4o": {
 				ModelRef:      "gpt-4o",
-				CustomModelID: ptr("gpt-4o-2024-08-06"),
+				CustomModelID: new("gpt-4o-2024-08-06"),
 				Enabled:       true,
 			},
 		},
@@ -365,7 +363,7 @@ func TestResolve_ReverseIndexNotBuilt(t *testing.T) {
 		ProviderModels: map[string]ProviderModelEntry{
 			"openai/gpt-4o": {
 				ModelRef:      "gpt-4o",
-				CustomModelID: ptr("gpt-4o-2024-08-06"),
+				CustomModelID: new("gpt-4o-2024-08-06"),
 				Enabled:       true,
 			},
 		},
@@ -384,23 +382,23 @@ func TestResolve_ReverseIndexWithProviderModelOverride(t *testing.T) {
 			"gpt-4o": {
 				DisplayName:   "GPT-4o",
 				Modes:         []string{"chat"},
-				ContextWindow: ptr(128000),
+				ContextWindow: new(128000),
 				Pricing: &core.ModelPricing{
 					Currency:      "USD",
-					InputPerMtok:  ptr(2.50),
-					OutputPerMtok: ptr(10.00),
+					InputPerMtok:  new(2.50),
+					OutputPerMtok: new(10.00),
 				},
 			},
 		},
 		ProviderModels: map[string]ProviderModelEntry{
 			"openai/gpt-4o": {
 				ModelRef:      "gpt-4o",
-				CustomModelID: ptr("gpt-4o-2024-08-06"),
+				CustomModelID: new("gpt-4o-2024-08-06"),
 				Enabled:       true,
 				Pricing: &core.ModelPricing{
 					Currency:      "USD",
-					InputPerMtok:  ptr(3.00),
-					OutputPerMtok: ptr(12.00),
+					InputPerMtok:  new(3.00),
+					OutputPerMtok: new(12.00),
 				},
 			},
 		},

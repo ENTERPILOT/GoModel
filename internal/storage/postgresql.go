@@ -29,10 +29,7 @@ func NewPostgreSQL(ctx context.Context, cfg PostgreSQLConfig) (Storage, error) {
 
 	// Set connection pool size
 	if cfg.MaxConns > 0 {
-		maxConns := cfg.MaxConns
-		if maxConns > math.MaxInt32 {
-			maxConns = math.MaxInt32
-		}
+		maxConns := min(cfg.MaxConns, math.MaxInt32)
 		poolCfg.MaxConns = int32(maxConns)
 	} else {
 		poolCfg.MaxConns = 10 // default
@@ -61,11 +58,11 @@ func (s *postgresStorage) SQLiteDB() *sql.DB {
 	return nil
 }
 
-func (s *postgresStorage) PostgreSQLPool() interface{} {
+func (s *postgresStorage) PostgreSQLPool() any {
 	return s.pool
 }
 
-func (s *postgresStorage) MongoDatabase() interface{} {
+func (s *postgresStorage) MongoDatabase() any {
 	return nil
 }
 

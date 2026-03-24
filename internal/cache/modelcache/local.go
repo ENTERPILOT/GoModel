@@ -63,7 +63,7 @@ func (c *LocalCache) Set(ctx context.Context, cache *ModelCache) error {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
-	data, err := json.MarshalIndent(cache, "", "  ")
+	data, err := json.Marshal(cache)
 	if err != nil {
 		return fmt.Errorf("failed to marshal cache: %w", err)
 	}

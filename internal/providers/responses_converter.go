@@ -28,7 +28,7 @@ type OpenAIResponsesStreamConverter struct {
 	closed      bool
 	sentCreate  bool
 	sentDone    bool
-	cachedUsage map[string]interface{} // Stores usage from final chunk for inclusion in response.completed
+	cachedUsage map[string]any // Stores usage from final chunk for inclusion in response.completed
 }
 
 // NewOpenAIResponsesStreamConverter creates a new converter that transforms
@@ -47,7 +47,7 @@ func NewOpenAIResponsesStreamConverter(reader io.ReadCloser, model, provider str
 	}
 }
 
-func normalizeToolCallIndex(value interface{}) (int, bool) {
+func normalizeToolCallIndex(value any) (int, bool) {
 	switch v := value.(type) {
 	case int:
 		return v, true
@@ -116,7 +116,7 @@ func (sc *OpenAIResponsesStreamConverter) completePendingToolCalls() string {
 	return out.String()
 }
 
-func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []interface{}) string {
+func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []any) string {
 	var out bytes.Buffer
 
 	if sc.output.AssistantStarted() && !sc.output.AssistantDone() {
@@ -124,7 +124,7 @@ func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []inter
 	}
 
 	for _, item := range toolCalls {
-		toolCall, ok := item.(map[string]interface{})
+		toolCall, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -138,7 +138,7 @@ func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []inter
 			state.CallID = callID
 		}
 
-		function, _ := toolCall["function"].(map[string]interface{})
+		function, _ := toolCall["function"].(map[string]any)
 		if name, _ := function["name"].(string); name != "" {
 			state.Name = name
 		}
@@ -186,9 +186,9 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 	// Send response.created event first
 	if !sc.sentCreate {
 		sc.sentCreate = true
-		createdEvent := map[string]interface{}{
+		createdEvent := map[string]any{
 			"type": "response.created",
-			"response": map[string]interface{}{
+			"response": map[string]any{
 				"id":         sc.responseID,
 				"object":     "response",
 				"status":     "in_progress",
@@ -230,15 +230,15 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 				continue
 			}
 
-			if bytes.HasPrefix(line, []byte("data: ")) {
-				data := bytes.TrimPrefix(line, []byte("data: "))
+			if after, ok := bytes.CutPrefix(line, []byte("data: ")); ok {
+				data := after
 				if bytes.Equal(data, []byte("[DONE]")) {
 					// Send done event
 					if !sc.sentDone {
 						sc.sentDone = true
 						sc.buffer = append(sc.buffer, []byte(sc.output.CompleteAssistantOutput(0))...)
 						sc.buffer = append(sc.buffer, []byte(sc.completePendingToolCalls())...)
-						responseData := map[string]interface{}{
+						responseData := map[string]any{
 							"id":         sc.responseID,
 							"object":     "response",
 							"status":     "completed",
@@ -250,7 +250,7 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 						if sc.cachedUsage != nil {
 							responseData["usage"] = sc.cachedUsage
 						}
-						doneEvent := map[string]interface{}{
+						doneEvent := map[string]any{
 							"type":     "response.completed",
 							"response": responseData,
 						}
@@ -266,25 +266,25 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 				}
 
 				// Parse the chat completion chunk
-				var chunk map[string]interface{}
+				var chunk map[string]any
 				if err := json.Unmarshal(data, &chunk); err != nil {
 					continue
 				}
 
 				// Capture usage data if present (OpenAI sends this in the final chunk)
-				if usage, ok := chunk["usage"].(map[string]interface{}); ok {
+				if usage, ok := chunk["usage"].(map[string]any); ok {
 					sc.cachedUsage = usage
 				}
 
 				// Extract content delta
-				if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
-					if choice, ok := choices[0].(map[string]interface{}); ok {
-						if delta, ok := choice["delta"].(map[string]interface{}); ok {
+				if choices, ok := chunk["choices"].([]any); ok && len(choices) > 0 {
+					if choice, ok := choices[0].(map[string]any); ok {
+						if delta, ok := choice["delta"].(map[string]any); ok {
 							if content, ok := delta["content"].(string); ok && content != "" {
 								sc.reserveAssistantOutput()
 								sc.buffer = append(sc.buffer, []byte(sc.output.StartAssistantOutput(0))...)
 								sc.output.AppendAssistantText(content)
-								deltaEvent := map[string]interface{}{
+								deltaEvent := map[string]any{
 									"type":  "response.output_text.delta",
 									"delta": content,
 								}
@@ -293,9 +293,9 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 									slog.Error("failed to marshal content delta event", "error", err, "response_id", sc.responseID)
 									continue
 								}
-								sc.buffer = append(sc.buffer, []byte(fmt.Sprintf("event: response.output_text.delta\ndata: %s\n\n", jsonData))...)
+								sc.buffer = append(sc.buffer, fmt.Appendf(nil, "event: response.output_text.delta\ndata: %s\n\n", jsonData)...)
 							}
-							if toolCalls, ok := delta["tool_calls"].([]interface{}); ok && len(toolCalls) > 0 {
+							if toolCalls, ok := delta["tool_calls"].([]any); ok && len(toolCalls) > 0 {
 								sc.buffer = append(sc.buffer, []byte(sc.handleToolCallDeltas(toolCalls))...)
 							}
 						}
@@ -315,7 +315,7 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 				sc.sentDone = true
 				sc.buffer = append(sc.buffer, []byte(sc.output.CompleteAssistantOutput(0))...)
 				sc.buffer = append(sc.buffer, []byte(sc.completePendingToolCalls())...)
-				responseData := map[string]interface{}{
+				responseData := map[string]any{
 					"id":         sc.responseID,
 					"object":     "response",
 					"status":     "completed",
@@ -327,7 +327,7 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 				if sc.cachedUsage != nil {
 					responseData["usage"] = sc.cachedUsage
 				}
-				doneEvent := map[string]interface{}{
+				doneEvent := map[string]any{
 					"type":     "response.completed",
 					"response": responseData,
 				}

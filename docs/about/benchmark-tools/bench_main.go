@@ -236,9 +236,7 @@ func main() {
 
 	start := time.Now()
 	for i := 0; i < *concurrency; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range jobs {
 				reqCtx, cancel := context.WithTimeout(context.Background(), *requestTimeout)
 				req, reqErr := http.NewRequestWithContext(reqCtx, http.MethodPost, strings.TrimRight(*baseURL, "/")+"/v1/chat/completions", bytes.NewReader(bodyBytes))
@@ -300,7 +298,7 @@ func main() {
 				results = append(results, r)
 				resultsMu.Unlock()
 			}
-		}()
+		})
 	}
 
 	for i := 0; i < *requests; i++ {

@@ -186,7 +186,7 @@ func buildAuditLogInsert(entries []*LogEntry) (string, []any) {
 			builder.WriteString(", ")
 		}
 		builder.WriteByte('(')
-		for col := 0; col < auditLogInsertColumnCount; col++ {
+		for col := range auditLogInsertColumnCount {
 			if col > 0 {
 				builder.WriteString(", ")
 			}

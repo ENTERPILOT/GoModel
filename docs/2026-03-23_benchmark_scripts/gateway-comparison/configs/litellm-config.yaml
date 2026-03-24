@@ -1,0 +1,15 @@
+model_list:
+  - model_name: "gpt-4o-mini"
+    litellm_params:
+      model: "openai/gpt-4o-mini"
+      api_key: "sk-bench-test-key"
+      api_base: "http://localhost:9999/v1"
+
+general_settings:
+  master_key: null
+  disable_spend_logs: true
+
+litellm_settings:
+  num_retries: 0
+  request_timeout: 60
+  drop_params: true

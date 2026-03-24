@@ -12,13 +12,12 @@ import (
 
 // handleError converts gateway errors to appropriate HTTP responses.
 func handleError(c *echo.Context, err error) error {
-	var gatewayErr *core.GatewayError
-	if errors.As(err, &gatewayErr) {
+	if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
 		auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message)
 		return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 	}
 
-	gatewayErr = core.NewProviderError("", http.StatusInternalServerError, "an unexpected error occurred", err)
+	gatewayErr := core.NewProviderError("", http.StatusInternalServerError, "an unexpected error occurred", err)
 	auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message)
 	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 }

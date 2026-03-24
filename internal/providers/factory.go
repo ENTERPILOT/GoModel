@@ -93,6 +93,11 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 			setter.SetBaseURL(cfg.BaseURL)
 		}
 	}
+	if cfg.APIVersion != "" {
+		if setter, ok := p.(interface{ SetAPIVersion(string) }); ok {
+			setter.SetAPIVersion(cfg.APIVersion)
+		}
+	}
 
 	return p, nil
 }

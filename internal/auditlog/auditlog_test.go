@@ -175,13 +175,13 @@ func TestLogEntryJSON(t *testing.T) {
 
 func TestLogDataWithBodies(t *testing.T) {
 	// Use interface{} types (maps) for bodies - this is how they're stored now
-	requestBody := map[string]interface{}{
+	requestBody := map[string]any{
 		"model":    "gpt-4",
-		"messages": []interface{}{},
+		"messages": []any{},
 	}
-	responseBody := map[string]interface{}{
+	responseBody := map[string]any{
 		"id":      "resp-123",
-		"choices": []interface{}{},
+		"choices": []any{},
 	}
 
 	data := &LogData{
@@ -202,7 +202,7 @@ func TestLogDataWithBodies(t *testing.T) {
 	}
 
 	// Verify bodies are preserved (decoded as map[string]interface{})
-	decodedReqBody, ok := decoded.RequestBody.(map[string]interface{})
+	decodedReqBody, ok := decoded.RequestBody.(map[string]any)
 	if !ok {
 		t.Fatalf("RequestBody is not a map, got %T", decoded.RequestBody)
 	}
@@ -210,7 +210,7 @@ func TestLogDataWithBodies(t *testing.T) {
 		t.Errorf("RequestBody model mismatch: expected gpt-4, got %v", decodedReqBody["model"])
 	}
 
-	decodedRespBody, ok := decoded.ResponseBody.(map[string]interface{})
+	decodedRespBody, ok := decoded.ResponseBody.(map[string]any)
 	if !ok {
 		t.Fatalf("ResponseBody is not a map, got %T", decoded.ResponseBody)
 	}
@@ -302,7 +302,7 @@ func TestLogger(t *testing.T) {
 	defer logger.Close()
 
 	// Write some entries
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		logger.Write(&LogEntry{
 			ID:        fmt.Sprintf("entry-%d", i),
 			Timestamp: time.Now(),
@@ -1156,7 +1156,7 @@ func TestLimitedReaderRequestBodyCapture(t *testing.T) {
 			t.Fatal("body should be under limit")
 		}
 
-		var parsed interface{}
+		var parsed any
 		if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
 			entry.Data.RequestBody = parsed
 		}

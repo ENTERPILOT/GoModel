@@ -9,7 +9,7 @@ import (
 
 type testSSEEvent struct {
 	Name    string
-	Payload map[string]interface{}
+	Payload map[string]any
 	Done    bool
 }
 
@@ -45,7 +45,7 @@ data: [DONE]
 		}
 		switch event.Name {
 		case "response.output_item.added":
-			item, _ := event.Payload["item"].(map[string]interface{})
+			item, _ := event.Payload["item"].(map[string]any)
 			if item["type"] == "function_call" && item["call_id"] == "call_123" && item["name"] == "lookup_weather" {
 				foundAdded = true
 			}
@@ -58,7 +58,7 @@ data: [DONE]
 				foundArgumentsDone = true
 			}
 		case "response.output_item.done":
-			item, _ := event.Payload["item"].(map[string]interface{})
+			item, _ := event.Payload["item"].(map[string]any)
 			if item["type"] == "function_call" && item["arguments"] == `{"city":"Warsaw"}` {
 				foundItemDone = true
 			}
@@ -109,7 +109,7 @@ data: [DONE]
 		}
 		switch event.Name {
 		case "response.output_item.added":
-			item, _ := event.Payload["item"].(map[string]interface{})
+			item, _ := event.Payload["item"].(map[string]any)
 			if item["type"] == "message" && item["role"] == "assistant" && event.Payload["output_index"] == float64(0) {
 				foundAssistantAdded = true
 			}
@@ -117,7 +117,7 @@ data: [DONE]
 				foundToolAddedAtIndexOne = true
 			}
 		case "response.output_item.done":
-			item, _ := event.Payload["item"].(map[string]interface{})
+			item, _ := event.Payload["item"].(map[string]any)
 			if item["type"] == "message" && item["role"] == "assistant" && event.Payload["output_index"] == float64(0) {
 				foundAssistantDone = true
 			}
@@ -170,7 +170,7 @@ data: [DONE]
 		}
 		switch event.Name {
 		case "response.output_item.added":
-			item, _ := event.Payload["item"].(map[string]interface{})
+			item, _ := event.Payload["item"].(map[string]any)
 			if item["type"] == "function_call" {
 				addedCount++
 				if item["call_id"] != "call_123" {
@@ -207,8 +207,8 @@ func parseTestSSEEvents(t *testing.T, raw string) []testSSEEvent {
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "event:") {
-			currentEventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		if after, ok := strings.CutPrefix(line, "event:"); ok {
+			currentEventName = strings.TrimSpace(after)
 			continue
 		}
 		if !strings.HasPrefix(line, "data:") {
@@ -222,7 +222,7 @@ func parseTestSSEEvents(t *testing.T, raw string) []testSSEEvent {
 			continue
 		}
 
-		var payload map[string]interface{}
+		var payload map[string]any
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
 			t.Fatalf("failed to unmarshal SSE payload %q: %v", data, err)
 		}

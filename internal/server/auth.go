@@ -2,10 +2,11 @@ package server
 
 import (
 	"crypto/subtle"
-	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v5"
+
+	"gomodel/internal/core"
 )
 
 // AuthMiddleware creates an Echo middleware that validates the master key
@@ -36,33 +37,21 @@ func AuthMiddleware(masterKey string, skipPaths []string) echo.MiddlewareFunc {
 			// Get Authorization header
 			authHeader := c.Request().Header.Get("Authorization")
 			if authHeader == "" {
-				return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-					"error": map[string]interface{}{
-						"type":    "authentication_error",
-						"message": "missing authorization header",
-					},
-				})
+				authErr := core.NewAuthenticationError("", "missing authorization header")
+				return c.JSON(authErr.HTTPStatusCode(), authErr.ToJSON())
 			}
 
 			// Extract Bearer token
 			const prefix = "Bearer "
 			if !strings.HasPrefix(authHeader, prefix) {
-				return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-					"error": map[string]interface{}{
-						"type":    "authentication_error",
-						"message": "invalid authorization header format, expected 'Bearer <token>'",
-					},
-				})
+				authErr := core.NewAuthenticationError("", "invalid authorization header format, expected 'Bearer <token>'")
+				return c.JSON(authErr.HTTPStatusCode(), authErr.ToJSON())
 			}
 
 			token := strings.TrimPrefix(authHeader, prefix)
 			if subtle.ConstantTimeCompare([]byte(token), []byte(masterKey)) != 1 {
-				return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-					"error": map[string]interface{}{
-						"type":    "authentication_error",
-						"message": "invalid master key",
-					},
-				})
+				authErr := core.NewAuthenticationError("", "invalid master key")
+				return c.JSON(authErr.HTTPStatusCode(), authErr.ToJSON())
 			}
 
 			// Authentication successful, proceed to next handler

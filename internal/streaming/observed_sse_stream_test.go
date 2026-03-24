@@ -10,11 +10,11 @@ import (
 type trackingObserver struct {
 	eventCount  int
 	lastID      string
-	lastPayload map[string]interface{}
+	lastPayload map[string]any
 	closed      bool
 }
 
-func (o *trackingObserver) OnJSONEvent(payload map[string]interface{}) {
+func (o *trackingObserver) OnJSONEvent(payload map[string]any) {
 	o.eventCount++
 	o.lastPayload = payload
 	if id, _ := payload["id"].(string); id != "" {
@@ -112,7 +112,7 @@ func TestObservedSSEStream_ReassemblesMultilineDataEvent(t *testing.T) {
 	if observer.lastID != "chatcmpl-multiline" {
 		t.Fatalf("lastID = %q, want chatcmpl-multiline", observer.lastID)
 	}
-	usage, ok := observer.lastPayload["usage"].(map[string]interface{})
+	usage, ok := observer.lastPayload["usage"].(map[string]any)
 	if !ok {
 		t.Fatalf("usage = %#v, want object", observer.lastPayload["usage"])
 	}
@@ -287,5 +287,51 @@ func TestObservedSSEStream_ParsesCRLFBufferedEventsOnClose(t *testing.T) {
 	}
 	if !observer.closed {
 		t.Fatal("observer was not closed")
+	}
+}
+
+func TestJoinedSuffix(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix []byte
+		data   []byte
+		n      int
+		want   []byte
+	}{
+		{
+			name: "returns nil for non-positive length",
+			data: []byte("abc"),
+			n:    0,
+			want: nil,
+		},
+		{
+			name: "returns suffix from data when data is long enough",
+			data: []byte("abcdef"),
+			n:    3,
+			want: []byte("def"),
+		},
+		{
+			name:   "combines prefix tail and data",
+			prefix: []byte("abcd"),
+			data:   []byte("ef"),
+			n:      4,
+			want:   []byte("cdef"),
+		},
+		{
+			name:   "uses available prefix bytes only",
+			prefix: []byte("ab"),
+			data:   []byte("cd"),
+			n:      5,
+			want:   []byte("abcd"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinedSuffix(tt.prefix, tt.data, tt.n)
+			if !bytes.Equal(got, tt.want) {
+				t.Fatalf("joinedSuffix() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

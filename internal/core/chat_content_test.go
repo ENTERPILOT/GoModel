@@ -187,8 +187,8 @@ func TestMessageUnmarshalJSON_RejectsEmptyJSONTextPart(t *testing.T) {
 }
 
 func TestNormalizeMessageContent_RejectsEmptyMapTextPart(t *testing.T) {
-	_, err := NormalizeMessageContent([]interface{}{
-		map[string]interface{}{
+	_, err := NormalizeMessageContent([]any{
+		map[string]any{
 			"type": "text",
 			"text": "",
 		},
@@ -308,10 +308,10 @@ func TestNormalizeMessageContent_RejectsNilInputAudio(t *testing.T) {
 }
 
 func TestNormalizeMessageContent_InputAudioFromMap(t *testing.T) {
-	result, err := NormalizeMessageContent([]interface{}{
-		map[string]interface{}{
+	result, err := NormalizeMessageContent([]any{
+		map[string]any{
 			"type":        "input_audio",
-			"input_audio": map[string]interface{}{"data": "abc", "format": "wav"},
+			"input_audio": map[string]any{"data": "abc", "format": "wav"},
 		},
 	})
 	if err != nil {
@@ -334,10 +334,10 @@ func TestNormalizeMessageContent_InputAudioFromMap(t *testing.T) {
 }
 
 func TestNormalizeMessageContent_RejectsInputAudioFromMapMissingFields(t *testing.T) {
-	_, err := NormalizeMessageContent([]interface{}{
-		map[string]interface{}{
+	_, err := NormalizeMessageContent([]any{
+		map[string]any{
 			"type":        "input_audio",
-			"input_audio": map[string]interface{}{"data": "", "format": "wav"},
+			"input_audio": map[string]any{"data": "", "format": "wav"},
 		},
 	})
 	if err == nil {

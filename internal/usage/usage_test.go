@@ -52,7 +52,7 @@ func TestLogger(t *testing.T) {
 	logger := NewLogger(store, cfg)
 
 	// Write some entries
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		logger.Write(&UsageEntry{
 			ID:           "test-" + string(rune('0'+i)),
 			RequestID:    "req-" + string(rune('0'+i)),
@@ -105,7 +105,7 @@ func TestLoggerClose(t *testing.T) {
 	logger := NewLogger(store, cfg)
 
 	// Write entries
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		logger.Write(&UsageEntry{
 			ID:        "test-" + string(rune('0'+i)),
 			RequestID: "req-" + string(rune('0'+i)),
@@ -210,7 +210,7 @@ func TestLoggerBufferFull(t *testing.T) {
 	var written atomic.Int32
 
 	// Try to write more than buffer size
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		logger.Write(&UsageEntry{ID: "test-" + string(rune('0'+i))})
 		written.Add(1)
 	}

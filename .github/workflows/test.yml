@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.25"
+  GO_VERSION: "1.26"
 
 # Restrict token permissions to minimum required
 permissions:
@@ -31,7 +31,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.6
+          version: v2.11
           # Temporary workaround: config verification fetches the remote JSON schema and
           # intermittently times out in CI before lint runs. Re-enable by 2026-04-01 once
           # the schema fetch is reliable again; track in this PR/branch discussion.
