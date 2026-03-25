@@ -14,52 +14,141 @@ func Resolve(list *ModelList, providerType string, modelID string) *core.ModelMe
 		return nil
 	}
 
-	// Try provider_model lookup first: "providerType/modelID"
-	var pm *ProviderModelEntry
-	key := providerType + "/" + modelID
-	if entry, ok := list.ProviderModels[key]; ok {
-		pm = &entry
-	}
-
-	// Determine the base model entry
-	var model *ModelEntry
-	if pm != nil {
-		// Use model_ref from provider_model to find the base model
-		if entry, ok := list.Models[pm.ModelRef]; ok {
-			model = &entry
-		}
-	} else {
-		// Fall back to direct model ID lookup
-		if entry, ok := list.Models[modelID]; ok {
-			model = &entry
-		}
-	}
-
-	// No match at all — try reverse lookup via provider_model_id.
-	// Inline the lookup instead of recursing to avoid unbounded recursion
-	// if the reverse index contains cycles or stale entries.
+	model, pm := resolveEntries(list, providerType, modelID)
 	if model == nil && pm == nil {
-		if list.providerModelByActualID != nil {
-			reverseKey := providerType + "/" + modelID
-			if compositeKey, ok := list.providerModelByActualID[reverseKey]; ok {
-				canonicalModelID := compositeKey[len(providerType)+1:]
-				// Look up the provider_model and base model directly
-				if entry, ok := list.ProviderModels[compositeKey]; ok {
-					pm = &entry
-					if baseEntry, ok := list.Models[entry.ModelRef]; ok {
-						model = &baseEntry
-					}
-				} else if baseEntry, ok := list.Models[canonicalModelID]; ok {
-					model = &baseEntry
-				}
-			}
-		}
-		if model == nil && pm == nil {
-			return nil
-		}
+		return nil
 	}
 
 	return buildMetadata(model, pm)
+}
+
+func resolveEntries(list *ModelList, providerType string, modelID string) (*ModelEntry, *ProviderModelEntry) {
+	if model, pm := resolveDirect(list, providerType, modelID); model != nil || pm != nil {
+		return model, pm
+	}
+	if model, pm := resolveReverseProviderModelID(list, providerType, modelID); model != nil || pm != nil {
+		return model, pm
+	}
+	return resolveAlias(list, providerType, modelID)
+}
+
+func resolveDirect(list *ModelList, providerType string, modelID string) (*ModelEntry, *ProviderModelEntry) {
+	if providerType != "" {
+		if entry, ok := list.ProviderModels[providerType+"/"+modelID]; ok {
+			pm := entry
+			return resolveModelRef(list, providerType, pm.ModelRef, &pm)
+		}
+	}
+	if entry, ok := list.Models[modelID]; ok {
+		model := entry
+		return &model, nil
+	}
+	return nil, nil
+}
+
+func resolveReverseProviderModelID(list *ModelList, providerType string, modelID string) (*ModelEntry, *ProviderModelEntry) {
+	if providerType == "" || list.providerModelByActualID == nil {
+		return nil, nil
+	}
+	compositeKey, ok := list.providerModelByActualID[providerType+"/"+modelID]
+	if !ok {
+		return nil, nil
+	}
+	pmEntry, ok := list.ProviderModels[compositeKey]
+	if !ok {
+		return nil, nil
+	}
+	pm := pmEntry
+	return resolveModelRef(list, providerType, pm.ModelRef, &pm)
+}
+
+func resolveAlias(list *ModelList, providerType string, modelID string) (*ModelEntry, *ProviderModelEntry) {
+	if list.aliasTargetsByID == nil {
+		return nil, nil
+	}
+	targets := list.aliasTargetsByID[modelID]
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	modelRef, ok := selectAliasModelRef(list, providerType, targets)
+	if !ok {
+		return nil, nil
+	}
+	return resolveModelRef(list, providerType, modelRef, nil)
+}
+
+func selectAliasModelRef(list *ModelList, providerType string, targets []aliasTarget) (string, bool) {
+	if len(targets) == 0 {
+		return "", false
+	}
+
+	bestScoreByModelRef := make(map[string]int, len(targets))
+	for _, target := range targets {
+		score := aliasTargetScore(providerType, target)
+		if score == 0 {
+			continue
+		}
+		if score > bestScoreByModelRef[target.ModelRef] {
+			bestScoreByModelRef[target.ModelRef] = score
+		}
+	}
+	if len(bestScoreByModelRef) == 0 {
+		return "", false
+	}
+
+	bestScore := 0
+	bestRefs := make([]string, 0, len(bestScoreByModelRef))
+	for modelRef, score := range bestScoreByModelRef {
+		switch {
+		case score > bestScore:
+			bestScore = score
+			bestRefs = []string{modelRef}
+		case score == bestScore:
+			bestRefs = append(bestRefs, modelRef)
+		}
+	}
+	if len(bestRefs) == 1 {
+		return bestRefs[0], true
+	}
+
+	if providerType != "" {
+		withProviderOverride := make([]string, 0, len(bestRefs))
+		for _, modelRef := range bestRefs {
+			if _, ok := list.ProviderModels[providerType+"/"+modelRef]; ok {
+				withProviderOverride = append(withProviderOverride, modelRef)
+			}
+		}
+		if len(withProviderOverride) == 1 {
+			return withProviderOverride[0], true
+		}
+	}
+
+	return "", false
+}
+
+func aliasTargetScore(providerType string, target aliasTarget) int {
+	switch {
+	case target.ProviderType == "":
+		return 1
+	case providerType != "" && target.ProviderType == providerType:
+		return 2
+	default:
+		return 0
+	}
+}
+
+func resolveModelRef(list *ModelList, providerType, modelRef string, pm *ProviderModelEntry) (*ModelEntry, *ProviderModelEntry) {
+	if pm == nil && providerType != "" {
+		if entry, ok := list.ProviderModels[providerType+"/"+modelRef]; ok {
+			providerModel := entry
+			pm = &providerModel
+		}
+	}
+	if entry, ok := list.Models[modelRef]; ok {
+		model := entry
+		return &model, pm
+	}
+	return nil, pm
 }
 
 // buildMetadata merges base model fields with provider-model overrides into ModelMetadata.

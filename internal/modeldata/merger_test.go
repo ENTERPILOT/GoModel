@@ -421,3 +421,74 @@ func TestResolve_ReverseIndexWithProviderModelOverride(t *testing.T) {
 		t.Errorf("OutputPerMtok = %f, want 12.00 (provider override)", *meta.Pricing.OutputPerMtok)
 	}
 }
+
+func TestResolve_ModelAliasUsesProviderOverride(t *testing.T) {
+	list := &ModelList{
+		Providers: map[string]ProviderEntry{
+			"gemini": {DisplayName: "Gemini"},
+		},
+		Models: map[string]ModelEntry{
+			"claude-4-opus": {
+				DisplayName: "Claude 4 Opus",
+				Modes:       []string{"chat"},
+				Aliases:     []string{"claude-opus-4", "gemini/claude-opus-4"},
+				Pricing: &core.ModelPricing{
+					Currency:      "USD",
+					InputPerMtok:  new(15.00),
+					OutputPerMtok: new(75.00),
+				},
+			},
+		},
+		ProviderModels: map[string]ProviderModelEntry{
+			"gemini/claude-4-opus": {
+				ModelRef:      "claude-4-opus",
+				Enabled:       true,
+				ContextWindow: new(200000),
+				Pricing: &core.ModelPricing{
+					Currency:      "USD",
+					InputPerMtok:  new(12.00),
+					OutputPerMtok: new(60.00),
+				},
+			},
+		},
+	}
+	list.buildReverseIndex()
+
+	meta := Resolve(list, "gemini", "claude-opus-4")
+	if meta == nil {
+		t.Fatal("expected non-nil metadata via model alias")
+	}
+	if meta.DisplayName != "Claude 4 Opus" {
+		t.Fatalf("DisplayName = %q, want Claude 4 Opus", meta.DisplayName)
+	}
+	if meta.ContextWindow == nil || *meta.ContextWindow != 200000 {
+		t.Fatalf("ContextWindow = %v, want 200000", meta.ContextWindow)
+	}
+	if meta.Pricing == nil || meta.Pricing.InputPerMtok == nil || *meta.Pricing.InputPerMtok != 12.00 {
+		t.Fatalf("InputPerMtok = %#v, want 12.00", meta.Pricing)
+	}
+}
+
+func TestResolve_AmbiguousModelAliasReturnsNil(t *testing.T) {
+	list := &ModelList{
+		Models: map[string]ModelEntry{
+			"model-a": {
+				DisplayName: "Model A",
+				Modes:       []string{"chat"},
+				Aliases:     []string{"shared-alias"},
+			},
+			"model-b": {
+				DisplayName: "Model B",
+				Modes:       []string{"chat"},
+				Aliases:     []string{"shared-alias"},
+			},
+		},
+		ProviderModels: map[string]ProviderModelEntry{},
+	}
+	list.buildReverseIndex()
+
+	meta := Resolve(list, "openai", "shared-alias")
+	if meta != nil {
+		t.Fatalf("expected nil for ambiguous alias, got %+v", meta)
+	}
+}

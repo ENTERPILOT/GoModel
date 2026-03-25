@@ -133,14 +133,20 @@ func TestParse_BuildsReverseIndex(t *testing.T) {
 	raw := []byte(`{
 		"version": 1,
 		"updated_at": "2025-01-01T00:00:00Z",
-		"providers": {},
+		"providers": {
+			"openai": {"display_name": "OpenAI"}
+		},
 		"models": {
-			"gpt-4o": {"display_name": "GPT-4o", "modes": ["chat"]}
+			"gpt-4o": {
+				"display_name": "GPT-4o",
+				"modes": ["chat"],
+				"aliases": ["gpt-4o-latest", "openai/gpt-4o-latest"]
+			}
 		},
 		"provider_models": {
 			"openai/gpt-4o": {
 				"model_ref": "gpt-4o",
-				"custom_model_id": "gpt-4o-2024-08-06",
+				"provider_model_id": "gpt-4o-2024-08-06",
 				"enabled": true
 			}
 		}
@@ -158,6 +164,29 @@ func TestParse_BuildsReverseIndex(t *testing.T) {
 	}
 	if compositeKey != "openai/gpt-4o" {
 		t.Errorf("reverse index = %s, want openai/gpt-4o", compositeKey)
+	}
+	targets := list.aliasTargetsByID["gpt-4o-latest"]
+	if len(targets) != 2 {
+		t.Fatalf("expected 2 alias targets for gpt-4o-latest, got %d", len(targets))
+	}
+	var sawGeneric bool
+	var sawProviderSpecific bool
+	for _, target := range targets {
+		if target.ModelRef != "gpt-4o" {
+			t.Fatalf("alias target ModelRef = %q, want gpt-4o", target.ModelRef)
+		}
+		if target.ProviderType == "" {
+			sawGeneric = true
+		}
+		if target.ProviderType == "openai" {
+			sawProviderSpecific = true
+		}
+	}
+	if !sawGeneric {
+		t.Fatal("expected generic alias target for gpt-4o-latest")
+	}
+	if !sawProviderSpecific {
+		t.Fatal("expected provider-qualified alias target for gpt-4o-latest")
 	}
 }
 

@@ -303,6 +303,84 @@ func TestModelRegistry(t *testing.T) {
 		}
 	})
 
+	t.Run("EnrichModelsUsesAliasesWithoutAddingSyntheticModels", func(t *testing.T) {
+		registry := NewModelRegistry()
+
+		mock := &registryMockProvider{
+			name: "gemini-provider",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{
+						ID:      "claude-opus-4",
+						Object:  "model",
+						OwnedBy: "gemini",
+					},
+				},
+			},
+		}
+		registry.RegisterProviderWithType(mock, "gemini")
+		if err := registry.Initialize(context.Background()); err != nil {
+			t.Fatalf("Initialize() error = %v", err)
+		}
+
+		raw := []byte(`{
+			"version": 1,
+			"updated_at": "2025-01-01T00:00:00Z",
+			"providers": {
+				"gemini": {
+					"display_name": "Gemini",
+					"api_type": "openai",
+					"supported_modes": ["chat"]
+				}
+			},
+			"models": {
+				"claude-4-opus": {
+					"display_name": "Claude 4 Opus",
+					"modes": ["chat"],
+					"aliases": ["claude-opus-4", "gemini/claude-opus-4"]
+				}
+			},
+			"provider_models": {
+				"gemini/claude-4-opus": {
+					"model_ref": "claude-4-opus",
+					"enabled": true,
+					"context_window": 200000
+				}
+			}
+		}`)
+		list, err := modeldata.Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+		registry.SetModelList(list, raw)
+		registry.EnrichModels()
+
+		if registry.ModelCount() != 1 {
+			t.Fatalf("ModelCount() = %d, want 1", registry.ModelCount())
+		}
+		if synthetic := registry.GetModel("claude-4-opus"); synthetic != nil {
+			t.Fatalf("expected canonical alias target to NOT be materialized, got %+v", synthetic)
+		}
+
+		info := registry.GetModel("claude-opus-4")
+		if info == nil {
+			t.Fatal("expected upstream model ID to remain registered")
+		}
+		if info.Model.ID != "claude-opus-4" {
+			t.Fatalf("Model.ID = %q, want claude-opus-4", info.Model.ID)
+		}
+		if info.Model.Metadata == nil {
+			t.Fatal("expected metadata to be enriched via alias")
+		}
+		if info.Model.Metadata.DisplayName != "Claude 4 Opus" {
+			t.Fatalf("DisplayName = %q, want Claude 4 Opus", info.Model.Metadata.DisplayName)
+		}
+		if info.Model.Metadata.ContextWindow == nil || *info.Model.Metadata.ContextWindow != 200000 {
+			t.Fatalf("ContextWindow = %v, want 200000", info.Model.Metadata.ContextWindow)
+		}
+	})
+
 	t.Run("DuplicateModels", func(t *testing.T) {
 		registry := NewModelRegistry()
 		mock1 := &registryMockProvider{
