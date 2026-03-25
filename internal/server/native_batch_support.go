@@ -49,12 +49,16 @@ func determineBatchProviderType(provider core.RoutableProvider, resolver Request
 	var providerType string
 	resolver = effectiveRequestModelResolver(provider, resolver)
 	for i, item := range req.Requests {
-		selector, err := core.BatchItemModelSelector(req.Endpoint, item)
+		requested, err := core.BatchItemRequestedModelSelector(req.Endpoint, item)
+		if err != nil {
+			return "", core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
+		}
+		selector, err := requested.Normalize()
 		if err != nil {
 			return "", core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
 		}
 		if resolver != nil {
-			selector, _, err = resolver.ResolveModel(selector.Model, selector.Provider)
+			selector, _, err = resolver.ResolveModel(requested)
 			if err != nil {
 				return "", core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
 			}

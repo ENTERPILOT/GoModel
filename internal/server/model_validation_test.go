@@ -267,7 +267,7 @@ func TestModelValidation_StoresExecutionPlan(t *testing.T) {
 		assert.True(t, capturedPlan.Capabilities.AliasResolution)
 		assert.True(t, capturedPlan.Capabilities.ResponseCaching)
 		if assert.NotNil(t, capturedPlan.Resolution) {
-			assert.Equal(t, "gpt-4o-mini", capturedPlan.Resolution.RequestedModel)
+			assert.Equal(t, "gpt-4o-mini", capturedPlan.Resolution.Requested.Model)
 			assert.Equal(t, "gpt-4o-mini", capturedPlan.Resolution.ResolvedSelector.Model)
 		}
 	}

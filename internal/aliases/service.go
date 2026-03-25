@@ -116,44 +116,32 @@ func (s *Service) Get(name string) (*Alias, bool) {
 	return &copy, true
 }
 
-// ResolveSelector resolves a selector through the alias table.
-// Explicit provider selection bypasses aliases.
-func (s *Service) ResolveSelector(selector core.ModelSelector) (Resolution, bool) {
-	resolution := Resolution{Requested: selector, Resolved: selector}
-	if strings.TrimSpace(selector.Provider) != "" {
-		return resolution, false
-	}
-
-	aliasResolution, ok := s.resolveAlias(selector.QualifiedModel())
-	if !ok {
-		return resolution, false
-	}
-	aliasResolution.Requested = selector
-	return aliasResolution, true
-}
-
 // Resolve resolves raw model/provider inputs through the alias table.
 func (s *Service) Resolve(model, provider string) (Resolution, bool, error) {
-	if strings.TrimSpace(provider) == "" {
-		if resolution, ok := s.resolveAlias(model); ok {
+	return s.resolveRequested(core.NewRequestedModelSelector(model, provider))
+}
+
+func (s *Service) resolveRequested(requested core.RequestedModelSelector) (Resolution, bool, error) {
+	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
+	if !requested.ExplicitProvider {
+		if resolution, ok := s.resolveAlias(requested.Model); ok {
 			return resolution, true, nil
 		}
 	}
 
-	selector, err := core.ParseModelSelector(model, provider)
+	selector, err := requested.Normalize()
 	if err != nil {
 		return Resolution{}, false, err
 	}
-	resolution, ok := s.ResolveSelector(selector)
-	return resolution, ok, nil
+	return Resolution{Requested: selector, Resolved: selector}, false, nil
 }
 
 // ResolveModel resolves raw model/provider inputs and returns the concrete
 // selector chosen for execution. This allows alias policy to be consumed as an
 // explicit planning dependency without requiring the provider chain itself to
 // own alias behavior.
-func (s *Service) ResolveModel(model, provider string) (core.ModelSelector, bool, error) {
-	resolution, changed, err := s.Resolve(model, provider)
+func (s *Service) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	resolution, changed, err := s.resolveRequested(requested)
 	if err != nil {
 		return core.ModelSelector{}, false, err
 	}
@@ -162,15 +150,7 @@ func (s *Service) ResolveModel(model, provider string) (core.ModelSelector, bool
 
 // Supports reports whether an alias currently resolves to a concrete model.
 func (s *Service) Supports(model string) bool {
-	if _, ok := s.resolveAlias(model); ok {
-		return true
-	}
-
-	selector, err := core.ParseModelSelector(model, "")
-	if err != nil {
-		return false
-	}
-	_, ok := s.ResolveSelector(selector)
+	_, ok := s.resolveAlias(model)
 	return ok
 }
 
@@ -179,16 +159,7 @@ func (s *Service) GetProviderType(model string) string {
 	if resolution, ok := s.resolveAlias(model); ok {
 		return strings.TrimSpace(s.catalog.GetProviderType(resolution.Resolved.QualifiedModel()))
 	}
-
-	selector, err := core.ParseModelSelector(model, "")
-	if err != nil {
-		return ""
-	}
-	resolution, ok := s.ResolveSelector(selector)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(s.catalog.GetProviderType(resolution.Resolved.QualifiedModel()))
+	return ""
 }
 
 // ExposedModels returns enabled aliases projected as model-list entries.

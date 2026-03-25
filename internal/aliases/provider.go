@@ -46,9 +46,9 @@ func NewProviderWithOptions(inner core.RoutableProvider, service *Service, optio
 	return &Provider{inner: inner, service: service, options: options}
 }
 
-// ResolveModel resolves a model/provider pair through the alias table.
-func (p *Provider) ResolveModel(model, provider string) (core.ModelSelector, bool, error) {
-	return resolveAliasModel(p.service, model, provider)
+// ResolveModel resolves a requested selector through the alias table.
+func (p *Provider) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	return resolveAliasModel(p.service, requested)
 }
 
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {

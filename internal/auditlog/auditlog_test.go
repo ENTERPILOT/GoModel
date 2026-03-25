@@ -471,7 +471,7 @@ func TestMiddleware_PrefersExecutionPlanOverLegacyResolution(t *testing.T) {
 	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
 		ProviderType: "openai",
 		Resolution: &core.RequestModelResolution{
-			RequestedModel:   "anthropic/claude-opus-4-6",
+			Requested:        core.NewRequestedModelSelector("anthropic/claude-opus-4-6", ""),
 			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
 			ProviderType:     "openai",
 			AliasApplied:     true,
@@ -520,7 +520,7 @@ func TestMiddleware_UsesExecutionPlanRequestID(t *testing.T) {
 		RequestID:    "plan-req-id",
 		ProviderType: "openai",
 		Resolution: &core.RequestModelResolution{
-			RequestedModel:   "gpt-5-nano",
+			Requested:        core.NewRequestedModelSelector("gpt-5-nano", ""),
 			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
 			ProviderType:     "openai",
 		},
