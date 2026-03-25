@@ -2,7 +2,7 @@
 
 ## Context
 
-GOModel supports multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, Ollama, xAI, Oracle). Each provider must be registered with the factory before use.
+GOModel supports multiple LLM providers, including OpenAI, Anthropic, Gemini, xAI, Groq, OpenRouter, Azure OpenAI, Oracle, Ollama, and custom OpenAI-compatible endpoints. Each provider must be registered with the factory before use.
 
 ## Decision
 

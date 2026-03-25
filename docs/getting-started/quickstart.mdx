@@ -6,8 +6,9 @@ description: "GOModel AI gateway quick start: run an OpenAI-compatible LLM gatew
 ## Run GOModel in 30 Seconds
 
 GOModel is an OpenAI-compatible AI gateway. You can connect one endpoint and
-route traffic across multiple LLM providers while keeping auth, audit logs, and
-admin visibility in one place.
+route traffic across OpenAI, Anthropic, Gemini, xAI, Groq, OpenRouter, Azure
+OpenAI, Oracle, Ollama, and more while keeping auth, audit logs, and admin
+visibility in one place.
 
 ### 1. Start GOModel
 
@@ -23,8 +24,12 @@ docker run --rm -p 8080:8080 \
 ```
 
 <Note>
-  Set at least one provider credential (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-  `GEMINI_API_KEY`, etc.) or GOModel will have no models to route.
+  Set at least one provider credential or base URL
+  (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`,
+  `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `AZURE_API_KEY` +
+  `AZURE_BASE_URL`, `ORACLE_API_KEY` + `ORACLE_BASE_URL`,
+  `OLLAMA_BASE_URL`) or GOModel will have no models to route. GOModel also
+  works well with additional OpenAI-compatible providers out of the box.
 </Note>
 
 ### 2. Send your first request

@@ -19,6 +19,10 @@ import (
 var Registration = providers.Registration{
 	Type: "ollama",
 	New:  New,
+	Discovery: providers.DiscoveryConfig{
+		DefaultBaseURL:  defaultBaseURL,
+		AllowAPIKeyless: true,
+	},
 }
 
 const (
@@ -35,16 +39,16 @@ type Provider struct {
 }
 
 // New creates a new Ollama provider.
-func New(apiKey string, opts providers.ProviderOptions) core.Provider {
-	p := &Provider{apiKey: apiKey}
-	cfg := llmclient.Config{
+func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
+	p := &Provider{apiKey: providerCfg.APIKey}
+	clientCfg := llmclient.Config{
 		ProviderName:   "ollama",
 		BaseURL:        defaultBaseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
-	p.client = llmclient.New(cfg, p.setHeaders)
+	p.client = llmclient.New(clientCfg, p.setHeaders)
 
 	nativeCfg := llmclient.Config{
 		ProviderName:   "ollama",
@@ -54,6 +58,7 @@ func New(apiKey string, opts providers.ProviderOptions) core.Provider {
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
 	p.nativeClient = llmclient.New(nativeCfg, p.setHeaders)
+	p.SetBaseURL(providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL))
 	return p
 }
 

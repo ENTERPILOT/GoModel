@@ -11,20 +11,10 @@ import (
 	"gomodel/internal/llmclient"
 )
 
-var _ ProviderConstructor = func(_ string, _ ProviderOptions) core.Provider { return nil }
+var _ ProviderConstructor = func(_ ProviderConfig, _ ProviderOptions) core.Provider { return nil }
 
-// factoryMockProvider is a test implementation of core.Provider
 type factoryMockProvider struct {
 	supportsFunc func(model string) bool
-}
-
-type factoryMockProviderWithAPIVersion struct {
-	factoryMockProvider
-	apiVersion string
-}
-
-func (m *factoryMockProviderWithAPIVersion) SetAPIVersion(v string) {
-	m.apiVersion = v
 }
 
 func (m *factoryMockProvider) Supports(model string) bool {
@@ -34,23 +24,23 @@ func (m *factoryMockProvider) Supports(model string) bool {
 	return true
 }
 
-func (m *factoryMockProvider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+func (m *factoryMockProvider) ChatCompletion(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
 	return &core.ChatResponse{}, nil
 }
 
-func (m *factoryMockProvider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+func (m *factoryMockProvider) StreamChatCompletion(_ context.Context, _ *core.ChatRequest) (io.ReadCloser, error) {
 	return nil, nil
 }
 
-func (m *factoryMockProvider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
+func (m *factoryMockProvider) ListModels(_ context.Context) (*core.ModelsResponse, error) {
 	return &core.ModelsResponse{}, nil
 }
 
-func (m *factoryMockProvider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+func (m *factoryMockProvider) Responses(_ context.Context, _ *core.ResponsesRequest) (*core.ResponsesResponse, error) {
 	return &core.ResponsesResponse{}, nil
 }
 
-func (m *factoryMockProvider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
+func (m *factoryMockProvider) StreamResponses(_ context.Context, _ *core.ResponsesRequest) (io.ReadCloser, error) {
 	return nil, nil
 }
 
@@ -63,7 +53,7 @@ func TestProviderFactory_Register(t *testing.T) {
 
 	factory.Add(Registration{
 		Type: "test-provider",
-		New: func(apiKey string, opts ProviderOptions) core.Provider {
+		New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
 			return &factoryMockProvider{}
 		},
 	})
@@ -85,7 +75,7 @@ func TestProviderFactory_Add_PanicsOnEmptyType(t *testing.T) {
 	}()
 	NewProviderFactory().Add(Registration{
 		Type: "",
-		New:  func(_ string, _ ProviderOptions) core.Provider { return nil },
+		New:  func(_ ProviderConfig, _ ProviderOptions) core.Provider { return nil },
 	})
 }
 
@@ -122,7 +112,7 @@ func TestProviderFactory_Create_Success(t *testing.T) {
 
 	factory.Add(Registration{
 		Type: "mock",
-		New: func(apiKey string, opts ProviderOptions) core.Provider {
+		New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
 			return &factoryMockProvider{}
 		},
 	})
@@ -148,7 +138,7 @@ func TestProviderFactory_RegisteredTypes(t *testing.T) {
 	for _, name := range []string{"provider1", "provider2", "provider3"} {
 		factory.Add(Registration{
 			Type: name,
-			New: func(apiKey string, opts ProviderOptions) core.Provider {
+			New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
 				return &factoryMockProvider{}
 			},
 		})
@@ -160,14 +150,12 @@ func TestProviderFactory_RegisteredTypes(t *testing.T) {
 		t.Errorf("expected 3 registered providers, got %d", len(registered))
 	}
 
-	// Check that all expected types are present
 	found := make(map[string]bool)
 	for _, name := range registered {
 		found[name] = true
 	}
 
-	expectedTypes := []string{"provider1", "provider2", "provider3"}
-	for _, expected := range expectedTypes {
+	for _, expected := range []string{"provider1", "provider2", "provider3"} {
 		if !found[expected] {
 			t.Errorf("expected '%s' to be in registered list", expected)
 		}
@@ -179,12 +167,12 @@ func TestProviderFactory_PassthroughSemanticEnrichers(t *testing.T) {
 
 	factory.Add(Registration{
 		Type:                        "provider-b",
-		New:                         func(apiKey string, opts ProviderOptions) core.Provider { return &factoryMockProvider{} },
+		New:                         func(cfg ProviderConfig, opts ProviderOptions) core.Provider { return &factoryMockProvider{} },
 		PassthroughSemanticEnricher: passthroughEnricherStub{providerType: "provider-b"},
 	})
 	factory.Add(Registration{
 		Type:                        "provider-a",
-		New:                         func(apiKey string, opts ProviderOptions) core.Provider { return &factoryMockProvider{} },
+		New:                         func(cfg ProviderConfig, opts ProviderOptions) core.Provider { return &factoryMockProvider{} },
 		PassthroughSemanticEnricher: passthroughEnricherStub{providerType: "provider-a"},
 	})
 
@@ -212,68 +200,40 @@ func (passthroughEnricherStub) Enrich(_ *core.RequestSnapshot, _ *core.WhiteBoxP
 	return info
 }
 
-func TestProviderFactory_Create_WithBaseURL(t *testing.T) {
+func TestProviderFactory_Create_PassesResolvedProviderConfig(t *testing.T) {
 	factory := NewProviderFactory()
 
-	customBaseURL := "https://custom.api.endpoint.com/v1"
-
-	type mockWithBaseURL struct {
-		factoryMockProvider
-	}
-	mockProvider := &mockWithBaseURL{}
-
+	var receivedCfg ProviderConfig
 	factory.Add(Registration{
 		Type: "custom",
-		New: func(apiKey string, opts ProviderOptions) core.Provider {
-			return mockProvider
+		New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
+			receivedCfg = cfg
+			return &factoryMockProvider{}
 		},
 	})
 
 	cfg := ProviderConfig{
-		Type:    "custom",
-		APIKey:  "test-key",
-		BaseURL: customBaseURL,
-	}
-
-	// The factory only calls SetBaseURL if the provider implements it.
-	// Our mock doesn't implement it, so we're just testing that Create succeeds.
-	provider, err := factory.Create(cfg)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if provider == nil {
-		t.Error("expected provider to be created, got nil")
-	}
-}
-
-func TestProviderFactory_Create_WithAPIVersion(t *testing.T) {
-	factory := NewProviderFactory()
-
-	mockProvider := &factoryMockProviderWithAPIVersion{}
-
-	factory.Add(Registration{
-		Type: "azure",
-		New: func(apiKey string, opts ProviderOptions) core.Provider {
-			return mockProvider
-		},
-	})
-
-	cfg := ProviderConfig{
-		Type:       "azure",
+		Type:       "custom",
 		APIKey:     "test-key",
+		BaseURL:    "https://custom.api.endpoint.com/v1",
 		APIVersion: "2025-04-01-preview",
 	}
 
 	provider, err := factory.Create(cfg)
 	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if provider == nil {
 		t.Fatal("expected provider to be created, got nil")
 	}
-	if mockProvider.apiVersion != "2025-04-01-preview" {
-		t.Fatalf("apiVersion = %q, want 2025-04-01-preview", mockProvider.apiVersion)
+	if receivedCfg.APIKey != "test-key" {
+		t.Fatalf("APIKey = %q, want test-key", receivedCfg.APIKey)
+	}
+	if receivedCfg.BaseURL != "https://custom.api.endpoint.com/v1" {
+		t.Fatalf("BaseURL = %q, want custom URL", receivedCfg.BaseURL)
+	}
+	if receivedCfg.APIVersion != "2025-04-01-preview" {
+		t.Fatalf("APIVersion = %q, want 2025-04-01-preview", receivedCfg.APIVersion)
 	}
 }
 
@@ -290,7 +250,7 @@ func TestProviderFactory_SetHooks(t *testing.T) {
 	var receivedOpts ProviderOptions
 	factory.Add(Registration{
 		Type: "test",
-		New: func(apiKey string, opts ProviderOptions) core.Provider {
+		New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
 			receivedOpts = opts
 			return &factoryMockProvider{}
 		},
@@ -322,10 +282,9 @@ func TestProviderFactory_HooksPassedToBuilder(t *testing.T) {
 	factory.SetHooks(mockHooks)
 
 	var receivedOpts ProviderOptions
-
 	factory.Add(Registration{
 		Type: "test",
-		New: func(apiKey string, opts ProviderOptions) core.Provider {
+		New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
 			receivedOpts = opts
 			return &factoryMockProvider{}
 		},
@@ -350,10 +309,9 @@ func TestProviderFactory_ZeroHooks(t *testing.T) {
 	factory := NewProviderFactory()
 
 	var receivedOpts ProviderOptions
-
 	factory.Add(Registration{
 		Type: "test",
-		New: func(apiKey string, opts ProviderOptions) core.Provider {
+		New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
 			receivedOpts = opts
 			return &factoryMockProvider{}
 		},
@@ -380,7 +338,7 @@ func TestProviderFactory_Create_PassesResilienceConfig(t *testing.T) {
 	var receivedOpts ProviderOptions
 	factory.Add(Registration{
 		Type: "test",
-		New: func(apiKey string, opts ProviderOptions) core.Provider {
+		New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
 			receivedOpts = opts
 			return &factoryMockProvider{}
 		},
@@ -431,7 +389,7 @@ func TestProviderFactory_Create_PassesConfiguredModels(t *testing.T) {
 	var receivedOpts ProviderOptions
 	factory.Add(Registration{
 		Type: "test",
-		New: func(apiKey string, opts ProviderOptions) core.Provider {
+		New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
 			receivedOpts = opts
 			return &factoryMockProvider{}
 		},

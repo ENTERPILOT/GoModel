@@ -22,6 +22,9 @@ import (
 var Registration = providers.Registration{
 	Type: "gemini",
 	New:  New,
+	Discovery: providers.DiscoveryConfig{
+		DefaultBaseURL: defaultOpenAICompatibleBaseURL,
+	},
 }
 
 const (
@@ -42,10 +45,11 @@ type Provider struct {
 }
 
 // New creates a new Gemini provider.
-func New(apiKey string, opts providers.ProviderOptions) core.Provider {
+func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
+	baseURL := providers.ResolveBaseURL(providerCfg.BaseURL, defaultOpenAICompatibleBaseURL)
 	p := &Provider{
 		httpClient: nil,
-		apiKey:     apiKey,
+		apiKey:     providerCfg.APIKey,
 		hooks:      opts.Hooks,
 		modelsURL:  defaultModelsBaseURL,
 		modelsClientConf: llmclient.Config{
@@ -56,14 +60,14 @@ func New(apiKey string, opts providers.ProviderOptions) core.Provider {
 			CircuitBreaker: opts.Resilience.CircuitBreaker,
 		},
 	}
-	cfg := llmclient.Config{
+	clientCfg := llmclient.Config{
 		ProviderName:   "gemini",
-		BaseURL:        defaultOpenAICompatibleBaseURL,
+		BaseURL:        baseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
-	p.client = llmclient.New(cfg, p.setHeaders)
+	p.client = llmclient.New(clientCfg, p.setHeaders)
 	return p
 }
 

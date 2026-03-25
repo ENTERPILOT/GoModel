@@ -19,6 +19,9 @@ const defaultBaseURL = "https://example.invalid"
 var Registration = providers.Registration{
 	Type: "oracle",
 	New:  New,
+	Discovery: providers.DiscoveryConfig{
+		RequireBaseURL: true,
+	},
 }
 
 type Provider struct {
@@ -26,12 +29,13 @@ type Provider struct {
 	configuredModels []string
 }
 
-func New(apiKey string, opts providers.ProviderOptions) core.Provider {
+func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
+	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
 	return &Provider{
-		compat: openai.NewCompatibleProvider(apiKey, opts, openai.CompatibleProviderConfig{
-			ProviderName:   "oracle",
-			DefaultBaseURL: defaultBaseURL,
-			SetHeaders:     setHeaders,
+		compat: openai.NewCompatibleProvider(cfg.APIKey, opts, openai.CompatibleProviderConfig{
+			ProviderName: "oracle",
+			BaseURL:      baseURL,
+			SetHeaders:   setHeaders,
 		}),
 		configuredModels: normalizeConfiguredModels(opts.Models),
 	}
@@ -40,9 +44,9 @@ func New(apiKey string, opts providers.ProviderOptions) core.Provider {
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks, models []string) *Provider {
 	return &Provider{
 		compat: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-			ProviderName:   "oracle",
-			DefaultBaseURL: defaultBaseURL,
-			SetHeaders:     setHeaders,
+			ProviderName: "oracle",
+			BaseURL:      defaultBaseURL,
+			SetHeaders:   setHeaders,
 		}),
 		configuredModels: normalizeConfiguredModels(models),
 	}

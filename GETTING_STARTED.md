@@ -197,7 +197,7 @@ Provider credentials:
 | `GROQ_API_KEY`       | Groq                                          |
 | `GROQ_BASE_URL`      | Groq (custom endpoint)                        |
 | `AZURE_API_KEY`      | Azure OpenAI                                  |
-| `AZURE_API_BASE`     | Azure OpenAI deployment base URL              |
+| `AZURE_BASE_URL`     | Azure OpenAI deployment base URL              |
 | `AZURE_API_VERSION`  | Azure OpenAI API version override (default: `2024-10-21`) |
 | `ORACLE_API_KEY`     | Oracle                                        |
 | `ORACLE_BASE_URL`    | Oracle OpenAI-compatible base URL             |
@@ -223,7 +223,7 @@ Setting `CIRCUIT_BREAKER_TIMEOUT=60s` in the environment overrides whatever `tim
 Ollama requires no API key. Even with no YAML and no `OLLAMA_BASE_URL` set, an Ollama provider is registered pointing at `http://localhost:11434/v1`. If you do not want Ollama, make sure no Ollama instance is reachable at that address (the gateway's availability check will remove it from routing if it cannot be reached).
 
 **Azure requires both key and base URL.**
-`AZURE_API_KEY` alone is not enough for auto-discovery. Set `AZURE_API_BASE` to the Azure deployment endpoint as well, otherwise the provider is ignored.
+`AZURE_API_KEY` alone is not enough for auto-discovery. Set `AZURE_BASE_URL` to the Azure deployment endpoint as well, otherwise the provider is ignored.
 
 **Oracle requires both key and base URL.**
 `ORACLE_API_KEY` alone is not enough for auto-discovery. Set `ORACLE_BASE_URL` to the Oracle OpenAI-compatible endpoint, otherwise the provider is ignored.

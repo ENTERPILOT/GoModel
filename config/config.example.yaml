@@ -155,7 +155,7 @@ providers:
   # Example: Azure OpenAI
   # azure:
   #   type: "azure"
-  #   base_url: "${AZURE_API_BASE}"
+  #   base_url: "${AZURE_BASE_URL}"
   #   api_key: "${AZURE_API_KEY}"
   #   api_version: "2024-10-21"
 

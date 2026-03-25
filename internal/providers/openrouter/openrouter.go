@@ -21,6 +21,9 @@ var Registration = providers.Registration{
 	Type:                        "openrouter",
 	New:                         New,
 	PassthroughSemanticEnricher: openai.Registration.PassthroughSemanticEnricher,
+	Discovery: providers.DiscoveryConfig{
+		DefaultBaseURL: defaultBaseURL,
+	},
 }
 
 type Provider struct {
@@ -29,15 +32,16 @@ type Provider struct {
 	appName string
 }
 
-func New(apiKey string, opts providers.ProviderOptions) core.Provider {
+func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
+	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
 	p := &Provider{
 		siteURL: envOrDefault("OPENROUTER_SITE_URL", defaultSiteURL),
 		appName: envOrDefault("OPENROUTER_APP_NAME", defaultAppName),
 	}
-	p.CompatibleProvider = openai.NewCompatibleProvider(apiKey, opts, openai.CompatibleProviderConfig{
-		ProviderName:   "openrouter",
-		DefaultBaseURL: defaultBaseURL,
-		SetHeaders:     setHeaders,
+	p.CompatibleProvider = openai.NewCompatibleProvider(cfg.APIKey, opts, openai.CompatibleProviderConfig{
+		ProviderName: "openrouter",
+		BaseURL:      baseURL,
+		SetHeaders:   setHeaders,
 	})
 	p.SetRequestMutator(p.mutateRequest)
 	return p
@@ -49,9 +53,9 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 		appName: envOrDefault("OPENROUTER_APP_NAME", defaultAppName),
 	}
 	p.CompatibleProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-		ProviderName:   "openrouter",
-		DefaultBaseURL: defaultBaseURL,
-		SetHeaders:     setHeaders,
+		ProviderName: "openrouter",
+		BaseURL:      defaultBaseURL,
+		SetHeaders:   setHeaders,
 	})
 	p.SetRequestMutator(p.mutateRequest)
 	return p

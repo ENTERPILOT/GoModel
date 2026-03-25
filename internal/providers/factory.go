@@ -19,19 +19,30 @@ type ProviderOptions struct {
 }
 
 // ProviderConstructor is the constructor signature for providers.
-type ProviderConstructor func(apiKey string, opts ProviderOptions) core.Provider
+type ProviderConstructor func(cfg ProviderConfig, opts ProviderOptions) core.Provider
+
+// DiscoveryConfig describes how a provider participates in config resolution.
+// Env var names are derived by convention from Registration.Type.
+type DiscoveryConfig struct {
+	DefaultBaseURL     string
+	RequireBaseURL     bool
+	AllowAPIKeyless    bool
+	SupportsAPIVersion bool
+}
 
 // Registration contains metadata for registering a provider with the factory.
 type Registration struct {
 	Type                        string
 	New                         ProviderConstructor
 	PassthroughSemanticEnricher core.PassthroughSemanticEnricher
+	Discovery                   DiscoveryConfig
 }
 
 // ProviderFactory manages provider registration and creation.
 type ProviderFactory struct {
 	mu                   sync.RWMutex
 	builders             map[string]ProviderConstructor
+	discoveryConfigs     map[string]DiscoveryConfig
 	passthroughEnrichers map[string]core.PassthroughSemanticEnricher
 	hooks                llmclient.Hooks
 }
@@ -40,6 +51,7 @@ type ProviderFactory struct {
 func NewProviderFactory() *ProviderFactory {
 	return &ProviderFactory{
 		builders:             make(map[string]ProviderConstructor),
+		discoveryConfigs:     make(map[string]DiscoveryConfig),
 		passthroughEnrichers: make(map[string]core.PassthroughSemanticEnricher),
 	}
 }
@@ -64,6 +76,7 @@ func (f *ProviderFactory) Add(reg Registration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.builders[reg.Type] = reg.New
+	f.discoveryConfigs[reg.Type] = reg.Discovery
 	if reg.PassthroughSemanticEnricher != nil {
 		f.passthroughEnrichers[reg.Type] = reg.PassthroughSemanticEnricher
 	} else {
@@ -88,20 +101,19 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 		Resilience: cfg.Resilience,
 	}
 
-	p := builder(cfg.APIKey, opts)
+	return builder(cfg, opts), nil
+}
 
-	if cfg.BaseURL != "" {
-		if setter, ok := p.(interface{ SetBaseURL(string) }); ok {
-			setter.SetBaseURL(cfg.BaseURL)
-		}
-	}
-	if cfg.APIVersion != "" {
-		if setter, ok := p.(interface{ SetAPIVersion(string) }); ok {
-			setter.SetAPIVersion(cfg.APIVersion)
-		}
-	}
+// discoveryConfigsSnapshot returns provider discovery metadata keyed by provider type.
+func (f *ProviderFactory) discoveryConfigsSnapshot() map[string]DiscoveryConfig {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 
-	return p, nil
+	snapshot := make(map[string]DiscoveryConfig, len(f.discoveryConfigs))
+	for providerType, cfg := range f.discoveryConfigs {
+		snapshot[providerType] = cfg
+	}
+	return snapshot
 }
 
 // RegisteredTypes returns a list of all registered provider types.

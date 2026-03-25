@@ -16,7 +16,7 @@ type RequestMutator func(*llmclient.Request)
 
 type CompatibleProviderConfig struct {
 	ProviderName   string
-	DefaultBaseURL string
+	BaseURL        string
 	SetHeaders     func(*http.Request, string)
 	RequestMutator RequestMutator
 }
@@ -36,7 +36,7 @@ func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg Co
 	}
 	clientCfg := llmclient.Config{
 		ProviderName:   cfg.ProviderName,
-		BaseURL:        cfg.DefaultBaseURL,
+		BaseURL:        cfg.BaseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
@@ -58,7 +58,7 @@ func NewCompatibleProviderWithHTTPClient(apiKey string, httpClient *http.Client,
 		providerName:   cfg.ProviderName,
 		requestMutator: cfg.RequestMutator,
 	}
-	clientCfg := llmclient.DefaultConfig(cfg.ProviderName, cfg.DefaultBaseURL)
+	clientCfg := llmclient.DefaultConfig(cfg.ProviderName, cfg.BaseURL)
 	clientCfg.Hooks = hooks
 	p.client = llmclient.NewWithHTTPClient(httpClient, clientCfg, func(req *http.Request) {
 		if cfg.SetHeaders != nil {

@@ -98,7 +98,7 @@ func SetupTestServer(t *testing.T, cfg TestServerConfig) *TestServerFixture {
 	testProvider := NewTestProvider(mockLLM.URL(), "sk-test-key")
 	factory.Add(providers.Registration{
 		Type: "test",
-		New:  func(_ string, _ providers.ProviderOptions) core.Provider { return testProvider },
+		New:  func(_ providers.ProviderConfig, _ providers.ProviderOptions) core.Provider { return testProvider },
 	})
 
 	// Create app

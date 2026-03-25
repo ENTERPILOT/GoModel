@@ -19,6 +19,10 @@ var Registration = providers.Registration{
 	Type:                        "azure",
 	New:                         New,
 	PassthroughSemanticEnricher: openai.Registration.PassthroughSemanticEnricher,
+	Discovery: providers.DiscoveryConfig{
+		RequireBaseURL:     true,
+		SupportsAPIVersion: true,
+	},
 }
 
 type Provider struct {
@@ -28,28 +32,31 @@ type Provider struct {
 	apiVersion             string
 }
 
-func New(apiKey string, opts providers.ProviderOptions) core.Provider {
-	p := &Provider{apiVersion: defaultAPIVersion}
-	cfg := openai.CompatibleProviderConfig{
-		ProviderName:   "azure",
-		DefaultBaseURL: "https://example.invalid",
-		SetHeaders:     setHeaders,
+func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
+	baseURL := providers.ResolveBaseURL(providerCfg.BaseURL, "https://example.invalid")
+	apiVersion := providers.ResolveAPIVersion(providerCfg.APIVersion, defaultAPIVersion)
+	p := &Provider{apiVersion: apiVersion}
+	clientCfg := openai.CompatibleProviderConfig{
+		ProviderName: "azure",
+		BaseURL:      baseURL,
+		SetHeaders:   setHeaders,
 	}
-	p.CompatibleProvider = openai.NewCompatibleProvider(apiKey, opts, cfg)
-	p.resourceProvider = openai.NewCompatibleProvider(apiKey, opts, cfg)
-	p.openAIResourceProvider = openai.NewCompatibleProvider(apiKey, opts, cfg)
+	p.CompatibleProvider = openai.NewCompatibleProvider(providerCfg.APIKey, opts, clientCfg)
+	p.resourceProvider = openai.NewCompatibleProvider(providerCfg.APIKey, opts, clientCfg)
+	p.openAIResourceProvider = openai.NewCompatibleProvider(providerCfg.APIKey, opts, clientCfg)
 	p.SetRequestMutator(p.mutateRequest)
 	p.resourceProvider.SetRequestMutator(p.mutateRequest)
 	p.openAIResourceProvider.SetRequestMutator(p.mutateRequest)
+	p.SetBaseURL(baseURL)
 	return p
 }
 
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	p := &Provider{apiVersion: defaultAPIVersion}
 	cfg := openai.CompatibleProviderConfig{
-		ProviderName:   "azure",
-		DefaultBaseURL: "https://example.invalid",
-		SetHeaders:     setHeaders,
+		ProviderName: "azure",
+		BaseURL:      "https://example.invalid",
+		SetHeaders:   setHeaders,
 	}
 	p.CompatibleProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg)
 	p.resourceProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg)

@@ -17,6 +17,38 @@ var globalRetry = config.RetryConfig{
 
 var globalResilience = config.ResilienceConfig{Retry: globalRetry}
 
+var testDiscoveryConfigs = map[string]DiscoveryConfig{
+	"openai": {
+		DefaultBaseURL: "https://api.openai.com/v1",
+	},
+	"anthropic": {
+		DefaultBaseURL: "https://api.anthropic.com/v1",
+	},
+	"gemini": {
+		DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+	},
+	"xai": {
+		DefaultBaseURL: "https://api.x.ai/v1",
+	},
+	"groq": {
+		DefaultBaseURL: "https://api.groq.com/openai/v1",
+	},
+	"openrouter": {
+		DefaultBaseURL: "https://openrouter.ai/api/v1",
+	},
+	"azure": {
+		RequireBaseURL:     true,
+		SupportsAPIVersion: true,
+	},
+	"oracle": {
+		RequireBaseURL: true,
+	},
+	"ollama": {
+		DefaultBaseURL:  "http://localhost:11434/v1",
+		AllowAPIKeyless: true,
+	},
+}
+
 // --- buildProviderConfig ---
 
 func TestBuildProviderConfig_InheritsGlobal(t *testing.T) {
@@ -186,7 +218,7 @@ func TestFilterEmptyProviders_RemovesEmptyAPIKey(t *testing.T) {
 		"openai":    {Type: "openai", APIKey: ""},
 		"anthropic": {Type: "anthropic", APIKey: "sk-ant"},
 	}
-	got := filterEmptyProviders(raw)
+	got := filterEmptyProviders(raw, testDiscoveryConfigs)
 
 	if _, exists := got["openai"]; exists {
 		t.Error("expected openai with empty API key to be removed")
@@ -201,7 +233,7 @@ func TestFilterEmptyProviders_RemovesUnresolvedPlaceholder(t *testing.T) {
 		"openai":    {Type: "openai", APIKey: "${OPENAI_API_KEY}"},
 		"anthropic": {Type: "anthropic", APIKey: "sk-real"},
 	}
-	got := filterEmptyProviders(raw)
+	got := filterEmptyProviders(raw, testDiscoveryConfigs)
 
 	if _, exists := got["openai"]; exists {
 		t.Error("expected openai with unresolved placeholder to be removed")
@@ -215,7 +247,7 @@ func TestFilterEmptyProviders_RemovesPartialPlaceholder(t *testing.T) {
 	raw := map[string]config.RawProviderConfig{
 		"openai": {Type: "openai", APIKey: "prefix-${UNRESOLVED}"},
 	}
-	got := filterEmptyProviders(raw)
+	got := filterEmptyProviders(raw, testDiscoveryConfigs)
 
 	if _, exists := got["openai"]; exists {
 		t.Error("expected provider with partial placeholder to be removed")
@@ -233,7 +265,7 @@ func TestFilterEmptyProviders_OllamaAlwaysKept(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := filterEmptyProviders(map[string]config.RawProviderConfig{"ollama": tc.raw})
+			got := filterEmptyProviders(map[string]config.RawProviderConfig{"ollama": tc.raw}, testDiscoveryConfigs)
 			if _, exists := got["ollama"]; !exists {
 				t.Errorf("expected ollama to be kept (%s)", tc.name)
 			}
@@ -242,7 +274,7 @@ func TestFilterEmptyProviders_OllamaAlwaysKept(t *testing.T) {
 }
 
 func TestFilterEmptyProviders_EmptyMap(t *testing.T) {
-	got := filterEmptyProviders(map[string]config.RawProviderConfig{})
+	got := filterEmptyProviders(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 	if len(got) != 0 {
 		t.Errorf("expected empty result, got %d entries", len(got))
 	}
@@ -253,7 +285,7 @@ func TestFilterEmptyProviders_RemovesAzureByTypeWithoutBaseURL(t *testing.T) {
 		"my-azure": {Type: "azure", APIKey: "sk-azure"},
 	}
 
-	got := filterEmptyProviders(raw)
+	got := filterEmptyProviders(raw, testDiscoveryConfigs)
 
 	if _, exists := got["my-azure"]; exists {
 		t.Fatal("expected azure provider without base URL to be removed regardless of map key")
@@ -265,7 +297,7 @@ func TestFilterEmptyProviders_RemovesOracleByTypeWithoutBaseURL(t *testing.T) {
 		"oracle-primary": {Type: "oracle", APIKey: "oracle-key"},
 	}
 
-	got := filterEmptyProviders(raw)
+	got := filterEmptyProviders(raw, testDiscoveryConfigs)
 
 	if _, exists := got["oracle-primary"]; exists {
 		t.Fatal("expected oracle provider without base URL to be removed regardless of map key")
@@ -277,7 +309,7 @@ func TestFilterEmptyProviders_RemovesOracleByTypeWithoutBaseURL(t *testing.T) {
 func TestApplyProviderEnvVars_DiscoversFromAPIKey(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-from-env")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["openai"]
 	if !exists {
@@ -294,7 +326,7 @@ func TestApplyProviderEnvVars_DiscoversFromAPIKey(t *testing.T) {
 func TestApplyProviderEnvVars_DiscoversFromBaseURL(t *testing.T) {
 	t.Setenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["ollama"]
 	if !exists {
@@ -308,7 +340,7 @@ func TestApplyProviderEnvVars_DiscoversFromBaseURL(t *testing.T) {
 func TestApplyProviderEnvVars_DiscoversOpenRouterFromAPIKey(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["openrouter"]
 	if !exists {
@@ -320,16 +352,16 @@ func TestApplyProviderEnvVars_DiscoversOpenRouterFromAPIKey(t *testing.T) {
 	if p.Type != "openrouter" {
 		t.Errorf("Type = %q, want openrouter", p.Type)
 	}
-	if p.BaseURL != "https://openrouter.ai/api/v1" {
-		t.Errorf("BaseURL = %q, want https://openrouter.ai/api/v1", p.BaseURL)
+	if p.BaseURL != testDiscoveryConfigs["openrouter"].DefaultBaseURL {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["openrouter"].DefaultBaseURL)
 	}
 }
 
 func TestApplyProviderEnvVars_DiscoversAzureFromExplicitEnvVars(t *testing.T) {
 	t.Setenv("AZURE_API_KEY", "sk-azure")
-	t.Setenv("AZURE_API_BASE", "https://example-resource.openai.azure.com/openai/deployments/gpt-4o")
+	t.Setenv("AZURE_BASE_URL", "https://example-resource.openai.azure.com/openai/deployments/gpt-4o")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["azure"]
 	if !exists {
@@ -348,10 +380,10 @@ func TestApplyProviderEnvVars_DiscoversAzureFromExplicitEnvVars(t *testing.T) {
 
 func TestApplyProviderEnvVars_AzureAPIVersionEnvWins(t *testing.T) {
 	t.Setenv("AZURE_API_KEY", "sk-azure")
-	t.Setenv("AZURE_API_BASE", "https://example-resource.openai.azure.com/openai/deployments/gpt-4o")
+	t.Setenv("AZURE_BASE_URL", "https://example-resource.openai.azure.com/openai/deployments/gpt-4o")
 	t.Setenv("AZURE_API_VERSION", "2025-04-01-preview")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["azure"]
 	if !exists {
@@ -374,7 +406,7 @@ func TestApplyProviderEnvVars_AzureAPIVersionEnvWinsWithoutOtherAzureEnvVars(t *
 		},
 	}
 
-	got := applyProviderEnvVars(raw)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
 	if got["azure"].APIVersion != "2025-04-01-preview" {
 		t.Fatalf("APIVersion = %q, want 2025-04-01-preview", got["azure"].APIVersion)
@@ -384,10 +416,10 @@ func TestApplyProviderEnvVars_AzureAPIVersionEnvWinsWithoutOtherAzureEnvVars(t *
 func TestApplyProviderEnvVars_DoesNotDiscoverAzureWithoutBaseURL(t *testing.T) {
 	t.Setenv("AZURE_API_KEY", "sk-azure")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	if _, exists := got["azure"]; exists {
-		t.Fatal("expected azure not to be discovered without AZURE_API_BASE")
+		t.Fatal("expected azure not to be discovered without AZURE_BASE_URL")
 	}
 }
 
@@ -395,7 +427,7 @@ func TestApplyProviderEnvVars_DiscoversOracleFromExplicitEnvVars(t *testing.T) {
 	t.Setenv("ORACLE_API_KEY", "oracle-key")
 	t.Setenv("ORACLE_BASE_URL", "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["oracle"]
 	if !exists {
@@ -415,7 +447,7 @@ func TestApplyProviderEnvVars_DiscoversOracleFromExplicitEnvVars(t *testing.T) {
 func TestApplyProviderEnvVars_DoesNotDiscoverOracleWithoutBaseURL(t *testing.T) {
 	t.Setenv("ORACLE_API_KEY", "oracle-key")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	if _, exists := got["oracle"]; exists {
 		t.Fatal("expected oracle not to be discovered without ORACLE_BASE_URL")
@@ -428,7 +460,7 @@ func TestApplyProviderEnvVars_EnvWinsOverYAML(t *testing.T) {
 	raw := map[string]config.RawProviderConfig{
 		"openai": {Type: "openai", APIKey: "sk-yaml-key", BaseURL: "https://custom.api.com"},
 	}
-	got := applyProviderEnvVars(raw)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
 	if got["openai"].APIKey != "sk-env-key" {
 		t.Errorf("APIKey = %q, want sk-env-key (env should win over YAML)", got["openai"].APIKey)
@@ -444,7 +476,7 @@ func TestApplyProviderEnvVars_BaseURLEnvWinsOverYAML(t *testing.T) {
 	raw := map[string]config.RawProviderConfig{
 		"openai": {Type: "openai", APIKey: "sk-key", BaseURL: "https://yaml-url.com"},
 	}
-	got := applyProviderEnvVars(raw)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
 	if got["openai"].BaseURL != "https://env-override.com" {
 		t.Errorf("BaseURL = %q, want https://env-override.com", got["openai"].BaseURL)
@@ -458,10 +490,10 @@ func TestApplyProviderEnvVars_DefaultBaseReplacesPlaceholderYAMLBaseURL(t *testi
 		"openrouter": {Type: "openrouter", APIKey: "sk-yaml", BaseURL: "${OPENROUTER_BASE_URL}"},
 	}
 
-	got := applyProviderEnvVars(raw)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
-	if got["openrouter"].BaseURL != openRouterDefaultBaseURL {
-		t.Fatalf("BaseURL = %q, want %q", got["openrouter"].BaseURL, openRouterDefaultBaseURL)
+	if got["openrouter"].BaseURL != testDiscoveryConfigs["openrouter"].DefaultBaseURL {
+		t.Fatalf("BaseURL = %q, want %q", got["openrouter"].BaseURL, testDiscoveryConfigs["openrouter"].DefaultBaseURL)
 	}
 }
 
@@ -469,21 +501,21 @@ func TestApplyProviderEnvVars_PlaceholderBaseURLEnvFallsBackToDefault(t *testing
 	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
 	t.Setenv("OPENROUTER_BASE_URL", "${OPENROUTER_BASE_URL}")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
-	if got["openrouter"].BaseURL != openRouterDefaultBaseURL {
-		t.Fatalf("BaseURL = %q, want %q", got["openrouter"].BaseURL, openRouterDefaultBaseURL)
+	if got["openrouter"].BaseURL != testDiscoveryConfigs["openrouter"].DefaultBaseURL {
+		t.Fatalf("BaseURL = %q, want %q", got["openrouter"].BaseURL, testDiscoveryConfigs["openrouter"].DefaultBaseURL)
 	}
 }
 
 func TestApplyProviderEnvVars_DoesNotDiscoverAzureWithPlaceholderBaseURL(t *testing.T) {
 	t.Setenv("AZURE_API_KEY", "sk-azure")
-	t.Setenv("AZURE_API_BASE", "${AZURE_API_BASE}")
+	t.Setenv("AZURE_BASE_URL", "${AZURE_BASE_URL}")
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	if _, exists := got["azure"]; exists {
-		t.Fatal("expected azure not to be discovered with placeholder AZURE_API_BASE")
+		t.Fatal("expected azure not to be discovered with placeholder AZURE_BASE_URL")
 	}
 }
 
@@ -500,7 +532,7 @@ func TestApplyProviderEnvVars_PreservesYAMLResilience(t *testing.T) {
 			},
 		},
 	}
-	got := applyProviderEnvVars(raw)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
 	if got["openai"].Resilience == nil || got["openai"].Resilience.Retry == nil {
 		t.Fatal("expected YAML resilience to be preserved after env var overlay")
@@ -512,11 +544,15 @@ func TestApplyProviderEnvVars_PreservesYAMLResilience(t *testing.T) {
 
 func TestApplyProviderEnvVars_SkipsWhenNoEnvVars(t *testing.T) {
 	// Ensure no ambient env vars interfere
-	for _, kp := range knownProviderEnvs {
-		t.Setenv(kp.apiKeyEnv, "")
-		t.Setenv(kp.baseURLEnv, "")
+	for providerType, spec := range testDiscoveryConfigs {
+		envNames := derivedEnvNames(providerType)
+		t.Setenv(envNames.APIKey, "")
+		t.Setenv(envNames.BaseURL, "")
+		if spec.SupportsAPIVersion {
+			t.Setenv(envNames.APIVersion, "")
+		}
 	}
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{})
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 	if len(got) != 0 {
 		t.Errorf("expected empty result when no env vars set, got %d entries", len(got))
 	}
@@ -526,10 +562,10 @@ func TestApplyProviderEnvVars_PreservesUnknownYAMLProviders(t *testing.T) {
 	raw := map[string]config.RawProviderConfig{
 		"custom-provider": {Type: "custom", APIKey: "sk-custom"},
 	}
-	got := applyProviderEnvVars(raw)
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
 	if _, exists := got["custom-provider"]; !exists {
-		t.Error("expected custom (non-knownProviderEnvs) YAML provider to be preserved")
+		t.Error("expected custom (non-registered) YAML provider to be preserved")
 	}
 }
 
@@ -667,7 +703,7 @@ func TestResolveProviders_EndToEnd(t *testing.T) {
 		},
 	}
 
-	got := resolveProviders(raw, globalResilience)
+	got := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
 
 	if _, exists := got["bad"]; exists {
 		t.Error("expected provider with unresolved placeholder to be filtered out")
@@ -686,7 +722,7 @@ func TestResolveProviders_EndToEnd(t *testing.T) {
 func TestResolveProviders_EmptyRaw_OnlyEnvVars(t *testing.T) {
 	t.Setenv("GROQ_API_KEY", "sk-groq")
 
-	got := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience)
+	got := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
 
 	if got["groq"].APIKey != "sk-groq" {
 		t.Errorf("groq APIKey = %q, want sk-groq", got["groq"].APIKey)
@@ -694,7 +730,7 @@ func TestResolveProviders_EmptyRaw_OnlyEnvVars(t *testing.T) {
 }
 
 func TestResolveProviders_NoProvidersNoEnvVars(t *testing.T) {
-	got := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience)
+	got := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
 	if len(got) != 0 {
 		t.Errorf("expected empty result, got %d entries", len(got))
 	}

@@ -16,6 +16,9 @@ var Registration = providers.Registration{
 	Type:                        "openai",
 	New:                         New,
 	PassthroughSemanticEnricher: passthroughSemanticEnricher{},
+	Discovery: providers.DiscoveryConfig{
+		DefaultBaseURL: defaultBaseURL,
+	},
 }
 
 const (
@@ -28,12 +31,13 @@ type Provider struct {
 }
 
 // New creates a new OpenAI provider.
-func New(apiKey string, opts providers.ProviderOptions) core.Provider {
+func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
+	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
 	return &Provider{
-		CompatibleProvider: NewCompatibleProvider(apiKey, opts, CompatibleProviderConfig{
-			ProviderName:   "openai",
-			DefaultBaseURL: defaultBaseURL,
-			SetHeaders:     setHeaders,
+		CompatibleProvider: NewCompatibleProvider(cfg.APIKey, opts, CompatibleProviderConfig{
+			ProviderName: "openai",
+			BaseURL:      baseURL,
+			SetHeaders:   setHeaders,
 		}),
 	}
 }
@@ -43,9 +47,9 @@ func New(apiKey string, opts providers.ProviderOptions) core.Provider {
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	return &Provider{
 		CompatibleProvider: NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, CompatibleProviderConfig{
-			ProviderName:   "openai",
-			DefaultBaseURL: defaultBaseURL,
-			SetHeaders:     setHeaders,
+			ProviderName: "openai",
+			BaseURL:      defaultBaseURL,
+			SetHeaders:   setHeaders,
 		}),
 	}
 }

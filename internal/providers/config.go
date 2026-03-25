@@ -3,7 +3,9 @@ package providers
 import (
 	"maps"
 	"os"
+	"sort"
 	"strings"
+	"unicode"
 
 	"gomodel/config"
 )
@@ -19,78 +21,60 @@ type ProviderConfig struct {
 	Resilience config.ResilienceConfig
 }
 
-const openRouterDefaultBaseURL = "https://openrouter.ai/api/v1"
-
-// knownProviderEnvs maps well-known provider names to their environment variables.
-// This list is the authoritative source for provider auto-discovery from env vars.
-var knownProviderEnvs = []struct {
-	name          string
-	providerType  string
-	apiKeyEnv     string
-	baseURLEnv    string
-	apiVersionEnv string
-	defaultBase   string
-	requireBase   bool
-}{
-	{"openai", "openai", "OPENAI_API_KEY", "OPENAI_BASE_URL", "", "", false},
-	{"anthropic", "anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "", "", false},
-	{"gemini", "gemini", "GEMINI_API_KEY", "GEMINI_BASE_URL", "", "", false},
-	{"xai", "xai", "XAI_API_KEY", "XAI_BASE_URL", "", "", false},
-	{"groq", "groq", "GROQ_API_KEY", "GROQ_BASE_URL", "", "", false},
-	{"openrouter", "openrouter", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "", openRouterDefaultBaseURL, false},
-	{"azure", "azure", "AZURE_API_KEY", "AZURE_API_BASE", "AZURE_API_VERSION", "", true},
-	{"oracle", "oracle", "ORACLE_API_KEY", "ORACLE_BASE_URL", "", "", true},
-	{"ollama", "ollama", "OLLAMA_API_KEY", "OLLAMA_BASE_URL", "", "", false},
-}
-
 // resolveProviders applies env var overrides to the raw YAML provider map, filters
 // out entries with invalid credentials, and merges each entry with the global
 // ResilienceConfig. Returns a fully resolved map ready for provider instantiation.
-func resolveProviders(raw map[string]config.RawProviderConfig, global config.ResilienceConfig) map[string]ProviderConfig {
-	merged := applyProviderEnvVars(raw)
-	filtered := filterEmptyProviders(merged)
+func resolveProviders(raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) map[string]ProviderConfig {
+	merged := applyProviderEnvVars(raw, discovery)
+	filtered := filterEmptyProviders(merged, discovery)
 	return buildProviderConfigs(filtered, global)
 }
 
 // applyProviderEnvVars overlays well-known provider env vars onto the raw YAML map.
 // Env var values always win over YAML values for the same provider name.
-func applyProviderEnvVars(raw map[string]config.RawProviderConfig) map[string]config.RawProviderConfig {
+func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) map[string]config.RawProviderConfig {
 	result := make(map[string]config.RawProviderConfig, len(raw))
 	maps.Copy(result, raw)
 
-	for _, kp := range knownProviderEnvs {
-		apiKey := os.Getenv(kp.apiKeyEnv)
-		explicitBaseURL := normalizeResolvedBaseURL(os.Getenv(kp.baseURLEnv))
-		apiVersion := os.Getenv(kp.apiVersionEnv)
+	for _, providerType := range sortedDiscoveryTypes(discovery) {
+		spec := discovery[providerType]
+		envNames := derivedEnvNames(providerType)
+
+		apiKey := os.Getenv(envNames.APIKey)
+		explicitBaseURL := normalizeResolvedBaseURL(os.Getenv(envNames.BaseURL))
+		apiVersion := ""
+		if spec.SupportsAPIVersion {
+			apiVersion = os.Getenv(envNames.APIVersion)
+		}
 		baseURL := explicitBaseURL
-		if baseURL == "" && apiKey != "" && kp.defaultBase != "" {
-			baseURL = kp.defaultBase
+		if baseURL == "" && apiKey != "" && spec.DefaultBaseURL != "" {
+			baseURL = spec.DefaultBaseURL
 		}
 
 		if apiKey == "" && baseURL == "" && apiVersion == "" {
 			continue
 		}
 
-		existing, exists := result[kp.name]
+		existing, exists := result[providerType]
 		if exists {
 			if apiKey != "" {
 				existing.APIKey = apiKey
 			}
 			if explicitBaseURL != "" {
 				existing.BaseURL = baseURL
-			} else if normalizeResolvedBaseURL(existing.BaseURL) == "" && apiKey != "" && kp.defaultBase != "" {
-				existing.BaseURL = kp.defaultBase
+			} else if normalizeResolvedBaseURL(existing.BaseURL) == "" && apiKey != "" && spec.DefaultBaseURL != "" {
+				existing.BaseURL = spec.DefaultBaseURL
 			}
 			if apiVersion != "" {
 				existing.APIVersion = apiVersion
 			}
-			result[kp.name] = existing
+			result[providerType] = existing
 		} else {
-			if kp.requireBase && explicitBaseURL == "" {
+			if spec.RequireBaseURL && explicitBaseURL == "" {
 				continue
 			}
-			result[kp.name] = config.RawProviderConfig{
-				Type:       kp.providerType,
+			result[providerType] = config.RawProviderConfig{
+				Type:       providerType,
 				APIKey:     apiKey,
 				BaseURL:    baseURL,
 				APIVersion: apiVersion,
@@ -99,6 +83,47 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig) map[string]co
 	}
 
 	return result
+}
+
+type providerEnvNames struct {
+	APIKey     string
+	BaseURL    string
+	APIVersion string
+}
+
+func derivedEnvNames(providerType string) providerEnvNames {
+	prefix := envPrefix(providerType)
+	return providerEnvNames{
+		APIKey:     prefix + "_API_KEY",
+		BaseURL:    prefix + "_BASE_URL",
+		APIVersion: prefix + "_API_VERSION",
+	}
+}
+
+func envPrefix(providerType string) string {
+	var b strings.Builder
+	b.Grow(len(providerType))
+	lastUnderscore := false
+	for _, r := range providerType {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(unicode.ToUpper(r))
+			lastUnderscore = false
+		case !lastUnderscore:
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
+func sortedDiscoveryTypes(discovery map[string]DiscoveryConfig) []string {
+	types := make([]string, 0, len(discovery))
+	for providerType := range discovery {
+		types = append(types, providerType)
+	}
+	sort.Strings(types)
+	return types
 }
 
 func normalizeResolvedBaseURL(value string) string {
@@ -118,15 +143,15 @@ func isUnresolvedEnvPlaceholder(value string) bool {
 }
 
 // filterEmptyProviders removes providers without valid credentials.
-// Ollama is always valid — it uses a default base URL when none is configured.
-func filterEmptyProviders(raw map[string]config.RawProviderConfig) map[string]config.RawProviderConfig {
+func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) map[string]config.RawProviderConfig {
 	result := make(map[string]config.RawProviderConfig, len(raw))
 	for name, p := range raw {
-		if p.Type == "ollama" {
-			result[name] = p
+		spec, known := discovery[strings.TrimSpace(p.Type)]
+		if known && spec.RequireBaseURL && strings.TrimSpace(p.BaseURL) == "" {
 			continue
 		}
-		if providerTypeRequiresBaseURL(p.Type) && strings.TrimSpace(p.BaseURL) == "" {
+		if known && spec.AllowAPIKeyless {
+			result[name] = p
 			continue
 		}
 		if p.APIKey != "" && !strings.Contains(p.APIKey, "${") {
@@ -134,15 +159,6 @@ func filterEmptyProviders(raw map[string]config.RawProviderConfig) map[string]co
 		}
 	}
 	return result
-}
-
-func providerTypeRequiresBaseURL(providerType string) bool {
-	switch strings.TrimSpace(providerType) {
-	case "azure", "oracle":
-		return true
-	default:
-		return false
-	}
 }
 
 // buildProviderConfigs merges each raw provider config with the global ResilienceConfig,

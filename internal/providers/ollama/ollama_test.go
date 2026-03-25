@@ -31,7 +31,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestNew_ReturnsProvider(t *testing.T) {
-	provider := New("test-api-key", providers.ProviderOptions{})
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key"}, providers.ProviderOptions{})
 
 	if provider == nil {
 		t.Error("provider should not be nil")

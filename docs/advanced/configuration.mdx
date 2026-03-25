@@ -131,11 +131,11 @@ Set these to automatically register providers. No YAML configuration required.
 | `OPENROUTER_API_KEY` | OpenRouter                |
 | `XAI_API_KEY`       | xAI (Grok)                 |
 | `GROQ_API_KEY`      | Groq                       |
-| `AZURE_API_KEY`     | Azure OpenAI (`AZURE_API_BASE` also required) |
+| `AZURE_API_KEY`     | Azure OpenAI (`AZURE_BASE_URL` also required) |
 | `ORACLE_API_KEY`    | Oracle (`ORACLE_BASE_URL` also required) |
 | `OLLAMA_BASE_URL`   | Ollama (no API key needed) |
 
-Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Azure uses `AZURE_API_BASE` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
+Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
 When using Oracle, `models:` also acts as a fallback inventory if the upstream endpoint does not expose a usable `/models` response.
 
 For OpenRouter, GOModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
@@ -231,7 +231,18 @@ The simplest way to add providers. GOModel checks for well-known API key environ
 export OPENAI_API_KEY="sk-..."      # Registers "openai" provider
 export ANTHROPIC_API_KEY="sk-ant-..." # Registers "anthropic" provider
 export GEMINI_API_KEY="..."          # Registers "gemini" provider
+export XAI_API_KEY="..."             # Registers "xai" provider
+export GROQ_API_KEY="gsk_..."        # Registers "groq" provider
+export OPENROUTER_API_KEY="sk-or-..." # Registers "openrouter" provider
+export AZURE_API_KEY="..."           # Registers "azure" provider when paired with AZURE_BASE_URL
+export AZURE_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment"
+export ORACLE_API_KEY="..."          # Registers "oracle" provider when paired with ORACLE_BASE_URL
+export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1"
+export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registers "ollama" provider
 ```
+
+GOModel also works with additional OpenAI-compatible providers out of the box
+through YAML provider blocks.
 
 ### YAML Provider Blocks
 

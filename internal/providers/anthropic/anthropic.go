@@ -29,6 +29,9 @@ var Registration = providers.Registration{
 	Type:                        "anthropic",
 	New:                         New,
 	PassthroughSemanticEnricher: passthroughSemanticEnricher{},
+	Discovery: providers.DiscoveryConfig{
+		DefaultBaseURL: defaultBaseURL,
+	},
 }
 
 const (
@@ -55,19 +58,19 @@ type Provider struct {
 }
 
 // New creates a new Anthropic provider.
-func New(apiKey string, opts providers.ProviderOptions) core.Provider {
+func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	p := &Provider{
-		apiKey:               apiKey,
+		apiKey:               providerCfg.APIKey,
 		batchResultEndpoints: make(map[string]map[string]string),
 	}
-	cfg := llmclient.Config{
+	clientCfg := llmclient.Config{
 		ProviderName:   "anthropic",
-		BaseURL:        defaultBaseURL,
+		BaseURL:        providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
-	p.client = llmclient.New(cfg, p.setHeaders)
+	p.client = llmclient.New(clientCfg, p.setHeaders)
 	return p
 }
 
