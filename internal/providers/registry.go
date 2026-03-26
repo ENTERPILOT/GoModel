@@ -792,16 +792,16 @@ func (r *ModelRegistry) ListModelsWithProviderByCategory(category core.ModelCate
 	}
 
 	result := make([]ModelWithProvider, 0)
-	for providerName, providerModels := range r.modelsByProvider {
+	for _, providerModels := range r.modelsByProvider {
 		for modelID, info := range providerModels {
 			if info.Model.Metadata == nil || !hasCategory(info.Model.Metadata.Categories, category) {
 				continue
 			}
 			result = append(result, ModelWithProvider{
 				Model:        info.Model,
-				ProviderType: r.providerTypes[info.Provider],
-				ProviderName: providerName,
-				Selector:     qualifyPublicModelID(providerName, modelID),
+				ProviderType: info.ProviderType,
+				ProviderName: info.ProviderName,
+				Selector:     qualifyPublicModelID(info.ProviderName, modelID),
 			})
 		}
 	}

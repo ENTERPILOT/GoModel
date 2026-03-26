@@ -304,13 +304,13 @@ func (r *Resolver) matchKeys(resolution *core.RequestModelResolution, source *pr
 	resolvedQualified := resolution.ResolvedQualifiedModel()
 
 	keys := make([]string, 0, 6)
-	if selectorHasProvider(requestedQualified) {
+	if strings.TrimSpace(resolution.Requested.ProviderHint) != "" {
 		keys = append(keys, requestedQualified)
 	}
 	if source != nil && source.ProviderName != "" && source.Model.ID != "" {
 		keys = append(keys, source.ProviderName+"/"+source.Model.ID)
 	}
-	if selectorHasProvider(resolvedQualified) {
+	if strings.TrimSpace(resolution.ResolvedSelector.Provider) != "" {
 		keys = append(keys, resolvedQualified)
 	}
 	keys = append(keys,
@@ -334,11 +334,6 @@ func (r *Resolver) matchKeys(resolution *core.RequestModelResolution, source *pr
 		result = append(result, key)
 	}
 	return result
-}
-
-func selectorHasProvider(selector string) bool {
-	parsed, err := core.ParseModelSelector(strings.TrimSpace(selector), "")
-	return err == nil && parsed.Provider != ""
 }
 
 func requiredCategoryForOperation(op core.Operation) core.ModelCategory {

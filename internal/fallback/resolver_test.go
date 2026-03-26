@@ -174,6 +174,37 @@ func TestResolverPrefersProviderQualifiedOverrideForBareRequests(t *testing.T) {
 	}
 }
 
+func TestResolverTreatsBareModelIDsContainingSlashAsGenericKeys(t *testing.T) {
+	registry := newFakeRegistry(
+		modelInfo("meta-llama/Meta-Llama-3-70B", "openrouter", "openrouter", 1287, "llama-3"),
+		modelInfo("meta-llama/Meta-Llama-3-70B", "groq", "groq", 1287, "llama-3"),
+	)
+
+	resolver := NewResolver(config.FallbackConfig{
+		DefaultMode: config.FallbackModeAuto,
+		Manual: map[string][]string{
+			"openrouter/meta-llama/Meta-Llama-3-70B": {"groq/meta-llama/Meta-Llama-3-70B"},
+		},
+		Overrides: map[string]config.FallbackModelOverride{
+			"meta-llama/Meta-Llama-3-70B":            {Mode: config.FallbackModeOff},
+			"openrouter/meta-llama/Meta-Llama-3-70B": {Mode: config.FallbackModeManual},
+		},
+	}, registry)
+
+	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+		Requested:        core.NewRequestedModelSelector("meta-llama/Meta-Llama-3-70B", ""),
+		ResolvedSelector: core.ModelSelector{Model: "meta-llama/Meta-Llama-3-70B", Provider: "openrouter"},
+		ProviderType:     "openrouter",
+	}, core.OperationChatCompletions)
+
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if got[0].QualifiedModel() != "groq/meta-llama/Meta-Llama-3-70B" {
+		t.Fatalf("got[0] = %q, want %q", got[0].QualifiedModel(), "groq/meta-llama/Meta-Llama-3-70B")
+	}
+}
+
 func TestSameFamily_IgnoresSurroundingWhitespace(t *testing.T) {
 	source := &core.ModelMetadata{Family: " gpt-4o "}
 	candidate := &core.ModelMetadata{Family: "gpt-4o"}

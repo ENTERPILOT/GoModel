@@ -1129,6 +1129,43 @@ func TestListModelsWithProviderByCategory(t *testing.T) {
 	})
 }
 
+func TestListModelsWithProviderByCategory_UsesStoredProviderMetadata(t *testing.T) {
+	registry := NewModelRegistry()
+	registry.modelsByProvider = map[string]map[string]*ModelInfo{
+		"internal-provider-key": {
+			"gpt-4o": {
+				Model: core.Model{
+					ID: "gpt-4o",
+					Metadata: &core.ModelMetadata{
+						Categories: []core.ModelCategory{core.CategoryTextGeneration},
+					},
+				},
+				ProviderName: "public-openai",
+				ProviderType: "openai",
+			},
+		},
+	}
+
+	allModels := registry.ListModelsWithProvider()
+	if len(allModels) != 1 {
+		t.Fatalf("expected 1 model from full listing, got %d", len(allModels))
+	}
+
+	filtered := registry.ListModelsWithProviderByCategory(core.CategoryTextGeneration)
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 model from category listing, got %d", len(filtered))
+	}
+	if filtered[0].ProviderName != allModels[0].ProviderName {
+		t.Fatalf("ProviderName = %q, want %q", filtered[0].ProviderName, allModels[0].ProviderName)
+	}
+	if filtered[0].ProviderType != allModels[0].ProviderType {
+		t.Fatalf("ProviderType = %q, want %q", filtered[0].ProviderType, allModels[0].ProviderType)
+	}
+	if filtered[0].Selector != allModels[0].Selector {
+		t.Fatalf("Selector = %q, want %q", filtered[0].Selector, allModels[0].Selector)
+	}
+}
+
 func TestGetCategoryCounts_CountsProviderBackedModels(t *testing.T) {
 	registry := NewModelRegistry()
 
