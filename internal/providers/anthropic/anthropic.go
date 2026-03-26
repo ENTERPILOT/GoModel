@@ -816,7 +816,7 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 
 		switch event.Delta.Type {
 		case "thinking_delta":
-			if sc.thinkingBlocks[event.Index] && strings.TrimSpace(event.Delta.Thinking) != "" {
+			if sc.thinkingBlocks[event.Index] && event.Delta.Thinking != "" {
 				delta := map[string]any{
 					"reasoning_content": event.Delta.Thinking,
 				}
@@ -1500,6 +1500,8 @@ type responsesStreamConverter struct {
 	assistantOutputIndex    int
 	toolCalls               map[int]*providers.ResponsesOutputToolCallState
 	thinkingContentIndices  map[int]int
+	pendingReasoningText    map[int]string
+	pendingReasoningSig     map[int]string
 	reasoning               *responsesReasoningState
 	emitReasoningSignatures bool
 	buffer                  []byte
@@ -1532,6 +1534,8 @@ func newResponsesStreamConverter(body io.ReadCloser, model string) *responsesStr
 		output:                  providers.NewResponsesOutputEventState(responseID),
 		toolCalls:               make(map[int]*providers.ResponsesOutputToolCallState),
 		thinkingContentIndices:  make(map[int]int),
+		pendingReasoningText:    make(map[int]string),
+		pendingReasoningSig:     make(map[int]string),
 		emitReasoningSignatures: anthropicThinkingSignaturesCompatEnabled(),
 		buffer:                  make([]byte, 0, 1024),
 	}
@@ -1676,33 +1680,64 @@ func (sc *responsesStreamConverter) reasoningContentIndex(anthropicIndex int) in
 	}
 	state := sc.ensureResponsesReasoningState()
 	contentIndex := len(state.Blocks)
-	state.Blocks = append(state.Blocks, responsesReasoningBlockState{})
+	block := responsesReasoningBlockState{}
+	if signature, ok := sc.pendingReasoningSig[anthropicIndex]; ok {
+		block.Signature = signature
+		delete(sc.pendingReasoningSig, anthropicIndex)
+	}
+	state.Blocks = append(state.Blocks, block)
 	sc.thinkingContentIndices[anthropicIndex] = contentIndex
 	return contentIndex
 }
 
-func (sc *responsesStreamConverter) appendReasoningText(anthropicIndex int, text string) {
+func (sc *responsesStreamConverter) materializeReasoningTextDelta(anthropicIndex int, text string) (int, string) {
 	if text == "" {
-		return
+		return 0, ""
 	}
+
+	if contentIndex, ok := sc.thinkingContentIndices[anthropicIndex]; ok {
+		state := sc.reasoning
+		if state == nil || contentIndex >= len(state.Blocks) {
+			return 0, ""
+		}
+		_, _ = state.Blocks[contentIndex].Text.WriteString(text)
+		return contentIndex, text
+	}
+
+	buffered := sc.pendingReasoningText[anthropicIndex] + text
+	sc.pendingReasoningText[anthropicIndex] = buffered
+	if strings.TrimSpace(buffered) == "" {
+		return 0, ""
+	}
+
 	state := sc.ensureResponsesReasoningState()
 	contentIndex := sc.reasoningContentIndex(anthropicIndex)
 	if contentIndex >= len(state.Blocks) {
-		return
+		return 0, ""
 	}
-	_, _ = state.Blocks[contentIndex].Text.WriteString(text)
+	delete(sc.pendingReasoningText, anthropicIndex)
+	_, _ = state.Blocks[contentIndex].Text.WriteString(buffered)
+	return contentIndex, buffered
 }
 
 func (sc *responsesStreamConverter) setReasoningSignature(anthropicIndex int, signature string) {
 	if signature == "" {
 		return
 	}
-	state := sc.ensureResponsesReasoningState()
-	contentIndex := sc.reasoningContentIndex(anthropicIndex)
-	if contentIndex >= len(state.Blocks) {
+	if contentIndex, ok := sc.thinkingContentIndices[anthropicIndex]; ok {
+		state := sc.reasoning
+		if state == nil || contentIndex >= len(state.Blocks) {
+			return
+		}
+		state.Blocks[contentIndex].Signature = signature
 		return
 	}
-	state.Blocks[contentIndex].Signature = signature
+	sc.pendingReasoningSig[anthropicIndex] = signature
+}
+
+func (sc *responsesStreamConverter) clearPendingReasoning(anthropicIndex int) {
+	delete(sc.pendingReasoningText, anthropicIndex)
+	delete(sc.pendingReasoningSig, anthropicIndex)
 }
 
 func (sc *responsesStreamConverter) reasoningTextDoneEvent(anthropicIndex int) string {
@@ -1800,11 +1835,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 
 	case "content_block_start":
 		if event.ContentBlock != nil && event.ContentBlock.Type == "thinking" {
-			if !sc.emitReasoningSignatures {
-				return ""
-			}
-			sc.reasoningContentIndex(event.Index)
-			return sc.startReasoningOutput()
+			return ""
 		}
 		if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
 			prefix := sc.completeReasoningOutputIfNeeded()
@@ -1830,15 +1861,17 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 			if !sc.emitReasoningSignatures || event.Delta.Thinking == "" {
 				return ""
 			}
+			contentIndex, delta := sc.materializeReasoningTextDelta(event.Index, event.Delta.Thinking)
+			if delta == "" {
+				return ""
+			}
 			prefix := sc.startReasoningOutput()
-			sc.appendReasoningText(event.Index, event.Delta.Thinking)
-			contentIndex := sc.reasoningContentIndex(event.Index)
 			return prefix + sc.output.WriteEvent("response.reasoning_text.delta", map[string]any{
 				"type":          "response.reasoning_text.delta",
 				"item_id":       sc.reasoning.ItemID,
 				"output_index":  sc.reasoning.OutputIndex,
 				"content_index": contentIndex,
-				"delta":         event.Delta.Thinking,
+				"delta":         delta,
 			})
 		case "signature_delta":
 			if !sc.emitReasoningSignatures || event.Delta.Signature == "" {
@@ -1885,6 +1918,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		return ""
 
 	case "content_block_stop":
+		defer sc.clearPendingReasoning(event.Index)
 		if sc.emitReasoningSignatures {
 			if _, ok := sc.thinkingContentIndices[event.Index]; ok {
 				return sc.reasoningTextDoneEvent(event.Index)

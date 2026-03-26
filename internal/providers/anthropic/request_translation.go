@@ -348,7 +348,9 @@ func convertResponsesRequestToAnthropic(req *core.ResponsesRequest) (*anthropicR
 		return nil, core.NewInvalidRequestError("anthropic responses request is required", nil)
 	}
 
-	chatReq, err := providers.ConvertResponsesRequestToChat(req)
+	chatReq, err := providers.ConvertResponsesRequestToChatWithOptions(req, providers.ResponsesToChatOptions{
+		PreserveAnthropicReasoningCompat: anthropicThinkingSignaturesCompatEnabled(),
+	})
 	if err != nil {
 		return nil, err
 	}

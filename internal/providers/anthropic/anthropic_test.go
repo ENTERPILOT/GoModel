@@ -748,6 +748,72 @@ data: {"type":"message_stop"}
 	}
 }
 
+func TestStreamChatCompletion_PreservesWhitespaceOnlyReasoningDeltasBehindFeatureFlag(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"foo"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"bar"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	responseStr := string(raw)
+	if !strings.Contains(responseStr, `"reasoning_content":"foo"`) {
+		t.Fatalf("expected first reasoning delta, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"reasoning_content":" "`) {
+		t.Fatalf("expected whitespace-only reasoning delta, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"reasoning_content":"bar"`) {
+		t.Fatalf("expected trailing reasoning delta, got %q", responseStr)
+	}
+}
+
 func TestStreamChatCompletion_WithToolCalls(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2936,7 +3002,7 @@ data: {"type":"message_stop"}
 	}
 }
 
-func TestStreamResponses_SkipsEmptyReasoningBlocks(t *testing.T) {
+func TestStreamResponses_SkipsEmptyReasoningBlocksAndUsesDenseReasoningContentIndices(t *testing.T) {
 	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2998,6 +3064,8 @@ data: {"type":"message_stop"}
 	}
 
 	events := parseTestSSEEvents(t, string(raw))
+	reasoningAddedCount := 0
+	reasoningDeltaCount := 0
 	reasoningDoneCount := 0
 	reasoningItemParts := 0
 
@@ -3006,8 +3074,22 @@ data: {"type":"message_stop"}
 			continue
 		}
 		switch event.Name {
+		case "response.output_item.added":
+			item, _ := event.Payload["item"].(map[string]any)
+			if item["type"] != "reasoning" {
+				continue
+			}
+			reasoningAddedCount++
+		case "response.reasoning_text.delta":
+			reasoningDeltaCount++
+			if got := event.Payload["content_index"]; got != float64(0) {
+				t.Fatalf("reasoning_text.delta content_index = %#v, want 0", got)
+			}
 		case "response.reasoning_text.done":
 			reasoningDoneCount++
+			if got := event.Payload["content_index"]; got != float64(0) {
+				t.Fatalf("reasoning_text.done content_index = %#v, want 0", got)
+			}
 			if event.Payload["text"] != "Let me think." {
 				t.Fatalf("unexpected reasoning_text.done payload: %+v", event.Payload)
 			}
@@ -3021,11 +3103,78 @@ data: {"type":"message_stop"}
 		}
 	}
 
+	if reasoningAddedCount != 1 {
+		t.Fatalf("reasoning output_item.added count = %d, want 1", reasoningAddedCount)
+	}
+	if reasoningDeltaCount != 1 {
+		t.Fatalf("reasoningTextDelta count = %d, want 1", reasoningDeltaCount)
+	}
 	if reasoningDoneCount != 1 {
 		t.Fatalf("reasoningTextDone count = %d, want 1", reasoningDoneCount)
 	}
 	if reasoningItemParts != 1 {
 		t.Fatalf("reasoning output content len = %d, want 1", reasoningItemParts)
+	}
+}
+
+func TestStreamResponses_DoesNotStartReasoningOutputForAllEmptyThinkingBlocks(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "Hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	responseStr := string(raw)
+	if strings.Contains(responseStr, `"type":"reasoning"`) {
+		t.Fatalf("did not expect reasoning output items, got %q", responseStr)
+	}
+	if strings.Contains(responseStr, "response.reasoning_text.") {
+		t.Fatalf("did not expect reasoning text events, got %q", responseStr)
 	}
 }
 
@@ -4022,6 +4171,86 @@ func TestConvertToAnthropicRequest_PreservesReasoningDetailsBehindFeatureFlag(t 
 	}
 	if blocks[1].Type != "text" || blocks[1].Text != "Hello" {
 		t.Fatalf("blocks[1] = %+v, want text block", blocks[1])
+	}
+}
+
+func TestConvertResponsesRequestToAnthropic_PreservesReasoningItemsBehindFeatureFlag(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	req := &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: []core.ResponsesInputElement{
+			{
+				Type: "reasoning",
+				Content: []core.ResponsesContentItem{
+					{
+						Type:      "reasoning_text",
+						Text:      "Let me think.",
+						Signature: "sig_123",
+					},
+				},
+			},
+			{
+				Type:    "message",
+				Role:    "assistant",
+				Content: "Hello",
+			},
+		},
+	}
+
+	result, err := convertResponsesRequestToAnthropic(req)
+	if err != nil {
+		t.Fatalf("convertResponsesRequestToAnthropic() error = %v", err)
+	}
+	if len(result.Messages) != 1 {
+		t.Fatalf("len(Messages) = %d, want 1", len(result.Messages))
+	}
+	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
+	if !ok {
+		t.Fatalf("content = %#v, want []anthropicContentBlock", result.Messages[0].Content)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
+	}
+	if blocks[0].Type != "thinking" || blocks[0].Thinking != "Let me think." || blocks[0].Signature != "sig_123" {
+		t.Fatalf("blocks[0] = %+v, want thinking block with signature", blocks[0])
+	}
+	if blocks[1].Type != "text" || blocks[1].Text != "Hello" {
+		t.Fatalf("blocks[1] = %+v, want text block", blocks[1])
+	}
+}
+
+func TestConvertResponsesRequestToAnthropic_RejectsReasoningItemsWhenFeatureFlagDisabled(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "")
+
+	_, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: []core.ResponsesInputElement{
+			{
+				Type: "reasoning",
+				Content: []core.ResponsesContentItem{
+					{
+						Type:      "reasoning_text",
+						Text:      "Let me think.",
+						Signature: "sig_123",
+					},
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("GatewayError.Type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
+	}
+	if !strings.Contains(err.Error(), "reasoning items require provider-specific reasoning compatibility") {
+		t.Fatalf("error = %v, want reasoning compatibility error", err)
 	}
 }
 

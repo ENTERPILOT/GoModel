@@ -18,6 +18,12 @@ type capturingChatProvider struct {
 	streamErr   error
 }
 
+func convertResponsesRequestToChatWithAnthropicCompat(req *core.ResponsesRequest) (*core.ChatRequest, error) {
+	return ConvertResponsesRequestToChatWithOptions(req, ResponsesToChatOptions{
+		PreserveAnthropicReasoningCompat: true,
+	})
+}
+
 func (p *capturingChatProvider) ChatCompletion(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
 	return nil, nil
 }
@@ -423,7 +429,65 @@ func TestConvertResponsesRequestToChat_DoesNotMergeAssistantMessagesWithExtraFie
 	}
 }
 
-func TestConvertResponsesRequestToChat_MergesReasoningItemIntoFollowingAssistantMessage(t *testing.T) {
+func TestConvertResponsesRequestToChat_RejectsReasoningItemsByDefault(t *testing.T) {
+	_, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{
+		Model: "test-model",
+		Input: []any{
+			map[string]any{
+				"type": "reasoning",
+				"content": []map[string]any{
+					{"type": "reasoning_text", "text": "Let me think."},
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("GatewayError.Type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
+	}
+	if !strings.Contains(err.Error(), "reasoning items require provider-specific reasoning compatibility") {
+		t.Fatalf("error = %v, want provider-specific reasoning compatibility error", err)
+	}
+}
+
+func TestConvertResponsesRequestToChat_RejectsAnthropicReasoningCompatFieldsByDefault(t *testing.T) {
+	_, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{
+		Model: "test-model",
+		Input: []core.ResponsesInputElement{
+			{
+				Type:    "message",
+				Role:    "assistant",
+				Content: "Hello",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"reasoning_details": json.RawMessage(`[{"type":"reasoning_text","text":"Let me think.","signature":"sig_123"}]`),
+				}),
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("GatewayError.Type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
+	}
+	if !strings.Contains(err.Error(), "anthropic reasoning compatibility fields require provider-specific reasoning compatibility") {
+		t.Fatalf("error = %v, want anthropic reasoning compatibility error", err)
+	}
+}
+
+func TestConvertResponsesRequestToChatWithAnthropicCompat_MergesReasoningItemIntoFollowingAssistantMessage(t *testing.T) {
 	req := &core.ResponsesRequest{
 		Model: "test-model",
 		Input: []core.ResponsesInputElement{
@@ -447,9 +511,9 @@ func TestConvertResponsesRequestToChat_MergesReasoningItemIntoFollowingAssistant
 		},
 	}
 
-	chatReq, err := ConvertResponsesRequestToChat(req)
+	chatReq, err := convertResponsesRequestToChatWithAnthropicCompat(req)
 	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+		t.Fatalf("convertResponsesRequestToChatWithAnthropicCompat() error = %v", err)
 	}
 	if len(chatReq.Messages) != 1 {
 		t.Fatalf("len(Messages) = %d, want 1", len(chatReq.Messages))
@@ -475,7 +539,7 @@ func TestConvertResponsesRequestToChat_MergesReasoningItemIntoFollowingAssistant
 	}
 }
 
-func TestConvertResponsesRequestToChat_DoesNotReplaceMultimodalAssistantAfterReasoningMerge(t *testing.T) {
+func TestConvertResponsesRequestToChatWithAnthropicCompat_DoesNotReplaceMultimodalAssistantAfterReasoningMerge(t *testing.T) {
 	req := &core.ResponsesRequest{
 		Model: "test-model",
 		Input: []any{
@@ -513,9 +577,9 @@ func TestConvertResponsesRequestToChat_DoesNotReplaceMultimodalAssistantAfterRea
 		},
 	}
 
-	chatReq, err := ConvertResponsesRequestToChat(req)
+	chatReq, err := convertResponsesRequestToChatWithAnthropicCompat(req)
 	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+		t.Fatalf("convertResponsesRequestToChatWithAnthropicCompat() error = %v", err)
 	}
 	if len(chatReq.Messages) != 2 {
 		t.Fatalf("len(Messages) = %d, want 2", len(chatReq.Messages))
@@ -540,7 +604,7 @@ func TestConvertResponsesRequestToChat_DoesNotReplaceMultimodalAssistantAfterRea
 	}
 }
 
-func TestConvertResponsesRequestToChat_RejectsNonReasoningTextParts(t *testing.T) {
+func TestConvertResponsesRequestToChatWithAnthropicCompat_RejectsNonReasoningTextParts(t *testing.T) {
 	tests := []struct {
 		name  string
 		input any
@@ -571,7 +635,7 @@ func TestConvertResponsesRequestToChat_RejectsNonReasoningTextParts(t *testing.T
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{
+			_, err := convertResponsesRequestToChatWithAnthropicCompat(&core.ResponsesRequest{
 				Model: "test-model",
 				Input: tt.input,
 			})
@@ -592,7 +656,7 @@ func TestConvertResponsesRequestToChat_RejectsNonReasoningTextParts(t *testing.T
 	}
 }
 
-func TestConvertResponsesRequestToChat_RejectsEmptyReasoningPayload(t *testing.T) {
+func TestConvertResponsesRequestToChatWithAnthropicCompat_RejectsEmptyReasoningPayload(t *testing.T) {
 	tests := []struct {
 		name  string
 		input any
@@ -621,7 +685,7 @@ func TestConvertResponsesRequestToChat_RejectsEmptyReasoningPayload(t *testing.T
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{
+			_, err := convertResponsesRequestToChatWithAnthropicCompat(&core.ResponsesRequest{
 				Model: "test-model",
 				Input: tt.input,
 			})
@@ -640,7 +704,7 @@ func TestConvertResponsesRequestToChat_RejectsEmptyReasoningPayload(t *testing.T
 	}
 }
 
-func TestConvertResponsesRequestToChat_MergesReasoningDetailsFromPendingAndAssistantExtras(t *testing.T) {
+func TestConvertResponsesRequestToChatWithAnthropicCompat_MergesReasoningDetailsFromPendingAndAssistantExtras(t *testing.T) {
 	req := &core.ResponsesRequest{
 		Model: "test-model",
 		Input: []core.ResponsesInputElement{
@@ -665,9 +729,9 @@ func TestConvertResponsesRequestToChat_MergesReasoningDetailsFromPendingAndAssis
 		},
 	}
 
-	chatReq, err := ConvertResponsesRequestToChat(req)
+	chatReq, err := convertResponsesRequestToChatWithAnthropicCompat(req)
 	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+		t.Fatalf("convertResponsesRequestToChatWithAnthropicCompat() error = %v", err)
 	}
 	if len(chatReq.Messages) != 1 {
 		t.Fatalf("len(Messages) = %d, want 1", len(chatReq.Messages))
@@ -690,7 +754,7 @@ func TestConvertResponsesRequestToChat_MergesReasoningDetailsFromPendingAndAssis
 	}
 }
 
-func TestConvertResponsesRequestToChat_PreservesReasoningExtrasWhenMerged(t *testing.T) {
+func TestConvertResponsesRequestToChatWithAnthropicCompat_PreservesReasoningExtrasWhenMerged(t *testing.T) {
 	req := &core.ResponsesRequest{
 		Model: "test-model",
 		Input: []core.ResponsesInputElement{
@@ -718,9 +782,9 @@ func TestConvertResponsesRequestToChat_PreservesReasoningExtrasWhenMerged(t *tes
 		},
 	}
 
-	chatReq, err := ConvertResponsesRequestToChat(req)
+	chatReq, err := convertResponsesRequestToChatWithAnthropicCompat(req)
 	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+		t.Fatalf("convertResponsesRequestToChatWithAnthropicCompat() error = %v", err)
 	}
 	if len(chatReq.Messages) != 1 {
 		t.Fatalf("len(Messages) = %d, want 1", len(chatReq.Messages))

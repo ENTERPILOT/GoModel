@@ -21,10 +21,25 @@ type ChatProvider interface {
 	StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error)
 }
 
+// ResponsesToChatOptions controls non-standard provider-specific translations
+// when adapting Responses input into Chat semantics.
+type ResponsesToChatOptions struct {
+	// PreserveAnthropicReasoningCompat allows Anthropic-only reasoning history
+	// to be carried through ChatRequest.ExtraFields. Generic chat adapters must
+	// keep this off so provider-specific fields do not leak upstream.
+	PreserveAnthropicReasoningCompat bool
+}
+
 // ConvertResponsesRequestToChat converts a ResponsesRequest to a ChatRequest.
 // It also validates the supported Responses input shapes and returns an error
 // when the request cannot be converted safely.
 func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatRequest, error) {
+	return ConvertResponsesRequestToChatWithOptions(req, ResponsesToChatOptions{})
+}
+
+// ConvertResponsesRequestToChatWithOptions converts a ResponsesRequest to a
+// ChatRequest while allowing explicit provider-specific compatibility modes.
+func ConvertResponsesRequestToChatWithOptions(req *core.ResponsesRequest, opts ResponsesToChatOptions) (*core.ChatRequest, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("responses request is required", nil)
 	}
@@ -54,7 +69,7 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 		})
 	}
 
-	messages, err := ConvertResponsesInputToMessages(req.Input)
+	messages, err := convertResponsesInputToMessagesWithOptions(req.Input, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -289,6 +304,10 @@ func mergeReasoningIntoAssistantMessage(dst *core.Message, src core.Message) {
 
 // ConvertResponsesInputToMessages converts a Responses API input payload into Chat API messages.
 func ConvertResponsesInputToMessages(input any) ([]core.Message, error) {
+	return convertResponsesInputToMessagesWithOptions(input, ResponsesToChatOptions{})
+}
+
+func convertResponsesInputToMessagesWithOptions(input any, opts ResponsesToChatOptions) ([]core.Message, error) {
 	switch in := input.(type) {
 	case string:
 		return []core.Message{{Role: "user", Content: in}}, nil
@@ -297,15 +316,15 @@ func ConvertResponsesInputToMessages(input any) ([]core.Message, error) {
 		for _, item := range in {
 			items = append(items, item)
 		}
-		return convertResponsesInputItems(items)
+		return convertResponsesInputItems(items, opts)
 	case []any:
-		return convertResponsesInputItems(in)
+		return convertResponsesInputItems(in, opts)
 	case []core.ResponsesInputElement:
 		items := make([]any, 0, len(in))
 		for _, item := range in {
 			items = append(items, item)
 		}
-		return convertResponsesInputItems(items)
+		return convertResponsesInputItems(items, opts)
 	case nil:
 		return nil, core.NewInvalidRequestError("invalid responses input: unsupported type", nil)
 	default:
@@ -313,7 +332,7 @@ func ConvertResponsesInputToMessages(input any) ([]core.Message, error) {
 	}
 }
 
-func convertResponsesInputItems(items []any) ([]core.Message, error) {
+func convertResponsesInputItems(items []any, opts ResponsesToChatOptions) ([]core.Message, error) {
 	messages := make([]core.Message, 0, len(items))
 	var pendingAssistant *core.Message
 
@@ -326,7 +345,7 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 	}
 
 	for i, item := range items {
-		msg, itemType, err := convertResponsesInputItem(item, i)
+		msg, itemType, err := convertResponsesInputItem(item, i, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -373,18 +392,18 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 	return messages, nil
 }
 
-func convertResponsesInputItem(item any, index int) (core.Message, string, error) {
+func convertResponsesInputItem(item any, index int, opts ResponsesToChatOptions) (core.Message, string, error) {
 	switch typed := item.(type) {
 	case core.ResponsesInputElement:
-		return convertResponsesInputElement(typed, index)
+		return convertResponsesInputElement(typed, index, opts)
 	case map[string]any:
-		return convertResponsesInputMap(typed, index)
+		return convertResponsesInputMap(typed, index, opts)
 	default:
 		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: expected object", index), nil)
 	}
 }
 
-func convertResponsesInputElement(item core.ResponsesInputElement, index int) (core.Message, string, error) {
+func convertResponsesInputElement(item core.ResponsesInputElement, index int, opts ResponsesToChatOptions) (core.Message, string, error) {
 	switch item.Type {
 	case "function_call":
 		name := strings.TrimSpace(item.Name)
@@ -427,6 +446,12 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 			ExtraFields: core.CloneUnknownJSONFields(item.ExtraFields),
 		}, "function_call_output", nil
 	case "reasoning":
+		if !opts.PreserveAnthropicReasoningCompat {
+			return core.Message{}, "", core.NewInvalidRequestError(
+				fmt.Sprintf("invalid responses input item at index %d: reasoning items require provider-specific reasoning compatibility", index),
+				nil,
+			)
+		}
 		reasoningExtras, err := mergeResponsesReasoningExtraFields(core.CloneUnknownJSONFields(item.ExtraFields), item.Content)
 		if err != nil {
 			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: reasoning.content must be an array of reasoning_text items", index), err)
@@ -442,6 +467,12 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 		if role == "" {
 			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", index), nil)
 		}
+		if !opts.PreserveAnthropicReasoningCompat && containsAnthropicReasoningCompatFields(item.ExtraFields) {
+			return core.Message{}, "", core.NewInvalidRequestError(
+				fmt.Sprintf("invalid responses input item at index %d: anthropic reasoning compatibility fields require provider-specific reasoning compatibility", index),
+				nil,
+			)
+		}
 		content, ok := ConvertResponsesContentToChatContent(item.Content)
 		if !ok {
 			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: unsupported content", index), nil)
@@ -454,7 +485,7 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 	}
 }
 
-func convertResponsesInputMap(item map[string]any, index int) (core.Message, string, error) {
+func convertResponsesInputMap(item map[string]any, index int, opts ResponsesToChatOptions) (core.Message, string, error) {
 	itemType, _ := item["type"].(string)
 	switch itemType {
 	case "function_call":
@@ -499,6 +530,12 @@ func convertResponsesInputMap(item map[string]any, index int) (core.Message, str
 			ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "call_id", "status", "output")),
 		}, "function_call_output", nil
 	case "reasoning":
+		if !opts.PreserveAnthropicReasoningCompat {
+			return core.Message{}, "", core.NewInvalidRequestError(
+				fmt.Sprintf("invalid responses input item at index %d: reasoning items require provider-specific reasoning compatibility", index),
+				nil,
+			)
+		}
 		reasoningExtras, err := mergeResponsesReasoningExtraFields(
 			core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "status", "content")),
 			item["content"],
@@ -519,6 +556,13 @@ func convertResponsesInputMap(item map[string]any, index int) (core.Message, str
 	if role == "" {
 		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", index), nil)
 	}
+	extraFields := core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "role", "status", "content"))
+	if !opts.PreserveAnthropicReasoningCompat && containsAnthropicReasoningCompatFields(extraFields) {
+		return core.Message{}, "", core.NewInvalidRequestError(
+			fmt.Sprintf("invalid responses input item at index %d: anthropic reasoning compatibility fields require provider-specific reasoning compatibility", index),
+			nil,
+		)
+	}
 
 	content, ok := ConvertResponsesContentToChatContent(item["content"])
 	if !ok {
@@ -527,8 +571,17 @@ func convertResponsesInputMap(item map[string]any, index int) (core.Message, str
 	return core.Message{
 		Role:        role,
 		Content:     content,
-		ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "role", "status", "content")),
+		ExtraFields: extraFields,
 	}, "message", nil
+}
+
+func containsAnthropicReasoningCompatFields(fields core.UnknownJSONFields) bool {
+	for _, key := range []string{"reasoning_details", "reasoning_content", "reasoning_signature"} {
+		if len(fields.Lookup(key)) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneResponsesMessage(msg core.Message) core.Message {
