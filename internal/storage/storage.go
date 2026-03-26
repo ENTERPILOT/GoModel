@@ -82,6 +82,36 @@ type MongoDBStorage interface {
 	Database() *mongo.Database
 }
 
+// ResolveBackend dispatches to the callback matching the concrete storage backend.
+func ResolveBackend[T any](
+	store Storage,
+	sqlite func(*sql.DB) (T, error),
+	postgresql func(*pgxpool.Pool) (T, error),
+	mongodb func(*mongo.Database) (T, error),
+) (T, error) {
+	var zero T
+
+	switch store := store.(type) {
+	case SQLiteStorage:
+		if sqlite == nil {
+			return zero, fmt.Errorf("sqlite handler is nil")
+		}
+		return sqlite(store.DB())
+	case PostgreSQLStorage:
+		if postgresql == nil {
+			return zero, fmt.Errorf("postgresql handler is nil")
+		}
+		return postgresql(store.Pool())
+	case MongoDBStorage:
+		if mongodb == nil {
+			return zero, fmt.Errorf("mongodb handler is nil")
+		}
+		return mongodb(store.Database())
+	default:
+		return zero, fmt.Errorf("unsupported storage backend %T", store)
+	}
+}
+
 // New creates a new Storage based on the configuration.
 // It validates the configuration and establishes the database connection.
 func New(ctx context.Context, cfg Config) (Storage, error) {

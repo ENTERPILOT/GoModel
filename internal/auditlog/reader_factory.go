@@ -1,7 +1,10 @@
 package auditlog
 
 import (
-	"fmt"
+	"database/sql"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"gomodel/internal/storage"
 )
@@ -13,14 +16,10 @@ func NewReader(store storage.Storage) (Reader, error) {
 		return nil, nil
 	}
 
-	switch store := store.(type) {
-	case storage.SQLiteStorage:
-		return NewSQLiteReader(store.DB())
-	case storage.PostgreSQLStorage:
-		return NewPostgreSQLReader(store.Pool())
-	case storage.MongoDBStorage:
-		return NewMongoDBReader(store.Database())
-	default:
-		return nil, fmt.Errorf("unsupported storage backend %T", store)
-	}
+	return storage.ResolveBackend[Reader](
+		store,
+		func(db *sql.DB) (Reader, error) { return NewSQLiteReader(db) },
+		func(pool *pgxpool.Pool) (Reader, error) { return NewPostgreSQLReader(pool) },
+		func(db *mongo.Database) (Reader, error) { return NewMongoDBReader(db) },
+	)
 }

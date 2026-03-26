@@ -2,10 +2,14 @@ package aliases
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"gomodel/config"
 	"gomodel/internal/storage"
@@ -106,14 +110,10 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 }
 
 func createStore(ctx context.Context, store storage.Storage) (Store, error) {
-	switch store := store.(type) {
-	case storage.SQLiteStorage:
-		return NewSQLiteStore(store.DB())
-	case storage.PostgreSQLStorage:
-		return NewPostgreSQLStore(ctx, store.Pool())
-	case storage.MongoDBStorage:
-		return NewMongoDBStore(store.Database())
-	default:
-		return nil, fmt.Errorf("unsupported storage backend %T", store)
-	}
+	return storage.ResolveBackend[Store](
+		store,
+		func(db *sql.DB) (Store, error) { return NewSQLiteStore(db) },
+		func(pool *pgxpool.Pool) (Store, error) { return NewPostgreSQLStore(ctx, pool) },
+		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(db) },
+	)
 }

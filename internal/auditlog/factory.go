@@ -2,9 +2,13 @@ package auditlog
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"gomodel/config"
 	"gomodel/internal/storage"
@@ -78,16 +82,12 @@ func New(ctx context.Context, cfg *config.Config) (*Result, error) {
 
 // createLogStore creates the appropriate LogStore for the given storage backend.
 func createLogStore(store storage.Storage, retentionDays int) (LogStore, error) {
-	switch store := store.(type) {
-	case storage.SQLiteStorage:
-		return NewSQLiteStore(store.DB(), retentionDays)
-	case storage.PostgreSQLStorage:
-		return NewPostgreSQLStore(store.Pool(), retentionDays)
-	case storage.MongoDBStorage:
-		return NewMongoDBStore(store.Database(), retentionDays)
-	default:
-		return nil, fmt.Errorf("unsupported storage backend %T", store)
-	}
+	return storage.ResolveBackend[LogStore](
+		store,
+		func(db *sql.DB) (LogStore, error) { return NewSQLiteStore(db, retentionDays) },
+		func(pool *pgxpool.Pool) (LogStore, error) { return NewPostgreSQLStore(pool, retentionDays) },
+		func(db *mongo.Database) (LogStore, error) { return NewMongoDBStore(db, retentionDays) },
+	)
 }
 
 // buildLoggerConfig creates an auditlog.Config from config.LogConfig.

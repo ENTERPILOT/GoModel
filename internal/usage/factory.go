@@ -2,9 +2,13 @@ package usage
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"gomodel/config"
 	"gomodel/internal/storage"
@@ -114,30 +118,22 @@ func NewReader(store storage.Storage) (UsageReader, error) {
 		return nil, nil
 	}
 
-	switch store := store.(type) {
-	case storage.SQLiteStorage:
-		return NewSQLiteReader(store.DB())
-	case storage.PostgreSQLStorage:
-		return NewPostgreSQLReader(store.Pool())
-	case storage.MongoDBStorage:
-		return NewMongoDBReader(store.Database())
-	default:
-		return nil, fmt.Errorf("unsupported storage backend %T", store)
-	}
+	return storage.ResolveBackend[UsageReader](
+		store,
+		func(db *sql.DB) (UsageReader, error) { return NewSQLiteReader(db) },
+		func(pool *pgxpool.Pool) (UsageReader, error) { return NewPostgreSQLReader(pool) },
+		func(db *mongo.Database) (UsageReader, error) { return NewMongoDBReader(db) },
+	)
 }
 
 // createUsageStore creates the appropriate UsageStore for the given storage backend.
 func createUsageStore(store storage.Storage, retentionDays int) (UsageStore, error) {
-	switch store := store.(type) {
-	case storage.SQLiteStorage:
-		return NewSQLiteStore(store.DB(), retentionDays)
-	case storage.PostgreSQLStorage:
-		return NewPostgreSQLStore(store.Pool(), retentionDays)
-	case storage.MongoDBStorage:
-		return NewMongoDBStore(store.Database(), retentionDays)
-	default:
-		return nil, fmt.Errorf("unsupported storage backend %T", store)
-	}
+	return storage.ResolveBackend[UsageStore](
+		store,
+		func(db *sql.DB) (UsageStore, error) { return NewSQLiteStore(db, retentionDays) },
+		func(pool *pgxpool.Pool) (UsageStore, error) { return NewPostgreSQLStore(pool, retentionDays) },
+		func(db *mongo.Database) (UsageStore, error) { return NewMongoDBStore(db, retentionDays) },
+	)
 }
 
 // buildLoggerConfig creates a usage.Config from config.UsageConfig.
