@@ -89,6 +89,7 @@ Suggested fields:
 - `scope_model` nullable
 - `version`
 - `active`
+- `name`
 - `plan_payload`
 - `plan_hash`
 - `created_at`
@@ -164,13 +165,14 @@ Instead, a matched execution plan configures:
 - simple feature flags for gateway-owned behaviors
 - guardrail execution order inside the predefined guardrails phase
 
+Human-facing metadata such as the plan name belongs in the immutable database
+row for the execution-plan version, not in the JSON payload.
+
 Recommended v1 payload shape:
 
 ```json
 {
   "schema_version": 1,
-  "kind": "execution_plan",
-  "name": "default",
   "features": {
     "cache": true,
     "audit": true,
