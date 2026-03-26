@@ -36,9 +36,13 @@ type Options struct {
 	DisableNativeBatchPreparation bool
 }
 
-// NewProvider creates an alias-aware provider wrapper.
+// NewProvider creates an alias-aware provider wrapper that exposes alias
+// inventory and native batch preparation without owning translated-route model
+// resolution by default.
 func NewProvider(inner core.RoutableProvider, service *Service) *Provider {
-	return NewProviderWithOptions(inner, service, Options{})
+	return NewProviderWithOptions(inner, service, Options{
+		DisableTranslatedRequestProcessing: true,
+	})
 }
 
 // NewProviderWithOptions creates an alias-aware provider wrapper with explicit options.
@@ -46,9 +50,9 @@ func NewProviderWithOptions(inner core.RoutableProvider, service *Service, optio
 	return &Provider{inner: inner, service: service, options: options}
 }
 
-// ResolveModel resolves a model/provider pair through the alias table.
-func (p *Provider) ResolveModel(model, provider string) (core.ModelSelector, bool, error) {
-	return resolveAliasModel(p.service, model, provider)
+// ResolveModel resolves a requested selector through the alias table.
+func (p *Provider) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	return resolveAliasModel(p.service, requested)
 }
 
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {

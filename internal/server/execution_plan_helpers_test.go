@@ -44,7 +44,7 @@ func TestEnsureTranslatedRequestPlan_CompletesPartialPlanFromDecodedSelector(t *
 	assert.Equal(t, core.ExecutionModeTranslated, plan.Mode)
 	assert.Equal(t, "mock", plan.ProviderType)
 	if assert.NotNil(t, plan.Resolution) {
-		assert.Equal(t, "gpt-4o-mini", plan.Resolution.RequestedModel)
+		assert.Equal(t, "gpt-4o-mini", plan.Resolution.Requested.Model)
 		assert.Equal(t, "gpt-4o-mini", plan.Resolution.ResolvedSelector.Model)
 	}
 

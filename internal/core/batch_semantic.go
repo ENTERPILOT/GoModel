@@ -63,14 +63,24 @@ func (decoded *DecodedBatchItemRequest) EmbeddingRequest() *EmbeddingRequest {
 // item. It returns an error when the receiver is nil, when the decoded request
 // type is unsupported, or when the canonical selector cannot be parsed.
 func (decoded *DecodedBatchItemRequest) ModelSelector() (ModelSelector, error) {
+	requested, err := decoded.RequestedModelSelector()
+	if err != nil {
+		return ModelSelector{}, err
+	}
+	return requested.Normalize()
+}
+
+// RequestedModelSelector returns the raw selector requested by the decoded batch
+// item, preserving whether the provider came from the explicit field.
+func (decoded *DecodedBatchItemRequest) RequestedModelSelector() (RequestedModelSelector, error) {
 	if decoded == nil {
-		return ModelSelector{}, fmt.Errorf("decoded batch request is required")
+		return RequestedModelSelector{}, fmt.Errorf("decoded batch request is required")
 	}
 	model, provider, ok := semanticSelectorFromCanonicalRequest(decoded.Request)
 	if !ok {
-		return ModelSelector{}, fmt.Errorf("unsupported batch item url: %s", decoded.Endpoint)
+		return RequestedModelSelector{}, fmt.Errorf("unsupported batch item url: %s", decoded.Endpoint)
 	}
-	return ParseModelSelector(model, provider)
+	return NewRequestedModelSelector(model, provider), nil
 }
 
 // DispatchDecodedBatchItem routes a decoded batch item to the matching typed
@@ -207,4 +217,14 @@ func BatchItemModelSelector(defaultEndpoint string, item BatchRequestItem) (Mode
 		return ModelSelector{}, err
 	}
 	return decoded.ModelSelector()
+}
+
+// BatchItemRequestedModelSelector derives the raw requested selector for a
+// known JSON batch subrequest.
+func BatchItemRequestedModelSelector(defaultEndpoint string, item BatchRequestItem) (RequestedModelSelector, error) {
+	decoded, err := DecodeKnownBatchItemRequest(defaultEndpoint, item)
+	if err != nil {
+		return RequestedModelSelector{}, err
+	}
+	return decoded.RequestedModelSelector()
 }

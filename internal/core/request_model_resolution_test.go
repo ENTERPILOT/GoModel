@@ -11,31 +11,28 @@ func TestRequestModelResolutionRequestedQualifiedModel(t *testing.T) {
 		{
 			name: "raw alias with slash and no explicit provider stays raw",
 			in: &RequestModelResolution{
-				RequestedModel: "anthropic/claude-opus-4-6",
+				Requested: NewRequestedModelSelector("anthropic/claude-opus-4-6", ""),
 			},
 			want: "anthropic/claude-opus-4-6",
 		},
 		{
 			name: "explicit provider with provider-prefixed model normalizes once",
 			in: &RequestModelResolution{
-				RequestedModel:    "openai/gpt-4o",
-				RequestedProvider: "openai",
+				Requested: NewRequestedModelSelector("openai/gpt-4o", "openai"),
 			},
 			want: "openai/gpt-4o",
 		},
 		{
 			name: "explicit provider without prefix becomes qualified model",
 			in: &RequestModelResolution{
-				RequestedModel:    "gpt-4o",
-				RequestedProvider: "openai",
+				Requested: NewRequestedModelSelector("gpt-4o", "openai"),
 			},
 			want: "openai/gpt-4o",
 		},
 		{
 			name: "explicit provider preserves raw slash model",
 			in: &RequestModelResolution{
-				RequestedModel:    "openai/gpt-oss-120b",
-				RequestedProvider: "groq",
+				Requested: NewRequestedModelSelector("openai/gpt-oss-120b", "groq"),
 			},
 			want: "groq/openai/gpt-oss-120b",
 		},

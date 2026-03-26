@@ -65,11 +65,11 @@ func (r *Router) checkReady() error {
 }
 
 // resolveProvider validates readiness, parses the model selector, and finds the target provider.
-func (r *Router) resolveProvider(model, provider string) (core.Provider, core.ModelSelector, error) {
+func (r *Router) resolveProvider(model, providerHint string) (core.Provider, core.ModelSelector, error) {
 	if err := r.checkReady(); err != nil {
 		return nil, core.ModelSelector{}, registryUnavailableError(err)
 	}
-	selector, err := core.ParseModelSelector(model, provider)
+	selector, err := core.ParseModelSelector(model, providerHint)
 	if err != nil {
 		return nil, core.ModelSelector{}, core.NewInvalidRequestError(err.Error(), err)
 	}
@@ -147,11 +147,11 @@ func routeResolvedModelCall[Req any, Resp any](
 	r *Router,
 	ctx context.Context,
 	model string,
-	provider string,
+	providerHint string,
 	buildForward func(core.ModelSelector) Req,
 	call func(context.Context, core.Provider, Req) (Resp, error),
 ) (Resp, string, error) {
-	p, selector, err := r.resolveProvider(model, provider)
+	p, selector, err := r.resolveProvider(model, providerHint)
 	if err != nil {
 		var zero Resp
 		return zero, "", err
@@ -165,11 +165,11 @@ func routeStampedModelResponse[Req any, Resp any](
 	r *Router,
 	ctx context.Context,
 	model string,
-	provider string,
+	providerHint string,
 	buildForward func(core.ModelSelector) Req,
 	call func(context.Context, core.Provider, Req) (Resp, error),
 ) (Resp, error) {
-	resp, providerType, err := routeResolvedModelCall(r, ctx, model, provider, buildForward, call)
+	resp, providerType, err := routeResolvedModelCall(r, ctx, model, providerHint, buildForward, call)
 	if err != nil {
 		var zero Resp
 		return zero, err
@@ -221,6 +221,8 @@ func stampProvider[T any](resp T, providerType string) T {
 	return resp
 }
 
+// Provider is gateway routing metadata on OpenAI-compatible request structs and
+// must be removed before dispatching to an upstream provider implementation.
 func forwardChatRequest(req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
 	forwardReq := *req
 	forwardReq.Model = selector.Model

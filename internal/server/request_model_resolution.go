@@ -12,7 +12,7 @@ import (
 // RequestModelResolver resolves raw request selectors into concrete model
 // selectors before provider execution.
 type RequestModelResolver interface {
-	ResolveModel(model, provider string) (core.ModelSelector, bool, error)
+	ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
 func effectiveRequestModelResolver(provider core.RoutableProvider, resolver RequestModelResolver) RequestModelResolver {
@@ -25,9 +25,8 @@ func effectiveRequestModelResolver(provider core.RoutableProvider, resolver Requ
 	return nil
 }
 
-func resolveRequestModel(provider core.RoutableProvider, resolver RequestModelResolver, model, providerHint string) (*core.RequestModelResolution, error) {
-	model = strings.TrimSpace(model)
-	providerHint = strings.TrimSpace(providerHint)
+func resolveRequestModel(provider core.RoutableProvider, resolver RequestModelResolver, requested core.RequestedModelSelector) (*core.RequestModelResolution, error) {
+	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
 
 	var (
 		resolvedSelector core.ModelSelector
@@ -36,9 +35,9 @@ func resolveRequestModel(provider core.RoutableProvider, resolver RequestModelRe
 	)
 
 	if effectiveResolver := effectiveRequestModelResolver(provider, resolver); effectiveResolver != nil {
-		resolvedSelector, aliasApplied, err = effectiveResolver.ResolveModel(model, providerHint)
+		resolvedSelector, aliasApplied, err = effectiveResolver.ResolveModel(requested)
 	} else {
-		resolvedSelector, err = core.ParseModelSelector(model, providerHint)
+		resolvedSelector, err = requested.Normalize()
 	}
 	if err != nil {
 		return nil, core.NewInvalidRequestError(err.Error(), err)
@@ -53,11 +52,10 @@ func resolveRequestModel(provider core.RoutableProvider, resolver RequestModelRe
 	}
 
 	return &core.RequestModelResolution{
-		RequestedModel:    model,
-		RequestedProvider: providerHint,
-		ResolvedSelector:  resolvedSelector,
-		ProviderType:      strings.TrimSpace(provider.GetProviderType(resolvedModel)),
-		AliasApplied:      aliasApplied,
+		Requested:        requested,
+		ResolvedSelector: resolvedSelector,
+		ProviderType:     strings.TrimSpace(provider.GetProviderType(resolvedModel)),
+		AliasApplied:     aliasApplied,
 	}, nil
 }
 
@@ -113,9 +111,10 @@ func resolveAndStoreRequestModelResolution(
 	resolver RequestModelResolver,
 	model, providerHint string,
 ) (*core.RequestModelResolution, error) {
-	enrichAuditEntryWithRequestedModel(c, model, providerHint)
+	requested := core.NewRequestedModelSelector(model, providerHint)
+	enrichAuditEntryWithRequestedModel(c, requested)
 
-	resolution, err := resolveRequestModel(provider, resolver, model, providerHint)
+	resolution, err := resolveRequestModel(provider, resolver, requested)
 	if err != nil {
 		return nil, err
 	}
@@ -123,13 +122,12 @@ func resolveAndStoreRequestModelResolution(
 	return resolution, nil
 }
 
-func enrichAuditEntryWithRequestedModel(c *echo.Context, model, providerHint string) {
+func enrichAuditEntryWithRequestedModel(c *echo.Context, requested core.RequestedModelSelector) {
 	if c == nil {
 		return
 	}
-	model = strings.TrimSpace(model)
-	providerHint = strings.TrimSpace(providerHint)
-	if model == "" {
+	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
+	if requested.Model == "" {
 		return
 	}
 	plan := &core.ExecutionPlan{}
@@ -138,8 +136,7 @@ func enrichAuditEntryWithRequestedModel(c *echo.Context, model, providerHint str
 		plan = &cloned
 	}
 	plan.Resolution = &core.RequestModelResolution{
-		RequestedModel:    model,
-		RequestedProvider: providerHint,
+		Requested: requested,
 	}
 	auditlog.EnrichEntryWithExecutionPlan(c, plan)
 }

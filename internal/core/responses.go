@@ -10,8 +10,8 @@ import "encoding/json"
 // should be preferred when available.
 type ResponsesRequest struct {
 	Model    string `json:"model"`
-	Provider string `json:"provider,omitempty"`
-	Input    any    `json:"input"` // string or []ResponsesInputElement — see docs for array form
+	Provider string `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
+	Input    any    `json:"input"`              // string or []ResponsesInputElement — see docs for array form
 	//nolint:govet // Intentional duplicate json tag for Swagger docs: input is string OR []ResponsesInputElement.
 	InputSchema       []ResponsesInputElement `json:"input,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"`
 	Instructions      string                  `json:"instructions,omitempty"`

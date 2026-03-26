@@ -50,31 +50,27 @@ type aliasModelProviderTypeChecker interface {
 	GetProviderType(string) string
 }
 
-func resolveAliasModel(service *Service, model, provider string) (core.ModelSelector, bool, error) {
+func resolveAliasModel(service *Service, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	if service == nil {
-		selector, err := core.ParseModelSelector(model, provider)
+		selector, err := requested.Normalize()
 		return selector, false, err
 	}
-	resolution, ok, err := service.Resolve(model, provider)
-	if err != nil {
-		return core.ModelSelector{}, false, err
-	}
-	return resolution.Resolved, ok, nil
+	return service.ResolveModel(requested)
 }
 
-func resolveAliasRequestSelector(service *Service, model, provider string) (core.ModelSelector, error) {
-	selector, changed, err := resolveAliasModel(service, model, provider)
+func resolveAliasRequestSelector(service *Service, requested core.RequestedModelSelector) (core.ModelSelector, error) {
+	selector, changed, err := resolveAliasModel(service, requested)
 	if err != nil {
 		return core.ModelSelector{}, err
 	}
 	if changed {
 		return selector, nil
 	}
-	return core.ParseModelSelector(model, provider)
+	return requested.Normalize()
 }
 
-func resolveAliasRoutableSelector(service *Service, checker aliasModelSupportChecker, model, provider, expectedProviderType string) (core.ModelSelector, error) {
-	selector, err := resolveAliasRequestSelector(service, model, provider)
+func resolveAliasRoutableSelector(service *Service, checker aliasModelSupportChecker, requested core.RequestedModelSelector, expectedProviderType string) (core.ModelSelector, error) {
+	selector, err := resolveAliasRequestSelector(service, requested)
 	if err != nil {
 		return core.ModelSelector{}, err
 	}
@@ -98,11 +94,9 @@ func validateResolvedProviderType(checker aliasModelSupportChecker, selector cor
 		return nil
 	}
 
-	actualProviderType := strings.TrimSpace(selector.Provider)
-	if actualProviderType == "" {
-		if typed, ok := checker.(aliasModelProviderTypeChecker); ok {
-			actualProviderType = strings.TrimSpace(typed.GetProviderType(selector.QualifiedModel()))
-		}
+	actualProviderType := ""
+	if typed, ok := checker.(aliasModelProviderTypeChecker); ok {
+		actualProviderType = strings.TrimSpace(typed.GetProviderType(selector.QualifiedModel()))
 	}
 	if actualProviderType == "" || actualProviderType == expectedProviderType {
 		return nil
@@ -122,7 +116,7 @@ func rewriteAliasChatRequest(service *Service, checker aliasModelSupportChecker,
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveAliasRoutableSelector(service, checker, req.Model, req.Provider, expectedProviderType)
+	selector, err := resolveAliasRoutableSelector(service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +130,7 @@ func rewriteAliasResponsesRequest(service *Service, checker aliasModelSupportChe
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveAliasRoutableSelector(service, checker, req.Model, req.Provider, expectedProviderType)
+	selector, err := resolveAliasRoutableSelector(service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +144,7 @@ func rewriteAliasEmbeddingRequest(service *Service, checker aliasModelSupportChe
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveAliasRoutableSelector(service, checker, req.Model, req.Provider, expectedProviderType)
+	selector, err := resolveAliasRoutableSelector(service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
 	if err != nil {
 		return nil, err
 	}

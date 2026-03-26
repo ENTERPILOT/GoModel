@@ -23,7 +23,7 @@ type ChatRequest struct {
 	Temperature       *float64          `json:"temperature,omitempty"`
 	MaxTokens         *int              `json:"max_tokens,omitempty"`
 	Model             string            `json:"model"`
-	Provider          string            `json:"provider,omitempty"`
+	Provider          string            `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
 	Messages          []Message         `json:"messages"`
 	Tools             []map[string]any  `json:"tools,omitempty"`
 	ToolChoice        any               `json:"tool_choice,omitempty"` // string or object
@@ -264,7 +264,7 @@ type ModelsResponse struct {
 // EmbeddingRequest represents the incoming embeddings request (OpenAI-compatible).
 type EmbeddingRequest struct {
 	Model          string            `json:"model"`
-	Provider       string            `json:"provider,omitempty"`
+	Provider       string            `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
 	Input          any               `json:"input"`
 	EncodingFormat string            `json:"encoding_format,omitempty"`
 	Dimensions     *int              `json:"dimensions,omitempty"`

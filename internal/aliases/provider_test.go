@@ -150,7 +150,7 @@ func TestProviderResolvesRequestsAndExposesAliasModels(t *testing.T) {
 	inner.providerType["gpt-4o"] = "openai"
 	inner.modelsResp = &core.ModelsResponse{Object: "list", Data: []core.Model{{ID: "gpt-4o", Object: "model"}}}
 
-	provider := NewProvider(inner, service)
+	provider := NewProviderWithOptions(inner, service, Options{})
 
 	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "smart"}); err != nil {
 		t.Fatalf("ChatCompletion() error = %v", err)
@@ -164,7 +164,7 @@ func TestProviderResolvesRequestsAndExposesAliasModels(t *testing.T) {
 	if got := provider.GetProviderType("smart"); got != "openai" {
 		t.Fatalf("GetProviderType(smart) = %q, want openai", got)
 	}
-	selector, changed, err := provider.ResolveModel("smart", "")
+	selector, changed, err := provider.ResolveModel(core.NewRequestedModelSelector("smart", ""))
 	if err != nil {
 		t.Fatalf("ResolveModel() error = %v", err)
 	}
@@ -207,7 +207,7 @@ func TestProviderMaskingAliasOverridesConcreteModelEntry(t *testing.T) {
 		{ID: "gpt-4o-mini", Object: "model", Metadata: &core.ModelMetadata{DisplayName: "GPT-4o mini"}},
 	}}
 
-	provider := NewProvider(inner, service)
+	provider := NewProviderWithOptions(inner, service, Options{})
 
 	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-4o"}); err != nil {
 		t.Fatalf("ChatCompletion() error = %v", err)
@@ -228,6 +228,38 @@ func TestProviderMaskingAliasOverridesConcreteModelEntry(t *testing.T) {
 	}
 	if models.Data[0].Metadata == nil || models.Data[0].Metadata.DisplayName != "GPT-4o mini" {
 		t.Fatalf("masked model metadata = %#v, want alias target metadata", models.Data[0].Metadata)
+	}
+}
+
+func TestProviderDefaultsToInventoryAndBatchPreparationOnly(t *testing.T) {
+	catalog := newTestCatalog()
+	catalog.add("gpt-4o", "openai", core.Model{ID: "gpt-4o", Object: "model", OwnedBy: "openai"})
+
+	service, err := NewService(newMemoryStore(Alias{Name: "smart", TargetModel: "gpt-4o", Enabled: true}), catalog)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	inner := newProviderMock()
+	inner.supported["gpt-4o"] = true
+	inner.providerType["gpt-4o"] = "openai"
+
+	provider := NewProvider(inner, service)
+
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "smart"}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if inner.chatReq == nil || inner.chatReq.Model != "smart" {
+		t.Fatalf("inner.chatReq = %#v, want untranslated alias model smart", inner.chatReq)
+	}
+	if !provider.Supports("smart") {
+		t.Fatal("Supports(smart) = false, want true")
+	}
+	if got := provider.GetProviderType("smart"); got != "openai" {
+		t.Fatalf("GetProviderType(smart) = %q, want openai", got)
 	}
 }
 
@@ -264,7 +296,7 @@ func TestProviderCanDisableTranslatedRequestRewriting(t *testing.T) {
 	if got := provider.GetProviderType("smart"); got != "openai" {
 		t.Fatalf("GetProviderType(smart) = %q, want openai", got)
 	}
-	selector, changed, err := provider.ResolveModel("smart", "")
+	selector, changed, err := provider.ResolveModel(core.NewRequestedModelSelector("smart", ""))
 	if err != nil {
 		t.Fatalf("ResolveModel() error = %v", err)
 	}
@@ -328,7 +360,7 @@ func TestProviderRewritesBatchItemBodies(t *testing.T) {
 
 	inner := newProviderMock()
 	inner.supported["openai/gpt-4o"] = true
-	provider := NewProvider(inner, service)
+	provider := NewProviderWithOptions(inner, service, Options{})
 
 	body := json.RawMessage(`{"model":"smart","messages":[{"role":"user","content":"hi"}]}`)
 	_, err = provider.CreateBatch(context.Background(), "openai", &core.BatchRequest{
@@ -374,7 +406,7 @@ func TestProviderRewritesBatchInputFiles(t *testing.T) {
 		Data:     []byte("{\"custom_id\":\"1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"smart\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}}\n"),
 	}
 	inner.fileObject = &core.FileObject{ID: "file_rewritten", Object: "file", Filename: "batch.jsonl", Purpose: "batch"}
-	provider := NewProvider(inner, service)
+	provider := NewProviderWithOptions(inner, service, Options{})
 
 	_, err = provider.CreateBatch(context.Background(), "openai", &core.BatchRequest{
 		InputFileID: "file_source",
@@ -416,7 +448,7 @@ func TestProviderBatchInputFileSkipsUploadWhenUnchanged(t *testing.T) {
 		Filename: "batch.jsonl",
 		Data:     []byte("{\"custom_id\":\"1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}}\n"),
 	}
-	provider := NewProvider(inner, service)
+	provider := NewProviderWithOptions(inner, service, Options{})
 
 	_, err = provider.CreateBatch(context.Background(), "openai", &core.BatchRequest{
 		InputFileID: "file_source",
@@ -455,7 +487,7 @@ func TestProviderRejectsDisabledAliasInBatchInputFiles(t *testing.T) {
 		Filename: "batch.jsonl",
 		Data:     []byte("{\"custom_id\":\"1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"smart\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}}\n"),
 	}
-	provider := NewProvider(inner, service)
+	provider := NewProviderWithOptions(inner, service, Options{})
 
 	_, err = provider.CreateBatch(context.Background(), "openai", &core.BatchRequest{
 		InputFileID: "file_source",
@@ -496,7 +528,7 @@ func TestProviderDeletesRewrittenBatchInputFileOnCreateFailure(t *testing.T) {
 		Data:     []byte("{\"custom_id\":\"1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"smart\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}}\n"),
 	}
 	inner.fileObject = &core.FileObject{ID: "file_rewritten", Object: "file", Filename: "batch.jsonl", Purpose: "batch"}
-	provider := NewProvider(inner, service)
+	provider := NewProviderWithOptions(inner, service, Options{})
 
 	_, err = provider.CreateBatch(context.Background(), "openai", &core.BatchRequest{
 		InputFileID: "file_source",
