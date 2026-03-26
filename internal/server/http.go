@@ -200,16 +200,18 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.Use(PassthroughSemanticEnrichment(cfg.PassthroughSemanticEnrichers, passthroughV1PrefixNormalizationEnabled(cfg)))
 	}
 
-	// Request planning must run before audit so per-request feature flags can
-	// suppress audit capture entirely.
-	e.Use(ExecutionPlanningWithResolverAndPolicy(provider, modelResolver, executionPolicyResolver))
-
-	// Audit logging middleware runs after planning so Audit=false can bypass
-	// request/response capture, but still before authentication so rejected model
-	// requests are logged when auditing is enabled for the matched plan.
+	// Audit logging runs before request planning so early planning/validation
+	// failures are still logged. The middleware defers request capture and
+	// dynamically gates response capture on the final resolved execution plan, so
+	// Audit=false still suppresses per-request capture work.
 	if cfg != nil && cfg.AuditLogger != nil && cfg.AuditLogger.Config().Enabled {
 		e.Use(auditlog.Middleware(cfg.AuditLogger))
 	}
+
+	// Request planning resolves the request-scoped execution plan before auth and
+	// handler execution. This keeps rejected model requests loggable and lets
+	// downstream stages consume a shared policy decision.
+	e.Use(ExecutionPlanningWithResolverAndPolicy(provider, modelResolver, executionPolicyResolver))
 
 	// Authentication (skips public paths)
 	if cfg != nil && cfg.MasterKey != "" {

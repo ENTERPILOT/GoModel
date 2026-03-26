@@ -72,28 +72,6 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				entry.Data.APIKeyHash = hashAPIKey(authHeader)
 			}
 
-			// Log request headers if enabled
-			if cfg.LogHeaders {
-				entry.Data.RequestHeaders = extractHeaders(req.Header)
-			}
-
-			// Capture request body if enabled
-			if cfg.LogBodies && req.Body != nil {
-				if snapshot := core.GetRequestSnapshot(req.Context()); snapshot != nil {
-					body := snapshot.CapturedBody()
-					switch {
-					case snapshot.BodyNotCaptured:
-						entry.Data.RequestBodyTooBigToHandle = true
-					case body != nil:
-						captureLoggedRequestBody(entry, body)
-					default:
-						captureRequestBodyForLogging(entry, req)
-					}
-				} else {
-					captureRequestBodyForLogging(entry, req)
-				}
-			}
-
 			// Store entry in context for potential enrichment by handlers
 			c.Set(string(LogEntryKey), entry)
 
@@ -104,7 +82,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 					ResponseWriter: c.Response(),
 					body:           &bytes.Buffer{},
 					shouldCapture: func() bool {
-						return shouldCaptureResponseBody(c)
+						return auditEnabledForContext(c.Request().Context()) && shouldCaptureResponseBody(c)
 					},
 				}
 				c.SetResponse(responseCapture)
@@ -115,6 +93,10 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 
 			applyExecutionPlan(entry, c.Request().Context())
 
+			if !auditEnabledForContext(c.Request().Context()) {
+				return err
+			}
+
 			// Calculate duration
 			entry.DurationNs = time.Since(start).Nanoseconds()
 
@@ -122,9 +104,13 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			// suggested status codes, and errors implementing HTTPStatusCoder.
 			_, entry.StatusCode = echo.ResolveResponseStatus(c.Response(), err)
 
+			// Request capture is deferred until after next so a later-resolved
+			// Audit=false plan can skip it entirely.
+			PopulateRequestData(entry, req, cfg)
+
 			// Log response headers if enabled
 			if cfg.LogHeaders {
-				entry.Data.ResponseHeaders = extractHeaders(c.Response().Header())
+				PopulateResponseHeaders(entry, c.Response().Header())
 			}
 
 			// Capture response body if enabled
@@ -205,35 +191,6 @@ func enrichEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
 	}
 }
 
-func captureRequestBodyForLogging(entry *LogEntry, req *http.Request) {
-	if req.ContentLength > MaxBodyCapture {
-		entry.Data.RequestBodyTooBigToHandle = true
-		return
-	}
-
-	// Read up to MaxBodyCapture+1 to detect overflow safely.
-	// Uses io.LimitReader to enforce the cap regardless of
-	// Content-Length (handles chunked/unknown-length requests).
-	limitedReader := io.LimitReader(req.Body, MaxBodyCapture+1)
-	bodyBytes, err := io.ReadAll(limitedReader)
-	if err != nil {
-		return
-	}
-	if int64(len(bodyBytes)) > MaxBodyCapture {
-		entry.Data.RequestBodyTooBigToHandle = true
-		// Reconstruct full body for downstream: read bytes + unread remainder
-		origBody := req.Body
-		req.Body = &combinedReadCloser{
-			Reader: io.MultiReader(bytes.NewReader(bodyBytes), origBody),
-			rc:     origBody,
-		}
-		return
-	}
-
-	captureLoggedRequestBody(entry, bodyBytes)
-	req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-}
-
 func captureLoggedRequestBody(entry *LogEntry, bodyBytes []byte) {
 	if len(bodyBytes) == 0 {
 		return
@@ -248,17 +205,6 @@ func captureLoggedRequestBody(entry *LogEntry, bodyBytes []byte) {
 
 	// Fallback: store as valid UTF-8 string if not valid JSON
 	entry.Data.RequestBody = toValidUTF8String(bodyBytes)
-}
-
-// combinedReadCloser delegates Read to an io.Reader and Close to an io.ReadCloser.
-// Used to reconstruct a request body that preserves the original closer.
-type combinedReadCloser struct {
-	io.Reader
-	rc io.ReadCloser
-}
-
-func (c *combinedReadCloser) Close() error {
-	return c.rc.Close()
 }
 
 // responseBodyCapture wraps http.ResponseWriter to capture the response body.

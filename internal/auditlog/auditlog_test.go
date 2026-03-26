@@ -1211,6 +1211,18 @@ func (t *trackingReadCloser) Close() error {
 	return nil
 }
 
+type chainReadCloser struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (c *chainReadCloser) Close() error {
+	if c == nil || c.closer == nil {
+		return nil
+	}
+	return c.closer.Close()
+}
+
 // discardWriter implements http.ResponseWriter but discards all output.
 type discardWriter struct{}
 
@@ -1304,9 +1316,9 @@ func TestLimitedReaderRequestBodyCapture(t *testing.T) {
 		}
 
 		origBody := req.Body
-		req.Body = &combinedReadCloser{
+		req.Body = &chainReadCloser{
 			Reader: io.MultiReader(bytes.NewReader(bodyBytes), origBody),
-			rc:     origBody,
+			closer: origBody,
 		}
 
 		// Read full body from reconstructed reader

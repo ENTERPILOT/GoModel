@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -123,7 +124,7 @@ func setupMongoDB(ctx context.Context) error {
 	var err error
 
 	log.Println("Starting MongoDB container...")
-	mongoContainer, err = mongodb.Run(ctx, "mongo:7")
+	mongoContainer, err = mongodb.Run(ctx, "mongo:7", mongodb.WithReplicaSet("rs"))
 	if err != nil {
 		return fmt.Errorf("failed to start MongoDB container: %w", err)
 	}
@@ -133,11 +134,15 @@ func setupMongoDB(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get MongoDB connection string: %w", err)
 	}
+	mongoURL, err = withDirectMongoConnection(mongoURL)
+	if err != nil {
+		return fmt.Errorf("failed to normalize MongoDB connection string: %w", err)
+	}
 
 	log.Printf("MongoDB URL: %s", mongoURL)
 
 	// Create client
-	mongoClient, err = mongo.Connect(options.Client().ApplyURI(mongoURL))
+	mongoClient, err = mongo.Connect(options.Client().ApplyURI(mongoURL).SetDirect(true))
 	if err != nil {
 		return fmt.Errorf("failed to create MongoDB client: %w", err)
 	}
@@ -212,4 +217,15 @@ func GetMongoURL() string {
 // GetTestContext returns the shared test context.
 func GetTestContext() context.Context {
 	return testCtx
+}
+
+func withDirectMongoConnection(rawURL string) (string, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	query := parsed.Query()
+	query.Set("directConnection", "true")
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
 }

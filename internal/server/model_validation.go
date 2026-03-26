@@ -54,10 +54,6 @@ func ExecutionPlanningWithResolverAndPolicy(
 	}
 }
 
-func deriveExecutionPlan(c *echo.Context, provider core.RoutableProvider, resolver RequestModelResolver) (*core.ExecutionPlan, error) {
-	return deriveExecutionPlanWithPolicy(c, provider, resolver, nil)
-}
-
 func deriveExecutionPlanWithPolicy(
 	c *echo.Context,
 	provider core.RoutableProvider,

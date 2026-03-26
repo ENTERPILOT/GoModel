@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -83,6 +84,8 @@ func SetupTestServer(t *testing.T, cfg TestServerConfig) *TestServerFixture {
 
 	ctx, cancel := context.WithCancel(GetTestContext())
 
+	resetIntegrationStorage(t, cfg.DBType)
+
 	// Create mock LLM server
 	mockLLM := NewMockLLMServer()
 
@@ -136,6 +139,68 @@ func SetupTestServer(t *testing.T, cfg TestServerConfig) *TestServerFixture {
 	}
 
 	return fixture
+}
+
+func resetIntegrationStorage(t *testing.T, dbType string) {
+	t.Helper()
+
+	switch dbType {
+	case "postgresql":
+		resetPostgreSQLStorage(t)
+	case "mongodb":
+		resetMongoDBStorage(t)
+	}
+}
+
+func resetPostgreSQLStorage(t *testing.T) {
+	t.Helper()
+
+	pool := GetPostgreSQLPool()
+	require.NotNil(t, pool, "postgresql pool must be initialized")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tables := []string{
+		"audit_logs",
+		"usage",
+		"execution_plan_versions",
+		"aliases",
+		"batches",
+	}
+	for _, table := range tables {
+		_, err := pool.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", table))
+		require.NoError(t, err, "failed to reset table %s", table)
+	}
+}
+
+func resetMongoDBStorage(t *testing.T) {
+	t.Helper()
+
+	db := GetMongoDatabase()
+	require.NotNil(t, db, "mongodb database must be initialized")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	collections := []string{
+		"audit_logs",
+		"usage",
+		"execution_plan_versions",
+		"aliases",
+		"batches",
+	}
+	for _, collection := range collections {
+		err := db.Collection(collection).Drop(ctx)
+		if err == nil {
+			continue
+		}
+		var cmdErr mongo.CommandError
+		if errors.As(err, &cmdErr) && cmdErr.Code == 26 {
+			continue
+		}
+		require.NoError(t, err, "failed to reset collection %s", collection)
+	}
 }
 
 // FlushAndClose flushes all pending log entries and closes loggers.

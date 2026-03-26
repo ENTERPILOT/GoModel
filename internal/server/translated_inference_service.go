@@ -332,6 +332,10 @@ func (s *translatedInferenceService) handleStreamingResponse(
 	auditlog.EnrichEntryWithStream(c, true)
 
 	entry := auditlog.GetStreamEntryFromContext(c)
+	auditEnabled := s.logger != nil && s.logger.Config().Enabled && (plan == nil || plan.AuditEnabled())
+	if auditEnabled && entry != nil {
+		auditlog.PopulateRequestData(entry, c.Request(), s.logger.Config())
+	}
 	streamEntry := auditlog.CreateStreamEntry(entry)
 	if streamEntry != nil {
 		streamEntry.StatusCode = http.StatusOK
@@ -340,7 +344,7 @@ func (s *translatedInferenceService) handleStreamingResponse(
 	requestID := requestIDFromContextOrHeader(c.Request())
 	endpoint := c.Request().URL.Path
 	observers := make([]streaming.Observer, 0, 2)
-	if s.logger != nil && s.logger.Config().Enabled && streamEntry != nil && (plan == nil || plan.AuditEnabled()) {
+	if auditEnabled && streamEntry != nil {
 		observers = append(observers, auditlog.NewStreamLogObserver(s.logger, streamEntry, endpoint))
 	}
 	if s.usageLogger != nil && s.usageLogger.Config().Enabled && (plan == nil || plan.UsageEnabled()) {
@@ -356,12 +360,8 @@ func (s *translatedInferenceService) handleStreamingResponse(
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
 
-	if streamEntry != nil && streamEntry.Data != nil {
-		streamEntry.Data.ResponseHeaders = map[string]string{
-			"Content-Type":  "text/event-stream",
-			"Cache-Control": "no-cache",
-			"Connection":    "keep-alive",
-		}
+	if auditEnabled && streamEntry != nil && s.logger.Config().LogHeaders {
+		auditlog.PopulateResponseHeaders(streamEntry, c.Response().Header())
 	}
 
 	c.Response().WriteHeader(http.StatusOK)
