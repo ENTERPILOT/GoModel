@@ -21,8 +21,10 @@ import (
 
 // ModelInfo holds information about a model and its provider
 type ModelInfo struct {
-	Model    core.Model
-	Provider core.Provider
+	Model        core.Model
+	Provider     core.Provider
+	ProviderName string
+	ProviderType string
 }
 
 // ModelRegistry manages the mapping of models to their providers.
@@ -154,8 +156,10 @@ func (r *ModelRegistry) Initialize(ctx context.Context) error {
 
 		for _, model := range resp.Data {
 			info := &ModelInfo{
-				Model:    model,
-				Provider: provider,
+				Model:        model,
+				Provider:     provider,
+				ProviderName: providerName,
+				ProviderType: providerTypes[provider],
 			}
 			newModelsByProvider[providerName][model.ID] = info
 
@@ -264,7 +268,9 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 					OwnedBy: cachedProv.OwnedBy,
 					Created: cached.Created,
 				},
-				Provider: provider,
+				Provider:     provider,
+				ProviderName: providerName,
+				ProviderType: cachedProv.ProviderType,
 			}
 			providerModels[cached.ID] = info
 			if _, exists := newModels[cached.ID]; !exists {
@@ -586,7 +592,7 @@ func (r *ModelRegistry) GetProviderType(model string) string {
 	if providerName != "" {
 		if providerModels, ok := r.modelsByProvider[providerName]; ok {
 			if info, exists := providerModels[modelID]; exists {
-				return r.providerTypes[info.Provider]
+				return info.ProviderType
 			}
 		}
 		if r.hasConfiguredProviderNameLocked(providerName) {
@@ -596,7 +602,7 @@ func (r *ModelRegistry) GetProviderType(model string) string {
 	}
 
 	if info, ok := r.models[model]; ok {
-		return r.providerTypes[info.Provider]
+		return info.ProviderType
 	}
 	return ""
 }
@@ -719,11 +725,15 @@ func (r *ModelRegistry) ListModelsWithProvider() []ModelWithProvider {
 	result := make([]ModelWithProvider, 0, total)
 	for providerName, providerModels := range r.modelsByProvider {
 		for modelID, info := range providerModels {
+			publicProviderName := providerName
+			if info.ProviderName != "" {
+				publicProviderName = info.ProviderName
+			}
 			result = append(result, ModelWithProvider{
 				Model:        info.Model,
-				ProviderType: r.providerTypes[info.Provider],
-				ProviderName: providerName,
-				Selector:     qualifyPublicModelID(providerName, modelID),
+				ProviderType: info.ProviderType,
+				ProviderName: publicProviderName,
+				Selector:     qualifyPublicModelID(publicProviderName, modelID),
 			})
 		}
 	}

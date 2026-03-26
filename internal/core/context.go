@@ -25,6 +25,12 @@ const (
 	// for the current request. Set by the translated inference handlers after
 	// PatchChatRequest; consumed by the semantic cache to build params_hash.
 	guardrailsHashKey contextKey = "guardrails-hash"
+
+	// fallbackUsedKey stores whether the translated execution path successfully
+	// served the request from a fallback model rather than the primary selector.
+	// Response cache writers use this to avoid storing fallback responses under
+	// the primary request key.
+	fallbackUsedKey contextKey = "fallback-used"
 )
 
 // WithRequestID returns a new context with the request ID attached.
@@ -135,4 +141,19 @@ func GetGuardrailsHash(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+// WithFallbackUsed returns a new context marked as having used a fallback model.
+func WithFallbackUsed(ctx context.Context) context.Context {
+	return context.WithValue(ctx, fallbackUsedKey, true)
+}
+
+// GetFallbackUsed reports whether the request was served by a fallback model.
+func GetFallbackUsed(ctx context.Context) bool {
+	if v := ctx.Value(fallbackUsedKey); v != nil {
+		if used, ok := v.(bool); ok {
+			return used
+		}
+	}
+	return false
 }

@@ -104,6 +104,15 @@ guardrails:
     #     mode: "inject"
     #     content: "Follow safety guidelines."
 
+fallback:
+  default_mode: off # "off", "manual", or "auto"
+  manual_rules_path: "config/fallback.example.json" # optional JSON map: {"model": ["fallback-1", "provider/model"]}
+  overrides:
+    "gpt-4o":
+      mode: manual # use only manual fallbacks for this model
+    "claude-sonnet-4":
+      mode: off # disable fallback just for this model
+
 providers:
   openai:
     type: openai

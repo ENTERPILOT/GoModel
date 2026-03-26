@@ -148,6 +148,43 @@ func TestResolve_ProviderModelOverride(t *testing.T) {
 	}
 }
 
+func TestResolve_MapsRankingsIntoMetadata(t *testing.T) {
+	list := &ModelList{
+		Models: map[string]ModelEntry{
+			"gpt-4o": {
+				DisplayName: "GPT-4o",
+				Modes:       []string{"chat"},
+				Rankings: map[string]RankingEntry{
+					"chatbot_arena": {
+						Elo:  new(1287.0),
+						Rank: new(3),
+						AsOf: new("2026-02-01"),
+					},
+				},
+			},
+		},
+		ProviderModels: map[string]ProviderModelEntry{},
+	}
+
+	meta := Resolve(list, "openai", "gpt-4o")
+	if meta == nil {
+		t.Fatal("expected non-nil metadata")
+	}
+	ranking, ok := meta.Rankings["chatbot_arena"]
+	if !ok {
+		t.Fatal("expected chatbot_arena ranking in metadata")
+	}
+	if ranking.Elo == nil || *ranking.Elo != 1287.0 {
+		t.Fatalf("ranking.Elo = %v, want 1287.0", ranking.Elo)
+	}
+	if ranking.Rank == nil || *ranking.Rank != 3 {
+		t.Fatalf("ranking.Rank = %v, want 3", ranking.Rank)
+	}
+	if ranking.AsOf != "2026-02-01" {
+		t.Fatalf("ranking.AsOf = %q, want %q", ranking.AsOf, "2026-02-01")
+	}
+}
+
 func TestResolve_ProviderModelWithoutBaseModel(t *testing.T) {
 	list := &ModelList{
 		Models: map[string]ModelEntry{},

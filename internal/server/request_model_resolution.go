@@ -15,6 +15,12 @@ type RequestModelResolver interface {
 	ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
+// RequestFallbackResolver resolves alternate concrete model selectors for a
+// translated request after the primary selector has already been resolved.
+type RequestFallbackResolver interface {
+	ResolveFallbacks(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector
+}
+
 func effectiveRequestModelResolver(provider core.RoutableProvider, resolver RequestModelResolver) RequestModelResolver {
 	if resolver != nil {
 		return resolver

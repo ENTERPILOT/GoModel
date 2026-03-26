@@ -41,6 +41,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"USAGE_ENABLED", "ENFORCE_RETURNING_USAGE_DATA",
 		"USAGE_BUFFER_SIZE", "USAGE_FLUSH_INTERVAL", "USAGE_RETENTION_DAYS",
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING",
+		"FALLBACK_DEFAULT_MODE", "FALLBACK_MANUAL_RULES_PATH",
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
 	} {
 		t.Setenv(key, "")
@@ -151,6 +152,9 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Guardrails.EnableForBatchProcessing {
 		t.Error("expected Guardrails.EnableForBatchProcessing=false")
 	}
+	if cfg.Fallback.DefaultMode != FallbackModeOff {
+		t.Errorf("expected Fallback.DefaultMode=off, got %q", cfg.Fallback.DefaultMode)
+	}
 
 	expectedRetry := DefaultRetryConfig()
 	if cfg.Resilience.Retry != expectedRetry {
@@ -245,6 +249,68 @@ logging:
 		}
 		if cfg.Storage.Type != "sqlite" {
 			t.Errorf("expected Storage.Type=sqlite (default), got %s", cfg.Storage.Type)
+		}
+	})
+}
+
+func TestLoad_FallbackManualRules(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		manualRulesPath := filepath.Join(dir, "fallback.json")
+		if err := os.WriteFile(manualRulesPath, []byte(`{
+			"gpt-4o": ["azure/gpt-4o", "gemini/gemini-2.5-pro"],
+			"claude-sonnet-4": ["openai/gpt-5-mini"]
+		}`), 0644); err != nil {
+			t.Fatalf("Failed to write fallback rules: %v", err)
+		}
+
+		yaml := `
+fallback:
+  default_mode: auto
+  manual_rules_path: "` + manualRulesPath + `"
+  overrides:
+    "gpt-4o":
+      mode: manual
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+
+		cfg := result.Config
+		if cfg.Fallback.DefaultMode != FallbackModeAuto {
+			t.Fatalf("Fallback.DefaultMode = %q, want %q", cfg.Fallback.DefaultMode, FallbackModeAuto)
+		}
+		if cfg.Fallback.Overrides["gpt-4o"].Mode != FallbackModeManual {
+			t.Fatalf("Fallback.Overrides[gpt-4o].Mode = %q, want %q", cfg.Fallback.Overrides["gpt-4o"].Mode, FallbackModeManual)
+		}
+		got := cfg.Fallback.Manual["gpt-4o"]
+		want := []string{"azure/gpt-4o", "gemini/gemini-2.5-pro"}
+		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("Fallback.Manual[gpt-4o] = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestLoad_InvalidFallbackMode(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+fallback:
+  default_mode: invalid
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		if _, err := Load(); err == nil {
+			t.Fatal("expected Load() to fail for invalid fallback mode")
 		}
 	})
 }
@@ -350,10 +416,24 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to read config.example.yaml: %v", err)
 	}
+	fallbackExamplePath, err := filepath.Abs("fallback.example.json")
+	if err != nil {
+		t.Fatalf("Failed to resolve fallback.example.json path: %v", err)
+	}
+	fallbackExampleData, err := os.ReadFile(fallbackExamplePath)
+	if err != nil {
+		t.Fatalf("Failed to read fallback.example.json: %v", err)
+	}
 
 	withTempDir(t, func(dir string) {
 		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), exampleData, 0644); err != nil {
 			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, "config"), 0755); err != nil {
+			t.Fatalf("Failed to create config directory: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config", "fallback.example.json"), fallbackExampleData, 0644); err != nil {
+			t.Fatalf("Failed to write fallback.example.json: %v", err)
 		}
 
 		result, err := Load()

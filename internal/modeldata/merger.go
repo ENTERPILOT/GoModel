@@ -170,6 +170,7 @@ func buildMetadata(model *ModelEntry, pm *ProviderModelEntry) *core.ModelMetadat
 		meta.ContextWindow = model.ContextWindow
 		meta.MaxOutputTokens = model.MaxOutputTokens
 		meta.Capabilities = model.Capabilities
+		meta.Rankings = buildRankings(model.Rankings)
 		meta.Pricing = model.Pricing
 	}
 
@@ -190,4 +191,27 @@ func buildMetadata(model *ModelEntry, pm *ProviderModelEntry) *core.ModelMetadat
 	}
 
 	return meta
+}
+
+func buildRankings(rankings map[string]RankingEntry) map[string]core.ModelRanking {
+	if len(rankings) == 0 {
+		return nil
+	}
+
+	result := make(map[string]core.ModelRanking, len(rankings))
+	for name, ranking := range rankings {
+		entry := core.ModelRanking{
+			Rank: ranking.Rank,
+		}
+		if ranking.Elo != nil {
+			entry.Elo = ranking.Elo
+		} else if ranking.Score != nil {
+			entry.Elo = ranking.Score
+		}
+		if ranking.AsOf != nil {
+			entry.AsOf = *ranking.AsOf
+		}
+		result[name] = entry
+	}
+	return result
 }

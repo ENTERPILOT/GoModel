@@ -127,6 +127,9 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 	if capture.status != http.StatusOK || capture.body.Len() == 0 {
 		return nil
 	}
+	if core.GetFallbackUsed(c.Request().Context()) {
+		return nil
+	}
 
 	data := bytes.Clone(capture.body.Bytes())
 	ttl := time.Duration(m.cfg.TTL) * time.Second

@@ -1,2 +1,0 @@
-#failover:
-#  "gpt-5": [gemini-1.5-pro, gemini2.5-pro]

@@ -1333,7 +1333,7 @@ func TestChatCompletion_UsesExplicitAliasResolverWithoutProviderDecorator(t *tes
 	}
 
 	e := echo.New()
-	handler := newHandler(inner, nil, nil, nil, service, nil)
+	handler := newHandler(inner, nil, nil, nil, service, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.Header.Set("Content-Type", "application/json")
@@ -1444,7 +1444,7 @@ func TestChatCompletion_UsesExplicitAliasResolverWithAliasProviderInventoryOnly(
 	})
 
 	e := echo.New()
-	handler := newHandler(provider, nil, nil, nil, service, nil)
+	handler := newHandler(provider, nil, nil, nil, service, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.Header.Set("Content-Type", "application/json")
@@ -1524,7 +1524,7 @@ func TestChatCompletion_UsesExplicitTranslatedRequestPatcher(t *testing.T) {
 	patcher := guardrails.NewRequestPatcher(pipeline)
 
 	e := echo.New()
-	handler := newHandler(inner, nil, nil, nil, nil, patcher)
+	handler := newHandler(inner, nil, nil, nil, nil, nil, patcher)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.Header.Set("Content-Type", "application/json")

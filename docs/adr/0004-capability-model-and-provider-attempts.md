@@ -6,7 +6,7 @@ Not every route or provider interaction can safely support the same gateway feat
 
 Examples:
 
-- `/v1/chat/completions` can usually support aliases, guardrails, and failover
+- `/v1/chat/completions` can usually support aliases, guardrails, and fallback
 - `/v1/responses` can usually support similar features
 - `/p/openai/responses` may support partial semantic extraction and selected policies
 - `/p/{provider}/{unknown-endpoint}` may support only authentication, auditing, and raw pass-through
@@ -14,7 +14,7 @@ Examples:
 The gateway also needs a clean execution model for:
 
 - retries
-- failover
+- fallback
 - translated provider calls
 - raw pass-through calls
 - future async media jobs and result artifacts
@@ -36,7 +36,7 @@ Examples include:
 
 - semantic extraction supported
 - guardrails supported
-- failover supported
+- fallback supported
 - alias resolution supported
 - request patching supported
 - usage extraction supported
@@ -52,7 +52,7 @@ A single request may produce one or more attempts:
 
 - one translated call to the primary provider
 - a retried call
-- a failover call to an alternate provider
+- a fallback call to an alternate provider
 - a raw pass-through call
 
 For async or media-oriented providers, an attempt may also produce:
@@ -66,7 +66,7 @@ For async or media-oriented providers, an attempt may also produce:
 ### Positive
 
 - **Safer feature gating**: The gateway will not try to apply unsupported features to opaque or provider-native routes
-- **Cleaner failover model**: Alternate calls become explicit attempts rather than hidden control flow
+- **Cleaner fallback model**: Alternate calls become explicit attempts rather than hidden control flow
 - **Better observability**: Audit logs and debugging can show which upstream attempts were made
 - **Media and async ready**: Video, audio, and task-based provider APIs fit naturally into an attempt-oriented execution model
 - **Clearer provider boundaries**: Capability declarations make route behavior predictable

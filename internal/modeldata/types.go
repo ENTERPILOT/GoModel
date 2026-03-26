@@ -53,8 +53,8 @@ func (l *ModelList) buildReverseIndex() {
 	}
 
 	for compositeKey, pm := range l.ProviderModels {
-		actualID := pm.actualModelID()
-		if actualID == "" {
+		actualID, ok := pm.actualModelID()
+		if !ok {
 			continue
 		}
 		// compositeKey is "providerType/modelID"
@@ -153,14 +153,14 @@ type ProviderModelEntry struct {
 	Regions         []string           `json:"regions"`
 }
 
-func (e ProviderModelEntry) actualModelID() string {
-	if e.ProviderModelID != nil && *e.ProviderModelID != "" {
-		return *e.ProviderModelID
+func (e ProviderModelEntry) actualModelID() (string, bool) {
+	if e.ProviderModelID != nil && strings.TrimSpace(*e.ProviderModelID) != "" {
+		return strings.TrimSpace(*e.ProviderModelID), true
 	}
-	if e.CustomModelID != nil && *e.CustomModelID != "" {
-		return *e.CustomModelID
+	if e.CustomModelID != nil && strings.TrimSpace(*e.CustomModelID) != "" {
+		return strings.TrimSpace(*e.CustomModelID), true
 	}
-	return ""
+	return "", false
 }
 
 // ParameterSpec describes a model parameter's constraints.
@@ -176,7 +176,9 @@ type ParameterSpec struct {
 // RankingEntry holds a model's score in a benchmark or ranking.
 type RankingEntry struct {
 	Score *float64 `json:"score"`
+	Elo   *float64 `json:"elo"`
 	Rank  *int     `json:"rank"`
+	AsOf  *string  `json:"as_of"`
 }
 
 // AuthConfig describes provider authentication configuration.

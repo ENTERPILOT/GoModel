@@ -190,6 +190,44 @@ func TestParse_BuildsReverseIndex(t *testing.T) {
 	}
 }
 
+func TestParse_BuildsReverseIndexFromProviderModelID(t *testing.T) {
+	raw := []byte(`{
+		"version": 1,
+		"updated_at": "2025-01-01T00:00:00Z",
+		"providers": {},
+		"models": {
+			"gpt-4o": {
+				"display_name": "GPT-4o",
+				"modes": ["chat"],
+				"rankings": {
+					"chatbot_arena": {
+						"elo": 1287,
+						"rank": 3,
+						"as_of": "2026-02-01"
+					}
+				}
+			}
+		},
+		"provider_models": {
+			"openai/gpt-4o": {
+				"model_ref": "gpt-4o",
+				"provider_model_id": "gpt-4o-2024-11-20",
+				"enabled": true
+			}
+		}
+	}`)
+	list, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := list.providerModelByActualID["openai/gpt-4o-2024-11-20"]; got != "openai/gpt-4o" {
+		t.Fatalf("reverse index = %q, want %q", got, "openai/gpt-4o")
+	}
+	if list.Models["gpt-4o"].Rankings["chatbot_arena"].Elo == nil {
+		t.Fatal("expected elo ranking to be parsed")
+	}
+}
+
 func TestParse_InvalidJSON(t *testing.T) {
 	_, err := Parse([]byte("not json"))
 	if err == nil {

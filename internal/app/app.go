@@ -17,6 +17,7 @@ import (
 	"gomodel/internal/auditlog"
 	"gomodel/internal/batch"
 	"gomodel/internal/core"
+	"gomodel/internal/fallback"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/providers"
 	"gomodel/internal/responsecache"
@@ -208,6 +209,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		UsageLogger:                  usageResult.Logger,
 		PricingResolver:              providerResult.Registry,
 		ModelResolver:                app.aliases.Service,
+		FallbackResolver:             fallback.NewResolver(appCfg.Fallback, providerResult.Registry),
 		TranslatedRequestPatcher:     translatedRequestPatcher,
 		GuardrailsHash:               guardrailsHash,
 		BatchRequestPreparer:         batchRequestPreparer,

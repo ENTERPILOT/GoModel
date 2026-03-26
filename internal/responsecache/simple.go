@@ -137,6 +137,9 @@ func (m *simpleCacheMiddleware) StoreAfter(c *echo.Context, body []byte, next fu
 		return err
 	}
 	if capture.status == http.StatusOK && capture.body.Len() > 0 {
+		if core.GetFallbackUsed(c.Request().Context()) {
+			return nil
+		}
 		data := bytes.Clone(capture.body.Bytes())
 		m.enqueueWrite(cacheWriteJob{key: key, data: data})
 	}

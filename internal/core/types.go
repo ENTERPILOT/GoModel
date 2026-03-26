@@ -152,16 +152,24 @@ type Model struct {
 
 // ModelMetadata holds enriched metadata from the external model registry.
 type ModelMetadata struct {
-	DisplayName     string          `json:"display_name,omitempty"`
-	Description     string          `json:"description,omitempty"`
-	Family          string          `json:"family,omitempty"`
-	Modes           []string        `json:"modes,omitempty"`
-	Categories      []ModelCategory `json:"categories,omitempty"`
-	Tags            []string        `json:"tags,omitempty"`
-	ContextWindow   *int            `json:"context_window,omitempty"`
-	MaxOutputTokens *int            `json:"max_output_tokens,omitempty"`
-	Capabilities    map[string]bool `json:"capabilities,omitempty"`
-	Pricing         *ModelPricing   `json:"pricing,omitempty"`
+	DisplayName     string                  `json:"display_name,omitempty"`
+	Description     string                  `json:"description,omitempty"`
+	Family          string                  `json:"family,omitempty"`
+	Modes           []string                `json:"modes,omitempty"`
+	Categories      []ModelCategory         `json:"categories,omitempty"`
+	Tags            []string                `json:"tags,omitempty"`
+	ContextWindow   *int                    `json:"context_window,omitempty"`
+	MaxOutputTokens *int                    `json:"max_output_tokens,omitempty"`
+	Capabilities    map[string]bool         `json:"capabilities,omitempty"`
+	Rankings        map[string]ModelRanking `json:"rankings,omitempty"`
+	Pricing         *ModelPricing           `json:"pricing,omitempty"`
+}
+
+// ModelRanking holds one benchmark or leaderboard entry for a model.
+type ModelRanking struct {
+	Elo  *float64 `json:"elo,omitempty"`
+	Rank *int     `json:"rank,omitempty"`
+	AsOf string   `json:"as_of,omitempty"`
 }
 
 // ModelCategory represents a model's functional category for UI grouping.

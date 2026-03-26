@@ -1,0 +1,10 @@
+{
+  "gpt-4o": [
+    "azure/gpt-4o",
+    "gemini/gemini-2.5-pro"
+  ],
+  "claude-sonnet-4": [
+    "openai/gpt-5-mini",
+    "gemini/gemini-2.5-pro"
+  ]
+}

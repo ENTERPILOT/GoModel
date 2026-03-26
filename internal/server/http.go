@@ -43,6 +43,7 @@ type Config struct {
 	UsageLogger                  usage.LoggerInterface                  // Optional: Usage logger for token tracking
 	PricingResolver              usage.PricingResolver                  // Optional: Resolves pricing for cost calculation
 	ModelResolver                RequestModelResolver                   // Optional: explicit model resolver used during request planning
+	FallbackResolver             RequestFallbackResolver                // Optional: translated-route fallback resolver
 	TranslatedRequestPatcher     TranslatedRequestPatcher               // Optional: request patcher for translated routes after planning
 	BatchRequestPreparer         BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
 	ExposedModelLister           ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
@@ -77,13 +78,15 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	var modelResolver RequestModelResolver
+	var fallbackResolver RequestFallbackResolver
 	var translatedRequestPatcher TranslatedRequestPatcher
 	if cfg != nil {
 		modelResolver = cfg.ModelResolver
+		fallbackResolver = cfg.FallbackResolver
 		translatedRequestPatcher = cfg.TranslatedRequestPatcher
 	}
 
-	handler := newHandler(provider, auditLogger, usageLogger, pricingResolver, modelResolver, translatedRequestPatcher)
+	handler := newHandler(provider, auditLogger, usageLogger, pricingResolver, modelResolver, fallbackResolver, translatedRequestPatcher)
 	if cfg != nil {
 		handler.batchRequestPreparer = cfg.BatchRequestPreparer
 		handler.exposedModelLister = cfg.ExposedModelLister
