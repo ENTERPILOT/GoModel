@@ -353,6 +353,52 @@ fallback:
 	})
 }
 
+func TestLoad_ManualFallbackModeRequiresManualRulesPath(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+fallback:
+  default_mode: manual
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("expected Load() to fail when manual fallback mode has no manual rules path")
+		}
+		if !strings.Contains(err.Error(), "fallback.manual_rules_path must be set") {
+			t.Fatalf("Load() error = %v, want manual rules path validation", err)
+		}
+	})
+}
+
+func TestLoad_ManualFallbackOverrideRequiresManualRulesPath(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+fallback:
+  overrides:
+    "gpt-4o":
+      mode: manual
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("expected Load() to fail when manual fallback override has no manual rules path")
+		}
+		if !strings.Contains(err.Error(), "fallback.manual_rules_path must be set") {
+			t.Fatalf("Load() error = %v, want manual rules path validation", err)
+		}
+	})
+}
+
 func TestLoad_FallbackOverrideDuplicateKeyAfterTrim(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
@@ -544,11 +590,11 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 	}
 
 	withTempDir(t, func(dir string) {
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), exampleData, 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
 		if err := os.MkdirAll(filepath.Join(dir, "config"), 0755); err != nil {
 			t.Fatalf("Failed to create config directory: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config", "config.yaml"), exampleData, 0644); err != nil {
+			t.Fatalf("Failed to write config/config.yaml: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(dir, "config", "fallback.example.json"), fallbackExampleData, 0644); err != nil {
 			t.Fatalf("Failed to write fallback.example.json: %v", err)

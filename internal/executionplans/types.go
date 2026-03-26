@@ -35,7 +35,17 @@ type FeatureFlags struct {
 	Fallback   *bool `json:"fallback,omitempty" bson:"fallback,omitempty"`
 }
 
+func (f FeatureFlags) canonicalize() FeatureFlags {
+	if f.Fallback != nil {
+		return f
+	}
+	fallbackEnabled := true
+	f.Fallback = &fallbackEnabled
+	return f
+}
+
 func (f FeatureFlags) runtimeFeatures() core.ExecutionFeatures {
+	f = f.canonicalize()
 	fallback := true
 	if f.Fallback != nil {
 		fallback = *f.Fallback
@@ -108,6 +118,7 @@ func normalizePayload(payload Payload) (Payload, string, error) {
 	if payload.SchemaVersion != currentSchemaVersion {
 		return Payload{}, "", newValidationError("unsupported schema_version", nil)
 	}
+	payload.Features = payload.Features.canonicalize()
 
 	type indexedGuardrail struct {
 		step  GuardrailStep

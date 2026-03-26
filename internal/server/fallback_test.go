@@ -389,6 +389,9 @@ func TestResponses_FallsBackToAlternateModel(t *testing.T) {
 	if len(provider.responsesCalls) != 2 {
 		t.Fatalf("responses calls = %v, want 2 attempts", provider.responsesCalls)
 	}
+	if !core.GetFallbackUsed(c.Request().Context()) {
+		t.Fatal("expected request context to be marked as fallback-used")
+	}
 }
 
 func TestResponses_StreamFallsBackToAlternateModel(t *testing.T) {

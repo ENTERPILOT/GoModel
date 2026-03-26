@@ -766,6 +766,16 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 
 	path := strings.TrimSpace(cfg.ManualRulesPath)
 	if path == "" {
+		if cfg.DefaultMode == FallbackModeManual {
+			return fmt.Errorf("fallback.manual_rules_path must be set when fallback.default_mode or any fallback.overrides[].mode is 'manual'")
+		}
+		for _, override := range cfg.Overrides {
+			if override.Mode == FallbackModeManual {
+				return fmt.Errorf("fallback.manual_rules_path must be set when fallback.default_mode or any fallback.overrides[].mode is 'manual'")
+			}
+		}
+	}
+	if path == "" {
 		cfg.Manual = nil
 		return nil
 	}
