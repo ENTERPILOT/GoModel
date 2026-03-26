@@ -11,6 +11,10 @@ import (
 	"gomodel/internal/core"
 )
 
+// openAICompatBreakingAnthropicThinkingSignaturesEnv enables preserving Anthropic
+// reasoning fingerprints/signatures in OpenAI-compatible chat/responses payloads.
+// This is intentionally behind a flag because it adds Anthropic-specific fields
+// that can break strict OpenAI-compatible clients.
 const openAICompatBreakingAnthropicThinkingSignaturesEnv = "OPENAI_COMPAT_BREAKING_ANTHROPIC_THINKING_SIGNATURES"
 
 type openAIReasoningDetail struct {
