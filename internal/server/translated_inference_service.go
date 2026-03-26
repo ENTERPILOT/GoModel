@@ -88,9 +88,12 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 				return err
 			}
 		}
-		stream, resolvedProviderType, resolvedUsageModel, err := s.streamChatCompletion(ctx, plan, streamReq, providerType, usageModel)
+		stream, resolvedProviderType, resolvedUsageModel, usedFallback, err := s.streamChatCompletion(ctx, plan, streamReq, providerType, usageModel)
 		if err != nil {
 			return handleError(c, err)
+		}
+		if usedFallback {
+			markRequestFallbackUsed(c)
 		}
 		return s.handleStreamingReadCloser(c, plan, resolvedUsageModel, resolvedProviderType, stream)
 	}
@@ -189,9 +192,12 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		if (plan == nil || plan.UsageEnabled()) && s.shouldEnforceReturningUsageData() {
 			ctx = core.WithEnforceReturningUsageData(ctx, true)
 		}
-		stream, resolvedProviderType, resolvedUsageModel, err := s.streamResponses(ctx, plan, req, providerType, usageModel)
+		stream, resolvedProviderType, resolvedUsageModel, usedFallback, err := s.streamResponses(ctx, plan, req, providerType, usageModel)
 		if err != nil {
 			return handleError(c, err)
+		}
+		if usedFallback {
+			markRequestFallbackUsed(c)
 		}
 		return s.handleStreamingReadCloser(c, plan, resolvedUsageModel, resolvedProviderType, stream)
 	}
@@ -414,13 +420,13 @@ func (s *translatedInferenceService) streamChatCompletion(
 	plan *core.ExecutionPlan,
 	req *core.ChatRequest,
 	providerType, usageModel string,
-) (io.ReadCloser, string, string, error) {
+) (io.ReadCloser, string, string, bool, error) {
 	stream, err := s.provider.StreamChatCompletion(ctx, req)
 	if err == nil {
-		return stream, providerType, usageModel, nil
+		return stream, providerType, usageModel, false, nil
 	}
 
-	return tryFallbackStream(ctx, s, plan, req.Model, req.Provider, err,
+	stream, resolvedProviderType, resolvedUsageModel, err := tryFallbackStream(ctx, s, plan, req.Model, req.Provider, err,
 		func(selector core.ModelSelector, providerType string) (io.ReadCloser, string, string, error) {
 			stream, err := s.provider.StreamChatCompletion(ctx, cloneChatRequestForSelector(req, selector))
 			if err != nil {
@@ -429,6 +435,10 @@ func (s *translatedInferenceService) streamChatCompletion(
 			return stream, providerType, selector.Model, nil
 		},
 	)
+	if err != nil {
+		return nil, "", "", false, err
+	}
+	return stream, resolvedProviderType, resolvedUsageModel, true, nil
 }
 
 //nolint:dupl // typed wrapper over the shared translated fallback executor
@@ -453,13 +463,13 @@ func (s *translatedInferenceService) streamResponses(
 	plan *core.ExecutionPlan,
 	req *core.ResponsesRequest,
 	providerType, usageModel string,
-) (io.ReadCloser, string, string, error) {
+) (io.ReadCloser, string, string, bool, error) {
 	stream, err := s.provider.StreamResponses(ctx, req)
 	if err == nil {
-		return stream, providerType, usageModel, nil
+		return stream, providerType, usageModel, false, nil
 	}
 
-	return tryFallbackStream(ctx, s, plan, req.Model, req.Provider, err,
+	stream, resolvedProviderType, resolvedUsageModel, err := tryFallbackStream(ctx, s, plan, req.Model, req.Provider, err,
 		func(selector core.ModelSelector, providerType string) (io.ReadCloser, string, string, error) {
 			stream, err := s.provider.StreamResponses(ctx, cloneResponsesRequestForSelector(req, selector))
 			if err != nil {
@@ -468,6 +478,10 @@ func (s *translatedInferenceService) streamResponses(
 			return stream, providerType, selector.Model, nil
 		},
 	)
+	if err != nil {
+		return nil, "", "", false, err
+	}
+	return stream, resolvedProviderType, resolvedUsageModel, true, nil
 }
 
 func (s *translatedInferenceService) executeEmbeddings(
@@ -525,6 +539,9 @@ func (s *translatedInferenceService) fallbackSelectors(plan *core.ExecutionPlan)
 
 func (s *translatedInferenceService) providerTypeForSelector(selector core.ModelSelector, fallback string) string {
 	fallback = strings.TrimSpace(fallback)
+	if provider := strings.TrimSpace(selector.Provider); provider != "" {
+		return provider
+	}
 	if s.provider == nil {
 		return fallback
 	}
@@ -809,7 +826,7 @@ func shouldAttemptFallback(err error) bool {
 	}
 
 	status := gatewayErr.HTTPStatusCode()
-	if status >= http.StatusInternalServerError || status == http.StatusTooManyRequests || status == http.StatusNotFound {
+	if status >= http.StatusInternalServerError || status == http.StatusTooManyRequests {
 		return true
 	}
 

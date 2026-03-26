@@ -45,3 +45,14 @@ func TestTranslatedInferenceService_LogUsageSkipsWhenExecutionPlanDisablesUsage(
 		t.Fatalf("len(entries) = %d, want 0", len(logger.entries))
 	}
 }
+
+func TestTranslatedInferenceService_ProviderTypeForSelectorPrefersExplicitProvider(t *testing.T) {
+	service := &translatedInferenceService{
+		provider: &mockProvider{},
+	}
+
+	got := service.providerTypeForSelector(core.ModelSelector{Provider: "azure", Model: "gpt-4o"}, "openai")
+	if got != "azure" {
+		t.Fatalf("providerTypeForSelector() = %q, want %q", got, "azure")
+	}
+}

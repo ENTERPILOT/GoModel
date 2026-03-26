@@ -23,8 +23,10 @@ func (s fallbackResolverStub) ResolveFallbacks(_ *core.RequestModelResolution, _
 
 type fallbackProvider struct {
 	chatResponses      map[string]*core.ChatResponse
+	chatStreams        map[string]string
 	chatErrors         map[string]error
 	responsesResponses map[string]*core.ResponsesResponse
+	responsesStreams   map[string]string
 	responsesErrors    map[string]error
 	embeddingResponses map[string]*core.EmbeddingResponse
 	embeddingErrors    map[string]error
@@ -49,6 +51,9 @@ func (p *fallbackProvider) StreamChatCompletion(_ context.Context, req *core.Cha
 	if err := p.chatErrors[key]; err != nil {
 		return nil, err
 	}
+	if stream := p.chatStreams[key]; stream != "" {
+		return io.NopCloser(strings.NewReader(stream)), nil
+	}
 	return io.NopCloser(strings.NewReader("data: [DONE]\n\n")), nil
 }
 
@@ -70,6 +75,9 @@ func (p *fallbackProvider) StreamResponses(_ context.Context, req *core.Response
 	p.responsesCalls = append(p.responsesCalls, key)
 	if err := p.responsesErrors[key]; err != nil {
 		return nil, err
+	}
+	if stream := p.responsesStreams[key]; stream != "" {
+		return io.NopCloser(strings.NewReader(stream)), nil
 	}
 	return io.NopCloser(strings.NewReader("data: [DONE]\n\n")), nil
 }
@@ -242,6 +250,96 @@ func TestChatCompletion_DoesNotFallbackWhenExecutionPolicyDisablesFallback(t *te
 	}
 }
 
+func TestChatCompletion_StreamFallsBackToAlternateModel(t *testing.T) {
+	provider := &fallbackProvider{
+		chatStreams: map[string]string{
+			"azure/gpt-4o": "data: {\"choices\":[{\"delta\":{\"content\":\"fallback ok\"}}]}\n\ndata: [DONE]\n\n",
+		},
+		chatErrors: map[string]error{
+			"gpt-4o": core.NewProviderError("openai", http.StatusServiceUnavailable, "model temporarily unavailable", nil),
+		},
+		supportedModels: map[string]string{
+			"gpt-4o":       "openai",
+			"azure/gpt-4o": "azure",
+		},
+	}
+
+	handler := newHandler(provider, nil, nil, nil, nil, nil, fallbackResolverStub{
+		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
+	}, nil)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.ChatCompletion(c); err != nil {
+		t.Fatalf("handler.ChatCompletion() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(provider.chatCalls) != 2 {
+		t.Fatalf("chat calls = %v, want 2 attempts", provider.chatCalls)
+	}
+	if provider.chatCalls[0] != "gpt-4o" || provider.chatCalls[1] != "azure/gpt-4o" {
+		t.Fatalf("chat calls = %v, want [gpt-4o azure/gpt-4o]", provider.chatCalls)
+	}
+	if !strings.Contains(rec.Body.String(), "fallback ok") {
+		t.Fatalf("response body = %s, want fallback stream content", rec.Body.String())
+	}
+	if !core.GetFallbackUsed(c.Request().Context()) {
+		t.Fatal("expected request context to be marked as fallback-used")
+	}
+}
+
+func TestChatCompletion_StreamDoesNotFallbackWhenExecutionPolicyDisablesFallback(t *testing.T) {
+	provider := &fallbackProvider{
+		chatStreams: map[string]string{
+			"azure/gpt-4o": "data: {\"choices\":[{\"delta\":{\"content\":\"fallback ok\"}}]}\n\ndata: [DONE]\n\n",
+		},
+		chatErrors: map[string]error{
+			"gpt-4o": core.NewProviderError("openai", http.StatusServiceUnavailable, "model temporarily unavailable", nil),
+		},
+		supportedModels: map[string]string{
+			"gpt-4o":       "openai",
+			"azure/gpt-4o": "azure",
+		},
+	}
+
+	handler := newHandler(provider, nil, nil, nil, nil, requestExecutionPolicyResolverFunc(func(core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+		return &core.ResolvedExecutionPolicy{
+			VersionID: "plan-fallback-off",
+			Features: core.ExecutionFeatures{
+				Cache:      true,
+				Audit:      true,
+				Usage:      true,
+				Guardrails: true,
+				Fallback:   false,
+			},
+		}, nil
+	}), fallbackResolverStub{
+		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
+	}, nil)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.ChatCompletion(c); err != nil {
+		t.Fatalf("handler.ChatCompletion() error = %v", err)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	}
+	if len(provider.chatCalls) != 1 || provider.chatCalls[0] != "gpt-4o" {
+		t.Fatalf("chat calls = %v, want only the primary model", provider.chatCalls)
+	}
+}
+
 func TestResponses_FallsBackToAlternateModel(t *testing.T) {
 	provider := &fallbackProvider{
 		responsesResponses: map[string]*core.ResponsesResponse{
@@ -293,6 +391,81 @@ func TestResponses_FallsBackToAlternateModel(t *testing.T) {
 	}
 }
 
+func TestResponses_StreamFallsBackToAlternateModel(t *testing.T) {
+	provider := &fallbackProvider{
+		responsesStreams: map[string]string{
+			"azure/gpt-4o": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"fallback response\"}\n\ndata: [DONE]\n\n",
+		},
+		responsesErrors: map[string]error{
+			"gpt-4o": core.NewNotFoundError("model not found"),
+		},
+		supportedModels: map[string]string{
+			"gpt-4o":       "openai",
+			"azure/gpt-4o": "azure",
+		},
+	}
+
+	handler := newHandler(provider, nil, nil, nil, nil, nil, fallbackResolverStub{
+		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
+	}, nil)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-4o","stream":true,"input":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.Responses(c); err != nil {
+		t.Fatalf("handler.Responses() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(provider.responsesCalls) != 2 {
+		t.Fatalf("responses calls = %v, want 2 attempts", provider.responsesCalls)
+	}
+	if provider.responsesCalls[0] != "gpt-4o" || provider.responsesCalls[1] != "azure/gpt-4o" {
+		t.Fatalf("responses calls = %v, want [gpt-4o azure/gpt-4o]", provider.responsesCalls)
+	}
+	if !strings.Contains(rec.Body.String(), "fallback response") {
+		t.Fatalf("response body = %s, want fallback stream content", rec.Body.String())
+	}
+	if !core.GetFallbackUsed(c.Request().Context()) {
+		t.Fatal("expected request context to be marked as fallback-used")
+	}
+}
+
+func TestChatCompletion_DoesNotFallbackOnNonModelNotFound(t *testing.T) {
+	provider := &fallbackProvider{
+		chatErrors: map[string]error{
+			"gpt-4o": core.NewProviderError("openai", http.StatusNotFound, "endpoint not found", nil),
+		},
+		supportedModels: map[string]string{
+			"gpt-4o":       "openai",
+			"azure/gpt-4o": "azure",
+		},
+	}
+
+	handler := newHandler(provider, nil, nil, nil, nil, nil, fallbackResolverStub{
+		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
+	}, nil)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.ChatCompletion(c); err != nil {
+		t.Fatalf("handler.ChatCompletion() error = %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+	if len(provider.chatCalls) != 1 || provider.chatCalls[0] != "gpt-4o" {
+		t.Fatalf("chat calls = %v, want only the primary model", provider.chatCalls)
+	}
+}
 func TestEmbeddings_DoesNotFallback(t *testing.T) {
 	provider := &fallbackProvider{
 		embeddingResponses: map[string]*core.EmbeddingResponse{

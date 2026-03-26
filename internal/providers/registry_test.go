@@ -1228,8 +1228,8 @@ func TestListModelsWithProviderByCategory_UsesStoredProviderMetadata(t *testing.
 	if filtered[0].ProviderType != allModels[0].ProviderType {
 		t.Fatalf("ProviderType = %q, want %q", filtered[0].ProviderType, allModels[0].ProviderType)
 	}
-	if filtered[0].Selector != allModels[0].Selector {
-		t.Fatalf("Selector = %q, want %q", filtered[0].Selector, allModels[0].Selector)
+	if filtered[0].Selector != "public-openai/gpt-4o" {
+		t.Fatalf("Selector = %q, want %q", filtered[0].Selector, "public-openai/gpt-4o")
 	}
 }
 

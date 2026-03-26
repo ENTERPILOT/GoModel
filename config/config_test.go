@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -348,6 +349,71 @@ fallback:
 
 		if _, err := Load(); err == nil {
 			t.Fatal("expected Load() to fail for empty fallback override mode")
+		}
+	})
+}
+
+func TestLoad_FallbackOverrideDuplicateKeyAfterTrim(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+fallback:
+  overrides:
+    "gpt-4o":
+      mode: manual
+    " gpt-4o ":
+      mode: auto
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("expected Load() to fail for duplicate fallback override keys after trimming")
+		}
+		if !strings.Contains(err.Error(), `fallback.overrides: duplicate model key after trimming: "gpt-4o"`) {
+			t.Fatalf("Load() error = %v, want duplicate trimmed override key error", err)
+		}
+	})
+}
+
+func TestLoad_FallbackManualRulesDuplicateKeyAfterTrim(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		manualRulesPath := filepath.Join(dir, "fallback.json")
+		if err := os.WriteFile(manualRulesPath, []byte(`{
+			"gpt-4o": ["azure/gpt-4o"],
+			" gpt-4o ": ["gemini/gemini-2.5-pro"]
+		}`), 0644); err != nil {
+			t.Fatalf("Failed to write fallback rules: %v", err)
+		}
+
+		type yamlConfig struct {
+			Fallback struct {
+				ManualRulesPath string `yaml:"manual_rules_path"`
+			} `yaml:"fallback"`
+		}
+
+		yamlCfg := yamlConfig{}
+		yamlCfg.Fallback.ManualRulesPath = manualRulesPath
+		yamlData, err := yaml.Marshal(yamlCfg)
+		if err != nil {
+			t.Fatalf("Failed to marshal config.yaml: %v", err)
+		}
+
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), yamlData, 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		_, err = Load()
+		if err == nil {
+			t.Fatal("expected Load() to fail for duplicate fallback manual rule keys after trimming")
+		}
+		if !strings.Contains(err.Error(), `fallback.manual_rules_path: duplicate manual rule key after trimming: "gpt-4o"`) {
+			t.Fatalf("Load() error = %v, want duplicate trimmed manual rule key error", err)
 		}
 	})
 }

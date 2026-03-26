@@ -749,6 +749,9 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 			if key == "" {
 				return fmt.Errorf("fallback.overrides: model key cannot be empty")
 			}
+			if _, exists := normalized[key]; exists {
+				return fmt.Errorf("fallback.overrides: duplicate model key after trimming: %q", key)
+			}
 			override.Mode = normalizeFallbackMode(override.Mode)
 			if override.Mode == "" {
 				return fmt.Errorf("fallback.overrides[%q].mode must be one of: auto, manual, off", key)
@@ -782,6 +785,9 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 		key = strings.TrimSpace(key)
 		if key == "" {
 			return fmt.Errorf("fallback.manual_rules_path: model key cannot be empty")
+		}
+		if _, exists := manual[key]; exists {
+			return fmt.Errorf("fallback.manual_rules_path: duplicate manual rule key after trimming: %q", key)
 		}
 		normalized := make([]string, 0, len(models))
 		for _, model := range models {
