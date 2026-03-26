@@ -261,9 +261,9 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 			// Provider not configured, skip all its models
 			continue
 		}
-		providerType := strings.TrimSpace(cachedProv.ProviderType)
+		providerType := strings.TrimSpace(nameToProviderType[providerName])
 		if providerType == "" {
-			providerType = strings.TrimSpace(nameToProviderType[providerName])
+			providerType = strings.TrimSpace(cachedProv.ProviderType)
 		}
 		providerModels := make(map[string]*ModelInfo, len(cachedProv.Models))
 		for _, cached := range cachedProv.Models {

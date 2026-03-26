@@ -247,6 +247,51 @@ func TestCacheFile(t *testing.T) {
 		}
 	})
 
+	t.Run("LoadFromCachePrefersConfiguredProviderTypeOverCachedValue", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "models.json")
+
+		modelCache := modelcache.ModelCache{
+			UpdatedAt: time.Now().UTC(),
+			Providers: map[string]modelcache.CachedProvider{
+				"openai-main": {
+					ProviderType: "stale-type",
+					OwnedBy:      "openai",
+					Models: []modelcache.CachedModel{
+						{ID: "gpt-4o"},
+					},
+				},
+			},
+		}
+		data, _ := json.Marshal(modelCache)
+		if err := os.WriteFile(cacheFile, data, 0o644); err != nil {
+			t.Fatalf("failed to write cache file: %v", err)
+		}
+
+		registry := NewModelRegistry()
+		localCache := modelcache.NewLocalCache(cacheFile)
+		registry.SetCache(localCache)
+
+		openaiMock := &registryMockProvider{name: "openai"}
+		registry.RegisterProviderWithNameAndType(openaiMock, "openai-main", "openai")
+
+		loaded, err := registry.LoadFromCache(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if loaded != 1 {
+			t.Fatalf("expected 1 model loaded, got %d", loaded)
+		}
+
+		models := registry.ListModelsWithProvider()
+		if len(models) != 1 {
+			t.Fatalf("expected 1 model with provider, got %d", len(models))
+		}
+		if models[0].ProviderType != "openai" {
+			t.Fatalf("ProviderType = %q, want %q", models[0].ProviderType, "openai")
+		}
+	})
+
 	t.Run("LoadFromCacheSkipsUnconfiguredProviders", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cacheFile := filepath.Join(tmpDir, "models.json")

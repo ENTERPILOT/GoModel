@@ -77,6 +77,11 @@ func (r *Resolver) ResolveFallbacks(resolution *core.RequestModelResolution, op 
 		return nil
 	}
 
+	requiredCategory := requiredCategoryForOperation(op)
+	if requiredCategory == core.CategoryEmbedding {
+		return nil
+	}
+
 	source := r.sourceModelInfo(resolution)
 	mode := r.modeFor(resolution, source)
 	if mode == config.FallbackModeOff {
@@ -91,7 +96,6 @@ func (r *Resolver) ResolveFallbacks(resolution *core.RequestModelResolution, op 
 		return result
 	}
 
-	requiredCategory := requiredCategoryForOperation(op)
 	return append(result, r.autoSelectorsFor(source, sourceKey, requiredCategory, seen)...)
 }
 
@@ -296,16 +300,24 @@ func (r *Resolver) sourceKey(resolution *core.RequestModelResolution, source *pr
 }
 
 func (r *Resolver) matchKeys(resolution *core.RequestModelResolution, source *providers.ModelInfo) []string {
-	keys := []string{
-		resolution.RequestedQualifiedModel(),
-		resolution.Requested.Model,
+	requestedQualified := resolution.RequestedQualifiedModel()
+	resolvedQualified := resolution.ResolvedQualifiedModel()
+
+	keys := make([]string, 0, 6)
+	if selectorHasProvider(requestedQualified) {
+		keys = append(keys, requestedQualified)
 	}
 	if source != nil && source.ProviderName != "" && source.Model.ID != "" {
 		keys = append(keys, source.ProviderName+"/"+source.Model.ID)
 	}
+	if selectorHasProvider(resolvedQualified) {
+		keys = append(keys, resolvedQualified)
+	}
 	keys = append(keys,
-		resolution.ResolvedQualifiedModel(),
+		resolution.Requested.Model,
 		resolution.ResolvedSelector.Model,
+		requestedQualified,
+		resolvedQualified,
 	)
 
 	seen := make(map[string]struct{}, len(keys))
@@ -322,6 +334,11 @@ func (r *Resolver) matchKeys(resolution *core.RequestModelResolution, source *pr
 		result = append(result, key)
 	}
 	return result
+}
+
+func selectorHasProvider(selector string) bool {
+	parsed, err := core.ParseModelSelector(strings.TrimSpace(selector), "")
+	return err == nil && parsed.Provider != ""
 }
 
 func requiredCategoryForOperation(op core.Operation) core.ModelCategory {

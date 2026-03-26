@@ -117,6 +117,63 @@ func TestResolverOverrideOffDisablesFallbacks(t *testing.T) {
 	}
 }
 
+func TestResolverDoesNotReturnFallbacksForEmbeddings(t *testing.T) {
+	registry := newFakeRegistry(
+		modelInfoWithCategories("text-embedding-3-small", "openai", "openai", 1287, "text-embedding-3", core.CategoryEmbedding),
+		modelInfoWithCategories("text-embedding-3-large", "azure", "azure", 1288, "text-embedding-3", core.CategoryEmbedding),
+	)
+
+	resolver := NewResolver(config.FallbackConfig{
+		DefaultMode: config.FallbackModeAuto,
+		Manual: map[string][]string{
+			"text-embedding-3-small": []string{"azure/text-embedding-3-large"},
+		},
+	}, registry)
+
+	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+		Requested:        core.NewRequestedModelSelector("text-embedding-3-small", ""),
+		ResolvedSelector: core.ModelSelector{Model: "text-embedding-3-small", Provider: "openai"},
+		ProviderType:     "openai",
+	}, core.OperationEmbeddings)
+
+	if len(got) != 0 {
+		t.Fatalf("len(got) = %d, want 0", len(got))
+	}
+}
+
+func TestResolverPrefersProviderQualifiedOverrideForBareRequests(t *testing.T) {
+	registry := newFakeRegistry(
+		modelInfo("gpt-4o", "openai", "openai", 1287, "gpt-4o"),
+		modelInfo("gpt-4o", "azure", "azure", 1287, "gpt-4o"),
+		modelInfo("gemini-2.5-pro", "gemini", "gemini", 1290, "gemini-2.5-pro"),
+	)
+
+	resolver := NewResolver(config.FallbackConfig{
+		DefaultMode: config.FallbackModeAuto,
+		Manual: map[string][]string{
+			"gpt-4o":        []string{"gemini/gemini-2.5-pro"},
+			"openai/gpt-4o": []string{"azure/gpt-4o"},
+		},
+		Overrides: map[string]config.FallbackModelOverride{
+			"gpt-4o":        {Mode: config.FallbackModeOff},
+			"openai/gpt-4o": {Mode: config.FallbackModeManual},
+		},
+	}, registry)
+
+	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
+		ResolvedSelector: core.ModelSelector{Model: "gpt-4o", Provider: "openai"},
+		ProviderType:     "openai",
+	}, core.OperationChatCompletions)
+
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if got[0].QualifiedModel() != "azure/gpt-4o" {
+		t.Fatalf("got[0] = %q, want %q", got[0].QualifiedModel(), "azure/gpt-4o")
+	}
+}
+
 func TestSameFamily_IgnoresSurroundingWhitespace(t *testing.T) {
 	source := &core.ModelMetadata{Family: " gpt-4o "}
 	candidate := &core.ModelMetadata{Family: "gpt-4o"}
@@ -149,12 +206,21 @@ func newFakeRegistry(infos ...*providers.ModelInfo) *fakeRegistry {
 }
 
 func modelInfo(id, providerName, providerType string, elo float64, family string) *providers.ModelInfo {
+	return modelInfoWithCategories(id, providerName, providerType, elo, family, core.CategoryTextGeneration)
+}
+
+func modelInfoWithCategories(
+	id, providerName, providerType string,
+	elo float64,
+	family string,
+	categories ...core.ModelCategory,
+) *providers.ModelInfo {
 	return &providers.ModelInfo{
 		Model: core.Model{
 			ID: id,
 			Metadata: &core.ModelMetadata{
 				Family:     family,
-				Categories: []core.ModelCategory{core.CategoryTextGeneration},
+				Categories: append([]core.ModelCategory(nil), categories...),
 				Capabilities: map[string]bool{
 					"streaming": true,
 				},
