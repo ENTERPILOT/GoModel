@@ -264,10 +264,13 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 		model = resolvedModelFromPlan(core.GetExecutionPlan(c.Request().Context()), model)
 
 		observers := make([]streaming.Observer, 0, 2)
-		if observer := auditlog.NewStreamLogObserver(s.logger, streamEntry, auditPath); observer != nil {
-			observers = append(observers, observer)
+		plan := core.GetExecutionPlan(c.Request().Context())
+		if (plan == nil || plan.AuditEnabled()) && streamEntry != nil {
+			if observer := auditlog.NewStreamLogObserver(s.logger, streamEntry, auditPath); observer != nil {
+				observers = append(observers, observer)
+			}
 		}
-		if s.usageLogger != nil && s.usageLogger.Config().Enabled {
+		if s.usageLogger != nil && s.usageLogger.Config().Enabled && (plan == nil || plan.UsageEnabled()) {
 			if observer := usage.NewStreamUsageObserver(s.usageLogger, model, providerType, requestID, usagePath, s.pricingResolver); observer != nil {
 				observers = append(observers, observer)
 			}

@@ -22,6 +22,7 @@ import (
 type nativeBatchService struct {
 	provider                             core.RoutableProvider
 	modelResolver                        RequestModelResolver
+	executionPolicyResolver              RequestExecutionPolicyResolver
 	batchRequestPreparer                 BatchRequestPreparer
 	batchStore                           batchstore.Store
 	loadBatch                            func(*echo.Context, string) (*batchstore.StoredBatch, error)
@@ -46,6 +47,10 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 	}
 
 	providerType, err := determineBatchProviderType(s.provider, s.modelResolver, req)
+	if err != nil {
+		return handleError(c, err)
+	}
+	plan, err := s.storeExecutionPlanForBatch(c, req, providerType)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -124,6 +129,8 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 			OriginalInputFileID:       batchPreparation.OriginalInputFileID,
 			RewrittenInputFileID:      batchPreparation.RewrittenInputFileID,
 			RequestID:                 requestID,
+			ExecutionPlanVersionID:    executionPlanVersionID(plan),
+			UsageEnabled:              boolPtr(plan == nil || plan.UsageEnabled()),
 		}
 		if err := s.batchStore.Create(ctx, stored); err != nil {
 			s.rollbackPreparedBatch(ctx, providerType, batchPreparation, providerBatchID)
@@ -143,6 +150,32 @@ func (s *nativeBatchService) rollbackPreparedBatch(ctx context.Context, provider
 	}
 	s.clearUpstreamBatchResultHints(providerType, providerBatchID)
 	s.cancelUpstreamBatch(ctx, providerType, providerBatchID)
+}
+
+func (s *nativeBatchService) storeExecutionPlanForBatch(
+	c *echo.Context,
+	req *core.BatchRequest,
+	providerType string,
+) (*core.ExecutionPlan, error) {
+	plan := cloneCurrentExecutionPlan(c)
+	if plan == nil {
+		return nil, nil
+	}
+	plan.Mode = core.ExecutionModeNativeBatch
+	plan.ProviderType = strings.TrimSpace(providerType)
+
+	if s.executionPolicyResolver != nil {
+		selector, err := determineBatchExecutionSelector(s.provider, s.modelResolver, req, providerType)
+		if err != nil {
+			return nil, err
+		}
+		if err := applyExecutionPolicy(plan, s.executionPolicyResolver, selector); err != nil {
+			return nil, err
+		}
+	}
+
+	storeExecutionPlan(c, plan)
+	return plan, nil
 }
 
 func (s *nativeBatchService) clearUpstreamBatchResultHints(providerType, batchID string) {

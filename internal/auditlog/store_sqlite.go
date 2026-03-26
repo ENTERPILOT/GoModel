@@ -11,12 +11,12 @@ import (
 )
 
 // SQLite has a default limit of 999 bindable parameters per query (SQLITE_MAX_VARIABLE_NUMBER).
-// With 15 columns per log entry, we can safely insert up to 66 entries per batch (66 * 15 = 990).
+// With 16 columns per log entry, we can safely insert up to 62 entries per batch (62 * 16 = 992).
 // We chunk larger batches to avoid hitting this limit.
 const (
 	maxSQLiteParams    = 999
-	columnsPerEntry    = 15
-	maxEntriesPerBatch = maxSQLiteParams / columnsPerEntry // 66 entries
+	columnsPerEntry    = 16
+	maxEntriesPerBatch = maxSQLiteParams / columnsPerEntry // 62 entries
 )
 
 // SQLiteStore implements LogStore for SQLite databases.
@@ -45,6 +45,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 			resolved_model TEXT,
 			provider TEXT,
 			alias_used INTEGER DEFAULT 0,
+			execution_plan_version_id TEXT,
 			status_code INTEGER DEFAULT 0,
 			request_id TEXT,
 			client_ip TEXT,
@@ -62,6 +63,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 	migrations := []string{
 		"ALTER TABLE audit_logs ADD COLUMN resolved_model TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN alias_used INTEGER DEFAULT 0",
+		"ALTER TABLE audit_logs ADD COLUMN execution_plan_version_id TEXT",
 	}
 	for _, migration := range migrations {
 		if _, err := db.Exec(migration); err != nil {
@@ -77,6 +79,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 		"CREATE INDEX IF NOT EXISTS idx_audit_model ON audit_logs(model)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status_code)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_provider ON audit_logs(provider)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON audit_logs(client_ip)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path)",
@@ -121,7 +124,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 		values := make([]any, 0, len(chunk)*columnsPerEntry)
 
 		for j, e := range chunk {
-			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 			dataJSON := marshalLogData(e.Data, e.ID)
 
@@ -149,6 +152,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 				e.ResolvedModel,
 				e.Provider,
 				aliasUsedInt,
+				e.ExecutionPlanVersionID,
 				e.StatusCode,
 				e.RequestID,
 				e.ClientIP,
@@ -160,7 +164,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 			)
 		}
 
-		query := `INSERT OR IGNORE INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, status_code,
+		query := `INSERT OR IGNORE INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, status_code,
 			request_id, client_ip, method, path, stream, error_type, data) VALUES ` +
 			strings.Join(placeholders, ",")
 

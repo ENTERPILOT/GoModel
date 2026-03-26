@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"gomodel/config"
 	"gomodel/internal/admin"
@@ -17,6 +18,7 @@ import (
 	"gomodel/internal/auditlog"
 	"gomodel/internal/batch"
 	"gomodel/internal/core"
+	"gomodel/internal/executionplans"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/providers"
 	"gomodel/internal/responsecache"
@@ -28,13 +30,14 @@ import (
 // App represents the main application with all its dependencies.
 // It provides centralized lifecycle management for all components.
 type App struct {
-	config    *config.Config
-	providers *providers.InitResult
-	audit     *auditlog.Result
-	usage     *usage.Result
-	batch     *batch.Result
-	aliases   *aliases.Result
-	server    *server.Server
+	config         *config.Config
+	providers      *providers.InitResult
+	audit          *auditlog.Result
+	usage          *usage.Result
+	batch          *batch.Result
+	aliases        *aliases.Result
+	executionPlans *executionplans.Result
+	server         *server.Server
 
 	shutdownMu sync.Mutex
 	shutdown   bool
@@ -156,8 +159,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	var provider core.RoutableProvider = app.providers.Router
 	var translatedRequestPatcher server.TranslatedRequestPatcher
 	var batchRequestPreparers []server.BatchRequestPreparer
-	if appCfg.Guardrails.Enabled {
-		pipeline, err := buildGuardrailsPipeline(appCfg.Guardrails)
+	featureCaps := runtimeExecutionFeatureCaps(appCfg)
+	var guardrailRegistry *guardrails.Registry
+	if featureCaps.Guardrails {
+		guardrailRegistry, err = buildGuardrailRegistry(appCfg.Guardrails)
 		if err != nil {
 			var (
 				aliasCloseErr error
@@ -175,14 +180,49 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			}
 			return nil, fmt.Errorf("failed to build guardrails: %w", err)
 		}
-		if pipeline.Len() > 0 {
-			translatedRequestPatcher = guardrails.NewRequestPatcher(pipeline)
+	}
+
+	var executionPlanResult *executionplans.Result
+	sharedExecutionPlanStorage := firstSharedStorage(auditResult.Storage, usageResult.Storage, batchResult.Storage, aliasResult.Storage)
+	executionPlanCompiler := executionplans.NewCompilerWithFeatureCaps(guardrailRegistry, featureCaps)
+	if sharedExecutionPlanStorage != nil {
+		executionPlanResult, err = executionplans.NewWithSharedStorage(ctx, sharedExecutionPlanStorage, executionPlanCompiler, time.Minute)
+	} else {
+		executionPlanResult, err = executionplans.New(ctx, appCfg, executionPlanCompiler, time.Minute)
+	}
+	if err != nil {
+		closeErr := errors.Join(app.aliases.Close(), app.batch.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to initialize execution plans: %w (also: close error: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to initialize execution plans: %w", err)
+	}
+	defaultExecutionPlan := defaultExecutionPlanInput(appCfg)
+	if err := executionPlanResult.Service.EnsureDefaultGlobal(ctx, defaultExecutionPlan); err != nil {
+		closeErr := errors.Join(executionPlanResult.Close(), app.aliases.Close(), app.batch.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to seed execution plans: %w (also: close error: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to seed execution plans: %w", err)
+	}
+	if err := executionPlanResult.Service.Refresh(ctx); err != nil {
+		closeErr := errors.Join(executionPlanResult.Close(), app.aliases.Close(), app.batch.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to load execution plans: %w (also: close error: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to load execution plans: %w", err)
+	}
+	app.executionPlans = executionPlanResult
+
+	if featureCaps.Guardrails {
+		if guardrailRegistry != nil && guardrailRegistry.Len() > 0 {
+			translatedRequestPatcher = guardrails.NewPlannedRequestPatcher(executionPlanResult.Service)
 			if appCfg.Guardrails.EnableForBatchProcessing {
-				batchRequestPreparers = append(batchRequestPreparers, guardrails.NewBatchPreparer(provider, pipeline))
+				batchRequestPreparers = append(batchRequestPreparers, guardrails.NewPlannedBatchPreparer(provider, executionPlanResult.Service))
 			}
 			slog.Info(
 				"guardrails enabled",
-				"count", pipeline.Len(),
+				"count", guardrailRegistry.Len(),
 				"enable_for_batch_processing", appCfg.Guardrails.EnableForBatchProcessing,
 			)
 		}
@@ -208,6 +248,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		UsageLogger:                  usageResult.Logger,
 		PricingResolver:              providerResult.Registry,
 		ModelResolver:                app.aliases.Service,
+		ExecutionPolicyResolver:      executionPlanResult.Service,
 		TranslatedRequestPatcher:     translatedRequestPatcher,
 		GuardrailsHash:               guardrailsHash,
 		BatchRequestPreparer:         batchRequestPreparer,
@@ -260,16 +301,20 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	rcm, err := responsecache.NewResponseCacheMiddleware(appCfg.Cache.Response, cfg.AppConfig.RawProviders)
 	if err != nil {
 		var (
-			aliasCloseErr error
-			batchCloseErr error
+			executionPlansCloseErr error
+			aliasCloseErr          error
+			batchCloseErr          error
 		)
+		if app.executionPlans != nil {
+			executionPlansCloseErr = app.executionPlans.Close()
+		}
 		if app.aliases != nil {
 			aliasCloseErr = app.aliases.Close()
 		}
 		if app.batch != nil {
 			batchCloseErr = app.batch.Close()
 		}
-		closeErr := errors.Join(aliasCloseErr, batchCloseErr, app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(executionPlansCloseErr, aliasCloseErr, batchCloseErr, app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to initialize response cache: %w (also: close error: %v)", err, closeErr)
 		}
@@ -401,7 +446,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 2. Close providers (stops background refresh and cache)
+	// 2. Close providers (stops model refresh and provider-owned resources)
 	if a.providers != nil {
 		if err := a.providers.Close(); err != nil {
 			slog.Error("providers close error", "error", err)
@@ -417,7 +462,15 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 4. Close batch store (flushes pending entries)
+	// 4. Close execution plans subsystem.
+	if a.executionPlans != nil {
+		if err := a.executionPlans.Close(); err != nil {
+			slog.Error("execution plans close error", "error", err)
+			errs = append(errs, fmt.Errorf("execution plans close: %w", err))
+		}
+	}
+
+	// 5. Close batch store (flushes pending entries)
 	if a.batch != nil {
 		if err := a.batch.Close(); err != nil {
 			slog.Error("batch store close error", "error", err)
@@ -425,7 +478,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 5. Close usage tracking (flushes pending entries)
+	// 6. Close usage tracking (flushes pending entries)
 	if a.usage != nil {
 		if err := a.usage.Close(); err != nil {
 			slog.Error("usage logger close error", "error", err)
@@ -433,7 +486,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 6. Close audit logging (flushes pending logs)
+	// 7. Close audit logging (flushes pending logs)
 	if a.audit != nil {
 		if err := a.audit.Close(); err != nil {
 			slog.Error("audit logger close error", "error", err)
@@ -542,20 +595,26 @@ func initAdmin(auditStorage, usageStorage storage.Storage, registry *providers.M
 	return adminHandler, dashHandler, nil
 }
 
-// buildGuardrailsPipeline creates a guardrails pipeline from configuration.
-func buildGuardrailsPipeline(cfg config.GuardrailsConfig) (*guardrails.Pipeline, error) {
-	pipeline := guardrails.NewPipeline()
+func buildGuardrailRegistry(cfg config.GuardrailsConfig) (*guardrails.Registry, error) {
+	registry := guardrails.NewRegistry()
 
 	for i, rule := range cfg.Rules {
 		g, err := buildGuardrail(rule)
 		if err != nil {
 			return nil, fmt.Errorf("guardrail rule #%d (%q): %w", i, rule.Name, err)
 		}
-		pipeline.Add(g, rule.Order)
+		if err := registry.Register(g, responsecache.GuardrailRuleDescriptor{
+			Type:    rule.Type,
+			Order:   rule.Order,
+			Mode:    effectiveSystemPromptMode(rule.SystemPrompt.Mode),
+			Content: rule.SystemPrompt.Content,
+		}); err != nil {
+			return nil, fmt.Errorf("register guardrail %q: %w", rule.Name, err)
+		}
 		slog.Info("guardrail registered", "name", rule.Name, "type", rule.Type, "order", rule.Order)
 	}
 
-	return pipeline, nil
+	return registry, nil
 }
 
 // buildGuardrail creates a single Guardrail instance from a rule config.
@@ -566,10 +625,7 @@ func buildGuardrail(rule config.GuardrailRuleConfig) (guardrails.Guardrail, erro
 
 	switch rule.Type {
 	case "system_prompt":
-		mode := guardrails.SystemPromptMode(rule.SystemPrompt.Mode)
-		if mode == "" {
-			mode = guardrails.SystemPromptInject
-		}
+		mode := guardrails.SystemPromptMode(effectiveSystemPromptMode(rule.SystemPrompt.Mode))
 		return guardrails.NewSystemPromptGuardrail(rule.Name, mode, rule.SystemPrompt.Content)
 
 	default:
@@ -590,9 +646,71 @@ func computeGuardrailsHashFromConfig(cfg config.GuardrailsConfig) string {
 			Name:    r.Name,
 			Type:    r.Type,
 			Order:   r.Order,
-			Mode:    r.SystemPrompt.Mode,
+			Mode:    effectiveSystemPromptMode(r.SystemPrompt.Mode),
 			Content: r.SystemPrompt.Content,
 		}
 	}
 	return responsecache.ComputeGuardrailsHash(rules)
+}
+
+func effectiveSystemPromptMode(mode string) string {
+	resolved := guardrails.SystemPromptMode(mode)
+	if resolved == "" {
+		return string(guardrails.SystemPromptInject)
+	}
+	return string(resolved)
+}
+
+func defaultExecutionPlanInput(cfg *config.Config) executionplans.CreateInput {
+	payload := executionplans.Payload{
+		SchemaVersion: 1,
+		Features: executionplans.FeatureFlags{
+			Cache:      responseCacheConfigured(cfg.Cache.Response),
+			Audit:      cfg.Logging.Enabled,
+			Usage:      cfg.Usage.Enabled,
+			Guardrails: cfg.Guardrails.Enabled && len(cfg.Guardrails.Rules) > 0,
+		},
+	}
+	if payload.Features.Guardrails {
+		payload.Guardrails = make([]executionplans.GuardrailStep, 0, len(cfg.Guardrails.Rules))
+		for _, rule := range cfg.Guardrails.Rules {
+			payload.Guardrails = append(payload.Guardrails, executionplans.GuardrailStep{
+				Ref:  rule.Name,
+				Step: rule.Order,
+			})
+		}
+	}
+
+	return executionplans.CreateInput{
+		Scope:       executionplans.Scope{},
+		Activate:    true,
+		Name:        "default-global",
+		Description: "Bootstrapped from runtime configuration",
+		Payload:     payload,
+	}
+}
+
+func runtimeExecutionFeatureCaps(cfg *config.Config) core.ExecutionFeatures {
+	if cfg == nil {
+		return core.ExecutionFeatures{}
+	}
+	return core.ExecutionFeatures{
+		Cache:      responseCacheConfigured(cfg.Cache.Response),
+		Audit:      cfg.Logging.Enabled,
+		Usage:      cfg.Usage.Enabled,
+		Guardrails: cfg.Guardrails.Enabled,
+	}
+}
+
+func responseCacheConfigured(cfg config.ResponseCacheConfig) bool {
+	return (cfg.Simple.Redis != nil && cfg.Simple.Redis.URL != "") || config.SemanticCacheActive(&cfg.Semantic)
+}
+
+func firstSharedStorage(candidates ...storage.Storage) storage.Storage {
+	for _, candidate := range candidates {
+		if candidate != nil {
+			return candidate
+		}
+	}
+	return nil
 }

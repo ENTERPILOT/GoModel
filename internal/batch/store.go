@@ -31,6 +31,8 @@ type StoredBatch struct {
 	OriginalInputFileID       string              `json:"original_input_file_id,omitempty"`
 	RewrittenInputFileID      string              `json:"rewritten_input_file_id,omitempty"`
 	RequestID                 string              `json:"request_id,omitempty"`
+	ExecutionPlanVersionID    string              `json:"execution_plan_version_id,omitempty"`
+	UsageEnabled              *bool               `json:"usage_enabled,omitempty"`
 	UsageLoggedAt             *time.Time          `json:"usage_logged_at,omitempty"`
 }
 
@@ -176,4 +178,10 @@ func parseUsageLoggedAt(raw string) *time.Time {
 	}
 
 	return nil
+}
+
+// EffectiveUsageEnabled reports whether batch usage logging should run.
+// Nil means the value was not persisted by older versions, so usage remains enabled.
+func (s *StoredBatch) EffectiveUsageEnabled() bool {
+	return s == nil || s.UsageEnabled == nil || *s.UsageEnabled
 }

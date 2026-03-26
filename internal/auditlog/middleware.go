@@ -44,6 +44,10 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				return next(c)
 			}
 
+			if !auditEnabledForContext(c.Request().Context()) {
+				return next(c)
+			}
+
 			start := time.Now()
 			req := c.Request()
 
@@ -195,6 +199,9 @@ func enrichEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
 	}
 	if plan.Resolution != nil {
 		entry.AliasUsed = plan.Resolution.AliasApplied
+	}
+	if versionID := strings.TrimSpace(plan.ExecutionPlanVersionID()); versionID != "" {
+		entry.ExecutionPlanVersionID = versionID
 	}
 }
 
@@ -392,6 +399,11 @@ func EnrichEntryWithExecutionPlan(c *echo.Context, plan *core.ExecutionPlan) {
 	}
 
 	enrichEntryWithExecutionPlan(entry, plan)
+}
+
+func auditEnabledForContext(ctx context.Context) bool {
+	plan := core.GetExecutionPlan(ctx)
+	return plan == nil || plan.AuditEnabled()
 }
 
 // EnrichEntryWithError adds error information to the log entry.

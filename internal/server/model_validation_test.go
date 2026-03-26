@@ -31,6 +31,17 @@ type modelCountingValidationProvider struct {
 	modelCount int
 }
 
+type staticExecutionPolicyResolver struct {
+	match func(core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error)
+}
+
+func (r *staticExecutionPolicyResolver) Match(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+	if r == nil || r.match == nil {
+		return nil, nil
+	}
+	return r.match(selector)
+}
+
 func (explodingValidationReadCloser) Read([]byte) (int, error) {
 	return 0, errors.New("live request body should not be read")
 }
@@ -270,6 +281,56 @@ func TestModelValidation_StoresExecutionPlan(t *testing.T) {
 			assert.Equal(t, "gpt-4o-mini", capturedPlan.Resolution.Requested.Model)
 			assert.Equal(t, "gpt-4o-mini", capturedPlan.Resolution.ResolvedSelector.Model)
 		}
+	}
+}
+
+func TestModelValidation_StoresMatchedExecutionPolicy(t *testing.T) {
+	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
+
+	e := echo.New()
+	var capturedPlan *core.ExecutionPlan
+
+	policyResolver := &staticExecutionPolicyResolver{
+		match: func(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+			if selector.Provider == "mock" && selector.Model == "gpt-4o-mini" {
+				return &core.ResolvedExecutionPolicy{
+					VersionID:      "plan-openai-gpt-4o-mini-v3",
+					Version:        3,
+					ScopeProvider:  "mock",
+					ScopeModel:     "gpt-4o-mini",
+					Name:           "provider-model",
+					PlanHash:       "hash-123",
+					Features:       core.DefaultExecutionFeatures(),
+					GuardrailsHash: "guardrails-123",
+				}, nil
+			}
+			return &core.ResolvedExecutionPolicy{
+				VersionID: "plan-global-v1",
+				Version:   1,
+				Name:      "global",
+				Features:  core.DefaultExecutionFeatures(),
+			}, nil
+		},
+	}
+
+	middleware := ExecutionPlanningWithResolverAndPolicy(provider, nil, policyResolver)
+	handler := middleware(func(c *echo.Context) error {
+		capturedPlan = core.GetExecutionPlan(c.Request().Context())
+		return c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler(c)
+	require.NoError(t, err)
+
+	if assert.NotNil(t, capturedPlan) && assert.NotNil(t, capturedPlan.Policy) {
+		assert.Equal(t, "plan-openai-gpt-4o-mini-v3", capturedPlan.Policy.VersionID)
+		assert.Equal(t, "guardrails-123", capturedPlan.Policy.GuardrailsHash)
 	}
 }
 

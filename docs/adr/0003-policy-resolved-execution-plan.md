@@ -40,6 +40,7 @@ handlers, middleware, and provider execution code.
 The runtime object is derived from:
 
 - the matched persisted execution plan version
+- process-level feature configuration for the running gateway instance
 - request facts captured from ingress
 - request-scoped resolution results such as endpoint metadata and model
   resolution
@@ -145,8 +146,12 @@ The first required persistence surface is `audit_logs`.
 
 - `execution_plan_version_id`
 
-This id is sufficient for request explainability because the referenced
-execution-plan row is immutable.
+This id identifies the immutable execution-plan version selected for the
+request.
+
+Process-level feature switches may still disable parts of that plan for a given
+deployment. In other words, the matched plan remains traceable, but effective
+runtime behavior can also depend on deployment configuration.
 
 The first slice does not require storing the same field in `usage`.
 
@@ -205,6 +210,14 @@ V1 semantics:
 - later steps start only after the previous step fully completes
 - if `features.guardrails` is `false`, the guardrails array is ignored
 - `ref` must point to an existing named guardrail managed by the gateway
+- process-level feature configuration is a hard upper bound over plan features
+- the effective runtime feature value is `process_enabled AND plan_enabled`
+- if a process-level feature switch is disabled, the corresponding plan field is
+  ignored by that process
+
+This preserves 12-factor operational control. Operators can disable gateway
+features for one deployment through environment-backed process configuration
+without rewriting persisted execution plans.
 
 To preserve immutability, omitted feature flags may be accepted at authoring
 time, but they must be resolved to explicit booleans before an immutable plan
@@ -217,7 +230,10 @@ In other words:
   defaults
 
 This prevents the same immutable execution plan version from changing behavior
-later if process-wide defaults drift.
+later because authoring-time defaults drift.
+
+Process-level hard-disable switches remain allowed to suppress features at
+runtime for a given deployment.
 
 ### 8. Future Evolution
 

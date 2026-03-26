@@ -49,29 +49,29 @@ func TestBuildAuditLogInsert(t *testing.T) {
 	})
 
 	normalized := strings.Join(strings.Fields(query), " ")
-	wantQuery := "INSERT INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, status_code, request_id, client_ip, method, path, stream, error_type, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15), ($16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30) ON CONFLICT (id) DO NOTHING"
+	wantQuery := "INSERT INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, status_code, request_id, client_ip, method, path, stream, error_type, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16), ($17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32) ON CONFLICT (id) DO NOTHING"
 	if normalized != wantQuery {
 		t.Fatalf("query = %q, want %q", normalized, wantQuery)
 	}
 
-	if got, want := len(args), 30; got != want {
+	if got, want := len(args), 32; got != want {
 		t.Fatalf("len(args) = %d, want %d", got, want)
 	}
 	if got := args[0]; got != "log-1" {
 		t.Fatalf("args[0] = %v, want log-1", got)
 	}
-	if got := args[15]; got != "log-2" {
-		t.Fatalf("args[15] = %v, want log-2", got)
+	if got := args[16]; got != "log-2" {
+		t.Fatalf("args[16] = %v, want log-2", got)
 	}
-	if got := string(args[14].([]byte)); got != `{"user_agent":"test-agent"}` {
-		t.Fatalf("args[14] = %q, want %q", got, `{"user_agent":"test-agent"}`)
+	if got := string(args[15].([]byte)); got != `{"user_agent":"test-agent"}` {
+		t.Fatalf("args[15] = %q, want %q", got, `{"user_agent":"test-agent"}`)
 	}
-	dataJSON, ok := args[29].([]byte)
+	dataJSON, ok := args[31].([]byte)
 	if !ok {
-		t.Fatalf("args[29] has type %T, want []byte", args[29])
+		t.Fatalf("args[31] has type %T, want []byte", args[31])
 	}
 	if dataJSON != nil {
-		t.Fatalf("args[29] = %v, want nil data", dataJSON)
+		t.Fatalf("args[31] = %v, want nil data", dataJSON)
 	}
 }
 

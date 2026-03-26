@@ -86,6 +86,49 @@ func determineBatchProviderType(provider core.RoutableProvider, resolver Request
 	return providerType, nil
 }
 
+func determineBatchExecutionSelector(
+	provider core.RoutableProvider,
+	resolver RequestModelResolver,
+	req *core.BatchRequest,
+	providerType string,
+) (core.ExecutionPlanSelector, error) {
+	selector := core.NewExecutionPlanSelector(providerType, "")
+	if req == nil || providerType == "" || strings.TrimSpace(req.InputFileID) != "" || len(req.Requests) == 0 {
+		return selector, nil
+	}
+
+	resolver = effectiveRequestModelResolver(provider, resolver)
+	commonModel := ""
+	for i, item := range req.Requests {
+		requested, err := core.BatchItemRequestedModelSelector(req.Endpoint, item)
+		if err != nil {
+			return core.ExecutionPlanSelector{}, core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
+		}
+		resolved, err := requested.Normalize()
+		if err != nil {
+			return core.ExecutionPlanSelector{}, core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
+		}
+		if resolver != nil {
+			resolved, _, err = resolver.ResolveModel(requested)
+			if err != nil {
+				return core.ExecutionPlanSelector{}, core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
+			}
+		}
+		model := strings.TrimSpace(resolved.Model)
+		if model == "" {
+			return selector, nil
+		}
+		if commonModel == "" {
+			commonModel = model
+			continue
+		}
+		if commonModel != model {
+			return selector, nil
+		}
+	}
+	return core.NewExecutionPlanSelector(providerType, commonModel), nil
+}
+
 func mergeBatchRequestEndpointHints(left, right map[string]string) map[string]string {
 	if len(left) == 0 {
 		if len(right) == 0 {
@@ -132,6 +175,9 @@ func (h *Handler) loadBatch(c *echo.Context, id string) (*batchstore.StoredBatch
 
 func (h *Handler) logBatchUsageFromBatchResults(stored *batchstore.StoredBatch, result *core.BatchResultsResponse, fallbackRequestID string) bool {
 	if h.usageLogger == nil || !h.usageLogger.Config().Enabled || stored == nil || stored.Batch == nil || result == nil || len(result.Data) == 0 {
+		return false
+	}
+	if !stored.EffectiveUsageEnabled() {
 		return false
 	}
 	if stored.UsageLoggedAt != nil {

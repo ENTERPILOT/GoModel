@@ -18,6 +18,7 @@ import (
 type Handler struct {
 	provider                     core.RoutableProvider
 	modelResolver                RequestModelResolver
+	executionPolicyResolver      RequestExecutionPolicyResolver
 	translatedRequestPatcher     TranslatedRequestPatcher
 	batchRequestPreparer         BatchRequestPreparer
 	exposedModelLister           ExposedModelLister
@@ -36,7 +37,7 @@ type Handler struct {
 
 // NewHandler creates a new handler with the given routable provider (typically the Router)
 func NewHandler(provider core.RoutableProvider, logger auditlog.LoggerInterface, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver) *Handler {
-	return newHandler(provider, logger, usageLogger, pricingResolver, nil, nil)
+	return newHandler(provider, logger, usageLogger, pricingResolver, nil, nil, nil)
 }
 
 func newHandler(
@@ -45,11 +46,13 @@ func newHandler(
 	usageLogger usage.LoggerInterface,
 	pricingResolver usage.PricingResolver,
 	modelResolver RequestModelResolver,
+	executionPolicyResolver RequestExecutionPolicyResolver,
 	translatedRequestPatcher TranslatedRequestPatcher,
 ) *Handler {
 	return &Handler{
 		provider:                     provider,
 		modelResolver:                modelResolver,
+		executionPolicyResolver:      executionPolicyResolver,
 		translatedRequestPatcher:     translatedRequestPatcher,
 		logger:                       logger,
 		usageLogger:                  usageLogger,
@@ -74,6 +77,7 @@ func (h *Handler) translatedInference() *translatedInferenceService {
 		s := &translatedInferenceService{
 			provider:                 h.provider,
 			modelResolver:            h.modelResolver,
+			executionPolicyResolver:  h.executionPolicyResolver,
 			translatedRequestPatcher: h.translatedRequestPatcher,
 			logger:                   h.logger,
 			usageLogger:              h.usageLogger,
@@ -91,6 +95,7 @@ func (h *Handler) nativeBatch() *nativeBatchService {
 	return &nativeBatchService{
 		provider:                             h.provider,
 		modelResolver:                        h.modelResolver,
+		executionPolicyResolver:              h.executionPolicyResolver,
 		batchRequestPreparer:                 h.batchRequestPreparer,
 		batchStore:                           h.batchStore,
 		loadBatch:                            h.loadBatch,

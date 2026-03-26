@@ -19,20 +19,30 @@ type modelCountProvider interface {
 // provider type, and any early model routing decision that downstream handlers
 // or middleware need to consume.
 func ExecutionPlanning(provider core.RoutableProvider) echo.MiddlewareFunc {
-	return ExecutionPlanningWithResolver(provider, nil)
+	return ExecutionPlanningWithResolverAndPolicy(provider, nil, nil)
 }
 
 // ExecutionPlanningWithResolver resolves request-scoped execution plans using
 // an explicit selector resolver when provided. This lets request planning own
 // alias policy instead of depending on provider decorators.
 func ExecutionPlanningWithResolver(provider core.RoutableProvider, resolver RequestModelResolver) echo.MiddlewareFunc {
+	return ExecutionPlanningWithResolverAndPolicy(provider, resolver, nil)
+}
+
+// ExecutionPlanningWithResolverAndPolicy resolves request-scoped execution plans
+// and matches one persisted execution policy when configured.
+func ExecutionPlanningWithResolverAndPolicy(
+	provider core.RoutableProvider,
+	resolver RequestModelResolver,
+	policyResolver RequestExecutionPolicyResolver,
+) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			path := c.Request().URL.Path
 			if !core.IsModelInteractionPath(path) {
 				return next(c)
 			}
-			plan, err := deriveExecutionPlan(c, provider, resolver)
+			plan, err := deriveExecutionPlanWithPolicy(c, provider, resolver, policyResolver)
 			if err != nil {
 				return handleError(c, err)
 			}
@@ -45,6 +55,15 @@ func ExecutionPlanningWithResolver(provider core.RoutableProvider, resolver Requ
 }
 
 func deriveExecutionPlan(c *echo.Context, provider core.RoutableProvider, resolver RequestModelResolver) (*core.ExecutionPlan, error) {
+	return deriveExecutionPlanWithPolicy(c, provider, resolver, nil)
+}
+
+func deriveExecutionPlanWithPolicy(
+	c *echo.Context,
+	provider core.RoutableProvider,
+	resolver RequestModelResolver,
+	policyResolver RequestExecutionPolicyResolver,
+) (*core.ExecutionPlan, error) {
 	if c == nil {
 		return nil, nil
 	}
@@ -79,15 +98,23 @@ func deriveExecutionPlan(c *echo.Context, provider core.RoutableProvider, resolv
 		plan.Mode = core.ExecutionModePassthrough
 		plan.ProviderType = providerType
 		plan.Passthrough = passthrough
-		auditlog.EnrichEntryWithExecutionPlan(c, plan)
+		if err := applyExecutionPolicy(plan, policyResolver, core.NewExecutionPlanSelector(providerType, passthrough.Model)); err != nil {
+			return nil, err
+		}
 		return plan, nil
 
 	case core.OperationBatches:
 		plan.Mode = core.ExecutionModeNativeBatch
+		if err := applyExecutionPolicy(plan, policyResolver, core.ExecutionPlanSelector{}); err != nil {
+			return nil, err
+		}
 		return plan, nil
 
 	case core.OperationFiles:
 		plan.Mode = core.ExecutionModeNativeFile
+		if err := applyExecutionPolicy(plan, policyResolver, core.ExecutionPlanSelector{}); err != nil {
+			return nil, err
+		}
 		return plan, nil
 
 	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings:
@@ -97,11 +124,16 @@ func deriveExecutionPlan(c *echo.Context, provider core.RoutableProvider, resolv
 			return nil, err
 		}
 		if !parsed || resolution == nil {
+			if err := applyExecutionPolicy(plan, policyResolver, core.ExecutionPlanSelector{}); err != nil {
+				return nil, err
+			}
 			return plan, nil
 		}
 		plan.ProviderType = resolution.ProviderType
 		plan.Resolution = resolution
-		auditlog.EnrichEntryWithExecutionPlan(c, plan)
+		if err := applyExecutionPolicy(plan, policyResolver, core.NewExecutionPlanSelector(resolution.ProviderType, resolution.ResolvedSelector.Model)); err != nil {
+			return nil, err
+		}
 		return plan, nil
 
 	default:
@@ -113,6 +145,7 @@ func storeExecutionPlan(c *echo.Context, plan *core.ExecutionPlan) {
 	if c == nil || plan == nil {
 		return
 	}
+	auditlog.EnrichEntryWithExecutionPlan(c, plan)
 	ctx := core.WithExecutionPlan(c.Request().Context(), plan)
 	c.SetRequest(c.Request().WithContext(ctx))
 }

@@ -1333,7 +1333,7 @@ func TestChatCompletion_UsesExplicitAliasResolverWithoutProviderDecorator(t *tes
 	}
 
 	e := echo.New()
-	handler := newHandler(inner, nil, nil, nil, service, nil)
+	handler := newHandler(inner, nil, nil, nil, service, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.Header.Set("Content-Type", "application/json")
@@ -1444,7 +1444,7 @@ func TestChatCompletion_UsesExplicitAliasResolverWithAliasProviderInventoryOnly(
 	})
 
 	e := echo.New()
-	handler := newHandler(provider, nil, nil, nil, service, nil)
+	handler := newHandler(provider, nil, nil, nil, service, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.Header.Set("Content-Type", "application/json")
@@ -1524,7 +1524,7 @@ func TestChatCompletion_UsesExplicitTranslatedRequestPatcher(t *testing.T) {
 	patcher := guardrails.NewRequestPatcher(pipeline)
 
 	e := echo.New()
-	handler := newHandler(inner, nil, nil, nil, nil, patcher)
+	handler := newHandler(inner, nil, nil, nil, nil, nil, patcher)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.Header.Set("Content-Type", "application/json")
@@ -2007,7 +2007,7 @@ func TestHandleStreamingResponse_FlushesEachChunk(t *testing.T) {
 		},
 	}
 
-	err := handler.translatedInference().handleStreamingResponse(c, "gpt-4o-mini", "openai", func() (io.ReadCloser, error) {
+	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", func() (io.ReadCloser, error) {
 		return stream, nil
 	})
 	if err != nil {
@@ -2099,7 +2099,7 @@ func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 		Data:      &auditlog.LogData{},
 	})
 
-	err := handler.translatedInference().handleStreamingResponse(c, "gpt-4o-mini", "openai", func() (io.ReadCloser, error) {
+	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", func() (io.ReadCloser, error) {
 		return &erroringReadCloser{
 			data: []byte("data: {\"id\":\"1\"}\n\n"),
 			err:  expectedErr,

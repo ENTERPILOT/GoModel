@@ -12,6 +12,7 @@ func ensureTranslatedRequestPlan(
 	c *echo.Context,
 	provider core.RoutableProvider,
 	resolver RequestModelResolver,
+	policyResolver RequestExecutionPolicyResolver,
 	model,
 	providerHint *string,
 ) (*core.ExecutionPlan, error) {
@@ -19,7 +20,7 @@ func ensureTranslatedRequestPlan(
 		return nil, core.NewInvalidRequestError("model selector targets are required", nil)
 	}
 
-	plan, err := ensureTranslatedExecutionPlan(c, provider, resolver)
+	plan, err := ensureTranslatedExecutionPlan(c, provider, resolver, policyResolver)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +31,10 @@ func ensureTranslatedRequestPlan(
 		if err != nil {
 			return nil, err
 		}
-		plan = translatedExecutionPlanForRequest(c, resolution)
+		plan, err = translatedExecutionPlanForRequest(c, resolution, policyResolver)
+		if err != nil {
+			return nil, err
+		}
 		storeExecutionPlan(c, plan)
 	}
 
@@ -38,12 +42,17 @@ func ensureTranslatedRequestPlan(
 	return plan, nil
 }
 
-func ensureTranslatedExecutionPlan(c *echo.Context, provider core.RoutableProvider, resolver RequestModelResolver) (*core.ExecutionPlan, error) {
+func ensureTranslatedExecutionPlan(
+	c *echo.Context,
+	provider core.RoutableProvider,
+	resolver RequestModelResolver,
+	policyResolver RequestExecutionPolicyResolver,
+) (*core.ExecutionPlan, error) {
 	if plan := currentTranslatedExecutionPlan(c); plan != nil {
 		return plan, nil
 	}
 
-	plan, err := deriveExecutionPlan(c, provider, resolver)
+	plan, err := deriveExecutionPlanWithPolicy(c, provider, resolver, policyResolver)
 	if err != nil || plan == nil {
 		return plan, err
 	}
@@ -86,9 +95,10 @@ func applyResolvedSelector(model, providerHint *string, resolution *core.Request
 func translatedExecutionPlanForRequest(
 	c *echo.Context,
 	resolution *core.RequestModelResolution,
-) *core.ExecutionPlan {
+	policyResolver RequestExecutionPolicyResolver,
+) (*core.ExecutionPlan, error) {
 	if c == nil {
-		return nil
+		return nil, nil
 	}
 
 	requestID := requestIDFromContextOrHeader(c.Request())
@@ -116,6 +126,9 @@ func translatedExecutionPlanForRequest(
 	plan.Capabilities = core.CapabilitiesForEndpoint(desc)
 	plan.ProviderType = strings.TrimSpace(resolution.ProviderType)
 	plan.Resolution = resolution
+	if err := applyExecutionPolicy(plan, policyResolver, core.NewExecutionPlanSelector(plan.ProviderType, resolution.ResolvedSelector.Model)); err != nil {
+		return nil, err
+	}
 
-	return plan
+	return plan, nil
 }

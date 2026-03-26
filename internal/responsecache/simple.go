@@ -193,7 +193,13 @@ func (m *simpleCacheMiddleware) enqueueWrite(job cacheWriteJob) {
 }
 
 func shouldSkipCacheForExecutionPlan(plan *core.ExecutionPlan) bool {
-	return plan != nil && plan.Mode == core.ExecutionModeTranslated && plan.Resolution == nil
+	if plan == nil {
+		return false
+	}
+	if !plan.CacheEnabled() {
+		return true
+	}
+	return plan.Mode == core.ExecutionModeTranslated && plan.Resolution == nil
 }
 
 func requestBodyForCache(req *http.Request) ([]byte, bool, error) {

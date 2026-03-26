@@ -626,6 +626,81 @@ func TestMiddleware_PassthroughExecutionPlanUsesPassthroughModel(t *testing.T) {
 	}
 }
 
+func TestMiddleware_StoresExecutionPlanVersionID(t *testing.T) {
+	e := echo.New()
+	logger := &capturingLogger{
+		cfg: Config{Enabled: true},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-nano"}`))
+	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+		ProviderType: "openai",
+		Policy: &core.ResolvedExecutionPolicy{
+			VersionID: "plan-version-123",
+			Features:  core.DefaultExecutionFeatures(),
+		},
+		Resolution: &core.RequestModelResolution{
+			Requested:        core.NewRequestedModelSelector("gpt-5-nano", ""),
+			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
+			ProviderType:     "openai",
+		},
+	}))
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		return c.NoContent(http.StatusNoContent)
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
+	}
+	if got := logger.entries[0].ExecutionPlanVersionID; got != "plan-version-123" {
+		t.Fatalf("ExecutionPlanVersionID = %q, want plan-version-123", got)
+	}
+}
+
+func TestMiddleware_SkipsWriteWhenExecutionPlanDisablesAudit(t *testing.T) {
+	e := echo.New()
+	logger := &capturingLogger{
+		cfg: Config{Enabled: true, LogBodies: true, LogHeaders: true},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-nano"}`))
+	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+		Policy: &core.ResolvedExecutionPolicy{
+			VersionID: "plan-version-123",
+			Features: core.ExecutionFeatures{
+				Cache:      true,
+				Audit:      false,
+				Usage:      true,
+				Guardrails: true,
+			},
+		},
+	}))
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		if entry := c.Get(string(LogEntryKey)); entry != nil {
+			t.Fatalf("LogEntryKey = %T, want nil", entry)
+		}
+		return c.NoContent(http.StatusNoContent)
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if len(logger.entries) != 0 {
+		t.Fatalf("len(entries) = %d, want 0", len(logger.entries))
+	}
+}
+
 func TestLoggerClose(t *testing.T) {
 	store := &mockStore{}
 	cfg := Config{

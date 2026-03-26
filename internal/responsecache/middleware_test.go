@@ -241,6 +241,59 @@ func TestSimpleCacheMiddleware_SkipsPartialTranslatedPlan(t *testing.T) {
 	}
 }
 
+func TestSimpleCacheMiddleware_SkipsWhenExecutionPlanDisablesCache(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			desc := core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path)
+			ctx := core.WithExecutionPlan(c.Request().Context(), &core.ExecutionPlan{
+				Endpoint:     desc,
+				Mode:         core.ExecutionModeTranslated,
+				Capabilities: core.CapabilitiesForEndpoint(desc),
+				Resolution: &core.RequestModelResolution{
+					ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-4"},
+					ProviderType:     "openai",
+				},
+				Policy: &core.ResolvedExecutionPolicy{
+					VersionID: "plan-cache-off",
+					Features: core.ExecutionFeatures{
+						Cache:      false,
+						Audit:      true,
+						Usage:      true,
+						Guardrails: true,
+					},
+				},
+			})
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	})
+	e.Use(mw.Middleware())
+	callCount := 0
+	e.POST("/v1/chat/completions", func(c *echo.Context) error {
+		callCount++
+		return c.JSON(http.StatusOK, map[string]string{"n": "1"})
+	})
+
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+	for range 2 {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Header().Get("X-Cache") != "" {
+			t.Fatalf("cache-disabled plan should bypass cache, got X-Cache=%q", rec.Header().Get("X-Cache"))
+		}
+	}
+
+	if callCount != 2 {
+		t.Fatalf("cache-disabled plan should bypass cache, handler called %d times", callCount)
+	}
+}
+
 func TestSimpleCacheMiddleware_UsesCapturedSnapshotBodyWithoutReadingLiveBody(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()
