@@ -1,8 +1,0 @@
-fallback:
-  default_mode: auto
-  manual_rules_path: "config/fallback.example.json"
-  overrides:
-    "gpt-4o":
-      mode: manual
-    "claude-sonnet-4":
-      mode: off

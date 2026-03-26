@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // clearProviderEnvVars unsets all known provider-related environment variables.
@@ -265,15 +267,26 @@ func TestLoad_FallbackManualRules(t *testing.T) {
 			t.Fatalf("Failed to write fallback rules: %v", err)
 		}
 
-		yaml := `
-fallback:
-  default_mode: auto
-  manual_rules_path: "` + manualRulesPath + `"
-  overrides:
-    "gpt-4o":
-      mode: manual
-`
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+		type yamlConfig struct {
+			Fallback struct {
+				DefaultMode     string                       `yaml:"default_mode"`
+				ManualRulesPath string                       `yaml:"manual_rules_path"`
+				Overrides       map[string]map[string]string `yaml:"overrides"`
+			} `yaml:"fallback"`
+		}
+
+		yamlCfg := yamlConfig{}
+		yamlCfg.Fallback.DefaultMode = "auto"
+		yamlCfg.Fallback.ManualRulesPath = manualRulesPath
+		yamlCfg.Fallback.Overrides = map[string]map[string]string{
+			"gpt-4o": {"mode": "manual"},
+		}
+
+		yamlData, err := yaml.Marshal(yamlCfg)
+		if err != nil {
+			t.Fatalf("Failed to marshal config.yaml: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), yamlData, 0644); err != nil {
 			t.Fatalf("Failed to write config.yaml: %v", err)
 		}
 
@@ -311,6 +324,25 @@ fallback:
 
 		if _, err := Load(); err == nil {
 			t.Fatal("expected Load() to fail for invalid fallback mode")
+		}
+	})
+}
+
+func TestLoad_EmptyFallbackOverrideMode(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+fallback:
+  overrides:
+    "gpt-4o": {}
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		if _, err := Load(); err == nil {
+			t.Fatal("expected Load() to fail for empty fallback override mode")
 		}
 	})
 }

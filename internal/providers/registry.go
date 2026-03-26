@@ -245,8 +245,10 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	// Build lookup maps from configured providers.
 	r.mu.RLock()
 	nameToProvider := make(map[string]core.Provider, len(r.providerNames))
+	nameToProviderType := make(map[string]string, len(r.providerNames))
 	for provider, pName := range r.providerNames {
 		nameToProvider[pName] = provider
+		nameToProviderType[pName] = r.providerTypes[provider]
 	}
 	r.mu.RUnlock()
 
@@ -259,6 +261,10 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 			// Provider not configured, skip all its models
 			continue
 		}
+		providerType := strings.TrimSpace(cachedProv.ProviderType)
+		if providerType == "" {
+			providerType = strings.TrimSpace(nameToProviderType[providerName])
+		}
 		providerModels := make(map[string]*ModelInfo, len(cachedProv.Models))
 		for _, cached := range cachedProv.Models {
 			info := &ModelInfo{
@@ -270,7 +276,7 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 				},
 				Provider:     provider,
 				ProviderName: providerName,
-				ProviderType: cachedProv.ProviderType,
+				ProviderType: providerType,
 			}
 			providerModels[cached.ID] = info
 			if _, exists := newModels[cached.ID]; !exists {

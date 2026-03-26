@@ -117,6 +117,15 @@ func TestResolverOverrideOffDisablesFallbacks(t *testing.T) {
 	}
 }
 
+func TestSameFamily_IgnoresSurroundingWhitespace(t *testing.T) {
+	source := &core.ModelMetadata{Family: " gpt-4o "}
+	candidate := &core.ModelMetadata{Family: "gpt-4o"}
+
+	if !sameFamily(source, candidate) {
+		t.Fatal("expected sameFamily to compare trimmed family values")
+	}
+}
+
 func newFakeRegistry(infos ...*providers.ModelInfo) *fakeRegistry {
 	registry := &fakeRegistry{
 		byKey:  make(map[string]*providers.ModelInfo),

@@ -739,7 +739,10 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 				return fmt.Errorf("fallback.overrides: model key cannot be empty")
 			}
 			override.Mode = normalizeFallbackMode(override.Mode)
-			if override.Mode != "" && !override.Mode.Valid() {
+			if override.Mode == "" {
+				return fmt.Errorf("fallback.overrides[%q].mode must be one of: auto, manual, off", key)
+			}
+			if !override.Mode.Valid() {
 				return fmt.Errorf("fallback.overrides[%q].mode must be one of: auto, manual, off", key)
 			}
 			normalized[key] = override

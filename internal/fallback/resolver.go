@@ -388,10 +388,12 @@ func sameFamily(source, candidate *core.ModelMetadata) bool {
 	if source == nil || candidate == nil {
 		return false
 	}
-	if strings.TrimSpace(source.Family) == "" || strings.TrimSpace(candidate.Family) == "" {
+	sourceFamily := strings.TrimSpace(source.Family)
+	candidateFamily := strings.TrimSpace(candidate.Family)
+	if sourceFamily == "" || candidateFamily == "" {
 		return false
 	}
-	return source.Family == candidate.Family
+	return sourceFamily == candidateFamily
 }
 
 func capabilityOverlap(source, candidate map[string]bool) int {
