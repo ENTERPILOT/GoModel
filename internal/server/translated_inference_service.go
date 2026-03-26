@@ -265,8 +265,8 @@ func translatedStreamingSelectorRewriteRequired(resolution *core.RequestModelRes
 		return true
 	}
 
-	requestedModel := strings.TrimSpace(resolution.RequestedModel)
-	requestedProvider := strings.TrimSpace(resolution.RequestedProvider)
+	requestedModel := strings.TrimSpace(resolution.Requested.Model)
+	requestedProvider := strings.TrimSpace(resolution.Requested.ProviderHint)
 	resolvedModel := strings.TrimSpace(resolution.ResolvedSelector.Model)
 	resolvedProvider := strings.TrimSpace(resolution.ResolvedSelector.Provider)
 
@@ -275,6 +275,9 @@ func translatedStreamingSelectorRewriteRequired(resolution *core.RequestModelRes
 
 func translatedStreamingChatBodyRewriteRequired(req *core.ChatRequest) bool {
 	if req == nil {
+		return true
+	}
+	if strings.TrimSpace(req.Provider) != "" {
 		return true
 	}
 
