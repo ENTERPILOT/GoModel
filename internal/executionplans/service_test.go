@@ -2,7 +2,10 @@ package executionplans
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"gomodel/internal/core"
 )
@@ -65,6 +68,106 @@ func (s *staticStore) Deactivate(_ context.Context, id string) error {
 	return ErrNotFound
 }
 func (s *staticStore) Close() error { return nil }
+
+type concurrentStore struct {
+	mu           sync.Mutex
+	versions     []Version
+	createCalled chan struct{}
+}
+
+func (s *concurrentStore) ListActive(context.Context) ([]Version, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result := make([]Version, 0, len(s.versions))
+	for _, version := range s.versions {
+		if version.Active {
+			result = append(result, version)
+		}
+	}
+	return result, nil
+}
+
+func (s *concurrentStore) Get(_ context.Context, id string) (*Version, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, version := range s.versions {
+		if version.ID == id {
+			copy := version
+			return &copy, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (s *concurrentStore) Create(_ context.Context, input CreateInput) (*Version, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	input, scopeKey, planHash, err := normalizeCreateInput(input)
+	if err != nil {
+		return nil, err
+	}
+	if input.Activate {
+		for i := range s.versions {
+			if s.versions[i].ScopeKey == scopeKey {
+				s.versions[i].Active = false
+			}
+		}
+	}
+	version := Version{
+		ID:          "created-provider",
+		Scope:       input.Scope,
+		ScopeKey:    scopeKey,
+		Version:     len(s.versions) + 1,
+		Active:      input.Activate,
+		Name:        input.Name,
+		Description: input.Description,
+		Payload:     input.Payload,
+		PlanHash:    planHash,
+	}
+	s.versions = append(s.versions, version)
+	if s.createCalled != nil {
+		select {
+		case s.createCalled <- struct{}{}:
+		default:
+		}
+	}
+	return &version, nil
+}
+
+func (s *concurrentStore) Deactivate(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.versions {
+		if s.versions[i].ID == id && s.versions[i].Active {
+			s.versions[i].Active = false
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+func (s *concurrentStore) Close() error { return nil }
+
+type blockingCompiler struct {
+	delegate  Compiler
+	blockCall int32
+	callCount int32
+	blocked   chan struct{}
+	release   chan struct{}
+}
+
+func (c *blockingCompiler) Compile(version Version) (*CompiledPlan, error) {
+	call := atomic.AddInt32(&c.callCount, 1)
+	if call == c.blockCall {
+		close(c.blocked)
+		<-c.release
+	}
+	return c.delegate.Compile(version)
+}
 
 func TestServiceMatch_MostSpecificWins(t *testing.T) {
 	store := &staticStore{
@@ -346,5 +449,93 @@ func TestServiceDeactivate_RejectsGlobalWorkflow(t *testing.T) {
 	}
 	if !IsValidationError(err) {
 		t.Fatalf("Deactivate() error = %v, want validation error", err)
+	}
+}
+
+func TestServiceCreateWaitsForInFlightRefreshBeforePersisting(t *testing.T) {
+	store := &concurrentStore{
+		versions: []Version{
+			{
+				ID:       "global-v1",
+				Scope:    Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: Payload{
+					SchemaVersion: 1,
+					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+				},
+			},
+		},
+		createCalled: make(chan struct{}, 1),
+	}
+	compiler := &blockingCompiler{
+		delegate:  NewCompiler(nil),
+		blockCall: 2,
+		blocked:   make(chan struct{}),
+		release:   make(chan struct{}),
+	}
+	service, err := NewService(store, compiler)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	refreshDone := make(chan error, 1)
+	go func() {
+		refreshDone <- service.Refresh(context.Background())
+	}()
+
+	<-compiler.blocked
+
+	type createResult struct {
+		version *Version
+		err     error
+	}
+	createDone := make(chan createResult, 1)
+	go func() {
+		version, err := service.Create(context.Background(), CreateInput{
+			Scope:    Scope{Provider: "openai"},
+			Activate: true,
+			Name:     "openai",
+			Payload: Payload{
+				SchemaVersion: 1,
+				Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+			},
+		})
+		createDone <- createResult{version: version, err: err}
+	}()
+
+	select {
+	case <-store.createCalled:
+		t.Fatal("Create() persisted a new version while an older refresh was still rebuilding the snapshot")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(compiler.release)
+
+	if err := <-refreshDone; err != nil {
+		t.Fatalf("background Refresh() error = %v", err)
+	}
+	result := <-createDone
+	if result.err != nil {
+		t.Fatalf("Create() error = %v", result.err)
+	}
+	if result.version == nil {
+		t.Fatal("Create() returned nil version")
+	}
+
+	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	if err != nil {
+		t.Fatalf("Match() error = %v", err)
+	}
+	if policy == nil {
+		t.Fatal("Match() returned nil policy")
+	}
+	if policy.VersionID != result.version.ID {
+		t.Fatalf("VersionID = %q, want %q", policy.VersionID, result.version.ID)
 	}
 }

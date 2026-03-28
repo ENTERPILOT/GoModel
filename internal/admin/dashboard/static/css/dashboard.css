@@ -2485,7 +2485,7 @@ body.conversation-drawer-open {
 .ep-node-icon svg {
     width: 15px;
     height: 15px;
-    stroke: currentColor;
+    stroke: currentcolor;
     fill: none;
     stroke-width: 2;
     stroke-linecap: round;
@@ -2653,17 +2653,6 @@ body.conversation-drawer-open {
     padding: 12px 16px;
     border-radius: var(--radius);
     gap: 6px;
-}
-
-.ep-node-ai .ep-node-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: var(--radius);
-}
-
-.ep-node-ai .ep-node-icon svg {
-    width: 17px;
-    height: 17px;
 }
 
 /* AI skipped — cache hit absorbed the request */

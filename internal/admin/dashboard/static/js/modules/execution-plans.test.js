@@ -170,6 +170,40 @@ test('workflowDisplayName falls back to scope label or All models', () => {
     );
 });
 
+test('epGuardrailLabel only shows a sublabel when guardrail steps exist', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        module.epGuardrailLabel({
+            plan_payload: {
+                guardrails: []
+            }
+        }),
+        ''
+    );
+
+    assert.equal(
+        module.epGuardrailLabel({
+            plan_payload: {
+                guardrails: [{ ref: 'policy-system', step: 10 }]
+            }
+        }),
+        '1 step'
+    );
+
+    assert.equal(
+        module.epGuardrailLabel({
+            plan_payload: {
+                guardrails: [
+                    { ref: 'policy-system', step: 10 },
+                    { ref: 'pii', step: 20 }
+                ]
+            }
+        }),
+        '2 steps'
+    );
+});
+
 test('deactivateExecutionPlan requires confirmation before posting', async () => {
     let fetchCalled = false;
     const module = createExecutionPlansModule({

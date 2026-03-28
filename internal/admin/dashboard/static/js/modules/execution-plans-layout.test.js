@@ -97,6 +97,39 @@ test('workflow nodes use endpoint and feature color groups consistently', () => 
     }
 });
 
+test('execution plan authoring inputs expose stable accessible names', () => {
+    const template = readFixture('../../../templates/index.html');
+
+    assert.match(
+        template,
+        /x-model="executionPlanFilter"[^>]*aria-label="Filter workflows by scope, name, hash, or guardrail"/
+    );
+    assert.match(
+        template,
+        /x-model="step\.ref"[^>]*aria-label="Guardrail reference"/
+    );
+    assert.match(
+        template,
+        /x-model\.number="step\.step"[^>]*aria-label="Guardrail step"/
+    );
+});
+
+test('guardrails node only renders a sublabel when step detail exists', () => {
+    const template = readFixture('../../../templates/index.html');
+
+    assert.match(
+        template,
+        /<span class="ep-node-label">Guardrails<\/span>\s*<span class="ep-node-sub" x-show="epGuardrailLabel\(plan\)" x-text="epGuardrailLabel\(plan\)"><\/span>/
+    );
+});
+
+test('execution pipeline icons use lowercase currentcolor keyword', () => {
+    const css = readFixture('../../css/dashboard.css');
+    const iconRule = readCSSRule(css, '.ep-node-icon svg');
+
+    assert.match(iconRule, /stroke:\s*currentcolor;/);
+});
+
 test('exec pipeline has bottom spacing so adjacent cards do not touch it', () => {
     const css = readFixture('../../css/dashboard.css');
     const pipelineRule = readCSSRule(css, '.exec-pipeline');
@@ -115,7 +148,6 @@ test('execution pipeline uses var(--radius) for chart-local corners', () => {
         '.ep-node-endpoint',
         '.ep-node-icon-endpoint',
         '.ep-node-ai',
-        '.ep-node-ai .ep-node-icon',
         '.ep-node-async',
         '.ep-node-async .ep-node-icon'
     ];
@@ -124,6 +156,14 @@ test('execution pipeline uses var(--radius) for chart-local corners', () => {
         const rule = readCSSRule(css, selector);
         assert.match(rule, /border-radius:\s*var\(--radius\)/);
     }
+});
+
+test('AI node renders as a text-only card without an icon', () => {
+    const template = readFixture('../../../templates/index.html');
+    const css = readFixture('../../css/dashboard.css');
+
+    assert.doesNotMatch(template, /class="ep-node ep-node-ai[^"]*"[^>]*>\s*<div class="ep-node-icon">/);
+    assert.doesNotMatch(css, /\.ep-node-ai \.ep-node-icon\s*\{/);
 });
 
 test('endpoint pills use dedicated flush-left icons and tighter right padding', () => {

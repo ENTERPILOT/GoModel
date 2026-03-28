@@ -683,6 +683,10 @@ func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
+	if err := h.validateExecutionPlanScope(req.ScopeProvider, req.ScopeModel); err != nil {
+		return handleError(c, err)
+	}
+
 	if err := h.validateExecutionPlanGuardrails(req.Payload); err != nil {
 		return handleError(c, err)
 	}
@@ -748,6 +752,34 @@ func (h *Handler) validateExecutionPlanGuardrails(payload executionplans.Payload
 		}
 	}
 	return nil
+}
+
+func (h *Handler) validateExecutionPlanScope(scopeProvider, scopeModel string) error {
+	scopeProvider = strings.TrimSpace(scopeProvider)
+	scopeModel = strings.TrimSpace(scopeModel)
+
+	if scopeProvider == "" {
+		if scopeModel != "" {
+			return core.NewInvalidRequestError("scope_model requires scope_provider", nil)
+		}
+		return nil
+	}
+	if h.registry == nil {
+		return core.NewInvalidRequestError("provider registry is unavailable for workflow scope validation", nil)
+	}
+	if !slices.Contains(h.registry.ProviderTypes(), scopeProvider) {
+		return core.NewInvalidRequestError("unknown provider type: "+scopeProvider, nil)
+	}
+	if scopeModel == "" {
+		return nil
+	}
+
+	for _, model := range h.registry.ListModelsWithProvider() {
+		if model.ProviderType == scopeProvider && model.Model.ID == scopeModel {
+			return nil
+		}
+	}
+	return core.NewInvalidRequestError("unknown model for provider "+scopeProvider+": "+scopeModel, nil)
 }
 
 func decodeAliasPathName(raw string) (string, error) {

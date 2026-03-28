@@ -446,7 +446,7 @@
 
             epGuardrailLabel(source) {
                 const count = this.executionPlanSourceGuardrails(source).length;
-                if (count === 0) return 'Guardrails';
+                if (count === 0) return '';
                 return count === 1 ? '1 step' : count + ' steps';
             },
 

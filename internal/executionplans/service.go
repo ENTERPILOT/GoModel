@@ -36,9 +36,10 @@ type snapshot struct {
 
 // Service keeps the active execution-plan set cached in memory.
 type Service struct {
-	store    Store
-	compiler Compiler
-	current  atomic.Value
+	store     Store
+	compiler  Compiler
+	current   atomic.Value
+	refreshMu sync.Mutex
 }
 
 // NewService creates an execution-plan service backed by storage.
@@ -64,6 +65,12 @@ func NewService(store Store, compiler Compiler) (*Service, error) {
 
 // Refresh reloads active plans from storage and atomically swaps the in-memory snapshot.
 func (s *Service) Refresh(ctx context.Context) error {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	return s.refreshLocked(ctx)
+}
+
+func (s *Service) refreshLocked(ctx context.Context) error {
 	versions, err := s.store.ListActive(ctx)
 	if err != nil {
 		return fmt.Errorf("list active execution plans: %w", err)
@@ -173,11 +180,14 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*Version, erro
 		return nil, err
 	}
 
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
 	version, err := s.store.Create(ctx, normalized)
 	if err != nil {
 		return nil, fmt.Errorf("create execution plan: %w", err)
 	}
-	if err := s.Refresh(ctx); err != nil {
+	if err := s.refreshLocked(ctx); err != nil {
 		return nil, fmt.Errorf("refresh execution plans: %w", err)
 	}
 	return version, nil
@@ -215,13 +225,16 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 		return newValidationError("workflow is already inactive", nil)
 	}
 
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
 	if err := s.store.Deactivate(ctx, version.ID); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return err
 		}
 		return fmt.Errorf("deactivate execution plan %q: %w", version.ID, err)
 	}
-	if err := s.Refresh(ctx); err != nil {
+	if err := s.refreshLocked(ctx); err != nil {
 		return fmt.Errorf("refresh execution plans: %w", err)
 	}
 	return nil

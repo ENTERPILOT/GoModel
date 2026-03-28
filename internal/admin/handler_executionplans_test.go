@@ -13,11 +13,21 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/executionplans"
 	"gomodel/internal/guardrails"
+	"gomodel/internal/providers"
 	"gomodel/internal/responsecache"
 )
 
 type executionPlanTestStore struct {
 	versions []executionplans.Version
+}
+
+type executionPlanErrorEnvelope struct {
+	Error struct {
+		Type    string  `json:"type"`
+		Message string  `json:"message"`
+		Param   *string `json:"param"`
+		Code    *string `json:"code"`
+	} `json:"error"`
 }
 
 func (s *executionPlanTestStore) ListActive(context.Context) ([]executionplans.Version, error) {
@@ -106,10 +116,42 @@ func newExecutionPlanRegistry(t *testing.T) *guardrails.Registry {
 	return registry
 }
 
-func newExecutionPlanHandler(t *testing.T, store executionplans.Store, registry *guardrails.Registry) *Handler {
+func newExecutionPlanModelRegistry(t *testing.T) *providers.ModelRegistry {
 	t.Helper()
 
-	service, err := executionplans.NewService(store, executionplans.NewCompiler(registry))
+	registry := providers.NewModelRegistry()
+	registry.RegisterProviderWithType(&handlerMockProvider{
+		models: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-5", Object: "model", OwnedBy: "openai"},
+			},
+		},
+	}, "openai")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	return registry
+}
+
+func decodeExecutionPlanErrorEnvelope(t *testing.T, body []byte) executionPlanErrorEnvelope {
+	t.Helper()
+
+	var envelope executionPlanErrorEnvelope
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	return envelope
+}
+
+func newExecutionPlanHandler(t *testing.T, store executionplans.Store, registry *guardrails.Registry) *Handler {
+	return newExecutionPlanHandlerWithModelRegistry(t, store, newExecutionPlanModelRegistry(t), registry)
+}
+
+func newExecutionPlanHandlerWithModelRegistry(t *testing.T, store executionplans.Store, modelRegistry *providers.ModelRegistry, guardrailRegistry *guardrails.Registry) *Handler {
+	t.Helper()
+
+	service, err := executionplans.NewService(store, executionplans.NewCompiler(guardrailRegistry))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -117,7 +159,7 @@ func newExecutionPlanHandler(t *testing.T, store executionplans.Store, registry 
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	return NewHandler(nil, nil, WithExecutionPlans(service), WithGuardrailsRegistry(registry))
+	return NewHandler(nil, modelRegistry, WithExecutionPlans(service), WithGuardrailsRegistry(guardrailRegistry))
 }
 
 func TestListExecutionPlans(t *testing.T) {
@@ -381,12 +423,18 @@ func TestCreateExecutionPlanRejectsUnknownGuardrail(t *testing.T) {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 
-	var body map[string]map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
+	body := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	if body.Error.Type != "invalid_request_error" {
+		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
 	}
-	if got := body["error"]["message"]; got != "unknown guardrail ref: missing-guardrail" {
-		t.Fatalf("error message = %v, want unknown guardrail ref", got)
+	if body.Error.Message != "unknown guardrail ref: missing-guardrail" {
+		t.Fatalf("error message = %q, want unknown guardrail ref", body.Error.Message)
+	}
+	if body.Error.Param != nil {
+		t.Fatalf("error param = %v, want nil", *body.Error.Param)
+	}
+	if body.Error.Code != nil {
+		t.Fatalf("error code = %v, want nil", *body.Error.Code)
 	}
 }
 
@@ -432,12 +480,102 @@ func TestCreateExecutionPlanReturnsValidationErrors(t *testing.T) {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 
-	var body map[string]map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
+	body := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	if body.Error.Type != "invalid_request_error" {
+		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
 	}
-	if got := body["error"]["type"]; got != "invalid_request_error" {
-		t.Fatalf("error type = %v, want invalid_request_error", got)
+	if body.Error.Param != nil {
+		t.Fatalf("error param = %v, want nil", *body.Error.Param)
+	}
+	if body.Error.Code != nil {
+		t.Fatalf("error code = %v, want nil", *body.Error.Code)
+	}
+}
+
+func TestCreateExecutionPlanRejectsUnknownProviderOrModelScope(t *testing.T) {
+	store := &executionPlanTestStore{
+		versions: []executionplans.Version{
+			{
+				ID:       "global-plan",
+				Scope:    executionplans.Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: executionplans.Payload{
+					SchemaVersion: 1,
+					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+				},
+				PlanHash: "hash-global",
+			},
+		},
+	}
+
+	tests := []struct {
+		name        string
+		body        string
+		wantMessage string
+	}{
+		{
+			name: "unknown provider",
+			body: `{
+				"scope_provider":"anthropic",
+				"name":"invalid provider",
+				"plan_payload":{
+					"schema_version":1,
+					"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
+					"guardrails":[]
+				}
+			}`,
+			wantMessage: "unknown provider type: anthropic",
+		},
+		{
+			name: "unknown model for provider",
+			body: `{
+				"scope_provider":"openai",
+				"scope_model":"gpt-4o-mini",
+				"name":"invalid model",
+				"plan_payload":{
+					"schema_version":1,
+					"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
+					"guardrails":[]
+				}
+			}`,
+			wantMessage: "unknown model for provider openai: gpt-4o-mini",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newExecutionPlanHandler(t, store, nil)
+			e := echo.New()
+
+			req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			if err := h.CreateExecutionPlan(c); err != nil {
+				t.Fatalf("CreateExecutionPlan() error = %v", err)
+			}
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", rec.Code)
+			}
+
+			body := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+			if body.Error.Type != "invalid_request_error" {
+				t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
+			}
+			if body.Error.Message != tt.wantMessage {
+				t.Fatalf("error message = %q, want %q", body.Error.Message, tt.wantMessage)
+			}
+			if body.Error.Param != nil {
+				t.Fatalf("error param = %v, want nil", *body.Error.Param)
+			}
+			if body.Error.Code != nil {
+				t.Fatalf("error code = %v, want nil", *body.Error.Code)
+			}
+		})
 	}
 }
 
@@ -593,11 +731,17 @@ func TestDeactivateExecutionPlanRejectsGlobalWorkflow(t *testing.T) {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 
-	var body map[string]map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
+	body := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	if body.Error.Type != "invalid_request_error" {
+		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
 	}
-	if got := body["error"]["message"]; got != "cannot deactivate the global workflow" {
-		t.Fatalf("error message = %v, want cannot deactivate the global workflow", got)
+	if body.Error.Message != "cannot deactivate the global workflow" {
+		t.Fatalf("error message = %q, want cannot deactivate the global workflow", body.Error.Message)
+	}
+	if body.Error.Param != nil {
+		t.Fatalf("error param = %v, want nil", *body.Error.Param)
+	}
+	if body.Error.Code != nil {
+		t.Fatalf("error code = %v, want nil", *body.Error.Code)
 	}
 }
