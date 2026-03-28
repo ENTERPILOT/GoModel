@@ -176,7 +176,8 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*Version, erro
 	if err != nil {
 		return nil, err
 	}
-	if err := s.validateCreateCandidate(normalized, scopeKey, planHash); err != nil {
+	previewCompiled, err := s.validateCreateCandidate(normalized, scopeKey, planHash)
+	if err != nil {
 		return nil, err
 	}
 
@@ -187,10 +188,8 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*Version, erro
 	if err != nil {
 		return nil, fmt.Errorf("create execution plan: %w", err)
 	}
-	refreshCtx, refreshCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer refreshCancel()
-	if err := s.refreshLocked(refreshCtx); err != nil {
-		return nil, fmt.Errorf("refresh execution plans: %w", err)
+	if version != nil && version.Active {
+		s.storeActivatedCompiledLocked(compiledPlanForVersion(previewCompiled, *version))
 	}
 	return version, nil
 }
@@ -236,11 +235,7 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 		}
 		return fmt.Errorf("deactivate execution plan %q: %w", version.ID, err)
 	}
-	refreshCtx, refreshCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer refreshCancel()
-	if err := s.refreshLocked(refreshCtx); err != nil {
-		return fmt.Errorf("refresh execution plans: %w", err)
-	}
+	s.storeDeactivatedVersionLocked(*version)
 	return nil
 }
 
@@ -384,7 +379,7 @@ func (s *Service) matchCompiled(selector core.ExecutionPlanSelector) (*CompiledP
 	return current.global, nil
 }
 
-func (s *Service) validateCreateCandidate(input CreateInput, scopeKey, planHash string) error {
+func (s *Service) validateCreateCandidate(input CreateInput, scopeKey, planHash string) (*CompiledPlan, error) {
 	version := Version{
 		ID:          "preview",
 		Scope:       input.Scope,
@@ -399,12 +394,12 @@ func (s *Service) validateCreateCandidate(input CreateInput, scopeKey, planHash 
 	}
 	compiled, err := s.compiler.Compile(version)
 	if err != nil {
-		return newValidationError(err.Error(), err)
+		return nil, newValidationError(err.Error(), err)
 	}
 	if compiled == nil || compiled.Policy == nil {
-		return newValidationError("compiled plan is empty or missing policy", nil)
+		return nil, newValidationError("compiled plan is empty or missing policy", nil)
 	}
-	return nil
+	return compiled, nil
 }
 
 func (s *Service) viewForVersion(version Version) (View, error) {
@@ -483,4 +478,110 @@ func (s *Service) snapshot() snapshot {
 		providerModels: map[string]map[string]*CompiledPlan{},
 		byVersionID:    map[string]*CompiledPlan{},
 	}
+}
+
+func cloneSnapshot(current snapshot) snapshot {
+	next := snapshot{
+		global:         current.global,
+		providers:      make(map[string]*CompiledPlan, len(current.providers)),
+		providerModels: make(map[string]map[string]*CompiledPlan, len(current.providerModels)),
+		byVersionID:    make(map[string]*CompiledPlan, len(current.byVersionID)),
+	}
+	for provider, compiled := range current.providers {
+		next.providers[provider] = compiled
+	}
+	for provider, models := range current.providerModels {
+		copied := make(map[string]*CompiledPlan, len(models))
+		for model, compiled := range models {
+			copied[model] = compiled
+		}
+		next.providerModels[provider] = copied
+	}
+	for versionID, compiled := range current.byVersionID {
+		next.byVersionID[versionID] = compiled
+	}
+	return next
+}
+
+func compiledPlanForVersion(compiled *CompiledPlan, version Version) *CompiledPlan {
+	if compiled == nil {
+		return nil
+	}
+	next := &CompiledPlan{
+		Version:  version,
+		Pipeline: compiled.Pipeline,
+	}
+	if compiled.Policy != nil {
+		policy := *compiled.Policy
+		policy.VersionID = version.ID
+		policy.Version = version.Version
+		policy.ScopeProvider = version.Scope.Provider
+		policy.ScopeModel = version.Scope.Model
+		policy.Name = version.Name
+		policy.PlanHash = version.PlanHash
+		next.Policy = &policy
+	}
+	return next
+}
+
+func (s *Service) storeActivatedCompiledLocked(compiled *CompiledPlan) {
+	if s == nil || compiled == nil {
+		return
+	}
+	next := cloneSnapshot(s.snapshot())
+	scope := compiled.Version.Scope
+
+	switch {
+	case scope.Provider == "":
+		if next.global != nil {
+			delete(next.byVersionID, next.global.Version.ID)
+		}
+		next.global = compiled
+	case scope.Model == "":
+		if existing := next.providers[scope.Provider]; existing != nil {
+			delete(next.byVersionID, existing.Version.ID)
+		}
+		next.providers[scope.Provider] = compiled
+	default:
+		models := next.providerModels[scope.Provider]
+		if models == nil {
+			models = make(map[string]*CompiledPlan)
+			next.providerModels[scope.Provider] = models
+		}
+		if existing := models[scope.Model]; existing != nil {
+			delete(next.byVersionID, existing.Version.ID)
+		}
+		models[scope.Model] = compiled
+	}
+
+	next.byVersionID[compiled.Version.ID] = compiled
+	s.current.Store(next)
+}
+
+func (s *Service) storeDeactivatedVersionLocked(version Version) {
+	if s == nil {
+		return
+	}
+	next := cloneSnapshot(s.snapshot())
+	scope := version.Scope
+
+	delete(next.byVersionID, version.ID)
+
+	switch {
+	case scope.Provider == "":
+		next.global = nil
+	case scope.Model == "":
+		delete(next.providers, scope.Provider)
+	default:
+		models := next.providerModels[scope.Provider]
+		if models == nil {
+			break
+		}
+		delete(models, scope.Model)
+		if len(models) == 0 {
+			delete(next.providerModels, scope.Provider)
+		}
+	}
+
+	s.current.Store(next)
 }

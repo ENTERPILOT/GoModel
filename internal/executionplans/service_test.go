@@ -2,6 +2,7 @@ package executionplans
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -186,6 +187,11 @@ type contextCancelingStore struct {
 	cancelOnDeactivate context.CancelFunc
 }
 
+type refreshFailingStore struct {
+	staticStore
+	failListActive error
+}
+
 func (s *contextCancelingStore) ListActive(ctx context.Context) ([]Version, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -205,6 +211,29 @@ func (s *contextCancelingStore) Deactivate(ctx context.Context, id string) error
 	err := s.staticStore.Deactivate(ctx, id)
 	if err == nil && s.cancelOnDeactivate != nil {
 		s.cancelOnDeactivate()
+	}
+	return err
+}
+
+func (s *refreshFailingStore) ListActive(ctx context.Context) ([]Version, error) {
+	if s.failListActive != nil {
+		return nil, s.failListActive
+	}
+	return s.staticStore.ListActive(ctx)
+}
+
+func (s *refreshFailingStore) Create(ctx context.Context, input CreateInput) (*Version, error) {
+	version, err := s.staticStore.Create(ctx, input)
+	if err == nil {
+		s.failListActive = errors.New("list active failed after create")
+	}
+	return version, err
+}
+
+func (s *refreshFailingStore) Deactivate(ctx context.Context, id string) error {
+	err := s.staticStore.Deactivate(ctx, id)
+	if err == nil {
+		s.failListActive = errors.New("list active failed after deactivate")
 	}
 	return err
 }
@@ -692,6 +721,61 @@ func TestServiceCreateRefreshIgnoresRequestContextCancellationAfterPersist(t *te
 	}
 }
 
+func TestServiceCreateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testing.T) {
+	store := &refreshFailingStore{
+		staticStore: staticStore{
+			versions: []Version{
+				{
+					ID:       "global-v1",
+					Scope:    Scope{},
+					ScopeKey: "global",
+					Version:  1,
+					Active:   true,
+					Name:     "global",
+					Payload: Payload{
+						SchemaVersion: 1,
+						Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					},
+				},
+			},
+		},
+	}
+	service, err := NewService(store, NewCompiler(nil))
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	created, err := service.Create(context.Background(), CreateInput{
+		Scope:    Scope{Provider: "openai"},
+		Activate: true,
+		Name:     "openai",
+		Payload: Payload{
+			SchemaVersion: 1,
+			Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if created == nil {
+		t.Fatal("Create() returned nil version")
+	}
+
+	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	if err != nil {
+		t.Fatalf("Match() error = %v", err)
+	}
+	if policy == nil {
+		t.Fatal("Match() returned nil policy")
+	}
+	if policy.VersionID != created.ID {
+		t.Fatalf("VersionID = %q, want %q", policy.VersionID, created.ID)
+	}
+}
+
 func TestServiceDeactivateRefreshIgnoresRequestContextCancellationAfterPersist(t *testing.T) {
 	store := &contextCancelingStore{
 		staticStore: staticStore{
@@ -735,6 +819,61 @@ func TestServiceDeactivateRefreshIgnoresRequestContextCancellationAfterPersist(t
 	store.cancelOnDeactivate = cancel
 
 	if err := service.Deactivate(ctx, "provider-v1"); err != nil {
+		t.Fatalf("Deactivate() error = %v", err)
+	}
+
+	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	if err != nil {
+		t.Fatalf("Match() error = %v", err)
+	}
+	if policy == nil {
+		t.Fatal("Match() returned nil policy")
+	}
+	if policy.VersionID != "global-v1" {
+		t.Fatalf("VersionID = %q, want global-v1", policy.VersionID)
+	}
+}
+
+func TestServiceDeactivateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testing.T) {
+	store := &refreshFailingStore{
+		staticStore: staticStore{
+			versions: []Version{
+				{
+					ID:       "global-v1",
+					Scope:    Scope{},
+					ScopeKey: "global",
+					Version:  1,
+					Active:   true,
+					Name:     "global",
+					Payload: Payload{
+						SchemaVersion: 1,
+						Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					},
+				},
+				{
+					ID:       "provider-v1",
+					Scope:    Scope{Provider: "openai"},
+					ScopeKey: "provider:openai",
+					Version:  1,
+					Active:   true,
+					Name:     "openai",
+					Payload: Payload{
+						SchemaVersion: 1,
+						Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+					},
+				},
+			},
+		},
+	}
+	service, err := NewService(store, NewCompiler(nil))
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	if err := service.Deactivate(context.Background(), "provider-v1"); err != nil {
 		t.Fatalf("Deactivate() error = %v", err)
 	}
 

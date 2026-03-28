@@ -151,7 +151,33 @@ test('buildExecutionPlanRequest preserves blank guardrail steps as invalid so va
     assert.ok(Number.isNaN(payload.plan_payload.guardrails[0].step));
     assert.equal(
         module.validateExecutionPlanRequest(payload),
-        'Each guardrail step must use an integer step number.'
+        'Each guardrail step must use a non-negative integer step number.'
+    );
+});
+
+test('validateExecutionPlanRequest rejects negative guardrail step numbers', () => {
+    const module = createExecutionPlansModule();
+    const payload = {
+        scope_provider: '',
+        scope_model: '',
+        name: 'Global',
+        plan_payload: {
+            schema_version: 1,
+            features: {
+                cache: true,
+                audit: true,
+                usage: true,
+                guardrails: true
+            },
+            guardrails: [
+                { ref: 'policy-system', step: -1 }
+            ]
+        }
+    };
+
+    assert.equal(
+        module.validateExecutionPlanRequest(payload),
+        'Each guardrail step must use a non-negative integer step number.'
     );
 });
 
@@ -306,6 +332,35 @@ test('deactivateExecutionPlan requires confirmation before posting', async () =>
 
     assert.equal(fetchCalled, false);
     assert.equal(module.executionPlanDeactivatingID, '');
+});
+
+test('deactivateExecutionPlan ignores duplicate clicks while another deactivation is in flight', async () => {
+    let confirmCalled = false;
+    let fetchCalled = false;
+    const module = createExecutionPlansModule({
+        window: {
+            confirm() {
+                confirmCalled = true;
+                return true;
+            }
+        },
+        fetch() {
+            fetchCalled = true;
+            throw new Error('fetch should not be called while another deactivation is already in flight');
+        }
+    });
+    module.executionPlanDeactivatingID = 'workflow-1';
+    module.headers = () => ({});
+
+    await module.deactivateExecutionPlan({
+        id: 'workflow-1',
+        name: 'Primary workflow',
+        scope_type: 'provider'
+    });
+
+    assert.equal(confirmCalled, false);
+    assert.equal(fetchCalled, false);
+    assert.equal(module.executionPlanDeactivatingID, 'workflow-1');
 });
 
 test('submitExecutionPlanForm ignores duplicate submissions while a request is already in flight', async () => {

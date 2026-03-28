@@ -870,10 +870,14 @@
                                 <button type="button"
                                         class="table-action-btn table-action-btn-danger"
                                         :disabled="executionPlanDeactivatingID === plan.id || !canDeactivateExecutionPlan(plan)"
+                                        :aria-label="'Deactivate workflow ' + workflowDisplayName(plan)"
                                         :title="canDeactivateExecutionPlan(plan) ? 'Deactivate active workflow' : 'The global workflow cannot be deactivated.'"
                                         @click="deactivateExecutionPlan(plan)"
                                         x-text="executionPlanDeactivatingID === plan.id ? 'Deactivating...' : 'Deactivate'"></button>
-                                <button type="button" class="table-action-btn" @click="openExecutionPlanCreate(plan)">Edit</button>
+                                <button type="button"
+                                        class="table-action-btn"
+                                        :aria-label="'Edit workflow ' + workflowDisplayName(plan)"
+                                        @click="openExecutionPlanCreate(plan)">Edit</button>
                             </div>
                             <div class="execution-plan-card-meta execution-plan-card-meta-footer">
                                 <span class="provider-badge mono" x-text="'version: v' + plan.version"></span>

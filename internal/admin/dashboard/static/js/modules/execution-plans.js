@@ -321,8 +321,8 @@
                     if (!step.ref) {
                         return 'Each guardrail step needs a guardrail ref.';
                     }
-                    if (!Number.isInteger(step.step)) {
-                        return 'Each guardrail step must use an integer step number.';
+                    if (!Number.isInteger(step.step) || step.step < 0) {
+                        return 'Each guardrail step must use a non-negative integer step number.';
                     }
                     if (seen.has(step.ref)) {
                         return 'Each guardrail ref may appear only once in a plan.';
@@ -524,7 +524,7 @@
 
             async deactivateExecutionPlan(plan) {
                 const planID = String(plan && plan.id || '').trim();
-                if (!planID || !this.canDeactivateExecutionPlan(plan)) {
+                if (!planID || this.executionPlanDeactivatingID || !this.canDeactivateExecutionPlan(plan)) {
                     return;
                 }
                 const workflowName = this.workflowDisplayName(plan);

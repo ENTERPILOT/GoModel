@@ -114,6 +114,19 @@ test('execution plan authoring inputs expose stable accessible names', () => {
     );
 });
 
+test('execution plan card actions expose plan-specific accessible names', () => {
+    const template = readFixture('../../../templates/index.html');
+
+    assert.match(
+        template,
+        /class="table-action-btn table-action-btn-danger"[\s\S]*?:aria-label="'Deactivate workflow ' \+ workflowDisplayName\(plan\)"/
+    );
+    assert.match(
+        template,
+        /class="table-action-btn"[^>]*:aria-label="'Edit workflow ' \+ workflowDisplayName\(plan\)"/
+    );
+});
+
 test('guardrails node only renders a sublabel when step detail exists', () => {
     const template = readFixture('../../../templates/index.html');
 
