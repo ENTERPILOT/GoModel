@@ -297,6 +297,33 @@ func TestAdminEndpoints_Enabled(t *testing.T) {
 	}
 }
 
+func TestAdminExecutionPlanEndpoints_AreRegistered(t *testing.T) {
+	mock := &mockProvider{}
+	adminHandler := admin.NewHandler(nil, nil)
+	srv := New(mock, &Config{
+		AdminEndpointsEnabled: true,
+		AdminHandler:          adminHandler,
+	})
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/admin/api/v1/execution-plans"},
+		{method: http.MethodGet, path: "/admin/api/v1/execution-plans/guardrails"},
+		{method: http.MethodPost, path: "/admin/api/v1/execution-plans"},
+		{method: http.MethodPost, path: "/admin/api/v1/execution-plans/test-plan/deactivate"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code == http.StatusNotFound {
+			t.Fatalf("%s %s returned 404, want registered route", tc.method, tc.path)
+		}
+	}
+}
+
 func TestAdminEndpoints_Disabled(t *testing.T) {
 	mock := &mockProvider{}
 	srv := New(mock, &Config{

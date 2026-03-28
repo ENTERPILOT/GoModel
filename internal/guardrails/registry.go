@@ -2,6 +2,7 @@ package guardrails
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"gomodel/internal/responsecache"
@@ -34,6 +35,20 @@ func (r *Registry) Len() int {
 		return 0
 	}
 	return len(r.entries)
+}
+
+// Names returns the registered guardrail names in sorted order.
+func (r *Registry) Names() []string {
+	if r == nil || len(r.entries) == 0 {
+		return []string{}
+	}
+
+	names := make([]string, 0, len(r.entries))
+	for name := range r.entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Register adds one named guardrail and its hashing descriptor.

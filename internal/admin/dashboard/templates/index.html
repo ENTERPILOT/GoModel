@@ -612,8 +612,292 @@
     <p class="empty-state" x-show="displayModels.length > 0 && filteredDisplayModels.length === 0 && modelFilter">No models match your filter.</p>
 </div>
 
+<!-- Workflows Page -->
+<div x-show="page==='workflows'">
+    <div class="page-header">
+        <div>
+            <h2>Workflows</h2>
+            <p class="execution-plan-page-note">Active workflows are matched with most-specific-wins precedence: provider + model, then provider, then global.</p>
+        </div>
+        <div class="page-header-controls">
+            <button type="button" class="pagination-btn pagination-btn-primary" x-show="executionPlansAvailable" @click="openExecutionPlanCreate()">Create Workflow</button>
+        </div>
+    </div>
+
+    <div class="alert alert-warning" x-show="authError">
+        Authentication required. Enter your API key in the sidebar to view data.
+    </div>
+    <div class="alert alert-warning" x-show="!executionPlansAvailable && !authError">
+        Workflows feature is unavailable.
+    </div>
+    <div class="alert alert-warning" x-show="executionPlanError && !authError" x-text="executionPlanError"></div>
+    <div class="alert alert-success" x-show="executionPlanNotice" x-text="executionPlanNotice"></div>
+
+    <div class="table-toolbar" x-show="executionPlansAvailable">
+        <div class="table-toolbar-main">
+            <input type="text" placeholder="Filter by scope, name, hash, or guardrail..." x-model="executionPlanFilter" class="filter-input">
+        </div>
+        <div class="table-toolbar-actions">
+            <span class="model-count" x-text="filteredExecutionPlans.length + ' active scopes'"></span>
+        </div>
+    </div>
+
+    <div class="execution-plans-layout" :class="{ 'is-editor-open': executionPlanFormOpen }">
+        <section class="model-alias-editor execution-plan-editor" x-show="executionPlanFormOpen">
+            <form class="alias-form" @submit.prevent="submitExecutionPlanForm()">
+                <div class="aliases-editor-header">
+                    <div>
+                        <div class="execution-plan-heading">
+                            <h3>Workflow</h3>
+                            <span class="execution-plan-help" title="Create immutable version. Submitting activates it for the selected scope.">?</span>
+                        </div>
+                    </div>
+                    <button type="button" class="table-action-btn alias-close-btn" aria-label="Close workflow editor" @click="closeExecutionPlanForm()">
+                        <span aria-hidden="true">X</span>
+                    </button>
+                </div>
+
+                <div class="alert alert-warning" x-show="executionPlanFormError" x-text="executionPlanFormError"></div>
+
+                <div class="alias-form-grid">
+                    <label class="alias-form-field">
+                        <span>Provider</span>
+                        <select class="usage-log-select execution-plan-input" x-model="executionPlanForm.scope_provider" @change="setExecutionPlanProvider(executionPlanForm.scope_provider)">
+                            <option value="">All providers and models</option>
+                            <template x-for="providerType in executionPlanProviderOptions()" :key="providerType">
+                                <option :value="providerType" x-text="providerType"></option>
+                            </template>
+                        </select>
+                    </label>
+
+                    <label class="alias-form-field" x-show="executionPlanForm.scope_provider">
+                        <span>Model</span>
+                        <select class="usage-log-select execution-plan-input" x-model="executionPlanForm.scope_model">
+                            <option value="">All models for provider</option>
+                            <template x-for="modelID in executionPlanModelOptions(executionPlanForm.scope_provider)" :key="executionPlanForm.scope_provider + '-' + modelID">
+                                <option :value="modelID" x-text="modelID"></option>
+                            </template>
+                        </select>
+                    </label>
+
+                    <label class="alias-form-field">
+                        <span>Name</span>
+                        <input type="text" class="filter-input execution-plan-input" placeholder="Optional. Defaults to scope label." x-model="executionPlanForm.name">
+                    </label>
+                </div>
+
+                <p class="alias-form-hint">Leave provider empty to target all providers and models. Select a provider without a model to target all models for that provider.</p>
+                <p class="alias-form-hint">If you leave the name empty, the workflow will display as the matched provider/model scope or “All models”.</p>
+
+                <label class="alias-form-field">
+                    <span>Description</span>
+                    <textarea class="alias-form-textarea" placeholder="Optional operator note for why this version exists." x-model="executionPlanForm.description"></textarea>
+                </label>
+
+                <div class="execution-plan-feature-toggles">
+                    <label class="execution-plan-feature-toggle">
+                        <input type="checkbox" x-model="executionPlanForm.features.cache">
+                        <span>Cache</span>
+                    </label>
+                    <label class="execution-plan-feature-toggle">
+                        <input type="checkbox" x-model="executionPlanForm.features.audit">
+                        <span>Audit</span>
+                    </label>
+                    <label class="execution-plan-feature-toggle">
+                        <input type="checkbox" x-model="executionPlanForm.features.usage">
+                        <span>Usage</span>
+                    </label>
+                    <label class="execution-plan-feature-toggle">
+                        <input type="checkbox" x-model="executionPlanForm.features.guardrails">
+                        <span>Guardrails</span>
+                    </label>
+                </div>
+
+                <div class="execution-plan-guardrail-editor" x-show="executionPlanForm.features.guardrails">
+                    <div class="execution-plan-section-head">
+                        <div>
+                            <h4>Guardrail Steps</h4>
+                            <p class="alias-form-hint">Guardrails in the same numeric step run together. Later steps wait for earlier ones to finish.</p>
+                        </div>
+                        <button type="button" class="table-action-btn" @click="addExecutionPlanGuardrailStep()">Add Step</button>
+                    </div>
+
+                    <div class="alert alert-warning" x-show="guardrailRefs.length === 0">
+                        No named guardrails are currently registered on this deployment. You can still draft a plan, but guardrail-backed creation may be rejected.
+                    </div>
+
+                    <div class="execution-plan-guardrail-list-editor" x-show="executionPlanForm.guardrails.length > 0">
+                        <template x-for="(step, index) in executionPlanForm.guardrails" :key="'execution-plan-form-guardrail-' + index">
+                            <div class="execution-plan-guardrail-row">
+                                <input type="text" class="filter-input execution-plan-input" list="execution-plan-guardrail-options" placeholder="Guardrail ref" x-model="step.ref">
+                                <input type="number" class="filter-input execution-plan-step-input" min="0" step="10" placeholder="Step" x-model.number="step.step">
+                                <button type="button" class="table-action-btn table-action-btn-danger" @click="removeExecutionPlanGuardrailStep(index)">Remove</button>
+                            </div>
+                        </template>
+                    </div>
+
+                    <p class="alias-form-hint" x-show="executionPlanForm.guardrails.length === 0">No guardrail steps configured yet.</p>
+                </div>
+
+                <div class="alias-form-actions">
+                    <button type="button" class="pagination-btn" @click="closeExecutionPlanForm()">Cancel</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary" :disabled="executionPlanSubmitting" x-text="executionPlanSubmitting ? 'Creating...' : 'Create Workflow'"></button>
+                </div>
+            </form>
+        </section>
+
+        <section class="execution-plans-list">
+            <p class="empty-state" x-show="executionPlansLoading && !authError">Loading workflows...</p>
+
+            <div class="execution-plan-card-grid" x-show="filteredExecutionPlans.length > 0">
+                <template x-for="plan in filteredExecutionPlans" :key="plan.id">
+                    <article class="execution-plan-card">
+                        <div class="execution-plan-card-head">
+                            <div>
+                                <p class="alias-form-kicker" x-text="planScopeTypeLabel(plan)"></p>
+                                <h3 x-text="workflowDisplayName(plan)"></h3>
+                            </div>
+                            <div class="execution-plan-card-badges">
+                                <span class="provider-badge" x-text="planScopeLabel(plan)"></span>
+                            </div>
+                        </div>
+
+                        <p class="execution-plan-card-description" x-show="plan.description" x-text="plan.description"></p>
+
+                        <!-- Execution Pipeline -->
+                        <div class="exec-pipeline">
+                            <div class="exec-pipeline-row">
+
+                                <!-- Left half: Client + optional steps + growing connector -->
+                                <div class="ep-left">
+                                    <div class="ep-node ep-node-endpoint">
+                                        <div class="ep-node-icon">
+                                            <svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>
+                                        </div>
+                                        <span class="ep-node-label">Client</span>
+                                    </div>
+
+                                    <!-- Guardrails step (optional) -->
+                                    <div class="ep-step" x-show="epHasGuardrails(plan)">
+                                        <div class="ep-conn"></div>
+                                        <div class="ep-node ep-node-guardrails">
+                                            <div class="ep-node-icon">
+                                                <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                            </div>
+                                            <span class="ep-node-label">Guardrails</span>
+                                            <span class="ep-node-sub" x-text="epGuardrailLabel(plan)"></span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Cache step (optional) -->
+                                    <div class="ep-step" x-show="epHasCache(plan)">
+                                        <div class="ep-conn"></div>
+                                        <div class="ep-node ep-node-cache">
+                                            <div class="ep-node-icon">
+                                                <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                                            </div>
+                                            <span class="ep-node-label">Cache</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Growing connector → AI -->
+                                    <div class="ep-conn ep-conn-grow"></div>
+                                </div>
+
+                                <!-- AI node (centered by equal halves) -->
+                                <div class="ep-node ep-node-ai">
+                                    <div class="ep-node-icon">
+                                        <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                    </div>
+                                    <span class="ep-node-label" x-text="epAiLabel(plan, null)"></span>
+                                    <span class="ep-node-sub" x-show="epAiSublabel(plan, null)" x-text="epAiSublabel(plan, null)"></span>
+                                </div>
+
+                                <!-- Right half: growing connector + Response + async nodes -->
+                                <div class="ep-right">
+                                    <div class="ep-conn ep-conn-grow"></div>
+                                    <div class="ep-node ep-node-endpoint">
+                                        <div class="ep-node-icon">
+                                            <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                        </div>
+                                        <span class="ep-node-label">Response</span>
+                                    </div>
+
+                                    <!-- Async nodes — fire after response is returned -->
+                                    <div class="ep-step" x-show="epHasAudit(plan)">
+                                        <div class="ep-conn ep-conn-async"></div>
+                                        <div class="ep-node ep-node-async ep-node-async-audit">
+                                            <div class="ep-node-icon">
+                                                <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                                            </div>
+                                            <span class="ep-node-label">Audit Log</span>
+                                        </div>
+                                    </div>
+                                    <div class="ep-step" x-show="epHasUsage(plan)">
+                                        <div class="ep-conn ep-conn-async"></div>
+                                        <div class="ep-node ep-node-async ep-node-async-usage">
+                                            <div class="ep-node-icon">
+                                                <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                                            </div>
+                                            <span class="ep-node-label">Usage</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+
+                        <div class="execution-plan-guardrails">
+                            <div class="execution-plan-section-head">
+                                <h4>Guardrails</h4>
+                                <span class="provider-badge" x-text="planGuardrails(plan).length ? planGuardrails(plan).length + ' steps' : 'None'"></span>
+                            </div>
+                            <div class="execution-plan-guardrail-list" x-show="planGuardrails(plan).length > 0">
+                                <template x-for="(step, stepIndex) in planGuardrails(plan)" :key="plan.id + '-guardrail-' + stepIndex">
+                                    <div class="execution-plan-guardrail-item">
+                                        <span class="mono" x-text="step.ref"></span>
+                                        <span class="provider-badge" x-text="'step ' + step.step"></span>
+                                    </div>
+                                </template>
+                            </div>
+                            <p class="alias-form-hint" x-show="planGuardrails(plan).length === 0">No guardrails configured for this plan.</p>
+                        </div>
+
+                        <div class="execution-plan-card-footer">
+                            <div class="alias-actions-cell">
+                                <button type="button"
+                                        class="table-action-btn table-action-btn-danger"
+                                        :disabled="executionPlanDeactivatingID === plan.id || !canDeactivateExecutionPlan(plan)"
+                                        :title="canDeactivateExecutionPlan(plan) ? 'Deactivate active workflow' : 'The global workflow cannot be deactivated.'"
+                                        @click="deactivateExecutionPlan(plan)"
+                                        x-text="executionPlanDeactivatingID === plan.id ? 'Deactivating...' : 'Deactivate'"></button>
+                                <button type="button" class="table-action-btn" @click="openExecutionPlanCreate(plan)">Edit</button>
+                            </div>
+                            <div class="execution-plan-card-meta execution-plan-card-meta-footer">
+                                <span class="provider-badge mono" x-text="'version: v' + plan.version"></span>
+                                <span class="provider-badge mono" x-text="'created: ' + formatTimestamp(plan.created_at)"></span>
+                                <span class="provider-badge mono" x-text="'hash: ' + shortHash(plan.plan_hash)"></span>
+                            </div>
+                        </div>
+                    </article>
+                </template>
+            </div>
+
+            <p class="empty-state" x-show="executionPlans.length === 0 && !executionPlansLoading && !authError && executionPlansAvailable">No active workflows found.</p>
+            <p class="empty-state" x-show="executionPlans.length > 0 && filteredExecutionPlans.length === 0 && !executionPlansLoading">No workflows match your filter.</p>
+        </section>
+
+    </div>
+
+    <datalist id="execution-plan-guardrail-options">
+        <template x-for="guardrailRef in guardrailRefs" :key="guardrailRef">
+            <option :value="guardrailRef"></option>
+        </template>
+    </datalist>
+</div>
+
 <!-- Audit Logs Page -->
-<div x-show="page==='audit'">
+<div x-show="page==='audit-logs'">
     <div class="page-header">
         <h2>Audit Logs</h2>
         <div class="page-header-controls">
@@ -700,6 +984,58 @@
                             <span class="provider-badge mono" x-show="entry.client_ip" x-text="'ip: ' + entry.client_ip"></span>
                             <span class="provider-badge" x-show="entry.stream">stream</span>
                             <span class="provider-badge" x-show="entry.error_type" x-text="entry.error_type"></span>
+                        </div>
+
+                        <!-- Execution Pipeline (runtime view) -->
+                        <div class="exec-pipeline">
+                            <div class="exec-pipeline-row">
+
+                                <!-- Left half: Client + optional steps + growing connector -->
+                                <div class="ep-left">
+                                    <div class="ep-node ep-node-endpoint">
+                                        <div class="ep-node-icon">
+                                            <svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>
+                                        </div>
+                                        <span class="ep-node-label">Client</span>
+                                    </div>
+
+                                    <!-- Cache step — shown when runtime has cache data -->
+                                    <div class="ep-step" x-show="epShowCacheStep(null, epRuntimeFromEntry(entry))">
+                                        <div class="ep-conn" :class="epCacheConnClass(epRuntimeFromEntry(entry))"></div>
+                                        <div class="ep-node ep-node-cache" :class="epCacheNodeClass(epRuntimeFromEntry(entry))">
+                                            <div class="ep-node-icon">
+                                                <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                                            </div>
+                                            <span class="ep-node-label">Cache</span>
+                                            <span class="ep-node-badge" x-show="epCacheStatusLabel(epRuntimeFromEntry(entry))" x-text="epCacheStatusLabel(epRuntimeFromEntry(entry))"></span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Growing connector → AI -->
+                                    <div class="ep-conn ep-conn-grow" :class="epAiConnClass(epRuntimeFromEntry(entry))"></div>
+                                </div>
+
+                                <!-- AI node (centered by equal halves) -->
+                                <div class="ep-node ep-node-ai" :class="epAiNodeClass(epRuntimeFromEntry(entry))">
+                                    <div class="ep-node-icon">
+                                        <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                    </div>
+                                    <span class="ep-node-label" x-text="epAiLabel(null, epRuntimeFromEntry(entry))"></span>
+                                    <span class="ep-node-sub" x-show="epAiSublabel(null, epRuntimeFromEntry(entry))" x-text="epAiSublabel(null, epRuntimeFromEntry(entry))"></span>
+                                </div>
+
+                                <!-- Right half: growing connector + Response -->
+                                <div class="ep-right">
+                                    <div class="ep-conn ep-conn-grow"></div>
+                                    <div class="ep-node ep-node-endpoint">
+                                        <div class="ep-node-icon">
+                                            <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                        </div>
+                                        <span class="ep-node-label">Response</span>
+                                    </div>
+                                </div>
+
+                            </div>
                         </div>
 
                         <div class="audit-request-response">

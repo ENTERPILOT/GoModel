@@ -34,7 +34,7 @@
                     this.daily = await dailyRes.json();
                     this.renderChart();
                     if (this.page === 'usage') this.fetchUsagePage();
-                    if (this.page === 'audit') this.fetchAuditLog(true);
+                    if (this.page === 'audit-logs') this.fetchAuditLog(true);
                 } catch (e) {
                     console.error('Failed to fetch usage:', e);
                 }

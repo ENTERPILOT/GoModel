@@ -2,8 +2,10 @@ package executionplans
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -156,6 +158,113 @@ func (s *Service) EnsureDefaultGlobal(ctx context.Context, input CreateInput) er
 	return nil
 }
 
+// Create inserts a new immutable execution-plan version and refreshes the
+// in-memory snapshot so future requests can match it immediately.
+func (s *Service) Create(ctx context.Context, input CreateInput) (*Version, error) {
+	if s == nil {
+		return nil, fmt.Errorf("execution plan service is required")
+	}
+
+	normalized, scopeKey, planHash, err := normalizeCreateInput(input)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateCreateCandidate(normalized, scopeKey, planHash); err != nil {
+		return nil, err
+	}
+
+	version, err := s.store.Create(ctx, normalized)
+	if err != nil {
+		return nil, fmt.Errorf("create execution plan: %w", err)
+	}
+	if err := s.Refresh(ctx); err != nil {
+		return nil, fmt.Errorf("refresh execution plans: %w", err)
+	}
+	return version, nil
+}
+
+// Deactivate turns off one active execution-plan version and refreshes the
+// in-memory snapshot so future requests stop matching it immediately.
+func (s *Service) Deactivate(ctx context.Context, id string) error {
+	if s == nil {
+		return fmt.Errorf("execution plan service is required")
+	}
+
+	version, err := s.store.Get(ctx, strings.TrimSpace(id))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return err
+		}
+		return fmt.Errorf("load execution plan %q: %w", id, err)
+	}
+	if version == nil {
+		return ErrNotFound
+	}
+
+	scope, scopeKey, err := normalizeScope(version.Scope)
+	if err != nil {
+		return fmt.Errorf("load execution plan %q: %w", id, err)
+	}
+	version.Scope = scope
+	version.ScopeKey = scopeKey
+
+	if scope.Provider == "" && scope.Model == "" {
+		return newValidationError("cannot deactivate the global workflow", nil)
+	}
+	if !version.Active {
+		return newValidationError("workflow is already inactive", nil)
+	}
+
+	if err := s.store.Deactivate(ctx, version.ID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return err
+		}
+		return fmt.Errorf("deactivate execution plan %q: %w", version.ID, err)
+	}
+	if err := s.Refresh(ctx); err != nil {
+		return fmt.Errorf("refresh execution plans: %w", err)
+	}
+	return nil
+}
+
+// ListViews returns the active execution plans together with their effective
+// runtime features after process-level caps are applied.
+func (s *Service) ListViews(ctx context.Context) ([]View, error) {
+	if s == nil {
+		return []View{}, nil
+	}
+
+	versions, err := s.store.ListActive(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list active execution plans: %w", err)
+	}
+
+	views := make([]View, 0, len(versions))
+	for _, version := range versions {
+		view, err := s.viewForVersion(version)
+		if err != nil {
+			return nil, err
+		}
+		views = append(views, view)
+	}
+
+	sort.SliceStable(views, func(i, j int) bool {
+		left, right := views[i], views[j]
+		if leftSpecificity, rightSpecificity := scopeSpecificity(left.Scope), scopeSpecificity(right.Scope); leftSpecificity != rightSpecificity {
+			return leftSpecificity < rightSpecificity
+		}
+		if left.ScopeDisplay != right.ScopeDisplay {
+			return left.ScopeDisplay < right.ScopeDisplay
+		}
+		if !left.CreatedAt.Equal(right.CreatedAt) {
+			return left.CreatedAt.After(right.CreatedAt)
+		}
+		return left.ID < right.ID
+	})
+
+	return views, nil
+}
+
 // Match returns the most-specific compiled execution policy for one request.
 func (s *Service) Match(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
 	compiled, err := s.matchCompiled(selector)
@@ -256,6 +365,85 @@ func (s *Service) matchCompiled(selector core.ExecutionPlanSelector) (*CompiledP
 		return nil, fmt.Errorf("missing active global execution plan")
 	}
 	return current.global, nil
+}
+
+func (s *Service) validateCreateCandidate(input CreateInput, scopeKey, planHash string) error {
+	version := Version{
+		ID:          "preview",
+		Scope:       input.Scope,
+		ScopeKey:    scopeKey,
+		Version:     1,
+		Active:      input.Activate,
+		Name:        input.Name,
+		Description: input.Description,
+		Payload:     input.Payload,
+		PlanHash:    planHash,
+		CreatedAt:   time.Unix(0, 0).UTC(),
+	}
+	if _, err := s.compiler.Compile(version); err != nil {
+		return newValidationError(err.Error(), err)
+	}
+	return nil
+}
+
+func (s *Service) viewForVersion(version Version) (View, error) {
+	scope, scopeKey, err := normalizeScope(version.Scope)
+	if err != nil {
+		return View{}, fmt.Errorf("load execution plan %q: %w", version.ID, err)
+	}
+	version.Scope = scope
+	if strings.TrimSpace(version.ScopeKey) == "" {
+		version.ScopeKey = scopeKey
+	}
+
+	compiled, err := s.compiler.Compile(version)
+	if err != nil {
+		return View{}, fmt.Errorf("compile execution plan %q: %w", version.ID, err)
+	}
+	if compiled == nil || compiled.Policy == nil {
+		return View{}, fmt.Errorf("compile execution plan %q: empty compiled plan", version.ID)
+	}
+
+	return View{
+		Version:           version,
+		ScopeType:         scopeType(scope),
+		ScopeDisplay:      scopeDisplay(scope),
+		EffectiveFeatures: compiled.Policy.Features,
+		GuardrailsHash:    compiled.Policy.GuardrailsHash,
+	}, nil
+}
+
+func scopeType(scope Scope) string {
+	switch {
+	case strings.TrimSpace(scope.Provider) == "":
+		return "global"
+	case strings.TrimSpace(scope.Model) == "":
+		return "provider"
+	default:
+		return "provider_model"
+	}
+}
+
+func scopeDisplay(scope Scope) string {
+	switch scopeType(scope) {
+	case "global":
+		return "global"
+	case "provider":
+		return scope.Provider
+	default:
+		return scope.Provider + "/" + scope.Model
+	}
+}
+
+func scopeSpecificity(scope Scope) int {
+	switch scopeType(scope) {
+	case "global":
+		return 0
+	case "provider":
+		return 1
+	default:
+		return 2
+	}
 }
 
 func (s *Service) snapshot() snapshot {

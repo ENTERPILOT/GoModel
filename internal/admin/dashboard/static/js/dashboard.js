@@ -76,7 +76,14 @@ function dashboard() {
             const path = pathname.replace(/\/$/, '');
             const rest = path.replace('/admin/dashboard', '').replace(/^\//, '');
             const parts = rest.split('/');
-            const page = (['overview', 'usage', 'models', 'audit'].includes(parts[0])) ? parts[0] : 'overview';
+            let page = parts[0];
+            if (page === 'execution-plans') {
+                page = 'workflows';
+            }
+            if (page === 'audit') {
+                page = 'audit-logs';
+            }
+            page = (['overview', 'usage', 'models', 'workflows', 'audit-logs'].includes(page)) ? page : 'overview';
             const sub = parts[1] || null;
             return { page, sub };
         },
@@ -90,7 +97,7 @@ function dashboard() {
             const { page, sub } = this._parseRoute(window.location.pathname);
             this.page = page;
             if (page === 'usage' && sub === 'costs') this.usageMode = 'costs';
-            if (page === 'audit') this.fetchAuditLog(true);
+            if (page === 'audit-logs') this.fetchAuditLog(true);
 
             window.addEventListener('popstate', () => {
                 const { page: p, sub: s } = this._parseRoute(window.location.pathname);
@@ -100,7 +107,10 @@ function dashboard() {
                     this.fetchUsagePage();
                 }
                 if (p === 'overview') this.renderChart();
-                if (p === 'audit') this.fetchAuditLog(true);
+                if (p === 'audit-logs') this.fetchAuditLog(true);
+                if (p === 'workflows' && typeof this.fetchExecutionPlansPage === 'function') {
+                    this.fetchExecutionPlansPage();
+                }
             });
 
             window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -124,7 +134,8 @@ function dashboard() {
             history.pushState(null, '', '/admin/dashboard/' + page);
             if (page === 'overview') this.renderChart();
             if (page === 'usage') this.fetchUsagePage();
-            if (page === 'audit') this.fetchAuditLog(true);
+            if (page === 'workflows' && typeof this.fetchExecutionPlansPage === 'function') this.fetchExecutionPlansPage();
+            if (page === 'audit-logs') this.fetchAuditLog(true);
         },
 
         setTheme(t) {
@@ -186,6 +197,9 @@ function dashboard() {
             const requests = [this.fetchUsage(), this.fetchModels(), this.fetchCategories()];
             if (typeof this.fetchAliases === 'function') {
                 requests.push(this.fetchAliases());
+            }
+            if (typeof this.fetchExecutionPlansPage === 'function') {
+                requests.push(this.fetchExecutionPlansPage());
             }
             if (this.hasCalendarModule && typeof this.fetchCalendarData === 'function') {
                 requests.push(this.fetchCalendarData());
@@ -329,6 +343,7 @@ function dashboard() {
         typeof dashboardUsageModule === 'function' ? dashboardUsageModule : null,
         typeof dashboardAuditListModule === 'function' ? dashboardAuditListModule : null,
         typeof dashboardAliasesModule === 'function' ? dashboardAliasesModule : null,
+        typeof dashboardExecutionPlansModule === 'function' ? dashboardExecutionPlansModule : null,
         typeof dashboardConversationDrawerModule === 'function' ? dashboardConversationDrawerModule : null,
         calendarModuleFactory,
         typeof dashboardChartsModule === 'function' ? dashboardChartsModule : null

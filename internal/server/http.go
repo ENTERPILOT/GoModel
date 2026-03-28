@@ -278,6 +278,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		adminAPI.GET("/aliases", cfg.AdminHandler.ListAliases)
 		adminAPI.PUT("/aliases/:name", cfg.AdminHandler.UpsertAlias)
 		adminAPI.DELETE("/aliases/:name", cfg.AdminHandler.DeleteAlias)
+		adminAPI.GET("/execution-plans", cfg.AdminHandler.ListExecutionPlans)
+		adminAPI.GET("/execution-plans/guardrails", cfg.AdminHandler.ListExecutionPlanGuardrails)
+		adminAPI.POST("/execution-plans", cfg.AdminHandler.CreateExecutionPlan)
+		adminAPI.POST("/execution-plans/:id/deactivate", cfg.AdminHandler.DeactivateExecutionPlan)
 	}
 
 	// Admin dashboard UI routes (behind ADMIN_UI_ENABLED flag)

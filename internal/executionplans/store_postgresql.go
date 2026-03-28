@@ -181,6 +181,21 @@ func (s *PostgreSQLStore) createVersion(ctx context.Context, input CreateInput, 
 	return version, nil
 }
 
+func (s *PostgreSQLStore) Deactivate(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE execution_plan_versions
+		SET active = FALSE
+		WHERE id::text = $1 AND active = TRUE
+	`, id)
+	if err != nil {
+		return fmt.Errorf("deactivate execution plan version: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgreSQLStore) Close() error {
 	return nil
 }

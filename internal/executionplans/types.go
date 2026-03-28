@@ -149,8 +149,5 @@ func normalizeCreateInput(input CreateInput) (CreateInput, string, string, error
 	input.Name = strings.TrimSpace(input.Name)
 	input.Description = strings.TrimSpace(input.Description)
 	input.Payload = payload
-	if input.Name == "" {
-		return CreateInput{}, "", "", newValidationError("name is required", nil)
-	}
 	return input, scopeKey, planHash, nil
 }

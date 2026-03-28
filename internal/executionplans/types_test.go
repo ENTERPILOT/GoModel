@@ -25,3 +25,29 @@ func TestNormalizeScope_RejectsColonDelimitedFields(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeCreateInput_AllowsEmptyName(t *testing.T) {
+	t.Parallel()
+
+	input, scopeKey, planHash, err := normalizeCreateInput(CreateInput{
+		Scope:    Scope{},
+		Activate: true,
+		Name:     "",
+		Payload: Payload{
+			SchemaVersion: 1,
+			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeCreateInput() error = %v", err)
+	}
+	if input.Name != "" {
+		t.Fatalf("Name = %q, want empty", input.Name)
+	}
+	if scopeKey != "global" {
+		t.Fatalf("scopeKey = %q, want global", scopeKey)
+	}
+	if planHash == "" {
+		t.Fatal("planHash is empty")
+	}
+}

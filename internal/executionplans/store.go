@@ -43,5 +43,6 @@ type Store interface {
 	ListActive(ctx context.Context) ([]Version, error)
 	Get(ctx context.Context, id string) (*Version, error)
 	Create(ctx context.Context, input CreateInput) (*Version, error)
+	Deactivate(ctx context.Context, id string) error
 	Close() error
 }

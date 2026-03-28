@@ -270,7 +270,15 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		adminCfg.UIEnabled = false
 	}
 	if adminCfg.EndpointsEnabled {
-		adminHandler, dashHandler, adminErr := initAdmin(auditResult.Storage, usageResult.Storage, providerResult.Registry, app.aliases.Service, adminCfg.UIEnabled)
+		adminHandler, dashHandler, adminErr := initAdmin(
+			auditResult.Storage,
+			usageResult.Storage,
+			providerResult.Registry,
+			app.aliases.Service,
+			executionPlanResult.Service,
+			guardrailRegistry,
+			adminCfg.UIEnabled,
+		)
 		if adminErr != nil {
 			slog.Warn("failed to initialize admin", "error", adminErr)
 		} else {
@@ -552,7 +560,14 @@ func (a *App) logStartupInfo() {
 
 // initAdmin creates the admin API handler and optionally the dashboard handler.
 // Returns nil dashboard handler if uiEnabled is false.
-func initAdmin(auditStorage, usageStorage storage.Storage, registry *providers.ModelRegistry, aliasService *aliases.Service, uiEnabled bool) (*admin.Handler, *dashboard.Handler, error) {
+func initAdmin(
+	auditStorage, usageStorage storage.Storage,
+	registry *providers.ModelRegistry,
+	aliasService *aliases.Service,
+	executionPlanService *executionplans.Service,
+	guardrailRegistry *guardrails.Registry,
+	uiEnabled bool,
+) (*admin.Handler, *dashboard.Handler, error) {
 	// Find a storage connection for reading usage data
 	var store storage.Storage
 	if auditStorage != nil {
@@ -582,7 +597,14 @@ func initAdmin(auditStorage, usageStorage storage.Storage, registry *providers.M
 		}
 	}
 
-	adminHandler := admin.NewHandler(reader, registry, admin.WithAuditReader(auditReader), admin.WithAliases(aliasService))
+	adminHandler := admin.NewHandler(
+		reader,
+		registry,
+		admin.WithAuditReader(auditReader),
+		admin.WithAliases(aliasService),
+		admin.WithExecutionPlans(executionPlanService),
+		admin.WithGuardrailsRegistry(guardrailRegistry),
+	)
 
 	var dashHandler *dashboard.Handler
 	if uiEnabled {

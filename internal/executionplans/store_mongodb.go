@@ -174,6 +174,20 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 	return version, nil
 }
 
+func (s *MongoDBStore) Deactivate(ctx context.Context, id string) error {
+	result, err := s.collection.UpdateOne(ctx,
+		bson.D{{Key: "_id", Value: id}, {Key: "active", Value: true}},
+		bson.D{{Key: "$set", Value: bson.D{{Key: "active", Value: false}}}},
+	)
+	if err != nil {
+		return fmt.Errorf("deactivate execution plan version: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *MongoDBStore) Close() error {
 	return nil
 }

@@ -50,6 +50,9 @@ func TestIndex_ReturnsHTML(t *testing.T) {
 	if !strings.Contains(body, "audit logs") {
 		t.Errorf("expected audit logs navigation item in page HTML")
 	}
+	if !strings.Contains(body, "workflows") {
+		t.Errorf("expected workflows navigation item in page HTML")
+	}
 	if !strings.Contains(body, `x-data="dashboard()"`) {
 		t.Errorf("expected alpine dashboard root in page HTML")
 	}
@@ -147,6 +150,29 @@ func TestStatic_ServesAliasesModuleJS(t *testing.T) {
 	}
 	if rec.Body.Len() == 0 {
 		t.Error("expected non-empty body for aliases module JS file")
+	}
+}
+
+func TestStatic_ServesExecutionPlansModuleJS(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/static/js/modules/execution-plans.js", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.Static(c); err != nil {
+		t.Fatalf("Static() returned error: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if rec.Body.Len() == 0 {
+		t.Error("expected non-empty body for execution plans module JS file")
 	}
 }
 

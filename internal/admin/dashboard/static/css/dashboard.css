@@ -1187,6 +1187,177 @@ td.col-price {
     opacity: 0.72;
 }
 
+/* Execution Plans */
+.execution-plan-page-note {
+    margin-top: 6px;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.execution-plans-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.execution-plans-layout.is-editor-open {
+    align-items: stretch;
+}
+
+.execution-plans-list {
+    min-width: 0;
+}
+
+.execution-plan-card-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+}
+
+.execution-plan-card {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+}
+
+.execution-plan-card-head,
+.execution-plan-section-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.execution-plan-card-footer {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+}
+
+.execution-plan-card-head h3,
+.execution-plan-section-head h4 {
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.execution-plan-section-head h4 {
+    font-size: 14px;
+}
+
+.execution-plan-card-badges,
+.execution-plan-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.execution-plan-card-meta-footer {
+    justify-content: flex-start;
+}
+
+.execution-plan-card-footer .alias-actions-cell {
+    align-self: flex-end;
+}
+
+.execution-plan-card-description {
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.execution-plan-heading {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.execution-plan-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: help;
+}
+
+.execution-plan-guardrails,
+.execution-plan-guardrail-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.execution-plan-guardrail-list,
+.execution-plan-guardrail-list-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.execution-plan-guardrail-item,
+.execution-plan-guardrail-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+}
+
+.execution-plan-guardrail-row {
+    justify-content: stretch;
+}
+
+.execution-plan-editor {
+    margin-bottom: 0;
+    width: 100%;
+}
+
+.execution-plan-input {
+    max-width: none;
+    width: 100%;
+}
+
+.execution-plan-step-input {
+    max-width: 120px;
+}
+
+.execution-plan-feature-toggles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.execution-plan-feature-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.execution-plan-feature-toggle input {
+    width: 16px;
+    height: 16px;
+}
+
 /* Usage Mode Toggle */
 .usage-mode-toggle {
     display: inline-flex;
@@ -2082,6 +2253,24 @@ body.conversation-drawer-open {
     .alias-form-grid {
         grid-template-columns: 1fr;
     }
+    .execution-plan-card-grid,
+    .execution-plan-feature-toggles {
+        grid-template-columns: 1fr;
+    }
+    .execution-plan-card-head,
+    .execution-plan-card-footer,
+    .execution-plan-section-head,
+    .execution-plan-card-badges,
+    .execution-plan-card-meta,
+    .execution-plan-guardrail-item,
+    .execution-plan-guardrail-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .execution-plan-step-input {
+        max-width: none;
+        width: 100%;
+    }
     .table-toolbar {
         flex-direction: column;
         align-items: stretch;
@@ -2172,4 +2361,389 @@ body.conversation-drawer-open {
     .dp-nav-prev-mobile {
         display: flex;
     }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Execution Pipeline Visualization
+   ═══════════════════════════════════════════════════════════════ */
+
+.exec-pipeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 18px 20px 20px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+}
+
+/* ─── Main pipeline row ─── */
+
+.exec-pipeline-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+/* Left/right halves — equal width keeps AI centered */
+.ep-left,
+.ep-right {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+}
+
+.ep-right {
+    justify-content: flex-end;
+}
+
+/* Optional step wrapper (connector + node shown/hidden together) */
+.ep-step {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* ─── Connectors ─── */
+
+.ep-conn {
+    flex-shrink: 0;
+    position: relative;
+    width: 32px;
+    height: 2px;
+    background: color-mix(in srgb, var(--accent) 44%, var(--border));
+}
+
+/* Growing connector — fills remaining half to keep AI centered */
+.ep-conn-grow {
+    flex: 1;
+    min-width: 16px;
+    width: auto;
+}
+
+.ep-conn::after {
+    content: "";
+    position: absolute;
+    right: -1px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 7px;
+    height: 9px;
+    background: color-mix(in srgb, var(--accent) 44%, var(--border));
+    clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+/* Green connector — cache hit path */
+.ep-conn-hit {
+    background: color-mix(in srgb, var(--success) 58%, var(--border));
+}
+
+.ep-conn-hit::after {
+    background: color-mix(in srgb, var(--success) 58%, var(--border));
+}
+
+/* Dimmed connector — path not taken */
+.ep-conn-dim {
+    background: color-mix(in srgb, var(--border) 75%, transparent);
+    opacity: 0.4;
+}
+
+.ep-conn-dim::after {
+    background: color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+/* ─── Base node ─── */
+
+.ep-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    min-width: 72px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.ep-node-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text-muted);
+}
+
+.ep-node-icon svg {
+    width: 15px;
+    height: 15px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.ep-node-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--text);
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
+.ep-node-sub {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+    font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.ep-node-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+/* ─── Endpoint nodes (Client / Response) ─── */
+
+.ep-node-endpoint {
+    flex-direction: row;
+    padding: 8px 16px;
+    border-radius: 999px;
+    min-width: auto;
+    gap: 7px;
+    border-color: color-mix(in srgb, var(--border) 70%, transparent);
+    background: color-mix(in srgb, var(--bg-surface) 60%, var(--bg));
+}
+
+.ep-node-endpoint .ep-node-icon {
+    width: 20px;
+    height: 20px;
+    background: transparent;
+    border-radius: 4px;
+    color: var(--text-muted);
+}
+
+.ep-node-endpoint .ep-node-icon svg {
+    width: 14px;
+    height: 14px;
+}
+
+.ep-node-endpoint .ep-node-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+/* ─── Guardrails node ─── */
+
+.ep-node-guardrails {
+    border-color: color-mix(in srgb, var(--warning) 46%, var(--border));
+    background: color-mix(in srgb, var(--warning) 8%, var(--bg-surface));
+}
+
+.ep-node-guardrails .ep-node-icon {
+    background: color-mix(in srgb, var(--warning) 16%, var(--bg));
+    color: color-mix(in srgb, var(--warning) 90%, var(--text));
+}
+
+.ep-node-guardrails .ep-node-label {
+    color: color-mix(in srgb, var(--warning) 80%, var(--text));
+}
+
+.ep-node-guardrails .ep-node-sub {
+    color: color-mix(in srgb, var(--warning) 60%, var(--text-muted));
+}
+
+/* ─── Cache node ─── */
+
+.ep-node-cache {
+    border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+}
+
+.ep-node-cache .ep-node-icon {
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg));
+    color: var(--accent);
+}
+
+.ep-node-cache .ep-node-label {
+    color: var(--accent);
+}
+
+/* Cache — runtime: exact hit */
+.ep-node-cache-hit {
+    border-color: color-mix(in srgb, var(--success) 52%, var(--border));
+    background: color-mix(in srgb, var(--success) 9%, var(--bg-surface));
+}
+
+.ep-node-cache-hit .ep-node-icon {
+    background: color-mix(in srgb, var(--success) 18%, var(--bg));
+    color: var(--success);
+}
+
+.ep-node-cache-hit .ep-node-label {
+    color: color-mix(in srgb, var(--success) 85%, var(--text));
+}
+
+.ep-node-cache-hit .ep-node-badge {
+    background: color-mix(in srgb, var(--success) 14%, var(--bg));
+    border-color: color-mix(in srgb, var(--success) 38%, var(--border));
+    color: var(--success);
+}
+
+/* Cache — runtime: semantic hit */
+.ep-node-cache-semantic {
+    border-color: color-mix(in srgb, #a78bfa 46%, var(--border));
+    background: color-mix(in srgb, #a78bfa 8%, var(--bg-surface));
+}
+
+.ep-node-cache-semantic .ep-node-icon {
+    background: color-mix(in srgb, #a78bfa 16%, var(--bg));
+    color: #a78bfa;
+}
+
+.ep-node-cache-semantic .ep-node-label {
+    color: #a78bfa;
+}
+
+.ep-node-cache-semantic .ep-node-badge {
+    background: color-mix(in srgb, #a78bfa 14%, var(--bg));
+    border-color: color-mix(in srgb, #a78bfa 38%, var(--border));
+    color: #a78bfa;
+}
+
+/* Cache — runtime: miss badge only */
+.ep-node-cache-miss .ep-node-badge {
+    color: var(--text-muted);
+    border-color: var(--border);
+}
+
+/* ─── AI node ─── */
+
+.ep-node-ai {
+    min-width: 96px;
+    padding: 12px 16px;
+    border-radius: 14px;
+    gap: 6px;
+}
+
+.ep-node-ai .ep-node-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+}
+
+.ep-node-ai .ep-node-icon svg {
+    width: 17px;
+    height: 17px;
+}
+
+/* AI skipped — cache hit absorbed the request */
+.ep-node-ai-skipped {
+    opacity: 0.28;
+}
+
+/* ─── Async connector ─── */
+
+/*
+ * Async nodes live after Response in the same row, connected by a dashed
+ * line — they fire after the response is returned to the client.
+ *
+ * [AI] ──────→ [Response] - - → [Audit Log] - - → [Usage]
+ */
+
+/* Dashed connector for async nodes */
+.ep-conn-async {
+    background: repeating-linear-gradient(
+        to right,
+        color-mix(in srgb, var(--text-muted) 45%, var(--border)) 0,
+        color-mix(in srgb, var(--text-muted) 45%, var(--border)) 5px,
+        transparent 5px,
+        transparent 9px
+    );
+    width: 20px;
+    flex-shrink: 0;
+}
+
+.ep-conn-async::after {
+    background: color-mix(in srgb, var(--text-muted) 45%, var(--border));
+}
+
+/* Async nodes — horizontal inline pills */
+.ep-node-async {
+    flex-direction: row;
+    padding: 7px 12px;
+    border-radius: 10px;
+    border-style: dashed;
+    min-width: auto;
+    gap: 7px;
+}
+
+.ep-node-async .ep-node-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+}
+
+.ep-node-async .ep-node-icon svg {
+    width: 12px;
+    height: 12px;
+}
+
+.ep-node-async .ep-node-label {
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.ep-node-async-audit {
+    border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+    background: color-mix(in srgb, var(--success) 7%, var(--bg-surface));
+}
+
+.ep-node-async-audit .ep-node-icon {
+    background: color-mix(in srgb, var(--success) 14%, var(--bg));
+    color: var(--success);
+}
+
+.ep-node-async-audit .ep-node-label {
+    color: color-mix(in srgb, var(--success) 75%, var(--text-muted));
+}
+
+.ep-node-async-usage {
+    border-color: color-mix(in srgb, #60a5fa 40%, var(--border));
+    background: color-mix(in srgb, #60a5fa 7%, var(--bg-surface));
+}
+
+.ep-node-async-usage .ep-node-icon {
+    background: color-mix(in srgb, #60a5fa 14%, var(--bg));
+    color: #60a5fa;
+}
+
+.ep-node-async-usage .ep-node-label {
+    color: color-mix(in srgb, #60a5fa 75%, var(--text-muted));
 }

@@ -16,6 +16,8 @@ import (
 	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
+	"gomodel/internal/executionplans"
+	"gomodel/internal/guardrails"
 	"gomodel/internal/providers"
 	"gomodel/internal/usage"
 )
@@ -26,6 +28,8 @@ type Handler struct {
 	auditReader auditlog.Reader
 	registry    *providers.ModelRegistry
 	aliases     *aliases.Service
+	plans       *executionplans.Service
+	guardrails  *guardrails.Registry
 }
 
 // Option configures the admin API handler.
@@ -42,6 +46,20 @@ func WithAuditReader(reader auditlog.Reader) Option {
 func WithAliases(service *aliases.Service) Option {
 	return func(h *Handler) {
 		h.aliases = service
+	}
+}
+
+// WithExecutionPlans enables execution-plan administration endpoints.
+func WithExecutionPlans(service *executionplans.Service) Option {
+	return func(h *Handler) {
+		h.plans = service
+	}
+}
+
+// WithGuardrailsRegistry enables listing valid guardrail references for plan authoring.
+func WithGuardrailsRegistry(registry *guardrails.Registry) Option {
+	return func(h *Handler) {
+		h.guardrails = registry
 	}
 }
 
@@ -515,9 +533,25 @@ type upsertAliasRequest struct {
 	Enabled        *bool  `json:"enabled,omitempty"`
 }
 
-func (h *Handler) aliasesUnavailableError() error {
-	return core.NewInvalidRequestErrorWithStatus(http.StatusServiceUnavailable, "aliases feature is unavailable", nil).
+type createExecutionPlanRequest struct {
+	ScopeProvider string                 `json:"scope_provider,omitempty"`
+	ScopeModel    string                 `json:"scope_model,omitempty"`
+	Name          string                 `json:"name"`
+	Description   string                 `json:"description,omitempty"`
+	Payload       executionplans.Payload `json:"plan_payload"`
+}
+
+func featureUnavailableError(message string) error {
+	return core.NewInvalidRequestErrorWithStatus(http.StatusServiceUnavailable, message, nil).
 		WithCode("feature_unavailable")
+}
+
+func (h *Handler) aliasesUnavailableError() error {
+	return featureUnavailableError("aliases feature is unavailable")
+}
+
+func (h *Handler) executionPlansUnavailableError() error {
+	return featureUnavailableError("execution plans feature is unavailable")
 }
 
 func aliasWriteError(err error) error {
@@ -525,6 +559,16 @@ func aliasWriteError(err error) error {
 		return nil
 	}
 	if aliases.IsValidationError(err) {
+		return core.NewInvalidRequestError(err.Error(), err)
+	}
+	return err
+}
+
+func executionPlanWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if executionplans.IsValidationError(err) {
 		return core.NewInvalidRequestError(err.Error(), err)
 	}
 	return err
@@ -601,6 +645,109 @@ func (h *Handler) DeleteAlias(c *echo.Context) error {
 		return handleError(c, aliasWriteError(err))
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// ListExecutionPlans handles GET /admin/api/v1/execution-plans
+func (h *Handler) ListExecutionPlans(c *echo.Context) error {
+	if h.plans == nil {
+		return handleError(c, h.executionPlansUnavailableError())
+	}
+
+	views, err := h.plans.ListViews(c.Request().Context())
+	if err != nil {
+		return handleError(c, err)
+	}
+	if views == nil {
+		views = []executionplans.View{}
+	}
+	return c.JSON(http.StatusOK, views)
+}
+
+// ListExecutionPlanGuardrails handles GET /admin/api/v1/execution-plans/guardrails
+func (h *Handler) ListExecutionPlanGuardrails(c *echo.Context) error {
+	if h.guardrails == nil {
+		return c.JSON(http.StatusOK, []string{})
+	}
+
+	return c.JSON(http.StatusOK, h.guardrails.Names())
+}
+
+// CreateExecutionPlan handles POST /admin/api/v1/execution-plans
+func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
+	if h.plans == nil {
+		return handleError(c, h.executionPlansUnavailableError())
+	}
+
+	var req createExecutionPlanRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+
+	if err := h.validateExecutionPlanGuardrails(req.Payload); err != nil {
+		return handleError(c, err)
+	}
+
+	version, err := h.plans.Create(c.Request().Context(), executionplans.CreateInput{
+		Scope: executionplans.Scope{
+			Provider: req.ScopeProvider,
+			Model:    req.ScopeModel,
+		},
+		Activate:    true,
+		Name:        req.Name,
+		Description: req.Description,
+		Payload:     req.Payload,
+	})
+	if err != nil {
+		return handleError(c, executionPlanWriteError(err))
+	}
+	if version == nil {
+		return c.NoContent(http.StatusNoContent)
+	}
+	return c.JSON(http.StatusCreated, version)
+}
+
+// DeactivateExecutionPlan handles POST /admin/api/v1/execution-plans/:id/deactivate
+func (h *Handler) DeactivateExecutionPlan(c *echo.Context) error {
+	if h.plans == nil {
+		return handleError(c, h.executionPlansUnavailableError())
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return handleError(c, core.NewInvalidRequestError("execution plan id is required", nil))
+	}
+
+	if err := h.plans.Deactivate(c.Request().Context(), id); err != nil {
+		if errors.Is(err, executionplans.ErrNotFound) {
+			return handleError(c, core.NewNotFoundError("workflow not found: "+id))
+		}
+		return handleError(c, executionPlanWriteError(err))
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *Handler) validateExecutionPlanGuardrails(payload executionplans.Payload) error {
+	if !payload.Features.Guardrails || len(payload.Guardrails) == 0 {
+		return nil
+	}
+	if h.guardrails == nil {
+		return featureUnavailableError("guardrail registry is unavailable for plan authoring")
+	}
+
+	known := make(map[string]struct{}, h.guardrails.Len())
+	for _, name := range h.guardrails.Names() {
+		known[name] = struct{}{}
+	}
+	for _, step := range payload.Guardrails {
+		ref := strings.TrimSpace(step.Ref)
+		if ref == "" {
+			continue
+		}
+		if _, ok := known[ref]; !ok {
+			return core.NewInvalidRequestError("unknown guardrail ref: "+ref, nil)
+		}
+	}
+	return nil
 }
 
 func decodeAliasPathName(raw string) (string, error) {

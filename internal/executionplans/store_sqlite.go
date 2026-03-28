@@ -172,6 +172,25 @@ func (s *SQLiteStore) Create(ctx context.Context, input CreateInput) (*Version, 
 	return version, nil
 }
 
+func (s *SQLiteStore) Deactivate(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE execution_plan_versions
+		SET active = 0
+		WHERE id = ? AND active = 1
+	`, id)
+	if err != nil {
+		return fmt.Errorf("deactivate execution plan version: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("deactivate execution plan version rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *SQLiteStore) Close() error {
 	return nil
 }
