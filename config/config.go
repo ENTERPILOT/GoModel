@@ -2,6 +2,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -842,8 +843,15 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 		}
 		seenKeys[key] = struct{}{}
 
+		var rawModels json.RawMessage
+		if err := decoder.Decode(&rawModels); err != nil {
+			return fmt.Errorf("fallback.manual_rules_path: failed to parse %q: %w", path, err)
+		}
+		if bytes.Equal(bytes.TrimSpace(rawModels), []byte("null")) {
+			return fmt.Errorf("fallback.manual_rules_path: null not allowed for %q in %q", key, path)
+		}
 		var models []string
-		if err := decoder.Decode(&models); err != nil {
+		if err := json.Unmarshal(rawModels, &models); err != nil {
 			return fmt.Errorf("fallback.manual_rules_path: failed to parse %q: %w", path, err)
 		}
 		decoded[key] = models
