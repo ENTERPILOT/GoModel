@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -157,49 +158,80 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 	}, nil
 }
 
+const sqliteTimestampBoundaryLayout = "2006-01-02T15:04:05"
+
 // sqliteDateRangeConditions returns WHERE conditions and args for a date range.
-// Dates are formatted as "2006-01-02" strings for SQLite text comparison.
+// Stored timestamps are RFC3339 UTC text with optional fractional seconds, so we
+// compare against second-precision prefixes to keep lexicographic ordering correct.
 func sqliteDateRangeConditions(params UsageQueryParams) (conditions []string, args []any) {
 	if !params.StartDate.IsZero() {
 		conditions = append(conditions, "timestamp >= ?")
-		args = append(args, params.StartDate.UTC().Format("2006-01-02"))
+		args = append(args, sqliteTimestampBoundary(params.StartDate))
 	}
 	if !params.EndDate.IsZero() {
 		conditions = append(conditions, "timestamp < ?")
-		args = append(args, params.EndDate.AddDate(0, 0, 1).UTC().Format("2006-01-02"))
+		args = append(args, sqliteTimestampBoundary(usageEndExclusive(params)))
 	}
 	return conditions, args
 }
 
+func sqliteTimestampBoundary(t time.Time) string {
+	return t.UTC().Format(sqliteTimestampBoundaryLayout)
+}
+
 func sqliteGroupExpr(interval string) string {
+	return sqliteGroupExprWithOffset(interval, 0)
+}
+
+func sqliteGroupExprWithOffset(interval string, offsetMinutes int) string {
+	modifier := sqliteOffsetModifier(offsetMinutes)
+
 	switch interval {
 	case "weekly":
-		return `strftime('%G-W%V', timestamp)`
+		if modifier == "" {
+			return `strftime('%G-W%V', timestamp)`
+		}
+		return fmt.Sprintf(`strftime('%%G-W%%V', timestamp, '%s')`, modifier)
 	case "monthly":
-		return `strftime('%Y-%m', timestamp)`
+		if modifier == "" {
+			return `strftime('%Y-%m', timestamp)`
+		}
+		return fmt.Sprintf(`strftime('%%Y-%%m', timestamp, '%s')`, modifier)
 	case "yearly":
-		return `strftime('%Y', timestamp)`
+		if modifier == "" {
+			return `strftime('%Y', timestamp)`
+		}
+		return fmt.Sprintf(`strftime('%%Y', timestamp, '%s')`, modifier)
 	default:
-		return `DATE(timestamp)`
+		if modifier == "" {
+			return `DATE(timestamp)`
+		}
+		return fmt.Sprintf(`DATE(timestamp, '%s')`, modifier)
 	}
 }
 
 // GetDailyUsage returns usage statistics grouped by time period (daily, weekly, monthly, yearly).
 func (r *SQLiteReader) GetDailyUsage(ctx context.Context, params UsageQueryParams) ([]DailyUsage, error) {
-	interval := params.Interval
-	if interval == "" {
-		interval = "daily"
+	groupExpr, groupArgs, err := r.sqliteGroupExpr(ctx, params)
+	if err != nil {
+		return nil, err
 	}
-	groupExpr := sqliteGroupExpr(interval)
 
 	conditions, args := sqliteDateRangeConditions(params)
 	where := buildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
-	query := fmt.Sprintf(`SELECT %s as period, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)`+costCols+`
-		FROM usage%s GROUP BY %s ORDER BY period`, groupExpr, where, groupExpr)
+	query := `WITH usage_periods AS (
+		SELECT ` + groupExpr + ` AS period,
+			input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost
+		FROM usage` + where + `
+	)
+	SELECT period, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + `
+		FROM usage_periods GROUP BY period ORDER BY period`
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	queryArgs := append(groupArgs, args...)
+
+	rows, err := r.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query daily usage: %w", err)
 	}
@@ -219,4 +251,158 @@ func (r *SQLiteReader) GetDailyUsage(ctx context.Context, params UsageQueryParam
 	}
 
 	return result, nil
+}
+
+func sqliteOffsetModifier(offsetMinutes int) string {
+	if offsetMinutes == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%+d minutes", offsetMinutes)
+}
+
+type sqliteTimeZoneSegment struct {
+	Until         time.Time
+	OffsetMinutes int
+}
+
+func (r *SQLiteReader) sqliteGroupExpr(ctx context.Context, params UsageQueryParams) (string, []any, error) {
+	interval := params.Interval
+	if interval == "" {
+		interval = "daily"
+	}
+
+	location := usageLocation(params)
+	if location == time.UTC {
+		return sqliteGroupExpr(interval), nil, nil
+	}
+
+	rangeStart, rangeEnd, ok, err := r.sqliteGroupingRange(ctx, params)
+	if err != nil {
+		return "", nil, err
+	}
+	if !ok {
+		return sqliteGroupExpr(interval), nil, nil
+	}
+
+	segments := sqliteTimeZoneSegments(rangeStart, rangeEnd, location)
+	if len(segments) == 0 {
+		return sqliteGroupExpr(interval), nil, nil
+	}
+	if len(segments) == 1 {
+		return sqliteGroupExprWithOffset(interval, segments[0].OffsetMinutes), nil, nil
+	}
+
+	var builder strings.Builder
+	args := make([]any, 0, len(segments)-1)
+	builder.WriteString("CASE")
+	for _, segment := range segments {
+		expr := sqliteGroupExprWithOffset(interval, segment.OffsetMinutes)
+		if segment.Until.IsZero() {
+			builder.WriteString(" ELSE ")
+			builder.WriteString(expr)
+			continue
+		}
+
+		builder.WriteString(" WHEN timestamp < ? THEN ")
+		builder.WriteString(expr)
+		args = append(args, sqliteTimestampBoundary(segment.Until))
+	}
+	builder.WriteString(" END")
+
+	return builder.String(), args, nil
+}
+
+func (r *SQLiteReader) sqliteGroupingRange(ctx context.Context, params UsageQueryParams) (time.Time, time.Time, bool, error) {
+	if !params.StartDate.IsZero() && !params.EndDate.IsZero() {
+		return params.StartDate.UTC(), usageEndExclusive(params).UTC(), true, nil
+	}
+
+	var minTS, maxTS sql.NullString
+	if err := r.db.QueryRowContext(ctx, `SELECT MIN(timestamp), MAX(timestamp) FROM usage`).Scan(&minTS, &maxTS); err != nil {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("failed to determine sqlite usage range: %w", err)
+	}
+	if !minTS.Valid || !maxTS.Valid {
+		return time.Time{}, time.Time{}, false, nil
+	}
+
+	start := parseUsageTimestamp(minTS.String)
+	end := parseUsageTimestamp(maxTS.String)
+	if start.IsZero() || end.IsZero() {
+		return time.Time{}, time.Time{}, false, nil
+	}
+
+	return start.UTC(), end.UTC().Add(time.Second), true, nil
+}
+
+func sqliteTimeZoneSegments(startUTC time.Time, endUTC time.Time, location *time.Location) []sqliteTimeZoneSegment {
+	if location == nil || !endUTC.After(startUTC) {
+		return nil
+	}
+
+	segments := make([]sqliteTimeZoneSegment, 0, 4)
+	current := startUTC.UTC()
+	currentOffset := sqliteOffsetMinutes(current, location)
+
+	for current.Before(endUTC) {
+		transition, ok := sqliteNextOffsetTransition(current, endUTC, location, currentOffset)
+		if !ok {
+			segments = append(segments, sqliteTimeZoneSegment{OffsetMinutes: currentOffset})
+			break
+		}
+
+		segments = append(segments, sqliteTimeZoneSegment{
+			Until:         transition.UTC(),
+			OffsetMinutes: currentOffset,
+		})
+		current = transition.UTC()
+		currentOffset = sqliteOffsetMinutes(current, location)
+	}
+
+	return segments
+}
+
+func sqliteNextOffsetTransition(startUTC time.Time, endUTC time.Time, location *time.Location, startOffset int) (time.Time, bool) {
+	for windowStart := startUTC.UTC(); windowStart.Before(endUTC); {
+		windowEnd := windowStart.Add(time.Hour)
+		if windowEnd.After(endUTC) {
+			windowEnd = endUTC
+		}
+
+		sample := windowEnd.Add(-time.Second)
+		if sample.Before(windowStart) {
+			sample = windowStart
+		}
+
+		if sqliteOffsetMinutes(sample, location) != startOffset {
+			for candidate := windowStart; candidate.Before(windowEnd); candidate = candidate.Add(time.Second) {
+				if sqliteOffsetMinutes(candidate, location) != startOffset {
+					return candidate, true
+				}
+			}
+		}
+
+		windowStart = windowEnd
+	}
+
+	return time.Time{}, false
+}
+
+func sqliteOffsetMinutes(ts time.Time, location *time.Location) int {
+	_, offsetSeconds := ts.In(location).Zone()
+	return offsetSeconds / 60
+}
+
+func parseUsageTimestamp(ts string) time.Time {
+	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+		return t
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", ts); err == nil {
+		return t
+	}
+	if t, err := time.Parse("2006-01-02T15:04:05Z", ts); err == nil {
+		return t
+	}
+
+	slog.Warn("failed to parse usage timestamp", "raw_timestamp", ts)
+	return time.Time{}
 }

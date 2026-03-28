@@ -1261,6 +1261,42 @@ func TestParseUsageParams_DaysDefault(t *testing.T) {
 	}
 }
 
+func TestParseUsageParams_UsesTimezoneHeaderForDefaultRange(t *testing.T) {
+	originalTimeNow := timeNow
+	timeNow = func() time.Time {
+		return time.Date(2026, 1, 15, 23, 30, 0, 0, time.UTC)
+	}
+	defer func() {
+		timeNow = originalTimeNow
+	}()
+
+	c := newContext("")
+	c.Request().Header.Set(dashboardTimeZoneHeader, "Europe/Warsaw")
+
+	params, err := parseUsageParams(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	location, err := time.LoadLocation("Europe/Warsaw")
+	if err != nil {
+		t.Fatalf("failed to load location: %v", err)
+	}
+
+	expectedEnd := time.Date(2026, 1, 16, 0, 0, 0, 0, location)
+	expectedStart := expectedEnd.AddDate(0, 0, -29)
+
+	if params.TimeZone != "Europe/Warsaw" {
+		t.Errorf("expected timezone %q, got %q", "Europe/Warsaw", params.TimeZone)
+	}
+	if !params.EndDate.Equal(expectedEnd) {
+		t.Errorf("expected end date %v, got %v", expectedEnd, params.EndDate)
+	}
+	if !params.StartDate.Equal(expectedStart) {
+		t.Errorf("expected start date %v, got %v", expectedStart, params.StartDate)
+	}
+}
+
 func TestParseUsageParams_DaysExplicit(t *testing.T) {
 	c := newContext("days=7")
 	params, err := parseUsageParams(c)

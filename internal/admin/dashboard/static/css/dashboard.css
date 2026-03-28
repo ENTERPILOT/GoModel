@@ -2153,10 +2153,22 @@ body.conversation-drawer-open {
     align-items: center;
     justify-content: space-between;
     margin-top: 12px;
+    gap: 12px;
+}
+
+.contribution-calendar-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .contribution-calendar-summary {
     font-size: 12px;
+    color: var(--text-muted);
+}
+
+.contribution-calendar-timezone {
+    font-size: 11px;
     color: var(--text-muted);
 }
 
@@ -2188,6 +2200,48 @@ body.conversation-drawer-open {
     pointer-events: none;
     transform: translateX(-50%);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.settings-panel {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+}
+
+.settings-panel-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.settings-panel-header h3 {
+    font-size: 18px;
+    margin-bottom: 6px;
+}
+
+.settings-panel-copy {
+    max-width: 780px;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.settings-form-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 420px);
+    gap: 16px;
+}
+
+.settings-select {
+    width: 100%;
+}
+
+.settings-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
 }
 
 /* Responsive */
@@ -2330,6 +2384,16 @@ body.conversation-drawer-open {
     /* Contribution calendar mobile */
     .contribution-calendar-day-labels { display: none; }
     .contribution-calendar-section { padding: 16px; }
+    .contribution-calendar-footer {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    .settings-panel {
+        padding: 18px;
+    }
+    .settings-form-grid {
+        grid-template-columns: 1fr;
+    }
 
     /* Date picker mobile */
     .date-picker-dropdown {

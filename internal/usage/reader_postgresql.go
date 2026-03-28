@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -157,22 +158,24 @@ func pgDateRangeConditions(params UsageQueryParams, argIdx int) (conditions []st
 	}
 	if !params.EndDate.IsZero() {
 		conditions = append(conditions, fmt.Sprintf("timestamp < $%d", nextIdx))
-		args = append(args, params.EndDate.AddDate(0, 0, 1).UTC())
+		args = append(args, usageEndExclusive(params).UTC())
 		nextIdx++
 	}
 	return conditions, args, nextIdx
 }
 
-func pgGroupExpr(interval string) string {
+func pgGroupExpr(interval string, timeZone string) string {
+	zoneLiteral := pgQuoteLiteral(timeZone)
+
 	switch interval {
 	case "weekly":
-		return `to_char(DATE_TRUNC('week', timestamp AT TIME ZONE 'UTC'), 'IYYY-"W"IW')`
+		return fmt.Sprintf(`to_char(DATE_TRUNC('week', timestamp AT TIME ZONE %s), 'IYYY-"W"IW')`, zoneLiteral)
 	case "monthly":
-		return `to_char(DATE_TRUNC('month', timestamp AT TIME ZONE 'UTC'), 'YYYY-MM')`
+		return fmt.Sprintf(`to_char(DATE_TRUNC('month', timestamp AT TIME ZONE %s), 'YYYY-MM')`, zoneLiteral)
 	case "yearly":
-		return `to_char(DATE_TRUNC('year', timestamp AT TIME ZONE 'UTC'), 'YYYY')`
+		return fmt.Sprintf(`to_char(DATE_TRUNC('year', timestamp AT TIME ZONE %s), 'YYYY')`, zoneLiteral)
 	default:
-		return `to_char(DATE(timestamp AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`
+		return fmt.Sprintf(`to_char(DATE(timestamp AT TIME ZONE %s), 'YYYY-MM-DD')`, zoneLiteral)
 	}
 }
 
@@ -182,7 +185,7 @@ func (r *PostgreSQLReader) GetDailyUsage(ctx context.Context, params UsageQueryP
 	if interval == "" {
 		interval = "daily"
 	}
-	groupExpr := pgGroupExpr(interval)
+	groupExpr := pgGroupExpr(interval, usageTimeZone(params))
 
 	conditions, args, _ := pgDateRangeConditions(params, 1)
 	where := buildWhereClause(conditions)
@@ -211,4 +214,8 @@ func (r *PostgreSQLReader) GetDailyUsage(ctx context.Context, params UsageQueryP
 	}
 
 	return result, nil
+}
+
+func pgQuoteLiteral(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }

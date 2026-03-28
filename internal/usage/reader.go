@@ -10,6 +10,7 @@ type UsageQueryParams struct {
 	StartDate time.Time // Inclusive start (day precision)
 	EndDate   time.Time // Inclusive end (day precision)
 	Interval  string    // "daily", "weekly", "monthly", "yearly"
+	TimeZone  string    // IANA timezone used for day-boundary interpretation and grouping
 }
 
 // UsageSummary holds aggregated usage statistics over a time period.

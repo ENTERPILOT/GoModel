@@ -1,6 +1,8 @@
 // GOModel Dashboard — Alpine.js + Chart.js logic
 
 function dashboard() {
+    const timezoneModuleFactory =
+        typeof dashboardTimezoneModule === 'function' ? dashboardTimezoneModule : null;
     const calendarModuleFactory =
         typeof dashboardContributionCalendarModule === 'function' ? dashboardContributionCalendarModule : null;
 
@@ -83,12 +85,15 @@ function dashboard() {
             if (page === 'audit') {
                 page = 'audit-logs';
             }
-            page = (['overview', 'usage', 'models', 'workflows', 'audit-logs'].includes(page)) ? page : 'overview';
+            page = (['overview', 'usage', 'models', 'workflows', 'audit-logs', 'settings'].includes(page)) ? page : 'overview';
             const sub = parts[1] || null;
             return { page, sub };
         },
 
         init() {
+            if (typeof this.initTimeZoneState === 'function') {
+                this.initTimeZoneState();
+            }
             this.apiKey = localStorage.getItem('gomodel_api_key') || '';
             this.theme = localStorage.getItem('gomodel_theme') || 'system';
             this.sidebarCollapsed = localStorage.getItem('gomodel_sidebar_collapsed') === 'true';
@@ -98,6 +103,7 @@ function dashboard() {
             this.page = page;
             if (page === 'usage' && sub === 'costs') this.usageMode = 'costs';
             if (page === 'audit-logs') this.fetchAuditLog(true);
+            if (page === 'settings' && typeof this.ensureTimezoneOptions === 'function') this.ensureTimezoneOptions();
 
             window.addEventListener('popstate', () => {
                 const { page: p, sub: s } = this._parseRoute(window.location.pathname);
@@ -110,6 +116,9 @@ function dashboard() {
                 if (p === 'audit-logs') this.fetchAuditLog(true);
                 if (p === 'workflows' && typeof this.fetchExecutionPlansPage === 'function') {
                     this.fetchExecutionPlansPage();
+                }
+                if (p === 'settings' && typeof this.ensureTimezoneOptions === 'function') {
+                    this.ensureTimezoneOptions();
                 }
             });
 
@@ -136,6 +145,7 @@ function dashboard() {
             if (page === 'usage') this.fetchUsagePage();
             if (page === 'workflows' && typeof this.fetchExecutionPlansPage === 'function') this.fetchExecutionPlansPage();
             if (page === 'audit-logs') this.fetchAuditLog(true);
+            if (page === 'settings' && typeof this.ensureTimezoneOptions === 'function') this.ensureTimezoneOptions();
         },
 
         setTheme(t) {
@@ -187,6 +197,9 @@ function dashboard() {
             if (this.apiKey) {
                 h.Authorization = 'Bearer ' + this.apiKey;
             }
+            if (typeof this.effectiveTimezone === 'function') {
+                h['X-GoModel-Timezone'] = this.effectiveTimezone();
+            }
             return h;
         },
 
@@ -222,9 +235,11 @@ function dashboard() {
         },
 
         _formatDate(date) {
-            return date.getFullYear() + '-' +
-                String(date.getMonth() + 1).padStart(2, '0') + '-' +
-                String(date.getDate()).padStart(2, '0');
+            if (!date) return '';
+            if (typeof date === 'string') return date;
+            return date.getUTCFullYear() + '-' +
+                String(date.getUTCMonth() + 1).padStart(2, '0') + '-' +
+                String(date.getUTCDate()).padStart(2, '0');
         },
 
         async fetchModels() {
@@ -329,16 +344,30 @@ function dashboard() {
         formatTimestamp(ts) {
             if (!ts) return '-';
             const d = new Date(ts);
+            if (Number.isNaN(d.getTime())) return '-';
             return d.getFullYear() + '-' +
                 String(d.getMonth() + 1).padStart(2, '0') + '-' +
                 String(d.getDate()).padStart(2, '0') + ' ' +
                 String(d.getHours()).padStart(2, '0') + ':' +
                 String(d.getMinutes()).padStart(2, '0') + ':' +
                 String(d.getSeconds()).padStart(2, '0');
+        },
+
+        formatTimestampUTC(ts) {
+            if (!ts) return '-';
+            const d = new Date(ts);
+            if (Number.isNaN(d.getTime())) return '-';
+            return d.getUTCFullYear() + '-' +
+                String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
+                String(d.getUTCDate()).padStart(2, '0') + ' ' +
+                String(d.getUTCHours()).padStart(2, '0') + ':' +
+                String(d.getUTCMinutes()).padStart(2, '0') + ':' +
+                String(d.getUTCSeconds()).padStart(2, '0') + ' UTC';
         }
     };
 
     const moduleFactories = [
+        timezoneModuleFactory,
         typeof dashboardDatePickerModule === 'function' ? dashboardDatePickerModule : null,
         typeof dashboardUsageModule === 'function' ? dashboardUsageModule : null,
         typeof dashboardAuditListModule === 'function' ? dashboardAuditListModule : null,

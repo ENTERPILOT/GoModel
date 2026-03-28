@@ -27,21 +27,18 @@
                 var byDate = {};
                 (this.calendarData || []).forEach(function(d) { byDate[d.date] = d; });
 
-                var today = new Date();
-                today.setHours(0, 0, 0, 0);
-
-                var start = new Date(today);
-                start.setDate(start.getDate() - 364);
+                var todayKey = this.currentDateKey();
+                var start = this.dateKeyToDate(this.addDaysToDateKey(todayKey, -364));
 
                 // Align start to Monday (ISO week start)
-                var dayOfWeek = start.getDay();
+                var dayOfWeek = start.getUTCDay();
                 var diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-                start.setDate(start.getDate() + diff);
+                start.setUTCDate(start.getUTCDate() + diff);
 
                 var mode = this.calendarMode;
                 var days = [];
-                for (var d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
-                    var key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                for (var d = new Date(start); this.dateToDateKey(d) <= todayKey; d.setUTCDate(d.getUTCDate() + 1)) {
+                    var key = this.dateToDateKey(d);
                     var entry = byDate[key];
                     var value = 0;
                     if (entry) {
@@ -102,20 +99,19 @@
             },
 
             calendarMonthLabels() {
-                var today = new Date();
-                today.setHours(0, 0, 0, 0);
-                var start = new Date(today);
-                start.setDate(start.getDate() - 364);
-                var dayOfWeek = start.getDay();
+                var todayKey = this.currentDateKey();
+                var today = this.dateKeyToDate(todayKey);
+                var start = this.dateKeyToDate(this.addDaysToDateKey(todayKey, -364));
+                var dayOfWeek = start.getUTCDay();
                 var diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-                start.setDate(start.getDate() + diff);
+                start.setUTCDate(start.getUTCDate() + diff);
 
                 var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                 var labels = [];
                 var seenMonths = {};
                 var totalWeeks = 0;
 
-                for (var weekStart = new Date(start); weekStart <= today; weekStart.setDate(weekStart.getDate() + 7), totalWeeks++) {
+                for (var weekStart = new Date(start); this.dateToDateKey(weekStart) <= todayKey; weekStart.setUTCDate(weekStart.getUTCDate() + 7), totalWeeks++) {
                     var labelDay = null;
 
                     if (totalWeeks === 0) {
@@ -123,11 +119,11 @@
                     } else {
                         for (var offset = 0; offset < 7; offset++) {
                             var d = new Date(weekStart);
-                            d.setDate(weekStart.getDate() + offset);
-                            if (d > today) {
+                            d.setUTCDate(weekStart.getUTCDate() + offset);
+                            if (this.dateToDateKey(d) > todayKey) {
                                 break;
                             }
-                            if (d.getDate() === 1) {
+                            if (d.getUTCDate() === 1) {
                                 labelDay = d;
                                 break;
                             }
@@ -138,13 +134,13 @@
                         continue;
                     }
 
-                    var monthKey = labelDay.getFullYear() + '-' + labelDay.getMonth();
+                    var monthKey = labelDay.getUTCFullYear() + '-' + labelDay.getUTCMonth();
                     if (seenMonths[monthKey]) {
                         continue;
                     }
 
                     labels.push({
-                        label: months[labelDay.getMonth()],
+                        label: months[labelDay.getUTCMonth()],
                         col: totalWeeks,
                         key: monthKey
                     });

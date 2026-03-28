@@ -87,6 +87,13 @@ var validIntervals = map[string]bool{
 	"yearly":  true,
 }
 
+const (
+	dashboardTimeZoneHeader = "X-GoModel-Timezone"
+	defaultDashboardTZ      = "UTC"
+)
+
+var timeNow = time.Now
+
 // parseUsageParams extracts UsageQueryParams from the request query string.
 // Returns an error if date parameters are provided but malformed.
 func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
@@ -109,8 +116,11 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 func parseDateRangeParams(c *echo.Context) (usage.UsageQueryParams, error) {
 	var params usage.UsageQueryParams
 
-	now := time.Now().UTC()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	timeZone, location := dashboardTimeZone(c)
+	params.TimeZone = timeZone
+
+	now := timeNow().In(location)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location)
 
 	startStr := c.QueryParam("start_date")
 	endStr := c.QueryParam("end_date")
@@ -118,7 +128,7 @@ func parseDateRangeParams(c *echo.Context) (usage.UsageQueryParams, error) {
 	var startParsed, endParsed bool
 
 	if startStr != "" {
-		t, err := time.Parse("2006-01-02", startStr)
+		t, err := time.ParseInLocation("2006-01-02", startStr, location)
 		if err != nil {
 			return params, core.NewInvalidRequestError("invalid start_date format, expected YYYY-MM-DD", nil)
 		}
@@ -127,7 +137,7 @@ func parseDateRangeParams(c *echo.Context) (usage.UsageQueryParams, error) {
 	}
 
 	if endStr != "" {
-		t, err := time.Parse("2006-01-02", endStr)
+		t, err := time.ParseInLocation("2006-01-02", endStr, location)
 		if err != nil {
 			return params, core.NewInvalidRequestError("invalid end_date format, expected YYYY-MM-DD", nil)
 		}
@@ -155,6 +165,20 @@ func parseDateRangeParams(c *echo.Context) (usage.UsageQueryParams, error) {
 	params.StartDate = today.AddDate(0, 0, -(days - 1))
 
 	return params, nil
+}
+
+func dashboardTimeZone(c *echo.Context) (string, *time.Location) {
+	value := strings.TrimSpace(c.Request().Header.Get(dashboardTimeZoneHeader))
+	if value == "" {
+		return defaultDashboardTZ, time.UTC
+	}
+
+	location, err := time.LoadLocation(value)
+	if err != nil {
+		return defaultDashboardTZ, time.UTC
+	}
+
+	return location.String(), location
 }
 
 // handleError converts errors to appropriate HTTP responses, matching the

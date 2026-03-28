@@ -92,7 +92,10 @@
             </div>
         </div>
         <div class="contribution-calendar-footer">
-            <span class="contribution-calendar-summary" x-text="calendarSummaryText()"></span>
+            <div class="contribution-calendar-meta">
+                <span class="contribution-calendar-summary" x-text="calendarSummaryText()"></span>
+                <span class="contribution-calendar-timezone" x-text="calendarTimeZoneText()"></span>
+            </div>
             <div class="contribution-calendar-legend">
                 <span>Less</span>
                 <div class="contribution-calendar-cell level-0"></div>
@@ -170,7 +173,7 @@
                 <tbody>
                     <template x-for="entry in usageLog.entries" :key="entry.id">
                         <tr>
-                            <td class="mono usage-ts" x-text="formatTimestamp(entry.timestamp)"></td>
+                            <td class="mono usage-ts" x-text="formatTimestamp(entry.timestamp)" :title="timestampTitle(entry.timestamp)"></td>
                             <td class="mono" x-text="entry.model"></td>
                             <td><span class="provider-badge" x-text="entry.provider"></span></td>
                             <td class="col-price"
@@ -202,6 +205,44 @@
                 <button class="pagination-btn" :disabled="usageLog.offset === 0" @click="usageLogPrevPage()">Prev</button>
                 <button class="pagination-btn" :disabled="usageLog.offset + usageLog.limit >= usageLog.total" @click="usageLogNextPage()">Next</button>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Page -->
+<div x-show="page==='settings'">
+    <div class="page-header">
+        <h2>User Settings</h2>
+    </div>
+
+    <div class="settings-panel">
+        <div class="settings-panel-header">
+            <div>
+                <h3>Timezone</h3>
+                <p class="settings-panel-copy">Day-based analytics, charts, and date filters use your effective timezone. Usage and audit logs keep UTC in the hover title while rendering row timestamps in your local browser timezone.</p>
+            </div>
+        </div>
+
+        <div class="settings-form-grid">
+            <label class="alias-form-field">
+                <span>Timezone Override</span>
+                <select class="usage-log-select settings-select" x-model="timezoneOverride" @focus="ensureTimezoneOptions()" @change="saveTimezoneOverride()">
+                    <option value="" x-text="'Automatic (' + detectedTimeZoneLabel() + ')'"></option>
+                    <template x-for="timeZone in timezoneOptions" :key="timeZone.value">
+                        <option :value="timeZone.value" x-text="timeZone.label"></option>
+                    </template>
+                </select>
+            </label>
+        </div>
+
+        <div class="settings-meta-row">
+            <span class="provider-badge mono" x-text="'Detected: ' + detectedTimeZoneLabel()"></span>
+            <span class="provider-badge mono" x-text="'Effective: ' + effectiveTimeZoneLabel()"></span>
+            <span class="provider-badge" x-text="timezoneOverride ? 'Mode: manual override' : 'Mode: automatic'"></span>
+        </div>
+
+        <div class="alias-form-actions">
+            <button type="button" class="pagination-btn" x-show="timezoneOverride" @click="clearTimezoneOverride()">Use Browser Timezone</button>
         </div>
     </div>
 </div>
@@ -960,16 +1001,16 @@
         <div class="audit-log-list" x-show="auditLog.entries.length > 0">
             <template x-for="entry in auditLog.entries" :key="entry.id">
                 <details class="audit-entry" @toggle="handleAuditEntryToggle($event)">
-                    <summary class="audit-entry-summary">
-                        <div class="audit-entry-main">
-                            <span class="audit-status-badge" :class="statusCodeClass(entry.status_code)" x-text="entry.status_code || '-'"></span>
+                        <summary class="audit-entry-summary">
+                            <div class="audit-entry-main">
+                                <span class="audit-status-badge" :class="statusCodeClass(entry.status_code)" x-text="entry.status_code || '-'"></span>
                             <span class="audit-method-badge" x-text="entry.method || '-'"></span>
                             <span class="audit-path mono" x-text="entry.path || '-'"></span>
-                        </div>
-                        <div class="audit-entry-meta">
-                            <span class="mono" x-text="formatTimestamp(entry.timestamp)"></span>
-                            <span class="mono" x-text="formatDurationNs(entry.duration_ns)"></span>
-                            <button class="audit-conversation-trigger"
+                            </div>
+                            <div class="audit-entry-meta">
+                                <span class="mono" x-text="formatTimestamp(entry.timestamp)" :title="timestampTitle(entry.timestamp)"></span>
+                                <span class="mono" x-text="formatDurationNs(entry.duration_ns)"></span>
+                                <button class="audit-conversation-trigger"
                                     x-show="canShowConversation(entry)"
                                     title="Open interactions"
                                     aria-label="Open interactions"

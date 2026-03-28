@@ -8,15 +8,16 @@
 
                 const byDate = {};
                 daily.forEach((d) => { byDate[d.date] = d; });
-                const end = this.customEndDate ? new Date(this.customEndDate) : new Date();
-                end.setHours(0, 0, 0, 0);
-                const start = this.customStartDate ? new Date(this.customStartDate) : new Date(end);
+                const end = this.customEndDate ? new Date(this.customEndDate) : this.todayDate();
+                let start = this.customStartDate ? new Date(this.customStartDate) : new Date(end);
                 if (!this.customStartDate) {
-                    start.setDate(start.getDate() - (parseInt(this.days, 10) - 1));
+                    start = this.dateKeyToDate(
+                        this.addDaysToDateKey(this.dateToDateKey(end), -(parseInt(this.days, 10) - 1))
+                    );
                 }
                 const result = [];
-                for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-                    const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+                    const key = this.dateToDateKey(d);
                     result.push(byDate[key] || { date: key, input_tokens: 0, output_tokens: 0, total_tokens: 0, requests: 0, input_cost: null, output_cost: null, total_cost: null });
                 }
                 return result;
