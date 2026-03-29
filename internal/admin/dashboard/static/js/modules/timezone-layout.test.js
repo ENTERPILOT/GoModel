@@ -20,6 +20,13 @@ test('dashboard templates expose a settings page and timezone context in activit
     assert.match(template, /x-ref="timezoneOverrideSelect"[\s\S]*x-model="timezoneOverride"[\s\S]*x-effect="timezoneOptions\.length; timezoneOverride; \$nextTick\(\(\) => syncTimezoneOverrideSelectValue\(\)\)"/);
     assert.match(template, /<option value=""[\s\S]*:selected="!timezoneOverride"/);
     assert.match(template, /<option :value="timeZone\.value"[\s\S]*:selected="timeZone\.value === timezoneOverride"/);
+    assert.match(template, /<div class="settings-panel-header" x-data="\{ timezoneHelpOpen: false \}">/);
+    assert.match(template, /<button type="button"[\s\S]*class="timezone-help-toggle"[\s\S]*@click="timezoneHelpOpen = !timezoneHelpOpen"/);
+    assert.match(template, /<span class="timezone-help-toggle-icon" x-text="timezoneHelpOpen \? '−' : '\?'"><\/span>/);
+    assert.match(template, /<p id="timezone-help-copy"[\s\S]*class="settings-panel-copy settings-panel-copy-collapsible"[\s\S]*x-show="timezoneHelpOpen"[\s\S]*x-transition\.opacity\.duration\.200ms[\s\S]*Day-based analytics, charts, and date filters use your effective timezone\./);
+    assert.doesNotMatch(template, /Detected: /);
+    assert.doesNotMatch(template, /Effective: /);
+    assert.doesNotMatch(template, /Mode: /);
     assert.match(template, /x-text="calendarTimeZoneText\(\)"/);
     assert.match(template, /usage-ts[^>]*x-text="formatTimestamp\(entry\.timestamp\)"[^>]*:title="timestampTitle\(entry\.timestamp\)"/);
     assert.match(template, /audit-entry-meta[\s\S]*x-text="formatTimestamp\(entry\.timestamp\)"[\s\S]*:title="timestampTitle\(entry\.timestamp\)"/);

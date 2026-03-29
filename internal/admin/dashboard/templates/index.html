@@ -216,10 +216,24 @@
     </div>
 
     <div class="settings-panel">
-        <div class="settings-panel-header">
+        <div class="settings-panel-header" x-data="{ timezoneHelpOpen: false }">
             <div>
-                <h3>Timezone</h3>
-                <p class="settings-panel-copy">Day-based analytics, charts, and date filters use your effective timezone. Usage and audit logs keep UTC in the hover title while rendering row timestamps in your local browser timezone.</p>
+                <div class="settings-panel-title-row">
+                    <h3>Timezone</h3>
+                    <button type="button"
+                            class="timezone-help-toggle"
+                            :class="{ 'is-open': timezoneHelpOpen }"
+                            :aria-label="timezoneHelpOpen ? 'Hide timezone help' : 'Show timezone help'"
+                            :aria-expanded="timezoneHelpOpen.toString()"
+                            aria-controls="timezone-help-copy"
+                            :title="timezoneHelpOpen ? 'Hide timezone help' : 'Show timezone help'"
+                            @click="timezoneHelpOpen = !timezoneHelpOpen">
+                        <span class="timezone-help-toggle-icon" x-text="timezoneHelpOpen ? '−' : '?'"></span>
+                    </button>
+                </div>
+                <p id="timezone-help-copy" class="settings-panel-copy settings-panel-copy-collapsible" x-show="timezoneHelpOpen" x-transition.opacity.duration.200ms>
+                    Day-based analytics, charts, and date filters use your effective timezone. Usage and audit logs keep UTC in the hover title while rendering row timestamps in your local browser timezone.
+                </p>
             </div>
         </div>
 
@@ -234,13 +248,6 @@
                 </select>
             </label>
         </div>
-
-        <div class="settings-meta-row">
-            <span class="provider-badge mono" x-text="'Detected: ' + detectedTimeZoneLabel()"></span>
-            <span class="provider-badge mono" x-text="'Effective: ' + effectiveTimeZoneLabel()"></span>
-            <span class="provider-badge" x-text="timezoneOverride ? 'Mode: manual override' : 'Mode: automatic'"></span>
-        </div>
-
         <div class="alias-form-actions">
             <button type="button" class="pagination-btn" x-show="timezoneOverride" @click="clearTimezoneOverride()">Use Browser Timezone</button>
         </div>

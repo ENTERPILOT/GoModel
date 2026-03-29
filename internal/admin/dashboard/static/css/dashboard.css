@@ -2218,10 +2218,64 @@ body.conversation-drawer-open {
     margin-bottom: 6px;
 }
 
+.settings-panel-title-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.settings-panel-title-row h3 {
+    margin-bottom: 0;
+}
+
+.timezone-help-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+    border-radius: 999px;
+    background:
+        radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 62%),
+        color-mix(in srgb, var(--bg-surface-hover) 82%, var(--accent) 18%);
+    color: var(--accent);
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 14%, transparent);
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.timezone-help-toggle:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 28px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.timezone-help-toggle.is-open {
+    background: color-mix(in srgb, var(--accent) 18%, var(--bg-surface));
+    color: var(--text);
+}
+
+.timezone-help-toggle-icon {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+}
+
 .settings-panel-copy {
     max-width: 780px;
     color: var(--text-muted);
     font-size: 14px;
+}
+
+.settings-panel-copy-collapsible {
+    margin-top: 2px;
+    padding: 12px 14px;
+    border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+    border-radius: 12px;
+    background:
+        linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 58%),
+        color-mix(in srgb, var(--bg-surface-hover) 78%, var(--accent) 8%);
 }
 
 .settings-form-grid {
@@ -2232,13 +2286,6 @@ body.conversation-drawer-open {
 
 .settings-select {
     width: 100%;
-}
-
-.settings-meta-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-top: 18px;
 }
 
 /* Responsive */
@@ -2268,6 +2315,10 @@ body.conversation-drawer-open {
         width: 100%;
         justify-content: space-between;
         flex-wrap: wrap;
+    }
+
+    .settings-panel-title-row {
+        gap: 8px;
     }
 
     /* Category tabs mobile */
