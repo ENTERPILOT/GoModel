@@ -1,10 +1,24 @@
 // GOModel Dashboard — Alpine.js + Chart.js logic
 
 function dashboard() {
-    const timezoneModuleFactory =
-        typeof dashboardTimezoneModule === 'function' ? dashboardTimezoneModule : null;
-    const calendarModuleFactory =
-        typeof dashboardContributionCalendarModule === 'function' ? dashboardContributionCalendarModule : null;
+    function resolveModuleFactory(factory, windowName) {
+        if (typeof factory === 'function') {
+            return factory;
+        }
+        if (typeof window !== 'undefined' && typeof window[windowName] === 'function') {
+            return window[windowName];
+        }
+        return null;
+    }
+
+    const timezoneModuleFactory = resolveModuleFactory(
+        typeof dashboardTimezoneModule === 'function' ? dashboardTimezoneModule : null,
+        'dashboardTimezoneModule'
+    );
+    const calendarModuleFactory = resolveModuleFactory(
+        typeof dashboardContributionCalendarModule === 'function' ? dashboardContributionCalendarModule : null,
+        'dashboardContributionCalendarModule'
+    );
 
     const base = {
         // State
@@ -203,6 +217,32 @@ function dashboard() {
             return h;
         },
 
+        _startAbortableRequest(controllerKey) {
+            const current = this[controllerKey];
+            if (current && typeof current.abort === 'function') {
+                current.abort();
+            }
+
+            if (typeof AbortController !== 'function') {
+                this[controllerKey] = null;
+                return null;
+            }
+
+            const controller = new AbortController();
+            this[controllerKey] = controller;
+            return controller;
+        },
+
+        _clearAbortableRequest(controllerKey, controller) {
+            if (this[controllerKey] === controller) {
+                this[controllerKey] = null;
+            }
+        },
+
+        _isAbortError(error) {
+            return Boolean(error) && (error.name === 'AbortError' || error.code === 20);
+        },
+
         async fetchAll() {
             this.loading = true;
             this.authError = false;
@@ -243,23 +283,38 @@ function dashboard() {
         },
 
         async fetchModels() {
+            const controller = this._startAbortableRequest('_modelsFetchController');
+            const options = { headers: this.headers() };
+            if (controller) {
+                options.signal = controller.signal;
+            }
+
             try {
                 let url = '/admin/api/v1/models';
                 if (this.activeCategory && this.activeCategory !== 'all') {
                     url += '?category=' + encodeURIComponent(this.activeCategory);
                 }
-                const res = await fetch(url, { headers: this.headers() });
+                const res = await fetch(url, options);
                 if (!this.handleFetchResponse(res, 'models')) {
                     this.models = [];
                     if (typeof this.syncDisplayModels === 'function') this.syncDisplayModels();
                     return;
                 }
-                this.models = await res.json();
+                const payload = await res.json();
+                if (controller && controller.signal.aborted) {
+                    return;
+                }
+                this.models = payload;
                 if (typeof this.syncDisplayModels === 'function') this.syncDisplayModels();
             } catch (e) {
+                if (this._isAbortError(e)) {
+                    return;
+                }
                 console.error('Failed to fetch models:', e);
                 this.models = [];
                 if (typeof this.syncDisplayModels === 'function') this.syncDisplayModels();
+            } finally {
+                this._clearAbortableRequest('_modelsFetchController', controller);
             }
         },
 
@@ -342,6 +397,9 @@ function dashboard() {
         },
 
         formatTimestamp(ts) {
+            if (typeof this.formatTimestampInEffectiveTimeZone === 'function') {
+                return this.formatTimestampInEffectiveTimeZone(ts);
+            }
             if (!ts) return '-';
             const d = new Date(ts);
             if (Number.isNaN(d.getTime())) return '-';
@@ -368,14 +426,35 @@ function dashboard() {
 
     const moduleFactories = [
         timezoneModuleFactory,
-        typeof dashboardDatePickerModule === 'function' ? dashboardDatePickerModule : null,
-        typeof dashboardUsageModule === 'function' ? dashboardUsageModule : null,
-        typeof dashboardAuditListModule === 'function' ? dashboardAuditListModule : null,
-        typeof dashboardAliasesModule === 'function' ? dashboardAliasesModule : null,
-        typeof dashboardExecutionPlansModule === 'function' ? dashboardExecutionPlansModule : null,
-        typeof dashboardConversationDrawerModule === 'function' ? dashboardConversationDrawerModule : null,
+        resolveModuleFactory(
+            typeof dashboardDatePickerModule === 'function' ? dashboardDatePickerModule : null,
+            'dashboardDatePickerModule'
+        ),
+        resolveModuleFactory(
+            typeof dashboardUsageModule === 'function' ? dashboardUsageModule : null,
+            'dashboardUsageModule'
+        ),
+        resolveModuleFactory(
+            typeof dashboardAuditListModule === 'function' ? dashboardAuditListModule : null,
+            'dashboardAuditListModule'
+        ),
+        resolveModuleFactory(
+            typeof dashboardAliasesModule === 'function' ? dashboardAliasesModule : null,
+            'dashboardAliasesModule'
+        ),
+        resolveModuleFactory(
+            typeof dashboardExecutionPlansModule === 'function' ? dashboardExecutionPlansModule : null,
+            'dashboardExecutionPlansModule'
+        ),
+        resolveModuleFactory(
+            typeof dashboardConversationDrawerModule === 'function' ? dashboardConversationDrawerModule : null,
+            'dashboardConversationDrawerModule'
+        ),
         calendarModuleFactory,
-        typeof dashboardChartsModule === 'function' ? dashboardChartsModule : null
+        resolveModuleFactory(
+            typeof dashboardChartsModule === 'function' ? dashboardChartsModule : null,
+            'dashboardChartsModule'
+        )
     ];
 
     return moduleFactories.reduce((app, factory) => {

@@ -10,6 +10,14 @@
             },
 
             async fetchUsage() {
+                const controller = typeof this._startAbortableRequest === 'function'
+                    ? this._startAbortableRequest('_usageFetchController')
+                    : null;
+                const options = { headers: this.headers() };
+                if (controller) {
+                    options.signal = controller.signal;
+                }
+
                 try {
                     let queryStr;
                     if (this.customStartDate && this.customEndDate) {
@@ -21,8 +29,8 @@
                     queryStr += '&interval=' + this.interval;
 
                     const [summaryRes, dailyRes] = await Promise.all([
-                        fetch('/admin/api/v1/usage/summary?' + queryStr, { headers: this.headers() }),
-                        fetch('/admin/api/v1/usage/daily?' + queryStr, { headers: this.headers() })
+                        fetch('/admin/api/v1/usage/summary?' + queryStr, options),
+                        fetch('/admin/api/v1/usage/daily?' + queryStr, options)
                     ]);
 
                     if (!this.handleFetchResponse(summaryRes, 'usage summary') ||
@@ -30,13 +38,27 @@
                         return;
                     }
 
-                    this.summary = await summaryRes.json();
-                    this.daily = await dailyRes.json();
+                    const [summary, daily] = await Promise.all([
+                        summaryRes.json(),
+                        dailyRes.json()
+                    ]);
+                    if (controller && controller.signal.aborted) {
+                        return;
+                    }
+                    this.summary = summary;
+                    this.daily = daily;
                     this.renderChart();
                     if (this.page === 'usage') this.fetchUsagePage();
                     if (this.page === 'audit-logs') this.fetchAuditLog(true);
                 } catch (e) {
+                    if (typeof this._isAbortError === 'function' && this._isAbortError(e)) {
+                        return;
+                    }
                     console.error('Failed to fetch usage:', e);
+                } finally {
+                    if (typeof this._clearAbortableRequest === 'function') {
+                        this._clearAbortableRequest('_usageFetchController', controller);
+                    }
                 }
             },
 
@@ -46,20 +68,47 @@
             },
 
             async fetchModelUsage() {
+                const controller = typeof this._startAbortableRequest === 'function'
+                    ? this._startAbortableRequest('_modelUsageFetchController')
+                    : null;
+                const options = { headers: this.headers() };
+                if (controller) {
+                    options.signal = controller.signal;
+                }
+
                 try {
-                    const res = await fetch('/admin/api/v1/usage/models?' + this._usageQueryStr(), { headers: this.headers() });
+                    const res = await fetch('/admin/api/v1/usage/models?' + this._usageQueryStr(), options);
                     if (!this.handleFetchResponse(res, 'usage models')) {
                         this.modelUsage = [];
                         return;
                     }
-                    this.modelUsage = await res.json();
+                    const payload = await res.json();
+                    if (controller && controller.signal.aborted) {
+                        return;
+                    }
+                    this.modelUsage = payload;
                 } catch (e) {
+                    if (typeof this._isAbortError === 'function' && this._isAbortError(e)) {
+                        return;
+                    }
                     console.error('Failed to fetch model usage:', e);
                     this.modelUsage = [];
+                } finally {
+                    if (typeof this._clearAbortableRequest === 'function') {
+                        this._clearAbortableRequest('_modelUsageFetchController', controller);
+                    }
                 }
             },
 
             async fetchUsageLog(resetOffset) {
+                const controller = typeof this._startAbortableRequest === 'function'
+                    ? this._startAbortableRequest('_usageLogFetchController')
+                    : null;
+                const options = { headers: this.headers() };
+                if (controller) {
+                    options.signal = controller.signal;
+                }
+
                 try {
                     if (resetOffset) this.usageLog.offset = 0;
                     let qs = this._usageQueryStr();
@@ -68,16 +117,27 @@
                     if (this.usageLogModel) qs += '&model=' + encodeURIComponent(this.usageLogModel);
                     if (this.usageLogProvider) qs += '&provider=' + encodeURIComponent(this.usageLogProvider);
 
-                    const res = await fetch('/admin/api/v1/usage/log?' + qs, { headers: this.headers() });
+                    const res = await fetch('/admin/api/v1/usage/log?' + qs, options);
                     if (!this.handleFetchResponse(res, 'usage log')) {
                         this.usageLog = { entries: [], total: 0, limit: 50, offset: 0 };
                         return;
                     }
-                    this.usageLog = await res.json();
+                    const payload = await res.json();
+                    if (controller && controller.signal.aborted) {
+                        return;
+                    }
+                    this.usageLog = payload;
                     if (!this.usageLog.entries) this.usageLog.entries = [];
                 } catch (e) {
+                    if (typeof this._isAbortError === 'function' && this._isAbortError(e)) {
+                        return;
+                    }
                     console.error('Failed to fetch usage log:', e);
                     this.usageLog = { entries: [], total: 0, limit: 50, offset: 0 };
+                } finally {
+                    if (typeof this._clearAbortableRequest === 'function') {
+                        this._clearAbortableRequest('_usageLogFetchController', controller);
+                    }
                 }
             },
 

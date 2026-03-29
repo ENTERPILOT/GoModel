@@ -17,7 +17,9 @@ test('dashboard templates expose a settings page and timezone context in activit
     const template = readFixture('../../../templates/index.html');
 
     assert.match(template, /<div x-show="page==='settings'">[\s\S]*<h2>User Settings<\/h2>/);
-    assert.match(template, /x-model="timezoneOverride"/);
+    assert.match(template, /x-ref="timezoneOverrideSelect"[\s\S]*x-model="timezoneOverride"[\s\S]*x-effect="timezoneOptions\.length; timezoneOverride; \$nextTick\(\(\) => syncTimezoneOverrideSelectValue\(\)\)"/);
+    assert.match(template, /<option value=""[\s\S]*:selected="!timezoneOverride"/);
+    assert.match(template, /<option :value="timeZone\.value"[\s\S]*:selected="timeZone\.value === timezoneOverride"/);
     assert.match(template, /x-text="calendarTimeZoneText\(\)"/);
     assert.match(template, /usage-ts[^>]*x-text="formatTimestamp\(entry\.timestamp\)"[^>]*:title="timestampTitle\(entry\.timestamp\)"/);
     assert.match(template, /audit-entry-meta[\s\S]*x-text="formatTimestamp\(entry\.timestamp\)"[\s\S]*:title="timestampTitle\(entry\.timestamp\)"/);

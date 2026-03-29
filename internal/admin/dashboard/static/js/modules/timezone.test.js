@@ -42,6 +42,21 @@ function createTimezoneModule(overrides) {
     return factory();
 }
 
+function createFakeSelect(values) {
+    const select = {
+        options: values.map((value) => ({ value: value })),
+        _value: '',
+        set value(nextValue) {
+            this._value = this.options.some((option) => option.value === nextValue) ? nextValue : '';
+        },
+        get value() {
+            return this._value;
+        }
+    };
+
+    return select;
+}
+
 test('dateKeyInTimeZone uses the configured IANA timezone boundary', () => {
     const module = createTimezoneModule();
 
@@ -74,6 +89,34 @@ test('timeZoneOptionLabel includes the IANA name and UTC offset', () => {
         module.timeZoneOptionLabel('Europe/Warsaw', new Date('2026-01-15T12:00:00Z')),
         'Europe/Warsaw (UTC+01:00)'
     );
+});
+
+test('timestampTitle keeps the UTC timestamp without a duplicate prefix label', () => {
+    const module = createTimezoneModule();
+    module.formatTimestampUTC = (value) => value === '2026-01-15T23:30:00Z'
+        ? '2026-01-15 23:30:00 UTC'
+        : '';
+
+    assert.equal(
+        module.timestampTitle('2026-01-15T23:30:00Z'),
+        '2026-01-15 23:30:00 UTC'
+    );
+});
+
+test('syncTimezoneOverrideSelectValue reapplies the saved override after options render', () => {
+    const module = createTimezoneModule();
+    const select = createFakeSelect(['']);
+
+    module.$refs = { timezoneOverrideSelect: select };
+    module.timezoneOverride = 'America/New_York';
+
+    module.syncTimezoneOverrideSelectValue();
+    assert.equal(select.value, '');
+
+    select.options.push({ value: 'America/New_York' });
+    module.syncTimezoneOverrideSelectValue();
+
+    assert.equal(select.value, 'America/New_York');
 });
 
 test('dateKeyInTimeZone reuses timezone support checks and formatters for repeated calls', () => {

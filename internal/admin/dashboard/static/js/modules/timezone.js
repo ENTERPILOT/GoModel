@@ -98,6 +98,41 @@
                 return byType.year + '-' + byType.month + '-' + byType.day;
             },
 
+            formatTimestampInTimeZone(ts, timeZone) {
+                if (!ts) {
+                    return '-';
+                }
+
+                const date = new Date(ts);
+                if (Number.isNaN(date.getTime())) {
+                    return '-';
+                }
+
+                const zone = this.isSupportedTimeZone(timeZone) ? timeZone : DEFAULT_TIMEZONE;
+                const parts = getCachedFormatter('en-CA', {
+                    timeZone: zone,
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hourCycle: 'h23'
+                }).formatToParts(date);
+
+                const byType = {};
+                parts.forEach((part) => {
+                    byType[part.type] = part.value;
+                });
+
+                return byType.year + '-' + byType.month + '-' + byType.day + ' ' +
+                    byType.hour + ':' + byType.minute + ':' + byType.second;
+            },
+
+            formatTimestampInEffectiveTimeZone(ts) {
+                return this.formatTimestampInTimeZone(ts, this.effectiveTimezone());
+            },
+
             currentDateKey(now) {
                 return this.dateKeyInTimeZone(now || new Date(), this.effectiveTimezone());
             },
@@ -189,6 +224,18 @@
                 return this.timeZoneOptionLabel(this.effectiveTimezone());
             },
 
+            syncTimezoneOverrideSelectValue() {
+                const select = this.$refs && this.$refs.timezoneOverrideSelect;
+                if (!select) {
+                    return;
+                }
+
+                const desiredValue = this.timezoneOverride || '';
+                if (select.value !== desiredValue) {
+                    select.value = desiredValue;
+                }
+            },
+
             ensureTimezoneOptions() {
                 if (this.timezoneOptionsLoaded) {
                     return;
@@ -271,7 +318,7 @@
                 if (!ts || typeof this.formatTimestampUTC !== 'function') {
                     return '';
                 }
-                return 'UTC: ' + this.formatTimestampUTC(ts);
+                return this.formatTimestampUTC(ts);
             }
         };
     }

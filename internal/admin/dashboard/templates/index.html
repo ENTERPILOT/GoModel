@@ -226,10 +226,10 @@
         <div class="settings-form-grid">
             <label class="alias-form-field">
                 <span>Timezone Override</span>
-                <select class="usage-log-select settings-select" x-model="timezoneOverride" @focus="ensureTimezoneOptions()" @change="saveTimezoneOverride()">
-                    <option value="" x-text="'Automatic (' + detectedTimeZoneLabel() + ')'"></option>
+                <select class="usage-log-select settings-select" x-ref="timezoneOverrideSelect" x-model="timezoneOverride" x-effect="timezoneOptions.length; timezoneOverride; $nextTick(() => syncTimezoneOverrideSelectValue())" @focus="ensureTimezoneOptions()" @change="saveTimezoneOverride()">
+                    <option value="" :selected="!timezoneOverride" x-text="'Automatic (' + detectedTimeZoneLabel() + ')'"></option>
                     <template x-for="timeZone in timezoneOptions" :key="timeZone.value">
-                        <option :value="timeZone.value" x-text="timeZone.label"></option>
+                        <option :value="timeZone.value" :selected="timeZone.value === timezoneOverride" x-text="timeZone.label"></option>
                     </template>
                 </select>
             </label>

@@ -7,18 +7,36 @@
             calendarTooltip: { show: false, x: 0, y: 0, text: '' },
 
             async fetchCalendarData() {
+                const controller = typeof this._startAbortableRequest === 'function'
+                    ? this._startAbortableRequest('_calendarFetchController')
+                    : null;
+                const options = { headers: this.headers() };
+                if (controller) {
+                    options.signal = controller.signal;
+                }
+
                 this.calendarLoading = true;
                 try {
-                    const res = await fetch('/admin/api/v1/usage/daily?days=365&interval=daily', { headers: this.headers() });
+                    const res = await fetch('/admin/api/v1/usage/daily?days=365&interval=daily', options);
                     if (!this.handleFetchResponse(res, 'calendar')) {
                         this.calendarData = [];
                         return;
                     }
-                    this.calendarData = await res.json();
+                    const payload = await res.json();
+                    if (controller && controller.signal.aborted) {
+                        return;
+                    }
+                    this.calendarData = payload;
                 } catch (e) {
+                    if (typeof this._isAbortError === 'function' && this._isAbortError(e)) {
+                        return;
+                    }
                     console.error('Failed to fetch calendar data:', e);
                     this.calendarData = [];
                 } finally {
+                    if (typeof this._clearAbortableRequest === 'function') {
+                        this._clearAbortableRequest('_calendarFetchController', controller);
+                    }
                     this.calendarLoading = false;
                 }
             },
