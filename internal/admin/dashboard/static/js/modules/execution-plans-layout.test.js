@@ -14,7 +14,7 @@ function readCSSRule(source, selector) {
     return match[1];
 }
 
-test('async pipeline branch spans full width and keeps the turn inline', () => {
+test('async pipeline branch spans full width and offsets the turn below the main row', () => {
     const template = readFixture('../../../templates/index.html');
     const css = readFixture('../../css/dashboard.css');
 
@@ -27,10 +27,10 @@ test('async pipeline branch spans full width and keeps the turn inline', () => {
     assert.match(asyncSectionRule, /width:\s*100%/);
     assert.doesNotMatch(asyncSectionRule, /flex-direction:\s*column/);
     assert.match(asyncSectionRule, /align-items:\s*center/);
-    assert.doesNotMatch(asyncSectionRule, /margin-top:\s*[1-9]/);
+    assert.match(asyncSectionRule, /margin-top:\s*10px/);
 
     const asyncTurnRule = readCSSRule(css, '.ep-async-turn');
-    assert.match(asyncTurnRule, /width:\s*\d/);
+    assert.match(asyncTurnRule, /flex:\s*0\s+0\s+60px/);
     assert.match(asyncTurnRule, /height:\s*2px/);
     assert.doesNotMatch(asyncTurnRule, /border-bottom:/);
     assert.doesNotMatch(asyncTurnRule, /border-right:/);

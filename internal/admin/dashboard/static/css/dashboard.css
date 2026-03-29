@@ -2796,13 +2796,12 @@ body.conversation-drawer-open {
     justify-content: flex-end;
     gap: 0;
     min-width: 0;
-    padding-right: 20px;
+    margin-top: 10px;
 }
 
 /* L-turn connector: centered horizontal leg plus vertical rise back to Response */
 .ep-async-turn {
-    flex: 0 0 28px;
-    width: 28px;
+    flex: 0 0 60px;
     position: relative; /* for arrowhead + vertical rise */
     height: 2px;
     background: repeating-linear-gradient(
@@ -2877,8 +2876,8 @@ body.conversation-drawer-open {
 }
 
 .ep-node-async .ep-node-icon {
-    width: 20px;
-    height: 20px;
+    width: 12px;
+    height: 12px;
     border-radius: var(--radius);
 }
 
