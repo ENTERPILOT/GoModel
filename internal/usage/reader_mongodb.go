@@ -200,18 +200,18 @@ func (r *MongoDBReader) GetUsageLog(ctx context.Context, params UsageLogParams) 
 
 	var facetResult struct {
 		Data []struct {
-			ID                     string    `bson:"_id"`
-			RequestID              string    `bson:"request_id"`
-			ProviderID             string    `bson:"provider_id"`
-			Timestamp              time.Time `bson:"timestamp"`
-			Model                  string    `bson:"model"`
-			Provider               string    `bson:"provider"`
-			Endpoint               string    `bson:"endpoint"`
-			InputTokens            int       `bson:"input_tokens"`
-			OutputTokens           int       `bson:"output_tokens"`
-			TotalTokens            int       `bson:"total_tokens"`
-			InputCost              *float64  `bson:"input_cost"`
-			OutputCost             *float64  `bson:"output_cost"`
+			ID                     string         `bson:"_id"`
+			RequestID              string         `bson:"request_id"`
+			ProviderID             string         `bson:"provider_id"`
+			Timestamp              time.Time      `bson:"timestamp"`
+			Model                  string         `bson:"model"`
+			Provider               string         `bson:"provider"`
+			Endpoint               string         `bson:"endpoint"`
+			InputTokens            int            `bson:"input_tokens"`
+			OutputTokens           int            `bson:"output_tokens"`
+			TotalTokens            int            `bson:"total_tokens"`
+			InputCost              *float64       `bson:"input_cost"`
+			OutputCost             *float64       `bson:"output_cost"`
 			TotalCost              *float64       `bson:"total_cost"`
 			RawData                map[string]any `bson:"raw_data"`
 			CostsCalculationCaveat string         `bson:"costs_calculation_caveat"`
@@ -272,13 +272,13 @@ func mongoDateRangeFilter(params UsageQueryParams) bson.D {
 	endZero := params.EndDate.IsZero()
 
 	if !startZero && !endZero {
-		return bson.D{{Key: "$gte", Value: params.StartDate.UTC()}, {Key: "$lt", Value: params.EndDate.AddDate(0, 0, 1).UTC()}}
+		return bson.D{{Key: "$gte", Value: params.StartDate.UTC()}, {Key: "$lt", Value: usageEndExclusive(params).UTC()}}
 	}
 	if !startZero {
 		return bson.D{{Key: "$gte", Value: params.StartDate.UTC()}}
 	}
 	if !endZero {
-		return bson.D{{Key: "$lt", Value: params.EndDate.AddDate(0, 0, 1).UTC()}}
+		return bson.D{{Key: "$lt", Value: usageEndExclusive(params).UTC()}}
 	}
 	return nil
 }
@@ -318,6 +318,7 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 			{Key: "_id", Value: bson.D{{Key: "$dateToString", Value: bson.D{
 				{Key: "format", Value: dateFormat},
 				{Key: "date", Value: "$timestamp"},
+				{Key: "timezone", Value: usageTimeZone(params)},
 			}}}},
 			{Key: "requests", Value: bson.D{{Key: "$sum", Value: 1}}},
 			{Key: "input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},

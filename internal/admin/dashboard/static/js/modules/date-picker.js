@@ -4,7 +4,7 @@
             toggleDatePicker() {
                 this.datePickerOpen = !this.datePickerOpen;
                 if (this.datePickerOpen) {
-                    this.calendarMonth = new Date();
+                    this.calendarMonth = this.startOfMonthDate(this.customEndDate || this.todayDate());
                     this.selectingDate = 'start';
                 }
             },
@@ -49,64 +49,77 @@
 
             formatDateShort(date) {
                 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                return months[date.getMonth()] + ' ' + date.getDate() + ', ' + date.getFullYear();
+                return months[date.getUTCMonth()] + ' ' + date.getUTCDate() + ', ' + date.getUTCFullYear();
             },
 
             calendarTitle(offset) {
-                const d = new Date(this.calendarMonth.getFullYear(), this.calendarMonth.getMonth() + offset, 1);
+                const d = new Date(Date.UTC(
+                    this.calendarMonth.getUTCFullYear(),
+                    this.calendarMonth.getUTCMonth() + offset,
+                    1
+                ));
                 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-                return months[d.getMonth()] + ' ' + d.getFullYear();
+                return months[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
             },
 
             calendarDays(offset) {
-                const year = this.calendarMonth.getFullYear();
-                const month = this.calendarMonth.getMonth() + offset;
-                const first = new Date(year, month, 1);
-                const last = new Date(year, month + 1, 0);
-                let startDay = (first.getDay() + 6) % 7;
+                const year = this.calendarMonth.getUTCFullYear();
+                const month = this.calendarMonth.getUTCMonth() + offset;
+                const first = new Date(Date.UTC(year, month, 1));
+                const last = new Date(Date.UTC(year, month + 1, 0));
+                let startDay = (first.getUTCDay() + 6) % 7;
                 const days = [];
 
-                const prevLast = new Date(year, month, 0);
+                const prevLast = new Date(Date.UTC(year, month, 0));
                 for (let i = startDay - 1; i >= 0; i--) {
-                    const d = prevLast.getDate() - i;
-                    days.push({ day: d, date: new Date(year, month - 1, d), current: false, key: 'p' + d });
+                    const d = prevLast.getUTCDate() - i;
+                    const date = new Date(Date.UTC(year, month - 1, d));
+                    days.push({ day: d, date, current: false, key: 'p-' + this.dateToDateKey(date) });
                 }
 
-                for (let d = 1; d <= last.getDate(); d++) {
-                    days.push({ day: d, date: new Date(year, month, d), current: true, key: 'c' + d });
+                for (let d = 1; d <= last.getUTCDate(); d++) {
+                    const date = new Date(Date.UTC(year, month, d));
+                    days.push({ day: d, date, current: true, key: 'c-' + this.dateToDateKey(date) });
                 }
 
                 const remaining = 42 - days.length;
                 for (let d = 1; d <= remaining; d++) {
-                    days.push({ day: d, date: new Date(year, month + 1, d), current: false, key: 'n' + d });
+                    const date = new Date(Date.UTC(year, month + 1, d));
+                    days.push({ day: d, date, current: false, key: 'n-' + this.dateToDateKey(date) });
                 }
 
                 return days;
             },
 
             prevMonth() {
-                this.calendarMonth = new Date(this.calendarMonth.getFullYear(), this.calendarMonth.getMonth() - 1, 1);
+                this.calendarMonth = new Date(Date.UTC(
+                    this.calendarMonth.getUTCFullYear(),
+                    this.calendarMonth.getUTCMonth() - 1,
+                    1
+                ));
             },
 
             nextMonth() {
-                const next = new Date(this.calendarMonth.getFullYear(), this.calendarMonth.getMonth() + 1, 1);
-                const today = new Date();
-                if (next.getFullYear() < today.getFullYear() ||
-                    (next.getFullYear() === today.getFullYear() && next.getMonth() <= today.getMonth())) {
+                const next = new Date(Date.UTC(
+                    this.calendarMonth.getUTCFullYear(),
+                    this.calendarMonth.getUTCMonth() + 1,
+                    1
+                ));
+                const currentMonth = this.startOfMonthDate(this.todayDate());
+                if (next.getTime() <= currentMonth.getTime()) {
                     this.calendarMonth = next;
                 }
             },
 
             isCurrentMonth() {
-                const today = new Date();
-                return this.calendarMonth.getFullYear() === today.getFullYear() &&
-                    this.calendarMonth.getMonth() === today.getMonth();
+                const today = this.todayDate();
+                return this.calendarMonth.getUTCFullYear() === today.getUTCFullYear() &&
+                    this.calendarMonth.getUTCMonth() === today.getUTCMonth();
             },
 
             selectCalendarDay(day) {
                 if (!day.current || this.isFutureDay(day)) return;
                 const clicked = new Date(day.date);
-                clicked.setHours(0, 0, 0, 0);
                 this.selectedPreset = null;
 
                 if (this.selectingDate === 'start') {
@@ -115,9 +128,7 @@
                         this.customEndDate = clicked;
                     }
                     if (!this.customEndDate) {
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        this.customEndDate = today;
+                        this.customEndDate = this.todayDate();
                     }
                     this.selectingDate = 'end';
                     this.fetchUsage();
@@ -136,34 +147,25 @@
 
             isToday(day) {
                 if (!day.current) return false;
-                const today = new Date();
-                return day.date.getFullYear() === today.getFullYear() &&
-                    day.date.getMonth() === today.getMonth() &&
-                    day.date.getDate() === today.getDate();
+                return this.dateToDateKey(day.date) === this.currentDateKey();
             },
 
             isFutureDay(day) {
-                const today = new Date();
-                today.setHours(23, 59, 59, 999);
-                return day.date > today;
+                return this.dateToDateKey(day.date) > this.currentDateKey();
             },
 
             isRangeStart(day) {
                 if (!day.current) return false;
                 const start = this._rangeStart();
                 if (!start) return false;
-                return day.date.getFullYear() === start.getFullYear() &&
-                    day.date.getMonth() === start.getMonth() &&
-                    day.date.getDate() === start.getDate();
+                return this.dateToDateKey(day.date) === this.dateToDateKey(start);
             },
 
             isRangeEnd(day) {
                 if (!day.current) return false;
                 const end = this._rangeEnd();
                 if (!end) return false;
-                return day.date.getFullYear() === end.getFullYear() &&
-                    day.date.getMonth() === end.getMonth() &&
-                    day.date.getDate() === end.getDate();
+                return this.dateToDateKey(day.date) === this.dateToDateKey(end);
             },
 
             isInRange(day) {
@@ -171,18 +173,16 @@
                 const start = this._rangeStart();
                 const end = this._rangeEnd();
                 if (!start || !end) return false;
-                const dayDate = new Date(day.date);
-                dayDate.setHours(0, 0, 0, 0);
-                return dayDate >= start && dayDate <= end;
+                const dayKey = this.dateToDateKey(day.date);
+                return dayKey >= this.dateToDateKey(start) && dayKey <= this.dateToDateKey(end);
             },
 
             _rangeStart() {
                 if (this.customStartDate) return this.customStartDate;
                 if (this.selectedPreset) {
-                    const s = new Date();
-                    s.setHours(0, 0, 0, 0);
-                    s.setDate(s.getDate() - (parseInt(this.selectedPreset, 10) - 1));
-                    return s;
+                    return this.dateKeyToDate(
+                        this.addDaysToDateKey(this.currentDateKey(), -(parseInt(this.selectedPreset, 10) - 1))
+                    );
                 }
                 return null;
             },
@@ -190,9 +190,7 @@
             _rangeEnd() {
                 if (this.customEndDate) return this.customEndDate;
                 if (this.customStartDate || this.selectedPreset) {
-                    const t = new Date();
-                    t.setHours(0, 0, 0, 0);
-                    return t;
+                    return this.todayDate();
                 }
                 return null;
             },

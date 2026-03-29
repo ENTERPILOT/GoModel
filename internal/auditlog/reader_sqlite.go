@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const sqliteTimestampBoundaryLayout = "2006-01-02T15:04:05"
+
 // SQLiteReader implements Reader for SQLite databases.
 type SQLiteReader struct {
 	db *sql.DB
@@ -237,13 +239,17 @@ func (r *SQLiteReader) GetConversation(ctx context.Context, logID string, limit 
 func sqliteDateRangeConditions(params QueryParams) (conditions []string, args []any) {
 	if !params.StartDate.IsZero() {
 		conditions = append(conditions, "timestamp >= ?")
-		args = append(args, params.StartDate.UTC().Format("2006-01-02"))
+		args = append(args, sqliteTimestampBoundary(params.StartDate))
 	}
 	if !params.EndDate.IsZero() {
 		conditions = append(conditions, "timestamp < ?")
-		args = append(args, params.EndDate.AddDate(0, 0, 1).UTC().Format("2006-01-02"))
+		args = append(args, sqliteTimestampBoundary(params.EndDate.AddDate(0, 0, 1)))
 	}
 	return conditions, args
+}
+
+func sqliteTimestampBoundary(t time.Time) string {
+	return t.UTC().Format(sqliteTimestampBoundaryLayout)
 }
 
 func parseSQLTimestamp(ts string, entryID string) time.Time {

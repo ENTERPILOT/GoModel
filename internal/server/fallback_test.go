@@ -452,6 +452,93 @@ func TestResponses_StreamFallsBackToAlternateModel(t *testing.T) {
 	}
 }
 
+func TestResponses_StreamDoesNotFallbackOnNonAvailabilityError(t *testing.T) {
+	provider := &fallbackProvider{
+		responsesStreams: map[string]string{
+			"azure/gpt-4o": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"fallback response\"}\n\ndata: [DONE]\n\n",
+		},
+		responsesErrors: map[string]error{
+			"gpt-4o": core.NewInvalidRequestError("temperature must be between 0 and 2", nil),
+		},
+		supportedModels: map[string]string{
+			"gpt-4o":       "openai",
+			"azure/gpt-4o": "azure",
+		},
+	}
+
+	handler := newHandler(provider, nil, nil, nil, nil, nil, fallbackResolverStub{
+		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
+	}, nil)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-4o","stream":true,"input":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.Responses(c); err != nil {
+		t.Fatalf("handler.Responses() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if len(provider.responsesCalls) != 1 || provider.responsesCalls[0] != "gpt-4o" {
+		t.Fatalf("responses calls = %v, want only the primary model", provider.responsesCalls)
+	}
+	if core.GetFallbackUsed(c.Request().Context()) {
+		t.Fatal("expected request context to remain unmarked for fallback")
+	}
+}
+
+func TestResponses_StreamDoesNotFallbackWhenExecutionPolicyDisablesFallback(t *testing.T) {
+	provider := &fallbackProvider{
+		responsesStreams: map[string]string{
+			"azure/gpt-4o": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"fallback response\"}\n\ndata: [DONE]\n\n",
+		},
+		responsesErrors: map[string]error{
+			"gpt-4o": core.NewProviderError("openai", http.StatusServiceUnavailable, "model temporarily unavailable", nil),
+		},
+		supportedModels: map[string]string{
+			"gpt-4o":       "openai",
+			"azure/gpt-4o": "azure",
+		},
+	}
+
+	handler := newHandler(provider, nil, nil, nil, nil, requestExecutionPolicyResolverFunc(func(core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+		return &core.ResolvedExecutionPolicy{
+			VersionID: "plan-fallback-off",
+			Features: core.ExecutionFeatures{
+				Cache:      true,
+				Audit:      true,
+				Usage:      true,
+				Guardrails: true,
+				Fallback:   false,
+			},
+		}, nil
+	}), fallbackResolverStub{
+		selectors: []core.ModelSelector{{Provider: "azure", Model: "gpt-4o"}},
+	}, nil)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-4o","stream":true,"input":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.Responses(c); err != nil {
+		t.Fatalf("handler.Responses() error = %v", err)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	}
+	if len(provider.responsesCalls) != 1 || provider.responsesCalls[0] != "gpt-4o" {
+		t.Fatalf("responses calls = %v, want only the primary model", provider.responsesCalls)
+	}
+	if core.GetFallbackUsed(c.Request().Context()) {
+		t.Fatal("expected request context to remain unmarked for fallback")
+	}
+}
+
 func TestChatCompletion_DoesNotFallbackOnNonModelNotFound(t *testing.T) {
 	provider := &fallbackProvider{
 		chatErrors: map[string]error{

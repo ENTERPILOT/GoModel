@@ -1,6 +1,141 @@
 (function(global) {
     function dashboardChartsModule() {
         return {
+            _overviewChartConfig(colors, labels, inputData, outputData) {
+                return {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Input Tokens',
+                                data: inputData,
+                                borderColor: '#c2845a',
+                                backgroundColor: 'rgba(194, 132, 90, 0.1)',
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 3,
+                                pointHoverRadius: 5
+                            },
+                            {
+                                label: 'Output Tokens',
+                                data: outputData,
+                                borderColor: '#7a9e7e',
+                                backgroundColor: 'rgba(122, 158, 126, 0.1)',
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 3,
+                                pointHoverRadius: 5
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 0 },
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: {
+                                labels: { color: colors.text, font: { size: 12 } }
+                            },
+                            tooltip: {
+                                backgroundColor: colors.tooltipBg,
+                                borderColor: colors.tooltipBorder,
+                                borderWidth: 1,
+                                titleColor: colors.tooltipText,
+                                bodyColor: colors.tooltipText,
+                                callbacks: {
+                                    label: function(c) {
+                                        return c.dataset.label + ': ' + c.parsed.y.toLocaleString();
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: colors.grid },
+                                ticks: { color: colors.text, font: { size: 11 }, maxTicksLimit: 10 }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                grid: { color: colors.grid },
+                                ticks: {
+                                    color: colors.text,
+                                    font: { size: 11 },
+                                    callback: function(value) {
+                                        if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
+                                        if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
+                                        return value;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+            },
+
+            _barChartConfig(colors, labels, values, palette) {
+                return {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            data: values,
+                            backgroundColor: labels.map((_, i) => palette[i % palette.length]),
+                            borderColor: 'transparent',
+                            borderWidth: 0,
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 0 },
+                        layout: { padding: { top: 8 } },
+                        scales: {
+                            x: {
+                                grid: { display: false },
+                                ticks: {
+                                    color: colors.text,
+                                    font: { size: 11, family: "'SF Mono', Menlo, Consolas, monospace" },
+                                    maxRotation: 45,
+                                    minRotation: 0
+                                }
+                            },
+                            y: {
+                                grid: { color: colors.grid },
+                                border: { display: false },
+                                ticks: {
+                                    color: colors.text,
+                                    font: { size: 11, family: "'SF Mono', Menlo, Consolas, monospace" },
+                                    callback: (v) => {
+                                        if (this.usageMode === 'costs') return '$' + v.toFixed(2);
+                                        return this.formatTokensShort(v);
+                                    }
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: colors.tooltipBg,
+                                borderColor: colors.tooltipBorder,
+                                borderWidth: 1,
+                                titleColor: colors.tooltipText,
+                                bodyColor: colors.tooltipText,
+                                callbacks: {
+                                    label: (c) => {
+                                        const val = c.parsed.y;
+                                        if (this.usageMode === 'costs') return '$' + val.toFixed(4);
+                                        return this.formatTokensShort(val);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+            },
+
             fillMissingDays(daily) {
                 if (this.interval !== 'daily') {
                     return daily;
@@ -8,15 +143,16 @@
 
                 const byDate = {};
                 daily.forEach((d) => { byDate[d.date] = d; });
-                const end = this.customEndDate ? new Date(this.customEndDate) : new Date();
-                end.setHours(0, 0, 0, 0);
-                const start = this.customStartDate ? new Date(this.customStartDate) : new Date(end);
+                const end = this.customEndDate ? new Date(this.customEndDate) : this.todayDate();
+                let start = this.customStartDate ? new Date(this.customStartDate) : new Date(end);
                 if (!this.customStartDate) {
-                    start.setDate(start.getDate() - (parseInt(this.days, 10) - 1));
+                    start = this.dateKeyToDate(
+                        this.addDaysToDateKey(this.dateToDateKey(end), -(parseInt(this.days, 10) - 1))
+                    );
                 }
                 const result = [];
-                for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-                    const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+                    const key = this.dateToDateKey(d);
                     result.push(byDate[key] || { date: key, input_tokens: 0, output_tokens: 0, total_tokens: 0, requests: 0, input_cost: null, output_cost: null, total_cost: null });
                 }
                 return result;
@@ -25,13 +161,13 @@
             renderChart(retries) {
                 if (retries === undefined) retries = 3;
                 this.$nextTick(() => {
-                    if (this.chart) {
-                        this.chart.destroy();
-                        this.chart = null;
+                    if (this.daily.length === 0 || this.page !== 'overview') {
+                        if (this.chart) {
+                            this.chart.destroy();
+                            this.chart = null;
+                        }
+                        return;
                     }
-
-                    if (this.daily.length === 0) return;
-                    if (this.page !== 'overview') return;
 
                     const canvas = document.getElementById('usageChart');
                     if (!canvas || canvas.offsetWidth === 0) {
@@ -46,77 +182,14 @@
                     const labels = filled.map((d) => d.date);
                     const inputData = filled.map((d) => d.input_tokens);
                     const outputData = filled.map((d) => d.output_tokens);
+                    const config = this._overviewChartConfig(colors, labels, inputData, outputData);
 
-                    this.chart = new Chart(canvas, {
-                        type: 'line',
-                        data: {
-                            labels: labels,
-                            datasets: [
-                                {
-                                    label: 'Input Tokens',
-                                    data: inputData,
-                                    borderColor: '#c2845a',
-                                    backgroundColor: 'rgba(194, 132, 90, 0.1)',
-                                    fill: true,
-                                    tension: 0.3,
-                                    pointRadius: 3,
-                                    pointHoverRadius: 5
-                                },
-                                {
-                                    label: 'Output Tokens',
-                                    data: outputData,
-                                    borderColor: '#7a9e7e',
-                                    backgroundColor: 'rgba(122, 158, 126, 0.1)',
-                                    fill: true,
-                                    tension: 0.3,
-                                    pointRadius: 3,
-                                    pointHoverRadius: 5
-                                }
-                            ]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            animation: { duration: 0 },
-                            interaction: { mode: 'index', intersect: false },
-                            plugins: {
-                                legend: {
-                                    labels: { color: colors.text, font: { size: 12 } }
-                                },
-                                tooltip: {
-                                    backgroundColor: colors.tooltipBg,
-                                    borderColor: colors.tooltipBorder,
-                                    borderWidth: 1,
-                                    titleColor: colors.tooltipText,
-                                    bodyColor: colors.tooltipText,
-                                    callbacks: {
-                                        label: function(c) {
-                                            return c.dataset.label + ': ' + c.parsed.y.toLocaleString();
-                                        }
-                                    }
-                                }
-                            },
-                            scales: {
-                                x: {
-                                    grid: { color: colors.grid },
-                                    ticks: { color: colors.text, font: { size: 11 }, maxTicksLimit: 10 }
-                                },
-                                y: {
-                                    beginAtZero: true,
-                                    grid: { color: colors.grid },
-                                    ticks: {
-                                        color: colors.text,
-                                        font: { size: 11 },
-                                        callback: function(value) {
-                                            if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
-                                            if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
-                                            return value;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
+                    if (this.chart) {
+                        this.chart.destroy();
+                        this.chart = null;
+                    }
+
+                    this.chart = new Chart(canvas, config);
                 });
             },
 
@@ -171,13 +244,13 @@
             renderBarChart(retries) {
                 if (retries === undefined) retries = 3;
                 this.$nextTick(() => {
-                    if (this.usageBarChart) {
-                        this.usageBarChart.destroy();
-                        this.usageBarChart = null;
+                    if (this.modelUsage.length === 0 || this.page !== 'usage') {
+                        if (this.usageBarChart) {
+                            this.usageBarChart.destroy();
+                            this.usageBarChart = null;
+                        }
+                        return;
                     }
-
-                    if (this.modelUsage.length === 0) return;
-                    if (this.page !== 'usage') return;
 
                     const canvas = document.getElementById('usageBarChart');
                     if (!canvas || canvas.offsetWidth === 0) {
@@ -190,66 +263,14 @@
                     const colors = this.chartColors();
                     const { labels, values } = this._barData();
                     const palette = this._barColors();
+                    const config = this._barChartConfig(colors, labels, values, palette);
 
-                    this.usageBarChart = new Chart(canvas, {
-                        type: 'bar',
-                        data: {
-                            labels: labels,
-                            datasets: [{
-                                data: values,
-                                backgroundColor: labels.map((_, i) => palette[i % palette.length]),
-                                borderColor: 'transparent',
-                                borderWidth: 0,
-                                borderRadius: 4
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            animation: { duration: 0 },
-                            layout: { padding: { top: 8 } },
-                            scales: {
-                                x: {
-                                    grid: { display: false },
-                                    ticks: {
-                                        color: colors.text,
-                                        font: { size: 11, family: "'SF Mono', Menlo, Consolas, monospace" },
-                                        maxRotation: 45,
-                                        minRotation: 0
-                                    }
-                                },
-                                y: {
-                                    grid: { color: colors.grid },
-                                    border: { display: false },
-                                    ticks: {
-                                        color: colors.text,
-                                        font: { size: 11, family: "'SF Mono', Menlo, Consolas, monospace" },
-                                        callback: (v) => {
-                                            if (this.usageMode === 'costs') return '$' + v.toFixed(2);
-                                            return this.formatTokensShort(v);
-                                        }
-                                    }
-                                }
-                            },
-                            plugins: {
-                                legend: { display: false },
-                                tooltip: {
-                                    backgroundColor: colors.tooltipBg,
-                                    borderColor: colors.tooltipBorder,
-                                    borderWidth: 1,
-                                    titleColor: colors.tooltipText,
-                                    bodyColor: colors.tooltipText,
-                                    callbacks: {
-                                        label: (c) => {
-                                            const val = c.parsed.y;
-                                            if (this.usageMode === 'costs') return '$' + val.toFixed(4);
-                                            return this.formatTokensShort(val);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
+                    if (this.usageBarChart) {
+                        this.usageBarChart.destroy();
+                        this.usageBarChart = null;
+                    }
+
+                    this.usageBarChart = new Chart(canvas, config);
                 });
             }
         };

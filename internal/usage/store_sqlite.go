@@ -74,6 +74,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 	// Create indexes for common queries
 	indexes := []string{
 		"CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage(timestamp)",
+		"CREATE INDEX IF NOT EXISTS idx_usage_timestamp_epoch ON usage(unixepoch(REPLACE(timestamp, ' ', 'T')))",
 		"CREATE INDEX IF NOT EXISTS idx_usage_request_id ON usage(request_id)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_provider_id ON usage(provider_id)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_model ON usage(model)",
@@ -184,7 +185,7 @@ func (s *SQLiteStore) cleanup() {
 
 	cutoff := time.Now().AddDate(0, 0, -s.retentionDays).UTC().Format(time.RFC3339Nano)
 
-	result, err := s.db.Exec("DELETE FROM usage WHERE timestamp < ?", cutoff)
+	result, err := s.db.Exec("DELETE FROM usage WHERE "+sqliteTimestampEpochExpr()+" < unixepoch(?)", cutoff)
 	if err != nil {
 		slog.Error("failed to cleanup old usage entries", "error", err)
 		return
