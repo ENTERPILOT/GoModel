@@ -185,7 +185,7 @@ func (s *SQLiteStore) cleanup() {
 
 	cutoff := time.Now().AddDate(0, 0, -s.retentionDays).UTC().Format(time.RFC3339Nano)
 
-	result, err := s.db.Exec("DELETE FROM usage WHERE timestamp < ?", cutoff)
+	result, err := s.db.Exec("DELETE FROM usage WHERE "+sqliteTimestampEpochExpr()+" < unixepoch(?)", cutoff)
 	if err != nil {
 		slog.Error("failed to cleanup old usage entries", "error", err)
 		return

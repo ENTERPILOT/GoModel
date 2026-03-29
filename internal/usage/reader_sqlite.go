@@ -107,7 +107,7 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 	// Fetch page
 	dataQuery := `SELECT id, request_id, provider_id, timestamp, model, provider, endpoint,
 		input_tokens, output_tokens, total_tokens, COALESCE(input_cost, 0), COALESCE(output_cost, 0), COALESCE(total_cost, 0), raw_data, COALESCE(costs_calculation_caveat, '')
-		FROM usage` + where + ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+		FROM usage` + where + ` ORDER BY ` + sqliteTimestampEpochExpr() + ` DESC, id DESC LIMIT ? OFFSET ?`
 	dataArgs := append(append([]any(nil), args...), limit, offset)
 
 	rows, err := r.db.QueryContext(ctx, dataQuery, dataArgs...)
@@ -392,19 +392,4 @@ func sqliteNextOffsetTransition(startUTC time.Time, endUTC time.Time, location *
 func sqliteOffsetMinutes(ts time.Time, location *time.Location) int {
 	_, offsetSeconds := ts.In(location).Zone()
 	return offsetSeconds / 60
-}
-
-func parseUsageTimestamp(ts string) time.Time {
-	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-		return t
-	}
-	if t, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", ts); err == nil {
-		return t
-	}
-	if t, err := time.Parse("2006-01-02T15:04:05Z", ts); err == nil {
-		return t
-	}
-
-	slog.Warn("failed to parse usage timestamp", "raw_timestamp", ts)
-	return time.Time{}
 }

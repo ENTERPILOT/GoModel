@@ -114,7 +114,9 @@ body {
     flex-direction: column;
     position: sticky;
     top: 0;
-    height: 100vh;
+    max-height: 100vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     z-index: 10;
     transition: flex-basis 0.2s, width 0.2s;
 }

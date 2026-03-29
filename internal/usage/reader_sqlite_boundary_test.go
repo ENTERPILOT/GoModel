@@ -399,3 +399,178 @@ func TestSQLiteReaderGroupingRange_UsesAbsoluteTimestampExtremaAcrossOffsets(t *
 		t.Fatalf("expected range end %s, got %s", expectedEnd, end)
 	}
 }
+
+func TestSQLiteReaderGetUsageLog_OrdersMixedTimestampFormatsByAbsoluteTime(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite database: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := NewSQLiteStore(db, 0); err != nil {
+		t.Fatalf("failed to create sqlite store: %v", err)
+	}
+
+	ctx := context.Background()
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO usage (
+			id, request_id, provider_id, timestamp, model, provider, endpoint,
+			input_tokens, output_tokens, total_tokens,
+			input_cost, output_cost, total_cost, costs_calculation_caveat
+		) VALUES
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"latest-negative-offset",
+		"req-latest",
+		"provider-latest",
+		"2026-03-29 23:30:00-02:00",
+		"gpt-5",
+		"openai",
+		"/v1/chat/completions",
+		0,
+		30,
+		30,
+		0.0,
+		0.0,
+		0.0,
+		"",
+		"middle-zulu",
+		"req-middle",
+		"provider-middle",
+		"2026-03-29T23:00:00Z",
+		"gpt-5",
+		"openai",
+		"/v1/chat/completions",
+		0,
+		20,
+		20,
+		0.0,
+		0.0,
+		0.0,
+		"",
+		"earliest-positive-offset",
+		"req-earliest",
+		"provider-earliest",
+		"2026-03-29 00:30:00+02:00",
+		"gpt-5",
+		"openai",
+		"/v1/chat/completions",
+		0,
+		10,
+		10,
+		0.0,
+		0.0,
+		0.0,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("failed to seed mixed-format usage entries: %v", err)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create sqlite reader: %v", err)
+	}
+
+	log, err := reader.GetUsageLog(ctx, UsageLogParams{
+		Limit:  2,
+		Offset: 0,
+	})
+	if err != nil {
+		t.Fatalf("GetUsageLog returned error: %v", err)
+	}
+
+	if len(log.Entries) != 2 {
+		t.Fatalf("expected 2 log entries, got %d", len(log.Entries))
+	}
+	if log.Entries[0].ID != "latest-negative-offset" {
+		t.Fatalf("expected latest entry first, got %s", log.Entries[0].ID)
+	}
+	if log.Entries[1].ID != "middle-zulu" {
+		t.Fatalf("expected middle entry second, got %s", log.Entries[1].ID)
+	}
+}
+
+func TestSQLiteStoreCleanup_KeepsNewerLegacyOffsetRows(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite database: %v", err)
+	}
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 1)
+	if err != nil {
+		t.Fatalf("failed to create sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	cutoff := time.Now().AddDate(0, 0, -1).UTC().Truncate(time.Second)
+	keepTimestamp := cutoff.Add(90 * time.Minute).In(time.FixedZone("minus2", -2*60*60)).Format("2006-01-02 15:04:05-07:00")
+	deleteTimestamp := cutoff.Add(-90 * time.Minute).In(time.FixedZone("plus2", 2*60*60)).Format("2006-01-02 15:04:05-07:00")
+
+	_, err = db.Exec(`
+		INSERT INTO usage (
+			id, request_id, provider_id, timestamp, model, provider, endpoint,
+			input_tokens, output_tokens, total_tokens,
+			input_cost, output_cost, total_cost, costs_calculation_caveat
+		) VALUES
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"keep-newer-legacy",
+		"req-keep",
+		"provider-keep",
+		keepTimestamp,
+		"gpt-5",
+		"openai",
+		"/v1/chat/completions",
+		0,
+		10,
+		10,
+		0.0,
+		0.0,
+		0.0,
+		"",
+		"delete-older-legacy",
+		"req-delete",
+		"provider-delete",
+		deleteTimestamp,
+		"gpt-5",
+		"openai",
+		"/v1/chat/completions",
+		0,
+		20,
+		20,
+		0.0,
+		0.0,
+		0.0,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("failed to seed cleanup rows: %v", err)
+	}
+
+	store.cleanup()
+
+	var remainingIDs []string
+	rows, err := db.Query(`SELECT id FROM usage ORDER BY id`)
+	if err != nil {
+		t.Fatalf("failed to query remaining rows: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("failed to scan remaining id: %v", err)
+		}
+		remainingIDs = append(remainingIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("failed to iterate remaining rows: %v", err)
+	}
+
+	if len(remainingIDs) != 1 || remainingIDs[0] != "keep-newer-legacy" {
+		t.Fatalf("expected only the newer legacy row to remain, got %v", remainingIDs)
+	}
+}
