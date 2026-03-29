@@ -114,16 +114,18 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 			}
 
 			registry.SetModelList(list, raw)
-			registry.EnrichModels()
+			metadataStats := registry.enrichModels()
 
 			if err := registry.SaveToCache(fetchCtx); err != nil {
 				slog.Warn("failed to save cache after model list fetch", "error", err)
 			}
-			slog.Info("model list loaded",
+			attrs := []any{
 				"models", len(list.Models),
 				"providers", len(list.Providers),
 				"provider_models", len(list.ProviderModels),
-			)
+			}
+			attrs = append(attrs, metadataStats.slogAttrs()...)
+			slog.Info("model list loaded", attrs...)
 		}()
 	}
 

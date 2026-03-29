@@ -50,6 +50,20 @@ type ModelRegistry struct {
 	categoryCache            map[core.ModelCategory][]ModelWithProvider
 }
 
+type metadataEnrichmentStats struct {
+	Enriched  int
+	Total     int
+	Providers int
+}
+
+func (s metadataEnrichmentStats) slogAttrs() []any {
+	return []any{
+		"metadata_enriched", s.Enriched,
+		"metadata_total", s.Total,
+		"metadata_providers", s.Providers,
+	}
+}
+
 // NewModelRegistry creates a new model registry
 func NewModelRegistry() *ModelRegistry {
 	return &ModelRegistry{
@@ -190,8 +204,9 @@ func (r *ModelRegistry) Initialize(ctx context.Context) error {
 	r.mu.RLock()
 	list := r.modelList
 	r.mu.RUnlock()
+	metadataStats := metadataEnrichmentStats{}
 	if list != nil {
-		enrichProviderModelMaps(list, providerTypes, newModelsByProvider, nil)
+		metadataStats = enrichProviderModelMaps(list, providerTypes, newModelsByProvider, nil)
 	}
 
 	// Atomically swap the models map and invalidate sorted caches
@@ -206,11 +221,13 @@ func (r *ModelRegistry) Initialize(ctx context.Context) error {
 	r.initialized = true
 	r.initMu.Unlock()
 
-	slog.Info("model registry initialized",
+	attrs := []any{
 		"total_models", totalModels,
 		"providers", len(providers),
 		"failed_providers", failedProviders,
-	)
+	}
+	attrs = append(attrs, metadataStats.slogAttrs()...)
+	slog.Info("model registry initialized", attrs...)
 
 	return nil
 }
@@ -297,8 +314,9 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	}
 
 	// Enrich cached models with model list metadata
+	metadataStats := metadataEnrichmentStats{}
 	if list != nil {
-		enrichProviderModelMaps(list, r.snapshotProviderTypes(), newModelsByProvider, nil)
+		metadataStats = enrichProviderModelMaps(list, r.snapshotProviderTypes(), newModelsByProvider, nil)
 	}
 
 	r.mu.Lock()
@@ -311,10 +329,12 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	}
 	r.mu.Unlock()
 
-	slog.Info("loaded models from cache",
+	attrs := []any{
 		"models", len(newModels),
 		"cache_updated_at", modelCache.UpdatedAt,
-	)
+	}
+	attrs = append(attrs, metadataStats.slogAttrs()...)
+	slog.Info("loaded models from cache", attrs...)
 
 	return len(newModels), nil
 }
@@ -902,24 +922,29 @@ func (r *ModelRegistry) SetModelList(list *modeldata.ModelList, raw json.RawMess
 // entries instead of mutating them in place so concurrent readers can safely keep
 // using older snapshots after unlocking.
 func (r *ModelRegistry) EnrichModels() {
+	_ = r.enrichModels()
+}
+
+func (r *ModelRegistry) enrichModels() metadataEnrichmentStats {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.modelList == nil || len(r.models) == 0 {
-		return
+		return metadataEnrichmentStats{}
 	}
 
 	providerTypes := make(map[core.Provider]string, len(r.providerTypes))
 	maps.Copy(providerTypes, r.providerTypes)
 
 	replacements := make(map[*ModelInfo]*ModelInfo, len(r.models))
-	enrichProviderModelMaps(r.modelList, providerTypes, r.modelsByProvider, replacements)
+	stats := enrichProviderModelMaps(r.modelList, providerTypes, r.modelsByProvider, replacements)
 	for modelID, info := range r.models {
 		if replacement, ok := replacements[info]; ok {
 			r.models[modelID] = replacement
 		}
 	}
 	r.invalidateSortedCaches()
+	return stats
 }
 
 // ResolveMetadata resolves metadata for a model directly via the stored model list,
@@ -976,21 +1001,26 @@ func enrichProviderModelMaps(
 	providerTypes map[core.Provider]string,
 	modelsByProvider map[string]map[string]*ModelInfo,
 	replacements map[*ModelInfo]*ModelInfo,
-) {
+) metadataEnrichmentStats {
 	if list == nil {
-		return
+		return metadataEnrichmentStats{}
 	}
+	stats := metadataEnrichmentStats{}
 	for _, providerModels := range modelsByProvider {
 		if len(providerModels) == 0 {
 			continue
 		}
+		stats.Providers++
 		accessor := &registryAccessor{
 			models:        providerModels,
 			providerTypes: providerTypes,
 			replacements:  replacements,
 		}
-		modeldata.Enrich(accessor, list)
+		enrichStats := modeldata.Enrich(accessor, list)
+		stats.Enriched += enrichStats.Enriched
+		stats.Total += enrichStats.Total
 	}
+	return stats
 }
 
 // registryAccessor implements modeldata.ModelInfoAccessor.
@@ -1104,14 +1134,16 @@ func (r *ModelRegistry) refreshModelList(ctx context.Context, url string) {
 	}
 
 	r.SetModelList(list, raw)
-	r.EnrichModels()
+	metadataStats := r.enrichModels()
 
 	if err := r.SaveToCache(fetchCtx); err != nil {
 		if !isBenignBackgroundRefreshError(ctx, err) {
 			slog.Warn("failed to save cache after model list refresh", "error", err)
 		}
 	}
-	slog.Debug("model list refreshed", "models", len(list.Models))
+	attrs := []any{"models", len(list.Models)}
+	attrs = append(attrs, metadataStats.slogAttrs()...)
+	slog.Debug("model list refreshed", attrs...)
 }
 
 func isBenignBackgroundRefreshError(parent context.Context, err error) bool {

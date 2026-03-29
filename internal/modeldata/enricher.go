@@ -1,8 +1,6 @@
 package modeldata
 
 import (
-	"log/slog"
-
 	"gomodel/internal/core"
 )
 
@@ -18,11 +16,17 @@ type ModelInfoAccessor interface {
 	SetMetadata(modelID string, meta *core.ModelMetadata)
 }
 
+// EnrichStats summarizes one metadata enrichment pass.
+type EnrichStats struct {
+	Enriched int
+	Total    int
+}
+
 // Enrich iterates all models accessible via the accessor and attaches resolved
 // metadata from the model list. Models not found in the list are left unchanged.
-func Enrich(accessor ModelInfoAccessor, list *ModelList) {
+func Enrich(accessor ModelInfoAccessor, list *ModelList) EnrichStats {
 	if list == nil || accessor == nil {
-		return
+		return EnrichStats{}
 	}
 
 	var enriched int
@@ -37,8 +41,8 @@ func Enrich(accessor ModelInfoAccessor, list *ModelList) {
 		}
 	}
 
-	slog.Info("enriched models with metadata",
-		"enriched", enriched,
-		"total", len(ids),
-	)
+	return EnrichStats{
+		Enriched: enriched,
+		Total:    len(ids),
+	}
 }

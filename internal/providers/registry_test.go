@@ -1,11 +1,14 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -606,6 +609,92 @@ func TestModelRegistry(t *testing.T) {
 			t.Errorf("expected empty provider type for unknown model, got '%s'", pType)
 		}
 	})
+}
+
+func TestInitialize_LogsSingleMetadataSummaryPerCycle(t *testing.T) {
+	registry := NewModelRegistry()
+
+	openAIProvider := &registryMockProvider{
+		name: "openai-primary",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-test", Object: "model", OwnedBy: "openai"},
+			},
+		},
+	}
+	anthropicProvider := &registryMockProvider{
+		name: "anthropic-primary",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "claude-test", Object: "model", OwnedBy: "anthropic"},
+			},
+		},
+	}
+	registry.RegisterProviderWithNameAndType(openAIProvider, "openai-primary", "openai")
+	registry.RegisterProviderWithNameAndType(anthropicProvider, "anthropic-primary", "anthropic")
+
+	raw := []byte(`{
+		"version": 1,
+		"updated_at": "2025-01-01T00:00:00Z",
+		"providers": {
+			"openai": {
+				"display_name": "OpenAI",
+				"api_type": "openai",
+				"supported_modes": ["chat"]
+			},
+			"anthropic": {
+				"display_name": "Anthropic",
+				"api_type": "openai",
+				"supported_modes": ["chat"]
+			}
+		},
+		"models": {
+			"gpt-test": {
+				"display_name": "GPT Test",
+				"modes": ["chat"]
+			},
+			"claude-test": {
+				"display_name": "Claude Test",
+				"modes": ["chat"]
+			}
+		},
+		"provider_models": {}
+	}`)
+	list, err := modeldata.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	registry.SetModelList(list, raw)
+
+	var buf bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() {
+		slog.SetDefault(original)
+	})
+
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	logs := buf.String()
+	if got := strings.Count(logs, `"msg":"enriched models with metadata"`); got != 0 {
+		t.Fatalf("expected no standalone enrichment info logs, got %d:\n%s", got, logs)
+	}
+	if got := strings.Count(logs, `"msg":"model registry initialized"`); got != 1 {
+		t.Fatalf("expected one initialization summary log, got %d:\n%s", got, logs)
+	}
+	if !strings.Contains(logs, `"metadata_enriched":2`) {
+		t.Fatalf("expected initialization log to include metadata_enriched=2:\n%s", logs)
+	}
+	if !strings.Contains(logs, `"metadata_total":2`) {
+		t.Fatalf("expected initialization log to include metadata_total=2:\n%s", logs)
+	}
+	if !strings.Contains(logs, `"metadata_providers":2`) {
+		t.Fatalf("expected initialization log to include metadata_providers=2:\n%s", logs)
+	}
 }
 
 func TestListModelsWithProvider_Empty(t *testing.T) {
