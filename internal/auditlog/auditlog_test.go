@@ -126,6 +126,7 @@ func TestLogEntryJSON(t *testing.T) {
 		ResolvedModel: "openai/gpt-4",
 		Provider:      "openai",
 		AliasUsed:     true,
+		CacheType:     CacheTypeExact,
 		StatusCode:    200,
 		RequestID:     "req-123",
 		ClientIP:      "192.168.1.1",
@@ -164,6 +165,9 @@ func TestLogEntryJSON(t *testing.T) {
 	}
 	if decoded.AliasUsed != entry.AliasUsed {
 		t.Errorf("AliasUsed mismatch: expected %v, got %v", entry.AliasUsed, decoded.AliasUsed)
+	}
+	if decoded.CacheType != entry.CacheType {
+		t.Errorf("CacheType mismatch: expected %q, got %q", entry.CacheType, decoded.CacheType)
 	}
 	if decoded.StatusCode != entry.StatusCode {
 		t.Errorf("StatusCode mismatch: expected %d, got %d", entry.StatusCode, decoded.StatusCode)
@@ -864,6 +868,8 @@ func TestCreateStreamEntry(t *testing.T) {
 		ResolvedModel: "openai/gpt-5-nano",
 		Provider:      "openai",
 		AliasUsed:     true,
+		ExecutionPlanVersionID: "plan-version-123",
+		CacheType:     CacheTypeSemantic,
 		StatusCode:    200,
 		RequestID:     "req-123",
 		ClientIP:      "127.0.0.1",
@@ -896,6 +902,12 @@ func TestCreateStreamEntry(t *testing.T) {
 	}
 	if streamEntry.AliasUsed != baseEntry.AliasUsed {
 		t.Errorf("AliasUsed mismatch")
+	}
+	if streamEntry.CacheType != baseEntry.CacheType {
+		t.Errorf("CacheType mismatch")
+	}
+	if streamEntry.ExecutionPlanVersionID != baseEntry.ExecutionPlanVersionID {
+		t.Errorf("ExecutionPlanVersionID mismatch")
 	}
 	if !streamEntry.Stream {
 		t.Error("Stream should be true")

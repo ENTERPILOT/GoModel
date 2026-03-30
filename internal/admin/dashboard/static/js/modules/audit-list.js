@@ -34,6 +34,13 @@
                     if (requestToken !== this.auditFetchToken) return;
                     this.auditLog = payload;
                     if (!this.auditLog.entries) this.auditLog.entries = [];
+                    if (typeof this.prefetchAuditExecutionPlans === 'function') {
+                        try {
+                            await this.prefetchAuditExecutionPlans(this.auditLog.entries);
+                        } catch (e) {
+                            console.error('Failed to prefetch audit workflows:', e);
+                        }
+                    }
                 } catch (e) {
                     console.error('Failed to fetch audit log:', e);
                     if (requestToken !== this.auditFetchToken) return;
@@ -133,6 +140,46 @@
                 } catch (_) {
                     return String(v);
                 }
+            },
+
+            auditRequestPane(entry) {
+                const data = entry && entry.data ? entry.data : null;
+
+                return {
+                    title: 'Request',
+                    entry,
+                    copyBody: data && data.request_body,
+                    showErrorMessage: false,
+                    errorMessage: null,
+                    showHeaders: !!(data && data.request_headers),
+                    headers: data && data.request_headers,
+                    showBody: !!(data && data.request_body),
+                    body: data && data.request_body,
+                    showEmpty: !data || (!data.request_headers && !data.request_body),
+                    emptyMessage: 'Request details were not captured.',
+                    showTooLarge: !!(data && data.request_body_too_big_to_handle),
+                    tooLargeMessage: 'Request body was too large to capture.'
+                };
+            },
+
+            auditResponsePane(entry) {
+                const data = entry && entry.data ? entry.data : null;
+
+                return {
+                    title: 'Response',
+                    entry,
+                    copyBody: data && data.response_body,
+                    showErrorMessage: !!(data && data.error_message),
+                    errorMessage: data && data.error_message,
+                    showHeaders: !!(data && data.response_headers),
+                    headers: data && data.response_headers,
+                    showBody: !!(data && data.response_body),
+                    body: data && data.response_body,
+                    showEmpty: !data || (!data.error_message && !data.response_headers && !data.response_body),
+                    emptyMessage: 'Response details were not captured.',
+                    showTooLarge: !!(data && data.response_body_too_big_to_handle),
+                    tooLargeMessage: 'Response body was too large to capture.'
+                };
             },
 
             async copyAuditJSON(v, event) {

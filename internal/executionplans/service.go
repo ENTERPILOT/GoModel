@@ -278,6 +278,26 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 	return nil
 }
 
+// GetView returns one execution plan version view, including inactive historical versions.
+func (s *Service) GetView(ctx context.Context, id string) (View, error) {
+	if s == nil {
+		return View{}, fmt.Errorf("execution plan service is required")
+	}
+
+	version, err := s.store.Get(ctx, strings.TrimSpace(id))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return View{}, err
+		}
+		return View{}, fmt.Errorf("load execution plan %q: %w", id, err)
+	}
+	if version == nil {
+		return View{}, ErrNotFound
+	}
+
+	return s.viewForVersion(*version)
+}
+
 // ListViews returns the active execution plans together with their effective
 // runtime features after process-level caps are applied.
 func (s *Service) ListViews(ctx context.Context) ([]View, error) {

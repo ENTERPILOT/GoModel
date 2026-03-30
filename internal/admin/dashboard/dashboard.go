@@ -22,7 +22,7 @@ type Handler struct {
 
 // New creates a new dashboard handler with parsed templates and static file server.
 func New() (*Handler, error) {
-	tmpl, err := template.ParseFS(content, "templates/layout.html", "templates/index.html", "templates/date-picker.html")
+	tmpl, err := template.ParseFS(content, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}

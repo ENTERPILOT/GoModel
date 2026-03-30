@@ -25,6 +25,7 @@ type mongoLogRow struct {
 	Provider               string    `bson:"provider"`
 	AliasUsed              bool      `bson:"alias_used"`
 	ExecutionPlanVersionID string    `bson:"execution_plan_version_id"`
+	CacheType              string    `bson:"cache_type"`
 	StatusCode             int       `bson:"status_code"`
 	RequestID              string    `bson:"request_id"`
 	ClientIP               string    `bson:"client_ip"`
@@ -46,6 +47,7 @@ func (r mongoLogRow) toLogEntry() *LogEntry {
 		Provider:               r.Provider,
 		AliasUsed:              r.AliasUsed,
 		ExecutionPlanVersionID: r.ExecutionPlanVersionID,
+		CacheType:              normalizeCacheType(r.CacheType),
 		StatusCode:             r.StatusCode,
 		RequestID:              r.RequestID,
 		ClientIP:               r.ClientIP,

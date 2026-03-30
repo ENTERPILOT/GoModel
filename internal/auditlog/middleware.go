@@ -352,6 +352,28 @@ func EnrichEntryWithExecutionPlan(c *echo.Context, plan *core.ExecutionPlan) {
 	enrichEntryWithExecutionPlan(entry, plan)
 }
 
+// EnrichEntryWithCacheType attaches cache-hit metadata to the live audit entry.
+// The value is intentionally sourced directly from the cache middleware, not
+// inferred from response headers after the fact.
+func EnrichEntryWithCacheType(c *echo.Context, cacheType string) {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return
+	}
+
+	entry, ok := entryVal.(*LogEntry)
+	if !ok || entry == nil {
+		return
+	}
+
+	cacheType = normalizeCacheType(cacheType)
+	if cacheType == "" {
+		return
+	}
+
+	entry.CacheType = cacheType
+}
+
 func auditEnabledForContext(ctx context.Context) bool {
 	plan := core.GetExecutionPlan(ctx)
 	return plan == nil || plan.AuditEnabled()

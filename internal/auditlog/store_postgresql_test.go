@@ -18,6 +18,7 @@ func TestBuildAuditLogInsert(t *testing.T) {
 			ResolvedModel: "gpt-4o-mini",
 			Provider:      "openai",
 			AliasUsed:     true,
+			CacheType:     CacheTypeExact,
 			StatusCode:    200,
 			RequestID:     "req-1",
 			ClientIP:      "127.0.0.1",
@@ -49,29 +50,35 @@ func TestBuildAuditLogInsert(t *testing.T) {
 	})
 
 	normalized := strings.Join(strings.Fields(query), " ")
-	wantQuery := "INSERT INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, status_code, request_id, client_ip, method, path, user_path, stream, error_type, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17), ($18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34) ON CONFLICT (id) DO NOTHING"
+	wantQuery := "INSERT INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, cache_type, status_code, request_id, client_ip, method, path, user_path, stream, error_type, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18), ($19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36) ON CONFLICT (id) DO NOTHING"
 	if normalized != wantQuery {
 		t.Fatalf("query = %q, want %q", normalized, wantQuery)
 	}
 
-	if got, want := len(args), 34; got != want {
+	if got, want := len(args), 36; got != want {
 		t.Fatalf("len(args) = %d, want %d", got, want)
 	}
 	if got := args[0]; got != "log-1" {
 		t.Fatalf("args[0] = %v, want log-1", got)
 	}
-	if got := args[17]; got != "log-2" {
-		t.Fatalf("args[17] = %v, want log-2", got)
+	if got := args[8]; got != CacheTypeExact {
+		t.Fatalf("args[8] = %v, want %q", got, CacheTypeExact)
 	}
-	if got := string(args[16].([]byte)); got != `{"user_agent":"test-agent"}` {
-		t.Fatalf("args[16] = %q, want %q", got, `{"user_agent":"test-agent"}`)
+	if got := args[18]; got != "log-2" {
+		t.Fatalf("args[18] = %v, want log-2", got)
 	}
-	dataJSON, ok := args[33].([]byte)
+	if got := string(args[17].([]byte)); got != `{"user_agent":"test-agent"}` {
+		t.Fatalf("args[17] = %q, want %q", got, `{"user_agent":"test-agent"}`)
+	}
+	if got := args[26]; got != nil {
+		t.Fatalf("args[26] = %v, want nil cache type", got)
+	}
+	dataJSON, ok := args[35].([]byte)
 	if !ok {
-		t.Fatalf("args[33] has type %T, want []byte", args[33])
+		t.Fatalf("args[35] has type %T, want []byte", args[35])
 	}
 	if dataJSON != nil {
-		t.Fatalf("args[33] = %v, want nil data", dataJSON)
+		t.Fatalf("args[35] = %v, want nil data", dataJSON)
 	}
 }
 

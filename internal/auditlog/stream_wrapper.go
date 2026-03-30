@@ -81,14 +81,16 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 	// Create a copy of the entry for the stream.
 	// The stream observer will complete and write it when the stream closes.
 	entryCopy := &LogEntry{
-		ID:            baseEntry.ID,
-		Timestamp:     baseEntry.Timestamp,
-		DurationNs:    baseEntry.DurationNs,
-		Model:         baseEntry.Model,
-		ResolvedModel: baseEntry.ResolvedModel,
-		Provider:      baseEntry.Provider,
-		AliasUsed:     baseEntry.AliasUsed,
-		StatusCode:    baseEntry.StatusCode,
+		ID:                     baseEntry.ID,
+		Timestamp:              baseEntry.Timestamp,
+		DurationNs:             baseEntry.DurationNs,
+		Model:                  baseEntry.Model,
+		ResolvedModel:          baseEntry.ResolvedModel,
+		Provider:               baseEntry.Provider,
+		AliasUsed:              baseEntry.AliasUsed,
+		ExecutionPlanVersionID: baseEntry.ExecutionPlanVersionID,
+		CacheType:              baseEntry.CacheType,
+		StatusCode:             baseEntry.StatusCode,
 		// Copy extracted fields
 		RequestID: baseEntry.RequestID,
 		ClientIP:  baseEntry.ClientIP,

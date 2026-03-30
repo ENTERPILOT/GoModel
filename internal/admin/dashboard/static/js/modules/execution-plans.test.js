@@ -38,8 +38,312 @@ test('executionPlanProviderOptions returns unique sorted provider types', () => 
     );
 });
 
+test('defaultExecutionPlanForm starts fallback disabled for new workflows', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(module.executionPlanForm.features.fallback, false);
+    assert.equal(module.defaultExecutionPlanForm().features.fallback, false);
+});
+
+test('executionPlanPreview mirrors the draft workflow card state from the editor form', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        name: 'Draft workflow',
+        description: 'Live preview of the edited workflow',
+        features: {
+            cache: true,
+            audit: false,
+            usage: true,
+            guardrails: true,
+            fallback: false
+        },
+        guardrails: [
+            { ref: 'policy-system', step: 10 }
+        ]
+    };
+
+    assert.equal(
+        JSON.stringify(module.executionPlanPreview()),
+        JSON.stringify({
+            id: 'draft-workflow-preview',
+            scope_type: 'provider_model',
+            scope_display: 'openai/gpt-5',
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            },
+            name: 'Draft workflow',
+            description: 'Live preview of the edited workflow',
+            plan_payload: {
+                schema_version: 1,
+                features: {
+                    cache: true,
+                    audit: false,
+                    usage: true,
+                    guardrails: true,
+                    fallback: false
+                },
+                guardrails: [
+                    { ref: 'policy-system', step: 10 }
+                ]
+            }
+        })
+    );
+});
+
+test('executionPlanPreview does not coerce blank guardrail steps into step zero', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        name: 'Draft workflow',
+        description: 'Preview should not invent step zero',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: true,
+            fallback: false
+        },
+        guardrails: [
+            { ref: 'policy-system', step: '   ' }
+        ]
+    };
+
+    assert.equal(
+        JSON.stringify(module.executionPlanPreview().plan_payload.guardrails),
+        JSON.stringify([])
+    );
+});
+
+test('executionPlanWorkflowChart returns the shared chart contract for workflow sources', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        JSON.stringify(module.executionPlanWorkflowChart({
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            },
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: false,
+                    guardrails: true,
+                    fallback: true
+                },
+                guardrails: [
+                    { ref: 'policy-system', step: 10 },
+                    { ref: 'pii', step: 20 }
+                ]
+            }
+        })),
+        JSON.stringify({
+            showGuardrails: true,
+            guardrailLabel: '2 steps',
+            showCache: true,
+            cacheNodeClass: '',
+            cacheConnClass: '',
+            cacheStatusLabel: null,
+            aiLabel: 'openai',
+            aiSublabel: 'gpt-5',
+            aiConnClass: '',
+            aiNodeClass: '',
+            responseConnClass: '',
+            responseNodeClass: '',
+            showAsync: true,
+            showUsage: false,
+            showAudit: true
+        })
+    );
+});
+
+test('executionPlanWorkflowChart masks globally disabled workflow features from persisted plans', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'off',
+        USAGE_ENABLED: 'off',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'off',
+        SEMANTIC_CACHE_ENABLED: 'off'
+    };
+
+    assert.equal(
+        JSON.stringify(module.executionPlanWorkflowChart({
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            },
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: true,
+                    fallback: true
+                },
+                guardrails: [
+                    { ref: 'policy-system', step: 10 }
+                ]
+            }
+        })),
+        JSON.stringify({
+            showGuardrails: false,
+            guardrailLabel: '',
+            showCache: false,
+            cacheNodeClass: '',
+            cacheConnClass: '',
+            cacheStatusLabel: null,
+            aiLabel: 'openai',
+            aiSublabel: 'gpt-5',
+            aiConnClass: '',
+            aiNodeClass: '',
+            responseConnClass: '',
+            responseNodeClass: '',
+            showAsync: false,
+            showUsage: false,
+            showAudit: false
+        })
+    );
+});
+
+test('executionPlanAuditChart returns the shared chart contract for audit runtime entries', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanVersionsByID = {
+        'historical-v1': {
+            id: 'historical-v1',
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            },
+            plan_payload: {
+                features: {
+                    cache: false,
+                    audit: true,
+                    usage: true,
+                    guardrails: true,
+                    fallback: true
+                },
+                guardrails: [
+                    { ref: 'policy-system', step: 10 }
+                ]
+            }
+        }
+    };
+
+    assert.equal(
+        JSON.stringify(module.executionPlanAuditChart({
+            execution_plan_version_id: 'historical-v1',
+            cache_type: 'semantic',
+            provider: 'openai',
+            model: 'gpt-5',
+            status_code: 200
+        })),
+        JSON.stringify({
+            showGuardrails: true,
+            guardrailLabel: '1 step',
+            showCache: true,
+            cacheNodeClass: 'ep-node-cache-semantic',
+            cacheConnClass: 'ep-conn-hit',
+            cacheStatusLabel: 'Hit (Semantic)',
+            aiLabel: 'openai',
+            aiSublabel: 'gpt-5',
+            aiConnClass: 'ep-conn-dim',
+            aiNodeClass: 'ep-node-ai-skipped',
+            responseConnClass: 'ep-conn-dim',
+            responseNodeClass: 'ep-node-endpoint-success',
+            showAsync: true,
+            showUsage: true,
+            showAudit: true
+        })
+    );
+});
+
+test('executionPlanAuditChart forces audit nodes even when the workflow version cannot be resolved', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        JSON.stringify(module.executionPlanAuditChart({
+            execution_plan_version_id: 'missing-plan',
+            cache_type: 'exact',
+            provider: 'openai',
+            model: 'gpt-5',
+            status_code: 200
+        })),
+        JSON.stringify({
+            showGuardrails: false,
+            guardrailLabel: '',
+            showCache: true,
+            cacheNodeClass: 'ep-node-cache-hit',
+            cacheConnClass: 'ep-conn-hit',
+            cacheStatusLabel: 'Hit (Exact)',
+            aiLabel: 'openai',
+            aiSublabel: 'gpt-5',
+            aiConnClass: 'ep-conn-dim',
+            aiNodeClass: 'ep-node-ai-skipped',
+            responseConnClass: 'ep-conn-dim',
+            responseNodeClass: 'ep-node-endpoint-success',
+            showAsync: true,
+            showUsage: false,
+            showAudit: true
+        })
+    );
+});
+
+test('executionPlanSubmitMode switches to save when an active workflow already matches the selected scope', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlans = [
+        {
+            id: 'global-plan',
+            scope: {
+                scope_provider: '',
+                scope_model: ''
+            }
+        },
+        {
+            id: 'openai-gpt-5-plan',
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            }
+        }
+    ];
+    module.executionPlanForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        name: '',
+        description: '',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false,
+            fallback: false
+        },
+        guardrails: []
+    };
+
+    assert.equal(module.executionPlanActiveScopeMatch().id, 'openai-gpt-5-plan');
+    assert.equal(module.executionPlanSubmitMode(), 'save');
+    assert.equal(module.executionPlanSubmitLabel(), 'Save');
+    assert.equal(module.executionPlanSubmittingLabel(), 'Saving...');
+
+    module.executionPlanForm.scope_model = 'gpt-4o-mini';
+    assert.equal(module.executionPlanActiveScopeMatch(), null);
+    assert.equal(module.executionPlanSubmitMode(), 'create');
+    assert.equal(module.executionPlanSubmitLabel(), 'Create');
+    assert.equal(module.executionPlanSubmittingLabel(), 'Creating...');
+});
+
 test('buildExecutionPlanRequest emits provider-model payload and strips guardrails when disabled', () => {
     const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'manual'
+    };
     module.executionPlanForm = {
         scope_provider: 'openai',
         scope_model: 'gpt-5',
@@ -50,7 +354,8 @@ test('buildExecutionPlanRequest emits provider-model payload and strips guardrai
             cache: true,
             audit: true,
             usage: true,
-            guardrails: false
+            guardrails: false,
+            fallback: false
         },
         guardrails: [
             { ref: 'policy-system', step: 10 }
@@ -71,7 +376,8 @@ test('buildExecutionPlanRequest emits provider-model payload and strips guardrai
                     cache: true,
                     audit: true,
                     usage: true,
-                    guardrails: false
+                    guardrails: false,
+                    fallback: false
                 },
                 guardrails: []
             }
@@ -85,7 +391,8 @@ test('openExecutionPlanCreate hydrates features and guardrails via shared normal
         cache: false,
         audit: false,
         usage: true,
-        guardrails: true
+        guardrails: true,
+        fallback: false
     });
     module.executionPlanSourceGuardrails = () => ([
         { ref: 'policy-system', step: 30 }
@@ -119,14 +426,68 @@ test('openExecutionPlanCreate hydrates features and guardrails via shared normal
             cache: false,
             audit: false,
             usage: true,
-            guardrails: true
+            guardrails: true,
+            fallback: false
         })
     );
+    assert.equal(module.executionPlanFormHydrated, true);
     assert.equal(
         JSON.stringify(module.executionPlanForm.guardrails),
         JSON.stringify([{ ref: 'policy-system', step: 30 }])
     );
     assert.equal(module.executionPlanForm.scope_user_path, '/team/alpha');
+});
+
+test('openExecutionPlanCreate drops blank guardrail steps instead of hydrating them as step zero', () => {
+    const module = createExecutionPlansModule();
+    module.scrollExecutionPlanFormIntoView = () => {};
+
+    module.openExecutionPlanCreate({
+        scope: {
+            scope_provider: 'openai',
+            scope_model: 'gpt-5'
+        },
+        name: 'Hydrated workflow',
+        description: 'Whitespace steps should stay invalid',
+        plan_payload: {
+            features: {
+                cache: true,
+                audit: true,
+                usage: true,
+                guardrails: true,
+                fallback: false
+            },
+            guardrails: [
+                { ref: 'policy-system', step: '   ' }
+            ]
+        }
+    });
+
+    assert.equal(
+        JSON.stringify(module.executionPlanForm.guardrails),
+        JSON.stringify([])
+    );
+});
+
+test('executionPlanSourceGuardrails keeps step zero but drops negative and fractional steps from previews', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        JSON.stringify(module.executionPlanSourceGuardrails({
+            plan_payload: {
+                guardrails: [
+                    { ref: 'zero-step', step: 0 },
+                    { ref: 'fractional', step: 1.5 },
+                    { ref: 'negative', step: -1 },
+                    { ref: 'valid', step: 10 }
+                ]
+            }
+        })),
+        JSON.stringify([
+            { ref: 'zero-step', step: 0 },
+            { ref: 'valid', step: 10 }
+        ])
+    );
 });
 
 test('editing a cloned workflow preserves retired provider and model options', () => {
@@ -148,7 +509,8 @@ test('editing a cloned workflow preserves retired provider and model options', (
                 cache: true,
                 audit: true,
                 usage: true,
-                guardrails: false
+                guardrails: false,
+                fallback: true
             },
             guardrails: []
         }
@@ -174,6 +536,9 @@ test('editing a cloned workflow preserves retired provider and model options', (
 
 test('buildExecutionPlanRequest preserves blank guardrail steps as invalid so validation rejects them', () => {
     const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'manual'
+    };
     module.models = [
         { provider_type: 'openai', model: { id: 'gpt-5' } }
     ];
@@ -186,7 +551,8 @@ test('buildExecutionPlanRequest preserves blank guardrail steps as invalid so va
             cache: true,
             audit: true,
             usage: true,
-            guardrails: true
+            guardrails: true,
+            fallback: true
         },
         guardrails: [
             { ref: 'policy-system', step: '   ' }
@@ -199,6 +565,394 @@ test('buildExecutionPlanRequest preserves blank guardrail steps as invalid so va
     assert.equal(
         module.validateExecutionPlanRequest(payload),
         'Each guardrail step must use a non-negative integer step number.'
+    );
+});
+
+test('executionPlanSourceFeatures defaults fallback to true when omitted', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        JSON.stringify(module.executionPlanSourceFeatures({
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: false,
+                    usage: true,
+                    guardrails: false
+                }
+            }
+        })),
+        JSON.stringify({
+            cache: true,
+            audit: false,
+            usage: true,
+            guardrails: false,
+            fallback: true
+        })
+    );
+});
+
+test('executionPlanSourceFeatures respects effective runtime features for persisted plans', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        JSON.stringify(module.executionPlanSourceFeatures({
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: true,
+                    fallback: true
+                }
+            },
+            effective_features: {
+                cache: false,
+                audit: false,
+                usage: true,
+                guardrails: false,
+                fallback: false
+            }
+        })),
+        JSON.stringify({
+            cache: false,
+            audit: false,
+            usage: true,
+            guardrails: false,
+            fallback: true
+        })
+    );
+});
+
+test('executionPlanSourceFeatures masks raw workflow features by global runtime config when effective features are unavailable', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'off',
+        USAGE_ENABLED: 'off',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'off',
+        SEMANTIC_CACHE_ENABLED: 'off'
+    };
+
+    assert.equal(
+        JSON.stringify(module.executionPlanSourceFeatures({
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: true,
+                    fallback: true
+                }
+            }
+        })),
+        JSON.stringify({
+            cache: false,
+            audit: false,
+            usage: false,
+            guardrails: false,
+            fallback: true
+        })
+    );
+});
+
+test('fetchExecutionPlanRuntimeConfig loads FEATURE_FALLBACK_MODE from the admin config endpoint', async () => {
+    const module = createExecutionPlansModule({
+        fetch(url, options) {
+            assert.equal(url, '/admin/api/v1/dashboard/config');
+            assert.equal(options.headers.authorization, 'Bearer token');
+            return Promise.resolve({
+                ok: true,
+                json: async () => ({
+                    FEATURE_FALLBACK_MODE: 'manual',
+                    LOGGING_ENABLED: 'on',
+                    USAGE_ENABLED: 'off',
+                    GUARDRAILS_ENABLED: 'on',
+                    REDIS_URL: 'on',
+                    SEMANTIC_CACHE_ENABLED: 'off',
+                    UNRELATED_FLAG: 'ignored'
+                })
+            });
+        }
+    });
+    module.headers = () => ({ authorization: 'Bearer token' });
+    module.handleFetchResponse = () => true;
+
+    await module.fetchExecutionPlanRuntimeConfig();
+
+    assert.equal(
+        JSON.stringify(module.executionPlanRuntimeConfig),
+        JSON.stringify({
+            FEATURE_FALLBACK_MODE: 'manual',
+            LOGGING_ENABLED: 'on',
+            USAGE_ENABLED: 'off',
+            GUARDRAILS_ENABLED: 'on',
+            REDIS_URL: 'on',
+            SEMANTIC_CACHE_ENABLED: 'off'
+        })
+    );
+});
+
+test('fetchExecutionPlanRuntimeConfig aborts hung requests and clears the timeout', async () => {
+    let timeoutCleared = false;
+    class AbortControllerStub {
+        constructor() {
+            this.signal = { aborted: false };
+        }
+
+        abort() {
+            this.signal.aborted = true;
+        }
+    }
+
+    const module = createExecutionPlansModule({
+        AbortController: AbortControllerStub,
+        setTimeout(fn) {
+            fn();
+            return 42;
+        },
+        clearTimeout(id) {
+            assert.equal(id, 42);
+            timeoutCleared = true;
+        },
+        fetch(_url, options) {
+            assert.equal(options.headers.authorization, 'Bearer token');
+            assert.equal(options.signal.aborted, true);
+            return Promise.reject(Object.assign(new Error('timed out'), { name: 'AbortError' }));
+        }
+    });
+    module.headers = () => ({ authorization: 'Bearer token' });
+    module.handleFetchResponse = () => true;
+
+    await module.fetchExecutionPlanRuntimeConfig();
+
+    assert.equal(JSON.stringify(module.executionPlanRuntimeConfig), JSON.stringify({}));
+    assert.equal(timeoutCleared, true);
+});
+
+test('buildExecutionPlanRequest omits fallback for new plans when the control is hidden', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'on',
+        USAGE_ENABLED: 'on',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'on',
+        SEMANTIC_CACHE_ENABLED: 'off'
+    };
+    module.executionPlanForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        name: 'OpenAI GPT-5',
+        description: 'Preserve hidden fallback state',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false,
+            fallback: false
+        },
+        guardrails: []
+    };
+
+    assert.equal(
+        JSON.stringify(module.buildExecutionPlanRequest().plan_payload.features),
+        JSON.stringify({
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false
+        })
+    );
+});
+
+test('buildExecutionPlanRequest preserves fallback state for hydrated plans even when the control is hidden', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'on',
+        USAGE_ENABLED: 'on',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'on',
+        SEMANTIC_CACHE_ENABLED: 'off'
+    };
+    module.executionPlanFormHydrated = true;
+    module.executionPlanHydratedScope = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5'
+    };
+    module.executionPlanForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        name: 'OpenAI GPT-5',
+        description: 'Preserve hidden fallback state',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false,
+            fallback: false
+        },
+        guardrails: []
+    };
+
+    assert.equal(
+        JSON.stringify(module.buildExecutionPlanRequest().plan_payload.features),
+        JSON.stringify({
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false,
+            fallback: false
+        })
+    );
+});
+
+test('buildExecutionPlanRequest preserves hidden fallback for fresh save flows that match an active workflow', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'on',
+        USAGE_ENABLED: 'on',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'on',
+        SEMANTIC_CACHE_ENABLED: 'off'
+    };
+    module.executionPlans = [
+        {
+            id: 'openai-gpt-5-plan',
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            },
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: false,
+                    fallback: false
+                },
+                guardrails: []
+            }
+        }
+    ];
+    module.executionPlanFormHydrated = false;
+    module.executionPlanForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        name: 'OpenAI GPT-5',
+        description: 'Preserve hidden fallback from the active workflow',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false,
+            fallback: true
+        },
+        guardrails: []
+    };
+
+    assert.equal(module.executionPlanSubmitMode(), 'save');
+    assert.equal(
+        JSON.stringify(module.buildExecutionPlanRequest().plan_payload.features),
+        JSON.stringify({
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false,
+            fallback: false
+        })
+    );
+});
+
+test('buildExecutionPlanRequest omits hidden fallback when a hydrated workflow is retargeted to a new scope', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'on',
+        USAGE_ENABLED: 'on',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'on',
+        SEMANTIC_CACHE_ENABLED: 'off'
+    };
+    module.executionPlanFormHydrated = true;
+    module.executionPlanHydratedScope = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5'
+    };
+    module.executionPlanForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-4o-mini',
+        name: 'OpenAI GPT-4o mini',
+        description: 'Retargeted hidden fallback should not carry over',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false,
+            fallback: true
+        },
+        guardrails: []
+    };
+
+    assert.equal(
+        JSON.stringify(module.buildExecutionPlanRequest().plan_payload.features),
+        JSON.stringify({
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false
+        })
+    );
+});
+
+test('buildExecutionPlanRequest clamps globally disabled workflow features off even when the form has them enabled', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'off',
+        USAGE_ENABLED: 'off',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'off',
+        SEMANTIC_CACHE_ENABLED: 'off'
+    };
+    module.executionPlanForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        name: 'OpenAI GPT-5',
+        description: 'Globally disabled features should be forced off',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: true,
+            fallback: true
+        },
+        guardrails: [
+            { ref: 'policy-system', step: 10 }
+        ]
+    };
+
+    assert.equal(
+        JSON.stringify(module.buildExecutionPlanRequest()),
+        JSON.stringify({
+            scope_provider: 'openai',
+            scope_model: 'gpt-5',
+            name: 'OpenAI GPT-5',
+            description: 'Globally disabled features should be forced off',
+            plan_payload: {
+                schema_version: 1,
+                features: {
+                    cache: false,
+                    audit: false,
+                    usage: false,
+                    guardrails: false
+                },
+                guardrails: []
+            }
+        })
     );
 });
 
@@ -510,4 +1264,244 @@ test('submitExecutionPlanForm ignores duplicate submissions while a request is a
 
     assert.equal(fetchCalled, false);
     assert.equal(module.executionPlanSubmitting, true);
+});
+
+test('epRuntimeFromEntry derives cache hit state from cache_type without relying on headers', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        JSON.stringify(module.epRuntimeFromEntry({ cache_type: 'semantic', provider: 'openai', model: 'gpt-5' })),
+        JSON.stringify({
+            cacheHit: true,
+            cacheType: 'semantic',
+            provider: 'openai',
+            model: 'gpt-5',
+            statusCode: null,
+            responseSuccess: false,
+            aiSuccess: false
+        })
+    );
+
+    assert.equal(
+        JSON.stringify(module.epRuntimeFromEntry({ cache_type: 'exact' })),
+        JSON.stringify({
+            cacheHit: true,
+            cacheType: 'exact',
+            provider: null,
+            model: null,
+            statusCode: null,
+            responseSuccess: false,
+            aiSuccess: false
+        })
+    );
+
+    assert.equal(
+        JSON.stringify(module.epRuntimeFromEntry({})),
+        JSON.stringify({
+            cacheHit: false,
+            cacheType: null,
+            provider: null,
+            model: null,
+            statusCode: null,
+            responseSuccess: false,
+            aiSuccess: false
+        })
+    );
+});
+
+test('audit runtime uses explicit cache-hit labels and highlights the uncached 200 path', () => {
+    const module = createExecutionPlansModule();
+
+    const semanticHit = module.epRuntimeFromEntry({
+        cache_type: 'semantic',
+        status_code: 200
+    });
+    assert.equal(module.epCacheNodeClass(semanticHit), 'ep-node-cache-semantic');
+    assert.equal(module.epCacheConnClass(semanticHit), 'ep-conn-hit');
+    assert.equal(module.epCacheStatusLabel(semanticHit), 'Hit (Semantic)');
+    assert.equal(module.epAiConnClass(semanticHit), 'ep-conn-dim');
+    assert.equal(module.epAiNodeClass(semanticHit), 'ep-node-ai-skipped');
+    assert.equal(module.epResponseConnClass(semanticHit), 'ep-conn-dim');
+    assert.equal(module.epResponseNodeClass(semanticHit), 'ep-node-endpoint-success');
+
+    const uncachedSuccess = module.epRuntimeFromEntry({
+        provider: 'openai',
+        model: 'gpt-5',
+        status_code: 200
+    });
+    assert.equal(uncachedSuccess.cacheHit, false);
+    assert.equal(module.epCacheNodeClass(uncachedSuccess), '');
+    assert.equal(module.epCacheStatusLabel(uncachedSuccess), null);
+    assert.equal(module.epAiConnClass(uncachedSuccess), '');
+    assert.equal(module.epAiNodeClass(uncachedSuccess), 'ep-node-ai-success');
+    assert.equal(module.epResponseConnClass(uncachedSuccess), '');
+    assert.equal(module.epResponseNodeClass(uncachedSuccess), 'ep-node-endpoint-success');
+});
+
+test('epRuntimeFromEntry treats any uncached 2xx status as a successful AI and response path', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        JSON.stringify(module.epRuntimeFromEntry({
+            provider: 'openai',
+            model: 'gpt-5',
+            status_code: 204
+        })),
+        JSON.stringify({
+            cacheHit: false,
+            cacheType: null,
+            provider: 'openai',
+            model: 'gpt-5',
+            statusCode: 204,
+            responseSuccess: true,
+            aiSuccess: true
+        })
+    );
+});
+
+test('auditEntryExecutionPlan prefers an exact historical workflow version cache over active workflows', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlans = [
+        {
+            id: 'active-current',
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            },
+            plan_payload: {
+                features: {
+                    cache: false,
+                    audit: false,
+                    usage: false,
+                    guardrails: false,
+                    fallback: true
+                },
+                guardrails: []
+            }
+        }
+    ];
+    module.executionPlanVersionsByID = {
+        'historical-v1': {
+            id: 'historical-v1',
+            active: false,
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            },
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: true,
+                    fallback: true
+                },
+                guardrails: [
+                    { ref: 'policy-system', step: 10 }
+                ]
+            }
+        }
+    };
+
+    const resolved = module.auditEntryExecutionPlan({
+        execution_plan_version_id: 'historical-v1'
+    });
+
+    assert.equal(resolved.id, 'historical-v1');
+    assert.equal(module.epHasUsage(resolved), true);
+    assert.equal(module.epHasAudit(resolved), true);
+    assert.equal(module.epHasGuardrails(resolved), true);
+});
+
+test('fetchExecutionPlanVersion loads a historical workflow version once and caches misses', async () => {
+    const fetchCalls = [];
+    const module = createExecutionPlansModule({
+        fetch(url) {
+            fetchCalls.push(url);
+            if (url.endsWith('/historical-v2')) {
+                return Promise.resolve({
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        id: 'historical-v2',
+                        active: false,
+                        scope: {
+                            scope_provider: 'openai',
+                            scope_model: 'gpt-5'
+                        },
+                        plan_payload: {
+                            features: {
+                                cache: true,
+                                audit: true,
+                                usage: true,
+                                guardrails: false,
+                                fallback: true
+                            },
+                            guardrails: []
+                        }
+                    })
+                });
+            }
+            return Promise.resolve({
+                ok: false,
+                status: 404,
+                statusText: 'Not Found'
+            });
+        }
+    });
+    module.headers = () => ({ authorization: 'Bearer token' });
+
+    const loaded = await module.fetchExecutionPlanVersion('historical-v2');
+    const repeated = await module.fetchExecutionPlanVersion('historical-v2');
+    const missing = await module.fetchExecutionPlanVersion('missing-plan');
+    const missingAgain = await module.fetchExecutionPlanVersion('missing-plan');
+
+    assert.equal(loaded.id, 'historical-v2');
+    assert.equal(repeated.id, 'historical-v2');
+    assert.equal(missing, null);
+    assert.equal(missingAgain, null);
+    assert.deepEqual(fetchCalls, [
+        '/admin/api/v1/execution-plans/historical-v2',
+        '/admin/api/v1/execution-plans/missing-plan'
+    ]);
+});
+
+test('fetchExecutionPlanVersion aborts hung requests, clears the timeout, and cleans up in-flight state', async () => {
+    let timeoutCleared = false;
+    class AbortControllerStub {
+        constructor() {
+            this.signal = { aborted: false };
+        }
+
+        abort() {
+            this.signal.aborted = true;
+        }
+    }
+
+    const module = createExecutionPlansModule({
+        AbortController: AbortControllerStub,
+        setTimeout(fn) {
+            fn();
+            return 7;
+        },
+        clearTimeout(id) {
+            assert.equal(id, 7);
+            timeoutCleared = true;
+        },
+        fetch(_url, options) {
+            assert.equal(options.signal.aborted, true);
+            return Promise.reject(Object.assign(new Error('timed out'), { name: 'AbortError' }));
+        }
+    });
+    module.headers = () => ({ authorization: 'Bearer token' });
+    module.handleFetchResponse = () => true;
+
+    const result = await module.fetchExecutionPlanVersion('historical-timeout');
+
+    assert.equal(result, null);
+    assert.equal(timeoutCleared, true);
+    assert.equal(
+        Object.prototype.hasOwnProperty.call(module.executionPlanVersionRequests || {}, 'historical-timeout'),
+        false
+    );
 });

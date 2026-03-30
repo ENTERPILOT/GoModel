@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/tidwall/gjson"
 
+	"gomodel/internal/auditlog"
 	"gomodel/internal/cache"
 	"gomodel/internal/core"
 )
@@ -106,6 +107,7 @@ func (m *simpleCacheMiddleware) TryHit(c *echo.Context, body []byte) (bool, erro
 		return false, nil
 	}
 	if len(cached) > 0 {
+		auditlog.EnrichEntryWithCacheType(c, CacheTypeExact)
 		c.Response().Header().Set("Content-Type", "application/json")
 		c.Response().Header().Set("X-Cache", "HIT (exact)")
 		c.Response().WriteHeader(http.StatusOK)

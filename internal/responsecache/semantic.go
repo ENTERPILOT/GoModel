@@ -21,6 +21,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/config"
+	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 	"gomodel/internal/embedding"
 )
@@ -102,6 +103,7 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 	}
 
 	if len(results) > 0 && float64(results[0].Score) >= threshold {
+		auditlog.EnrichEntryWithCacheType(c, CacheTypeSemantic)
 		c.Response().Header().Set("Content-Type", "application/json")
 		c.Response().Header().Set("X-Cache", "HIT (semantic)")
 		c.Response().WriteHeader(http.StatusOK)

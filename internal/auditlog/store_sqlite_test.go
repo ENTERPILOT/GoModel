@@ -414,3 +414,71 @@ func TestSQLiteReader_GetLogsFiltersByUserPathSubtree(t *testing.T) {
 		t.Fatalf("entry id = %q, want match-team", logs.Entries[0].ID)
 	}
 }
+
+func TestSQLiteStoreAndReader_PreserveCacheType(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	now := time.Now()
+	if err := store.WriteBatch(ctx, []*LogEntry{
+		{
+			ID:        "cache-exact",
+			Timestamp: now,
+			Model:     "gpt-4",
+			Provider:  "openai",
+			CacheType: CacheTypeExact,
+		},
+		{
+			ID:        "cache-none",
+			Timestamp: now.Add(time.Second),
+			Model:     "gpt-4",
+			Provider:  "openai",
+		},
+	}); err != nil {
+		t.Fatalf("WriteBatch failed: %v", err)
+	}
+
+	var exactCacheType sql.NullString
+	if err := db.QueryRow("SELECT cache_type FROM audit_logs WHERE id = ?", "cache-exact").Scan(&exactCacheType); err != nil {
+		t.Fatalf("query exact cache_type failed: %v", err)
+	}
+	if !exactCacheType.Valid || exactCacheType.String != CacheTypeExact {
+		t.Fatalf("exact cache_type = %#v, want %q", exactCacheType, CacheTypeExact)
+	}
+
+	var noneCacheType sql.NullString
+	if err := db.QueryRow("SELECT cache_type FROM audit_logs WHERE id = ?", "cache-none").Scan(&noneCacheType); err != nil {
+		t.Fatalf("query nil cache_type failed: %v", err)
+	}
+	if noneCacheType.Valid {
+		t.Fatalf("nil cache_type = %#v, want SQL NULL", noneCacheType)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create reader: %v", err)
+	}
+
+	exactEntry, err := reader.GetLogByID(ctx, "cache-exact")
+	if err != nil {
+		t.Fatalf("GetLogByID(exact) failed: %v", err)
+	}
+	if exactEntry == nil || exactEntry.CacheType != CacheTypeExact {
+		t.Fatalf("exact entry cache_type = %#v, want %q", exactEntry, CacheTypeExact)
+	}
+
+	noneEntry, err := reader.GetLogByID(ctx, "cache-none")
+	if err != nil {
+		t.Fatalf("GetLogByID(none) failed: %v", err)
+	}
+	if noneEntry == nil || noneEntry.CacheType != "" {
+		t.Fatalf("none entry cache_type = %#v, want empty", noneEntry)
+	}
+}

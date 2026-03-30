@@ -24,16 +24,36 @@ import (
 
 // Handler serves admin API endpoints.
 type Handler struct {
-	usageReader usage.UsageReader
-	auditReader auditlog.Reader
-	registry    *providers.ModelRegistry
-	aliases     *aliases.Service
-	plans       *executionplans.Service
-	guardrails  *guardrails.Registry
+	usageReader   usage.UsageReader
+	auditReader   auditlog.Reader
+	registry      *providers.ModelRegistry
+	aliases       *aliases.Service
+	plans         *executionplans.Service
+	guardrails    *guardrails.Registry
+	runtimeConfig DashboardConfigResponse
 }
 
 // Option configures the admin API handler.
 type Option func(*Handler)
+
+const (
+	DashboardConfigFeatureFallbackMode  = "FEATURE_FALLBACK_MODE"
+	DashboardConfigLoggingEnabled       = "LOGGING_ENABLED"
+	DashboardConfigUsageEnabled         = "USAGE_ENABLED"
+	DashboardConfigGuardrailsEnabled    = "GUARDRAILS_ENABLED"
+	DashboardConfigRedisURL             = "REDIS_URL"
+	DashboardConfigSemanticCacheEnabled = "SEMANTIC_CACHE_ENABLED"
+)
+
+// DashboardConfigResponse is the allowlisted runtime config contract exposed to the dashboard UI.
+type DashboardConfigResponse struct {
+	FeatureFallbackMode  string `json:"FEATURE_FALLBACK_MODE,omitempty"`
+	LoggingEnabled       string `json:"LOGGING_ENABLED,omitempty"`
+	UsageEnabled         string `json:"USAGE_ENABLED,omitempty"`
+	GuardrailsEnabled    string `json:"GUARDRAILS_ENABLED,omitempty"`
+	RedisURL             string `json:"REDIS_URL,omitempty"`
+	SemanticCacheEnabled string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
+}
 
 // WithAuditReader enables audit log read endpoints.
 func WithAuditReader(reader auditlog.Reader) Option {
@@ -63,12 +83,20 @@ func WithGuardrailsRegistry(registry *guardrails.Registry) Option {
 	}
 }
 
+// WithDashboardRuntimeConfig enables the allowlisted dashboard runtime config endpoint.
+func WithDashboardRuntimeConfig(values DashboardConfigResponse) Option {
+	return func(h *Handler) {
+		h.runtimeConfig = normalizeDashboardRuntimeConfig(values)
+	}
+}
+
 // NewHandler creates a new admin API handler.
 // usageReader may be nil if usage tracking is not available.
 func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, options ...Option) *Handler {
 	h := &Handler{
-		usageReader: reader,
-		registry:    registry,
+		usageReader:   reader,
+		registry:      registry,
+		runtimeConfig: DashboardConfigResponse{},
 	}
 
 	for _, opt := range options {
@@ -78,6 +106,21 @@ func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, opt
 	}
 
 	return h
+}
+
+func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardConfigResponse {
+	return DashboardConfigResponse{
+		FeatureFallbackMode:  strings.TrimSpace(values.FeatureFallbackMode),
+		LoggingEnabled:       strings.TrimSpace(values.LoggingEnabled),
+		UsageEnabled:         strings.TrimSpace(values.UsageEnabled),
+		GuardrailsEnabled:    strings.TrimSpace(values.GuardrailsEnabled),
+		RedisURL:             strings.TrimSpace(values.RedisURL),
+		SemanticCacheEnabled: strings.TrimSpace(values.SemanticCacheEnabled),
+	}
+}
+
+func cloneDashboardRuntimeConfig(values DashboardConfigResponse) DashboardConfigResponse {
+	return values
 }
 
 var validIntervals = map[string]bool{
@@ -571,6 +614,11 @@ func (h *Handler) ListCategories(c *echo.Context) error {
 	return c.JSON(http.StatusOK, h.registry.GetCategoryCounts())
 }
 
+// DashboardConfig handles GET /admin/api/v1/dashboard/config
+func (h *Handler) DashboardConfig(c *echo.Context) error {
+	return c.JSON(http.StatusOK, cloneDashboardRuntimeConfig(h.runtimeConfig))
+}
+
 type upsertAliasRequest struct {
 	TargetModel    string `json:"target_model"`
 	TargetProvider string `json:"target_provider,omitempty"`
@@ -707,6 +755,28 @@ func (h *Handler) ListExecutionPlans(c *echo.Context) error {
 		views = []executionplans.View{}
 	}
 	return c.JSON(http.StatusOK, views)
+}
+
+// GetExecutionPlan handles GET /admin/api/v1/execution-plans/:id
+func (h *Handler) GetExecutionPlan(c *echo.Context) error {
+	if h.plans == nil {
+		return handleError(c, h.executionPlansUnavailableError())
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return handleError(c, core.NewInvalidRequestError("execution plan id is required", nil))
+	}
+
+	view, err := h.plans.GetView(c.Request().Context(), id)
+	if err != nil {
+		if errors.Is(err, executionplans.ErrNotFound) {
+			return handleError(c, core.NewNotFoundError("workflow not found: "+id))
+		}
+		return handleError(c, err)
+	}
+
+	return c.JSON(http.StatusOK, view)
 }
 
 // ListExecutionPlanGuardrails handles GET /admin/api/v1/execution-plans/guardrails

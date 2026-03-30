@@ -47,3 +47,20 @@ func TestSanitizeLogDataNilSafe(t *testing.T) {
 		t.Fatalf("expected nil input to return nil")
 	}
 }
+
+func TestMongoLogRowToLogEntryPreservesCacheType(t *testing.T) {
+	row := mongoLogRow{
+		ID:        "log-1",
+		Model:     "gpt-4",
+		Provider:  "openai",
+		CacheType: CacheTypeSemantic,
+	}
+
+	entry := row.toLogEntry()
+	if entry == nil {
+		t.Fatal("expected entry, got nil")
+	}
+	if entry.CacheType != CacheTypeSemantic {
+		t.Fatalf("CacheType = %q, want %q", entry.CacheType, CacheTypeSemantic)
+	}
+}

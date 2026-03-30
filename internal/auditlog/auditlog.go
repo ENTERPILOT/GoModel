@@ -25,6 +25,11 @@ type LogStore interface {
 	Close() error
 }
 
+const (
+	CacheTypeExact    = "exact"
+	CacheTypeSemantic = "semantic"
+)
+
 // LogEntry represents a single audit log entry.
 // Core fields are indexed for efficient queries.
 type LogEntry struct {
@@ -43,6 +48,7 @@ type LogEntry struct {
 	Provider               string `json:"provider" bson:"provider"`
 	AliasUsed              bool   `json:"alias_used,omitempty" bson:"alias_used,omitempty"`
 	ExecutionPlanVersionID string `json:"execution_plan_version_id,omitempty" bson:"execution_plan_version_id,omitempty"`
+	CacheType              string `json:"cache_type,omitempty" bson:"cache_type,omitempty"`
 	StatusCode             int    `json:"status_code" bson:"status_code"`
 
 	// Extracted fields for efficient filtering (indexed in relational DBs)
@@ -102,6 +108,17 @@ func marshalLogData(data *LogData, entryID string) []byte {
 		return []byte("{}")
 	}
 	return dataJSON
+}
+
+func normalizeCacheType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case CacheTypeExact:
+		return CacheTypeExact
+	case CacheTypeSemantic:
+		return CacheTypeSemantic
+	default:
+		return ""
+	}
 }
 
 // RedactedHeaders contains headers that should be automatically redacted.

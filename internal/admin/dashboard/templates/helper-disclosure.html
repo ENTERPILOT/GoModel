@@ -1,0 +1,17 @@
+{{define "helper-disclosure"}}
+<div class="inline-help-section" x-data="{{.}}">
+    <div class="inline-help-title-row">
+        <h3 x-text="heading"></h3>
+        <button type="button"
+                class="inline-help-toggle"
+                :class="{ 'is-open': open }"
+                :aria-label="open ? hideLabel : showLabel"
+                :aria-expanded="open.toString()"
+                :aria-controls="copyId"
+                @click="open = !open">
+            <span class="inline-help-toggle-icon" aria-hidden="true">?</span>
+        </button>
+    </div>
+    <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+</div>
+{{end}}

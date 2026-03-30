@@ -280,6 +280,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			app.aliases.Service,
 			executionPlanResult.Service,
 			guardrailRegistry,
+			dashboardRuntimeConfig(appCfg),
 			adminCfg.UIEnabled,
 		)
 		if adminErr != nil {
@@ -569,6 +570,7 @@ func initAdmin(
 	aliasService *aliases.Service,
 	executionPlanService *executionplans.Service,
 	guardrailRegistry *guardrails.Registry,
+	runtimeConfig admin.DashboardConfigResponse,
 	uiEnabled bool,
 ) (*admin.Handler, *dashboard.Handler, error) {
 	// Find a storage connection for reading usage data
@@ -607,6 +609,7 @@ func initAdmin(
 		admin.WithAliases(aliasService),
 		admin.WithExecutionPlans(executionPlanService),
 		admin.WithGuardrailsRegistry(guardrailRegistry),
+		admin.WithDashboardRuntimeConfig(runtimeConfig),
 	)
 
 	var dashHandler *dashboard.Handler
@@ -718,6 +721,50 @@ func defaultExecutionPlanInput(cfg *config.Config) executionplans.CreateInput {
 	}
 }
 
+func dashboardRuntimeConfig(cfg *config.Config) admin.DashboardConfigResponse {
+	return admin.DashboardConfigResponse{
+		FeatureFallbackMode:  dashboardFallbackModeValue(cfg),
+		LoggingEnabled:       dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
+		UsageEnabled:         dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
+		GuardrailsEnabled:    dashboardEnabledValue(cfg != nil && cfg.Guardrails.Enabled),
+		RedisURL:             dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
+		SemanticCacheEnabled: dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
+	}
+}
+
+func dashboardEnabledValue(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
+}
+
+func dashboardFallbackModeValue(cfg *config.Config) string {
+	if cfg == nil || !fallbackFeatureEnabledGlobally(cfg) {
+		return string(config.FallbackModeOff)
+	}
+
+	switch mode := strings.ToLower(strings.TrimSpace(string(cfg.Fallback.DefaultMode))); mode {
+	case string(config.FallbackModeAuto):
+		return string(config.FallbackModeAuto)
+	case string(config.FallbackModeManual):
+		return string(config.FallbackModeManual)
+	}
+
+	for _, override := range cfg.Fallback.Overrides {
+		if strings.EqualFold(strings.TrimSpace(string(override.Mode)), string(config.FallbackModeAuto)) {
+			return string(config.FallbackModeAuto)
+		}
+	}
+	for _, override := range cfg.Fallback.Overrides {
+		if strings.EqualFold(strings.TrimSpace(string(override.Mode)), string(config.FallbackModeManual)) {
+			return string(config.FallbackModeManual)
+		}
+	}
+
+	return string(config.FallbackModeOff)
+}
+
 func runtimeExecutionFeatureCaps(cfg *config.Config) core.ExecutionFeatures {
 	if cfg == nil {
 		return core.ExecutionFeatures{}
@@ -739,7 +786,25 @@ func executionPlanRefreshInterval(cfg *config.Config) time.Duration {
 }
 
 func responseCacheConfigured(cfg config.ResponseCacheConfig) bool {
-	return (cfg.Simple.Redis != nil && cfg.Simple.Redis.URL != "") || config.SemanticCacheActive(&cfg.Semantic)
+	return simpleResponseCacheConfiguredFromResponse(cfg) || config.SemanticCacheActive(&cfg.Semantic)
+}
+
+func simpleResponseCacheConfigured(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	return simpleResponseCacheConfiguredFromResponse(cfg.Cache.Response)
+}
+
+func simpleResponseCacheConfiguredFromResponse(cfg config.ResponseCacheConfig) bool {
+	return cfg.Simple.Redis != nil && strings.TrimSpace(cfg.Simple.Redis.URL) != ""
+}
+
+func semanticResponseCacheConfigured(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	return config.SemanticCacheActive(&cfg.Cache.Response.Semantic)
 }
 
 func fallbackFeatureEnabledGlobally(cfg *config.Config) bool {
