@@ -2,7 +2,7 @@
 <section class="audit-pane">
     <div class="audit-pane-head">
         <h4 x-text="{{.}}.title"></h4>
-        <button class="pagination-btn" @click.prevent="copyAuditJSON({{.}}.copyBody, $event)">Copy Body</button>
+        <button type="button" class="pagination-btn" @click.prevent="copyAuditJSON({{.}}.copyBody, $event)">Copy Body</button>
     </div>
     <div class="audit-pane-block" x-show="{{.}}.showErrorMessage">
         <h5>Error Message</h5>

@@ -213,6 +213,37 @@ test('executionPlanAuditChart returns the shared chart contract for audit runtim
     );
 });
 
+test('executionPlanAuditChart forces audit nodes even when the workflow version cannot be resolved', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        JSON.stringify(module.executionPlanAuditChart({
+            execution_plan_version_id: 'missing-plan',
+            cache_type: 'exact',
+            provider: 'openai',
+            model: 'gpt-5',
+            status_code: 200
+        })),
+        JSON.stringify({
+            showGuardrails: false,
+            guardrailLabel: '',
+            showCache: true,
+            cacheNodeClass: 'ep-node-cache-hit',
+            cacheConnClass: 'ep-conn-hit',
+            cacheStatusLabel: 'Hit (Exact)',
+            aiLabel: 'openai',
+            aiSublabel: 'gpt-5',
+            aiConnClass: 'ep-conn-dim',
+            aiNodeClass: 'ep-node-ai-skipped',
+            responseConnClass: 'ep-conn-dim',
+            responseNodeClass: 'ep-node-endpoint-success',
+            showAsync: true,
+            showUsage: false,
+            showAudit: true
+        })
+    );
+});
+
 test('executionPlanSubmitMode switches to save when an active workflow already matches the selected scope', () => {
     const module = createExecutionPlansModule();
     module.executionPlans = [
@@ -381,6 +412,27 @@ test('openExecutionPlanCreate drops blank guardrail steps instead of hydrating t
     assert.equal(
         JSON.stringify(module.executionPlanForm.guardrails),
         JSON.stringify([])
+    );
+});
+
+test('executionPlanSourceGuardrails keeps step zero but drops negative and fractional steps from previews', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        JSON.stringify(module.executionPlanSourceGuardrails({
+            plan_payload: {
+                guardrails: [
+                    { ref: 'zero-step', step: 0 },
+                    { ref: 'fractional', step: 1.5 },
+                    { ref: 'negative', step: -1 },
+                    { ref: 'valid', step: 10 }
+                ]
+            }
+        })),
+        JSON.stringify([
+            { ref: 'zero-step', step: 0 },
+            { ref: 'valid', step: 10 }
+        ])
     );
 });
 
@@ -587,6 +639,10 @@ test('buildExecutionPlanRequest preserves fallback state for hydrated plans even
         FEATURE_FALLBACK_MODE: 'off'
     };
     module.executionPlanFormHydrated = true;
+    module.executionPlanHydratedScope = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5'
+    };
     module.executionPlanForm = {
         scope_provider: 'openai',
         scope_model: 'gpt-5',
@@ -610,6 +666,42 @@ test('buildExecutionPlanRequest preserves fallback state for hydrated plans even
             usage: true,
             guardrails: false,
             fallback: false
+        })
+    );
+});
+
+test('buildExecutionPlanRequest omits hidden fallback when a hydrated workflow is retargeted to a new scope', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'off'
+    };
+    module.executionPlanFormHydrated = true;
+    module.executionPlanHydratedScope = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5'
+    };
+    module.executionPlanForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-4o-mini',
+        name: 'OpenAI GPT-4o mini',
+        description: 'Retargeted hidden fallback should not carry over',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false,
+            fallback: true
+        },
+        guardrails: []
+    };
+
+    assert.equal(
+        JSON.stringify(module.buildExecutionPlanRequest().plan_payload.features),
+        JSON.stringify({
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false
         })
     );
 });

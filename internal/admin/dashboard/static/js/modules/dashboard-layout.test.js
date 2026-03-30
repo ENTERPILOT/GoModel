@@ -95,7 +95,7 @@ test('usage and audit pages reuse a shared pagination template', () => {
 
     assert.match(
         paginationTemplate,
-        /{{define "pagination"}}[\s\S]*x-show="{{\.}}\.total > 0"[\s\S]*@click="{{\.}}PrevPage\(\)"[\s\S]*@click="{{\.}}NextPage\(\)"[\s\S]*{{end}}/
+        /{{define "pagination"}}[\s\S]*x-show="{{\.}}\.total > 0"[\s\S]*type="button"[\s\S]*@click="{{\.}}PrevPage\(\)"[\s\S]*type="button"[\s\S]*@click="{{\.}}NextPage\(\)"[\s\S]*{{end}}/
     );
     assert.match(indexTemplate, /{{template "pagination" "usageLog"}}/);
     assert.match(indexTemplate, /{{template "pagination" "auditLog"}}/);
@@ -115,7 +115,7 @@ test('audit request and response sections reuse a shared audit pane template', (
 
     assert.match(
         auditPaneTemplate,
-        /{{define "audit-pane"}}[\s\S]*x-text="{{\.}}\.title"[\s\S]*copyAuditJSON\({{\.\}}\.copyBody, \$event\)[\s\S]*x-text="formatJSON\({{\.\}}\.headers\)"[\s\S]*renderBodyWithConversationHighlights\({{\.\}}\.entry, {{\.}}\.body\)[\s\S]*x-text="{{\.}}\.emptyMessage"[\s\S]*x-text="{{\.}}\.tooLargeMessage"[\s\S]*{{end}}/
+        /{{define "audit-pane"}}[\s\S]*x-text="{{\.}}\.title"[\s\S]*type="button"[\s\S]*copyAuditJSON\({{\.\}}\.copyBody, \$event\)[\s\S]*x-text="formatJSON\({{\.\}}\.headers\)"[\s\S]*renderBodyWithConversationHighlights\({{\.\}}\.entry, {{\.}}\.body\)[\s\S]*x-text="{{\.}}\.emptyMessage"[\s\S]*x-text="{{\.}}\.tooLargeMessage"[\s\S]*{{end}}/
     );
     assert.match(indexTemplate, /{{template "audit-pane" "auditRequestPane\(entry\)"}}/);
     assert.match(indexTemplate, /{{template "audit-pane" "auditResponsePane\(entry\)"}}/);

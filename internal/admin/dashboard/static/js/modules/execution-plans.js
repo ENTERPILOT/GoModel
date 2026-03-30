@@ -275,7 +275,7 @@
                         ref: String(step && step.ref || '').trim(),
                         step: this.parseExecutionPlanGuardrailStep(step && step.step)
                     }))
-                    .filter((step) => Number.isFinite(step.step));
+                    .filter((step) => Number.isInteger(step.step) && step.step >= 0);
             },
 
             canDeactivateExecutionPlan(plan) {
@@ -404,7 +404,16 @@
                 const provider = String(form.scope_provider || '').trim();
                 const model = provider ? String(form.scope_model || '').trim() : '';
                 const features = form.features || {};
-                const includeFallback = this.executionPlanFailoverVisible() || !!this.executionPlanFormHydrated;
+                const hydratedScope = this.executionPlanHydratedScope || {
+                    scope_provider: '',
+                    scope_model: ''
+                };
+                const sameHydratedScope = String(hydratedScope.scope_provider || '').trim() === provider
+                    && String(hydratedScope.scope_model || '').trim() === model;
+                const includeFallback = this.executionPlanFailoverVisible()
+                    || (!!this.executionPlanFormHydrated
+                        && sameHydratedScope
+                        && Object.prototype.hasOwnProperty.call(features, 'fallback'));
 
                 const guardrails = !!features.guardrails
                     ? (Array.isArray(form.guardrails) ? form.guardrails : []).map((step) => {
@@ -813,6 +822,8 @@
 
             executionPlanChartModel(source, runtime, options) {
                 const config = options || {};
+                const forceAudit = !!config.forceAudit;
+                const forceAsync = !!config.forceAsync || forceAudit;
                 return {
                     showGuardrails: this.epHasGuardrails(source),
                     guardrailLabel: this.epGuardrailLabel(source),
@@ -826,9 +837,9 @@
                     aiNodeClass: this.epAiNodeClass(runtime),
                     responseConnClass: this.epResponseConnClass(runtime),
                     responseNodeClass: this.epResponseNodeClass(runtime),
-                    showAsync: this.epHasAsync(source),
+                    showAsync: forceAsync || this.epHasAsync(source),
                     showUsage: this.epHasUsage(source),
-                    showAudit: this.epHasAudit(source)
+                    showAudit: forceAudit || this.epHasAudit(source)
                 };
             },
 
@@ -839,7 +850,11 @@
             executionPlanAuditChart(entry) {
                 const source = this.auditEntryExecutionPlan(entry);
                 const runtime = this.epRuntimeFromEntry(entry);
-                return this.executionPlanChartModel(source, runtime, { forceCache: true });
+                return this.executionPlanChartModel(source, runtime, {
+                    forceCache: true,
+                    forceAudit: true,
+                    forceAsync: true
+                });
             },
 
             // runtime shape: {
