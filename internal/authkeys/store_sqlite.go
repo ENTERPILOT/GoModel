@@ -37,7 +37,6 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("failed to create auth_keys table: %w", err)
 	}
 	for _, index := range []string{
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_keys_secret_hash ON auth_keys(secret_hash)`,
 		`CREATE INDEX IF NOT EXISTS idx_auth_keys_enabled ON auth_keys(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_auth_keys_created_at ON auth_keys(created_at DESC)`,
 	} {

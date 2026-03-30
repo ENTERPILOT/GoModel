@@ -65,7 +65,7 @@ func TestBuildAuditLogInsert(t *testing.T) {
 		t.Fatalf("args[8] = %v, want %q", got, CacheTypeExact)
 	}
 	if got := args[18]; got != "log-2" {
-		t.Fatalf("args[17] = %v, want log-2", got)
+		t.Fatalf("args[18] = %v, want log-2", got)
 	}
 	if got := string(args[17].([]byte)); got != `{"user_agent":"test-agent"}` {
 		t.Fatalf("args[17] = %q, want %q", got, `{"user_agent":"test-agent"}`)

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -144,8 +145,8 @@ func (s *Service) ListViews() []View {
 	return result
 }
 
-// Create issues a new managed auth key, persists it, refreshes the snapshot,
-// and returns the plaintext token once.
+// Create issues a new managed auth key, persists it, updates the in-memory
+// snapshot immediately, and then best-effort reconciles from storage.
 func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, error) {
 	if s == nil {
 		return nil, fmt.Errorf("auth key service is required")
@@ -177,9 +178,8 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 	if err := s.store.Create(ctx, key); err != nil {
 		return nil, fmt.Errorf("create auth key: %w", err)
 	}
-	if err := s.Refresh(ctx); err != nil {
-		return nil, fmt.Errorf("refresh auth keys: %w", err)
-	}
+	s.applyUpsert(key, now)
+	s.refreshBestEffort(ctx, "create")
 
 	return &IssuedKey{
 		View: View{
@@ -190,7 +190,8 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 	}, nil
 }
 
-// Deactivate marks a managed auth key inactive while preserving its record.
+// Deactivate marks a managed auth key inactive while preserving its record and
+// best-effort reconciles the snapshot from storage afterward.
 func (s *Service) Deactivate(ctx context.Context, id string) error {
 	if s == nil {
 		return fmt.Errorf("auth key service is required")
@@ -204,9 +205,8 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 	if err := s.store.Deactivate(ctx, id, now); err != nil {
 		return fmt.Errorf("deactivate auth key: %w", err)
 	}
-	if err := s.Refresh(ctx); err != nil {
-		return fmt.Errorf("refresh auth keys: %w", err)
-	}
+	s.applyDeactivate(id, now)
+	s.refreshBestEffort(ctx, "deactivate")
 	return nil
 }
 
@@ -222,25 +222,20 @@ func (s *Service) Authenticate(_ context.Context, token string) (string, error) 
 		return "", err
 	}
 	secretHash := hashSecret(secret)
+	now := time.Now().UTC()
 
 	s.mu.RLock()
 	active, ok := s.snapshot.activeByHash[secretHash]
 	if ok {
 		s.mu.RUnlock()
-		return active.ID, nil
+		return authenticateKey(active, now)
 	}
 	key, exists := s.snapshot.bySecretHash[secretHash]
 	s.mu.RUnlock()
 	if !exists {
 		return "", ErrInvalidToken
 	}
-	if key.DeactivatedAt != nil || !key.Enabled {
-		return "", ErrInactive
-	}
-	if key.ExpiresAt != nil && !key.ExpiresAt.After(time.Now().UTC()) {
-		return "", ErrExpired
-	}
-	return "", ErrInvalidToken
+	return authenticateKey(key, now)
 }
 
 // StartBackgroundRefresh periodically reloads auth keys from storage until stopped.
@@ -275,6 +270,109 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 			<-done
 		})
 	}
+}
+
+func authenticateKey(key AuthKey, now time.Time) (string, error) {
+	if !key.Enabled || key.DeactivatedAt != nil {
+		return "", ErrInactive
+	}
+	if key.ExpiresAt != nil && !key.ExpiresAt.After(now) {
+		return "", ErrExpired
+	}
+	if strings.TrimSpace(key.ID) == "" {
+		return "", ErrInvalidToken
+	}
+	return key.ID, nil
+}
+
+func (s *Service) refreshBestEffort(ctx context.Context, operation string) {
+	if err := s.Refresh(ctx); err != nil {
+		slog.Warn("auth key snapshot reconciliation failed", "operation", operation, "error", err)
+	}
+}
+
+func (s *Service) applyUpsert(key AuthKey, now time.Time) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := cloneSnapshot(s.snapshot)
+	if previous, exists := next.byID[key.ID]; exists && previous.SecretHash != "" && previous.SecretHash != key.SecretHash {
+		delete(next.bySecretHash, previous.SecretHash)
+		delete(next.activeByHash, previous.SecretHash)
+	}
+	if _, exists := next.byID[key.ID]; !exists {
+		next.order = append(next.order, key.ID)
+	}
+	next.byID[key.ID] = key
+	next.bySecretHash[key.SecretHash] = key
+	if key.Active(now) {
+		next.activeByHash[key.SecretHash] = key
+	} else {
+		delete(next.activeByHash, key.SecretHash)
+	}
+	sortSnapshotOrder(&next)
+	s.snapshot = next
+}
+
+func (s *Service) applyDeactivate(id string, now time.Time) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := cloneSnapshot(s.snapshot)
+	key, exists := next.byID[id]
+	if !exists {
+		s.snapshot = next
+		return
+	}
+	key.Enabled = false
+	key.UpdatedAt = now.UTC()
+	if key.DeactivatedAt == nil {
+		deactivatedAt := now.UTC()
+		key.DeactivatedAt = &deactivatedAt
+	}
+	next.byID[id] = key
+	next.bySecretHash[key.SecretHash] = key
+	delete(next.activeByHash, key.SecretHash)
+	s.snapshot = next
+}
+
+func cloneSnapshot(src snapshot) snapshot {
+	next := snapshot{
+		order:        append([]string(nil), src.order...),
+		byID:         make(map[string]AuthKey, len(src.byID)),
+		bySecretHash: make(map[string]AuthKey, len(src.bySecretHash)),
+		activeByHash: make(map[string]AuthKey, len(src.activeByHash)),
+	}
+	for id, key := range src.byID {
+		next.byID[id] = key
+	}
+	for hash, key := range src.bySecretHash {
+		next.bySecretHash[hash] = key
+	}
+	for hash, key := range src.activeByHash {
+		next.activeByHash[hash] = key
+	}
+	return next
+}
+
+func sortSnapshotOrder(next *snapshot) {
+	sort.Slice(next.order, func(i, j int) bool {
+		left := next.byID[next.order[i]]
+		right := next.byID[next.order[j]]
+		if !left.CreatedAt.Equal(right.CreatedAt) {
+			return left.CreatedAt.After(right.CreatedAt)
+		}
+		if left.Name != right.Name {
+			return left.Name < right.Name
+		}
+		return left.ID < right.ID
+	})
 }
 
 func generateTokenMaterial() (value string, redactedValue string, secretHash string, err error) {

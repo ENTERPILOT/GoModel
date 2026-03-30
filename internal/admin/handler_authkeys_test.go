@@ -90,6 +90,17 @@ func TestAuthKeyEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	if createRec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("CreateAuthKey() status = %d, want 503", createRec.Code)
 	}
+
+	deactivateReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/auth-keys/test-key/deactivate", nil)
+	deactivateRec := httptest.NewRecorder()
+	deactivateCtx := e.NewContext(deactivateReq, deactivateRec)
+	deactivateCtx.SetPathValues(echo.PathValues{{Name: "id", Value: "test-key"}})
+	if err := h.DeactivateAuthKey(deactivateCtx); err != nil {
+		t.Fatalf("DeactivateAuthKey() error = %v", err)
+	}
+	if deactivateRec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("DeactivateAuthKey() status = %d, want 503", deactivateRec.Code)
+	}
 }
 
 func TestCreateListAndDeactivateAuthKey(t *testing.T) {

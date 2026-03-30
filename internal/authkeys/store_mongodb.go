@@ -93,15 +93,16 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 }
 
 func (s *MongoDBStore) Deactivate(ctx context.Context, id string, now time.Time) error {
-	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, bson.M{
-		"$set": bson.M{
-			"enabled":    false,
-			"updated_at": now.UTC(),
-		},
-		"$setOnInsert": bson.M{},
-		"$max": bson.M{
-			"deactivated_at": now.UTC(),
-		},
+	now = now.UTC()
+	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, mongo.Pipeline{
+		{{
+			Key: "$set",
+			Value: bson.D{
+				{Key: "enabled", Value: false},
+				{Key: "updated_at", Value: now},
+				{Key: "deactivated_at", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$deactivated_at", now}}}},
+			},
+		}},
 	})
 	if err != nil {
 		return fmt.Errorf("deactivate auth key: %w", err)

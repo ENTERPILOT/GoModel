@@ -209,6 +209,36 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *te
 	assert.Equal(t, "ok", rec.Body.String())
 }
 
+func TestAuthMiddlewareWithAuthenticator_ManagedKeyFailureUsesGenericClientMessage(t *testing.T) {
+	e := echo.New()
+	handler := AuthMiddlewareWithAuthenticator("", mockAuthenticator{
+		enabled: true,
+		err:     context.DeadlineExceeded,
+	}, nil)(func(c *echo.Context) error {
+		t.Fatal("next handler should not be called")
+		return nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_token")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.JSONEq(t, `{"error":{"message":"authentication failed","type":"authentication_error","param":null,"code":null}}`, rec.Body.String())
+
+	entryVal := c.Get(string(auditlog.LogEntryKey))
+	entry, ok := entryVal.(*auditlog.LogEntry)
+	require.True(t, ok)
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.Data)
+	assert.Equal(t, string(core.ErrorTypeAuthentication), entry.ErrorType)
+	assert.Equal(t, "authentication unavailable", entry.Data.ErrorMessage)
+}
+
 func TestAuthMiddleware_SkipPaths(t *testing.T) {
 	t.Run("skips authentication for specified paths", func(t *testing.T) {
 		e := echo.New()

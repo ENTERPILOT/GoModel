@@ -78,7 +78,7 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 					return next(c)
 				}
 
-				authErr := authenticationError(c, authFailureMessage(err))
+				authErr := authenticationErrorWithAudit(c, authFailureMessage(err), "authentication failed")
 				return c.JSON(authErr.HTTPStatusCode(), authErr.ToJSON())
 			}
 
@@ -105,4 +105,9 @@ func authFailureMessage(err error) string {
 func authenticationError(c *echo.Context, message string) *core.GatewayError {
 	auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message)
 	return core.NewAuthenticationError("", message)
+}
+
+func authenticationErrorWithAudit(c *echo.Context, auditMessage, responseMessage string) *core.GatewayError {
+	auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), auditMessage)
+	return core.NewAuthenticationError("", responseMessage)
 }

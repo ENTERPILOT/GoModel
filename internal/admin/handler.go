@@ -4,6 +4,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -734,7 +735,13 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 		return handleError(c, authKeyWriteError(err))
 	}
 	if issued == nil {
-		return c.NoContent(http.StatusNoContent)
+		requestID := strings.TrimSpace(core.GetRequestID(c.Request().Context()))
+		slog.Error("auth key service returned nil issued key", "request_id", requestID, "path", c.Request().URL.Path)
+		return c.JSON(http.StatusInternalServerError, (&core.GatewayError{
+			Type:       core.ErrorType("internal_error"),
+			Message:    "auth key creation failed unexpectedly",
+			StatusCode: http.StatusInternalServerError,
+		}).WithCode("auth_key_issue_failed").ToJSON())
 	}
 	return c.JSON(http.StatusCreated, issued)
 }
