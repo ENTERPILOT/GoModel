@@ -724,7 +724,19 @@ func defaultExecutionPlanInput(cfg *config.Config) executionplans.CreateInput {
 func dashboardRuntimeConfig(cfg *config.Config) map[string]string {
 	return map[string]string{
 		admin.DashboardConfigFeatureFallbackMode: dashboardFallbackModeValue(cfg),
+		admin.DashboardConfigLoggingEnabled:      dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
+		admin.DashboardConfigUsageEnabled:        dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
+		admin.DashboardConfigGuardrailsEnabled:   dashboardEnabledValue(cfg != nil && cfg.Guardrails.Enabled),
+		admin.DashboardConfigRedisURL:            dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
+		admin.DashboardConfigSemanticCacheEnabled: dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
 	}
+}
+
+func dashboardEnabledValue(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
 }
 
 func dashboardFallbackModeValue(cfg *config.Config) string {
@@ -764,7 +776,25 @@ func executionPlanRefreshInterval(cfg *config.Config) time.Duration {
 }
 
 func responseCacheConfigured(cfg config.ResponseCacheConfig) bool {
-	return (cfg.Simple.Redis != nil && cfg.Simple.Redis.URL != "") || config.SemanticCacheActive(&cfg.Semantic)
+	return simpleResponseCacheConfiguredFromResponse(cfg) || config.SemanticCacheActive(&cfg.Semantic)
+}
+
+func simpleResponseCacheConfigured(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	return simpleResponseCacheConfiguredFromResponse(cfg.Cache.Response)
+}
+
+func simpleResponseCacheConfiguredFromResponse(cfg config.ResponseCacheConfig) bool {
+	return cfg.Simple.Redis != nil && strings.TrimSpace(cfg.Simple.Redis.URL) != ""
+}
+
+func semanticResponseCacheConfigured(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	return config.SemanticCacheActive(&cfg.Cache.Response.Semantic)
 }
 
 func fallbackFeatureEnabledGlobally(cfg *config.Config) bool {

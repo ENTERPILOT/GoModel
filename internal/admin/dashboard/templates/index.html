@@ -709,19 +709,19 @@
                 </label>
 
                 <div class="execution-plan-feature-toggles">
-                    <label class="execution-plan-feature-toggle">
+                    <label class="execution-plan-feature-toggle" x-show="executionPlanCacheVisible()">
                         <input type="checkbox" x-model="executionPlanForm.features.cache">
                         <span>Cache</span>
                     </label>
-                    <label class="execution-plan-feature-toggle">
+                    <label class="execution-plan-feature-toggle" x-show="executionPlanAuditVisible()">
                         <input type="checkbox" x-model="executionPlanForm.features.audit">
                         <span>Audit Logs</span>
                     </label>
-                    <label class="execution-plan-feature-toggle">
+                    <label class="execution-plan-feature-toggle" x-show="executionPlanUsageVisible()">
                         <input type="checkbox" x-model="executionPlanForm.features.usage">
                         <span>Usage</span>
                     </label>
-                    <label class="execution-plan-feature-toggle">
+                    <label class="execution-plan-feature-toggle" x-show="executionPlanGuardrailsVisible()">
                         <input type="checkbox" x-model="executionPlanForm.features.guardrails">
                         <span>Guardrails</span>
                     </label>
@@ -753,7 +753,7 @@
 
                         {{template "execution-plan-chart" "executionPlanWorkflowChart(executionPlanPreview())"}}
 
-                        <div class="execution-plan-guardrails">
+                        <div class="execution-plan-guardrails" x-show="executionPlanGuardrailsVisible()">
                             <div class="execution-plan-section-head">
                                 <h4>Guardrails</h4>
                                 <span class="provider-badge" x-text="planGuardrails(executionPlanPreview()).length ? planGuardrails(executionPlanPreview()).length + ' steps' : 'None'"></span>
@@ -771,7 +771,7 @@
                     </article>
                 </div>
 
-                <div class="execution-plan-guardrail-editor" x-show="executionPlanForm.features.guardrails">
+	                <div class="execution-plan-guardrail-editor" x-show="executionPlanForm.features.guardrails && executionPlanGuardrailsVisible()">
                     <div class="execution-plan-section-head">
                         <div>
                             <h4>Guardrail Steps</h4>
@@ -838,7 +838,7 @@
 
                         {{template "execution-plan-chart" "executionPlanWorkflowChart(plan)"}}
 
-                        <div class="execution-plan-guardrails">
+	                        <div class="execution-plan-guardrails" x-show="executionPlanGuardrailsVisible()">
                             <div class="execution-plan-section-head">
                                 <h4>Guardrails</h4>
                                 <span class="provider-badge" x-text="planGuardrails(plan).length ? planGuardrails(plan).length + ' steps' : 'None'"></span>

@@ -161,6 +161,56 @@ test('executionPlanWorkflowChart returns the shared chart contract for workflow 
     );
 });
 
+test('executionPlanWorkflowChart masks globally disabled workflow features from persisted plans', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'off',
+        USAGE_ENABLED: 'off',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'off',
+        SEMANTIC_CACHE_ENABLED: 'off'
+    };
+
+    assert.equal(
+        JSON.stringify(module.executionPlanWorkflowChart({
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            },
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: true,
+                    fallback: true
+                },
+                guardrails: [
+                    { ref: 'policy-system', step: 10 }
+                ]
+            }
+        })),
+        JSON.stringify({
+            showGuardrails: false,
+            guardrailLabel: '',
+            showCache: false,
+            cacheNodeClass: '',
+            cacheConnClass: '',
+            cacheStatusLabel: null,
+            aiLabel: 'openai',
+            aiSublabel: 'gpt-5',
+            aiConnClass: '',
+            aiNodeClass: '',
+            responseConnClass: '',
+            responseNodeClass: '',
+            showAsync: false,
+            showUsage: false,
+            showAudit: false
+        })
+    );
+});
+
 test('executionPlanAuditChart returns the shared chart contract for audit runtime entries', () => {
     const module = createExecutionPlansModule();
     module.executionPlanVersionsByID = {
@@ -538,6 +588,71 @@ test('executionPlanSourceFeatures defaults fallback to true when omitted', () =>
     );
 });
 
+test('executionPlanSourceFeatures respects effective runtime features for persisted plans', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        JSON.stringify(module.executionPlanSourceFeatures({
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: true,
+                    fallback: true
+                }
+            },
+            effective_features: {
+                cache: false,
+                audit: false,
+                usage: true,
+                guardrails: false,
+                fallback: false
+            }
+        })),
+        JSON.stringify({
+            cache: false,
+            audit: false,
+            usage: true,
+            guardrails: false,
+            fallback: true
+        })
+    );
+});
+
+test('executionPlanSourceFeatures masks raw workflow features by global runtime config when effective features are unavailable', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'off',
+        USAGE_ENABLED: 'off',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'off',
+        SEMANTIC_CACHE_ENABLED: 'off'
+    };
+
+    assert.equal(
+        JSON.stringify(module.executionPlanSourceFeatures({
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: true,
+                    fallback: true
+                }
+            }
+        })),
+        JSON.stringify({
+            cache: false,
+            audit: false,
+            usage: false,
+            guardrails: false,
+            fallback: true
+        })
+    );
+});
+
 test('fetchExecutionPlanRuntimeConfig loads FEATURE_FALLBACK_MODE from the admin config endpoint', async () => {
     const module = createExecutionPlansModule({
         fetch(url, options) {
@@ -547,6 +662,11 @@ test('fetchExecutionPlanRuntimeConfig loads FEATURE_FALLBACK_MODE from the admin
                 ok: true,
                 json: async () => ({
                     FEATURE_FALLBACK_MODE: 'manual',
+                    LOGGING_ENABLED: 'on',
+                    USAGE_ENABLED: 'off',
+                    GUARDRAILS_ENABLED: 'on',
+                    REDIS_URL: 'on',
+                    SEMANTIC_CACHE_ENABLED: 'off',
                     UNRELATED_FLAG: 'ignored'
                 })
             });
@@ -560,7 +680,12 @@ test('fetchExecutionPlanRuntimeConfig loads FEATURE_FALLBACK_MODE from the admin
     assert.equal(
         JSON.stringify(module.executionPlanRuntimeConfig),
         JSON.stringify({
-            FEATURE_FALLBACK_MODE: 'manual'
+            FEATURE_FALLBACK_MODE: 'manual',
+            LOGGING_ENABLED: 'on',
+            USAGE_ENABLED: 'off',
+            GUARDRAILS_ENABLED: 'on',
+            REDIS_URL: 'on',
+            SEMANTIC_CACHE_ENABLED: 'off'
         })
     );
 });
@@ -605,7 +730,12 @@ test('fetchExecutionPlanRuntimeConfig aborts hung requests and clears the timeou
 test('buildExecutionPlanRequest omits fallback for new plans when the control is hidden', () => {
     const module = createExecutionPlansModule();
     module.executionPlanRuntimeConfig = {
-        FEATURE_FALLBACK_MODE: 'off'
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'on',
+        USAGE_ENABLED: 'on',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'on',
+        SEMANTIC_CACHE_ENABLED: 'off'
     };
     module.executionPlanForm = {
         scope_provider: 'openai',
@@ -636,7 +766,12 @@ test('buildExecutionPlanRequest omits fallback for new plans when the control is
 test('buildExecutionPlanRequest preserves fallback state for hydrated plans even when the control is hidden', () => {
     const module = createExecutionPlansModule();
     module.executionPlanRuntimeConfig = {
-        FEATURE_FALLBACK_MODE: 'off'
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'on',
+        USAGE_ENABLED: 'on',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'on',
+        SEMANTIC_CACHE_ENABLED: 'off'
     };
     module.executionPlanFormHydrated = true;
     module.executionPlanHydratedScope = {
@@ -673,7 +808,12 @@ test('buildExecutionPlanRequest preserves fallback state for hydrated plans even
 test('buildExecutionPlanRequest omits hidden fallback when a hydrated workflow is retargeted to a new scope', () => {
     const module = createExecutionPlansModule();
     module.executionPlanRuntimeConfig = {
-        FEATURE_FALLBACK_MODE: 'off'
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'on',
+        USAGE_ENABLED: 'on',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'on',
+        SEMANTIC_CACHE_ENABLED: 'off'
     };
     module.executionPlanFormHydrated = true;
     module.executionPlanHydratedScope = {
@@ -702,6 +842,54 @@ test('buildExecutionPlanRequest omits hidden fallback when a hydrated workflow i
             audit: true,
             usage: true,
             guardrails: false
+        })
+    );
+});
+
+test('buildExecutionPlanRequest clamps globally disabled workflow features off even when the form has them enabled', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'off',
+        USAGE_ENABLED: 'off',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'off',
+        SEMANTIC_CACHE_ENABLED: 'off'
+    };
+    module.executionPlanForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        name: 'OpenAI GPT-5',
+        description: 'Globally disabled features should be forced off',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: true,
+            fallback: true
+        },
+        guardrails: [
+            { ref: 'policy-system', step: 10 }
+        ]
+    };
+
+    assert.equal(
+        JSON.stringify(module.buildExecutionPlanRequest()),
+        JSON.stringify({
+            scope_provider: 'openai',
+            scope_model: 'gpt-5',
+            name: 'OpenAI GPT-5',
+            description: 'Globally disabled features should be forced off',
+            plan_payload: {
+                schema_version: 1,
+                features: {
+                    cache: false,
+                    audit: false,
+                    usage: false,
+                    guardrails: false
+                },
+                guardrails: []
+            }
         })
     );
 });

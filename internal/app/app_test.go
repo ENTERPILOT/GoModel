@@ -64,3 +64,46 @@ func TestDashboardRuntimeConfig_InvalidFallbackModeDefaultsOff(t *testing.T) {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigFeatureFallbackMode, got, config.FallbackModeOff)
 	}
 }
+
+func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
+	cfg := &config.Config{
+		Logging: config.LogConfig{
+			Enabled: true,
+		},
+		Usage: config.UsageConfig{
+			Enabled: false,
+		},
+		Guardrails: config.GuardrailsConfig{
+			Enabled: true,
+		},
+		Cache: config.CacheConfig{
+			Response: config.ResponseCacheConfig{
+				Simple: config.SimpleCacheConfig{
+					Redis: &config.RedisResponseConfig{
+						URL: "redis://localhost:6379",
+					},
+				},
+				Semantic: config.SemanticCacheConfig{
+					Enabled: false,
+				},
+			},
+		},
+	}
+
+	values := dashboardRuntimeConfig(cfg)
+	if got := values[admin.DashboardConfigLoggingEnabled]; got != "on" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLoggingEnabled, got)
+	}
+	if got := values[admin.DashboardConfigUsageEnabled]; got != "off" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigUsageEnabled, got)
+	}
+	if got := values[admin.DashboardConfigGuardrailsEnabled]; got != "on" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigGuardrailsEnabled, got)
+	}
+	if got := values[admin.DashboardConfigRedisURL]; got != "on" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigRedisURL, got)
+	}
+	if got := values[admin.DashboardConfigSemanticCacheEnabled]; got != "off" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigSemanticCacheEnabled, got)
+	}
+}

@@ -36,7 +36,14 @@ type Handler struct {
 // Option configures the admin API handler.
 type Option func(*Handler)
 
-const DashboardConfigFeatureFallbackMode = "FEATURE_FALLBACK_MODE"
+const (
+	DashboardConfigFeatureFallbackMode   = "FEATURE_FALLBACK_MODE"
+	DashboardConfigLoggingEnabled        = "LOGGING_ENABLED"
+	DashboardConfigUsageEnabled          = "USAGE_ENABLED"
+	DashboardConfigGuardrailsEnabled     = "GUARDRAILS_ENABLED"
+	DashboardConfigRedisURL              = "REDIS_URL"
+	DashboardConfigSemanticCacheEnabled  = "SEMANTIC_CACHE_ENABLED"
+)
 
 // WithAuditReader enables audit log read endpoints.
 func WithAuditReader(reader auditlog.Reader) Option {
@@ -96,9 +103,18 @@ func normalizeDashboardRuntimeConfig(values map[string]string) map[string]string
 		return map[string]string{}
 	}
 
-	normalized := make(map[string]string, 1)
-	if value, ok := values[DashboardConfigFeatureFallbackMode]; ok {
-		normalized[DashboardConfigFeatureFallbackMode] = strings.TrimSpace(value)
+	normalized := make(map[string]string, 6)
+	for _, key := range []string{
+		DashboardConfigFeatureFallbackMode,
+		DashboardConfigLoggingEnabled,
+		DashboardConfigUsageEnabled,
+		DashboardConfigGuardrailsEnabled,
+		DashboardConfigRedisURL,
+		DashboardConfigSemanticCacheEnabled,
+	} {
+		if value, ok := values[key]; ok {
+			normalized[key] = strings.TrimSpace(value)
+		}
 	}
 	return normalized
 }

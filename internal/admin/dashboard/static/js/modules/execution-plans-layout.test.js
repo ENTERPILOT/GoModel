@@ -174,6 +174,39 @@ test('workflow failover controls are gated by the runtime FEATURE_FALLBACK_MODE 
     );
 });
 
+test('workflow feature controls and guardrail sections are gated by global runtime visibility helpers', () => {
+    const template = readFixture('../../../templates/index.html');
+
+    assert.match(
+        template,
+        /x-show="executionPlanCacheVisible\(\)"[\s\S]*x-model="executionPlanForm\.features\.cache"/
+    );
+    assert.match(
+        template,
+        /x-show="executionPlanAuditVisible\(\)"[\s\S]*x-model="executionPlanForm\.features\.audit"/
+    );
+    assert.match(
+        template,
+        /x-show="executionPlanUsageVisible\(\)"[\s\S]*x-model="executionPlanForm\.features\.usage"/
+    );
+    assert.match(
+        template,
+        /x-show="executionPlanGuardrailsVisible\(\)"[\s\S]*x-model="executionPlanForm\.features\.guardrails"/
+    );
+    assert.match(
+        template,
+        /<div class="execution-plan-guardrails" x-show="executionPlanGuardrailsVisible\(\)">/
+    );
+    assert.match(
+        template,
+        /<div class="execution-plan-guardrails" x-show="executionPlanGuardrailsVisible\(\)">[\s\S]*planGuardrails\(plan\)/
+    );
+    assert.match(
+        template,
+        /<div class="execution-plan-guardrail-editor" x-show="executionPlanForm\.features\.guardrails && executionPlanGuardrailsVisible\(\)">/
+    );
+});
+
 test('workflow editor renders a live preview card from the draft workflow state', () => {
     const template = readFixture('../../../templates/index.html');
     const chartTemplate = readFixture('../../../templates/execution-plan-chart.html');

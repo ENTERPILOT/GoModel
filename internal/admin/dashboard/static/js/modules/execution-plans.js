@@ -52,19 +52,100 @@
                 };
             },
 
-            executionPlanRuntimeConfigKeys() {
-                return ['FEATURE_FALLBACK_MODE'];
-            },
+	            executionPlanRuntimeConfigKeys() {
+	                return [
+	                    'FEATURE_FALLBACK_MODE',
+	                    'LOGGING_ENABLED',
+	                    'USAGE_ENABLED',
+	                    'GUARDRAILS_ENABLED',
+	                    'REDIS_URL',
+	                    'SEMANTIC_CACHE_ENABLED'
+	                ];
+	            },
 
-            executionPlanRuntimeFlag(name) {
-                const value = this.executionPlanRuntimeConfig && this.executionPlanRuntimeConfig[name];
-                return String(value || '').trim().toLowerCase();
-            },
+	            executionPlanRuntimeFlag(name) {
+	                const value = this.executionPlanRuntimeConfig && this.executionPlanRuntimeConfig[name];
+	                return String(value || '').trim().toLowerCase();
+	            },
 
-            executionPlanFailoverVisible() {
-                const mode = this.executionPlanRuntimeFlag('FEATURE_FALLBACK_MODE');
-                return mode !== '' && mode !== 'off';
-            },
+	            executionPlanRuntimeBooleanFlag(name, defaultValue) {
+	                const value = this.executionPlanRuntimeFlag(name);
+	                if (value === '') {
+	                    return !!defaultValue;
+	                }
+	                return value === 'on' || value === 'true' || value === '1';
+	            },
+
+	            executionPlanCacheVisible() {
+	                const redis = this.executionPlanRuntimeFlag('REDIS_URL');
+	                const semantic = this.executionPlanRuntimeFlag('SEMANTIC_CACHE_ENABLED');
+	                if (redis === '' && semantic === '') {
+	                    return true;
+	                }
+	                return this.executionPlanRuntimeBooleanFlag('REDIS_URL', false)
+	                    || this.executionPlanRuntimeBooleanFlag('SEMANTIC_CACHE_ENABLED', false);
+	            },
+
+	            executionPlanAuditVisible() {
+	                return this.executionPlanRuntimeBooleanFlag('LOGGING_ENABLED', true);
+	            },
+
+	            executionPlanUsageVisible() {
+	                return this.executionPlanRuntimeBooleanFlag('USAGE_ENABLED', true);
+	            },
+
+	            executionPlanGuardrailsVisible() {
+	                return this.executionPlanRuntimeBooleanFlag('GUARDRAILS_ENABLED', true);
+	            },
+
+	            executionPlanFeatureCaps() {
+	                return {
+	                    cache: this.executionPlanCacheVisible(),
+	                    audit: this.executionPlanAuditVisible(),
+	                    usage: this.executionPlanUsageVisible(),
+	                    guardrails: this.executionPlanGuardrailsVisible()
+	                };
+	            },
+
+	            executionPlanReadFeatureFlag(raw, key, defaultValue) {
+	                if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+	                    return defaultValue;
+	                }
+	                const capitalizedKey = key.charAt(0).toUpperCase() + key.slice(1);
+	                for (const candidate of [key, capitalizedKey]) {
+	                    if (Object.prototype.hasOwnProperty.call(raw, candidate) && raw[candidate] !== null && raw[candidate] !== undefined) {
+	                        return raw[candidate];
+	                    }
+	                }
+	                return defaultValue;
+	            },
+
+	            executionPlanNormalizedFeatures(raw) {
+	                return {
+	                    cache: !!this.executionPlanReadFeatureFlag(raw, 'cache', false),
+	                    audit: !!this.executionPlanReadFeatureFlag(raw, 'audit', false),
+	                    usage: !!this.executionPlanReadFeatureFlag(raw, 'usage', false),
+	                    guardrails: !!this.executionPlanReadFeatureFlag(raw, 'guardrails', false),
+	                    fallback: this.executionPlanReadFeatureFlag(raw, 'fallback', true) !== false
+	                };
+	            },
+
+	            executionPlanApplyGlobalFeatureCaps(raw) {
+	                const features = this.executionPlanNormalizedFeatures(raw);
+	                const caps = this.executionPlanFeatureCaps();
+	                return {
+	                    cache: features.cache && caps.cache,
+	                    audit: features.audit && caps.audit,
+	                    usage: features.usage && caps.usage,
+	                    guardrails: features.guardrails && caps.guardrails,
+	                    fallback: features.fallback
+	                };
+	            },
+
+	            executionPlanFailoverVisible() {
+	                const mode = this.executionPlanRuntimeFlag('FEATURE_FALLBACK_MODE');
+	                return mode !== '' && mode !== 'off';
+	            },
 
             executionPlanFallbackLabel(source) {
                 return this.executionPlanSourceFeatures(source).fallback ? 'On' : 'Off';
@@ -207,15 +288,17 @@
                 return this.executionPlanSubmitMode() === 'save' ? 'Saving...' : 'Creating...';
             },
 
-            executionPlanPreview() {
-                const form = this.executionPlanForm || this.defaultExecutionPlanForm();
-                const provider = String(form.scope_provider || '').trim();
-                const model = provider ? String(form.scope_model || '').trim() : '';
-                const features = form.features || {};
-                const guardrailsEnabled = !!features.guardrails;
-                const guardrails = guardrailsEnabled ? this.executionPlanSourceGuardrails(form) : [];
-                let scopeType = 'global';
-                let scopeDisplay = 'global';
+	            executionPlanPreview() {
+	                const form = this.executionPlanForm || this.defaultExecutionPlanForm();
+	                const provider = String(form.scope_provider || '').trim();
+	                const model = provider ? String(form.scope_model || '').trim() : '';
+	                const rawFeatures = this.executionPlanNormalizedFeatures(form.features || {});
+	                const features = this.executionPlanApplyGlobalFeatureCaps(rawFeatures);
+	                features.fallback = rawFeatures.fallback;
+	                const guardrailsEnabled = !!features.guardrails;
+	                const guardrails = guardrailsEnabled ? this.executionPlanSourceGuardrails(form) : [];
+	                let scopeType = 'global';
+	                let scopeDisplay = 'global';
 
                 if (provider && model) {
                     scopeType = 'provider_model';
@@ -249,20 +332,21 @@
                 };
             },
 
-            executionPlanSourceFeatures(source) {
-                const raw = source && source.plan_payload && source.plan_payload.features
-                    ? source.plan_payload.features
-                    : source && source.features
-                        ? source.features
-                        : {};
-                return {
-                    cache: !!raw.cache,
-                    audit: !!raw.audit,
-                    usage: !!raw.usage,
-                    guardrails: !!raw.guardrails,
-                    fallback: raw.fallback !== false
-                };
-            },
+	            executionPlanSourceFeatures(source) {
+	                const raw = source && source.plan_payload && source.plan_payload.features
+	                    ? source.plan_payload.features
+	                    : source && source.features
+	                        ? source.features
+	                        : {};
+	                const effective = source && source.effective_features && typeof source.effective_features === 'object' && !Array.isArray(source.effective_features)
+	                    ? source.effective_features
+	                    : null;
+	                const features = this.executionPlanApplyGlobalFeatureCaps(effective || raw);
+	                return {
+	                    ...features,
+	                    fallback: this.executionPlanNormalizedFeatures(raw).fallback
+	                };
+	            },
 
             executionPlanSourceGuardrails(source) {
                 const raw = Array.isArray(source && source.plan_payload && source.plan_payload.guardrails)
@@ -303,11 +387,14 @@
                 scroll();
             },
 
-            planGuardrails(plan) {
-                return Array.isArray(plan && plan.plan_payload && plan.plan_payload.guardrails)
-                    ? plan.plan_payload.guardrails
-                    : [];
-            },
+	            planGuardrails(plan) {
+	                if (!this.executionPlanSourceFeatures(plan).guardrails) {
+	                    return [];
+	                }
+	                return Array.isArray(plan && plan.plan_payload && plan.plan_payload.guardrails)
+	                    ? plan.plan_payload.guardrails
+	                    : [];
+	            },
 
             shortHash(value) {
                 const hash = String(value || '').trim();
@@ -399,26 +486,27 @@
                 this.executionPlanForm.guardrails.splice(index, 1);
             },
 
-            buildExecutionPlanRequest() {
-                const form = this.executionPlanForm || this.defaultExecutionPlanForm();
-                const provider = String(form.scope_provider || '').trim();
-                const model = provider ? String(form.scope_model || '').trim() : '';
-                const features = form.features || {};
-                const hydratedScope = this.executionPlanHydratedScope || {
-                    scope_provider: '',
-                    scope_model: ''
+	            buildExecutionPlanRequest() {
+	                const form = this.executionPlanForm || this.defaultExecutionPlanForm();
+	                const provider = String(form.scope_provider || '').trim();
+	                const model = provider ? String(form.scope_model || '').trim() : '';
+	                const rawFeatures = this.executionPlanNormalizedFeatures(form.features || {});
+	                const features = this.executionPlanApplyGlobalFeatureCaps(rawFeatures);
+	                const hydratedScope = this.executionPlanHydratedScope || {
+	                    scope_provider: '',
+	                    scope_model: ''
                 };
                 const sameHydratedScope = String(hydratedScope.scope_provider || '').trim() === provider
                     && String(hydratedScope.scope_model || '').trim() === model;
-                const includeFallback = this.executionPlanFailoverVisible()
-                    || (!!this.executionPlanFormHydrated
-                        && sameHydratedScope
-                        && Object.prototype.hasOwnProperty.call(features, 'fallback'));
+	                const includeFallback = this.executionPlanFailoverVisible()
+	                    || (!!this.executionPlanFormHydrated
+	                        && sameHydratedScope
+	                        && Object.prototype.hasOwnProperty.call(rawFeatures, 'fallback'));
 
-                const guardrails = !!features.guardrails
-                    ? (Array.isArray(form.guardrails) ? form.guardrails : []).map((step) => {
-                        return {
-                            ref: String(step && step.ref || '').trim(),
+	                const guardrails = !!features.guardrails
+	                    ? (Array.isArray(form.guardrails) ? form.guardrails : []).map((step) => {
+	                        return {
+	                            ref: String(step && step.ref || '').trim(),
                             step: this.parseExecutionPlanGuardrailStep(step && step.step)
                         };
                     })
@@ -430,19 +518,19 @@
                     name: String(form.name || '').trim(),
                     description: String(form.description || '').trim(),
                     plan_payload: {
-                        schema_version: 1,
-                        features: {
-                            cache: !!features.cache,
-                            audit: !!features.audit,
-                            usage: !!features.usage,
-                            guardrails: !!features.guardrails
-                        },
-                        guardrails
-                    }
-                };
-                if (includeFallback) {
-                    payload.plan_payload.features.fallback = !!features.fallback;
-                }
+	                        schema_version: 1,
+	                        features: {
+	                            cache: !!features.cache,
+	                            audit: !!features.audit,
+	                            usage: !!features.usage,
+	                            guardrails: !!features.guardrails
+	                        },
+	                        guardrails
+	                    }
+	                };
+	                if (includeFallback) {
+	                    payload.plan_payload.features.fallback = !!rawFeatures.fallback;
+	                }
 
                 return payload;
             },
@@ -820,28 +908,31 @@
                 return source && source.scope && source.scope.scope_model || null;
             },
 
-            executionPlanChartModel(source, runtime, options) {
-                const config = options || {};
-                const forceAudit = !!config.forceAudit;
-                const forceAsync = !!config.forceAsync || forceAudit;
-                return {
-                    showGuardrails: this.epHasGuardrails(source),
-                    guardrailLabel: this.epGuardrailLabel(source),
-                    showCache: !!config.forceCache || this.epShowCacheStep(source, runtime),
+	            executionPlanChartModel(source, runtime, options) {
+	                const config = options || {};
+	                const forceAudit = !!config.forceAudit;
+	                const showGuardrails = this.epHasGuardrails(source);
+	                const showUsage = this.epHasUsage(source);
+	                const showAudit = this.executionPlanAuditVisible() && (forceAudit || this.epHasAudit(source));
+	                const showAsync = !!(showUsage || showAudit);
+	                return {
+	                    showGuardrails,
+	                    guardrailLabel: showGuardrails ? this.epGuardrailLabel(source) : '',
+	                    showCache: !!config.forceCache || this.epShowCacheStep(source, runtime),
                     cacheNodeClass: this.epCacheNodeClass(runtime),
                     cacheConnClass: this.epCacheConnClass(runtime),
                     cacheStatusLabel: this.epCacheStatusLabel(runtime),
                     aiLabel: this.epAiLabel(source, runtime),
                     aiSublabel: this.epAiSublabel(source, runtime),
-                    aiConnClass: this.epAiConnClass(runtime),
-                    aiNodeClass: this.epAiNodeClass(runtime),
-                    responseConnClass: this.epResponseConnClass(runtime),
-                    responseNodeClass: this.epResponseNodeClass(runtime),
-                    showAsync: forceAsync || this.epHasAsync(source),
-                    showUsage: this.epHasUsage(source),
-                    showAudit: forceAudit || this.epHasAudit(source)
-                };
-            },
+	                    aiConnClass: this.epAiConnClass(runtime),
+	                    aiNodeClass: this.epAiNodeClass(runtime),
+	                    responseConnClass: this.epResponseConnClass(runtime),
+	                    responseNodeClass: this.epResponseNodeClass(runtime),
+	                    showAsync,
+	                    showUsage,
+	                    showAudit
+	                };
+	            },
 
             executionPlanWorkflowChart(source) {
                 return this.executionPlanChartModel(source, null, { forceCache: false });
