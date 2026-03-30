@@ -22,7 +22,7 @@ require (
 	go.mongodb.org/mongo-driver/v2 v2.5.0
 	golang.org/x/term v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.47.0
+	modernc.org/sqlite v1.48.0
 )
 
 require (
