@@ -47,7 +47,7 @@ func TestDashboardRuntimeConfig_ExposesFallbackMode(t *testing.T) {
 	}
 
 	values := dashboardRuntimeConfig(cfg)
-	if got := values[admin.DashboardConfigFeatureFallbackMode]; got != string(config.FallbackModeManual) {
+	if got := values.FeatureFallbackMode; got != string(config.FallbackModeManual) {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigFeatureFallbackMode, got, config.FallbackModeManual)
 	}
 }
@@ -60,8 +60,24 @@ func TestDashboardRuntimeConfig_InvalidFallbackModeDefaultsOff(t *testing.T) {
 	}
 
 	values := dashboardRuntimeConfig(cfg)
-	if got := values[admin.DashboardConfigFeatureFallbackMode]; got != string(config.FallbackModeOff) {
+	if got := values.FeatureFallbackMode; got != string(config.FallbackModeOff) {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigFeatureFallbackMode, got, config.FallbackModeOff)
+	}
+}
+
+func TestDashboardRuntimeConfig_FallbackOverrideEnablesVisibilityWhenDefaultModeIsOff(t *testing.T) {
+	cfg := &config.Config{
+		Fallback: config.FallbackConfig{
+			DefaultMode: config.FallbackModeOff,
+			Overrides: map[string]config.FallbackModelOverride{
+				"gpt-4o": {Mode: config.FallbackModeManual},
+			},
+		},
+	}
+
+	values := dashboardRuntimeConfig(cfg)
+	if got := values.FeatureFallbackMode; got != string(config.FallbackModeManual) {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigFeatureFallbackMode, got, config.FallbackModeManual)
 	}
 }
 
@@ -91,19 +107,19 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 	}
 
 	values := dashboardRuntimeConfig(cfg)
-	if got := values[admin.DashboardConfigLoggingEnabled]; got != "on" {
+	if got := values.LoggingEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLoggingEnabled, got)
 	}
-	if got := values[admin.DashboardConfigUsageEnabled]; got != "off" {
+	if got := values.UsageEnabled; got != "off" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigUsageEnabled, got)
 	}
-	if got := values[admin.DashboardConfigGuardrailsEnabled]; got != "on" {
+	if got := values.GuardrailsEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigGuardrailsEnabled, got)
 	}
-	if got := values[admin.DashboardConfigRedisURL]; got != "on" {
+	if got := values.RedisURL; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigRedisURL, got)
 	}
-	if got := values[admin.DashboardConfigSemanticCacheEnabled]; got != "off" {
+	if got := values.SemanticCacheEnabled; got != "off" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigSemanticCacheEnabled, got)
 	}
 }

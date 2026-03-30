@@ -120,6 +120,18 @@
 	                return defaultValue;
 	            },
 
+	            executionPlanHasDefinedFeatureFlag(raw, key) {
+	                if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+	                    return false;
+	                }
+	                const capitalizedKey = key.charAt(0).toUpperCase() + key.slice(1);
+	                return [key, capitalizedKey].some((candidate) => {
+	                    return Object.prototype.hasOwnProperty.call(raw, candidate)
+	                        && raw[candidate] !== null
+	                        && raw[candidate] !== undefined;
+	                });
+	            },
+
 	            executionPlanNormalizedFeatures(raw) {
 	                return {
 	                    cache: !!this.executionPlanReadFeatureFlag(raw, 'cache', false),
@@ -492,6 +504,12 @@
 	                const model = provider ? String(form.scope_model || '').trim() : '';
 	                const rawFeatures = this.executionPlanNormalizedFeatures(form.features || {});
 	                const features = this.executionPlanApplyGlobalFeatureCaps(rawFeatures);
+	                const activeScopeMatch = this.executionPlanActiveScopeMatch();
+	                const activeScopeFeatures = activeScopeMatch && activeScopeMatch.plan_payload && activeScopeMatch.plan_payload.features;
+	                const activeScopeHasFallback = this.executionPlanHasDefinedFeatureFlag(activeScopeFeatures, 'fallback');
+	                const preservedActiveFallback = activeScopeHasFallback
+	                    ? this.executionPlanReadFeatureFlag(activeScopeFeatures, 'fallback', true) !== false
+	                    : null;
 	                const hydratedScope = this.executionPlanHydratedScope || {
 	                    scope_provider: '',
 	                    scope_model: ''
@@ -501,7 +519,10 @@
 	                const includeFallback = this.executionPlanFailoverVisible()
 	                    || (!!this.executionPlanFormHydrated
 	                        && sameHydratedScope
-	                        && Object.prototype.hasOwnProperty.call(rawFeatures, 'fallback'));
+	                        && Object.prototype.hasOwnProperty.call(rawFeatures, 'fallback'))
+	                    || (!this.executionPlanFormHydrated
+	                        && !!activeScopeMatch
+	                        && activeScopeHasFallback);
 
 	                const guardrails = !!features.guardrails
 	                    ? (Array.isArray(form.guardrails) ? form.guardrails : []).map((step) => {
@@ -529,7 +550,12 @@
 	                    }
 	                };
 	                if (includeFallback) {
-	                    payload.plan_payload.features.fallback = !!rawFeatures.fallback;
+	                    payload.plan_payload.features.fallback = !this.executionPlanFailoverVisible()
+	                        && !this.executionPlanFormHydrated
+	                        && !!activeScopeMatch
+	                        && activeScopeHasFallback
+	                        ? preservedActiveFallback
+	                        : !!rawFeatures.fallback;
 	                }
 
                 return payload;
@@ -761,14 +787,20 @@
                     return this.executionPlanVersionRequests[normalizedID];
                 }
 
-                const request = (async () => {
-                    try {
-                        const res = await fetch('/admin/api/v1/execution-plans/' + encodeURIComponent(normalizedID), {
-                            headers: this.headers()
-                        });
-                        if (res.status === 404) {
-                            this.cacheMissingExecutionPlanVersion(normalizedID);
-                            return null;
+	                const request = (async () => {
+	                    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+	                    const timeoutID = controller && typeof setTimeout === 'function'
+	                        ? setTimeout(() => controller.abort(), 10000)
+	                        : null;
+	                    try {
+	                        const options = { headers: this.headers() };
+	                        if (controller) {
+	                            options.signal = controller.signal;
+	                        }
+	                        const res = await fetch('/admin/api/v1/execution-plans/' + encodeURIComponent(normalizedID), options);
+	                        if (res.status === 404) {
+	                            this.cacheMissingExecutionPlanVersion(normalizedID);
+	                            return null;
                         }
                         if (res.status === 401) {
                             if (typeof this.handleFetchResponse === 'function') {
@@ -787,15 +819,21 @@
                         if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
                             this.cacheMissingExecutionPlanVersion(normalizedID);
                             return null;
-                        }
-                        return this.cacheExecutionPlanVersion(payload);
-                    } catch (e) {
-                        console.error('Failed to fetch workflow version:', e);
-                        return null;
-                    } finally {
-                        if (this.executionPlanVersionRequests) {
-                            delete this.executionPlanVersionRequests[normalizedID];
-                        }
+	                        }
+	                        return this.cacheExecutionPlanVersion(payload);
+	                    } catch (e) {
+	                        if (e && e.name === 'AbortError') {
+	                            return null;
+	                        }
+	                        console.error('Failed to fetch workflow version:', e);
+	                        return null;
+	                    } finally {
+	                        if (timeoutID !== null && typeof clearTimeout === 'function') {
+	                            clearTimeout(timeoutID);
+	                        }
+	                        if (this.executionPlanVersionRequests) {
+	                            delete this.executionPlanVersionRequests[normalizedID];
+	                        }
                     }
                 })();
 

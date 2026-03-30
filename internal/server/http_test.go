@@ -327,8 +327,8 @@ func TestAdminExecutionPlanEndpoints_AreRegistered(t *testing.T) {
 
 func TestAdminDashboardConfigEndpoint_ReturnsHandlerResponse(t *testing.T) {
 	mock := &mockProvider{}
-	adminHandler := admin.NewHandler(nil, nil, admin.WithDashboardRuntimeConfig(map[string]string{
-		"FEATURE_FALLBACK_MODE": "manual",
+	adminHandler := admin.NewHandler(nil, nil, admin.WithDashboardRuntimeConfig(admin.DashboardConfigResponse{
+		FeatureFallbackMode: "manual",
 	}))
 	srv := New(mock, &Config{
 		AdminEndpointsEnabled: true,

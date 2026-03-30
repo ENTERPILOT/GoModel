@@ -805,6 +805,64 @@ test('buildExecutionPlanRequest preserves fallback state for hydrated plans even
     );
 });
 
+test('buildExecutionPlanRequest preserves hidden fallback for fresh save flows that match an active workflow', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanRuntimeConfig = {
+        FEATURE_FALLBACK_MODE: 'off',
+        LOGGING_ENABLED: 'on',
+        USAGE_ENABLED: 'on',
+        GUARDRAILS_ENABLED: 'off',
+        REDIS_URL: 'on',
+        SEMANTIC_CACHE_ENABLED: 'off'
+    };
+    module.executionPlans = [
+        {
+            id: 'openai-gpt-5-plan',
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            },
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: false,
+                    fallback: false
+                },
+                guardrails: []
+            }
+        }
+    ];
+    module.executionPlanFormHydrated = false;
+    module.executionPlanForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        name: 'OpenAI GPT-5',
+        description: 'Preserve hidden fallback from the active workflow',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false,
+            fallback: true
+        },
+        guardrails: []
+    };
+
+    assert.equal(module.executionPlanSubmitMode(), 'save');
+    assert.equal(
+        JSON.stringify(module.buildExecutionPlanRequest().plan_payload.features),
+        JSON.stringify({
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false,
+            fallback: false
+        })
+    );
+});
+
 test('buildExecutionPlanRequest omits hidden fallback when a hydrated workflow is retargeted to a new scope', () => {
     const module = createExecutionPlansModule();
     module.executionPlanRuntimeConfig = {
@@ -1376,4 +1434,44 @@ test('fetchExecutionPlanVersion loads a historical workflow version once and cac
         '/admin/api/v1/execution-plans/historical-v2',
         '/admin/api/v1/execution-plans/missing-plan'
     ]);
+});
+
+test('fetchExecutionPlanVersion aborts hung requests, clears the timeout, and cleans up in-flight state', async () => {
+    let timeoutCleared = false;
+    class AbortControllerStub {
+        constructor() {
+            this.signal = { aborted: false };
+        }
+
+        abort() {
+            this.signal.aborted = true;
+        }
+    }
+
+    const module = createExecutionPlansModule({
+        AbortController: AbortControllerStub,
+        setTimeout(fn) {
+            fn();
+            return 7;
+        },
+        clearTimeout(id) {
+            assert.equal(id, 7);
+            timeoutCleared = true;
+        },
+        fetch(_url, options) {
+            assert.equal(options.signal.aborted, true);
+            return Promise.reject(Object.assign(new Error('timed out'), { name: 'AbortError' }));
+        }
+    });
+    module.headers = () => ({ authorization: 'Bearer token' });
+    module.handleFetchResponse = () => true;
+
+    const result = await module.fetchExecutionPlanVersion('historical-timeout');
+
+    assert.equal(result, null);
+    assert.equal(timeoutCleared, true);
+    assert.equal(
+        Object.prototype.hasOwnProperty.call(module.executionPlanVersionRequests || {}, 'historical-timeout'),
+        false
+    );
 });

@@ -570,7 +570,7 @@ func initAdmin(
 	aliasService *aliases.Service,
 	executionPlanService *executionplans.Service,
 	guardrailRegistry *guardrails.Registry,
-	runtimeConfig map[string]string,
+	runtimeConfig admin.DashboardConfigResponse,
 	uiEnabled bool,
 ) (*admin.Handler, *dashboard.Handler, error) {
 	// Find a storage connection for reading usage data
@@ -721,14 +721,14 @@ func defaultExecutionPlanInput(cfg *config.Config) executionplans.CreateInput {
 	}
 }
 
-func dashboardRuntimeConfig(cfg *config.Config) map[string]string {
-	return map[string]string{
-		admin.DashboardConfigFeatureFallbackMode: dashboardFallbackModeValue(cfg),
-		admin.DashboardConfigLoggingEnabled:      dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
-		admin.DashboardConfigUsageEnabled:        dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
-		admin.DashboardConfigGuardrailsEnabled:   dashboardEnabledValue(cfg != nil && cfg.Guardrails.Enabled),
-		admin.DashboardConfigRedisURL:            dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
-		admin.DashboardConfigSemanticCacheEnabled: dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
+func dashboardRuntimeConfig(cfg *config.Config) admin.DashboardConfigResponse {
+	return admin.DashboardConfigResponse{
+		FeatureFallbackMode:  dashboardFallbackModeValue(cfg),
+		LoggingEnabled:       dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
+		UsageEnabled:         dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
+		GuardrailsEnabled:    dashboardEnabledValue(cfg != nil && cfg.Guardrails.Enabled),
+		RedisURL:             dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
+		SemanticCacheEnabled: dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
 	}
 }
 
@@ -740,19 +740,29 @@ func dashboardEnabledValue(enabled bool) string {
 }
 
 func dashboardFallbackModeValue(cfg *config.Config) string {
-	if cfg == nil {
+	if cfg == nil || !fallbackFeatureEnabledGlobally(cfg) {
 		return string(config.FallbackModeOff)
 	}
 
-	mode := strings.ToLower(strings.TrimSpace(string(cfg.Fallback.DefaultMode)))
-	switch mode {
+	switch mode := strings.ToLower(strings.TrimSpace(string(cfg.Fallback.DefaultMode))); mode {
 	case string(config.FallbackModeAuto):
 		return string(config.FallbackModeAuto)
 	case string(config.FallbackModeManual):
 		return string(config.FallbackModeManual)
-	default:
-		return string(config.FallbackModeOff)
 	}
+
+	for _, override := range cfg.Fallback.Overrides {
+		if strings.EqualFold(strings.TrimSpace(string(override.Mode)), string(config.FallbackModeAuto)) {
+			return string(config.FallbackModeAuto)
+		}
+	}
+	for _, override := range cfg.Fallback.Overrides {
+		if strings.EqualFold(strings.TrimSpace(string(override.Mode)), string(config.FallbackModeManual)) {
+			return string(config.FallbackModeManual)
+		}
+	}
+
+	return string(config.FallbackModeOff)
 }
 
 func runtimeExecutionFeatureCaps(cfg *config.Config) core.ExecutionFeatures {

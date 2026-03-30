@@ -30,20 +30,30 @@ type Handler struct {
 	aliases       *aliases.Service
 	plans         *executionplans.Service
 	guardrails    *guardrails.Registry
-	runtimeConfig map[string]string
+	runtimeConfig DashboardConfigResponse
 }
 
 // Option configures the admin API handler.
 type Option func(*Handler)
 
 const (
-	DashboardConfigFeatureFallbackMode   = "FEATURE_FALLBACK_MODE"
-	DashboardConfigLoggingEnabled        = "LOGGING_ENABLED"
-	DashboardConfigUsageEnabled          = "USAGE_ENABLED"
-	DashboardConfigGuardrailsEnabled     = "GUARDRAILS_ENABLED"
-	DashboardConfigRedisURL              = "REDIS_URL"
-	DashboardConfigSemanticCacheEnabled  = "SEMANTIC_CACHE_ENABLED"
+	DashboardConfigFeatureFallbackMode  = "FEATURE_FALLBACK_MODE"
+	DashboardConfigLoggingEnabled       = "LOGGING_ENABLED"
+	DashboardConfigUsageEnabled         = "USAGE_ENABLED"
+	DashboardConfigGuardrailsEnabled    = "GUARDRAILS_ENABLED"
+	DashboardConfigRedisURL             = "REDIS_URL"
+	DashboardConfigSemanticCacheEnabled = "SEMANTIC_CACHE_ENABLED"
 )
+
+// DashboardConfigResponse is the allowlisted runtime config contract exposed to the dashboard UI.
+type DashboardConfigResponse struct {
+	FeatureFallbackMode  string `json:"FEATURE_FALLBACK_MODE,omitempty"`
+	LoggingEnabled       string `json:"LOGGING_ENABLED,omitempty"`
+	UsageEnabled         string `json:"USAGE_ENABLED,omitempty"`
+	GuardrailsEnabled    string `json:"GUARDRAILS_ENABLED,omitempty"`
+	RedisURL             string `json:"REDIS_URL,omitempty"`
+	SemanticCacheEnabled string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
+}
 
 // WithAuditReader enables audit log read endpoints.
 func WithAuditReader(reader auditlog.Reader) Option {
@@ -74,7 +84,7 @@ func WithGuardrailsRegistry(registry *guardrails.Registry) Option {
 }
 
 // WithDashboardRuntimeConfig enables the allowlisted dashboard runtime config endpoint.
-func WithDashboardRuntimeConfig(values map[string]string) Option {
+func WithDashboardRuntimeConfig(values DashboardConfigResponse) Option {
 	return func(h *Handler) {
 		h.runtimeConfig = normalizeDashboardRuntimeConfig(values)
 	}
@@ -86,7 +96,7 @@ func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, opt
 	h := &Handler{
 		usageReader:   reader,
 		registry:      registry,
-		runtimeConfig: map[string]string{},
+		runtimeConfig: DashboardConfigResponse{},
 	}
 
 	for _, opt := range options {
@@ -98,37 +108,19 @@ func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, opt
 	return h
 }
 
-func normalizeDashboardRuntimeConfig(values map[string]string) map[string]string {
-	if len(values) == 0 {
-		return map[string]string{}
+func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardConfigResponse {
+	return DashboardConfigResponse{
+		FeatureFallbackMode:  strings.TrimSpace(values.FeatureFallbackMode),
+		LoggingEnabled:       strings.TrimSpace(values.LoggingEnabled),
+		UsageEnabled:         strings.TrimSpace(values.UsageEnabled),
+		GuardrailsEnabled:    strings.TrimSpace(values.GuardrailsEnabled),
+		RedisURL:             strings.TrimSpace(values.RedisURL),
+		SemanticCacheEnabled: strings.TrimSpace(values.SemanticCacheEnabled),
 	}
-
-	normalized := make(map[string]string, 6)
-	for _, key := range []string{
-		DashboardConfigFeatureFallbackMode,
-		DashboardConfigLoggingEnabled,
-		DashboardConfigUsageEnabled,
-		DashboardConfigGuardrailsEnabled,
-		DashboardConfigRedisURL,
-		DashboardConfigSemanticCacheEnabled,
-	} {
-		if value, ok := values[key]; ok {
-			normalized[key] = strings.TrimSpace(value)
-		}
-	}
-	return normalized
 }
 
-func cloneDashboardRuntimeConfig(values map[string]string) map[string]string {
-	if len(values) == 0 {
-		return map[string]string{}
-	}
-
-	cloned := make(map[string]string, len(values))
-	for key, value := range values {
-		cloned[key] = value
-	}
-	return cloned
+func cloneDashboardRuntimeConfig(values DashboardConfigResponse) DashboardConfigResponse {
+	return values
 }
 
 var validIntervals = map[string]bool{

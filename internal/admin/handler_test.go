@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -1141,14 +1142,13 @@ func TestListCategories_WithModels(t *testing.T) {
 }
 
 func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
-	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(map[string]string{
-		"FEATURE_FALLBACK_MODE":   "auto",
-		"LOGGING_ENABLED":         "on",
-		"USAGE_ENABLED":           "off",
-		"GUARDRAILS_ENABLED":      "on",
-		"REDIS_URL":               "on",
-		"SEMANTIC_CACHE_ENABLED":  "off",
-		"UNRELATED_FLAG":          "hidden",
+	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
+		FeatureFallbackMode:  "auto",
+		LoggingEnabled:       "on",
+		UsageEnabled:         "off",
+		GuardrailsEnabled:    "on",
+		RedisURL:             "on",
+		SemanticCacheEnabled: "off",
 	}))
 	c, rec := newHandlerContext("/admin/api/v1/dashboard/config")
 
@@ -1159,29 +1159,29 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 
-	var body map[string]string
+	var body DashboardConfigResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
-	if got := body["FEATURE_FALLBACK_MODE"]; got != "auto" {
+	if got := body.FeatureFallbackMode; got != "auto" {
 		t.Fatalf("FEATURE_FALLBACK_MODE = %q, want auto", got)
 	}
-	if got := body["LOGGING_ENABLED"]; got != "on" {
+	if got := body.LoggingEnabled; got != "on" {
 		t.Fatalf("LOGGING_ENABLED = %q, want on", got)
 	}
-	if got := body["USAGE_ENABLED"]; got != "off" {
+	if got := body.UsageEnabled; got != "off" {
 		t.Fatalf("USAGE_ENABLED = %q, want off", got)
 	}
-	if got := body["GUARDRAILS_ENABLED"]; got != "on" {
+	if got := body.GuardrailsEnabled; got != "on" {
 		t.Fatalf("GUARDRAILS_ENABLED = %q, want on", got)
 	}
-	if got := body["REDIS_URL"]; got != "on" {
+	if got := body.RedisURL; got != "on" {
 		t.Fatalf("REDIS_URL = %q, want on", got)
 	}
-	if got := body["SEMANTIC_CACHE_ENABLED"]; got != "off" {
+	if got := body.SemanticCacheEnabled; got != "off" {
 		t.Fatalf("SEMANTIC_CACHE_ENABLED = %q, want off", got)
 	}
-	if _, ok := body["UNRELATED_FLAG"]; ok {
+	if rec.Body.String() == "" || strings.Contains(rec.Body.String(), "UNRELATED_FLAG") {
 		t.Fatal("UNRELATED_FLAG should not be exposed")
 	}
 }
