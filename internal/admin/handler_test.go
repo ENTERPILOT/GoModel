@@ -24,6 +24,7 @@ type mockUsageReader struct {
 	daily         []usage.DailyUsage
 	modelUsage    []usage.ModelUsage
 	usageLog      *usage.UsageLogResult
+	lastUsageLog  usage.UsageLogParams
 	summaryErr    error
 	dailyErr      error
 	modelUsageErr error
@@ -63,7 +64,8 @@ func (m *mockUsageReader) GetUsageByModel(_ context.Context, _ usage.UsageQueryP
 	return m.modelUsage, nil
 }
 
-func (m *mockUsageReader) GetUsageLog(_ context.Context, _ usage.UsageLogParams) (*usage.UsageLogResult, error) {
+func (m *mockUsageReader) GetUsageLog(_ context.Context, params usage.UsageLogParams) (*usage.UsageLogResult, error) {
+	m.lastUsageLog = params
 	if m.usageLogErr != nil {
 		return nil, m.usageLogErr
 	}
@@ -536,13 +538,16 @@ func TestUsageLog_WithFilters(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/log?model=gpt-4&provider=openai&search=test&limit=10&offset=5")
+	c, rec := newHandlerContext("/admin/api/v1/usage/log?model=gpt-4&provider=openai&user_path=/team&search=test&limit=10&offset=5")
 
 	if err := h.UsageLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if reader.lastUsageLog.UserPath != "/team" {
+		t.Errorf("expected user_path /team, got %q", reader.lastUsageLog.UserPath)
 	}
 }
 
@@ -638,7 +643,7 @@ func TestAuditLog_WithFilters(t *testing.T) {
 	}
 
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/log?model=gpt-4&provider=openai&method=post&path=/v1/chat/completions&error_type=provider_error&status_code=502&stream=true&search=timeout&limit=10&offset=5")
+	c, rec := newHandlerContext("/admin/api/v1/audit/log?model=gpt-4&provider=openai&method=post&path=/v1/chat/completions&user_path=/team&error_type=provider_error&status_code=502&stream=true&search=timeout&limit=10&offset=5")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -658,6 +663,9 @@ func TestAuditLog_WithFilters(t *testing.T) {
 	}
 	if reader.lastQuery.Path != "/v1/chat/completions" {
 		t.Errorf("expected path filter to match, got %q", reader.lastQuery.Path)
+	}
+	if reader.lastQuery.UserPath != "/team" {
+		t.Errorf("expected user_path filter to match, got %q", reader.lastQuery.UserPath)
 	}
 	if reader.lastQuery.ErrorType != "provider_error" {
 		t.Errorf("expected error_type provider_error, got %q", reader.lastQuery.ErrorType)

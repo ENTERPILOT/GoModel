@@ -148,6 +148,28 @@ data: [DONE]
 	}
 }
 
+func TestStreamUsageObserverIncludesUserPath(t *testing.T) {
+	logger := &trackingLogger{enabled: true}
+	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "/team/alpha")
+	observer.OnJSONEvent(map[string]any{
+		"id": "chatcmpl-123",
+		"usage": map[string]any{
+			"prompt_tokens":     float64(10),
+			"completion_tokens": float64(5),
+			"total_tokens":      float64(15),
+		},
+	})
+	observer.OnStreamClose()
+
+	entries := logger.getEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if got := entries[0].UserPath; got != "/team/alpha" {
+		t.Fatalf("UserPath = %q, want /team/alpha", got)
+	}
+}
+
 func TestStreamUsageObserverDoubleClose(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)

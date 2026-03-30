@@ -11,12 +11,17 @@ type StreamUsageObserver struct {
 	provider        string
 	requestID       string
 	endpoint        string
+	userPath        string
 	closed          bool
 }
 
-func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, endpoint string, pricingResolver PricingResolver) *StreamUsageObserver {
+func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, endpoint string, pricingResolver PricingResolver, userPath ...string) *StreamUsageObserver {
 	if logger == nil {
 		return nil
+	}
+	var normalizedUserPath string
+	if len(userPath) > 0 {
+		normalizedUserPath = userPath[0]
 	}
 	return &StreamUsageObserver{
 		logger:          logger,
@@ -25,6 +30,7 @@ func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, 
 		provider:        provider,
 		requestID:       requestID,
 		endpoint:        endpoint,
+		userPath:        normalizedUserPath,
 	}
 }
 
@@ -130,11 +136,15 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 		}
 	}
 
-	return ExtractFromSSEUsage(
+	entry := ExtractFromSSEUsage(
 		providerID,
 		inputTokens, outputTokens, totalTokens,
 		rawData,
 		o.requestID, model, o.provider, o.endpoint,
 		pricingArgs...,
 	)
+	if entry != nil {
+		entry.UserPath = o.userPath
+	}
+	return entry
 }

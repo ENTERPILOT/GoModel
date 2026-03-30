@@ -54,11 +54,23 @@ func (s *executionPlanTestStore) Create(_ context.Context, input executionplans.
 	var scopeKey string
 	switch {
 	case input.Scope.Provider == "":
-		scopeKey = "global"
+		if input.Scope.UserPath == "" {
+			scopeKey = "global"
+		} else {
+			scopeKey = "path:" + input.Scope.UserPath
+		}
 	case input.Scope.Model == "":
-		scopeKey = "provider:" + input.Scope.Provider
+		if input.Scope.UserPath == "" {
+			scopeKey = "provider:" + input.Scope.Provider
+		} else {
+			scopeKey = "provider_path:" + input.Scope.Provider + ":" + input.Scope.UserPath
+		}
 	default:
-		scopeKey = "provider_model:" + input.Scope.Provider + ":" + input.Scope.Model
+		if input.Scope.UserPath == "" {
+			scopeKey = "provider_model:" + input.Scope.Provider + ":" + input.Scope.Model
+		} else {
+			scopeKey = "provider_model_path:" + input.Scope.Provider + ":" + input.Scope.Model + ":" + input.Scope.UserPath
+		}
 	}
 	planHash := "hash-created"
 
@@ -281,6 +293,57 @@ func TestExecutionPlansEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	}
 	if deactivateEnvelope.Error.Code == nil || *deactivateEnvelope.Error.Code != "feature_unavailable" {
 		t.Fatalf("deactivate error code = %v, want feature_unavailable", deactivateEnvelope.Error.Code)
+	}
+}
+
+func TestCreateExecutionPlan_NormalizesScopeUserPath(t *testing.T) {
+	store := &executionPlanTestStore{
+		versions: []executionplans.Version{
+			{
+				ID:       "global-plan",
+				Scope:    executionplans.Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: executionplans.Payload{
+					SchemaVersion: 1,
+					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true},
+				},
+				PlanHash: "hash-global",
+			},
+		},
+	}
+	h := newExecutionPlanHandler(t, store, nil)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{
+		"scope_provider":"openai",
+		"scope_model":"gpt-5",
+		"scope_user_path":" team//alpha/user/ ",
+		"name":"Scoped workflow",
+		"plan_payload":{
+			"schema_version":1,
+			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false}
+		}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.CreateExecutionPlan(c); err != nil {
+		t.Fatalf("CreateExecutionPlan() error = %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+
+	var version executionplans.Version
+	if err := json.Unmarshal(rec.Body.Bytes(), &version); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if got := version.Scope.UserPath; got != "/team/alpha/user" {
+		t.Fatalf("Scope.UserPath = %q, want /team/alpha/user", got)
 	}
 }
 

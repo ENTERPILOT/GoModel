@@ -339,3 +339,78 @@ func TestSQLiteReader_AllowsNullExecutionPlanVersionID(t *testing.T) {
 		t.Fatalf("list ExecutionPlanVersionID = %q, want empty", logs.Entries[0].ExecutionPlanVersionID)
 	}
 }
+
+func TestSQLiteReader_GetLogsFiltersByUserPathSubtree(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = db.Exec(`
+		INSERT INTO audit_logs (
+			id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id,
+			status_code, request_id, client_ip, method, path, user_path, stream, error_type, data
+		) VALUES
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		"match-team",
+		now,
+		0,
+		"gpt-4",
+		"",
+		"openai",
+		0,
+		nil,
+		200,
+		"req-1",
+		"127.0.0.1",
+		"POST",
+		"/v1/chat/completions",
+		"/team/a",
+		0,
+		"",
+		nil,
+		"miss-other",
+		now,
+		0,
+		"gpt-4",
+		"",
+		"openai",
+		0,
+		nil,
+		200,
+		"req-2",
+		"127.0.0.1",
+		"POST",
+		"/v1/chat/completions",
+		"/other",
+		0,
+		"",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("failed to insert audit log rows: %v", err)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create reader: %v", err)
+	}
+
+	logs, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "/team", Limit: 10})
+	if err != nil {
+		t.Fatalf("GetLogs failed: %v", err)
+	}
+	if len(logs.Entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(logs.Entries))
+	}
+	if logs.Entries[0].ID != "match-team" {
+		t.Fatalf("entry id = %q, want match-team", logs.Entries[0].ID)
+	}
+}

@@ -334,6 +334,43 @@ func TestModelValidation_StoresMatchedExecutionPolicy(t *testing.T) {
 	}
 }
 
+func TestModelValidation_PassesUserPathToExecutionPolicyResolver(t *testing.T) {
+	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
+
+	e := echo.New()
+	var capturedSelector core.ExecutionPlanSelector
+
+	policyResolver := &staticExecutionPolicyResolver{
+		match: func(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+			capturedSelector = selector
+			return &core.ResolvedExecutionPolicy{
+				VersionID: "plan-global-v1",
+				Version:   1,
+				Name:      "global",
+				Features:  core.DefaultExecutionFeatures(),
+			}, nil
+		},
+	}
+
+	middleware := RequestSnapshotCapture()
+	handler := middleware(ExecutionPlanningWithResolverAndPolicy(provider, nil, policyResolver)(func(c *echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(core.UserPathHeader, "/team/a/user")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, "mock", capturedSelector.Provider)
+	assert.Equal(t, "gpt-4o-mini", capturedSelector.Model)
+	assert.Equal(t, "/team/a/user", capturedSelector.UserPath)
+}
+
 func TestExecutionPlanning_StoresPassthroughRouteInfo(t *testing.T) {
 	provider := &mockProvider{}
 

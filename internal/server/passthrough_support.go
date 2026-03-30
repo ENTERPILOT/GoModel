@@ -278,7 +278,7 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 			}
 		}
 		if s.usageLogger != nil && s.usageLogger.Config().Enabled && (plan == nil || plan.UsageEnabled()) {
-			if observer := usage.NewStreamUsageObserver(s.usageLogger, model, providerType, requestID, usagePath, s.pricingResolver); observer != nil {
+			if observer := usage.NewStreamUsageObserver(s.usageLogger, model, providerType, requestID, usagePath, s.pricingResolver, core.UserPathFromContext(c.Request().Context())); observer != nil {
 				observers = append(observers, observer)
 			}
 		}

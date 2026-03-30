@@ -67,6 +67,26 @@ func TestSerializeBatchPreservesRequestEndpointHints(t *testing.T) {
 	}
 }
 
+func TestSerializeBatchPreservesUserPath(t *testing.T) {
+	raw, err := serializeBatch(&StoredBatch{
+		Batch: &core.BatchResponse{
+			ID: "batch_123",
+		},
+		UserPath: "/team/alpha",
+	})
+	if err != nil {
+		t.Fatalf("serializeBatch() error = %v", err)
+	}
+
+	decoded, err := deserializeBatch(raw)
+	if err != nil {
+		t.Fatalf("deserializeBatch() error = %v", err)
+	}
+	if got := decoded.UserPath; got != "/team/alpha" {
+		t.Fatalf("UserPath = %q, want /team/alpha", got)
+	}
+}
+
 func TestSerializeBatchStripsGatewayOnlyMetadata(t *testing.T) {
 	loggedAt := time.Unix(1700000000, 0).UTC()
 	raw, err := serializeBatch(&StoredBatch{

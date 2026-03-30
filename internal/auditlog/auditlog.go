@@ -50,6 +50,7 @@ type LogEntry struct {
 	ClientIP  string `json:"client_ip,omitempty" bson:"client_ip,omitempty"`
 	Method    string `json:"method,omitempty" bson:"method,omitempty"`
 	Path      string `json:"path,omitempty" bson:"path,omitempty"`
+	UserPath  string `json:"user_path,omitempty" bson:"user_path,omitempty"`
 	Stream    bool   `json:"stream,omitempty" bson:"stream,omitempty"`
 	ErrorType string `json:"error_type,omitempty" bson:"error_type,omitempty"`
 

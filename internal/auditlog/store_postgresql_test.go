@@ -49,29 +49,29 @@ func TestBuildAuditLogInsert(t *testing.T) {
 	})
 
 	normalized := strings.Join(strings.Fields(query), " ")
-	wantQuery := "INSERT INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, status_code, request_id, client_ip, method, path, stream, error_type, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16), ($17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32) ON CONFLICT (id) DO NOTHING"
+	wantQuery := "INSERT INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, status_code, request_id, client_ip, method, path, user_path, stream, error_type, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17), ($18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34) ON CONFLICT (id) DO NOTHING"
 	if normalized != wantQuery {
 		t.Fatalf("query = %q, want %q", normalized, wantQuery)
 	}
 
-	if got, want := len(args), 32; got != want {
+	if got, want := len(args), 34; got != want {
 		t.Fatalf("len(args) = %d, want %d", got, want)
 	}
 	if got := args[0]; got != "log-1" {
 		t.Fatalf("args[0] = %v, want log-1", got)
 	}
-	if got := args[16]; got != "log-2" {
-		t.Fatalf("args[16] = %v, want log-2", got)
+	if got := args[17]; got != "log-2" {
+		t.Fatalf("args[17] = %v, want log-2", got)
 	}
-	if got := string(args[15].([]byte)); got != `{"user_agent":"test-agent"}` {
-		t.Fatalf("args[15] = %q, want %q", got, `{"user_agent":"test-agent"}`)
+	if got := string(args[16].([]byte)); got != `{"user_agent":"test-agent"}` {
+		t.Fatalf("args[16] = %q, want %q", got, `{"user_agent":"test-agent"}`)
 	}
-	dataJSON, ok := args[31].([]byte)
+	dataJSON, ok := args[33].([]byte)
 	if !ok {
-		t.Fatalf("args[31] has type %T, want []byte", args[31])
+		t.Fatalf("args[33] has type %T, want []byte", args[33])
 	}
 	if dataJSON != nil {
-		t.Fatalf("args[31] = %v, want nil data", dataJSON)
+		t.Fatalf("args[33] = %v, want nil data", dataJSON)
 	}
 }
 

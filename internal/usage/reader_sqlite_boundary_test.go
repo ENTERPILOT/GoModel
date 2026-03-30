@@ -574,3 +574,82 @@ func TestSQLiteStoreCleanup_KeepsNewerLegacyOffsetRows(t *testing.T) {
 		t.Fatalf("expected only the newer legacy row to remain, got %v", remainingIDs)
 	}
 }
+
+func TestSQLiteReader_GetUsageLogFiltersByUserPathSubtree(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite database: %v", err)
+	}
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	_, err = db.Exec(`
+		INSERT INTO usage (
+			id, request_id, provider_id, timestamp, model, provider, endpoint, user_path,
+			input_tokens, output_tokens, total_tokens,
+			input_cost, output_cost, total_cost, costs_calculation_caveat
+		) VALUES
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"match-team",
+		"req-match",
+		"provider-match",
+		"2026-03-30T10:00:00Z",
+		"gpt-5",
+		"openai",
+		"/v1/chat/completions",
+		"/team/a",
+		10,
+		5,
+		15,
+		0.0,
+		0.0,
+		0.0,
+		"",
+		"miss-other",
+		"req-miss",
+		"provider-miss",
+		"2026-03-30T11:00:00Z",
+		"gpt-5",
+		"openai",
+		"/v1/chat/completions",
+		"/other",
+		10,
+		5,
+		15,
+		0.0,
+		0.0,
+		0.0,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("failed to seed usage rows: %v", err)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create sqlite reader: %v", err)
+	}
+
+	log, err := reader.GetUsageLog(ctx, UsageLogParams{
+		UsageQueryParams: UsageQueryParams{
+			UserPath: "/team",
+		},
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("GetUsageLog returned error: %v", err)
+	}
+	if len(log.Entries) != 1 {
+		t.Fatalf("expected 1 log entry, got %d", len(log.Entries))
+	}
+	if log.Entries[0].ID != "match-team" {
+		t.Fatalf("expected match-team, got %s", log.Entries[0].ID)
+	}
+}

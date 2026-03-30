@@ -130,6 +130,7 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 			OriginalInputFileID:       batchPreparation.OriginalInputFileID,
 			RewrittenInputFileID:      batchPreparation.RewrittenInputFileID,
 			RequestID:                 requestID,
+			UserPath:                  core.UserPathFromContext(ctx),
 			ExecutionPlanVersionID:    executionPlanVersionID(plan),
 			UsageEnabled:              boolPtr(plan == nil || plan.UsageEnabled()),
 		}
@@ -162,7 +163,8 @@ func (s *nativeBatchService) storeExecutionPlanForBatch(c *echo.Context, selecti
 	plan.ProviderType = strings.TrimSpace(selection.providerType)
 
 	if s.executionPolicyResolver != nil {
-		if err := applyExecutionPolicy(plan, s.executionPolicyResolver, selection.selector); err != nil {
+		selector := core.NewExecutionPlanSelector(selection.selector.Provider, selection.selector.Model, core.UserPathFromContext(c.Request().Context()))
+		if err := applyExecutionPolicy(plan, s.executionPolicyResolver, selector); err != nil {
 			return nil, err
 		}
 	}

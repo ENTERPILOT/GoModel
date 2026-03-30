@@ -290,6 +290,30 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 					Features:      FeatureFlags{Cache: false, Audit: false, Usage: true, Guardrails: false},
 				},
 			},
+			{
+				ID:       "path-team",
+				Scope:    Scope{UserPath: "/team"},
+				ScopeKey: "path:/team",
+				Version:  1,
+				Active:   true,
+				Name:     "path-team",
+				Payload: Payload{
+					SchemaVersion: 1,
+					Features:      FeatureFlags{Cache: true, Audit: false, Usage: true, Guardrails: false},
+				},
+			},
+			{
+				ID:       "provider-model-path",
+				Scope:    Scope{Provider: "openai", Model: "gpt-5", UserPath: "/team/a"},
+				ScopeKey: "provider_model_path:openai:gpt-5:/team/a",
+				Version:  1,
+				Active:   true,
+				Name:     "provider-model-path",
+				Payload: Payload{
+					SchemaVersion: 1,
+					Features:      FeatureFlags{Cache: false, Audit: false, Usage: false, Guardrails: false},
+				},
+			},
 		},
 	}
 
@@ -315,7 +339,9 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 		}
 	}
 
+	assertMatch("provider+model+path", core.NewExecutionPlanSelector("openai", "gpt-5", "/team/a/user"), "provider-model-path")
 	assertMatch("provider+model", core.NewExecutionPlanSelector("openai", "gpt-5"), "provider-model")
+	assertMatch("path", core.NewExecutionPlanSelector("anthropic", "claude-sonnet-4", "/team/a/user"), "path-team")
 	assertMatch("provider", core.NewExecutionPlanSelector("openai", "gpt-4o"), "provider")
 	assertMatch("global", core.NewExecutionPlanSelector("anthropic", "claude-sonnet-4"), "global")
 }

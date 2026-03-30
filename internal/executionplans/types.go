@@ -17,6 +17,7 @@ const currentSchemaVersion = 1
 type Scope struct {
 	Provider string `json:"scope_provider,omitempty" bson:"scope_provider,omitempty"`
 	Model    string `json:"scope_model,omitempty" bson:"scope_model,omitempty"`
+	UserPath string `json:"scope_user_path,omitempty" bson:"scope_user_path,omitempty"`
 }
 
 // Payload is the immutable persisted execution-plan JSON document.
@@ -91,10 +92,15 @@ type CreateInput struct {
 func normalizeScope(scope Scope) (Scope, string, error) {
 	scope.Provider = strings.TrimSpace(scope.Provider)
 	scope.Model = strings.TrimSpace(scope.Model)
+	userPath, err := core.NormalizeUserPath(scope.UserPath)
+	if err != nil {
+		return Scope{}, "", newValidationError("invalid scope_user_path", err)
+	}
+	scope.UserPath = userPath
 	if scope.Provider == "" && scope.Model != "" {
 		return Scope{}, "", newValidationError("scope_model requires scope_provider", nil)
 	}
-	if strings.Contains(scope.Provider, ":") || strings.Contains(scope.Model, ":") {
+	if strings.Contains(scope.Provider, ":") || strings.Contains(scope.Model, ":") || strings.Contains(scope.UserPath, ":") {
 		return Scope{}, "", newValidationError("scope fields cannot contain ':'", nil)
 	}
 	return scope, scopeKey(scope), nil
@@ -102,12 +108,18 @@ func normalizeScope(scope Scope) (Scope, string, error) {
 
 func scopeKey(scope Scope) string {
 	switch {
-	case scope.Provider == "":
+	case scope.Provider == "" && scope.UserPath == "":
 		return "global"
-	case scope.Model == "":
+	case scope.Provider == "" && scope.UserPath != "":
+		return "path:" + scope.UserPath
+	case scope.Model == "" && scope.UserPath == "":
 		return "provider:" + scope.Provider
-	default:
+	case scope.Model == "" && scope.UserPath != "":
+		return "provider_path:" + scope.Provider + ":" + scope.UserPath
+	case scope.UserPath == "":
 		return "provider_model:" + scope.Provider + ":" + scope.Model
+	default:
+		return "provider_model_path:" + scope.Provider + ":" + scope.Model + ":" + scope.UserPath
 	}
 }
 

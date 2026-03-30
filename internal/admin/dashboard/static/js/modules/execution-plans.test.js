@@ -43,6 +43,7 @@ test('buildExecutionPlanRequest emits provider-model payload and strips guardrai
     module.executionPlanForm = {
         scope_provider: 'openai',
         scope_model: 'gpt-5',
+        scope_user_path: '/team/alpha',
         name: 'OpenAI GPT-5',
         description: 'Primary translated requests',
         features: {
@@ -61,6 +62,7 @@ test('buildExecutionPlanRequest emits provider-model payload and strips guardrai
         JSON.stringify({
             scope_provider: 'openai',
             scope_model: 'gpt-5',
+            scope_user_path: '/team/alpha',
             name: 'OpenAI GPT-5',
             description: 'Primary translated requests',
             plan_payload: {
@@ -93,7 +95,8 @@ test('openExecutionPlanCreate hydrates features and guardrails via shared normal
     module.openExecutionPlanCreate({
         scope: {
             scope_provider: 'openai',
-            scope_model: 'gpt-5'
+            scope_model: 'gpt-5',
+            scope_user_path: '/team/alpha'
         },
         name: 'Hydrated workflow',
         description: 'Uses helper normalization',
@@ -123,6 +126,7 @@ test('openExecutionPlanCreate hydrates features and guardrails via shared normal
         JSON.stringify(module.executionPlanForm.guardrails),
         JSON.stringify([{ ref: 'policy-system', step: 30 }])
     );
+    assert.equal(module.executionPlanForm.scope_user_path, '/team/alpha');
 });
 
 test('editing a cloned workflow preserves retired provider and model options', () => {

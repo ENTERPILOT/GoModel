@@ -30,6 +30,10 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
 	conditions, args := sqliteDateRangeConditions(params.QueryParams)
+	userPath, err := normalizeAuditUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, err
+	}
 
 	if params.Model != "" {
 		conditions = append(conditions, "model LIKE ? ESCAPE '\\'")
@@ -46,6 +50,10 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 	if params.Path != "" {
 		conditions = append(conditions, "path LIKE ? ESCAPE '\\'")
 		args = append(args, "%"+escapeLikeWildcards(params.Path)+"%")
+	}
+	if userPath != "" {
+		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
+		args = append(args, userPath, auditUserPathSubtreePattern(userPath))
 	}
 	if params.ErrorType != "" {
 		conditions = append(conditions, "error_type LIKE ? ESCAPE '\\'")
@@ -79,7 +87,7 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 	}
 
 	dataQuery := `SELECT id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, status_code, request_id,
-		client_ip, method, path, stream, error_type, data
+		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs` + where + ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`
 	dataArgs := append(append([]any(nil), args...), limit, offset)
 
@@ -97,9 +105,10 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 		var streamInt int
 		var dataJSON *string
 		var executionPlanVersionID sql.NullString
+		var userPath sql.NullString
 
 		if err := rows.Scan(&e.ID, &ts, &e.DurationNs, &e.Model, &e.ResolvedModel, &e.Provider, &aliasUsedInt, &executionPlanVersionID, &e.StatusCode,
-			&e.RequestID, &e.ClientIP, &e.Method, &e.Path, &streamInt, &e.ErrorType, &dataJSON); err != nil {
+			&e.RequestID, &e.ClientIP, &e.Method, &e.Path, &userPath, &streamInt, &e.ErrorType, &dataJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 		}
 
@@ -108,6 +117,9 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 		e.Timestamp = parseSQLTimestamp(ts, e.ID)
 		if executionPlanVersionID.Valid {
 			e.ExecutionPlanVersionID = executionPlanVersionID.String
+		}
+		if userPath.Valid {
+			e.UserPath = userPath.String
 		}
 
 		if dataJSON != nil && *dataJSON != "" {
@@ -137,7 +149,7 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 // GetLogByID returns a single audit log entry by ID.
 func (r *SQLiteReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error) {
 	query := `SELECT id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, status_code, request_id,
-		client_ip, method, path, stream, error_type, data
+		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs WHERE id = ? LIMIT 1`
 
 	rows, err := r.db.QueryContext(ctx, query, id)
@@ -269,7 +281,7 @@ func parseSQLTimestamp(ts string, entryID string) time.Time {
 
 func (r *SQLiteReader) findByResponseID(ctx context.Context, responseID string) (*LogEntry, error) {
 	query := `SELECT id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, status_code, request_id,
-		client_ip, method, path, stream, error_type, data
+		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs
 		WHERE json_extract(data, '$.response_body.id') = ?
 		ORDER BY timestamp ASC
@@ -288,7 +300,7 @@ func (r *SQLiteReader) findByResponseID(ctx context.Context, responseID string) 
 
 func (r *SQLiteReader) findByPreviousResponseID(ctx context.Context, previousResponseID string) (*LogEntry, error) {
 	query := `SELECT id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, status_code, request_id,
-		client_ip, method, path, stream, error_type, data
+		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs
 		WHERE json_extract(data, '$.request_body.previous_response_id') = ?
 		ORDER BY timestamp ASC
@@ -312,9 +324,10 @@ func scanSQLiteLogEntry(rows *sql.Rows) (*LogEntry, error) {
 	var streamInt int
 	var dataJSON *string
 	var executionPlanVersionID sql.NullString
+	var userPath sql.NullString
 
 	if err := rows.Scan(&e.ID, &ts, &e.DurationNs, &e.Model, &e.ResolvedModel, &e.Provider, &aliasUsedInt, &executionPlanVersionID, &e.StatusCode,
-		&e.RequestID, &e.ClientIP, &e.Method, &e.Path, &streamInt, &e.ErrorType, &dataJSON); err != nil {
+		&e.RequestID, &e.ClientIP, &e.Method, &e.Path, &userPath, &streamInt, &e.ErrorType, &dataJSON); err != nil {
 		return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 	}
 
@@ -323,6 +336,9 @@ func scanSQLiteLogEntry(rows *sql.Rows) (*LogEntry, error) {
 	e.Timestamp = parseSQLTimestamp(ts, e.ID)
 	if executionPlanVersionID.Valid {
 		e.ExecutionPlanVersionID = executionPlanVersionID.String
+	}
+	if userPath.Valid {
+		e.UserPath = userPath.String
 	}
 
 	if dataJSON != nil && *dataJSON != "" {

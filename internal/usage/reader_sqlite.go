@@ -26,6 +26,14 @@ func NewSQLiteReader(db *sql.DB) (*SQLiteReader, error) {
 // GetSummary returns aggregated usage statistics for the given query parameters.
 func (r *SQLiteReader) GetSummary(ctx context.Context, params UsageQueryParams) (*UsageSummary, error) {
 	conditions, args := sqliteDateRangeConditions(params)
+	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, err
+	}
+	if userPath != "" {
+		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
+		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
+	}
 	where := buildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
@@ -33,7 +41,7 @@ func (r *SQLiteReader) GetSummary(ctx context.Context, params UsageQueryParams) 
 			FROM usage` + where
 
 	summary := &UsageSummary{}
-	err := r.db.QueryRowContext(ctx, query, args...).Scan(
+	err = r.db.QueryRowContext(ctx, query, args...).Scan(
 		&summary.TotalRequests, &summary.TotalInput, &summary.TotalOutput, &summary.TotalTokens,
 		&summary.TotalInputCost, &summary.TotalOutputCost, &summary.TotalCost,
 	)
@@ -47,6 +55,14 @@ func (r *SQLiteReader) GetSummary(ctx context.Context, params UsageQueryParams) 
 // GetUsageByModel returns token and cost totals grouped by model and provider.
 func (r *SQLiteReader) GetUsageByModel(ctx context.Context, params UsageQueryParams) ([]ModelUsage, error) {
 	conditions, args := sqliteDateRangeConditions(params)
+	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, err
+	}
+	if userPath != "" {
+		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
+		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
+	}
 	where := buildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
@@ -80,6 +96,10 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
 	conditions, args := sqliteDateRangeConditions(params.UsageQueryParams)
+	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, err
+	}
 
 	if params.Model != "" {
 		conditions = append(conditions, "model = ?")
@@ -88,6 +108,10 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 	if params.Provider != "" {
 		conditions = append(conditions, "provider = ?")
 		args = append(args, params.Provider)
+	}
+	if userPath != "" {
+		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
+		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
 	}
 	if params.Search != "" {
 		conditions = append(conditions, "(model LIKE ? ESCAPE '\\' OR provider LIKE ? ESCAPE '\\' OR request_id LIKE ? ESCAPE '\\' OR provider_id LIKE ? ESCAPE '\\')")
@@ -105,7 +129,7 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 	}
 
 	// Fetch page
-	dataQuery := `SELECT id, request_id, provider_id, timestamp, model, provider, endpoint,
+	dataQuery := `SELECT id, request_id, provider_id, timestamp, model, provider, endpoint, user_path,
 		input_tokens, output_tokens, total_tokens, COALESCE(input_cost, 0), COALESCE(output_cost, 0), COALESCE(total_cost, 0), raw_data, COALESCE(costs_calculation_caveat, '')
 		FROM usage` + where + ` ORDER BY ` + sqliteTimestampEpochExpr() + ` DESC, id DESC LIMIT ? OFFSET ?`
 	dataArgs := append(append([]any(nil), args...), limit, offset)
@@ -122,7 +146,8 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 		var ts string
 		var caveat *string
 		var rawDataJSON *string
-		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &ts, &e.Model, &e.Provider, &e.Endpoint,
+		var userPath sql.NullString
+		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &ts, &e.Model, &e.Provider, &e.Endpoint, &userPath,
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &rawDataJSON, &caveat); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
 		}
@@ -139,6 +164,9 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 			if err := json.Unmarshal([]byte(*rawDataJSON), &e.RawData); err != nil {
 				slog.Warn("failed to unmarshal raw_data JSON", "request_id", e.RequestID, "error", err)
 			}
+		}
+		if userPath.Valid {
+			e.UserPath = userPath.String
 		}
 		if caveat != nil {
 			e.CostsCalculationCaveat = *caveat
@@ -221,6 +249,14 @@ func (r *SQLiteReader) GetDailyUsage(ctx context.Context, params UsageQueryParam
 	}
 
 	conditions, args := sqliteDateRangeConditions(params)
+	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, err
+	}
+	if userPath != "" {
+		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
+		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
+	}
 	where := buildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
@@ -323,8 +359,17 @@ func (r *SQLiteReader) sqliteGroupingRange(ctx context.Context, params UsageQuer
 	}
 
 	var minTS, maxTS sql.NullInt64
-	query := `SELECT MIN(` + sqliteTimestampEpochExpr() + `), MAX(` + sqliteTimestampEpochExpr() + `) FROM usage`
-	if err := r.db.QueryRowContext(ctx, query).Scan(&minTS, &maxTS); err != nil {
+	conditions, args := sqliteDateRangeConditions(params)
+	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	if err != nil {
+		return time.Time{}, time.Time{}, false, err
+	}
+	if userPath != "" {
+		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
+		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
+	}
+	query := `SELECT MIN(` + sqliteTimestampEpochExpr() + `), MAX(` + sqliteTimestampEpochExpr() + `) FROM usage` + buildWhereClause(conditions)
+	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&minTS, &maxTS); err != nil {
 		return time.Time{}, time.Time{}, false, fmt.Errorf("failed to determine sqlite usage range: %w", err)
 	}
 	if !minTS.Valid || !maxTS.Valid {

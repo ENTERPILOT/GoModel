@@ -13,12 +13,14 @@
             executionPlanFormError: '',
             executionPlanHydratedScope: {
                 scope_provider: '',
-                scope_model: ''
+                scope_model: '',
+                scope_user_path: ''
             },
             guardrailRefs: [],
             executionPlanForm: {
                 scope_provider: '',
                 scope_model: '',
+                scope_user_path: '',
                 name: '',
                 description: '',
                 features: {
@@ -34,6 +36,7 @@
                 return {
                     scope_provider: '',
                     scope_model: '',
+                    scope_user_path: '',
                     name: '',
                     description: '',
                     features: {
@@ -66,6 +69,7 @@
                         plan.scope_type,
                         plan.scope && plan.scope.scope_provider,
                         plan.scope && plan.scope.scope_model,
+                        plan.scope && plan.scope.scope_user_path,
                         plan.plan_hash,
                         ...(Array.isArray(plan.plan_payload && plan.plan_payload.guardrails)
                             ? plan.plan_payload.guardrails.map((step) => step.ref)
@@ -115,6 +119,9 @@
             planScopeTypeLabel(plan) {
                 const scopeType = String(plan && plan.scope_type || '').trim();
                 if (scopeType === 'provider_model') return 'Provider + Model';
+                if (scopeType === 'provider_model_path') return 'Provider + Model + Path';
+                if (scopeType === 'provider_path') return 'Provider + Path';
+                if (scopeType === 'path') return 'Path';
                 if (scopeType === 'provider') return 'Provider';
                 return 'Global';
             },
@@ -210,7 +217,8 @@
                 if (!plan) {
                     this.executionPlanHydratedScope = {
                         scope_provider: '',
-                        scope_model: ''
+                        scope_model: '',
+                        scope_user_path: ''
                     };
                     this.executionPlanForm = this.defaultExecutionPlanForm();
                     this.scrollExecutionPlanFormIntoView();
@@ -219,13 +227,15 @@
 
                 this.executionPlanHydratedScope = {
                     scope_provider: String(plan.scope && plan.scope.scope_provider || '').trim(),
-                    scope_model: String(plan.scope && plan.scope.scope_model || '').trim()
+                    scope_model: String(plan.scope && plan.scope.scope_model || '').trim(),
+                    scope_user_path: String(plan.scope && plan.scope.scope_user_path || '').trim()
                 };
                 const features = this.executionPlanSourceFeatures(plan);
                 const guardrails = this.executionPlanSourceGuardrails(plan);
                 this.executionPlanForm = {
                     scope_provider: String(plan.scope && plan.scope.scope_provider || ''),
                     scope_model: String(plan.scope && plan.scope.scope_model || ''),
+                    scope_user_path: String(plan.scope && plan.scope.scope_user_path || ''),
                     name: String(plan.name || ''),
                     description: String(plan.description || ''),
                     features: {
@@ -248,7 +258,8 @@
                 this.executionPlanFormError = '';
                 this.executionPlanHydratedScope = {
                     scope_provider: '',
-                    scope_model: ''
+                    scope_model: '',
+                    scope_user_path: ''
                 };
                 this.executionPlanForm = this.defaultExecutionPlanForm();
             },
@@ -284,6 +295,7 @@
                 const form = this.executionPlanForm || this.defaultExecutionPlanForm();
                 const provider = String(form.scope_provider || '').trim();
                 const model = provider ? String(form.scope_model || '').trim() : '';
+                const userPath = String(form.scope_user_path || '').trim();
                 const features = form.features || {};
 
                 const guardrails = !!features.guardrails
@@ -303,6 +315,7 @@
                 return {
                     scope_provider: provider,
                     scope_model: model,
+                    scope_user_path: userPath,
                     name: String(form.name || '').trim(),
                     description: String(form.description || '').trim(),
                     plan_payload: {
@@ -321,6 +334,7 @@
             validateExecutionPlanRequest(payload) {
                 const preservedProvider = String(this.executionPlanHydratedScope && this.executionPlanHydratedScope.scope_provider || '').trim();
                 const preservedModel = String(this.executionPlanHydratedScope && this.executionPlanHydratedScope.scope_model || '').trim();
+                const userPath = String(payload.scope_user_path || '').trim();
 
                 if (payload.scope_provider) {
                     const providers = this.executionPlanProviderOptions();
@@ -337,6 +351,9 @@
                     if (!models.includes(payload.scope_model) && !isPreservedModel) {
                         return 'Choose a registered model for the selected provider.';
                     }
+                }
+                if (userPath && !userPath.startsWith('/')) {
+                    return 'Path scopes must start with /.';
                 }
 
                 const features = payload.plan_payload && payload.plan_payload.features ? payload.plan_payload.features : {};

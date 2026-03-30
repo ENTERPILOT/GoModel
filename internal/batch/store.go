@@ -31,6 +31,7 @@ type StoredBatch struct {
 	OriginalInputFileID       string              `json:"original_input_file_id,omitempty"`
 	RewrittenInputFileID      string              `json:"rewritten_input_file_id,omitempty"`
 	RequestID                 string              `json:"request_id,omitempty"`
+	UserPath                  string              `json:"user_path,omitempty"`
 	ExecutionPlanVersionID    string              `json:"execution_plan_version_id,omitempty"`
 	UsageEnabled              *bool               `json:"usage_enabled,omitempty"`
 	UsageLoggedAt             *time.Time          `json:"usage_logged_at,omitempty"`

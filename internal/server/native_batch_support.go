@@ -239,6 +239,7 @@ func (h *Handler) logBatchUsageFromBatchResults(stored *batchstore.StoredBatch, 
 			continue
 		}
 		entry.ID = deterministicBatchUsageID(stored.Batch, item, providerID)
+		entry.UserPath = stored.UserPath
 
 		h.usageLogger.Write(entry)
 		loggedEntries++

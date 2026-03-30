@@ -32,6 +32,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 			id UUID PRIMARY KEY,
 			scope_provider TEXT,
 			scope_model TEXT,
+			scope_user_path TEXT,
 			scope_key TEXT NOT NULL,
 			version INTEGER NOT NULL,
 			active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -48,6 +49,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 			ON execution_plan_versions(scope_key) WHERE active = TRUE`,
 		`CREATE INDEX IF NOT EXISTS idx_execution_plan_versions_active_created_at
 			ON execution_plan_versions(active, created_at DESC)`,
+		`ALTER TABLE execution_plan_versions ADD COLUMN IF NOT EXISTS scope_user_path TEXT`,
 	}
 	for _, statement := range statements {
 		if _, err := pool.Exec(ctx, statement); err != nil {
@@ -60,7 +62,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 
 func (s *PostgreSQLStore) ListActive(ctx context.Context) ([]Version, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, scope_provider, scope_model, scope_key, version, active, name, description, plan_payload, plan_hash, created_at
+		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, name, description, plan_payload, plan_hash, created_at
 		FROM execution_plan_versions
 		WHERE active = TRUE
 		ORDER BY created_at DESC, id DESC
@@ -76,7 +78,7 @@ func (s *PostgreSQLStore) ListActive(ctx context.Context) ([]Version, error) {
 
 func (s *PostgreSQLStore) Get(ctx context.Context, id string) (*Version, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, scope_provider, scope_model, scope_key, version, active, name, description, plan_payload, plan_hash, created_at
+		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, name, description, plan_payload, plan_hash, created_at
 		FROM execution_plan_versions
 		WHERE id::text = $1
 	`, id)
@@ -157,12 +159,13 @@ func (s *PostgreSQLStore) createVersion(ctx context.Context, input CreateInput, 
 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO execution_plan_versions (
-			id, scope_provider, scope_model, scope_key, version, active, name, description, plan_payload, plan_hash, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			id, scope_provider, scope_model, scope_user_path, scope_key, version, active, name, description, plan_payload, plan_hash, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`,
 		version.ID,
 		nullIfEmpty(version.Scope.Provider),
 		nullIfEmpty(version.Scope.Model),
+		nullIfEmpty(version.Scope.UserPath),
 		version.ScopeKey,
 		version.Version,
 		version.Active,
@@ -207,6 +210,7 @@ func scanPostgreSQLVersion(scanner interface {
 		version       Version
 		scopeProvider *string
 		scopeModel    *string
+		scopeUserPath *string
 		payloadJSON   []byte
 	)
 
@@ -214,6 +218,7 @@ func scanPostgreSQLVersion(scanner interface {
 		&version.ID,
 		&scopeProvider,
 		&scopeModel,
+		&scopeUserPath,
 		&version.ScopeKey,
 		&version.Version,
 		&version.Active,
@@ -231,6 +236,9 @@ func scanPostgreSQLVersion(scanner interface {
 	}
 	if scopeModel != nil {
 		version.Scope.Model = *scopeModel
+	}
+	if scopeUserPath != nil {
+		version.Scope.UserPath = *scopeUserPath
 	}
 	if err := json.Unmarshal(payloadJSON, &version.Payload); err != nil {
 		return Version{}, fmt.Errorf("decode execution plan payload %q: %w", version.ID, err)

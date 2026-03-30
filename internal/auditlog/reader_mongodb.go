@@ -30,6 +30,7 @@ type mongoLogRow struct {
 	ClientIP               string    `bson:"client_ip"`
 	Method                 string    `bson:"method"`
 	Path                   string    `bson:"path"`
+	UserPath               string    `bson:"user_path"`
 	Stream                 bool      `bson:"stream"`
 	ErrorType              string    `bson:"error_type"`
 	Data                   *LogData  `bson:"data"`
@@ -50,6 +51,7 @@ func (r mongoLogRow) toLogEntry() *LogEntry {
 		ClientIP:               r.ClientIP,
 		Method:                 r.Method,
 		Path:                   r.Path,
+		UserPath:               r.UserPath,
 		Stream:                 r.Stream,
 		ErrorType:              r.ErrorType,
 		Data:                   sanitizeLogData(r.Data),
@@ -110,6 +112,16 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 			Value: bson.D{
 				{Key: "$regex", Value: regexp.QuoteMeta(params.Path)},
 				{Key: "$options", Value: "i"},
+			},
+		})
+	}
+	if userPath, err := normalizeAuditUserPathFilter(params.UserPath); err != nil {
+		return nil, err
+	} else if userPath != "" {
+		matchFilters = append(matchFilters, bson.E{
+			Key: "user_path",
+			Value: bson.D{
+				{Key: "$regex", Value: auditUserPathSubtreeRegex(userPath)},
 			},
 		})
 	}

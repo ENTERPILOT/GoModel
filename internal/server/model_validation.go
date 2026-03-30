@@ -70,6 +70,7 @@ func deriveExecutionPlanWithPolicy(
 	}
 
 	desc := core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path)
+	userPath := core.UserPathFromContext(c.Request().Context())
 	plan := &core.ExecutionPlan{
 		RequestID:    requestID,
 		Endpoint:     desc,
@@ -94,7 +95,7 @@ func deriveExecutionPlanWithPolicy(
 		plan.Mode = core.ExecutionModePassthrough
 		plan.ProviderType = providerType
 		plan.Passthrough = passthrough
-		if err := applyExecutionPolicy(plan, policyResolver, core.NewExecutionPlanSelector(providerType, passthrough.Model)); err != nil {
+		if err := applyExecutionPolicy(plan, policyResolver, core.NewExecutionPlanSelector(providerType, passthrough.Model, userPath)); err != nil {
 			return nil, err
 		}
 		return plan, nil
@@ -127,7 +128,7 @@ func deriveExecutionPlanWithPolicy(
 		}
 		plan.ProviderType = resolution.ProviderType
 		plan.Resolution = resolution
-		if err := applyExecutionPolicy(plan, policyResolver, core.NewExecutionPlanSelector(resolution.ProviderType, resolution.ResolvedSelector.Model)); err != nil {
+		if err := applyExecutionPolicy(plan, policyResolver, core.NewExecutionPlanSelector(resolution.ProviderType, resolution.ResolvedSelector.Model, userPath)); err != nil {
 			return nil, err
 		}
 		return plan, nil
