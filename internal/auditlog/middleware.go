@@ -96,6 +96,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			err := next(c)
 
 			applyExecutionPlan(entry, c.Request().Context())
+			applyAuthentication(entry, c.Request().Context())
 
 			if !auditEnabledForContext(c.Request().Context()) {
 				return err
@@ -160,6 +161,15 @@ func applyExecutionPlan(entry *LogEntry, ctx context.Context) {
 
 	if plan := core.GetExecutionPlan(ctx); plan != nil {
 		enrichEntryWithExecutionPlan(entry, plan)
+	}
+}
+
+func applyAuthentication(entry *LogEntry, ctx context.Context) {
+	if entry == nil || ctx == nil {
+		return
+	}
+	if authKeyID := strings.TrimSpace(core.GetAuthKeyID(ctx)); authKeyID != "" {
+		entry.AuthKeyID = authKeyID
 	}
 }
 
@@ -371,6 +381,25 @@ func EnrichEntryWithCacheType(c *echo.Context, cacheType string) {
 	}
 
 	entry.CacheType = cacheType
+}
+
+// EnrichEntryWithAuthKeyID attaches the authenticated managed auth key id to the live audit entry.
+func EnrichEntryWithAuthKeyID(c *echo.Context, authKeyID string) {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return
+	}
+
+	entry, ok := entryVal.(*LogEntry)
+	if !ok || entry == nil {
+		return
+	}
+
+	authKeyID = strings.TrimSpace(authKeyID)
+	if authKeyID == "" {
+		return
+	}
+	entry.AuthKeyID = authKeyID
 }
 
 func auditEnabledForContext(ctx context.Context) bool {

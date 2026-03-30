@@ -14,14 +14,14 @@ import (
 )
 
 const (
-	auditLogInsertColumnCount     = 17
+	auditLogInsertColumnCount     = 18
 	postgresMaxBindParameters     = 65535
 	auditLogInsertMaxRowsPerQuery = postgresMaxBindParameters / auditLogInsertColumnCount
 )
 
 const auditLogInsertPrefix = `
 		INSERT INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, cache_type, status_code,
-			request_id, client_ip, method, path, stream, error_type, data)
+			request_id, auth_key_id, client_ip, method, path, stream, error_type, data)
 		VALUES `
 
 const auditLogInsertSuffix = `
@@ -64,6 +64,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 			cache_type TEXT,
 			status_code INTEGER DEFAULT 0,
 			request_id TEXT,
+			auth_key_id TEXT,
 			client_ip TEXT,
 			method TEXT,
 			path TEXT,
@@ -81,6 +82,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS alias_used BOOLEAN DEFAULT FALSE",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS execution_plan_version_id TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS cache_type TEXT",
+		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS auth_key_id TEXT",
 	}
 	for _, migration := range migrations {
 		if _, err := pool.Exec(ctx, migration); err != nil {
@@ -96,6 +98,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"CREATE INDEX IF NOT EXISTS idx_audit_provider ON audit_logs(provider)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON audit_logs(auth_key_id)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON audit_logs(client_ip)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_error_type ON audit_logs(error_type)",
@@ -218,6 +221,7 @@ func buildAuditLogInsert(entries []*LogEntry) (string, []any) {
 			cacheTypeValue,
 			entry.StatusCode,
 			entry.RequestID,
+			entry.AuthKeyID,
 			entry.ClientIP,
 			entry.Method,
 			entry.Path,

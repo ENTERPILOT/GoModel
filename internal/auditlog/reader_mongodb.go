@@ -28,6 +28,7 @@ type mongoLogRow struct {
 	CacheType              string    `bson:"cache_type"`
 	StatusCode             int       `bson:"status_code"`
 	RequestID              string    `bson:"request_id"`
+	AuthKeyID              string    `bson:"auth_key_id"`
 	ClientIP               string    `bson:"client_ip"`
 	Method                 string    `bson:"method"`
 	Path                   string    `bson:"path"`
@@ -49,6 +50,7 @@ func (r mongoLogRow) toLogEntry() *LogEntry {
 		CacheType:              normalizeCacheType(r.CacheType),
 		StatusCode:             r.StatusCode,
 		RequestID:              r.RequestID,
+		AuthKeyID:              r.AuthKeyID,
 		ClientIP:               r.ClientIP,
 		Method:                 r.Method,
 		Path:                   r.Path,
@@ -135,6 +137,7 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 		regex := bson.D{{Key: "$regex", Value: pattern}, {Key: "$options", Value: "i"}}
 		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
 			bson.D{{Key: "request_id", Value: regex}},
+			bson.D{{Key: "auth_key_id", Value: regex}},
 			bson.D{{Key: "model", Value: regex}},
 			bson.D{{Key: "provider", Value: regex}},
 			bson.D{{Key: "method", Value: regex}},

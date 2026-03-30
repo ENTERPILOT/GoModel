@@ -673,6 +673,32 @@ func TestMiddleware_StoresExecutionPlanVersionID(t *testing.T) {
 	}
 }
 
+func TestMiddleware_StoresAuthKeyIDFromContext(t *testing.T) {
+	logger := &capturingLogger{cfg: Config{Enabled: true}}
+	middleware := Middleware(logger)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(core.WithAuthKeyID(req.Context(), "key-123"))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := middleware(func(c *echo.Context) error {
+		return c.NoContent(http.StatusOK)
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler() error = %v", err)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("logger.entries len = %d, want 1", len(logger.entries))
+	}
+	if got := logger.entries[0].AuthKeyID; got != "key-123" {
+		t.Fatalf("AuthKeyID = %q, want key-123", got)
+	}
+}
+
 func TestMiddleware_SkipsWriteWhenExecutionPlanDisablesAudit(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{
@@ -861,21 +887,21 @@ func TestCreateStreamEntry(t *testing.T) {
 
 	// Test with valid entry
 	baseEntry := &LogEntry{
-		ID:            "test-id",
-		Timestamp:     time.Now(),
-		DurationNs:    1000,
-		Model:         "claude-opus-4-6",
-		ResolvedModel: "openai/gpt-5-nano",
-		Provider:      "openai",
-		AliasUsed:     true,
+		ID:                     "test-id",
+		Timestamp:              time.Now(),
+		DurationNs:             1000,
+		Model:                  "claude-opus-4-6",
+		ResolvedModel:          "openai/gpt-5-nano",
+		Provider:               "openai",
+		AliasUsed:              true,
 		ExecutionPlanVersionID: "plan-version-123",
-		CacheType:     CacheTypeSemantic,
-		StatusCode:    200,
-		RequestID:     "req-123",
-		ClientIP:      "127.0.0.1",
-		Method:        "POST",
-		Path:          "/v1/chat/completions",
-		Stream:        false,
+		CacheType:              CacheTypeSemantic,
+		StatusCode:             200,
+		RequestID:              "req-123",
+		ClientIP:               "127.0.0.1",
+		Method:                 "POST",
+		Path:                   "/v1/chat/completions",
+		Stream:                 false,
 		Data: &LogData{
 			UserAgent: "test",
 			RequestHeaders: map[string]string{

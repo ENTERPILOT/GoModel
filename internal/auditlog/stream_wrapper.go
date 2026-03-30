@@ -93,6 +93,7 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 		StatusCode:             baseEntry.StatusCode,
 		// Copy extracted fields
 		RequestID: baseEntry.RequestID,
+		AuthKeyID: baseEntry.AuthKeyID,
 		ClientIP:  baseEntry.ClientIP,
 		Method:    baseEntry.Method,
 		Path:      baseEntry.Path,

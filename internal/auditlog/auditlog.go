@@ -53,6 +53,7 @@ type LogEntry struct {
 
 	// Extracted fields for efficient filtering (indexed in relational DBs)
 	RequestID string `json:"request_id,omitempty" bson:"request_id,omitempty"`
+	AuthKeyID string `json:"auth_key_id,omitempty" bson:"auth_key_id,omitempty"`
 	ClientIP  string `json:"client_ip,omitempty" bson:"client_ip,omitempty"`
 	Method    string `json:"method,omitempty" bson:"method,omitempty"`
 	Path      string `json:"path,omitempty" bson:"path,omitempty"`

@@ -27,6 +27,7 @@ type AuditLogEntry struct {
 	Provider   string
 	StatusCode int
 	RequestID  string
+	AuthKeyID  string
 	ClientIP   string
 	Method     string
 	Path       string
@@ -43,7 +44,7 @@ func QueryAuditLogsByRequestID(t *testing.T, pool *pgxpool.Pool, requestID strin
 
 	query := `
 		SELECT id, timestamp, duration_ns, model, provider, status_code,
-		       request_id, client_ip, method, path, stream, error_type, data
+		       request_id, auth_key_id, client_ip, method, path, stream, error_type, data
 		FROM audit_logs
 		WHERE request_id = $1
 		ORDER BY timestamp ASC
@@ -60,7 +61,7 @@ func QueryAuditLogsByRequestID(t *testing.T, pool *pgxpool.Pool, requestID strin
 		err := rows.Scan(
 			&entry.ID, &entry.Timestamp, &entry.DurationNs,
 			&entry.Model, &entry.Provider, &entry.StatusCode,
-			&entry.RequestID, &entry.ClientIP, &entry.Method,
+			&entry.RequestID, &entry.AuthKeyID, &entry.ClientIP, &entry.Method,
 			&entry.Path, &entry.Stream, &entry.ErrorType, &dataJSON,
 		)
 		require.NoError(t, err, "failed to scan audit log row")
@@ -143,6 +144,9 @@ func bsonToAuditLogEntry(t *testing.T, doc bson.M) AuditLogEntry {
 	}
 	if v, ok := doc["request_id"].(string); ok {
 		entry.RequestID = v
+	}
+	if v, ok := doc["auth_key_id"].(string); ok {
+		entry.AuthKeyID = v
 	}
 	if v, ok := doc["client_ip"].(string); ok {
 		entry.ClientIP = v

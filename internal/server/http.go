@@ -35,6 +35,7 @@ type Server struct {
 // Config holds server configuration options
 type Config struct {
 	MasterKey                    string                                 // Optional: Master key for authentication
+	Authenticator                BearerTokenAuthenticator               // Optional: managed API key authenticator
 	MetricsEnabled               bool                                   // Whether to expose Prometheus metrics endpoint
 	MetricsEndpoint              string                                 // HTTP path for metrics endpoint (default: /metrics)
 	BodySizeLimit                string                                 // Max request body size (e.g., "10M", "1024K")
@@ -131,6 +132,11 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.AdminUIEnabled && cfg.DashboardHandler != nil {
 		authSkipPaths = append(authSkipPaths, "/admin/dashboard", "/admin/dashboard/*", "/admin/static/*")
 	}
+	// When no bootstrap master key is configured, keep admin APIs reachable so
+	// the dashboard can recover managed-key access instead of locking itself out.
+	if cfg != nil && cfg.MasterKey == "" && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
+		authSkipPaths = append(authSkipPaths, "/admin/api/v1/*")
+	}
 	if cfg != nil && cfg.SwaggerEnabled {
 		authSkipPaths = append(authSkipPaths, "/swagger/*")
 	}
@@ -217,8 +223,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.Use(ExecutionPlanningWithResolverAndPolicy(provider, modelResolver, executionPolicyResolver))
 
 	// Authentication (skips public paths)
-	if cfg != nil && cfg.MasterKey != "" {
-		e.Use(AuthMiddleware(cfg.MasterKey, authSkipPaths))
+	if cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil) {
+		e.Use(AuthMiddlewareWithAuthenticator(cfg.MasterKey, cfg.Authenticator, authSkipPaths))
 	}
 
 	// Public routes
@@ -279,6 +285,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		adminAPI.GET("/audit/conversation", cfg.AdminHandler.AuditConversation)
 		adminAPI.GET("/models", cfg.AdminHandler.ListModels)
 		adminAPI.GET("/models/categories", cfg.AdminHandler.ListCategories)
+		adminAPI.GET("/auth-keys", cfg.AdminHandler.ListAuthKeys)
+		adminAPI.POST("/auth-keys", cfg.AdminHandler.CreateAuthKey)
+		adminAPI.POST("/auth-keys/:id/deactivate", cfg.AdminHandler.DeactivateAuthKey)
 		adminAPI.GET("/aliases", cfg.AdminHandler.ListAliases)
 		adminAPI.PUT("/aliases/:name", cfg.AdminHandler.UpsertAlias)
 		adminAPI.DELETE("/aliases/:name", cfg.AdminHandler.DeleteAlias)

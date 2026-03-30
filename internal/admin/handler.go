@@ -15,6 +15,7 @@ import (
 
 	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
+	"gomodel/internal/authkeys"
 	"gomodel/internal/core"
 	"gomodel/internal/executionplans"
 	"gomodel/internal/guardrails"
@@ -27,6 +28,7 @@ type Handler struct {
 	usageReader   usage.UsageReader
 	auditReader   auditlog.Reader
 	registry      *providers.ModelRegistry
+	authKeys      *authkeys.Service
 	aliases       *aliases.Service
 	plans         *executionplans.Service
 	guardrails    *guardrails.Registry
@@ -66,6 +68,13 @@ func WithAuditReader(reader auditlog.Reader) Option {
 func WithAliases(service *aliases.Service) Option {
 	return func(h *Handler) {
 		h.aliases = service
+	}
+}
+
+// WithAuthKeys enables managed auth key administration endpoints.
+func WithAuthKeys(service *authkeys.Service) Option {
+	return func(h *Handler) {
+		h.authKeys = service
 	}
 }
 
@@ -613,6 +622,12 @@ type createExecutionPlanRequest struct {
 	Payload       executionplans.Payload `json:"plan_payload"`
 }
 
+type createAuthKeyRequest struct {
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+}
+
 func featureUnavailableError(message string) error {
 	return core.NewInvalidRequestErrorWithStatus(http.StatusServiceUnavailable, message, nil).
 		WithCode("feature_unavailable")
@@ -620,6 +635,10 @@ func featureUnavailableError(message string) error {
 
 func (h *Handler) aliasesUnavailableError() error {
 	return featureUnavailableError("aliases feature is unavailable")
+}
+
+func (h *Handler) authKeysUnavailableError() error {
+	return featureUnavailableError("auth keys feature is unavailable")
 }
 
 func (h *Handler) executionPlansUnavailableError() error {
@@ -644,6 +663,92 @@ func executionPlanWriteError(err error) error {
 		return core.NewInvalidRequestError(err.Error(), err)
 	}
 	return err
+}
+
+func authKeyWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if authkeys.IsValidationError(err) {
+		return core.NewInvalidRequestError(err.Error(), err)
+	}
+	return err
+}
+
+func deactivateByID(
+	c *echo.Context,
+	unavailableErr error,
+	idLabel string,
+	notFoundErr error,
+	notFoundMessage string,
+	deactivate func(context.Context, string) error,
+	writeError func(error) error,
+) error {
+	if unavailableErr != nil {
+		return handleError(c, unavailableErr)
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return handleError(c, core.NewInvalidRequestError(idLabel+" id is required", nil))
+	}
+
+	if err := deactivate(c.Request().Context(), id); err != nil {
+		if errors.Is(err, notFoundErr) {
+			return handleError(c, core.NewNotFoundError(notFoundMessage+id))
+		}
+		return handleError(c, writeError(err))
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// ListAuthKeys handles GET /admin/api/v1/auth-keys
+func (h *Handler) ListAuthKeys(c *echo.Context) error {
+	if h.authKeys == nil {
+		return handleError(c, h.authKeysUnavailableError())
+	}
+	views := h.authKeys.ListViews()
+	if views == nil {
+		views = []authkeys.View{}
+	}
+	return c.JSON(http.StatusOK, views)
+}
+
+// CreateAuthKey handles POST /admin/api/v1/auth-keys
+func (h *Handler) CreateAuthKey(c *echo.Context) error {
+	if h.authKeys == nil {
+		return handleError(c, h.authKeysUnavailableError())
+	}
+
+	var req createAuthKeyRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+
+	issued, err := h.authKeys.Create(c.Request().Context(), authkeys.CreateInput{
+		Name:        req.Name,
+		Description: req.Description,
+		ExpiresAt:   req.ExpiresAt,
+	})
+	if err != nil {
+		return handleError(c, authKeyWriteError(err))
+	}
+	if issued == nil {
+		return c.NoContent(http.StatusNoContent)
+	}
+	return c.JSON(http.StatusCreated, issued)
+}
+
+// DeactivateAuthKey handles POST /admin/api/v1/auth-keys/:id/deactivate
+func (h *Handler) DeactivateAuthKey(c *echo.Context) error {
+	var unavailableErr error
+	var deactivate func(context.Context, string) error
+	if h.authKeys == nil {
+		unavailableErr = h.authKeysUnavailableError()
+	} else {
+		deactivate = h.authKeys.Deactivate
+	}
+	return deactivateByID(c, unavailableErr, "auth key", authkeys.ErrNotFound, "auth key not found: ", deactivate, authKeyWriteError)
 }
 
 // ListAliases handles GET /admin/api/v1/aliases
@@ -806,22 +911,14 @@ func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
 
 // DeactivateExecutionPlan handles POST /admin/api/v1/execution-plans/:id/deactivate
 func (h *Handler) DeactivateExecutionPlan(c *echo.Context) error {
+	var unavailableErr error
+	var deactivate func(context.Context, string) error
 	if h.plans == nil {
-		return handleError(c, h.executionPlansUnavailableError())
+		unavailableErr = h.executionPlansUnavailableError()
+	} else {
+		deactivate = h.plans.Deactivate
 	}
-
-	id := strings.TrimSpace(c.Param("id"))
-	if id == "" {
-		return handleError(c, core.NewInvalidRequestError("execution plan id is required", nil))
-	}
-
-	if err := h.plans.Deactivate(c.Request().Context(), id); err != nil {
-		if errors.Is(err, executionplans.ErrNotFound) {
-			return handleError(c, core.NewNotFoundError("workflow not found: "+id))
-		}
-		return handleError(c, executionPlanWriteError(err))
-	}
-	return c.NoContent(http.StatusNoContent)
+	return deactivateByID(c, unavailableErr, "execution plan", executionplans.ErrNotFound, "workflow not found: ", deactivate, executionPlanWriteError)
 }
 
 func (h *Handler) validateExecutionPlanGuardrails(payload executionplans.Payload) error {
