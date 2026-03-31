@@ -21,12 +21,11 @@ type Embedder interface {
 	Close() error
 }
 
-// NewEmbedder returns an Embedder that calls POST /v1/embeddings on the
-// OpenAI-compatible endpoint for the named provider. cfg.Provider must be a
-// non-empty key in resolvedProviders (the env-merged, credential-filtered map
-// from providers.Init, not YAML-only config). That entry's api_key and base_url are reused.
-// When base_url is omitted, defaults match the gateway's provider packages
-// (e.g. gemini → Google OpenAI-compatible host), not api.openai.com.
+// NewEmbedder returns an Embedder that calls POST …/v1/embeddings (OpenAI-compatible)
+// for the named provider. cfg.Provider must be a non-empty key in resolvedProviders
+// (the env-merged, credential-filtered map from providers.Init). That entry's
+// api_key and base_url are reused; base_url must be non-empty (discovery defaults
+// fill it when only an API key is set).
 func NewEmbedder(cfg config.EmbedderConfig, resolvedProviders map[string]config.RawProviderConfig) (Embedder, error) {
 	p := strings.TrimSpace(cfg.Provider)
 	if p == "" {
@@ -39,7 +38,10 @@ func NewEmbedder(cfg config.EmbedderConfig, resolvedProviders map[string]config.
 	if !ok {
 		return nil, fmt.Errorf("embedding: provider %q not found among credential-resolved providers (check key spelling, env vars, and that the provider passes gateway credential rules)", p)
 	}
-	baseURL := embeddingAPIBaseURL(raw)
+	endpointURL, err := openAIEmbeddingsEndpointURL(raw.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("embedding: provider %q: %w", p, err)
+	}
 	typ := strings.ToLower(strings.TrimSpace(raw.Type))
 	model := strings.TrimSpace(cfg.Model)
 	if model == "" {
@@ -52,10 +54,10 @@ func NewEmbedder(cfg config.EmbedderConfig, resolvedProviders map[string]config.
 		model = normalizeGeminiEmbeddingModel(model)
 	}
 	return &apiEmbedder{
-		baseURL:    baseURL,
-		apiKey:     raw.APIKey,
-		model:      model,
-		httpClient: &http.Client{Timeout: defaultTimeout},
+		endpointURL: endpointURL,
+		apiKey:      raw.APIKey,
+		model:       model,
+		httpClient:  &http.Client{Timeout: defaultTimeout},
 	}, nil
 }
 
@@ -73,29 +75,26 @@ func normalizeGeminiEmbeddingModel(model string) string {
 	return model
 }
 
-func embeddingAPIBaseURL(raw config.RawProviderConfig) string {
-	if u := strings.TrimSpace(raw.BaseURL); u != "" {
-		return strings.TrimSuffix(u, "/")
+// openAIEmbeddingsEndpointURL builds the full POST URL for OpenAI-compatible embeddings.
+// Resolved provider base URLs from discovery often end with "/v1"; if so, only "/embeddings"
+// is appended to avoid "/v1/v1/embeddings".
+func openAIEmbeddingsEndpointURL(base string) (string, error) {
+	b := strings.TrimSpace(base)
+	if b == "" {
+		return "", fmt.Errorf("base_url is empty; set base_url on the provider or rely on provider env defaults")
 	}
-	switch strings.ToLower(strings.TrimSpace(raw.Type)) {
-	case "gemini":
-		return "https://generativelanguage.googleapis.com/v1beta/openai"
-	case "groq":
-		return "https://api.groq.com/openai"
-	case "xai":
-		return "https://api.x.ai/v1"
-	case "openrouter":
-		return "https://openrouter.ai/api/v1"
-	default:
-		return "https://api.openai.com"
+	b = strings.TrimSuffix(b, "/")
+	if strings.HasSuffix(b, "/v1") {
+		return b + "/embeddings", nil
 	}
+	return b + "/v1/embeddings", nil
 }
 
 type apiEmbedder struct {
-	baseURL    string
-	apiKey     string
-	model      string
-	httpClient *http.Client
+	endpointURL string
+	apiKey      string
+	model       string
+	httpClient  *http.Client
 }
 
 type embeddingRequest struct {
@@ -117,7 +116,7 @@ func (e *apiEmbedder) Embed(ctx context.Context, text string) ([]float32, error)
 	if err != nil {
 		return nil, fmt.Errorf("embedding: marshal request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+"/v1/embeddings", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.endpointURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("embedding: build request: %w", err)
 	}
