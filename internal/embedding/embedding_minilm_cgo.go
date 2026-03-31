@@ -4,16 +4,24 @@ package embedding
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 
 	all_minilm "github.com/clems4ever/all-minilm-l6-v2-go/all_minilm_l6_v2"
+
+	"gomodel/internal/core"
 )
 
 // MiniLMEmbedder uses the local all-MiniLM-L6-v2 ONNX model.
 // No network calls are made; the model runs in-process.
 type miniLMEmbedder struct {
 	model *all_minilm.Model
+}
+
+var miniLMModelCompute = func(model *all_minilm.Model, text string) ([]float32, error) {
+	return model.Compute(text, true)
 }
 
 func newMiniLMEmbedder(runtimePath string) (*miniLMEmbedder, error) {
@@ -32,24 +40,21 @@ func newMiniLMEmbedder(runtimePath string) (*miniLMEmbedder, error) {
 }
 
 func (e *miniLMEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	type result struct {
-		vec []float32
-		err error
+	if err := ctx.Err(); err != nil {
+		return nil, core.NewInvalidRequestError("embedding: MiniLM compute canceled", err)
 	}
-	ch := make(chan result, 1)
-	go func() {
-		vec, err := e.model.Compute(text, true)
-		ch <- result{vec, err}
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("embedding: MiniLM compute failed: %w", ctx.Err())
-	case r := <-ch:
-		if r.err != nil {
-			return nil, fmt.Errorf("embedding: MiniLM compute failed: %w", r.err)
+
+	vec, err := miniLMModelCompute(e.model, text)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, core.NewInvalidRequestError("embedding: MiniLM compute canceled", errors.Join(ctxErr, err))
 		}
-		return r.vec, nil
+		return nil, core.NewProviderError("local", http.StatusBadGateway, "embedding: MiniLM compute failed", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, core.NewInvalidRequestError("embedding: MiniLM compute canceled", err)
+	}
+	return vec, nil
 }
 
 func (e *miniLMEmbedder) Close() error {

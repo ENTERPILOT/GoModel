@@ -57,6 +57,7 @@ Prefer squash-and-merge to keep the merged commit subject aligned with the PR ti
 ## Error Handling
 
 - All errors returned to clients must be instances of `core.GatewayError`.
+- Do not hide work in detached goroutines; respect context synchronously and return typed `core.GatewayError` values.
 - Use the typed client-facing categories `provider_error`, `rate_limit_error`, `invalid_request_error`, `authentication_error`, and `not_found_error`.
 - Public error responses must use the OpenAI-compatible shape:
 
