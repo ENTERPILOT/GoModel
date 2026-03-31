@@ -2,6 +2,7 @@ package authkeys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -118,7 +119,7 @@ func scanPostgreSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		&createdAt,
 		&updatedAt,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return AuthKey{}, ErrNotFound
 		}
 		return AuthKey{}, err

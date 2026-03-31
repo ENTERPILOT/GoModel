@@ -21,6 +21,7 @@ func TestBuildAuditLogInsert(t *testing.T) {
 			CacheType:     CacheTypeExact,
 			StatusCode:    200,
 			RequestID:     "req-1",
+			AuthKeyID:     "auth-key-1",
 			ClientIP:      "127.0.0.1",
 			Method:        "POST",
 			Path:          "/v1/chat/completions",
@@ -64,8 +65,14 @@ func TestBuildAuditLogInsert(t *testing.T) {
 	if got := args[8]; got != CacheTypeExact {
 		t.Fatalf("args[8] = %v, want %q", got, CacheTypeExact)
 	}
+	if got, ok := args[11].(string); !ok || got != "auth-key-1" {
+		t.Fatalf("args[11] = (%T) %v, want (string) auth-key-1", args[11], args[11])
+	}
 	if got := args[18]; got != "log-2" {
 		t.Fatalf("args[18] = %v, want log-2", got)
+	}
+	if got, ok := args[29].(string); !ok || got != "" {
+		t.Fatalf("args[29] = (%T) %v, want (string) \"\"", args[29], args[29])
 	}
 	if got := string(args[17].([]byte)); got != `{"user_agent":"test-agent"}` {
 		t.Fatalf("args[17] = %q, want %q", got, `{"user_agent":"test-agent"}`)
