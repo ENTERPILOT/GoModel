@@ -45,6 +45,7 @@ func (r *ResponsesRequest) WithStreaming() *ResponsesRequest {
 // ResponsesInputElement represents a single item in the Responses API input array.
 // It is a discriminated union keyed on Type:
 //   - "" or "message": a chat-style message with Role and Content
+//   - "reasoning": a reasoning item with Content
 //   - "function_call": a tool invocation with CallID, Name, and Arguments
 //   - "function_call_output": a tool result with CallID and Output
 //
@@ -53,7 +54,7 @@ func (r *ResponsesRequest) WithStreaming() *ResponsesRequest {
 // extensions can round-trip; Swagger ignores ExtraFields, and typed fields
 // should be preferred when available.
 type ResponsesInputElement struct {
-	Type string `json:"type,omitempty"` // "message", "function_call", "function_call_output"
+	Type string `json:"type,omitempty"` // "message", "reasoning", "function_call", "function_call_output"
 
 	// Message fields (type="" or "message")
 	Role    string `json:"role,omitempty"`
@@ -88,7 +89,7 @@ type ResponsesResponse struct {
 // ResponsesOutputItem represents an item in the output array.
 type ResponsesOutputItem struct {
 	ID        string                 `json:"id"`
-	Type      string                 `json:"type"` // "message", "function_call", etc.
+	Type      string                 `json:"type"` // "message", "reasoning", "function_call", etc.
 	Role      string                 `json:"role,omitempty"`
 	Status    string                 `json:"status,omitempty"`
 	CallID    string                 `json:"call_id,omitempty"`
@@ -99,8 +100,9 @@ type ResponsesOutputItem struct {
 
 // ResponsesContentItem represents a content item in the output.
 type ResponsesContentItem struct {
-	Type       string             `json:"type"` // "output_text", "input_image", "input_audio", etc.
+	Type       string             `json:"type"` // "output_text", "reasoning_text", "input_image", "input_audio", etc.
 	Text       string             `json:"text,omitempty"`
+	Signature  string             `json:"signature,omitempty"`
 	ImageURL   *ImageURLContent   `json:"image_url,omitempty"`
 	InputAudio *InputAudioContent `json:"input_audio,omitempty"`
 	// Providers can return structured annotation objects here (for example

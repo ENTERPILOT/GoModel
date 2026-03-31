@@ -29,6 +29,50 @@ func CloneUnknownJSONFields(fields UnknownJSONFields) UnknownJSONFields {
 	return UnknownJSONFields{raw: CloneRawJSON(fields.raw)}
 }
 
+// MergeUnknownJSONFields combines multiple unknown-field objects into one.
+// Later field sets override earlier ones for duplicate keys.
+func MergeUnknownJSONFields(fields ...UnknownJSONFields) UnknownJSONFields {
+	if len(fields) == 0 {
+		return UnknownJSONFields{}
+	}
+
+	var merged map[string]json.RawMessage
+	for _, fieldSet := range fields {
+		if fieldSet.IsEmpty() {
+			continue
+		}
+
+		dec := json.NewDecoder(bytes.NewReader(fieldSet.raw))
+		tok, err := dec.Token()
+		if err != nil {
+			continue
+		}
+		delim, ok := tok.(json.Delim)
+		if !ok || delim != '{' {
+			continue
+		}
+
+		for dec.More() {
+			key, ok := readJSONObjectKey(dec)
+			if !ok {
+				return UnknownJSONFields{}
+			}
+
+			var value json.RawMessage
+			if err := dec.Decode(&value); err != nil {
+				return UnknownJSONFields{}
+			}
+
+			if merged == nil {
+				merged = make(map[string]json.RawMessage)
+			}
+			merged[key] = CloneRawJSON(value)
+		}
+	}
+
+	return UnknownJSONFieldsFromMap(merged)
+}
+
 // UnknownJSONFieldsFromMap converts a raw field map into a compact JSON object.
 func UnknownJSONFieldsFromMap(fields map[string]json.RawMessage) UnknownJSONFields {
 	if len(fields) == 0 {
@@ -41,7 +85,7 @@ func UnknownJSONFieldsFromMap(fields map[string]json.RawMessage) UnknownJSONFiel
 	}
 	sort.Strings(keys)
 
-	buf := bytes.NewBuffer(make([]byte, 0, len(keys)*16))
+	var buf bytes.Buffer
 	buf.WriteByte('{')
 	for i, key := range keys {
 		if i > 0 {

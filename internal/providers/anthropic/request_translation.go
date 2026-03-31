@@ -190,6 +190,18 @@ func parseToolCallArguments(arguments string) (any, error) {
 func buildAnthropicMessageContent(msg core.Message) (any, error) {
 	const maxToolCallsPerMessage = 1024
 
+	if hasAnthropicReasoningCompatFields(msg.ExtraFields) {
+		if msg.Role != "assistant" {
+			return nil, core.NewInvalidRequestError("anthropic reasoning compatibility fields are only supported on assistant messages", nil)
+		}
+	}
+	if hasAnthropicBreakingReasoningCompatFields(msg.ExtraFields) && !anthropicThinkingSignaturesCompatEnabled() {
+		return nil, core.NewInvalidRequestError(
+			"anthropic reasoning compatibility fields require "+openAICompatBreakingAnthropicThinkingSignaturesEnv+" to be enabled",
+			nil,
+		)
+	}
+
 	if msg.Role == "tool" {
 		toolUseID := strings.TrimSpace(msg.ToolCallID)
 		if toolUseID == "" {
@@ -204,18 +216,43 @@ func buildAnthropicMessageContent(msg core.Message) (any, error) {
 		}, nil
 	}
 
+	reasoningBlocks, err := extractAnthropicReasoningBlocksFromExtraFields(msg.ExtraFields)
+	if err != nil {
+		return nil, err
+	}
+
 	content, err := convertMessageContentToAnthropic(msg.Content)
 	if err != nil {
 		return nil, err
 	}
 	if len(msg.ToolCalls) == 0 {
-		return content, nil
+		if len(reasoningBlocks) == 0 {
+			return content, nil
+		}
+		blocks := make([]anthropicContentBlock, 0, len(reasoningBlocks)+1)
+		blocks = append(blocks, reasoningBlocks...)
+		switch c := content.(type) {
+		case string:
+			if strings.TrimSpace(c) != "" {
+				blocks = append(blocks, anthropicContentBlock{
+					Type: "text",
+					Text: c,
+				})
+			}
+		case []anthropicContentBlock:
+			blocks = append(blocks, c...)
+		}
+		if len(blocks) == 0 {
+			return "", nil
+		}
+		return blocks, nil
 	}
 	if len(msg.ToolCalls) > maxToolCallsPerMessage {
 		return nil, core.NewInvalidRequestError("too many tool calls in message", nil)
 	}
 
-	blocks := make([]anthropicContentBlock, 0, len(msg.ToolCalls)+1)
+	blocks := make([]anthropicContentBlock, 0, len(reasoningBlocks)+len(msg.ToolCalls)+1)
+	blocks = append(blocks, reasoningBlocks...)
 	switch c := content.(type) {
 	case string:
 		if strings.TrimSpace(c) != "" {
@@ -323,7 +360,9 @@ func convertResponsesRequestToAnthropic(req *core.ResponsesRequest) (*anthropicR
 		return nil, core.NewInvalidRequestError("anthropic responses request is required", nil)
 	}
 
-	chatReq, err := providers.ConvertResponsesRequestToChat(req)
+	chatReq, err := providers.ConvertResponsesRequestToChatWithOptions(req, providers.ResponsesToChatOptions{
+		PreserveAnthropicReasoningCompat: anthropicThinkingSignaturesCompatEnabled(),
+	})
 	if err != nil {
 		return nil, err
 	}

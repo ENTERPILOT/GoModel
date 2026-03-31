@@ -553,6 +553,267 @@ data: {"type":"message_stop"}
 	}
 }
 
+func TestStreamChatCompletion_EmitsReasoningSignatureBehindFeatureFlag(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	responseStr := string(raw)
+	if !strings.Contains(responseStr, `"reasoning_signature":"sig_123"`) {
+		t.Fatalf("expected reasoning_signature delta, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"reasoning_index":0`) {
+		t.Fatalf("expected reasoning_index delta, got %q", responseStr)
+	}
+}
+
+func TestStreamChatCompletion_DoesNotEmitReasoningSignatureWhenFeatureFlagDisabled(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	responseStr := string(raw)
+	if strings.Contains(responseStr, `"reasoning_signature":"sig_123"`) {
+		t.Fatalf("did not expect reasoning_signature delta, got %q", responseStr)
+	}
+	if strings.Contains(responseStr, `"reasoning_index":0`) {
+		t.Fatalf("did not expect reasoning_index delta, got %q", responseStr)
+	}
+}
+
+func TestStreamChatCompletion_UsesDenseReasoningIndicesBehindFeatureFlag(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"thinking_delta","thinking":"Let me think."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"signature_delta","signature":"sig_123"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":2}
+
+event: content_block_start
+data: {"type":"content_block_start","index":3,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":3,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	responseStr := string(raw)
+	if !strings.Contains(responseStr, `"reasoning_index":0`) {
+		t.Fatalf("expected dense reasoning_index 0, got %q", responseStr)
+	}
+	if strings.Contains(responseStr, `"reasoning_index":2`) {
+		t.Fatalf("did not expect sparse reasoning_index 2, got %q", responseStr)
+	}
+}
+
+func TestStreamChatCompletion_PreservesWhitespaceOnlyReasoningDeltasBehindFeatureFlag(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"foo"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"bar"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	responseStr := string(raw)
+	if !strings.Contains(responseStr, `"reasoning_content":"foo"`) {
+		t.Fatalf("expected first reasoning delta, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"reasoning_content":" "`) {
+		t.Fatalf("expected whitespace-only reasoning delta, got %q", responseStr)
+	}
+	if !strings.Contains(responseStr, `"reasoning_content":"bar"`) {
+		t.Fatalf("expected trailing reasoning delta, got %q", responseStr)
+	}
+}
+
 func TestStreamChatCompletion_WithToolCalls(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2005,6 +2266,46 @@ func TestConvertFromAnthropicResponse_WithThinkingBlocks(t *testing.T) {
 	}
 }
 
+func TestConvertFromAnthropicResponse_PreservesThinkingSignaturesBehindFeatureFlag(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	resp := &anthropicResponse{
+		ID:    "msg_reasoning",
+		Type:  "message",
+		Role:  "assistant",
+		Model: "claude-sonnet-4-5-20250929",
+		Content: []anthropicContent{
+			{Type: "thinking", Thinking: "Let me think.", Signature: "sig_123"},
+			{Type: "text", Text: "Hello"},
+		},
+		StopReason: "end_turn",
+		Usage: anthropicUsage{
+			InputTokens:  10,
+			OutputTokens: 2,
+		},
+	}
+
+	result := convertFromAnthropicResponse(resp)
+	if len(result.Choices) != 1 {
+		t.Fatalf("len(Choices) = %d, want 1", len(result.Choices))
+	}
+
+	if got := result.Choices[0].Message.ExtraFields.Lookup("reasoning_signature"); string(got) != `"sig_123"` {
+		t.Fatalf("reasoning_signature = %s, want %q", got, `"sig_123"`)
+	}
+
+	var details []openAIReasoningDetail
+	if err := json.Unmarshal(result.Choices[0].Message.ExtraFields.Lookup("reasoning_details"), &details); err != nil {
+		t.Fatalf("failed to unmarshal reasoning_details: %v", err)
+	}
+	if len(details) != 1 {
+		t.Fatalf("len(reasoning_details) = %d, want 1", len(details))
+	}
+	if details[0].Type != "reasoning_text" || details[0].Text != "Let me think." || details[0].Signature != "sig_123" {
+		t.Fatalf("reasoning_details[0] = %+v, want reasoning_text/Let me think./sig_123", details[0])
+	}
+}
+
 func TestExtractTextContent(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2535,6 +2836,345 @@ data: {"type":"message_stop"}
 	}
 	if strings.Contains(responseStr, `"cache_creation_input_tokens":4`) {
 		t.Fatalf("did not expect cache_creation_input_tokens in normalized response.completed usage, got %q", responseStr)
+	}
+}
+
+func TestStreamResponses_EmitsReasoningSignaturesBehindFeatureFlag(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "Hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	events := parseTestSSEEvents(t, string(raw))
+	foundReasoningDelta := false
+	foundReasoningDone := false
+	foundReasoningItemDone := false
+
+	for _, event := range events {
+		if event.Done {
+			continue
+		}
+		switch event.Name {
+		case "response.reasoning_text.delta":
+			if event.Payload["delta"] == "Let me think." {
+				foundReasoningDelta = true
+			}
+		case "response.reasoning_text.done":
+			if event.Payload["signature"] == "sig_123" {
+				foundReasoningDone = true
+			}
+		case "response.output_item.done":
+			item, _ := event.Payload["item"].(map[string]any)
+			if item["type"] != "reasoning" {
+				continue
+			}
+			content, _ := item["content"].([]any)
+			if len(content) == 1 {
+				part, _ := content[0].(map[string]any)
+				if part["signature"] == "sig_123" {
+					foundReasoningItemDone = true
+				}
+			}
+		}
+	}
+
+	if !foundReasoningDelta {
+		t.Fatal("expected response.reasoning_text.delta event")
+	}
+	if !foundReasoningDone {
+		t.Fatal("expected response.reasoning_text.done event with signature")
+	}
+	if !foundReasoningItemDone {
+		t.Fatal("expected response.output_item.done reasoning item with signature")
+	}
+}
+
+func TestStreamResponses_DoesNotEmitReasoningSignaturesWhenFeatureFlagDisabled(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "Hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	responseStr := string(raw)
+	if strings.Contains(responseStr, "response.reasoning_text.delta") {
+		t.Fatalf("did not expect reasoning delta events, got %q", responseStr)
+	}
+	if strings.Contains(responseStr, `"type":"reasoning"`) {
+		t.Fatalf("did not expect reasoning output items, got %q", responseStr)
+	}
+}
+
+func TestStreamResponses_SkipsEmptyReasoningBlocksAndUsesDenseReasoningContentIndices(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"Let me think."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"signature_delta","signature":"sig_123"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":2}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "Hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	events := parseTestSSEEvents(t, string(raw))
+	reasoningAddedCount := 0
+	reasoningDeltaCount := 0
+	reasoningDoneCount := 0
+	reasoningItemParts := 0
+
+	for _, event := range events {
+		if event.Done {
+			continue
+		}
+		switch event.Name {
+		case "response.output_item.added":
+			item, _ := event.Payload["item"].(map[string]any)
+			if item["type"] != "reasoning" {
+				continue
+			}
+			reasoningAddedCount++
+		case "response.reasoning_text.delta":
+			reasoningDeltaCount++
+			if got := event.Payload["content_index"]; got != float64(0) {
+				t.Fatalf("reasoning_text.delta content_index = %#v, want 0", got)
+			}
+		case "response.reasoning_text.done":
+			reasoningDoneCount++
+			if got := event.Payload["content_index"]; got != float64(0) {
+				t.Fatalf("reasoning_text.done content_index = %#v, want 0", got)
+			}
+			if event.Payload["text"] != "Let me think." {
+				t.Fatalf("unexpected reasoning_text.done payload: %+v", event.Payload)
+			}
+		case "response.output_item.done":
+			item, _ := event.Payload["item"].(map[string]any)
+			if item["type"] != "reasoning" {
+				continue
+			}
+			content, _ := item["content"].([]any)
+			reasoningItemParts = len(content)
+		}
+	}
+
+	if reasoningAddedCount != 1 {
+		t.Fatalf("reasoning output_item.added count = %d, want 1", reasoningAddedCount)
+	}
+	if reasoningDeltaCount != 1 {
+		t.Fatalf("reasoningTextDelta count = %d, want 1", reasoningDeltaCount)
+	}
+	if reasoningDoneCount != 1 {
+		t.Fatalf("reasoningTextDone count = %d, want 1", reasoningDoneCount)
+	}
+	if reasoningItemParts != 1 {
+		t.Fatalf("reasoning output content len = %d, want 1", reasoningItemParts)
+	}
+}
+
+func TestStreamResponses_DoesNotStartReasoningOutputForAllEmptyThinkingBlocks(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "Hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	responseStr := string(raw)
+	if strings.Contains(responseStr, `"type":"reasoning"`) {
+		t.Fatalf("did not expect reasoning output items, got %q", responseStr)
+	}
+	if strings.Contains(responseStr, "response.reasoning_text.") {
+		t.Fatalf("did not expect reasoning text events, got %q", responseStr)
 	}
 }
 
@@ -3450,6 +4090,332 @@ func TestConvertAnthropicResponseToResponses_WithThinkingBlocks(t *testing.T) {
 			}
 			if result.Usage.OutputTokens != 50 {
 				t.Errorf("OutputTokens = %d, want 50", result.Usage.OutputTokens)
+			}
+		})
+	}
+}
+
+func TestConvertAnthropicResponseToResponses_PreservesThinkingSignaturesBehindFeatureFlag(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	resp := &anthropicResponse{
+		ID:    "msg_reasoning_resp",
+		Type:  "message",
+		Role:  "assistant",
+		Model: "claude-sonnet-4-5-20250929",
+		Content: []anthropicContent{
+			{Type: "thinking", Thinking: "Let me think.", Signature: "sig_123"},
+			{Type: "text", Text: "Hello"},
+		},
+		StopReason: "end_turn",
+		Usage: anthropicUsage{
+			InputTokens:  10,
+			OutputTokens: 2,
+		},
+	}
+
+	result := convertAnthropicResponseToResponses(resp, "claude-sonnet-4-5-20250929")
+	if len(result.Output) != 2 {
+		t.Fatalf("len(Output) = %d, want 2", len(result.Output))
+	}
+	if result.Output[0].Type != "reasoning" {
+		t.Fatalf("Output[0].Type = %q, want reasoning", result.Output[0].Type)
+	}
+	if len(result.Output[0].Content) != 1 {
+		t.Fatalf("len(Output[0].Content) = %d, want 1", len(result.Output[0].Content))
+	}
+	if result.Output[0].Content[0].Type != "reasoning_text" {
+		t.Fatalf("Output[0].Content[0].Type = %q, want reasoning_text", result.Output[0].Content[0].Type)
+	}
+	if result.Output[0].Content[0].Signature != "sig_123" {
+		t.Fatalf("Output[0].Content[0].Signature = %q, want sig_123", result.Output[0].Content[0].Signature)
+	}
+	if result.Output[1].Type != "message" || result.Output[1].Content[0].Text != "Hello" {
+		t.Fatalf("unexpected message output: %+v", result.Output[1])
+	}
+}
+
+func TestConvertToAnthropicRequest_PreservesReasoningDetailsBehindFeatureFlag(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	req := &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{
+				Role:    "assistant",
+				Content: "Hello",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"reasoning_details": json.RawMessage(`[{"type":"reasoning_text","text":"Let me think.","signature":"sig_123"}]`),
+				}),
+			},
+		},
+	}
+
+	result, err := convertToAnthropicRequest(req)
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+
+	if len(result.Messages) != 1 {
+		t.Fatalf("len(Messages) = %d, want 1", len(result.Messages))
+	}
+	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
+	if !ok {
+		t.Fatalf("content = %#v, want []anthropicContentBlock", result.Messages[0].Content)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
+	}
+	if blocks[0].Type != "thinking" || blocks[0].Thinking != "Let me think." || blocks[0].Signature != "sig_123" {
+		t.Fatalf("blocks[0] = %+v, want thinking block with signature", blocks[0])
+	}
+	if blocks[1].Type != "text" || blocks[1].Text != "Hello" {
+		t.Fatalf("blocks[1] = %+v, want text block", blocks[1])
+	}
+}
+
+func TestConvertToAnthropicRequest_RejectsReasoningCompatFieldsOutsideAssistantTurnOrWithoutFlag(t *testing.T) {
+	tests := []struct {
+		name        string
+		flagValue   string
+		role        string
+		wantMessage string
+	}{
+		{
+			name:        "assistant turn requires flag",
+			flagValue:   "",
+			role:        "assistant",
+			wantMessage: "anthropic reasoning compatibility fields require " + openAICompatBreakingAnthropicThinkingSignaturesEnv + " to be enabled",
+		},
+		{
+			name:        "user turn unsupported",
+			flagValue:   "true",
+			role:        "user",
+			wantMessage: "anthropic reasoning compatibility fields are only supported on assistant messages",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, tt.flagValue)
+
+			_, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model: "claude-sonnet-4-5-20250929",
+				Messages: []core.Message{
+					{
+						Role:    tt.role,
+						Content: "Hello",
+						ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+							"reasoning_details": json.RawMessage(`[{"type":"reasoning_text","text":"Let me think.","signature":"sig_123"}]`),
+						}),
+					},
+				},
+			})
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+
+			var gatewayErr *core.GatewayError
+			if !errors.As(err, &gatewayErr) {
+				t.Fatalf("error = %T, want *core.GatewayError", err)
+			}
+			if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+				t.Fatalf("GatewayError.Type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
+			}
+			if !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestConvertToAnthropicRequest_AllowsReplayedReasoningContentWhenFeatureFlagDisabled(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "")
+
+	result, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{
+				Role:    "assistant",
+				Content: "Hello",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"reasoning_content": json.RawMessage(`"Let me think."`),
+				}),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+	if len(result.Messages) != 1 {
+		t.Fatalf("len(Messages) = %d, want 1", len(result.Messages))
+	}
+	if got, ok := result.Messages[0].Content.(string); !ok || got != "Hello" {
+		t.Fatalf("content = %#v, want plain text Hello", result.Messages[0].Content)
+	}
+}
+
+func TestConvertResponsesRequestToAnthropic_PreservesReasoningItemsBehindFeatureFlag(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	req := &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: []core.ResponsesInputElement{
+			{
+				Type: "reasoning",
+				Content: []core.ResponsesContentItem{
+					{
+						Type:      "reasoning_text",
+						Text:      "Let me think.",
+						Signature: "sig_123",
+					},
+				},
+			},
+			{
+				Type:    "message",
+				Role:    "assistant",
+				Content: "Hello",
+			},
+		},
+	}
+
+	result, err := convertResponsesRequestToAnthropic(req)
+	if err != nil {
+		t.Fatalf("convertResponsesRequestToAnthropic() error = %v", err)
+	}
+	if len(result.Messages) != 1 {
+		t.Fatalf("len(Messages) = %d, want 1", len(result.Messages))
+	}
+	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
+	if !ok {
+		t.Fatalf("content = %#v, want []anthropicContentBlock", result.Messages[0].Content)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
+	}
+	if blocks[0].Type != "thinking" || blocks[0].Thinking != "Let me think." || blocks[0].Signature != "sig_123" {
+		t.Fatalf("blocks[0] = %+v, want thinking block with signature", blocks[0])
+	}
+	if blocks[1].Type != "text" || blocks[1].Text != "Hello" {
+		t.Fatalf("blocks[1] = %+v, want text block", blocks[1])
+	}
+}
+
+func TestConvertResponsesRequestToAnthropic_RejectsReasoningItemsWhenFeatureFlagDisabled(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "")
+
+	_, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: []core.ResponsesInputElement{
+			{
+				Type: "reasoning",
+				Content: []core.ResponsesContentItem{
+					{
+						Type:      "reasoning_text",
+						Text:      "Let me think.",
+						Signature: "sig_123",
+					},
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("GatewayError.Type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
+	}
+	if !strings.Contains(err.Error(), "reasoning items require provider-specific reasoning compatibility") {
+		t.Fatalf("error = %v, want reasoning compatibility error", err)
+	}
+}
+
+func TestConvertToAnthropicRequest_RejectsInvalidReasoningCompatFieldsBehindFeatureFlag(t *testing.T) {
+	t.Setenv(openAICompatBreakingAnthropicThinkingSignaturesEnv, "true")
+
+	tests := []struct {
+		name        string
+		extraFields core.UnknownJSONFields
+		wantMessage string
+	}{
+		{
+			name: "empty reasoning_details",
+			extraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_details": json.RawMessage(`[]`),
+			}),
+			wantMessage: "message.reasoning_details",
+		},
+		{
+			name: "whitespace reasoning_details",
+			extraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_details": json.RawMessage(`[{"type":"reasoning_text","text":"   ","signature":"sig_123"}]`),
+			}),
+			wantMessage: "message.reasoning_details",
+		},
+		{
+			name: "missing reasoning_signature",
+			extraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_content": json.RawMessage(`"Let me think."`),
+			}),
+			wantMessage: "message.reasoning_content requires message.reasoning_signature",
+		},
+		{
+			name: "missing reasoning_content",
+			extraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_signature": json.RawMessage(`"sig_123"`),
+			}),
+			wantMessage: "message.reasoning_signature requires message.reasoning_content",
+		},
+		{
+			name: "blank reasoning_content",
+			extraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_content":   json.RawMessage(`"   "`),
+				"reasoning_signature": json.RawMessage(`"sig_123"`),
+			}),
+			wantMessage: "message.reasoning_content must be a non-empty string",
+		},
+		{
+			name: "blank reasoning_signature",
+			extraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_content":   json.RawMessage(`"Let me think."`),
+				"reasoning_signature": json.RawMessage(`"   "`),
+			}),
+			wantMessage: "message.reasoning_signature must be a non-empty string",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &core.ChatRequest{
+				Model: "claude-sonnet-4-5-20250929",
+				Messages: []core.Message{
+					{
+						Role:        "assistant",
+						Content:     "Hello",
+						ExtraFields: tt.extraFields,
+					},
+				},
+			}
+
+			_, err := convertToAnthropicRequest(req)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+
+			var gatewayErr *core.GatewayError
+			if !errors.As(err, &gatewayErr) {
+				t.Fatalf("error = %T, want *core.GatewayError", err)
+			}
+			if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+				t.Fatalf("GatewayError.Type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
+			}
+			if !strings.Contains(gatewayErr.Message, tt.wantMessage) {
+				t.Fatalf("GatewayError.Message = %q, want substring %q", gatewayErr.Message, tt.wantMessage)
 			}
 		})
 	}

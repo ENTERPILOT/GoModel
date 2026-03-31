@@ -61,6 +61,35 @@ func TestResponsesRequestUnmarshalJSON_ArrayInputFunctionCall(t *testing.T) {
 	}
 }
 
+func TestResponsesRequestUnmarshalJSON_ArrayInputReasoning(t *testing.T) {
+	var req ResponsesRequest
+	if err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini","input":[
+		{"type":"reasoning","status":"completed","content":[{"type":"reasoning_text","text":"Let me think.","signature":"sig_123"}]},
+		{"type":"message","role":"assistant","content":"Hello"}
+	]}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	input, ok := req.Input.([]ResponsesInputElement)
+	if !ok || len(input) != 2 {
+		t.Fatalf("Input = %#v, want []ResponsesInputElement len=2", req.Input)
+	}
+	if input[0].Type != "reasoning" || input[0].Status != "completed" {
+		t.Fatalf("Input[0] = %+v, want reasoning/completed", input[0])
+	}
+	content, ok := input[0].Content.([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("Input[0].Content = %#v, want []any len=1", input[0].Content)
+	}
+	part, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("Input[0].Content[0] = %#v, want object", content[0])
+	}
+	if part["signature"] != "sig_123" {
+		t.Fatalf("Input[0].Content[0].signature = %#v, want sig_123", part["signature"])
+	}
+}
+
 func TestResponsesRequestUnmarshalJSON_FunctionCallAcceptsIDField(t *testing.T) {
 	var req ResponsesRequest
 	if err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini","input":[
@@ -512,6 +541,48 @@ func TestResponsesInputElementMarshalJSON_FunctionCallOutput(t *testing.T) {
 	}
 	if decoded["output"] != `{"temperature_c":21}` {
 		t.Fatalf("output = %v, want JSON string", decoded["output"])
+	}
+}
+
+func TestResponsesInputElementMarshalJSON_Reasoning(t *testing.T) {
+	elem := ResponsesInputElement{
+		Type: "reasoning",
+		Content: []any{
+			map[string]any{
+				"type":      "reasoning_text",
+				"text":      "Let me think.",
+				"signature": "sig_123",
+			},
+		},
+		Status: "completed",
+	}
+
+	body, err := json.Marshal(elem)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if decoded["type"] != "reasoning" {
+		t.Fatalf("type = %v, want reasoning", decoded["type"])
+	}
+	if decoded["status"] != "completed" {
+		t.Fatalf("status = %v, want completed", decoded["status"])
+	}
+	content, ok := decoded["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("content = %#v, want []any len=1", decoded["content"])
+	}
+	part, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("content[0] = %#v, want object", content[0])
+	}
+	if part["signature"] != "sig_123" {
+		t.Fatalf("content[0].signature = %#v, want sig_123", part["signature"])
 	}
 }
 

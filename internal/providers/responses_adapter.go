@@ -21,10 +21,25 @@ type ChatProvider interface {
 	StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error)
 }
 
+// ResponsesToChatOptions controls non-standard provider-specific translations
+// when adapting Responses input into Chat semantics.
+type ResponsesToChatOptions struct {
+	// PreserveAnthropicReasoningCompat allows Anthropic-only reasoning history
+	// to be carried through ChatRequest.ExtraFields. Generic chat adapters must
+	// keep this off so provider-specific fields do not leak upstream.
+	PreserveAnthropicReasoningCompat bool
+}
+
 // ConvertResponsesRequestToChat converts a ResponsesRequest to a ChatRequest.
 // It also validates the supported Responses input shapes and returns an error
 // when the request cannot be converted safely.
 func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatRequest, error) {
+	return ConvertResponsesRequestToChatWithOptions(req, ResponsesToChatOptions{})
+}
+
+// ConvertResponsesRequestToChatWithOptions converts a ResponsesRequest to a
+// ChatRequest while allowing explicit provider-specific compatibility modes.
+func ConvertResponsesRequestToChatWithOptions(req *core.ResponsesRequest, opts ResponsesToChatOptions) (*core.ChatRequest, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("responses request is required", nil)
 	}
@@ -54,7 +69,7 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 		})
 	}
 
-	messages, err := ConvertResponsesInputToMessages(req.Input)
+	messages, err := convertResponsesInputToMessagesWithOptions(req.Input, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -146,8 +161,153 @@ func cloneStringAnyMap(src map[string]any) map[string]any {
 	return dst
 }
 
+type responsesReasoningDetail struct {
+	Type      string `json:"type"`
+	Text      string `json:"text"`
+	Signature string `json:"signature,omitempty"`
+}
+
+func buildResponsesReasoningExtraFields(content any) (core.UnknownJSONFields, error) {
+	details, err := parseResponsesReasoningDetails(content)
+	if err != nil {
+		return core.UnknownJSONFields{}, err
+	}
+	if len(details) == 0 {
+		return core.UnknownJSONFields{}, nil
+	}
+
+	raw, err := json.Marshal(details)
+	if err != nil {
+		return core.UnknownJSONFields{}, err
+	}
+	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"reasoning_details": raw,
+	}), nil
+}
+
+func mergeResponsesReasoningExtraFields(base core.UnknownJSONFields, content any) (core.UnknownJSONFields, error) {
+	reasoningExtras, err := buildResponsesReasoningExtraFields(content)
+	if err != nil {
+		return core.UnknownJSONFields{}, err
+	}
+	if reasoningExtras.IsEmpty() {
+		return core.UnknownJSONFields{}, fmt.Errorf("reasoning content must include at least one non-empty reasoning_text item")
+	}
+	return core.MergeUnknownJSONFields(base, reasoningExtras), nil
+}
+
+func parseResponsesReasoningDetails(content any) ([]responsesReasoningDetail, error) {
+	switch typed := content.(type) {
+	case []core.ResponsesContentItem:
+		details := make([]responsesReasoningDetail, 0, len(typed))
+		for _, part := range typed {
+			if part.Type != "reasoning_text" {
+				return nil, fmt.Errorf("reasoning content items must have type reasoning_text")
+			}
+			if strings.TrimSpace(part.Text) == "" {
+				continue
+			}
+			details = append(details, responsesReasoningDetail{
+				Type:      "reasoning_text",
+				Text:      part.Text,
+				Signature: strings.TrimSpace(part.Signature),
+			})
+		}
+		return details, nil
+	case []map[string]any:
+		items := make([]any, 0, len(typed))
+		for _, item := range typed {
+			items = append(items, item)
+		}
+		return parseResponsesReasoningDetails(items)
+	case []any:
+		details := make([]responsesReasoningDetail, 0, len(typed))
+		for _, item := range typed {
+			part, ok := item.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("reasoning content items must be objects")
+			}
+			partType, _ := part["type"].(string)
+			if partType != "reasoning_text" {
+				return nil, fmt.Errorf("reasoning content items must have type reasoning_text")
+			}
+			text, _ := part["text"].(string)
+			if strings.TrimSpace(text) == "" {
+				continue
+			}
+			signature, _ := part["signature"].(string)
+			details = append(details, responsesReasoningDetail{
+				Type:      "reasoning_text",
+				Text:      text,
+				Signature: strings.TrimSpace(signature),
+			})
+		}
+		return details, nil
+	case nil:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("reasoning content must be an array")
+	}
+}
+
+func reasoningDetailsFromUnknownFields(fields core.UnknownJSONFields) []responsesReasoningDetail {
+	raw := fields.Lookup("reasoning_details")
+	if len(raw) == 0 {
+		return nil
+	}
+
+	var details []responsesReasoningDetail
+	if err := json.Unmarshal(raw, &details); err != nil {
+		return nil
+	}
+	return details
+}
+
+func buildReasoningUnknownFields(details []responsesReasoningDetail) core.UnknownJSONFields {
+	if len(details) == 0 {
+		return core.UnknownJSONFields{}
+	}
+
+	raw, err := json.Marshal(details)
+	if err != nil {
+		return core.UnknownJSONFields{}
+	}
+	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"reasoning_details": raw,
+	})
+}
+
+func assistantMessageContainsOnlyReasoning(msg core.Message) bool {
+	if msg.Role != "assistant" || len(msg.ToolCalls) != 0 {
+		return false
+	}
+	if core.HasStructuredContent(msg.Content) {
+		return false
+	}
+	if core.ExtractTextContent(msg.Content) != "" {
+		return false
+	}
+	return len(reasoningDetailsFromUnknownFields(msg.ExtraFields)) > 0
+}
+
+func mergeReasoningOnlyAssistantMessage(dst *core.Message, src core.Message) {
+	details := append(reasoningDetailsFromUnknownFields(dst.ExtraFields), reasoningDetailsFromUnknownFields(src.ExtraFields)...)
+	dst.ExtraFields = core.MergeUnknownJSONFields(dst.ExtraFields, src.ExtraFields, buildReasoningUnknownFields(details))
+}
+
+func mergeReasoningIntoAssistantMessage(dst *core.Message, src core.Message) {
+	details := append(reasoningDetailsFromUnknownFields(dst.ExtraFields), reasoningDetailsFromUnknownFields(src.ExtraFields)...)
+	merged := cloneResponsesMessage(src)
+	merged.ExtraFields = core.MergeUnknownJSONFields(dst.ExtraFields, src.ExtraFields, buildReasoningUnknownFields(details))
+	*dst = merged
+}
+
 // ConvertResponsesInputToMessages converts a Responses API input payload into Chat API messages.
 func ConvertResponsesInputToMessages(input any) ([]core.Message, error) {
+	return convertResponsesInputToMessagesWithOptions(input, ResponsesToChatOptions{})
+}
+
+func convertResponsesInputToMessagesWithOptions(input any, opts ResponsesToChatOptions) ([]core.Message, error) {
 	switch in := input.(type) {
 	case string:
 		return []core.Message{{Role: "user", Content: in}}, nil
@@ -156,15 +316,15 @@ func ConvertResponsesInputToMessages(input any) ([]core.Message, error) {
 		for _, item := range in {
 			items = append(items, item)
 		}
-		return convertResponsesInputItems(items)
+		return convertResponsesInputItems(items, opts)
 	case []any:
-		return convertResponsesInputItems(in)
+		return convertResponsesInputItems(in, opts)
 	case []core.ResponsesInputElement:
 		items := make([]any, 0, len(in))
 		for _, item := range in {
 			items = append(items, item)
 		}
-		return convertResponsesInputItems(items)
+		return convertResponsesInputItems(items, opts)
 	case nil:
 		return nil, core.NewInvalidRequestError("invalid responses input: unsupported type", nil)
 	default:
@@ -172,7 +332,7 @@ func ConvertResponsesInputToMessages(input any) ([]core.Message, error) {
 	}
 }
 
-func convertResponsesInputItems(items []any) ([]core.Message, error) {
+func convertResponsesInputItems(items []any, opts ResponsesToChatOptions) ([]core.Message, error) {
 	messages := make([]core.Message, 0, len(items))
 	var pendingAssistant *core.Message
 
@@ -185,12 +345,29 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 	}
 
 	for i, item := range items {
-		msg, itemType, err := convertResponsesInputItem(item, i)
+		msg, itemType, err := convertResponsesInputItem(item, i, opts)
 		if err != nil {
 			return nil, err
 		}
 
 		if msg.Role == "assistant" {
+			if itemType == "reasoning" {
+				if pendingAssistant == nil {
+					assistant := cloneResponsesMessage(msg)
+					pendingAssistant = &assistant
+				} else if assistantMessageContainsOnlyReasoning(*pendingAssistant) {
+					mergeReasoningOnlyAssistantMessage(pendingAssistant, msg)
+				} else {
+					flushPendingAssistant()
+					assistant := cloneResponsesMessage(msg)
+					pendingAssistant = &assistant
+				}
+				continue
+			}
+			if pendingAssistant != nil && assistantMessageContainsOnlyReasoning(*pendingAssistant) {
+				mergeReasoningIntoAssistantMessage(pendingAssistant, msg)
+				continue
+			}
 			if itemType == "message" {
 				flushPendingAssistant()
 			}
@@ -215,18 +392,18 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 	return messages, nil
 }
 
-func convertResponsesInputItem(item any, index int) (core.Message, string, error) {
+func convertResponsesInputItem(item any, index int, opts ResponsesToChatOptions) (core.Message, string, error) {
 	switch typed := item.(type) {
 	case core.ResponsesInputElement:
-		return convertResponsesInputElement(typed, index)
+		return convertResponsesInputElement(typed, index, opts)
 	case map[string]any:
-		return convertResponsesInputMap(typed, index)
+		return convertResponsesInputMap(typed, index, opts)
 	default:
 		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: expected object", index), nil)
 	}
 }
 
-func convertResponsesInputElement(item core.ResponsesInputElement, index int) (core.Message, string, error) {
+func convertResponsesInputElement(item core.ResponsesInputElement, index int, opts ResponsesToChatOptions) (core.Message, string, error) {
 	switch item.Type {
 	case "function_call":
 		name := strings.TrimSpace(item.Name)
@@ -268,10 +445,30 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 			Content:     content,
 			ExtraFields: core.CloneUnknownJSONFields(item.ExtraFields),
 		}, "function_call_output", nil
+	case "reasoning":
+		if !opts.PreserveAnthropicReasoningCompat {
+			return core.Message{}, "", core.NewInvalidRequestError(
+				fmt.Sprintf("invalid responses input item at index %d: reasoning items require provider-specific reasoning compatibility", index),
+				nil,
+			)
+		}
+		reasoningExtras, err := mergeResponsesReasoningExtraFields(core.CloneUnknownJSONFields(item.ExtraFields), item.Content)
+		if err != nil {
+			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: reasoning.content must be an array of reasoning_text items", index), err)
+		}
+		return core.Message{
+			Role:        "assistant",
+			Content:     "",
+			ContentNull: true,
+			ExtraFields: reasoningExtras,
+		}, "reasoning", nil
 	default: // message (type="" or "message")
 		role := strings.TrimSpace(item.Role)
 		if role == "" {
 			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", index), nil)
+		}
+		if err := validateResponsesMessageAnthropicReasoningCompat(index, role, item.ExtraFields, opts); err != nil {
+			return core.Message{}, "", err
 		}
 		content, ok := ConvertResponsesContentToChatContent(item.Content)
 		if !ok {
@@ -285,7 +482,7 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 	}
 }
 
-func convertResponsesInputMap(item map[string]any, index int) (core.Message, string, error) {
+func convertResponsesInputMap(item map[string]any, index int, opts ResponsesToChatOptions) (core.Message, string, error) {
 	itemType, _ := item["type"].(string)
 	switch itemType {
 	case "function_call":
@@ -329,12 +526,36 @@ func convertResponsesInputMap(item map[string]any, index int) (core.Message, str
 			Content:     content,
 			ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "call_id", "status", "output")),
 		}, "function_call_output", nil
+	case "reasoning":
+		if !opts.PreserveAnthropicReasoningCompat {
+			return core.Message{}, "", core.NewInvalidRequestError(
+				fmt.Sprintf("invalid responses input item at index %d: reasoning items require provider-specific reasoning compatibility", index),
+				nil,
+			)
+		}
+		reasoningExtras, err := mergeResponsesReasoningExtraFields(
+			core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "status", "content")),
+			item["content"],
+		)
+		if err != nil {
+			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: reasoning.content must be an array of reasoning_text items", index), err)
+		}
+		return core.Message{
+			Role:        "assistant",
+			Content:     "",
+			ContentNull: true,
+			ExtraFields: reasoningExtras,
+		}, "reasoning", nil
 	}
 
 	role, _ := item["role"].(string)
 	role = strings.TrimSpace(role)
 	if role == "" {
 		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", index), nil)
+	}
+	extraFields := core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "role", "status", "content"))
+	if err := validateResponsesMessageAnthropicReasoningCompat(index, role, extraFields, opts); err != nil {
+		return core.Message{}, "", err
 	}
 
 	content, ok := ConvertResponsesContentToChatContent(item["content"])
@@ -344,8 +565,137 @@ func convertResponsesInputMap(item map[string]any, index int) (core.Message, str
 	return core.Message{
 		Role:        role,
 		Content:     content,
-		ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "role", "status", "content")),
+		ExtraFields: extraFields,
 	}, "message", nil
+}
+
+func containsAnthropicReasoningCompatFields(fields core.UnknownJSONFields) bool {
+	for _, key := range []string{"reasoning_details", "reasoning_content", "reasoning_signature"} {
+		if len(fields.Lookup(key)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func validateResponsesMessageAnthropicReasoningCompat(index int, role string, fields core.UnknownJSONFields, opts ResponsesToChatOptions) error {
+	if !containsAnthropicReasoningCompatFields(fields) {
+		return nil
+	}
+	if !opts.PreserveAnthropicReasoningCompat {
+		return core.NewInvalidRequestError(
+			fmt.Sprintf("invalid responses input item at index %d: anthropic reasoning compatibility fields require provider-specific reasoning compatibility", index),
+			nil,
+		)
+	}
+	if role != "assistant" {
+		return core.NewInvalidRequestError(
+			fmt.Sprintf("invalid responses input item at index %d: anthropic reasoning compatibility fields are only supported on assistant messages", index),
+			nil,
+		)
+	}
+	return validateAnthropicReasoningCompatPayload(index, fields)
+}
+
+func validateAnthropicReasoningCompatPayload(index int, fields core.UnknownJSONFields) error {
+	if raw := fields.Lookup("reasoning_details"); len(raw) > 0 {
+		details, err := parseAnthropicReasoningCompatDetails(raw)
+		if err != nil {
+			return core.NewInvalidRequestError(
+				fmt.Sprintf("invalid responses input item at index %d: message.reasoning_details must be an array of reasoning_text objects", index),
+				err,
+			)
+		}
+		if len(details) == 0 {
+			return core.NewInvalidRequestError(
+				fmt.Sprintf("invalid responses input item at index %d: message.reasoning_details must contain at least one non-empty reasoning_text object", index),
+				nil,
+			)
+		}
+		return nil
+	}
+
+	reasoningContentRaw := fields.Lookup("reasoning_content")
+	reasoningSignatureRaw := fields.Lookup("reasoning_signature")
+	if len(reasoningContentRaw) == 0 && len(reasoningSignatureRaw) == 0 {
+		return nil
+	}
+	if len(reasoningContentRaw) == 0 {
+		return core.NewInvalidRequestError(
+			fmt.Sprintf("invalid responses input item at index %d: message.reasoning_signature requires message.reasoning_content", index),
+			nil,
+		)
+	}
+	if len(reasoningSignatureRaw) == 0 {
+		return core.NewInvalidRequestError(
+			fmt.Sprintf("invalid responses input item at index %d: message.reasoning_content requires message.reasoning_signature", index),
+			nil,
+		)
+	}
+
+	var reasoningContent string
+	if err := json.Unmarshal(reasoningContentRaw, &reasoningContent); err != nil {
+		return core.NewInvalidRequestError(
+			fmt.Sprintf("invalid responses input item at index %d: message.reasoning_content must be a string", index),
+			err,
+		)
+	}
+
+	var reasoningSignature string
+	if err := json.Unmarshal(reasoningSignatureRaw, &reasoningSignature); err != nil {
+		return core.NewInvalidRequestError(
+			fmt.Sprintf("invalid responses input item at index %d: message.reasoning_signature must be a string", index),
+			err,
+		)
+	}
+
+	if strings.TrimSpace(reasoningContent) == "" {
+		return core.NewInvalidRequestError(
+			fmt.Sprintf("invalid responses input item at index %d: message.reasoning_content must be a non-empty string", index),
+			nil,
+		)
+	}
+	if strings.TrimSpace(reasoningSignature) == "" {
+		return core.NewInvalidRequestError(
+			fmt.Sprintf("invalid responses input item at index %d: message.reasoning_signature must be a non-empty string", index),
+			nil,
+		)
+	}
+
+	return nil
+}
+
+func parseAnthropicReasoningCompatDetails(raw json.RawMessage) ([]responsesReasoningDetail, error) {
+	var details []responsesReasoningDetail
+	if err := json.Unmarshal(raw, &details); err != nil {
+		return nil, err
+	}
+
+	normalized := make([]responsesReasoningDetail, 0, len(details))
+	for _, detail := range details {
+		if strings.TrimSpace(detail.Text) == "" {
+			continue
+		}
+
+		detailType := strings.TrimSpace(detail.Type)
+		if detailType == "" {
+			detailType = "reasoning_text"
+		}
+		if detailType != "reasoning_text" && detailType != "thinking" {
+			return nil, fmt.Errorf("unsupported reasoning_details type %q", detailType)
+		}
+
+		normalized = append(normalized, responsesReasoningDetail{
+			Type:      "reasoning_text",
+			Text:      detail.Text,
+			Signature: strings.TrimSpace(detail.Signature),
+		})
+	}
+
+	if len(normalized) == 0 {
+		return nil, nil
+	}
+	return normalized, nil
 }
 
 func cloneResponsesMessage(msg core.Message) core.Message {
@@ -368,13 +718,16 @@ func cloneResponsesMessage(msg core.Message) core.Message {
 }
 
 func canMergeAssistantMessages(current, next core.Message) bool {
+	if isAssistantToolCallOnlyMessage(next) {
+		return next.ExtraFields.IsEmpty()
+	}
 	if !current.ExtraFields.IsEmpty() || !next.ExtraFields.IsEmpty() {
 		return false
 	}
 	if !core.HasStructuredContent(current.Content) && !core.HasStructuredContent(next.Content) {
 		return true
 	}
-	return isAssistantToolCallOnlyMessage(next)
+	return false
 }
 
 func mergeAssistantMessage(dst *core.Message, src core.Message) {

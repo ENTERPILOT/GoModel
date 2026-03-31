@@ -70,6 +70,29 @@ func TestUnknownJSONFieldsFromMap_EmptyRawValueEncodesAsNull(t *testing.T) {
 	}
 }
 
+func TestMergeUnknownJSONFields(t *testing.T) {
+	first := UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"x_first":  json.RawMessage(`true`),
+		"x_shared": json.RawMessage(`"first"`),
+	})
+	second := UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"x_second": json.RawMessage(`{"ok":true}`),
+		"x_shared": json.RawMessage(`"second"`),
+	})
+
+	merged := MergeUnknownJSONFields(first, second)
+
+	if got := merged.Lookup("x_first"); !bytes.Equal(got, []byte("true")) {
+		t.Fatalf("x_first = %s, want true", got)
+	}
+	if got := merged.Lookup("x_second"); !bytes.Equal(got, []byte(`{"ok":true}`)) {
+		t.Fatalf("x_second = %s, want object", got)
+	}
+	if got := merged.Lookup("x_shared"); !bytes.Equal(got, []byte(`"second"`)) {
+		t.Fatalf("x_shared = %s, want later override", got)
+	}
+}
+
 func TestExtractUnknownJSONFieldsObjectByScan_RejectsInvalidJSONSyntax(t *testing.T) {
 	tests := []struct {
 		name string

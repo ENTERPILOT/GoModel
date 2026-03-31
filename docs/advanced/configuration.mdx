@@ -162,6 +162,20 @@ cp .env.template .env
   `.env` file is only loaded if it exists — missing it is not an error.
 </Note>
 
+### Experimental Compatibility Flags
+
+Some compatibility features are intentionally opt-in because they preserve
+provider-specific behavior by emitting non-standard fields.
+
+`OPENAI_COMPAT_BREAKING_ANTHROPIC_THINKING_SIGNATURES=true`
+
+- Preserves Anthropic reasoning fingerprints/signatures when Claude is accessed
+  through the OpenAI-compatible Chat Completions and Responses APIs.
+- Adds Anthropic-specific fields such as `reasoning_details`,
+  `reasoning_signature`, and `reasoning_index`.
+- Can break strict OpenAI-compatible clients, typed SDKs, and schema validators,
+  so it is disabled by default.
+
 ### 3. Configuration File (YAML)
 
 For more complex setups, you can use an optional YAML configuration file. GOModel looks for it in two locations (in order):

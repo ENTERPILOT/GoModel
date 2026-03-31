@@ -151,6 +151,18 @@ func (e *ResponsesInputElement) UnmarshalJSON(data []byte) error {
 		if v, ok := raw["output"]; ok {
 			e.Output = stringifyRawValue(v)
 		}
+	case "reasoning":
+		if v, ok := raw["status"]; ok {
+			_ = json.Unmarshal(v, &e.Status)
+		}
+		if v, ok := raw["content"]; ok {
+			trimmed := bytes.TrimSpace(v)
+			if len(trimmed) != 0 && !bytes.Equal(trimmed, []byte("null")) {
+				var content any
+				_ = json.Unmarshal(trimmed, &content)
+				e.Content = content
+			}
+		}
 	default: // message (type="" or "message")
 		if v, ok := raw["role"]; ok {
 			_ = json.Unmarshal(v, &e.Role)
@@ -174,6 +186,8 @@ func (e *ResponsesInputElement) UnmarshalJSON(data []byte) error {
 		knownFields = append(knownFields, "call_id", "id", "name", "arguments", "status")
 	case "function_call_output":
 		knownFields = append(knownFields, "call_id", "status", "output")
+	case "reasoning":
+		knownFields = append(knownFields, "status", "content")
 	default:
 		knownFields = append(knownFields, "role", "status", "content")
 	}
@@ -215,6 +229,16 @@ func (e ResponsesInputElement) MarshalJSON() ([]byte, error) {
 			CallID: e.CallID,
 			Output: e.Output,
 			Status: e.Status,
+		}, e.ExtraFields)
+	case "reasoning":
+		return marshalWithUnknownJSONFields(struct {
+			Type    string `json:"type"`
+			Content any    `json:"content,omitempty"`
+			Status  string `json:"status,omitempty"`
+		}{
+			Type:    "reasoning",
+			Content: e.Content,
+			Status:  e.Status,
 		}, e.ExtraFields)
 	default: // message
 		type msg struct {

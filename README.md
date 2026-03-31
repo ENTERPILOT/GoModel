@@ -177,6 +177,7 @@ Key settings:
 | `METRICS_ENABLED` | `false` | Enable Prometheus metrics |
 | `LOGGING_ENABLED` | `false` | Enable audit logging |
 | `GUARDRAILS_ENABLED` | `false` | Enable the configured guardrails pipeline |
+| `OPENAI_COMPAT_BREAKING_ANTHROPIC_THINKING_SIGNATURES` | `false` | Preserve Anthropic reasoning fingerprints/signatures in OpenAI-compatible payloads by emitting non-standard fields; breaks strict compatibility |
 
 **Quick Start - Authentication:** By default `GOMODEL_MASTER_KEY` is unset. Without this key, API endpoints are unprotected and anyone can call them. This is insecure for production. **Strongly recommend** setting a strong secret before exposing the service. Add `GOMODEL_MASTER_KEY` to your `.env` or environment for production deployments.
 
