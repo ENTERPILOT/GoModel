@@ -81,11 +81,31 @@ func TestNewSQLiteStore_AddsMissingScopeUserPathColumn(t *testing.T) {
 		t.Fatal("NewSQLiteStore() = nil, want store")
 	}
 
-	hasColumn, err := sqliteTableHasColumn(db, "execution_plan_versions", "scope_user_path")
+	rows, err := db.Query(`PRAGMA table_info('execution_plan_versions')`)
 	if err != nil {
-		t.Fatalf("sqliteTableHasColumn() error = %v", err)
+		t.Fatalf("PRAGMA table_info() error = %v", err)
 	}
-	if !hasColumn {
+	defer rows.Close()
+
+	hasScopeUserPathColumn := false
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatalf("rows.Scan() error = %v", err)
+		}
+		if name == "scope_user_path" {
+			hasScopeUserPathColumn = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err() = %v", err)
+	}
+	if !hasScopeUserPathColumn {
 		t.Fatal("scope_user_path column missing after initialization")
 	}
 }

@@ -212,6 +212,10 @@ func buildAuditLogInsert(entries []*LogEntry) (string, []any) {
 		if cacheType := normalizeCacheType(entry.CacheType); cacheType != "" {
 			cacheTypeValue = cacheType
 		}
+		userPathValue := entry.UserPath
+		if strings.TrimSpace(userPathValue) == "" {
+			userPathValue = "/"
+		}
 		args = append(args,
 			entry.ID,
 			entry.Timestamp,
@@ -228,7 +232,7 @@ func buildAuditLogInsert(entries []*LogEntry) (string, []any) {
 			entry.ClientIP,
 			entry.Method,
 			entry.Path,
-			entry.UserPath,
+			userPathValue,
 			entry.Stream,
 			entry.ErrorType,
 			dataJSON,

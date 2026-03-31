@@ -78,8 +78,8 @@ func TestBuildAuditLogInsert(t *testing.T) {
 	if got, ok := args[30].(string); !ok || got != "" {
 		t.Fatalf("args[30] = (%T) %v, want (string) \"\"", args[30], args[30])
 	}
-	if got, ok := args[34].(string); !ok || got != "" {
-		t.Fatalf("args[34] = (%T) %v, want (string) \"\"", args[34], args[34])
+	if got, ok := args[34].(string); !ok || got != "/" {
+		t.Fatalf("args[34] = (%T) %v, want (string) \"/\"", args[34], args[34])
 	}
 	if got := string(args[18].([]byte)); got != `{"user_agent":"test-agent"}` {
 		t.Fatalf("args[18] = %q, want %q", got, `{"user_agent":"test-agent"}`)

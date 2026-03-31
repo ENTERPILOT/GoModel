@@ -273,6 +273,9 @@ func TestSQLiteStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 	if !logEntry.AliasUsed {
 		t.Fatal("AliasUsed = false, want true")
 	}
+	if logEntry.UserPath != "/" {
+		t.Fatalf("UserPath = %q, want /", logEntry.UserPath)
+	}
 }
 
 func TestSQLiteReader_AllowsNullExecutionPlanVersionID(t *testing.T) {
@@ -412,6 +415,9 @@ func TestSQLiteReader_GetLogsFiltersByUserPathSubtree(t *testing.T) {
 	}
 	if logs.Entries[0].ID != "match-team" {
 		t.Fatalf("entry id = %q, want match-team", logs.Entries[0].ID)
+	}
+	if logs.Entries[0].UserPath != "/team/a" {
+		t.Fatalf("entry user_path = %q, want /team/a", logs.Entries[0].UserPath)
 	}
 }
 

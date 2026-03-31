@@ -82,6 +82,26 @@ func NewMongoDBReader(database *mongo.Database) (*MongoDBReader, error) {
 	return &MongoDBReader{collection: database.Collection("audit_logs")}, nil
 }
 
+func mongoUserPathMatchFilter(userPath string) bson.E {
+	regexFilter := bson.D{{
+		Key: "user_path",
+		Value: bson.D{
+			{Key: "$regex", Value: auditUserPathSubtreeRegex(userPath)},
+		},
+	}}
+	if userPath != "/" {
+		return regexFilter[0]
+	}
+	return bson.E{
+		Key: "$or",
+		Value: bson.A{
+			regexFilter,
+			bson.D{{Key: "user_path", Value: bson.D{{Key: "$exists", Value: false}}}},
+			bson.D{{Key: "user_path", Value: nil}},
+		},
+	}
+}
+
 // GetLogs returns a paginated list of audit log entries.
 func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
@@ -124,12 +144,7 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 	if userPath, err := normalizeAuditUserPathFilter(params.UserPath); err != nil {
 		return nil, core.NewInvalidRequestError(err.Error(), err)
 	} else if userPath != "" {
-		matchFilters = append(matchFilters, bson.E{
-			Key: "user_path",
-			Value: bson.D{
-				{Key: "$regex", Value: auditUserPathSubtreeRegex(userPath)},
-			},
-		})
+		matchFilters = append(matchFilters, mongoUserPathMatchFilter(userPath))
 	}
 	if params.ErrorType != "" {
 		matchFilters = append(matchFilters, bson.E{

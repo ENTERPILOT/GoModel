@@ -704,12 +704,12 @@
 
                     <label class="alias-form-field">
                         <span>User Path</span>
-                        <input type="text" class="filter-input execution-plan-input" placeholder="/team/alpha" x-model="executionPlanForm.scope_user_path">
+                        <input type="text" class="filter-input execution-plan-input" placeholder="team/alpha or /team/alpha" x-model="executionPlanForm.scope_user_path">
                     </label>
                 </div>
 
                 <p class="alias-form-hint">Leave provider empty to target all providers and models. Select a provider without a model to target all models for that provider.</p>
-                <p class="alias-form-hint">Add a path to scope the workflow to that subtree. Matching falls back from the deepest path toward the root.</p>
+                <p class="alias-form-hint">Add a path to scope the workflow to that subtree. Leading slashes are optional and will be normalized; you can enter &quot;team/alpha&quot; or &quot;/team/alpha&quot;. Matching falls back from the deepest path toward the root.</p>
                 <p class="alias-form-hint">If you leave the name empty, the workflow will display as the matched provider/model scope or “All models”.</p>
 
                 <label class="alias-form-field">

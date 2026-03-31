@@ -155,6 +155,10 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 			if cacheType := normalizeCacheType(e.CacheType); cacheType != "" {
 				cacheTypeValue = cacheType
 			}
+			userPathValue := e.UserPath
+			if strings.TrimSpace(userPathValue) == "" {
+				userPathValue = "/"
+			}
 
 			values = append(values,
 				e.ID,
@@ -172,7 +176,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 				e.ClientIP,
 				e.Method,
 				e.Path,
-				e.UserPath,
+				userPathValue,
 				streamInt,
 				e.ErrorType,
 				dataValue,
