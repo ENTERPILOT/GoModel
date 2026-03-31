@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	all_minilm "github.com/clems4ever/all-minilm-l6-v2-go/all_minilm_l6_v2"
@@ -32,7 +34,8 @@ type Embedder interface {
 // cfg.ModelPath if set.
 //
 // For any other provider value, the named provider must exist in rawProviders;
-// its api_key and base_url are reused to call POST /v1/embeddings.
+// its api_key and base_url are reused to call POST /v1/embeddings (OpenAI-compatible).
+// When base_url is omitted, defaults match the gateway's provider packages (e.g. gemini → Google OpenAI-compatible host), not api.openai.com.
 func NewEmbedder(cfg config.EmbedderConfig, rawProviders map[string]config.RawProviderConfig) (Embedder, error) {
 	if cfg.Provider == "" || cfg.Provider == "local" {
 		return newMiniLMEmbedder(cfg.ModelPath)
@@ -41,13 +44,17 @@ func NewEmbedder(cfg config.EmbedderConfig, rawProviders map[string]config.RawPr
 	if !ok {
 		return nil, fmt.Errorf("embedding: provider %q not found in providers map", cfg.Provider)
 	}
-	baseURL := raw.BaseURL
-	if baseURL == "" {
-		baseURL = "https://api.openai.com"
-	}
-	model := cfg.Model
+	baseURL := embeddingAPIBaseURL(raw)
+	typ := strings.ToLower(strings.TrimSpace(raw.Type))
+	model := strings.TrimSpace(cfg.Model)
 	if model == "" {
-		model = "text-embedding-ada-002"
+		if typ == "gemini" {
+			model = "gemini-embedding-001"
+		} else {
+			model = "text-embedding-ada-002"
+		}
+	} else if typ == "gemini" {
+		model = normalizeGeminiEmbeddingModel(model)
 	}
 	return &apiEmbedder{
 		baseURL:    baseURL,
@@ -55,6 +62,41 @@ func NewEmbedder(cfg config.EmbedderConfig, rawProviders map[string]config.RawPr
 		model:      model,
 		httpClient: &http.Client{Timeout: defaultTimeout},
 	}, nil
+}
+
+// normalizeGeminiEmbeddingModel maps OpenAI-style embedding IDs that do not exist on
+// Google's OpenAI-compatible /v1/embeddings surface to a supported Gemini model.
+// See: https://ai.google.dev/gemini-api/docs/openai#embeddings
+func normalizeGeminiEmbeddingModel(model string) string {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	if lower == "" {
+		return "gemini-embedding-001"
+	}
+	if strings.HasPrefix(lower, "text-embedding-") {
+		slog.Warn("embedding: Gemini OpenAI-compatible API uses gemini-embedding-* for /v1/embeddings; replacing configured model",
+			"from", model,
+			"to", "gemini-embedding-001")
+		return "gemini-embedding-001"
+	}
+	return model
+}
+
+func embeddingAPIBaseURL(raw config.RawProviderConfig) string {
+	if u := strings.TrimSpace(raw.BaseURL); u != "" {
+		return strings.TrimSuffix(u, "/")
+	}
+	switch strings.ToLower(strings.TrimSpace(raw.Type)) {
+	case "gemini":
+		return "https://generativelanguage.googleapis.com/v1beta/openai"
+	case "groq":
+		return "https://api.groq.com/openai"
+	case "xai":
+		return "https://api.x.ai/v1"
+	case "openrouter":
+		return "https://openrouter.ai/api/v1"
+	default:
+		return "https://api.openai.com"
+	}
 }
 
 // MiniLMEmbedder uses the local all-MiniLM-L6-v2 ONNX model.

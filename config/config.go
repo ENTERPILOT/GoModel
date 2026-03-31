@@ -377,30 +377,39 @@ type RedisModelConfig struct {
 // Uses separate env vars from RedisModelConfig for key and TTL to allow independent
 // configuration. The URL is shared via REDIS_URL to simplify single-Redis deployments;
 // use YAML config if different Redis instances are needed for model and response caches.
+// Env vars are applied in Load via applyResponseSimpleEnv, only when cache.response.simple is present
+// (see RESPONSE_CACHE_SIMPLE_ENABLED for env-only opt-in without YAML).
 type RedisResponseConfig struct {
-	URL string `yaml:"url" env:"REDIS_URL"`
-	Key string `yaml:"key" env:"REDIS_KEY_RESPONSES"`
-	TTL int    `yaml:"ttl" env:"REDIS_TTL_RESPONSES"`
+	URL string `yaml:"url"`
+	Key string `yaml:"key"`
+	TTL int    `yaml:"ttl"`
 }
 
 // ResponseCacheConfig holds configuration for response cache middleware.
 type ResponseCacheConfig struct {
-	Simple   SimpleCacheConfig   `yaml:"simple"`
-	Semantic SemanticCacheConfig `yaml:"semantic"`
+	Simple   *SimpleCacheConfig   `yaml:"simple"`
+	Semantic *SemanticCacheConfig `yaml:"semantic"`
 }
 
 // SimpleCacheConfig holds configuration for exact-match response caching.
+// When the simple block is omitted from config.yaml, this layer stays off unless
+// RESPONSE_CACHE_SIMPLE_ENABLED=true is set (e.g. Helm without a response-cache YAML fragment).
+// Omitted enabled (nil) means true whenever the simple block exists.
 type SimpleCacheConfig struct {
-	Redis *RedisResponseConfig `yaml:"redis"`
+	Enabled *bool                `yaml:"enabled"`
+	Redis   *RedisResponseConfig `yaml:"redis"`
 }
 
 // SemanticCacheConfig holds configuration for the semantic (vector-similarity) response cache.
+// When the semantic block is omitted from config.yaml, this layer stays off unless
+// SEMANTIC_CACHE_ENABLED=true is set. Omitted enabled (nil) means true whenever the semantic block exists.
+// Tuning env vars are applied in Load via applyResponseSemanticEnv when this block exists.
 type SemanticCacheConfig struct {
-	Enabled                 bool              `yaml:"enabled"                   env:"SEMANTIC_CACHE_ENABLED"`
-	SimilarityThreshold     float64           `yaml:"similarity_threshold"      env:"SEMANTIC_CACHE_THRESHOLD"`
-	TTL                     int               `yaml:"ttl"                       env:"SEMANTIC_CACHE_TTL"`
-	MaxConversationMessages int               `yaml:"max_conversation_messages" env:"SEMANTIC_CACHE_MAX_CONV_MESSAGES"`
-	ExcludeSystemPrompt     bool              `yaml:"exclude_system_prompt"     env:"SEMANTIC_CACHE_EXCLUDE_SYSTEM_PROMPT"`
+	Enabled                 *bool             `yaml:"enabled"`
+	SimilarityThreshold     float64           `yaml:"similarity_threshold"`
+	TTL                     int               `yaml:"ttl"`
+	MaxConversationMessages int               `yaml:"max_conversation_messages"`
+	ExcludeSystemPrompt     bool              `yaml:"exclude_system_prompt"`
 	Embedder                EmbedderConfig    `yaml:"embedder"`
 	VectorStore             VectorStoreConfig `yaml:"vector_store"`
 }
@@ -410,15 +419,15 @@ type SemanticCacheConfig struct {
 // Any other value must match a key in the top-level providers map;
 // that provider's api_key and base_url are reused automatically.
 type EmbedderConfig struct {
-	Provider  string `yaml:"provider"   env:"SEMANTIC_CACHE_EMBEDDER_PROVIDER"`
-	Model     string `yaml:"model"      env:"SEMANTIC_CACHE_EMBEDDER_MODEL"`
-	ModelPath string `yaml:"model_path" env:"SEMANTIC_CACHE_MODEL_PATH"`
+	Provider  string `yaml:"provider"`
+	Model     string `yaml:"model"`
+	ModelPath string `yaml:"model_path"`
 }
 
 // VectorStoreConfig selects the vector DB backend.
 // Type: "sqlite-vec" (default), "qdrant", "pgvector".
 type VectorStoreConfig struct {
-	Type      string          `yaml:"type"       env:"SEMANTIC_CACHE_VECTOR_STORE_TYPE"`
+	Type      string          `yaml:"type"`
 	SQLiteVec SQLiteVecConfig `yaml:"sqlite_vec"`
 	Qdrant    QdrantConfig    `yaml:"qdrant"`
 	PGVector  PGVectorConfig  `yaml:"pgvector"`
@@ -426,20 +435,20 @@ type VectorStoreConfig struct {
 
 // SQLiteVecConfig holds path configuration for the sqlite-vec vector store.
 type SQLiteVecConfig struct {
-	Path string `yaml:"path" env:"SEMANTIC_CACHE_SQLITE_PATH"`
+	Path string `yaml:"path"`
 }
 
 // QdrantConfig holds connection configuration for the Qdrant vector store.
 type QdrantConfig struct {
-	URL        string `yaml:"url"        env:"SEMANTIC_CACHE_QDRANT_URL"`
-	Collection string `yaml:"collection" env:"SEMANTIC_CACHE_QDRANT_COLLECTION"`
-	APIKey     string `yaml:"api_key"    env:"SEMANTIC_CACHE_QDRANT_API_KEY"`
+	URL        string `yaml:"url"`
+	Collection string `yaml:"collection"`
+	APIKey     string `yaml:"api_key"`
 }
 
 // PGVectorConfig holds connection configuration for the pgvector vector store.
 type PGVectorConfig struct {
-	URL   string `yaml:"url"   env:"SEMANTIC_CACHE_PGVECTOR_URL"`
-	Table string `yaml:"table" env:"SEMANTIC_CACHE_PGVECTOR_TABLE"`
+	URL   string `yaml:"url"`
+	Table string `yaml:"table"`
 }
 
 // ValidateCacheConfig validates the cache configuration in c.
@@ -465,8 +474,8 @@ func ValidateCacheConfig(c *CacheConfig) error {
 		return fmt.Errorf("cache.model.redis: URL is required when using redis")
 	}
 
-	sem := &c.Response.Semantic
-	if SemanticCacheActive(sem) {
+	sem := c.Response.Semantic
+	if sem != nil && SemanticCacheActive(sem) {
 		switch sem.VectorStore.Type {
 		case "sqlite-vec", "qdrant", "pgvector":
 		default:
@@ -489,20 +498,157 @@ func ValidateCacheConfig(c *CacheConfig) error {
 	return nil
 }
 
-// SemanticCacheActive reports whether the semantic response cache should be
-// validated and constructed. It requires enabled: true plus at least one
-// non-default tuning field or embedder/vector-store setting, matching
-// NewResponseCacheMiddleware in internal/responsecache.
-func SemanticCacheActive(sem *SemanticCacheConfig) bool {
-	if sem == nil || !sem.Enabled {
+// SimpleCacheEnabled reports whether the exact-match response cache layer is
+// allowed to run for a non-nil simple config. Omitted enabled means true.
+func SimpleCacheEnabled(s *SimpleCacheConfig) bool {
+	if s == nil {
 		return false
 	}
-	return sem.SimilarityThreshold != 0 ||
-		sem.TTL != 0 ||
-		sem.MaxConversationMessages != 0 ||
-		sem.VectorStore.Type != "" ||
-		sem.VectorStore.SQLiteVec.Path != "" ||
-		sem.Embedder.Provider != ""
+	if s.Enabled != nil && !*s.Enabled {
+		return false
+	}
+	return true
+}
+
+// SemanticCacheActive reports whether the semantic response cache should be
+// validated and constructed. The semantic block must be present (YAML or
+// SEMANTIC_CACHE_ENABLED=true); omitted enabled means true.
+func SemanticCacheActive(sem *SemanticCacheConfig) bool {
+	if sem == nil {
+		return false
+	}
+	if sem.Enabled != nil && !*sem.Enabled {
+		return false
+	}
+	return true
+}
+
+func mergeSemanticResponseDefaults(sem *SemanticCacheConfig) {
+	if sem == nil {
+		return
+	}
+	if sem.SimilarityThreshold == 0 {
+		sem.SimilarityThreshold = 0.92
+	}
+	if sem.TTL == 0 {
+		sem.TTL = 3600
+	}
+	if sem.MaxConversationMessages == 0 {
+		sem.MaxConversationMessages = 3
+	}
+	if sem.Embedder.Provider == "" {
+		sem.Embedder.Provider = "local"
+	}
+	if sem.VectorStore.Type == "" {
+		sem.VectorStore.Type = "sqlite-vec"
+	}
+	if sem.VectorStore.SQLiteVec.Path == "" {
+		sem.VectorStore.SQLiteVec.Path = ".cache/semantic.db"
+	}
+}
+
+func applyResponseSimpleEnv(resp *ResponseCacheConfig) {
+	v, ok := os.LookupEnv("RESPONSE_CACHE_SIMPLE_ENABLED")
+	if ok && !parseBool(v) {
+		resp.Simple = nil
+		return
+	}
+	if resp.Simple == nil {
+		if ok && parseBool(v) {
+			resp.Simple = &SimpleCacheConfig{}
+		} else {
+			return
+		}
+	}
+	simple := resp.Simple
+	if u := os.Getenv("REDIS_URL"); u != "" {
+		if simple.Redis == nil {
+			simple.Redis = &RedisResponseConfig{}
+		}
+		simple.Redis.URL = u
+	}
+	if k := os.Getenv("REDIS_KEY_RESPONSES"); k != "" {
+		if simple.Redis == nil {
+			simple.Redis = &RedisResponseConfig{}
+		}
+		simple.Redis.Key = k
+	}
+	if ts := os.Getenv("REDIS_TTL_RESPONSES"); ts != "" {
+		if simple.Redis == nil {
+			simple.Redis = &RedisResponseConfig{}
+		}
+		if n, err := strconv.Atoi(ts); err == nil {
+			simple.Redis.TTL = n
+		}
+	}
+}
+
+func applyResponseSemanticEnv(resp *ResponseCacheConfig) {
+	v, enabledKeySet := os.LookupEnv("SEMANTIC_CACHE_ENABLED")
+	if enabledKeySet && !parseBool(v) {
+		resp.Semantic = nil
+		return
+	}
+	if resp.Semantic == nil {
+		if enabledKeySet && parseBool(v) {
+			resp.Semantic = &SemanticCacheConfig{}
+		} else {
+			return
+		}
+	}
+	sem := resp.Semantic
+	if val := os.Getenv("SEMANTIC_CACHE_ENABLED"); val != "" {
+		b := parseBool(val)
+		sem.Enabled = &b
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_THRESHOLD"); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			sem.SimilarityThreshold = f
+		}
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_TTL"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			sem.TTL = i
+		}
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_MAX_CONV_MESSAGES"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			sem.MaxConversationMessages = i
+		}
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_EXCLUDE_SYSTEM_PROMPT"); val != "" {
+		sem.ExcludeSystemPrompt = parseBool(val)
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_EMBEDDER_PROVIDER"); val != "" {
+		sem.Embedder.Provider = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_EMBEDDER_MODEL"); val != "" {
+		sem.Embedder.Model = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_MODEL_PATH"); val != "" {
+		sem.Embedder.ModelPath = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_VECTOR_STORE_TYPE"); val != "" {
+		sem.VectorStore.Type = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_SQLITE_PATH"); val != "" {
+		sem.VectorStore.SQLiteVec.Path = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_QDRANT_URL"); val != "" {
+		sem.VectorStore.Qdrant.URL = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_QDRANT_COLLECTION"); val != "" {
+		sem.VectorStore.Qdrant.Collection = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_QDRANT_API_KEY"); val != "" {
+		sem.VectorStore.Qdrant.APIKey = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_PGVECTOR_URL"); val != "" {
+		sem.VectorStore.PGVector.URL = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_PGVECTOR_TABLE"); val != "" {
+		sem.VectorStore.PGVector.Table = val
+	}
 }
 
 // ServerConfig holds HTTP server configuration
@@ -601,23 +747,7 @@ func buildDefaultConfig() *Config {
 				Local: nil,
 				Redis: nil,
 			},
-			Response: ResponseCacheConfig{
-				Semantic: SemanticCacheConfig{
-					SimilarityThreshold:     0.92,
-					TTL:                     3600,
-					MaxConversationMessages: 3,
-					ExcludeSystemPrompt:     false,
-					Embedder: EmbedderConfig{
-						Provider: "local",
-					},
-					VectorStore: VectorStoreConfig{
-						Type: "sqlite-vec",
-						SQLiteVec: SQLiteVecConfig{
-							Path: ".cache/semantic.db",
-						},
-					},
-				},
-			},
+			Response: ResponseCacheConfig{},
 		},
 		Storage: StorageConfig{
 			Type: "sqlite",
@@ -684,6 +814,10 @@ func Load() (*LoadResult, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	applyResponseSimpleEnv(&cfg.Cache.Response)
+	applyResponseSemanticEnv(&cfg.Cache.Response)
+	mergeSemanticResponseDefaults(cfg.Cache.Response.Semantic)
 
 	if err := applyEnvOverrides(cfg); err != nil {
 		return nil, err

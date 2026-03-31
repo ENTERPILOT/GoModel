@@ -100,14 +100,22 @@ Example model identifiers are illustrative and subject to change; consult provid
    make run
    ```
 
-### Docker Compose (Full Stack)
+### Docker Compose
 
-Includes GOModel + Redis + PostgreSQL + MongoDB + Adminer + Prometheus:
+**Infrastructure only** (Redis, PostgreSQL, MongoDB, Adminer — no image build):
+
+```bash
+docker compose up -d
+# or: make infra
+```
+
+**Full stack** (adds GOModel + Prometheus; builds the app image):
 
 ```bash
 cp .env.template .env
 # Add your API keys to .env
-docker compose up -d
+docker compose --profile app up -d
+# or: make image
 ```
 
 | Service | URL |

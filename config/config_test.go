@@ -36,6 +36,12 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"PORT", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "ENABLED_PASSTHROUGH_PROVIDERS",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
+		"RESPONSE_CACHE_SIMPLE_ENABLED",
+		"SEMANTIC_CACHE_ENABLED", "SEMANTIC_CACHE_THRESHOLD", "SEMANTIC_CACHE_TTL", "SEMANTIC_CACHE_MAX_CONV_MESSAGES",
+		"SEMANTIC_CACHE_EXCLUDE_SYSTEM_PROMPT", "SEMANTIC_CACHE_EMBEDDER_PROVIDER", "SEMANTIC_CACHE_EMBEDDER_MODEL",
+		"SEMANTIC_CACHE_MODEL_PATH", "SEMANTIC_CACHE_VECTOR_STORE_TYPE", "SEMANTIC_CACHE_SQLITE_PATH",
+		"SEMANTIC_CACHE_QDRANT_URL", "SEMANTIC_CACHE_QDRANT_COLLECTION", "SEMANTIC_CACHE_QDRANT_API_KEY",
+		"SEMANTIC_CACHE_PGVECTOR_URL", "SEMANTIC_CACHE_PGVECTOR_TABLE",
 		"STORAGE_TYPE", "SQLITE_PATH", "POSTGRES_URL", "POSTGRES_MAX_CONNS",
 		"MONGODB_URL", "MONGODB_DATABASE",
 		"METRICS_ENABLED", "METRICS_ENDPOINT",
@@ -162,6 +168,12 @@ func TestBuildDefaultConfig(t *testing.T) {
 	}
 	if cfg.Fallback.DefaultMode != FallbackModeOff {
 		t.Errorf("expected Fallback.DefaultMode=off, got %q", cfg.Fallback.DefaultMode)
+	}
+	if cfg.Cache.Response.Simple != nil {
+		t.Errorf("expected Cache.Response.Simple=nil in defaults, got %+v", cfg.Cache.Response.Simple)
+	}
+	if cfg.Cache.Response.Semantic != nil {
+		t.Errorf("expected Cache.Response.Semantic=nil in defaults, got %+v", cfg.Cache.Response.Semantic)
 	}
 
 	expectedRetry := DefaultRetryConfig()
@@ -1217,7 +1229,16 @@ func TestLoad_EnvOnlyRedisModelCache(t *testing.T) {
 func TestLoad_EnvOnlyRedisResponseCache(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
-	withTempDir(t, func(_ string) {
+	withTempDir(t, func(dir string) {
+		cfgDir := filepath.Join(dir, "config")
+		if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		yamlContent := "cache:\n  response:\n    simple: {}\n"
+		if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(yamlContent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
 		t.Setenv("REDIS_URL", "redis://env-host:6379")
 		t.Setenv("REDIS_KEY_RESPONSES", "env:responses")
 		t.Setenv("REDIS_TTL_RESPONSES", "1800")
@@ -1228,8 +1249,8 @@ func TestLoad_EnvOnlyRedisResponseCache(t *testing.T) {
 		}
 		cfg := result.Config
 
-		if cfg.Cache.Response.Simple.Redis == nil {
-			t.Fatal("expected Cache.Response.Simple.Redis to be allocated from env vars")
+		if cfg.Cache.Response.Simple == nil || cfg.Cache.Response.Simple.Redis == nil {
+			t.Fatal("expected Cache.Response.Simple.Redis from env vars with simple: {} in config.yaml")
 		}
 		if cfg.Cache.Response.Simple.Redis.URL != "redis://env-host:6379" {
 			t.Errorf("expected REDIS_URL=redis://env-host:6379, got %s", cfg.Cache.Response.Simple.Redis.URL)
@@ -1239,6 +1260,45 @@ func TestLoad_EnvOnlyRedisResponseCache(t *testing.T) {
 		}
 		if cfg.Cache.Response.Simple.Redis.TTL != 1800 {
 			t.Errorf("expected REDIS_TTL_RESPONSES=1800, got %d", cfg.Cache.Response.Simple.Redis.TTL)
+		}
+	})
+}
+
+func TestLoad_RedisURLDoesNotAllocateResponseSimpleWithoutYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(_ string) {
+		t.Setenv("REDIS_URL", "redis://env-host:6379")
+		t.Setenv("REDIS_KEY_RESPONSES", "env:responses")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		if result.Config.Cache.Response.Simple != nil {
+			t.Fatalf("expected no response simple cache without cache.response.simple in YAML and without RESPONSE_CACHE_SIMPLE_ENABLED")
+		}
+	})
+}
+
+func TestLoad_ResponseSimpleOptInViaEnvWithoutYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(_ string) {
+		t.Setenv("RESPONSE_CACHE_SIMPLE_ENABLED", "true")
+		t.Setenv("REDIS_URL", "redis://env-host:6379")
+		t.Setenv("REDIS_KEY_RESPONSES", "env:responses")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		cfg := result.Config
+		if cfg.Cache.Response.Simple == nil || cfg.Cache.Response.Simple.Redis == nil {
+			t.Fatal("expected simple + redis from env opt-in")
+		}
+		if cfg.Cache.Response.Simple.Redis.URL != "redis://env-host:6379" {
+			t.Errorf("redis URL: got %q", cfg.Cache.Response.Simple.Redis.URL)
 		}
 	})
 }

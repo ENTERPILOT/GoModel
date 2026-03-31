@@ -33,7 +33,6 @@ func newTestSemanticMiddleware(threshold float64, maxConvMessages int, excludeSy
 	store := NewMapVecStore()
 	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
 	cfg := config.SemanticCacheConfig{
-		Enabled:                 true,
 		SimilarityThreshold:     threshold,
 		TTL:                     3600,
 		MaxConversationMessages: maxConvMessages,
@@ -158,7 +157,6 @@ func TestSemanticCacheMiddleware_CacheMissOnLowScore(t *testing.T) {
 	emb := &mockEmbedder{}
 
 	m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
-		Enabled:                 true,
 		SimilarityThreshold:     0.99,
 		TTL:                     3600,
 		MaxConversationMessages: 10,
@@ -329,7 +327,6 @@ func TestSemanticCacheMiddleware_HeaderThresholdOverride(t *testing.T) {
 	emb := &mockEmbedder{}
 
 	m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
-		Enabled:                 true,
 		SimilarityThreshold:     0.99,
 		TTL:                     3600,
 		MaxConversationMessages: 10,
@@ -365,7 +362,6 @@ func TestSemanticCacheMiddleware_TTLExpiry(t *testing.T) {
 	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
 
 	m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
-		Enabled:                 true,
 		SimilarityThreshold:     0.90,
 		TTL:                     1,
 		MaxConversationMessages: 10,

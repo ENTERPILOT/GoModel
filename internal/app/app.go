@@ -739,7 +739,9 @@ func executionPlanRefreshInterval(cfg *config.Config) time.Duration {
 }
 
 func responseCacheConfigured(cfg config.ResponseCacheConfig) bool {
-	return (cfg.Simple.Redis != nil && cfg.Simple.Redis.URL != "") || config.SemanticCacheActive(&cfg.Semantic)
+	simpleOn := cfg.Simple != nil && config.SimpleCacheEnabled(cfg.Simple) &&
+		cfg.Simple.Redis != nil && cfg.Simple.Redis.URL != ""
+	return simpleOn || (cfg.Semantic != nil && config.SemanticCacheActive(cfg.Semantic))
 }
 
 func fallbackFeatureEnabledGlobally(cfg *config.Config) bool {

@@ -13,6 +13,7 @@ data:
   REDIS_KEY_RESPONSES: {{ .Values.cache.redis.keyResponses | default "gomodel:response:" | quote }}
   REDIS_TTL_MODELS: {{ .Values.cache.redis.ttlModels | default 86400 | quote }}
   REDIS_TTL_RESPONSES: {{ .Values.cache.redis.ttlResponses | default 3600 | quote }}
+  RESPONSE_CACHE_SIMPLE_ENABLED: "true"
   {{- end }}
   METRICS_ENABLED: {{ .Values.metrics.enabled | quote }}
   METRICS_ENDPOINT: {{ .Values.metrics.endpoint | quote }}

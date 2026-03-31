@@ -26,7 +26,13 @@ type ResponseCacheMiddleware struct {
 func NewResponseCacheMiddleware(cfg config.ResponseCacheConfig, rawProviders map[string]config.RawProviderConfig) (*ResponseCacheMiddleware, error) {
 	m := &ResponseCacheMiddleware{}
 
-	if cfg.Simple.Redis != nil && cfg.Simple.Redis.URL != "" {
+	switch {
+	case cfg.Simple == nil:
+	case !config.SimpleCacheEnabled(cfg.Simple):
+		slog.Info("response cache (simple/exact) disabled by config")
+	case cfg.Simple.Redis == nil || cfg.Simple.Redis.URL == "":
+		slog.Warn("response cache (simple/exact) enabled in config but redis URL is missing; set cache.response.simple.redis.url or REDIS_URL")
+	default:
 		ttl := time.Duration(cfg.Simple.Redis.TTL) * time.Second
 		if ttl == 0 {
 			ttl = time.Hour
@@ -45,12 +51,10 @@ func NewResponseCacheMiddleware(cfg config.ResponseCacheConfig, rawProviders map
 		}
 		m.simple = newSimpleCacheMiddleware(store, ttl)
 		slog.Info("response cache (simple/exact) enabled", "ttl_seconds", cfg.Simple.Redis.TTL, "prefix", prefix)
-	} else {
-		slog.Warn("response cache (simple/exact) is disabled; set cache.response.simple.redis.url to enable it")
 	}
 
 	sem := cfg.Semantic
-	if config.SemanticCacheActive(&sem) {
+	if sem != nil && config.SemanticCacheActive(sem) {
 		emb, err := embedding.NewEmbedder(sem.Embedder, rawProviders)
 		if err != nil {
 			return nil, err
@@ -60,7 +64,7 @@ func NewResponseCacheMiddleware(cfg config.ResponseCacheConfig, rawProviders map
 			_ = emb.Close()
 			return nil, err
 		}
-		m.semantic = newSemanticCacheMiddleware(emb, vs, sem)
+		m.semantic = newSemanticCacheMiddleware(emb, vs, *sem)
 		slog.Info("response cache (semantic) enabled",
 			"threshold", sem.SimilarityThreshold,
 			"ttl_seconds", sem.TTL,

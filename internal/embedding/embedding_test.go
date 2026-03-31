@@ -42,6 +42,59 @@ func TestNewEmbedder_APIEmbedder(t *testing.T) {
 	}
 }
 
+func TestNewEmbedder_GeminiEmptyBaseURLUsesGoogleOpenAICompat(t *testing.T) {
+	rawProviders := map[string]config.RawProviderConfig{
+		"gemini": {
+			Type:   "gemini",
+			APIKey: "AIza-test",
+		},
+	}
+	emb, err := NewEmbedder(config.EmbedderConfig{
+		Provider: "gemini",
+		Model:    "text-embedding-004",
+	}, rawProviders)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer emb.Close()
+	a, ok := emb.(*apiEmbedder)
+	if !ok {
+		t.Fatalf("expected *apiEmbedder, got %T", emb)
+	}
+	want := "https://generativelanguage.googleapis.com/v1beta/openai"
+	if a.baseURL != want {
+		t.Fatalf("baseURL = %q, want %q", a.baseURL, want)
+	}
+	if a.model != "gemini-embedding-001" {
+		t.Fatalf("model = %q, want gemini-embedding-001 (text-embedding-* is not valid on Gemini OpenAI compat)", a.model)
+	}
+}
+
+func TestNewEmbedder_GeminiEmptyModelDefault(t *testing.T) {
+	rawProviders := map[string]config.RawProviderConfig{
+		"gemini": {Type: "gemini", APIKey: "k"},
+	}
+	emb, err := NewEmbedder(config.EmbedderConfig{Provider: "gemini", Model: ""}, rawProviders)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer emb.Close()
+	a := emb.(*apiEmbedder)
+	if a.model != "gemini-embedding-001" {
+		t.Fatalf("model = %q", a.model)
+	}
+}
+
+func TestEmbeddingAPIBaseURL_ExplicitOverridesDefault(t *testing.T) {
+	got := embeddingAPIBaseURL(config.RawProviderConfig{
+		Type:    "gemini",
+		BaseURL: "https://example.com/custom/",
+	})
+	if got != "https://example.com/custom" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestAPIEmbedder_UsesProviderCredentials(t *testing.T) {
 	rawProviders := map[string]config.RawProviderConfig{
 		"groq": {

@@ -11,14 +11,13 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-
-	_ "github.com/asg017/sqlite-vec-go-bindings/ncruces"
-	_ "github.com/ncruces/go-sqlite3/driver"
 )
 
 const sqliteVecCleanupInterval = time.Hour
 
-// sqliteVecStore is a VecStore backed by sqlite-vec (WASM, CGO-free).
+// sqliteVecStore is a VecStore backed by sqlite-vec.
+// With CGO_ENABLED=0 the driver is ncruces/go-sqlite3 (WASM). With CGO_ENABLED=1
+// and a C toolchain, the build uses mattn/go-sqlite3 and the CGO sqlite-vec extension.
 //
 // Schema:
 //
@@ -35,7 +34,7 @@ type sqliteVecStore struct {
 	wg     sync.WaitGroup
 }
 
-func newSQLiteVecStore(path string) (*sqliteVecStore, error) {
+func openSQLiteVecDB(path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("vecstore sqlite: create dir %s: %w", filepath.Dir(path), err)
 	}
@@ -44,9 +43,9 @@ func newSQLiteVecStore(path string) (*sqliteVecStore, error) {
 		return nil, fmt.Errorf("vecstore sqlite: open %s: %w", path, err)
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+	if err := configureSQLiteVecJournalMode(db); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("vecstore sqlite: enable WAL: %w", err)
+		return nil, err
 	}
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS vec_items (
@@ -60,7 +59,6 @@ func newSQLiteVecStore(path string) (*sqliteVecStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("vecstore sqlite: create table: %w", err)
 	}
-	// Enforces uniqueness on (key, params_hash) for INSERT ... ON CONFLICT and upgrades pre-constraint DBs.
 	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vec_items_key_params ON vec_items (key, params_hash)`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("vecstore sqlite: create unique index key_params: %w", err)
@@ -73,10 +71,17 @@ func newSQLiteVecStore(path string) (*sqliteVecStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("vecstore sqlite: create index expires: %w", err)
 	}
-	s := &sqliteVecStore{db: db, stopCh: make(chan struct{})}
-	s.wg.Add(1)
-	go s.cleanupLoop()
-	return s, nil
+	return db, nil
+}
+
+func configureSQLiteVecJournalMode(db *sql.DB) error {
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		slog.Warn("vecstore sqlite: WAL unavailable; using DELETE journal mode", "err", err)
+		if _, err := db.Exec(`PRAGMA journal_mode=DELETE`); err != nil {
+			return fmt.Errorf("vecstore sqlite: journal mode DELETE: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *sqliteVecStore) Search(ctx context.Context, vec []float32, paramsHash string, limit int) ([]VecResult, error) {
@@ -174,8 +179,6 @@ func (s *sqliteVecStore) cleanupLoop() {
 	}
 }
 
-// serializeFloat32 encodes a float32 slice as little-endian bytes,
-// matching the format sqlite-vec expects for KNN queries.
 func serializeFloat32(vec []float32) []byte {
 	buf := make([]byte, len(vec)*4)
 	for i, v := range vec {

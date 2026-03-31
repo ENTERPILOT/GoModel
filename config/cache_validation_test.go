@@ -79,6 +79,8 @@ func TestValidateCacheConfig_RedisOnly(t *testing.T) {
 	}
 }
 
+func boolPtr(b bool) *bool { return &b }
+
 func TestValidateCacheConfig_SemanticDisabledIgnoresInvalidVectorStore(t *testing.T) {
 	cfg := &CacheConfig{
 		Model: ModelCacheConfig{
@@ -86,8 +88,8 @@ func TestValidateCacheConfig_SemanticDisabledIgnoresInvalidVectorStore(t *testin
 			Redis: nil,
 		},
 		Response: ResponseCacheConfig{
-			Semantic: SemanticCacheConfig{
-				Enabled: false,
+			Semantic: &SemanticCacheConfig{
+				Enabled: boolPtr(false),
 				VectorStore: VectorStoreConfig{
 					Type: "qdrant",
 					// Intentionally missing URL — valid because semantic cache is off.
@@ -107,8 +109,8 @@ func TestValidateCacheConfig_SemanticEnabledRequiresQdrantURL(t *testing.T) {
 			Redis: nil,
 		},
 		Response: ResponseCacheConfig{
-			Semantic: SemanticCacheConfig{
-				Enabled:             true,
+			Semantic: &SemanticCacheConfig{
+				Enabled:             boolPtr(true),
 				SimilarityThreshold: 0.9,
 				TTL:                 3600,
 				VectorStore: VectorStoreConfig{
@@ -129,8 +131,8 @@ func TestValidateCacheConfig_SemanticSimilarityThresholdInvalid(t *testing.T) {
 			Redis: nil,
 		},
 		Response: ResponseCacheConfig{
-			Semantic: SemanticCacheConfig{
-				Enabled: true,
+			Semantic: &SemanticCacheConfig{
+				Enabled: boolPtr(true),
 				TTL:     3600,
 				VectorStore: VectorStoreConfig{
 					Type: "sqlite-vec",
@@ -172,8 +174,8 @@ func TestValidateCacheConfig_SemanticNegativeTTL(t *testing.T) {
 			Redis: nil,
 		},
 		Response: ResponseCacheConfig{
-			Semantic: SemanticCacheConfig{
-				Enabled:             true,
+			Semantic: &SemanticCacheConfig{
+				Enabled:             boolPtr(true),
 				SimilarityThreshold: 0.9,
 				TTL:                 -1,
 				VectorStore: VectorStoreConfig{

@@ -21,7 +21,6 @@ func TestHandleRequest_SemanticMissPopulatesExactCache(t *testing.T) {
 	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
 	vecStore := NewMapVecStore()
 	semCfg := config.SemanticCacheConfig{
-		Enabled:                 true,
 		SimilarityThreshold:     0.90,
 		TTL:                     3600,
 		MaxConversationMessages: 10,
@@ -78,7 +77,6 @@ func TestHandleRequest_FallbackUsedSkipsCacheWrites(t *testing.T) {
 	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
 	vecStore := NewMapVecStore()
 	semCfg := config.SemanticCacheConfig{
-		Enabled:                 true,
 		SimilarityThreshold:     0.90,
 		TTL:                     3600,
 		MaxConversationMessages: 10,

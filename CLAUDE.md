@@ -35,6 +35,8 @@ make tidy              # go mod tidy
 make clean             # Remove bin/
 make record-api        # Record API responses for contract tests
 make swagger           # Regenerate Swagger docs
+make infra             # Docker Compose: Redis, Postgres, MongoDB, Adminer only
+make image             # Docker Compose: full stack (GOModel + Prometheus)
 ```
 
 **Single test:** `go test ./internal/providers -v -run TestName`
@@ -106,7 +108,7 @@ Full reference: `.env.template` and `config/config.yaml`
 - **Storage:** `STORAGE_TYPE` (sqlite), `SQLITE_PATH` (data/gomodel.db), `POSTGRES_URL`, `MONGODB_URL`
 - **Audit logging:** `LOGGING_ENABLED` (false), `LOGGING_LOG_BODIES` (false), `LOGGING_LOG_HEADERS` (false), `LOGGING_RETENTION_DAYS` (30)
 - **Usage tracking:** `USAGE_ENABLED` (true), `ENFORCE_RETURNING_USAGE_DATA` (true), `USAGE_RETENTION_DAYS` (90)
-- **Cache:** `CACHE_TYPE` (local), `CACHE_REFRESH_INTERVAL` (3600s), `REDIS_URL`, `REDIS_KEY_MODELS`, `REDIS_TTL_MODELS`, `REDIS_KEY_RESPONSES`, `REDIS_TTL_RESPONSES`
+- **Cache:** `CACHE_TYPE` (local), `CACHE_REFRESH_INTERVAL` (3600s), `REDIS_URL`, `REDIS_KEY_MODELS`, `REDIS_TTL_MODELS`. Exact response cache uses `cache.response.simple` in `config.yaml` (optional `enabled`); `REDIS_KEY_RESPONSES`, `REDIS_TTL_RESPONSES`, and `REDIS_URL` apply only when that block exists or when `RESPONSE_CACHE_SIMPLE_ENABLED=true`. Semantic response cache uses `cache.response.semantic` (optional `enabled`); tuning via `SEMANTIC_CACHE_*` env vars applies when the semantic block exists or `SEMANTIC_CACHE_ENABLED=true`. For `sqlite-vec`, `CGO_ENABLED=1` (default on most dev machines) selects `mattn/go-sqlite3` + `sqlite-vec-go-bindings/cgo`; `CGO_ENABLED=0` uses `ncruces/go-sqlite3` (WASM), which can fail on some hosts without WASM atomics.
 - **HTTP client:** `HTTP_TIMEOUT` (600s), `HTTP_RESPONSE_HEADER_TIMEOUT` (600s)
 - **Resilience:** Configured via `config/config.yaml` — global `resilience.retry.*` and `resilience.circuit_breaker.*` defaults with optional per-provider overrides under `providers.<name>.resilience.retry.*` and `providers.<name>.resilience.circuit_breaker.*`. Retry defaults: `max_retries` (3), `initial_backoff` (1s), `max_backoff` (30s), `backoff_factor` (2.0), `jitter_factor` (0.1). Circuit breaker defaults: `failure_threshold` (5), `success_threshold` (2), `timeout` (30s)
 - **Metrics:** `METRICS_ENABLED` (false), `METRICS_ENDPOINT` (/metrics)

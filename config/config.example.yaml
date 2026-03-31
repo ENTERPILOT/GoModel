@@ -22,6 +22,19 @@ cache:
     #   url: "redis://localhost:6379"
     #   key: "gomodel:models"
     #   ttl: 86400 # 24 hours in seconds
+  # response:
+  #   simple: # omit the whole `simple` key to disable exact-match caching (unless RESPONSE_CACHE_SIMPLE_ENABLED=true)
+  #     enabled: true # default when `simple` is present; set false to disable while keeping the block
+  #     redis:
+  #       url: "redis://localhost:6379"
+  #       key: "gomodel:response:"
+  #       ttl: 3600
+  #   semantic: # omit the whole `semantic` key to disable semantic caching (unless SEMANTIC_CACHE_ENABLED=true)
+  #     enabled: true
+  #     embedder:
+  #       provider: local
+  #     vector_store:
+  #       type: sqlite-vec
 
 storage:
   type: "sqlite" # "sqlite", "postgresql", or "mongodb"

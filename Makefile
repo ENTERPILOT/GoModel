@@ -1,4 +1,4 @@
-.PHONY: all build run clean tidy test test-e2e test-integration test-contract test-all lint lint-fix record-api swagger install-tools perf-check perf-bench
+.PHONY: all build run clean tidy test test-e2e test-integration test-contract test-all lint lint-fix record-api swagger install-tools perf-check perf-bench infra image
 
 all: build
 
@@ -30,6 +30,14 @@ clean:
 # Tidy dependencies
 tidy:
 	go mod tidy
+
+# Docker Compose: Redis, PostgreSQL, MongoDB, Adminer (no app image build)
+infra:
+	docker compose up -d
+
+# Docker Compose: full stack (GOModel + Prometheus; builds app image when needed)
+image:
+	docker compose --profile app up -d
 
 # Run unit tests only
 test:
