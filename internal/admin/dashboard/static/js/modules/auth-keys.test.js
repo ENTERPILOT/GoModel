@@ -192,3 +192,110 @@ test('copyAuthKeyValue falls back to document.execCommand when clipboard API is 
     assert.equal(module.authKeyCopied, true);
     assert.equal(module.authKeyCopyError, false);
 });
+
+test('fetchAuthKeys preserves existing rows and surfaces non-auth HTTP errors', async () => {
+    const module = createAuthKeysModule({
+        fetch: async () => ({
+            status: 500,
+            ok: false,
+            statusText: 'Internal Server Error',
+            async json() {
+                return {
+                    error: {
+                        message: 'storage unavailable'
+                    }
+                };
+            }
+        }),
+        console: {
+            error() {}
+        }
+    });
+
+    module.authKeys = [{ id: 'existing-key' }];
+    module.headers = () => ({});
+    module.handleFetchResponse = () => false;
+
+    await module.fetchAuthKeys();
+
+    assert.deepEqual(module.authKeys, [{ id: 'existing-key' }]);
+    assert.equal(module.authKeyError, 'storage unavailable');
+});
+
+test('fetchAuthKeys preserves existing rows on authentication failures handled by handleFetchResponse', async () => {
+    const module = createAuthKeysModule({
+        fetch: async () => ({
+            status: 401,
+            ok: false,
+            statusText: 'Unauthorized'
+        })
+    });
+
+    module.authKeys = [{ id: 'existing-key' }];
+    module.headers = () => ({});
+    module.handleFetchResponse = (res) => {
+        if (res.status === 401) {
+            module.authError = true;
+            module.needsAuth = true;
+        }
+        return false;
+    };
+
+    await module.fetchAuthKeys();
+
+    assert.deepEqual(module.authKeys, [{ id: 'existing-key' }]);
+    assert.equal(module.authKeyError, '');
+    assert.equal(module.authError, true);
+    assert.equal(module.needsAuth, true);
+});
+
+test('openAuthKeyForm and closeAuthKeyForm preserve an issued key instead of clearing it', () => {
+    const module = createAuthKeysModule();
+    module.authKeyIssuedValue = 'sk_gom_once';
+
+    module.openAuthKeyForm();
+    assert.equal(module.authKeyFormOpen, true);
+    assert.equal(module.authKeyIssuedValue, 'sk_gom_once');
+
+    module.closeAuthKeyForm();
+    assert.equal(module.authKeyFormOpen, false);
+    assert.equal(module.authKeyIssuedValue, 'sk_gom_once');
+});
+
+test('submitAuthKeyForm reopens the editor if issuance finishes after a manual close', async () => {
+    let resolveResponse;
+    const responsePromise = new Promise((resolve) => {
+        resolveResponse = resolve;
+    });
+    const module = createAuthKeysModule({
+        fetch: async () => responsePromise
+    });
+
+    module.headers = () => ({ 'Content-Type': 'application/json' });
+    module.fetchAuthKeys = async () => {};
+    module.authKeyFormOpen = true;
+    module.authKeyForm = {
+        name: 'ci-deploy',
+        description: '',
+        expires_at: ''
+    };
+
+    const submitPromise = module.submitAuthKeyForm();
+    module.closeAuthKeyForm();
+
+    assert.equal(module.authKeyFormOpen, false);
+    assert.equal(module.authKeyFormSubmitting, true);
+
+    resolveResponse({
+        status: 201,
+        async json() {
+            return { value: 'sk_gom_async' };
+        }
+    });
+
+    await submitPromise;
+
+    assert.equal(module.authKeyFormOpen, true);
+    assert.equal(module.authKeyIssuedValue, 'sk_gom_async');
+    assert.equal(module.authKeyFormSubmitting, false);
+});

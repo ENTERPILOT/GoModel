@@ -35,7 +35,9 @@
                     }
                     this.authKeysAvailable = true;
                     if (!this.handleFetchResponse(res, 'auth keys')) {
-                        this.authKeys = [];
+                        if (res.status !== 401) {
+                            this.authKeyError = await this._authKeyResponseMessage(res, 'Unable to load API keys.');
+                        }
                         return;
                     }
                     const payload = await res.json();
@@ -50,20 +52,28 @@
             },
 
             openAuthKeyForm() {
+                if (this.authKeyFormSubmitting || this.authKeyFormOpen) {
+                    return;
+                }
                 this.authKeyFormOpen = true;
                 this.authKeyError = '';
                 this.authKeyNotice = '';
-                this.authKeyIssuedValue = '';
-                this.resetAuthKeyCopyFeedback();
-                this.authKeyForm = this.defaultAuthKeyForm();
+                if (!this.authKeyIssuedValue) {
+                    this.resetAuthKeyCopyFeedback();
+                    this.authKeyForm = this.defaultAuthKeyForm();
+                }
             },
 
             closeAuthKeyForm() {
+                if (!this.authKeyFormOpen) {
+                    return;
+                }
                 this.authKeyFormOpen = false;
                 this.authKeyError = '';
-                this.authKeyIssuedValue = '';
                 this.resetAuthKeyCopyFeedback();
-                this.authKeyForm = this.defaultAuthKeyForm();
+                if (!this.authKeyFormSubmitting && !this.authKeyIssuedValue) {
+                    this.authKeyForm = this.defaultAuthKeyForm();
+                }
             },
 
             clearAuthKeyCopyResetTimer() {
@@ -208,6 +218,8 @@
                     }
                     const issued = await res.json();
                     this.authKeyIssuedValue = issued.value || '';
+                    this.authKeyFormOpen = true;
+                    this.resetAuthKeyCopyFeedback();
                     this.authKeyForm = this.defaultAuthKeyForm();
                     await this.fetchAuthKeys();
                 } catch (e) {

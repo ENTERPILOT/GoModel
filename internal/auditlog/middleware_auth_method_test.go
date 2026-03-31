@@ -25,6 +25,16 @@ func TestEnrichEntryWithAuthMethodTrimsAndValidatesAllowedValues(t *testing.T) {
 	if entry.AuthMethod != AuthMethodMasterKey {
 		t.Fatalf("entry auth method = %q, want %q", entry.AuthMethod, AuthMethodMasterKey)
 	}
+
+	EnrichEntryWithAuthMethod(c, "no_key")
+	if entry.AuthMethod != AuthMethodNoKey {
+		t.Fatalf("entry auth method = %q, want %q", entry.AuthMethod, AuthMethodNoKey)
+	}
+
+	EnrichEntryWithAuthMethod(c, "unknown")
+	if entry.AuthMethod != "unknown" {
+		t.Fatalf("entry auth method = %q, want %q", entry.AuthMethod, "unknown")
+	}
 }
 
 func TestEnrichEntryWithAuthMethodIgnoresBlankAndUnsupportedValues(t *testing.T) {

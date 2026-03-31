@@ -44,9 +44,11 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 				if strings.HasSuffix(skipPath, "/*") {
 					prefix := strings.TrimSuffix(skipPath, "*")
 					if strings.HasPrefix(requestPath, prefix) {
+						auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
 						return next(c)
 					}
 				} else if requestPath == skipPath {
+					auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
 					return next(c)
 				}
 			}

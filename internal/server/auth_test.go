@@ -365,6 +365,31 @@ func TestAuthMiddleware_WildcardSkipPaths(t *testing.T) {
 	}
 }
 
+func TestAuthMiddleware_SkipPathEnrichesNoKeyAuditMethod(t *testing.T) {
+	e := echo.New()
+	handler := AuthMiddlewareWithAuthenticator("secret-key", nil, []string{"/health"})(func(c *echo.Context) error {
+		entryVal := c.Get(string(auditlog.LogEntryKey))
+		entry, ok := entryVal.(*auditlog.LogEntry)
+		if !ok || entry == nil {
+			t.Fatal("audit log entry missing from context")
+		}
+		if entry.AuthMethod != auditlog.AuthMethodNoKey {
+			t.Fatalf("audit entry auth method = %q, want %q", entry.AuthMethod, auditlog.AuthMethodNoKey)
+		}
+		return c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "ok", rec.Body.String())
+}
+
 func TestAuthMiddleware_ConstantTimeComparison(t *testing.T) {
 	t.Run("constant-time comparison prevents timing attacks", func(t *testing.T) {
 		// Test that the constant-time comparison works correctly for various inputs

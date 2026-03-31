@@ -237,7 +237,8 @@
         <div class="page-header-controls">
             <button type="button" class="pagination-btn pagination-btn-primary"
                 x-show="authKeysAvailable && !authError"
-                @click="openAuthKeyForm()">Create API Key</button>
+                :disabled="authKeyFormSubmitting"
+                @click="if (!authKeyFormSubmitting) openAuthKeyForm()">Create API Key</button>
         </div>
     </div>
 
@@ -360,7 +361,7 @@
     </div>
 
     <p class="empty-state"
-        x-show="authKeys.length === 0 && !authKeysLoading && !authError && authKeysAvailable">
+        x-show="authKeys.length === 0 && !authKeysLoading && !authError && !authKeyError && authKeysAvailable">
         No API keys yet. Issue a key to get started.
     </p>
 </div>
