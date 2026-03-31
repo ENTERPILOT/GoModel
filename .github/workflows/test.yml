@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.26"
+  GO_VERSION: "1.26.1"
 
 # Restrict token permissions to minimum required
 permissions:
@@ -53,7 +53,7 @@ jobs:
         run: go test -v -race -coverprofile=coverage.out ./internal/... ./config/...
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: ./coverage.out
           fail_ci_if_error: false
