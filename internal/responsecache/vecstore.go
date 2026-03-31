@@ -3,6 +3,7 @@ package responsecache
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"gomodel/config"
@@ -36,24 +37,22 @@ type VecStore interface {
 }
 
 // NewVecStore creates a VecStore for the backend selected by cfg.Type.
-// An empty type defaults to "sqlite-vec".
+// Type must be non-empty and one of: qdrant, pgvector, pinecone, weaviate.
 func NewVecStore(cfg config.VectorStoreConfig) (VecStore, error) {
-	t := cfg.Type
+	t := strings.TrimSpace(cfg.Type)
 	if t == "" {
-		t = "sqlite-vec"
+		return nil, fmt.Errorf("vecstore: vector_store.type is required (qdrant, pgvector, pinecone, weaviate)")
 	}
 	switch t {
-	case "sqlite-vec":
-		path := cfg.SQLiteVec.Path
-		if path == "" {
-			path = ".cache/semantic.db"
-		}
-		return newSQLiteVecStore(path)
 	case "qdrant":
-		return nil, fmt.Errorf("vecstore: qdrant backend is not yet implemented")
+		return newQdrantStore(cfg.Qdrant)
 	case "pgvector":
-		return nil, fmt.Errorf("vecstore: pgvector backend is not yet implemented")
+		return newPGVectorStore(cfg.PGVector)
+	case "pinecone":
+		return newPineconeStore(cfg.Pinecone)
+	case "weaviate":
+		return newWeaviateStore(cfg.Weaviate)
 	default:
-		return nil, fmt.Errorf("vecstore: unknown backend type %q (valid: sqlite-vec, qdrant, pgvector)", t)
+		return nil, fmt.Errorf("vecstore: unknown backend type %q (valid: qdrant, pgvector, pinecone, weaviate)", t)
 	}
 }

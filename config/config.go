@@ -424,17 +424,13 @@ type EmbedderConfig struct {
 }
 
 // VectorStoreConfig selects the vector DB backend.
-// Type: "sqlite-vec" (default), "qdrant", "pgvector".
+// Type must be set when semantic caching is enabled: qdrant, pgvector, pinecone, weaviate.
 type VectorStoreConfig struct {
 	Type      string          `yaml:"type"`
-	SQLiteVec SQLiteVecConfig `yaml:"sqlite_vec"`
 	Qdrant    QdrantConfig    `yaml:"qdrant"`
 	PGVector  PGVectorConfig  `yaml:"pgvector"`
-}
-
-// SQLiteVecConfig holds path configuration for the sqlite-vec vector store.
-type SQLiteVecConfig struct {
-	Path string `yaml:"path"`
+	Pinecone  PineconeConfig  `yaml:"pinecone"`
+	Weaviate  WeaviateConfig  `yaml:"weaviate"`
 }
 
 // QdrantConfig holds connection configuration for the Qdrant vector store.
@@ -446,8 +442,24 @@ type QdrantConfig struct {
 
 // PGVectorConfig holds connection configuration for the pgvector vector store.
 type PGVectorConfig struct {
-	URL   string `yaml:"url"`
-	Table string `yaml:"table"`
+	URL       string `yaml:"url"`
+	Table     string `yaml:"table"`
+	Dimension int    `yaml:"dimension"`
+}
+
+// PineconeConfig holds connection configuration for Pinecone (data-plane HTTP API).
+type PineconeConfig struct {
+	Host      string `yaml:"host"`
+	APIKey    string `yaml:"api_key"`
+	Namespace string `yaml:"namespace"`
+	Dimension int    `yaml:"dimension"`
+}
+
+// WeaviateConfig holds connection configuration for Weaviate.
+type WeaviateConfig struct {
+	URL    string `yaml:"url"`
+	Class  string `yaml:"class"`
+	APIKey string `yaml:"api_key"`
 }
 
 // ValidateCacheConfig validates the cache configuration in c.
@@ -475,16 +487,49 @@ func ValidateCacheConfig(c *CacheConfig) error {
 
 	sem := c.Response.Semantic
 	if sem != nil && SemanticCacheActive(sem) {
-		switch sem.VectorStore.Type {
-		case "sqlite-vec", "qdrant", "pgvector":
+		vsType := strings.TrimSpace(sem.VectorStore.Type)
+		if vsType == "" {
+			return fmt.Errorf("cache.response.semantic.vector_store.type: required when semantic cache is enabled; use qdrant, pgvector, pinecone, or weaviate")
+		}
+		switch vsType {
+		case "qdrant", "pgvector", "pinecone", "weaviate":
 		default:
-			return fmt.Errorf("cache.response.semantic.vector_store.type: must be one of sqlite-vec, qdrant, pgvector; got %q", sem.VectorStore.Type)
+			return fmt.Errorf("cache.response.semantic.vector_store.type: must be one of qdrant, pgvector, pinecone, weaviate; got %q", sem.VectorStore.Type)
 		}
-		if sem.VectorStore.Type == "qdrant" && sem.VectorStore.Qdrant.URL == "" {
-			return fmt.Errorf("cache.response.semantic.vector_store.qdrant.url: required when using qdrant")
+		if vsType == "qdrant" {
+			if strings.TrimSpace(sem.VectorStore.Qdrant.URL) == "" {
+				return fmt.Errorf("cache.response.semantic.vector_store.qdrant.url: required when using qdrant")
+			}
+			if strings.TrimSpace(sem.VectorStore.Qdrant.Collection) == "" {
+				return fmt.Errorf("cache.response.semantic.vector_store.qdrant.collection: required when using qdrant")
+			}
 		}
-		if sem.VectorStore.Type == "pgvector" && sem.VectorStore.PGVector.URL == "" {
-			return fmt.Errorf("cache.response.semantic.vector_store.pgvector.url: required when using pgvector")
+		if vsType == "pgvector" {
+			if strings.TrimSpace(sem.VectorStore.PGVector.URL) == "" {
+				return fmt.Errorf("cache.response.semantic.vector_store.pgvector.url: required when using pgvector")
+			}
+			if sem.VectorStore.PGVector.Dimension <= 0 {
+				return fmt.Errorf("cache.response.semantic.vector_store.pgvector.dimension: must be > 0 when using pgvector")
+			}
+		}
+		if vsType == "pinecone" {
+			if strings.TrimSpace(sem.VectorStore.Pinecone.Host) == "" {
+				return fmt.Errorf("cache.response.semantic.vector_store.pinecone.host: required when using pinecone")
+			}
+			if strings.TrimSpace(sem.VectorStore.Pinecone.APIKey) == "" {
+				return fmt.Errorf("cache.response.semantic.vector_store.pinecone.api_key: required when using pinecone")
+			}
+			if sem.VectorStore.Pinecone.Dimension <= 0 {
+				return fmt.Errorf("cache.response.semantic.vector_store.pinecone.dimension: must be > 0 when using pinecone")
+			}
+		}
+		if vsType == "weaviate" {
+			if strings.TrimSpace(sem.VectorStore.Weaviate.URL) == "" {
+				return fmt.Errorf("cache.response.semantic.vector_store.weaviate.url: required when using weaviate")
+			}
+			if strings.TrimSpace(sem.VectorStore.Weaviate.Class) == "" {
+				return fmt.Errorf("cache.response.semantic.vector_store.weaviate.class: required when using weaviate")
+			}
 		}
 		st := sem.SimilarityThreshold
 		if math.IsNaN(st) || math.IsInf(st, 0) || st <= 0 || st > 1 {
@@ -541,12 +586,6 @@ func mergeSemanticResponseDefaults(sem *SemanticCacheConfig) {
 	}
 	if sem.MaxConversationMessages == 0 {
 		sem.MaxConversationMessages = 3
-	}
-	if sem.VectorStore.Type == "" {
-		sem.VectorStore.Type = "sqlite-vec"
-	}
-	if sem.VectorStore.SQLiteVec.Path == "" {
-		sem.VectorStore.SQLiteVec.Path = ".cache/semantic.db"
 	}
 }
 
@@ -631,9 +670,6 @@ func applyResponseSemanticEnv(resp *ResponseCacheConfig) {
 	if val := os.Getenv("SEMANTIC_CACHE_VECTOR_STORE_TYPE"); val != "" {
 		sem.VectorStore.Type = val
 	}
-	if val := os.Getenv("SEMANTIC_CACHE_SQLITE_PATH"); val != "" {
-		sem.VectorStore.SQLiteVec.Path = val
-	}
 	if val := os.Getenv("SEMANTIC_CACHE_QDRANT_URL"); val != "" {
 		sem.VectorStore.Qdrant.URL = val
 	}
@@ -648,6 +684,34 @@ func applyResponseSemanticEnv(resp *ResponseCacheConfig) {
 	}
 	if val := os.Getenv("SEMANTIC_CACHE_PGVECTOR_TABLE"); val != "" {
 		sem.VectorStore.PGVector.Table = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_PGVECTOR_DIMENSION"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil {
+			sem.VectorStore.PGVector.Dimension = n
+		}
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_PINECONE_HOST"); val != "" {
+		sem.VectorStore.Pinecone.Host = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_PINECONE_API_KEY"); val != "" {
+		sem.VectorStore.Pinecone.APIKey = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_PINECONE_NAMESPACE"); val != "" {
+		sem.VectorStore.Pinecone.Namespace = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_PINECONE_DIMENSION"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil {
+			sem.VectorStore.Pinecone.Dimension = n
+		}
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_WEAVIATE_URL"); val != "" {
+		sem.VectorStore.Weaviate.URL = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_WEAVIATE_CLASS"); val != "" {
+		sem.VectorStore.Weaviate.Class = val
+	}
+	if val := os.Getenv("SEMANTIC_CACHE_WEAVIATE_API_KEY"); val != "" {
+		sem.VectorStore.Weaviate.APIKey = val
 	}
 }
 

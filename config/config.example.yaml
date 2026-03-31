@@ -35,7 +35,24 @@ cache:
   #       provider: openai # must match a key under `providers` (openai, gemini, groq, …)
   #       model: text-embedding-3-small # optional; provider-specific defaults apply if omitted
   #     vector_store:
-  #       type: sqlite-vec
+  #       type: qdrant # required: qdrant | pgvector | pinecone | weaviate (pick one block below)
+  #       qdrant:
+  #         url: "http://localhost:6333"
+  #         collection: "gomodel_semantic"
+  #         api_key: "" # optional for local Qdrant
+  #       # pgvector:
+  #       #   url: "postgres://user:pass@localhost:5432/gomodel"
+  #       #   table: "gomodel_semantic_cache" # optional; default if omitted
+  #       #   dimension: 1536 # must match embedding model output
+  #       # pinecone:
+  #       #   host: "https://your-index.svc.region.pinecone.io" # data-plane host
+  #       #   api_key: "..."
+  #       #   namespace: "" # optional
+  #       #   dimension: 1536 # must match your Pinecone index
+  #       # weaviate:
+  #       #   url: "http://localhost:8080"
+  #       #   class: "GomodelSemanticCache" # PascalCase recommended (GraphQL)
+  #       #   api_key: "" # optional
 
 storage:
   type: "sqlite" # "sqlite", "postgresql", or "mongodb"

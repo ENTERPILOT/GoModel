@@ -125,6 +125,30 @@ func TestValidateCacheConfig_SemanticEnabledRequiresQdrantURL(t *testing.T) {
 	}
 }
 
+func TestValidateCacheConfig_SemanticEnabledRequiresQdrantCollection(t *testing.T) {
+	cfg := &CacheConfig{
+		Model: ModelCacheConfig{
+			Local: &LocalCacheConfig{CacheDir: ".cache"},
+			Redis: nil,
+		},
+		Response: ResponseCacheConfig{
+			Semantic: &SemanticCacheConfig{
+				Enabled:             boolPtr(true),
+				SimilarityThreshold: 0.9,
+				TTL:                 3600,
+				Embedder:            EmbedderConfig{Provider: "openai"},
+				VectorStore: VectorStoreConfig{
+					Type:   "qdrant",
+					Qdrant: QdrantConfig{URL: "http://localhost:6333"},
+				},
+			},
+		},
+	}
+	if err := ValidateCacheConfig(cfg); err == nil {
+		t.Fatal("expected error when qdrant collection empty")
+	}
+}
+
 func TestValidateCacheConfig_SemanticSimilarityThresholdInvalid(t *testing.T) {
 	base := CacheConfig{
 		Model: ModelCacheConfig{
@@ -137,9 +161,11 @@ func TestValidateCacheConfig_SemanticSimilarityThresholdInvalid(t *testing.T) {
 				TTL:      3600,
 				Embedder: EmbedderConfig{Provider: "openai"},
 				VectorStore: VectorStoreConfig{
-					Type: "sqlite-vec",
-					SQLiteVec: SQLiteVecConfig{
-						Path: ".cache/semantic.db",
+					Type: "pgvector",
+					PGVector: PGVectorConfig{
+						URL:       "postgres://localhost/test",
+						Table:     "gomodel_semantic_cache",
+						Dimension: 1536,
 					},
 				},
 			},
@@ -181,9 +207,10 @@ func TestValidateCacheConfig_SemanticRequiresEmbedderProvider(t *testing.T) {
 				SimilarityThreshold: 0.9,
 				TTL:                 3600,
 				VectorStore: VectorStoreConfig{
-					Type: "sqlite-vec",
-					SQLiteVec: SQLiteVecConfig{
-						Path: ".cache/semantic.db",
+					Type: "pgvector",
+					PGVector: PGVectorConfig{
+						URL:       "postgres://localhost/test",
+						Dimension: 768,
 					},
 				},
 			},
@@ -211,9 +238,10 @@ func TestValidateCacheConfig_SemanticRejectsLocalEmbedder(t *testing.T) {
 				TTL:                 3600,
 				Embedder:            EmbedderConfig{Provider: "local"},
 				VectorStore: VectorStoreConfig{
-					Type: "sqlite-vec",
-					SQLiteVec: SQLiteVecConfig{
-						Path: ".cache/semantic.db",
+					Type: "pgvector",
+					PGVector: PGVectorConfig{
+						URL:       "postgres://localhost/test",
+						Dimension: 768,
 					},
 				},
 			},
@@ -238,9 +266,10 @@ func TestValidateCacheConfig_SemanticNegativeTTL(t *testing.T) {
 				TTL:                 -1,
 				Embedder:            EmbedderConfig{Provider: "openai"},
 				VectorStore: VectorStoreConfig{
-					Type: "sqlite-vec",
-					SQLiteVec: SQLiteVecConfig{
-						Path: ".cache/semantic.db",
+					Type: "pgvector",
+					PGVector: PGVectorConfig{
+						URL:       "postgres://localhost/test",
+						Dimension: 768,
 					},
 				},
 			},
