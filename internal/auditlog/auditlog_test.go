@@ -126,6 +126,7 @@ func TestLogEntryJSON(t *testing.T) {
 		ResolvedModel: "openai/gpt-4",
 		Provider:      "openai",
 		AliasUsed:     true,
+		CacheType:     CacheTypeExact,
 		StatusCode:    200,
 		RequestID:     "req-123",
 		ClientIP:      "192.168.1.1",
@@ -164,6 +165,9 @@ func TestLogEntryJSON(t *testing.T) {
 	}
 	if decoded.AliasUsed != entry.AliasUsed {
 		t.Errorf("AliasUsed mismatch: expected %v, got %v", entry.AliasUsed, decoded.AliasUsed)
+	}
+	if decoded.CacheType != entry.CacheType {
+		t.Errorf("CacheType mismatch: expected %q, got %q", entry.CacheType, decoded.CacheType)
 	}
 	if decoded.StatusCode != entry.StatusCode {
 		t.Errorf("StatusCode mismatch: expected %d, got %d", entry.StatusCode, decoded.StatusCode)
@@ -669,6 +673,57 @@ func TestMiddleware_StoresExecutionPlanVersionID(t *testing.T) {
 	}
 }
 
+func TestMiddleware_StoresAuthKeyIDFromContext(t *testing.T) {
+	logger := &capturingLogger{cfg: Config{Enabled: true}}
+	middleware := Middleware(logger)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(core.WithAuthKeyID(req.Context(), "key-123"))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := middleware(func(c *echo.Context) error {
+		return c.NoContent(http.StatusOK)
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler() error = %v", err)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("logger.entries len = %d, want 1", len(logger.entries))
+	}
+	if got := logger.entries[0].AuthKeyID; got != "key-123" {
+		t.Fatalf("AuthKeyID = %q, want key-123", got)
+	}
+}
+
+func TestMiddleware_DefaultsMissingUserPathToRoot(t *testing.T) {
+	logger := &capturingLogger{cfg: Config{Enabled: true}}
+	middleware := Middleware(logger)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := middleware(func(c *echo.Context) error {
+		return c.NoContent(http.StatusOK)
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler() error = %v", err)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("logger.entries len = %d, want 1", len(logger.entries))
+	}
+	if got := logger.entries[0].UserPath; got != "/" {
+		t.Fatalf("UserPath = %q, want /", got)
+	}
+}
+
 func TestMiddleware_SkipsWriteWhenExecutionPlanDisablesAudit(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{
@@ -857,19 +912,21 @@ func TestCreateStreamEntry(t *testing.T) {
 
 	// Test with valid entry
 	baseEntry := &LogEntry{
-		ID:            "test-id",
-		Timestamp:     time.Now(),
-		DurationNs:    1000,
-		Model:         "claude-opus-4-6",
-		ResolvedModel: "openai/gpt-5-nano",
-		Provider:      "openai",
-		AliasUsed:     true,
-		StatusCode:    200,
-		RequestID:     "req-123",
-		ClientIP:      "127.0.0.1",
-		Method:        "POST",
-		Path:          "/v1/chat/completions",
-		Stream:        false,
+		ID:                     "test-id",
+		Timestamp:              time.Now(),
+		DurationNs:             1000,
+		Model:                  "claude-opus-4-6",
+		ResolvedModel:          "openai/gpt-5-nano",
+		Provider:               "openai",
+		AliasUsed:              true,
+		ExecutionPlanVersionID: "plan-version-123",
+		CacheType:              CacheTypeSemantic,
+		StatusCode:             200,
+		RequestID:              "req-123",
+		ClientIP:               "127.0.0.1",
+		Method:                 "POST",
+		Path:                   "/v1/chat/completions",
+		Stream:                 false,
 		Data: &LogData{
 			UserAgent: "test",
 			RequestHeaders: map[string]string{
@@ -896,6 +953,12 @@ func TestCreateStreamEntry(t *testing.T) {
 	}
 	if streamEntry.AliasUsed != baseEntry.AliasUsed {
 		t.Errorf("AliasUsed mismatch")
+	}
+	if streamEntry.CacheType != baseEntry.CacheType {
+		t.Errorf("CacheType mismatch")
+	}
+	if streamEntry.ExecutionPlanVersionID != baseEntry.ExecutionPlanVersionID {
+		t.Errorf("ExecutionPlanVersionID mismatch")
 	}
 	if !streamEntry.Stream {
 		t.Error("Stream should be true")

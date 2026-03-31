@@ -309,6 +309,10 @@ func TestAdminExecutionPlanEndpoints_AreRegistered(t *testing.T) {
 		method string
 		path   string
 	}{
+		{method: http.MethodGet, path: "/admin/api/v1/dashboard/config"},
+		{method: http.MethodGet, path: "/admin/api/v1/auth-keys"},
+		{method: http.MethodPost, path: "/admin/api/v1/auth-keys"},
+		{method: http.MethodPost, path: "/admin/api/v1/auth-keys/test-key/deactivate"},
 		{method: http.MethodGet, path: "/admin/api/v1/execution-plans"},
 		{method: http.MethodGet, path: "/admin/api/v1/execution-plans/guardrails"},
 		{method: http.MethodPost, path: "/admin/api/v1/execution-plans"},
@@ -321,6 +325,28 @@ func TestAdminExecutionPlanEndpoints_AreRegistered(t *testing.T) {
 		if rec.Code == http.StatusNotFound {
 			t.Fatalf("%s %s returned 404, want registered route", tc.method, tc.path)
 		}
+	}
+}
+
+func TestAdminDashboardConfigEndpoint_ReturnsHandlerResponse(t *testing.T) {
+	mock := &mockProvider{}
+	adminHandler := admin.NewHandler(nil, nil, admin.WithDashboardRuntimeConfig(admin.DashboardConfigResponse{
+		FeatureFallbackMode: "manual",
+	}))
+	srv := New(mock, &Config{
+		AdminEndpointsEnabled: true,
+		AdminHandler:          adminHandler,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/v1/dashboard/config", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"FEATURE_FALLBACK_MODE":"manual"`) {
+		t.Fatalf("response body = %s, want FEATURE_FALLBACK_MODE payload", rec.Body.String())
 	}
 }
 
@@ -418,6 +444,32 @@ func TestAdminAPI_RequiresAuth(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestAdminAPI_SkipsAuthWithoutMasterKey(t *testing.T) {
+	mock := &mockProvider{}
+	adminHandler := admin.NewHandler(nil, nil)
+	srv := New(mock, &Config{
+		Authenticator:         mockAuthenticator{enabled: true, tokenToID: map[string]string{"managed-token": "key-123"}},
+		AdminEndpointsEnabled: true,
+		AdminHandler:          adminHandler,
+	})
+
+	adminReq := httptest.NewRequest(http.MethodGet, "/admin/api/v1/models", nil)
+	adminRec := httptest.NewRecorder()
+	srv.ServeHTTP(adminRec, adminReq)
+
+	if adminRec.Code != http.StatusOK {
+		t.Fatalf("expected admin API 200 without auth when master key is unset, got %d body=%s", adminRec.Code, adminRec.Body.String())
+	}
+
+	modelReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	modelRec := httptest.NewRecorder()
+	srv.ServeHTTP(modelRec, modelReq)
+
+	if modelRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected model API 401 without auth when managed keys are enabled, got %d body=%s", modelRec.Code, modelRec.Body.String())
 	}
 }
 

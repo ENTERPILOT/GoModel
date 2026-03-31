@@ -1,6 +1,9 @@
 package core
 
-import "maps"
+import (
+	"maps"
+	"strings"
+)
 
 // RequestSnapshot is the transport-level capture of an inbound request. It
 // preserves the request as received at the HTTP boundary so later stages can
@@ -11,6 +14,9 @@ type RequestSnapshot struct {
 	Method string
 	// Path is the request URL path as received at ingress.
 	Path string
+	// UserPath is the canonical business hierarchy path sourced from
+	// X-GoModel-User-Path when provided.
+	UserPath string
 	// RouteParams contains resolved router parameters such as provider or file id.
 	routeParams map[string]string
 	// QueryParams contains the raw query string values by key.
@@ -35,18 +41,18 @@ type RequestSnapshot struct {
 
 // NewRequestSnapshot constructs a RequestSnapshot and defensively copies its
 // mutable map and byte-slice inputs.
-func NewRequestSnapshot(method, path string, routeParams map[string]string, queryParams, headers map[string][]string, contentType string, capturedBody []byte, bodyNotCaptured bool, requestID string, traceMetadata map[string]string) *RequestSnapshot {
-	return newRequestSnapshot(method, path, routeParams, queryParams, headers, contentType, capturedBody, bodyNotCaptured, requestID, traceMetadata, true)
+func NewRequestSnapshot(method, path string, routeParams map[string]string, queryParams, headers map[string][]string, contentType string, capturedBody []byte, bodyNotCaptured bool, requestID string, traceMetadata map[string]string, userPath ...string) *RequestSnapshot {
+	return newRequestSnapshot(method, path, routeParams, queryParams, headers, contentType, capturedBody, bodyNotCaptured, requestID, traceMetadata, true, userPath...)
 }
 
 // NewRequestSnapshotWithOwnedBody constructs a RequestSnapshot that takes
 // ownership of capturedBody without cloning it. Callers must ensure the slice
 // will not be mutated after passing it here.
-func NewRequestSnapshotWithOwnedBody(method, path string, routeParams map[string]string, queryParams, headers map[string][]string, contentType string, capturedBody []byte, bodyNotCaptured bool, requestID string, traceMetadata map[string]string) *RequestSnapshot {
-	return newRequestSnapshot(method, path, routeParams, queryParams, headers, contentType, capturedBody, bodyNotCaptured, requestID, traceMetadata, false)
+func NewRequestSnapshotWithOwnedBody(method, path string, routeParams map[string]string, queryParams, headers map[string][]string, contentType string, capturedBody []byte, bodyNotCaptured bool, requestID string, traceMetadata map[string]string, userPath ...string) *RequestSnapshot {
+	return newRequestSnapshot(method, path, routeParams, queryParams, headers, contentType, capturedBody, bodyNotCaptured, requestID, traceMetadata, false, userPath...)
 }
 
-func newRequestSnapshot(method, path string, routeParams map[string]string, queryParams, headers map[string][]string, contentType string, capturedBody []byte, bodyNotCaptured bool, requestID string, traceMetadata map[string]string, cloneBody bool) *RequestSnapshot {
+func newRequestSnapshot(method, path string, routeParams map[string]string, queryParams, headers map[string][]string, contentType string, capturedBody []byte, bodyNotCaptured bool, requestID string, traceMetadata map[string]string, cloneBody bool, userPath ...string) *RequestSnapshot {
 	body := capturedBody
 	if cloneBody {
 		body = cloneBytes(capturedBody)
@@ -54,6 +60,7 @@ func newRequestSnapshot(method, path string, routeParams map[string]string, quer
 	return &RequestSnapshot{
 		Method:          method,
 		Path:            path,
+		UserPath:        firstUserPath(userPath),
 		routeParams:     cloneStringMap(routeParams),
 		queryParams:     cloneMultiMap(queryParams),
 		headers:         cloneMultiMap(headers),
@@ -63,6 +70,13 @@ func newRequestSnapshot(method, path string, routeParams map[string]string, quer
 		RequestID:       requestID,
 		traceMetadata:   cloneStringMap(traceMetadata),
 	}
+}
+
+func firstUserPath(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(values[0])
 }
 
 // CapturedBody returns a defensive copy of the captured request body bytes.

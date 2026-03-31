@@ -71,3 +71,64 @@ test('dashboard layout pins Chart.js to 4.5.0', () => {
         /<script src="https:\/\/unpkg\.com\/htmx\.org@2\.0\.8\/dist\/htmx\.min\.js" integrity="sha384-\/TgkGk7p307TH7EXJDuUlgG3Ce1UVolAOFopFekQkkXihi5u\/6OCvVKyz1W\+idaz" crossorigin="anonymous"><\/script>/
     );
 });
+
+test('dashboard pages reuse a shared auth banner template', () => {
+    const indexTemplate = readFixture('../../../templates/index.html');
+    const authBannerTemplate = readFixture('../../../templates/auth-banner.html');
+
+    assert.match(
+        authBannerTemplate,
+        /{{define "auth-banner"}}[\s\S]*x-show="authError"[\s\S]*Authentication required\. Enter your API key in the sidebar to view data\.[\s\S]*{{end}}/
+    );
+
+    const authBannerCalls = indexTemplate.match(/{{template "auth-banner" \.}}/g) || [];
+    assert.equal(authBannerCalls.length, 6);
+    assert.doesNotMatch(
+        indexTemplate,
+        /<div class="alert alert-warning" x-show="authError">[\s\S]*Authentication required\. Enter your API key in the sidebar to view data\.[\s\S]*<\/div>/
+    );
+});
+
+test('auth key expirations render as a UTC date with the full UTC timestamp in the hover title', () => {
+    const indexTemplate = readFixture('../../../templates/index.html');
+
+    assert.match(indexTemplate, /x-text="key\.expires_at \? formatDateUTC\(key\.expires_at\) : '\\u2014'"/);
+    assert.match(indexTemplate, /:title="key\.expires_at \? formatTimestampUTC\(key\.expires_at\) : ''"/);
+    assert.match(indexTemplate, /:disabled="authKeyFormSubmitting"/);
+    assert.match(indexTemplate, /@click="if \(!authKeyFormSubmitting\) openAuthKeyForm\(\)"/);
+    assert.match(indexTemplate, /x-show="authKeys\.length === 0 && !authKeysLoading && !authError && !authKeyError && authKeysAvailable"/);
+});
+
+test('usage and audit pages reuse a shared pagination template', () => {
+    const indexTemplate = readFixture('../../../templates/index.html');
+    const paginationTemplate = readFixture('../../../templates/pagination.html');
+
+    assert.match(
+        paginationTemplate,
+        /{{define "pagination"}}[\s\S]*x-show="{{\.}}\.total > 0"[\s\S]*type="button"[\s\S]*@click="{{\.}}PrevPage\(\)"[\s\S]*type="button"[\s\S]*@click="{{\.}}NextPage\(\)"[\s\S]*{{end}}/
+    );
+    assert.match(indexTemplate, /{{template "pagination" "usageLog"}}/);
+    assert.match(indexTemplate, /{{template "pagination" "auditLog"}}/);
+    assert.doesNotMatch(
+        indexTemplate,
+        /<div class="pagination" x-show="usageLog\.total > 0">[\s\S]*usageLogPrevPage\(\)[\s\S]*<\/div>/
+    );
+    assert.doesNotMatch(
+        indexTemplate,
+        /<div class="pagination" x-show="auditLog\.total > 0">[\s\S]*auditLogPrevPage\(\)[\s\S]*<\/div>/
+    );
+});
+
+test('audit request and response sections reuse a shared audit pane template', () => {
+    const indexTemplate = readFixture('../../../templates/index.html');
+    const auditPaneTemplate = readFixture('../../../templates/audit-pane.html');
+
+    assert.match(
+        auditPaneTemplate,
+        /{{define "audit-pane"}}[\s\S]*x-text="{{\.}}\.title"[\s\S]*type="button"[\s\S]*copyAuditJSON\({{\.\}}\.copyBody, \$event\)[\s\S]*x-text="formatJSON\({{\.\}}\.headers\)"[\s\S]*renderBodyWithConversationHighlights\({{\.\}}\.entry, {{\.}}\.body\)[\s\S]*x-text="{{\.}}\.emptyMessage"[\s\S]*x-text="{{\.}}\.tooLargeMessage"[\s\S]*{{end}}/
+    );
+    assert.match(indexTemplate, /{{template "audit-pane" "auditRequestPane\(entry\)"}}/);
+    assert.match(indexTemplate, /{{template "audit-pane" "auditResponsePane\(entry\)"}}/);
+    assert.doesNotMatch(indexTemplate, /<section class="audit-pane">[\s\S]*<h4>Request<\/h4>/);
+    assert.doesNotMatch(indexTemplate, /<section class="audit-pane">[\s\S]*<h4>Response<\/h4>/);
+});

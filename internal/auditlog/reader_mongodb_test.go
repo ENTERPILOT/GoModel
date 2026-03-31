@@ -1,6 +1,15 @@
 package auditlog
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"reflect"
+	"testing"
+
+	"gomodel/internal/core"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+)
 
 func TestSanitizeLogDataRedactsHeaders(t *testing.T) {
 	original := &LogData{
@@ -46,4 +55,66 @@ func TestSanitizeLogDataNilSafe(t *testing.T) {
 	if sanitizeLogData(nil) != nil {
 		t.Fatalf("expected nil input to return nil")
 	}
+}
+
+func TestMongoLogRowToLogEntryPreservesCacheType(t *testing.T) {
+	row := mongoLogRow{
+		ID:        "log-1",
+		Model:     "gpt-4",
+		Provider:  "openai",
+		CacheType: CacheTypeSemantic,
+	}
+
+	entry := row.toLogEntry()
+	if entry == nil {
+		t.Fatal("expected entry, got nil")
+	}
+	if entry.CacheType != CacheTypeSemantic {
+		t.Fatalf("CacheType = %q, want %q", entry.CacheType, CacheTypeSemantic)
+	}
+}
+
+func TestMongoDBReader_GetLogsInvalidUserPathReturnsGatewayError(t *testing.T) {
+	reader := &MongoDBReader{}
+
+	_, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "/team/../alpha"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("gatewayErr.Type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
+	}
+}
+
+func TestMongoUserPathMatchFilter(t *testing.T) {
+	t.Run("root includes regex plus legacy null or missing", func(t *testing.T) {
+		got := mongoUserPathMatchFilter("/")
+		want := bson.E{
+			Key: "$or",
+			Value: bson.A{
+				bson.D{{Key: "user_path", Value: bson.D{{Key: "$regex", Value: "^/"}}}},
+				bson.D{{Key: "user_path", Value: bson.D{{Key: "$exists", Value: false}}}},
+				bson.D{{Key: "user_path", Value: nil}},
+			},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("mongoUserPathMatchFilter(%q) = %#v, want %#v", "/", got, want)
+		}
+	})
+
+	t.Run("non-root uses regex only", func(t *testing.T) {
+		got := mongoUserPathMatchFilter("/team")
+		want := bson.E{
+			Key:   "user_path",
+			Value: bson.D{{Key: "$regex", Value: "^/team(?:/|$)"}},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("mongoUserPathMatchFilter(%q) = %#v, want %#v", "/team", got, want)
+		}
+	})
 }

@@ -14,14 +14,14 @@ import (
 )
 
 const (
-	usageInsertColumnCount     = 15
+	usageInsertColumnCount     = 16
 	postgresMaxBindParameters  = 65535
 	usageInsertMaxRowsPerQuery = postgresMaxBindParameters / usageInsertColumnCount
 )
 
 const usageInsertPrefix = `
 		INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider,
-			endpoint, input_tokens, output_tokens, total_tokens, raw_data,
+			endpoint, user_path, input_tokens, output_tokens, total_tokens, raw_data,
 			input_cost, output_cost, total_cost, costs_calculation_caveat)
 		VALUES `
 
@@ -61,6 +61,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 			model TEXT NOT NULL,
 			provider TEXT NOT NULL,
 			endpoint TEXT NOT NULL,
+			user_path TEXT,
 			input_tokens INTEGER NOT NULL DEFAULT 0,
 			output_tokens INTEGER NOT NULL DEFAULT 0,
 			total_tokens INTEGER NOT NULL DEFAULT 0,
@@ -77,6 +78,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS output_cost DOUBLE PRECISION",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS total_cost DOUBLE PRECISION",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS costs_calculation_caveat TEXT DEFAULT ''",
+		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS user_path TEXT",
 	}
 	for _, migration := range costMigrations {
 		if _, err := pool.Exec(ctx, migration); err != nil {
@@ -91,6 +93,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"CREATE INDEX IF NOT EXISTS idx_usage_provider_id ON usage(provider_id)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_model ON usage(model)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage(provider)",
+		"CREATE INDEX IF NOT EXISTS idx_usage_user_path ON usage(user_path)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_raw_data_gin ON usage USING GIN (raw_data)",
 	}
 	for _, idx := range indexes {
@@ -200,6 +203,7 @@ func buildUsageInsert(entries []*UsageEntry) (string, []any) {
 			entry.Model,
 			entry.Provider,
 			entry.Endpoint,
+			entry.UserPath,
 			entry.InputTokens,
 			entry.OutputTokens,
 			entry.TotalTokens,

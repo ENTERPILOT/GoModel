@@ -25,7 +25,15 @@ func NewPostgreSQLReader(pool *pgxpool.Pool) (*PostgreSQLReader, error) {
 
 // GetSummary returns aggregated usage statistics for the given query parameters.
 func (r *PostgreSQLReader) GetSummary(ctx context.Context, params UsageQueryParams) (*UsageSummary, error) {
-	conditions, args, _ := pgDateRangeConditions(params, 1)
+	conditions, args, nextIdx := pgDateRangeConditions(params, 1)
+	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, err
+	}
+	if userPath != "" {
+		conditions = append(conditions, fmt.Sprintf("(user_path = $%d OR user_path LIKE $%d ESCAPE '\\')", nextIdx, nextIdx+1))
+		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
+	}
 	where := buildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
@@ -33,7 +41,7 @@ func (r *PostgreSQLReader) GetSummary(ctx context.Context, params UsageQueryPara
 			FROM "usage"` + where
 
 	summary := &UsageSummary{}
-	err := r.pool.QueryRow(ctx, query, args...).Scan(
+	err = r.pool.QueryRow(ctx, query, args...).Scan(
 		&summary.TotalRequests, &summary.TotalInput, &summary.TotalOutput, &summary.TotalTokens,
 		&summary.TotalInputCost, &summary.TotalOutputCost, &summary.TotalCost,
 	)
@@ -46,7 +54,15 @@ func (r *PostgreSQLReader) GetSummary(ctx context.Context, params UsageQueryPara
 
 // GetUsageByModel returns token and cost totals grouped by model and provider.
 func (r *PostgreSQLReader) GetUsageByModel(ctx context.Context, params UsageQueryParams) ([]ModelUsage, error) {
-	conditions, args, _ := pgDateRangeConditions(params, 1)
+	conditions, args, nextIdx := pgDateRangeConditions(params, 1)
+	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, err
+	}
+	if userPath != "" {
+		conditions = append(conditions, fmt.Sprintf("(user_path = $%d OR user_path LIKE $%d ESCAPE '\\')", nextIdx, nextIdx+1))
+		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
+	}
 	where := buildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
@@ -80,6 +96,10 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
 	conditions, args, argIdx := pgDateRangeConditions(params.UsageQueryParams, 1)
+	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, err
+	}
 
 	if params.Model != "" {
 		conditions = append(conditions, fmt.Sprintf("model = $%d", argIdx))
@@ -90,6 +110,11 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 		conditions = append(conditions, fmt.Sprintf("provider = $%d", argIdx))
 		args = append(args, params.Provider)
 		argIdx++
+	}
+	if userPath != "" {
+		conditions = append(conditions, fmt.Sprintf("(user_path = $%d OR user_path LIKE $%d ESCAPE '\\')", argIdx, argIdx+1))
+		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
+		argIdx += 2
 	}
 	if params.Search != "" {
 		s := "%" + escapeLikeWildcards(params.Search) + "%"
@@ -108,7 +133,7 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 	}
 
 	// Fetch page
-	dataQuery := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, endpoint,
+	dataQuery := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, endpoint, user_path,
 		input_tokens, output_tokens, total_tokens, COALESCE(input_cost, 0), COALESCE(output_cost, 0), COALESCE(total_cost, 0), raw_data, COALESCE(costs_calculation_caveat, '')
 		FROM "usage"%s ORDER BY timestamp DESC LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
 	dataArgs := append(append([]any(nil), args...), limit, offset)
@@ -123,7 +148,8 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 	for rows.Next() {
 		var e UsageLogEntry
 		var rawDataJSON *string
-		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &e.Timestamp, &e.Model, &e.Provider, &e.Endpoint,
+		var userPath *string
+		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &e.Timestamp, &e.Model, &e.Provider, &e.Endpoint, &userPath,
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &rawDataJSON, &e.CostsCalculationCaveat); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
 		}
@@ -131,6 +157,9 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 			if err := json.Unmarshal([]byte(*rawDataJSON), &e.RawData); err != nil {
 				slog.Warn("failed to unmarshal raw_data JSON", "request_id", e.RequestID, "error", err)
 			}
+		}
+		if userPath != nil {
+			e.UserPath = *userPath
 		}
 		entries = append(entries, e)
 	}
@@ -187,7 +216,15 @@ func (r *PostgreSQLReader) GetDailyUsage(ctx context.Context, params UsageQueryP
 	}
 	groupExpr := pgGroupExpr(interval, usageTimeZone(params))
 
-	conditions, args, _ := pgDateRangeConditions(params, 1)
+	conditions, args, nextIdx := pgDateRangeConditions(params, 1)
+	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, err
+	}
+	if userPath != "" {
+		conditions = append(conditions, fmt.Sprintf("(user_path = $%d OR user_path LIKE $%d ESCAPE '\\')", nextIdx, nextIdx+1))
+		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
+	}
 	where := buildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`

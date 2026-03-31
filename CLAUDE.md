@@ -26,7 +26,7 @@ make run               # Run server (requires .env with API key)
 make build             # Build to bin/gomodel (with version injection)
 make test              # Unit tests only
 make test-e2e          # E2E tests (in-process mock, no Docker)
-make test-integration  # Integration tests (requires Docker/testcontainers, 10m timeout)
+make test-integration  # Integration tests (requires Docker, 10m timeout)
 make test-contract     # Contract replay tests (golden file validation)
 make test-all          # All tests (unit + e2e + integration + contract)
 make lint              # Run golangci-lint
@@ -59,6 +59,7 @@ Prefer squash-and-merge to keep the merged commit subject aligned with the PR ti
 ## Error Handling
 
 - All errors returned to clients must be instances of `core.GatewayError`.
+- Do not hide work in detached goroutines; respect context synchronously and return typed `core.GatewayError` values.
 - Use the typed client-facing categories `provider_error`, `rate_limit_error`, `invalid_request_error`, `authentication_error`, and `not_found_error`.
 - Public error responses must use the OpenAI-compatible shape:
 
@@ -80,11 +81,11 @@ Prefer squash-and-merge to keep the merged commit subject aligned with the PR ti
 
 - **Unit tests:** Alongside implementation files (`*_test.go`). No Docker.
 - **E2E tests:** Currently in-process mock LLM server, no Docker. Tag: `-tags=e2e`
-- **Integration tests:** Real databases via testcontainers (Docker required). Tag: `-tags=integration`. Timeout: 10m.
+- **Integration tests:** Real databases via Docker-managed containers (Docker required). Tag: `-tags=integration`. Timeout: 10m.
 - **Contract tests:** Golden file validation against real API responses. Tag: `-tags=contract`. Record new golden files: `make record-api`
 - **Stress tests:** In `tests/stress/`
 
-Docker Compose is optional and intended solely for manual storage-backend validation; automated tests must run without Docker (except integration tests which use testcontainers).
+Docker Compose is optional and intended solely for manual storage-backend validation; automated tests must run without Docker (except integration tests which start ephemeral database containers through the Docker CLI).
 
 ```bash
 # Manual storage testing with Docker Compose running

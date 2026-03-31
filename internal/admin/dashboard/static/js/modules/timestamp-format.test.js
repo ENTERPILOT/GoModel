@@ -100,3 +100,14 @@ test('formatTimestamp uses the effective timezone override for dashboard rows', 
         formatInZone(timestamp, 'America/New_York')
     );
 });
+
+test('formatDateUTC keeps expiration dates on their stored UTC calendar day', () => {
+    const app = loadDashboardApp();
+    app.detectedTimezone = 'Europe/Warsaw';
+    app.timezoneOverride = 'America/Los_Angeles';
+
+    assert.equal(
+        app.formatDateUTC('2026-04-01T23:59:59Z'),
+        '2026-04-01'
+    );
+});

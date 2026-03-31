@@ -17,6 +17,7 @@ import (
 	"gomodel/internal/admin/dashboard"
 	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
+	"gomodel/internal/authkeys"
 	"gomodel/internal/batch"
 	"gomodel/internal/core"
 	"gomodel/internal/executionplans"
@@ -38,6 +39,7 @@ type App struct {
 	usage          *usage.Result
 	batch          *batch.Result
 	aliases        *aliases.Result
+	authKeys       *authkeys.Result
 	executionPlans *executionplans.Result
 	server         *server.Server
 
@@ -153,9 +155,6 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	app.aliases = aliasResult
 
-	// Log configuration status
-	app.logStartupInfo()
-
 	// Build runtime execution dependencies. Policy is passed explicitly into the
 	// server; the live provider dependency remains the bare router.
 	var provider core.RoutableProvider = app.providers.Router
@@ -217,6 +216,32 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	app.executionPlans = executionPlanResult
 
+	var authKeyResult *authkeys.Result
+	sharedAuthKeyStorage := firstSharedStorage(
+		auditResult.Storage,
+		usageResult.Storage,
+		batchResult.Storage,
+		aliasResult.Storage,
+		executionPlanResult.Storage,
+	)
+	if sharedAuthKeyStorage != nil {
+		authKeyResult, err = authkeys.NewWithSharedStorage(ctx, sharedAuthKeyStorage)
+	} else {
+		authKeyResult, err = authkeys.New(ctx, appCfg)
+	}
+	if err != nil {
+		closeErr := errors.Join(executionPlanResult.Close(), app.aliases.Close(), app.batch.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to initialize auth keys: %w (also: close error: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to initialize auth keys: %w", err)
+	}
+	app.authKeys = authKeyResult
+
+	// Log configuration status after auth has been initialized so the startup
+	// message reflects both bootstrap and managed auth modes.
+	app.logStartupInfo()
+
 	if featureCaps.Guardrails {
 		if guardrailRegistry != nil && guardrailRegistry.Len() > 0 {
 			translatedRequestPatcher = guardrails.NewPlannedRequestPatcher(executionPlanResult.Service)
@@ -243,6 +268,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	allowPassthroughV1Alias := appCfg.Server.AllowPassthroughV1Alias
 	serverCfg := &server.Config{
 		MasterKey:                    appCfg.Server.MasterKey,
+		Authenticator:                authKeyResult.Service,
 		MetricsEnabled:               appCfg.Metrics.Enabled,
 		MetricsEndpoint:              appCfg.Metrics.Endpoint,
 		BodySizeLimit:                appCfg.Server.BodySizeLimit,
@@ -277,9 +303,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			auditResult.Storage,
 			usageResult.Storage,
 			providerResult.Registry,
+			authKeyResult.Service,
 			app.aliases.Service,
 			executionPlanResult.Service,
 			guardrailRegistry,
+			dashboardRuntimeConfig(appCfg),
 			adminCfg.UIEnabled,
 		)
 		if adminErr != nil {
@@ -314,11 +342,15 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if err != nil {
 		var (
 			executionPlansCloseErr error
+			authKeysCloseErr       error
 			aliasCloseErr          error
 			batchCloseErr          error
 		)
 		if app.executionPlans != nil {
 			executionPlansCloseErr = app.executionPlans.Close()
+		}
+		if app.authKeys != nil {
+			authKeysCloseErr = app.authKeys.Close()
 		}
 		if app.aliases != nil {
 			aliasCloseErr = app.aliases.Close()
@@ -326,7 +358,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		if app.batch != nil {
 			batchCloseErr = app.batch.Close()
 		}
-		closeErr := errors.Join(executionPlansCloseErr, aliasCloseErr, batchCloseErr, app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(executionPlansCloseErr, authKeysCloseErr, aliasCloseErr, batchCloseErr, app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to initialize response cache: %w (also: close error: %v)", err, closeErr)
 		}
@@ -482,7 +514,15 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 5. Close batch store (flushes pending entries)
+	// 5. Close managed auth keys subsystem.
+	if a.authKeys != nil {
+		if err := a.authKeys.Close(); err != nil {
+			slog.Error("auth keys close error", "error", err)
+			errs = append(errs, fmt.Errorf("auth keys close: %w", err))
+		}
+	}
+
+	// 6. Close batch store (flushes pending entries)
 	if a.batch != nil {
 		if err := a.batch.Close(); err != nil {
 			slog.Error("batch store close error", "error", err)
@@ -490,7 +530,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 6. Close usage tracking (flushes pending entries)
+	// 7. Close usage tracking (flushes pending entries)
 	if a.usage != nil {
 		if err := a.usage.Close(); err != nil {
 			slog.Error("usage logger close error", "error", err)
@@ -498,7 +538,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 7. Close audit logging (flushes pending logs)
+	// 8. Close audit logging (flushes pending logs)
 	if a.audit != nil {
 		if err := a.audit.Close(); err != nil {
 			slog.Error("audit logger close error", "error", err)
@@ -519,11 +559,17 @@ func (a *App) logStartupInfo() {
 	cfg := a.config
 
 	// Security warnings
-	if cfg.Server.MasterKey == "" {
+	managedKeysConfigured := a.authKeys != nil && a.authKeys.Service != nil && a.authKeys.Service.Enabled()
+	switch {
+	case cfg.Server.MasterKey != "" && managedKeysConfigured:
+		slog.Info("authentication enabled", "mode", "master_key+managed_keys", "managed_key_total", a.authKeys.Service.Total(), "managed_key_active", a.authKeys.Service.ActiveCount())
+	case managedKeysConfigured:
+		slog.Info("authentication enabled", "mode", "managed_keys", "managed_key_total", a.authKeys.Service.Total(), "managed_key_active", a.authKeys.Service.ActiveCount())
+	case cfg.Server.MasterKey == "":
 		slog.Warn("SECURITY WARNING: GOMODEL_MASTER_KEY not set - server running in UNSAFE MODE",
 			"security_risk", "unauthenticated access allowed",
 			"recommendation", "set GOMODEL_MASTER_KEY environment variable to secure this gateway")
-	} else {
+	default:
 		slog.Info("authentication enabled", "mode", "master_key")
 	}
 
@@ -566,9 +612,11 @@ func (a *App) logStartupInfo() {
 func initAdmin(
 	auditStorage, usageStorage storage.Storage,
 	registry *providers.ModelRegistry,
+	authKeyService *authkeys.Service,
 	aliasService *aliases.Service,
 	executionPlanService *executionplans.Service,
 	guardrailRegistry *guardrails.Registry,
+	runtimeConfig admin.DashboardConfigResponse,
 	uiEnabled bool,
 ) (*admin.Handler, *dashboard.Handler, error) {
 	// Find a storage connection for reading usage data
@@ -604,9 +652,11 @@ func initAdmin(
 		reader,
 		registry,
 		admin.WithAuditReader(auditReader),
+		admin.WithAuthKeys(authKeyService),
 		admin.WithAliases(aliasService),
 		admin.WithExecutionPlans(executionPlanService),
 		admin.WithGuardrailsRegistry(guardrailRegistry),
+		admin.WithDashboardRuntimeConfig(runtimeConfig),
 	)
 
 	var dashHandler *dashboard.Handler
@@ -718,6 +768,50 @@ func defaultExecutionPlanInput(cfg *config.Config) executionplans.CreateInput {
 	}
 }
 
+func dashboardRuntimeConfig(cfg *config.Config) admin.DashboardConfigResponse {
+	return admin.DashboardConfigResponse{
+		FeatureFallbackMode:  dashboardFallbackModeValue(cfg),
+		LoggingEnabled:       dashboardEnabledValue(cfg != nil && cfg.Logging.Enabled),
+		UsageEnabled:         dashboardEnabledValue(cfg != nil && cfg.Usage.Enabled),
+		GuardrailsEnabled:    dashboardEnabledValue(cfg != nil && cfg.Guardrails.Enabled),
+		RedisURL:             dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
+		SemanticCacheEnabled: dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
+	}
+}
+
+func dashboardEnabledValue(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
+}
+
+func dashboardFallbackModeValue(cfg *config.Config) string {
+	if cfg == nil || !fallbackFeatureEnabledGlobally(cfg) {
+		return string(config.FallbackModeOff)
+	}
+
+	switch mode := strings.ToLower(strings.TrimSpace(string(cfg.Fallback.DefaultMode))); mode {
+	case string(config.FallbackModeAuto):
+		return string(config.FallbackModeAuto)
+	case string(config.FallbackModeManual):
+		return string(config.FallbackModeManual)
+	}
+
+	for _, override := range cfg.Fallback.Overrides {
+		if strings.EqualFold(strings.TrimSpace(string(override.Mode)), string(config.FallbackModeAuto)) {
+			return string(config.FallbackModeAuto)
+		}
+	}
+	for _, override := range cfg.Fallback.Overrides {
+		if strings.EqualFold(strings.TrimSpace(string(override.Mode)), string(config.FallbackModeManual)) {
+			return string(config.FallbackModeManual)
+		}
+	}
+
+	return string(config.FallbackModeOff)
+}
+
 func runtimeExecutionFeatureCaps(cfg *config.Config) core.ExecutionFeatures {
 	if cfg == nil {
 		return core.ExecutionFeatures{}
@@ -739,9 +833,30 @@ func executionPlanRefreshInterval(cfg *config.Config) time.Duration {
 }
 
 func responseCacheConfigured(cfg config.ResponseCacheConfig) bool {
-	simpleOn := cfg.Simple != nil && config.SimpleCacheEnabled(cfg.Simple) &&
-		cfg.Simple.Redis != nil && cfg.Simple.Redis.URL != ""
-	return simpleOn || (cfg.Semantic != nil && config.SemanticCacheActive(cfg.Semantic))
+	return simpleResponseCacheConfiguredFromResponse(cfg) || semanticResponseCacheConfiguredFromResponse(cfg)
+}
+
+func simpleResponseCacheConfigured(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	return simpleResponseCacheConfiguredFromResponse(cfg.Cache.Response)
+}
+
+func simpleResponseCacheConfiguredFromResponse(cfg config.ResponseCacheConfig) bool {
+	return cfg.Simple != nil && config.SimpleCacheEnabled(cfg.Simple) &&
+		cfg.Simple.Redis != nil && strings.TrimSpace(cfg.Simple.Redis.URL) != ""
+}
+
+func semanticResponseCacheConfigured(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	return semanticResponseCacheConfiguredFromResponse(cfg.Cache.Response)
+}
+
+func semanticResponseCacheConfiguredFromResponse(cfg config.ResponseCacheConfig) bool {
+	return cfg.Semantic != nil && config.SemanticCacheActive(cfg.Semantic)
 }
 
 func fallbackFeatureEnabledGlobally(cfg *config.Config) bool {

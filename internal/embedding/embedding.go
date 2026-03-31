@@ -90,6 +90,7 @@ func openAIEmbeddingsEndpointURL(base string) (string, error) {
 	return b + "/v1/embeddings", nil
 }
 
+// apiEmbedder calls POST …/v1/embeddings on any OpenAI-compatible endpoint.
 type apiEmbedder struct {
 	endpointURL string
 	apiKey      string

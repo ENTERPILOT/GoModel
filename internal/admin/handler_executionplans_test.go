@@ -54,11 +54,23 @@ func (s *executionPlanTestStore) Create(_ context.Context, input executionplans.
 	var scopeKey string
 	switch {
 	case input.Scope.Provider == "":
-		scopeKey = "global"
+		if input.Scope.UserPath == "" {
+			scopeKey = "global"
+		} else {
+			scopeKey = "path:" + input.Scope.UserPath
+		}
 	case input.Scope.Model == "":
-		scopeKey = "provider:" + input.Scope.Provider
+		if input.Scope.UserPath == "" {
+			scopeKey = "provider:" + input.Scope.Provider
+		} else {
+			scopeKey = "provider_path:" + input.Scope.Provider + ":" + input.Scope.UserPath
+		}
 	default:
-		scopeKey = "provider_model:" + input.Scope.Provider + ":" + input.Scope.Model
+		if input.Scope.UserPath == "" {
+			scopeKey = "provider_model:" + input.Scope.Provider + ":" + input.Scope.Model
+		} else {
+			scopeKey = "provider_model_path:" + input.Scope.Provider + ":" + input.Scope.Model + ":" + input.Scope.UserPath
+		}
 	}
 	planHash := "hash-created"
 
@@ -163,6 +175,7 @@ func newExecutionPlanHandlerWithModelRegistry(t *testing.T, store executionplans
 }
 
 func TestListExecutionPlans(t *testing.T) {
+	fallbackDisabled := false
 	store := &executionPlanTestStore{
 		versions: []executionplans.Version{
 			{
@@ -174,7 +187,7 @@ func TestListExecutionPlans(t *testing.T) {
 				Name:     "global",
 				Payload: executionplans.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false, Fallback: &fallbackDisabled},
 				},
 				PlanHash: "hash-global",
 			},
@@ -204,8 +217,14 @@ func TestListExecutionPlans(t *testing.T) {
 	if body[0].ScopeDisplay != "global" {
 		t.Fatalf("scope display = %q, want global", body[0].ScopeDisplay)
 	}
+	if body[0].Payload.Features.Fallback == nil || *body[0].Payload.Features.Fallback {
+		t.Fatalf("payload fallback = %v, want explicit false", body[0].Payload.Features.Fallback)
+	}
 	if !body[0].EffectiveFeatures.Cache || !body[0].EffectiveFeatures.Audit || !body[0].EffectiveFeatures.Usage {
 		t.Fatalf("effective features = %+v, want cache/audit/usage enabled", body[0].EffectiveFeatures)
+	}
+	if body[0].EffectiveFeatures.Fallback {
+		t.Fatalf("effective features = %+v, want fallback disabled", body[0].EffectiveFeatures)
 	}
 }
 
@@ -282,6 +301,158 @@ func TestExecutionPlansEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	if deactivateEnvelope.Error.Code == nil || *deactivateEnvelope.Error.Code != "feature_unavailable" {
 		t.Fatalf("deactivate error code = %v, want feature_unavailable", deactivateEnvelope.Error.Code)
 	}
+
+	getCtx, getRec := newHandlerContext("/admin/api/v1/execution-plans/test-plan")
+	getCtx.SetPath("/admin/api/v1/execution-plans/:id")
+	getCtx.SetPathValues(echo.PathValues{{Name: "id", Value: "test-plan"}})
+	if err := h.GetExecutionPlan(getCtx); err != nil {
+		t.Fatalf("GetExecutionPlan() error = %v", err)
+	}
+	if getRec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("get status = %d, want 503", getRec.Code)
+	}
+	getEnvelope := decodeExecutionPlanErrorEnvelope(t, getRec.Body.Bytes())
+	if getEnvelope.Error.Type != "invalid_request_error" {
+		t.Fatalf("get error type = %q, want invalid_request_error", getEnvelope.Error.Type)
+	}
+	if getEnvelope.Error.Message != "execution plans feature is unavailable" {
+		t.Fatalf("get error message = %q, want execution plans feature is unavailable", getEnvelope.Error.Message)
+	}
+	if getEnvelope.Error.Code == nil || *getEnvelope.Error.Code != "feature_unavailable" {
+		t.Fatalf("get error code = %v, want feature_unavailable", getEnvelope.Error.Code)
+	}
+}
+
+func TestGetExecutionPlan(t *testing.T) {
+	fallbackEnabled := true
+	store := &executionPlanTestStore{
+		versions: []executionplans.Version{
+			{
+				ID:       "global-plan",
+				Scope:    executionplans.Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: executionplans.Payload{
+					SchemaVersion: 1,
+					Features: executionplans.FeatureFlags{
+						Cache: true,
+						Audit: true,
+						Usage: true,
+					},
+				},
+				PlanHash: "hash-global",
+			},
+			{
+				ID:          "provider-plan-v1",
+				Scope:       executionplans.Scope{Provider: "openai", Model: "gpt-5"},
+				ScopeKey:    "provider_model:openai:gpt-5",
+				Version:     1,
+				Active:      false,
+				Name:        "historical provider workflow",
+				Description: "inactive but still queryable",
+				Payload: executionplans.Payload{
+					SchemaVersion: 1,
+					Features: executionplans.FeatureFlags{
+						Cache:      true,
+						Audit:      true,
+						Usage:      true,
+						Guardrails: true,
+						Fallback:   &fallbackEnabled,
+					},
+					Guardrails: []executionplans.GuardrailStep{
+						{Ref: "policy-system", Step: 10},
+					},
+				},
+				PlanHash: "hash-provider-v1",
+			},
+		},
+	}
+
+	registry := newExecutionPlanRegistry(t)
+	h := newExecutionPlanHandler(t, store, registry)
+	c, rec := newHandlerContext("/admin/api/v1/execution-plans/provider-plan-v1")
+	c.SetPath("/admin/api/v1/execution-plans/:id")
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: "provider-plan-v1"}})
+
+	if err := h.GetExecutionPlan(c); err != nil {
+		t.Fatalf("GetExecutionPlan() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var body executionplans.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.ID != "provider-plan-v1" {
+		t.Fatalf("id = %q, want provider-plan-v1", body.ID)
+	}
+	if body.Active {
+		t.Fatal("Active = true, want false")
+	}
+	if body.ScopeType != "provider_model" {
+		t.Fatalf("scope type = %q, want provider_model", body.ScopeType)
+	}
+	if body.ScopeDisplay != "openai/gpt-5" {
+		t.Fatalf("scope display = %q, want openai/gpt-5", body.ScopeDisplay)
+	}
+	if !body.Payload.Features.Usage || !body.Payload.Features.Audit || !body.Payload.Features.Guardrails {
+		t.Fatalf("payload features = %+v, want usage/audit/guardrails enabled", body.Payload.Features)
+	}
+}
+
+func TestCreateExecutionPlan_NormalizesScopeUserPath(t *testing.T) {
+	store := &executionPlanTestStore{
+		versions: []executionplans.Version{
+			{
+				ID:       "global-plan",
+				Scope:    executionplans.Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: executionplans.Payload{
+					SchemaVersion: 1,
+					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true},
+				},
+				PlanHash: "hash-global",
+			},
+		},
+	}
+	h := newExecutionPlanHandler(t, store, nil)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{
+		"scope_provider":"openai",
+		"scope_model":"gpt-5",
+		"scope_user_path":" team//alpha/user/ ",
+		"name":"Scoped workflow",
+		"plan_payload":{
+			"schema_version":1,
+			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false}
+		}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.CreateExecutionPlan(c); err != nil {
+		t.Fatalf("CreateExecutionPlan() error = %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+
+	var version executionplans.Version
+	if err := json.Unmarshal(rec.Body.Bytes(), &version); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if got := version.Scope.UserPath; got != "/team/alpha/user" {
+		t.Fatalf("Scope.UserPath = %q, want /team/alpha/user", got)
+	}
 }
 
 func TestListExecutionPlanGuardrails(t *testing.T) {
@@ -334,7 +505,7 @@ func TestCreateExecutionPlan(t *testing.T) {
 		"description":"provider-model plan",
 		"plan_payload":{
 			"schema_version":1,
-			"features":{"cache":false,"audit":true,"usage":true,"guardrails":false},
+			"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"fallback":false},
 			"guardrails":[]
 		}
 	}`))
@@ -358,6 +529,9 @@ func TestCreateExecutionPlan(t *testing.T) {
 	}
 	if body.Name != "openai gpt-5" {
 		t.Fatalf("name = %q, want openai gpt-5", body.Name)
+	}
+	if body.Payload.Features.Fallback == nil || *body.Payload.Features.Fallback {
+		t.Fatalf("payload fallback = %v, want explicit false", body.Payload.Features.Fallback)
 	}
 
 	views, err := h.plans.ListViews(context.Background())
@@ -615,6 +789,56 @@ func TestCreateExecutionPlanRejectsUnknownProviderOrModelScope(t *testing.T) {
 				t.Fatalf("error code = %v, want nil", *body.Error.Code)
 			}
 		})
+	}
+}
+
+func TestCreateExecutionPlan_UsesScopeUserPathInValidationErrors(t *testing.T) {
+	store := &executionPlanTestStore{
+		versions: []executionplans.Version{
+			{
+				ID:       "global-plan",
+				Scope:    executionplans.Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: executionplans.Payload{
+					SchemaVersion: 1,
+					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+				},
+				PlanHash: "hash-global",
+			},
+		},
+	}
+	h := newExecutionPlanHandler(t, store, nil)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{
+		"scope_user_path":"/team/../alpha",
+		"name":"invalid path",
+		"plan_payload":{
+			"schema_version":1,
+			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
+			"guardrails":[]
+		}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.CreateExecutionPlan(c); err != nil {
+		t.Fatalf("CreateExecutionPlan() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+
+	body := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	if body.Error.Type != "invalid_request_error" {
+		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
+	}
+	if body.Error.Message != `invalid scope_user_path: user path cannot contain '.' or '..' segments` {
+		t.Fatalf("error message = %q, want invalid scope_user_path message", body.Error.Message)
 	}
 }
 

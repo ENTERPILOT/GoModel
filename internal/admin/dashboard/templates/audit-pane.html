@@ -1,0 +1,25 @@
+{{define "audit-pane"}}
+<section class="audit-pane">
+    <div class="audit-pane-head">
+        <h4 x-text="{{.}}.title"></h4>
+        <button type="button" class="pagination-btn" @click.prevent="copyAuditJSON({{.}}.copyBody, $event)">Copy Body</button>
+    </div>
+    <div class="audit-pane-block" x-show="{{.}}.showErrorMessage">
+        <h5>Error Message</h5>
+        <pre class="audit-json" x-text="{{.}}.errorMessage"></pre>
+    </div>
+    <div class="audit-pane-block" x-show="{{.}}.showHeaders">
+        <h5>Headers</h5>
+        <pre class="audit-json" x-text="formatJSON({{.}}.headers)"></pre>
+    </div>
+    <div class="audit-pane-block" x-show="{{.}}.showBody">
+        <h5>Body</h5>
+        <pre class="audit-json audit-json-body"
+             x-html="renderBodyWithConversationHighlights({{.}}.entry, {{.}}.body)"
+             @mousedown="startBodyInteraction($event)"
+             @click="handleBodyConversationClick($event, {{.}}.entry)"></pre>
+    </div>
+    <p class="empty-state audit-pane-empty" x-show="{{.}}.showEmpty" x-text="{{.}}.emptyMessage"></p>
+    <p class="audit-size-warning" x-show="{{.}}.showTooLarge" x-text="{{.}}.tooLargeMessage"></p>
+</section>
+{{end}}

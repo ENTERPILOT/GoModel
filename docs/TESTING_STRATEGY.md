@@ -9,7 +9,7 @@ A 3-layer testing strategy with **DB state verification** as the highest priorit
 │  - Replay through real provider adapters in CI               │
 ├─────────────────────────────────────────────────────────────┤
 │  Layer 2: Integration Tests (DB Verification) ← PRIORITY    │
-│  - Real PostgreSQL/MongoDB via testcontainers               │
+│  - Real PostgreSQL/MongoDB via Docker-managed containers    │
 │  - Verify DB state after each request                       │
 │  - Field completeness assertions                            │
 ├─────────────────────────────────────────────────────────────┤
@@ -80,7 +80,7 @@ go test -v -tags=e2e ./tests/e2e/... -run TestName
 
 ## Layer 2: Integration Tests (DB Verification)
 
-Real database testing with testcontainers. **Priority for data integrity.**
+Real database testing with Docker-managed containers. **Priority for data integrity.**
 
 ```bash
 # Run integration tests (requires Docker)
@@ -89,7 +89,7 @@ go test -v -tags=integration ./tests/integration/...
 
 **Key characteristics:**
 
-- Real PostgreSQL/MongoDB via testcontainers
+- Real PostgreSQL/MongoDB via Docker-managed containers
 - Verify DB state after each request
 - Field completeness assertions
 - Validates audit logging, usage tracking
@@ -226,7 +226,7 @@ jobs:
 1. **Unit tests**: Test business logic in isolation, mock external dependencies
 2. **E2E tests**: Test full request flow with mock providers
 3. **Contract tests**: Validate API compatibility, update golden files when APIs change
-4. **Integration tests**: Verify DB state, use real databases via testcontainers
+4. **Integration tests**: Verify DB state, use real databases via Docker-managed containers
 
 ### When to Update Golden Files
 

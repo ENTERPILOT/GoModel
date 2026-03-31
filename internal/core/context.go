@@ -14,6 +14,8 @@ const (
 	whiteBoxPromptKey contextKey = "white-box-prompt"
 	// executionPlanKey stores the request-scoped execution plan chosen for handling.
 	executionPlanKey contextKey = "execution-plan"
+	// authKeyIDKey stores the internal managed auth key id for the request.
+	authKeyIDKey contextKey = "auth-key-id"
 	// batchPreparationMetadataKey stores request-scoped batch preprocessing metadata.
 	batchPreparationMetadataKey contextKey = "batch-preparation-metadata"
 
@@ -92,6 +94,21 @@ func GetExecutionPlan(ctx context.Context) *ExecutionPlan {
 		}
 	}
 	return nil
+}
+
+// WithAuthKeyID returns a new context with the authenticated managed auth key id attached.
+func WithAuthKeyID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, authKeyIDKey, id)
+}
+
+// GetAuthKeyID retrieves the managed auth key id from the context.
+func GetAuthKeyID(ctx context.Context) string {
+	if v := ctx.Value(authKeyIDKey); v != nil {
+		if id, ok := v.(string); ok {
+			return id
+		}
+	}
+	return ""
 }
 
 // WithBatchPreparationMetadata returns a new context with batch preprocessing metadata attached.

@@ -57,6 +57,10 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 
 			// Read request ID (always set by the request ID middleware in http.go)
 			requestID := req.Header.Get("X-Request-ID")
+			userPath := core.UserPathFromContext(req.Context())
+			if userPath == "" {
+				userPath = "/"
+			}
 
 			// Create initial log entry
 			entry := &LogEntry{
@@ -66,6 +70,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				ClientIP:  c.RealIP(),
 				Method:    req.Method,
 				Path:      req.URL.Path,
+				UserPath:  userPath,
 				Data: &LogData{
 					UserAgent: req.UserAgent(),
 				},
@@ -96,6 +101,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			err := next(c)
 
 			applyExecutionPlan(entry, c.Request().Context())
+			applyAuthentication(entry, c.Request().Context())
 
 			if !auditEnabledForContext(c.Request().Context()) {
 				return err
@@ -160,6 +166,15 @@ func applyExecutionPlan(entry *LogEntry, ctx context.Context) {
 
 	if plan := core.GetExecutionPlan(ctx); plan != nil {
 		enrichEntryWithExecutionPlan(entry, plan)
+	}
+}
+
+func applyAuthentication(entry *LogEntry, ctx context.Context) {
+	if entry == nil || ctx == nil {
+		return
+	}
+	if authKeyID := strings.TrimSpace(core.GetAuthKeyID(ctx)); authKeyID != "" {
+		entry.AuthKeyID = authKeyID
 	}
 }
 
@@ -349,6 +364,66 @@ func EnrichEntryWithExecutionPlan(c *echo.Context, plan *core.ExecutionPlan) {
 	}
 
 	enrichEntryWithExecutionPlan(entry, plan)
+}
+
+// EnrichEntryWithCacheType attaches cache-hit metadata to the live audit entry.
+// The value is intentionally sourced directly from the cache middleware, not
+// inferred from response headers after the fact.
+func EnrichEntryWithCacheType(c *echo.Context, cacheType string) {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return
+	}
+
+	entry, ok := entryVal.(*LogEntry)
+	if !ok || entry == nil {
+		return
+	}
+
+	cacheType = normalizeCacheType(cacheType)
+	if cacheType == "" {
+		return
+	}
+
+	entry.CacheType = cacheType
+}
+
+// EnrichEntryWithAuthMethod records which authentication mechanism was used for the request.
+func EnrichEntryWithAuthMethod(c *echo.Context, method string) {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return
+	}
+	entry, ok := entryVal.(*LogEntry)
+	if !ok || entry == nil {
+		return
+	}
+	method = strings.ToLower(strings.TrimSpace(method))
+	switch method {
+	case AuthMethodAPIKey, AuthMethodMasterKey, AuthMethodNoKey, "unknown":
+	default:
+		return
+	}
+	entry.AuthMethod = method
+}
+
+// EnrichEntryWithAuthKeyID attaches the authenticated managed auth key id to the live audit entry.
+func EnrichEntryWithAuthKeyID(c *echo.Context, authKeyID string) {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return
+	}
+
+	entry, ok := entryVal.(*LogEntry)
+	if !ok || entry == nil {
+		return
+	}
+
+	authKeyID = strings.TrimSpace(authKeyID)
+	if authKeyID == "" {
+		return
+	}
+	entry.AuthKeyID = authKeyID
 }
 
 func auditEnabledForContext(ctx context.Context) bool {

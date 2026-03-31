@@ -273,6 +273,9 @@ func TestSQLiteStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 	if !logEntry.AliasUsed {
 		t.Fatal("AliasUsed = false, want true")
 	}
+	if logEntry.UserPath != "/" {
+		t.Fatalf("UserPath = %q, want /", logEntry.UserPath)
+	}
 }
 
 func TestSQLiteReader_AllowsNullExecutionPlanVersionID(t *testing.T) {
@@ -337,5 +340,223 @@ func TestSQLiteReader_AllowsNullExecutionPlanVersionID(t *testing.T) {
 	}
 	if logs.Entries[0].ExecutionPlanVersionID != "" {
 		t.Fatalf("list ExecutionPlanVersionID = %q, want empty", logs.Entries[0].ExecutionPlanVersionID)
+	}
+}
+
+func TestSQLiteReader_GetLogsFiltersByUserPathSubtree(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = db.Exec(`
+		INSERT INTO audit_logs (
+			id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id,
+			status_code, request_id, client_ip, method, path, user_path, stream, error_type, data
+		) VALUES
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		"match-team",
+		now,
+		0,
+		"gpt-4",
+		"",
+		"openai",
+		0,
+		nil,
+		200,
+		"req-1",
+		"127.0.0.1",
+		"POST",
+		"/v1/chat/completions",
+		"/team/a",
+		0,
+		"",
+		nil,
+		"miss-other",
+		now,
+		0,
+		"gpt-4",
+		"",
+		"openai",
+		0,
+		nil,
+		200,
+		"req-2",
+		"127.0.0.1",
+		"POST",
+		"/v1/chat/completions",
+		"/other",
+		0,
+		"",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("failed to insert audit log rows: %v", err)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create reader: %v", err)
+	}
+
+	logs, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "/team", Limit: 10})
+	if err != nil {
+		t.Fatalf("GetLogs failed: %v", err)
+	}
+	if len(logs.Entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(logs.Entries))
+	}
+	if logs.Entries[0].ID != "match-team" {
+		t.Fatalf("entry id = %q, want match-team", logs.Entries[0].ID)
+	}
+	if logs.Entries[0].UserPath != "/team/a" {
+		t.Fatalf("entry user_path = %q, want /team/a", logs.Entries[0].UserPath)
+	}
+}
+
+func TestSQLiteReader_GetLogsRootUserPathIncludesLegacyNullRows(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = db.Exec(`
+		INSERT INTO audit_logs (
+			id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id,
+			status_code, request_id, client_ip, method, path, user_path, stream, error_type, data
+		) VALUES
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		"legacy-null",
+		now,
+		0,
+		"gpt-4",
+		"",
+		"openai",
+		0,
+		nil,
+		200,
+		"req-legacy",
+		"127.0.0.1",
+		"POST",
+		"/v1/chat/completions",
+		nil,
+		0,
+		"",
+		nil,
+		"root-explicit",
+		now,
+		0,
+		"gpt-4",
+		"",
+		"openai",
+		0,
+		nil,
+		200,
+		"req-root",
+		"127.0.0.1",
+		"POST",
+		"/v1/chat/completions",
+		"/",
+		0,
+		"",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("failed to insert audit log rows: %v", err)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create reader: %v", err)
+	}
+
+	logs, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "/", Limit: 10})
+	if err != nil {
+		t.Fatalf("GetLogs failed: %v", err)
+	}
+	if len(logs.Entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(logs.Entries))
+	}
+}
+
+func TestSQLiteStoreAndReader_PreserveCacheType(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	now := time.Now()
+	if err := store.WriteBatch(ctx, []*LogEntry{
+		{
+			ID:        "cache-exact",
+			Timestamp: now,
+			Model:     "gpt-4",
+			Provider:  "openai",
+			CacheType: CacheTypeExact,
+		},
+		{
+			ID:        "cache-none",
+			Timestamp: now.Add(time.Second),
+			Model:     "gpt-4",
+			Provider:  "openai",
+		},
+	}); err != nil {
+		t.Fatalf("WriteBatch failed: %v", err)
+	}
+
+	var exactCacheType sql.NullString
+	if err := db.QueryRow("SELECT cache_type FROM audit_logs WHERE id = ?", "cache-exact").Scan(&exactCacheType); err != nil {
+		t.Fatalf("query exact cache_type failed: %v", err)
+	}
+	if !exactCacheType.Valid || exactCacheType.String != CacheTypeExact {
+		t.Fatalf("exact cache_type = %#v, want %q", exactCacheType, CacheTypeExact)
+	}
+
+	var noneCacheType sql.NullString
+	if err := db.QueryRow("SELECT cache_type FROM audit_logs WHERE id = ?", "cache-none").Scan(&noneCacheType); err != nil {
+		t.Fatalf("query nil cache_type failed: %v", err)
+	}
+	if noneCacheType.Valid {
+		t.Fatalf("nil cache_type = %#v, want SQL NULL", noneCacheType)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create reader: %v", err)
+	}
+
+	exactEntry, err := reader.GetLogByID(ctx, "cache-exact")
+	if err != nil {
+		t.Fatalf("GetLogByID(exact) failed: %v", err)
+	}
+	if exactEntry == nil || exactEntry.CacheType != CacheTypeExact {
+		t.Fatalf("exact entry cache_type = %#v, want %q", exactEntry, CacheTypeExact)
+	}
+
+	noneEntry, err := reader.GetLogByID(ctx, "cache-none")
+	if err != nil {
+		t.Fatalf("GetLogByID(none) failed: %v", err)
+	}
+	if noneEntry == nil || noneEntry.CacheType != "" {
+		t.Fatalf("none entry cache_type = %#v, want empty", noneEntry)
 	}
 }

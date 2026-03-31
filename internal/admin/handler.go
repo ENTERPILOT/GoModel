@@ -4,6 +4,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -15,6 +16,7 @@ import (
 
 	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
+	"gomodel/internal/authkeys"
 	"gomodel/internal/core"
 	"gomodel/internal/executionplans"
 	"gomodel/internal/guardrails"
@@ -24,16 +26,37 @@ import (
 
 // Handler serves admin API endpoints.
 type Handler struct {
-	usageReader usage.UsageReader
-	auditReader auditlog.Reader
-	registry    *providers.ModelRegistry
-	aliases     *aliases.Service
-	plans       *executionplans.Service
-	guardrails  *guardrails.Registry
+	usageReader   usage.UsageReader
+	auditReader   auditlog.Reader
+	registry      *providers.ModelRegistry
+	authKeys      *authkeys.Service
+	aliases       *aliases.Service
+	plans         *executionplans.Service
+	guardrails    *guardrails.Registry
+	runtimeConfig DashboardConfigResponse
 }
 
 // Option configures the admin API handler.
 type Option func(*Handler)
+
+const (
+	DashboardConfigFeatureFallbackMode  = "FEATURE_FALLBACK_MODE"
+	DashboardConfigLoggingEnabled       = "LOGGING_ENABLED"
+	DashboardConfigUsageEnabled         = "USAGE_ENABLED"
+	DashboardConfigGuardrailsEnabled    = "GUARDRAILS_ENABLED"
+	DashboardConfigRedisURL             = "REDIS_URL"
+	DashboardConfigSemanticCacheEnabled = "SEMANTIC_CACHE_ENABLED"
+)
+
+// DashboardConfigResponse is the allowlisted runtime config contract exposed to the dashboard UI.
+type DashboardConfigResponse struct {
+	FeatureFallbackMode  string `json:"FEATURE_FALLBACK_MODE,omitempty"`
+	LoggingEnabled       string `json:"LOGGING_ENABLED,omitempty"`
+	UsageEnabled         string `json:"USAGE_ENABLED,omitempty"`
+	GuardrailsEnabled    string `json:"GUARDRAILS_ENABLED,omitempty"`
+	RedisURL             string `json:"REDIS_URL,omitempty"`
+	SemanticCacheEnabled string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
+}
 
 // WithAuditReader enables audit log read endpoints.
 func WithAuditReader(reader auditlog.Reader) Option {
@@ -46,6 +69,13 @@ func WithAuditReader(reader auditlog.Reader) Option {
 func WithAliases(service *aliases.Service) Option {
 	return func(h *Handler) {
 		h.aliases = service
+	}
+}
+
+// WithAuthKeys enables managed auth key administration endpoints.
+func WithAuthKeys(service *authkeys.Service) Option {
+	return func(h *Handler) {
+		h.authKeys = service
 	}
 }
 
@@ -63,12 +93,20 @@ func WithGuardrailsRegistry(registry *guardrails.Registry) Option {
 	}
 }
 
+// WithDashboardRuntimeConfig enables the allowlisted dashboard runtime config endpoint.
+func WithDashboardRuntimeConfig(values DashboardConfigResponse) Option {
+	return func(h *Handler) {
+		h.runtimeConfig = normalizeDashboardRuntimeConfig(values)
+	}
+}
+
 // NewHandler creates a new admin API handler.
 // usageReader may be nil if usage tracking is not available.
 func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, options ...Option) *Handler {
 	h := &Handler{
-		usageReader: reader,
-		registry:    registry,
+		usageReader:   reader,
+		registry:      registry,
+		runtimeConfig: DashboardConfigResponse{},
 	}
 
 	for _, opt := range options {
@@ -78,6 +116,21 @@ func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, opt
 	}
 
 	return h
+}
+
+func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardConfigResponse {
+	return DashboardConfigResponse{
+		FeatureFallbackMode:  strings.TrimSpace(values.FeatureFallbackMode),
+		LoggingEnabled:       strings.TrimSpace(values.LoggingEnabled),
+		UsageEnabled:         strings.TrimSpace(values.UsageEnabled),
+		GuardrailsEnabled:    strings.TrimSpace(values.GuardrailsEnabled),
+		RedisURL:             strings.TrimSpace(values.RedisURL),
+		SemanticCacheEnabled: strings.TrimSpace(values.SemanticCacheEnabled),
+	}
+}
+
+func cloneDashboardRuntimeConfig(values DashboardConfigResponse) DashboardConfigResponse {
+	return values
 }
 
 var validIntervals = map[string]bool{
@@ -108,7 +161,21 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 		params.Interval = "daily"
 	}
 
+	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
+	if err != nil {
+		return params, err
+	}
+	params.UserPath = userPath
+
 	return params, nil
+}
+
+func normalizeUserPathQueryParam(fieldName, raw string) (string, error) {
+	userPath, err := core.NormalizeUserPath(raw)
+	if err != nil {
+		return "", core.NewInvalidRequestError("invalid "+fieldName+": "+err.Error(), err)
+	}
+	return userPath, nil
 }
 
 // parseDateRangeParams extracts common date range query params.
@@ -302,6 +369,7 @@ func (h *Handler) UsageByModel(c *echo.Context) error {
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
 // @Param        model       query     string  false  "Filter by model name"
 // @Param        provider    query     string  false  "Filter by provider"
+// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        search      query     string  false  "Search across model, provider, request_id, provider_id"
 // @Param        limit       query     int     false  "Page size (default 50, max 200)"
 // @Param        offset      query     int     false  "Offset for pagination"
@@ -364,6 +432,7 @@ func (h *Handler) UsageLog(c *echo.Context) error {
 // @Param        provider     query     string  false  "Filter by provider"
 // @Param        method       query     string  false  "Filter by HTTP method"
 // @Param        path         query     string  false  "Filter by request path"
+// @Param        user_path    query     string  false  "Filter by tracked user path subtree"
 // @Param        error_type   query     string  false  "Filter by error type"
 // @Param        status_code  query     int     false  "Filter by status code"
 // @Param        stream       query     bool    false  "Filter by stream mode (true/false)"
@@ -385,6 +454,10 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
+	if err != nil {
+		return handleError(c, err)
+	}
 
 	params := auditlog.LogQueryParams{
 		QueryParams: auditlog.QueryParams{
@@ -395,6 +468,7 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 		Provider:  c.QueryParam("provider"),
 		Method:    strings.ToUpper(c.QueryParam("method")),
 		Path:      c.QueryParam("path"),
+		UserPath:  userPath,
 		ErrorType: c.QueryParam("error_type"),
 		Search:    c.QueryParam("search"),
 	}
@@ -550,6 +624,11 @@ func (h *Handler) ListCategories(c *echo.Context) error {
 	return c.JSON(http.StatusOK, h.registry.GetCategoryCounts())
 }
 
+// DashboardConfig handles GET /admin/api/v1/dashboard/config
+func (h *Handler) DashboardConfig(c *echo.Context) error {
+	return c.JSON(http.StatusOK, cloneDashboardRuntimeConfig(h.runtimeConfig))
+}
+
 type upsertAliasRequest struct {
 	TargetModel    string `json:"target_model"`
 	TargetProvider string `json:"target_provider,omitempty"`
@@ -560,9 +639,16 @@ type upsertAliasRequest struct {
 type createExecutionPlanRequest struct {
 	ScopeProvider string                 `json:"scope_provider,omitempty"`
 	ScopeModel    string                 `json:"scope_model,omitempty"`
+	ScopeUserPath string                 `json:"scope_user_path,omitempty"`
 	Name          string                 `json:"name"`
 	Description   string                 `json:"description,omitempty"`
 	Payload       executionplans.Payload `json:"plan_payload"`
+}
+
+type createAuthKeyRequest struct {
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 }
 
 func featureUnavailableError(message string) error {
@@ -572,6 +658,10 @@ func featureUnavailableError(message string) error {
 
 func (h *Handler) aliasesUnavailableError() error {
 	return featureUnavailableError("aliases feature is unavailable")
+}
+
+func (h *Handler) authKeysUnavailableError() error {
+	return featureUnavailableError("auth keys feature is unavailable")
 }
 
 func (h *Handler) executionPlansUnavailableError() error {
@@ -596,6 +686,98 @@ func executionPlanWriteError(err error) error {
 		return core.NewInvalidRequestError(err.Error(), err)
 	}
 	return err
+}
+
+func authKeyWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if authkeys.IsValidationError(err) {
+		return core.NewInvalidRequestError(err.Error(), err)
+	}
+	return err
+}
+
+func deactivateByID(
+	c *echo.Context,
+	unavailableErr error,
+	idLabel string,
+	notFoundErr error,
+	notFoundMessage string,
+	deactivate func(context.Context, string) error,
+	writeError func(error) error,
+) error {
+	if unavailableErr != nil {
+		return handleError(c, unavailableErr)
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return handleError(c, core.NewInvalidRequestError(idLabel+" id is required", nil))
+	}
+
+	if err := deactivate(c.Request().Context(), id); err != nil {
+		if errors.Is(err, notFoundErr) {
+			return handleError(c, core.NewNotFoundError(notFoundMessage+id))
+		}
+		return handleError(c, writeError(err))
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// ListAuthKeys handles GET /admin/api/v1/auth-keys
+func (h *Handler) ListAuthKeys(c *echo.Context) error {
+	if h.authKeys == nil {
+		return handleError(c, h.authKeysUnavailableError())
+	}
+	views := h.authKeys.ListViews()
+	if views == nil {
+		views = []authkeys.View{}
+	}
+	return c.JSON(http.StatusOK, views)
+}
+
+// CreateAuthKey handles POST /admin/api/v1/auth-keys
+func (h *Handler) CreateAuthKey(c *echo.Context) error {
+	if h.authKeys == nil {
+		return handleError(c, h.authKeysUnavailableError())
+	}
+
+	var req createAuthKeyRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+
+	issued, err := h.authKeys.Create(c.Request().Context(), authkeys.CreateInput{
+		Name:        req.Name,
+		Description: req.Description,
+		ExpiresAt:   req.ExpiresAt,
+	})
+	if err != nil {
+		return handleError(c, authKeyWriteError(err))
+	}
+	if issued == nil {
+		requestID := strings.TrimSpace(core.GetRequestID(c.Request().Context()))
+		slog.Error("auth key service returned nil issued key", "request_id", requestID, "path", c.Request().URL.Path)
+		return c.JSON(http.StatusInternalServerError, (&core.GatewayError{
+			Type:       core.ErrorType("internal_error"),
+			Message:    "auth key creation failed unexpectedly",
+			StatusCode: http.StatusInternalServerError,
+		}).WithCode("auth_key_issue_failed").ToJSON())
+	}
+	return c.JSON(http.StatusCreated, issued)
+}
+
+// DeactivateAuthKey handles POST /admin/api/v1/auth-keys/:id/deactivate
+func (h *Handler) DeactivateAuthKey(c *echo.Context) error {
+	var unavailableErr error
+	var deactivate func(context.Context, string) error
+	if h.authKeys == nil {
+		unavailableErr = h.authKeysUnavailableError()
+	} else {
+		deactivate = h.authKeys.Deactivate
+	}
+	return deactivateByID(c, unavailableErr, "auth key", authkeys.ErrNotFound, "auth key not found: ", deactivate, authKeyWriteError)
 }
 
 // ListAliases handles GET /admin/api/v1/aliases
@@ -687,6 +869,28 @@ func (h *Handler) ListExecutionPlans(c *echo.Context) error {
 	return c.JSON(http.StatusOK, views)
 }
 
+// GetExecutionPlan handles GET /admin/api/v1/execution-plans/:id
+func (h *Handler) GetExecutionPlan(c *echo.Context) error {
+	if h.plans == nil {
+		return handleError(c, h.executionPlansUnavailableError())
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return handleError(c, core.NewInvalidRequestError("execution plan id is required", nil))
+	}
+
+	view, err := h.plans.GetView(c.Request().Context(), id)
+	if err != nil {
+		if errors.Is(err, executionplans.ErrNotFound) {
+			return handleError(c, core.NewNotFoundError("workflow not found: "+id))
+		}
+		return handleError(c, err)
+	}
+
+	return c.JSON(http.StatusOK, view)
+}
+
 // ListExecutionPlanGuardrails handles GET /admin/api/v1/execution-plans/guardrails
 func (h *Handler) ListExecutionPlanGuardrails(c *echo.Context) error {
 	if h.guardrails == nil {
@@ -707,6 +911,11 @@ func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
+	scopeUserPath, err := normalizeUserPathQueryParam("scope_user_path", req.ScopeUserPath)
+	if err != nil {
+		return handleError(c, err)
+	}
+
 	if err := h.validateExecutionPlanScope(req.ScopeProvider, req.ScopeModel); err != nil {
 		return handleError(c, err)
 	}
@@ -719,6 +928,7 @@ func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
 		Scope: executionplans.Scope{
 			Provider: req.ScopeProvider,
 			Model:    req.ScopeModel,
+			UserPath: scopeUserPath,
 		},
 		Activate:    true,
 		Name:        req.Name,
@@ -736,22 +946,14 @@ func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
 
 // DeactivateExecutionPlan handles POST /admin/api/v1/execution-plans/:id/deactivate
 func (h *Handler) DeactivateExecutionPlan(c *echo.Context) error {
+	var unavailableErr error
+	var deactivate func(context.Context, string) error
 	if h.plans == nil {
-		return handleError(c, h.executionPlansUnavailableError())
+		unavailableErr = h.executionPlansUnavailableError()
+	} else {
+		deactivate = h.plans.Deactivate
 	}
-
-	id := strings.TrimSpace(c.Param("id"))
-	if id == "" {
-		return handleError(c, core.NewInvalidRequestError("execution plan id is required", nil))
-	}
-
-	if err := h.plans.Deactivate(c.Request().Context(), id); err != nil {
-		if errors.Is(err, executionplans.ErrNotFound) {
-			return handleError(c, core.NewNotFoundError("workflow not found: "+id))
-		}
-		return handleError(c, executionPlanWriteError(err))
-	}
-	return c.NoContent(http.StatusNoContent)
+	return deactivateByID(c, unavailableErr, "execution plan", executionplans.ErrNotFound, "workflow not found: ", deactivate, executionPlanWriteError)
 }
 
 func (h *Handler) validateExecutionPlanGuardrails(payload executionplans.Payload) error {

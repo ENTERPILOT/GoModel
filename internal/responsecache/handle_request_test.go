@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/config"
+	"gomodel/internal/auditlog"
 	"gomodel/internal/cache"
 	"gomodel/internal/core"
 )
@@ -126,5 +127,51 @@ func TestHandleRequest_FallbackUsedSkipsCacheWrites(t *testing.T) {
 	}
 	if handlerCalls != 2 {
 		t.Fatalf("expected second request to execute handler again, got %d calls", handlerCalls)
+	}
+}
+
+func TestHandleRequest_ExactHitMarksAuditEntryCacheType(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+
+	m := &ResponseCacheMiddleware{
+		simple: newSimpleCacheMiddleware(store, time.Hour),
+	}
+
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"mark-exact-cache-type"}]}`)
+	e := echo.New()
+
+	run := func() (*httptest.ResponseRecorder, *auditlog.LogEntry) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		entry := &auditlog.LogEntry{ID: "audit-entry"}
+		c.Set(string(auditlog.LogEntryKey), entry)
+		if err := m.HandleRequest(c, body, func() error {
+			return c.JSON(http.StatusOK, map[string]string{"n": "1"})
+		}); err != nil {
+			t.Fatalf("HandleRequest: %v", err)
+		}
+		return rec, entry
+	}
+
+	rec1, entry1 := run()
+	if rec1.Header().Get("X-Cache") != "" {
+		t.Fatalf("first request should miss exact cache, got X-Cache=%q", rec1.Header().Get("X-Cache"))
+	}
+	if entry1.CacheType != "" {
+		t.Fatalf("first request CacheType = %q, want empty", entry1.CacheType)
+	}
+
+	m.simple.wg.Wait()
+
+	rec2, entry2 := run()
+	if rec2.Header().Get("X-Cache") != "HIT (exact)" {
+		t.Fatalf("second request should be exact hit, got X-Cache=%q", rec2.Header().Get("X-Cache"))
+	}
+	if entry2.CacheType != auditlog.CacheTypeExact {
+		t.Fatalf("second request CacheType = %q, want %q", entry2.CacheType, auditlog.CacheTypeExact)
 	}
 }

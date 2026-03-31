@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +11,31 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gomodel/internal/auditlog"
+	"gomodel/internal/core"
 )
+
+type mockAuthenticator struct {
+	enabled   bool
+	tokenToID map[string]string
+	err       error
+}
+
+func (m mockAuthenticator) Enabled() bool {
+	return m.enabled
+}
+
+func (m mockAuthenticator) Authenticate(_ context.Context, token string) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+	id, ok := m.tokenToID[token]
+	if !ok {
+		return "", assert.AnError
+	}
+	return id, nil
+}
 
 func TestAuthMiddleware(t *testing.T) {
 	tests := []struct {
@@ -150,6 +175,74 @@ func TestAuthMiddleware_Integration(t *testing.T) {
 	})
 }
 
+func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *testing.T) {
+	e := echo.New()
+	testHandler := func(c *echo.Context) error {
+		if got := core.GetAuthKeyID(c.Request().Context()); got != "key-123" {
+			t.Fatalf("auth key id in context = %q, want key-123", got)
+		}
+		entryVal := c.Get(string(auditlog.LogEntryKey))
+		entry, ok := entryVal.(*auditlog.LogEntry)
+		if !ok || entry == nil {
+			t.Fatal("audit log entry missing from context")
+		}
+		if entry.AuthKeyID != "key-123" {
+			t.Fatalf("audit entry auth key id = %q, want key-123", entry.AuthKeyID)
+		}
+		if entry.AuthMethod != auditlog.AuthMethodAPIKey {
+			t.Fatalf("audit entry auth method = %q, want %q", entry.AuthMethod, auditlog.AuthMethodAPIKey)
+		}
+		return c.String(http.StatusOK, "ok")
+	}
+
+	handler := AuthMiddlewareWithAuthenticator("", mockAuthenticator{
+		enabled:   true,
+		tokenToID: map[string]string{"sk_gom_token": "key-123"},
+	}, nil)(testHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_token")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "ok", rec.Body.String())
+}
+
+func TestAuthMiddlewareWithAuthenticator_ManagedKeyFailureUsesGenericClientMessage(t *testing.T) {
+	e := echo.New()
+	handler := AuthMiddlewareWithAuthenticator("", mockAuthenticator{
+		enabled: true,
+		err:     context.DeadlineExceeded,
+	}, nil)(func(c *echo.Context) error {
+		t.Fatal("next handler should not be called")
+		return nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_token")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.JSONEq(t, `{"error":{"message":"authentication failed","type":"authentication_error","param":null,"code":null}}`, rec.Body.String())
+
+	entryVal := c.Get(string(auditlog.LogEntryKey))
+	entry, ok := entryVal.(*auditlog.LogEntry)
+	require.True(t, ok)
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.Data)
+	assert.Equal(t, auditlog.AuthMethodAPIKey, entry.AuthMethod)
+	assert.Equal(t, string(core.ErrorTypeAuthentication), entry.ErrorType)
+	assert.Equal(t, "authentication unavailable", entry.Data.ErrorMessage)
+}
+
 func TestAuthMiddleware_SkipPaths(t *testing.T) {
 	t.Run("skips authentication for specified paths", func(t *testing.T) {
 		e := echo.New()
@@ -214,9 +307,9 @@ func TestAuthMiddleware_WildcardSkipPaths(t *testing.T) {
 	skipPaths := []string{"/admin/dashboard", "/admin/dashboard/*", "/admin/static/*"}
 
 	tests := []struct {
-		name       string
-		path       string
-		wantSkip   bool
+		name     string
+		path     string
+		wantSkip bool
 	}{
 		{
 			name:     "exact match /admin/dashboard",
@@ -270,6 +363,31 @@ func TestAuthMiddleware_WildcardSkipPaths(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAuthMiddleware_SkipPathEnrichesNoKeyAuditMethod(t *testing.T) {
+	e := echo.New()
+	handler := AuthMiddlewareWithAuthenticator("secret-key", nil, []string{"/health"})(func(c *echo.Context) error {
+		entryVal := c.Get(string(auditlog.LogEntryKey))
+		entry, ok := entryVal.(*auditlog.LogEntry)
+		if !ok || entry == nil {
+			t.Fatal("audit log entry missing from context")
+		}
+		if entry.AuthMethod != auditlog.AuthMethodNoKey {
+			t.Fatalf("audit entry auth method = %q, want %q", entry.AuthMethod, auditlog.AuthMethodNoKey)
+		}
+		return c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "ok", rec.Body.String())
 }
 
 func TestAuthMiddleware_ConstantTimeComparison(t *testing.T) {

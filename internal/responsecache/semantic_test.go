@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/config"
+	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 )
 
@@ -454,5 +455,37 @@ func TestShouldSkipAllCache_CacheControlNoStore(t *testing.T) {
 	req.Header.Set("Cache-Control", "private, no-store, max-age=0")
 	if !ShouldSkipAllCache(req) {
 		t.Fatal("expected ShouldSkipAllCache for Cache-Control: no-store")
+	}
+}
+
+func TestSemanticCacheMiddleware_HitMarksAuditEntryCacheType(t *testing.T) {
+	m, _, _ := newTestSemanticMiddleware(0.90, 10, false)
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"semantic-cache-type"}]}`)
+
+	rec1 := serveSemanticRequest(t, m, body, "")
+	if rec1.Header().Get("X-Cache") != "" {
+		t.Fatalf("first request should miss semantic cache, got X-Cache=%q", rec1.Header().Get("X-Cache"))
+	}
+	m.wg.Wait()
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	entry := &auditlog.LogEntry{ID: "semantic-audit-entry"}
+	c.Set(string(auditlog.LogEntryKey), entry)
+
+	if err := m.Handle(c, body, func() error {
+		return c.JSON(http.StatusOK, map[string]string{"answer": "42"})
+	}); err != nil {
+		t.Fatalf("Handle error: %v", err)
+	}
+
+	if rec.Header().Get("X-Cache") != "HIT (semantic)" {
+		t.Fatalf("expected semantic cache hit, got X-Cache=%q", rec.Header().Get("X-Cache"))
+	}
+	if entry.CacheType != auditlog.CacheTypeSemantic {
+		t.Fatalf("CacheType = %q, want %q", entry.CacheType, auditlog.CacheTypeSemantic)
 	}
 }

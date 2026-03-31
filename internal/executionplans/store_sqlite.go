@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 			id TEXT PRIMARY KEY,
 			scope_provider TEXT,
 			scope_model TEXT,
+			scope_user_path TEXT,
 			scope_key TEXT NOT NULL,
 			version INTEGER NOT NULL,
 			active INTEGER NOT NULL DEFAULT 1,
@@ -49,13 +51,24 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 			return nil, fmt.Errorf("initialize execution plan versions table: %w", err)
 		}
 	}
+	if _, err := db.Exec(`ALTER TABLE execution_plan_versions ADD COLUMN scope_user_path TEXT`); err != nil && !isSQLiteDuplicateColumnError(err) {
+		return nil, fmt.Errorf("initialize execution plan versions table: %w", err)
+	}
 
 	return &SQLiteStore{db: db}, nil
 }
 
+func isSQLiteDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "duplicate column") || strings.Contains(message, "already exists")
+}
+
 func (s *SQLiteStore) ListActive(ctx context.Context) ([]Version, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, scope_provider, scope_model, scope_key, version, active, name, description, plan_payload, plan_hash, created_at
+		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, name, description, plan_payload, plan_hash, created_at
 		FROM execution_plan_versions
 		WHERE active = 1
 		ORDER BY created_at DESC, id DESC
@@ -71,7 +84,7 @@ func (s *SQLiteStore) ListActive(ctx context.Context) ([]Version, error) {
 
 func (s *SQLiteStore) Get(ctx context.Context, id string) (*Version, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, scope_provider, scope_model, scope_key, version, active, name, description, plan_payload, plan_hash, created_at
+		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, name, description, plan_payload, plan_hash, created_at
 		FROM execution_plan_versions
 		WHERE id = ?
 	`, id)
@@ -147,12 +160,13 @@ func (s *SQLiteStore) Create(ctx context.Context, input CreateInput) (*Version, 
 
 	if _, err := conn.ExecContext(ctx, `
 		INSERT INTO execution_plan_versions (
-			id, scope_provider, scope_model, scope_key, version, active, name, description, plan_payload, plan_hash, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, scope_provider, scope_model, scope_user_path, scope_key, version, active, name, description, plan_payload, plan_hash, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		version.ID,
 		nullableString(version.Scope.Provider),
 		nullableString(version.Scope.Model),
+		nullableString(version.Scope.UserPath),
 		version.ScopeKey,
 		version.Version,
 		boolToSQLite(version.Active),
@@ -202,6 +216,7 @@ func scanSQLiteVersion(scanner interface {
 		version       Version
 		scopeProvider sql.NullString
 		scopeModel    sql.NullString
+		scopeUserPath sql.NullString
 		active        int
 		payloadJSON   string
 		createdAtUnix int64
@@ -211,6 +226,7 @@ func scanSQLiteVersion(scanner interface {
 		&version.ID,
 		&scopeProvider,
 		&scopeModel,
+		&scopeUserPath,
 		&version.ScopeKey,
 		&version.Version,
 		&active,
@@ -226,6 +242,7 @@ func scanSQLiteVersion(scanner interface {
 	version.Scope = Scope{
 		Provider: scopeProvider.String,
 		Model:    scopeModel.String,
+		UserPath: storedScopeUserPath(version.ScopeKey, scopeUserPath.String),
 	}
 	version.Active = active != 0
 	version.CreatedAt = time.Unix(createdAtUnix, 0).UTC()

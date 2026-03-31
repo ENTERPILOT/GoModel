@@ -40,6 +40,7 @@ type UsageEntry struct {
 	Model    string `json:"model" bson:"model"`
 	Provider string `json:"provider" bson:"provider"`
 	Endpoint string `json:"endpoint" bson:"endpoint"`
+	UserPath string `json:"user_path,omitempty" bson:"user_path,omitempty"`
 
 	// Standard token counts (normalized across providers)
 	InputTokens  int `json:"input_tokens" bson:"input_tokens"`

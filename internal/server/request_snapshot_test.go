@@ -59,6 +59,7 @@ func TestRequestSnapshotCapture_SetsSnapshotAndSemantics(t *testing.T) {
 	assert.Equal(t, "/v1/chat/completions", capturedFrame.Path)
 	assert.Equal(t, "application/json", capturedFrame.ContentType)
 	assert.Equal(t, "req-123", capturedFrame.RequestID)
+	assert.Equal(t, "", capturedFrame.UserPath)
 	assert.Equal(t, []string{"bar"}, capturedFrame.GetQueryParams()["foo"])
 	assert.Equal(t, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00", capturedFrame.GetTraceMetadata()["Traceparent"])
 	assert.JSONEq(t, reqBody, string(capturedFrame.CapturedBody()))
@@ -73,6 +74,28 @@ func TestRequestSnapshotCapture_SetsSnapshotAndSemantics(t *testing.T) {
 	assert.Nil(t, capturedEnv.CachedResponsesRequest())
 	assert.Nil(t, capturedEnv.CachedEmbeddingRequest())
 	assert.Nil(t, capturedEnv.CachedBatchRequest())
+}
+
+func TestRequestSnapshotCapture_NormalizesUserPathHeader(t *testing.T) {
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(core.UserPathHeader, " team//alpha/user/ ")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	var capturedFrame *core.RequestSnapshot
+	handler := RequestSnapshotCapture()(func(c *echo.Context) error {
+		capturedFrame = core.GetRequestSnapshot(c.Request().Context())
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	require.NotNil(t, capturedFrame)
+	assert.Equal(t, "/team/alpha/user", capturedFrame.UserPath)
+	assert.Equal(t, "/team/alpha/user", c.Request().Header.Get(core.UserPathHeader))
 }
 
 func TestRequestSnapshotCapture_PreservesPassthroughRouteParams(t *testing.T) {

@@ -47,7 +47,7 @@ test:
 test-e2e:
 	go test -v -tags=e2e ./tests/e2e/...
 
-# Run integration tests (requires Docker for testcontainers)
+# Run integration tests (requires Docker)
 test-integration:
 	go test -v -tags=integration -timeout=10m ./tests/integration/...
 

@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"time"
 
+	"gomodel/internal/core"
+
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -25,11 +27,15 @@ type mongoLogRow struct {
 	Provider               string    `bson:"provider"`
 	AliasUsed              bool      `bson:"alias_used"`
 	ExecutionPlanVersionID string    `bson:"execution_plan_version_id"`
+	CacheType              string    `bson:"cache_type"`
 	StatusCode             int       `bson:"status_code"`
 	RequestID              string    `bson:"request_id"`
+	AuthKeyID              string    `bson:"auth_key_id"`
+	AuthMethod             string    `bson:"auth_method"`
 	ClientIP               string    `bson:"client_ip"`
 	Method                 string    `bson:"method"`
 	Path                   string    `bson:"path"`
+	UserPath               string    `bson:"user_path"`
 	Stream                 bool      `bson:"stream"`
 	ErrorType              string    `bson:"error_type"`
 	Data                   *LogData  `bson:"data"`
@@ -45,11 +51,15 @@ func (r mongoLogRow) toLogEntry() *LogEntry {
 		Provider:               r.Provider,
 		AliasUsed:              r.AliasUsed,
 		ExecutionPlanVersionID: r.ExecutionPlanVersionID,
+		CacheType:              normalizeCacheType(r.CacheType),
 		StatusCode:             r.StatusCode,
 		RequestID:              r.RequestID,
+		AuthKeyID:              r.AuthKeyID,
+		AuthMethod:             r.AuthMethod,
 		ClientIP:               r.ClientIP,
 		Method:                 r.Method,
 		Path:                   r.Path,
+		UserPath:               r.UserPath,
 		Stream:                 r.Stream,
 		ErrorType:              r.ErrorType,
 		Data:                   sanitizeLogData(r.Data),
@@ -72,6 +82,26 @@ func NewMongoDBReader(database *mongo.Database) (*MongoDBReader, error) {
 		return nil, fmt.Errorf("database is required")
 	}
 	return &MongoDBReader{collection: database.Collection("audit_logs")}, nil
+}
+
+func mongoUserPathMatchFilter(userPath string) bson.E {
+	regexFilter := bson.D{{
+		Key: "user_path",
+		Value: bson.D{
+			{Key: "$regex", Value: auditUserPathSubtreeRegex(userPath)},
+		},
+	}}
+	if userPath != "/" {
+		return regexFilter[0]
+	}
+	return bson.E{
+		Key: "$or",
+		Value: bson.A{
+			regexFilter,
+			bson.D{{Key: "user_path", Value: bson.D{{Key: "$exists", Value: false}}}},
+			bson.D{{Key: "user_path", Value: nil}},
+		},
+	}
 }
 
 // GetLogs returns a paginated list of audit log entries.
@@ -113,6 +143,11 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 			},
 		})
 	}
+	if userPath, err := normalizeAuditUserPathFilter(params.UserPath); err != nil {
+		return nil, core.NewInvalidRequestError(err.Error(), err)
+	} else if userPath != "" {
+		matchFilters = append(matchFilters, mongoUserPathMatchFilter(userPath))
+	}
 	if params.ErrorType != "" {
 		matchFilters = append(matchFilters, bson.E{
 			Key: "error_type",
@@ -133,6 +168,7 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 		regex := bson.D{{Key: "$regex", Value: pattern}, {Key: "$options", Value: "i"}}
 		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
 			bson.D{{Key: "request_id", Value: regex}},
+			bson.D{{Key: "auth_key_id", Value: regex}},
 			bson.D{{Key: "model", Value: regex}},
 			bson.D{{Key: "provider", Value: regex}},
 			bson.D{{Key: "method", Value: regex}},

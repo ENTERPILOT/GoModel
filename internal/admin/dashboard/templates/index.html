@@ -15,9 +15,7 @@
     </div>
 
     <!-- Auth Error Banner -->
-    <div class="alert alert-warning" x-show="authError">
-        Authentication required. Enter your API key in the sidebar to view data.
-    </div>
+    {{template "auth-banner" .}}
 
     <!-- Summary Cards -->
     <div class="cards">
@@ -127,9 +125,7 @@
     </div>
 
     <!-- Auth Error Banner -->
-    <div class="alert alert-warning" x-show="authError">
-        Authentication required. Enter your API key in the sidebar to view data.
-    </div>
+    {{template "auth-banner" .}}
 
     <!-- Usage by Model Chart -->
     <div class="model-chart-section" x-show="modelUsage.length > 0">
@@ -156,6 +152,7 @@
                     <option :value="p" x-text="p"></option>
                 </template>
             </select>
+            <input type="text" placeholder="User path /team/alpha" aria-label="Filter by user path" x-model="usageLogUserPath" @input.debounce.300ms="fetchUsageLog(true)" class="filter-input">
         </div>
         <div class="table-wrapper" x-show="usageLog.entries.length > 0">
             <table class="data-table usage-log-table">
@@ -164,6 +161,7 @@
                         <th>Timestamp</th>
                         <th>Model</th>
                         <th>Provider</th>
+                        <th>User Path</th>
                         <th class="col-price" x-text="usageMode === 'costs' ? 'Input Cost' : 'Input'"></th>
                         <th class="col-price" x-text="usageMode === 'costs' ? 'Output Cost' : 'Output'"></th>
                         <th class="col-price" x-text="usageMode === 'costs' ? 'Total Cost' : 'Total'"></th>
@@ -176,6 +174,7 @@
                             <td class="mono usage-ts" x-text="formatTimestamp(entry.timestamp)" :title="timestampTitle(entry.timestamp)"></td>
                             <td class="mono" x-text="entry.model"></td>
                             <td><span class="provider-badge" x-text="entry.provider"></span></td>
+                            <td class="mono" x-text="entry.user_path || '-'"></td>
                             <td class="col-price"
                                 x-text="usageMode === 'costs' ? formatCost(entry.input_cost) : formatNumber(entry.input_tokens)"
                                 :title="usageMode === 'costs' ? formatNumber(entry.input_tokens) + ' tokens' : ''"></td>
@@ -199,13 +198,7 @@
         </div>
         <p class="empty-state" x-show="usageLog.entries.length === 0 && !loading && !authError">No usage log entries found.</p>
         <!-- Pagination -->
-        <div class="pagination" x-show="usageLog.total > 0">
-            <span class="pagination-info" x-text="'Showing ' + (usageLog.offset + 1) + '-' + Math.min(usageLog.offset + usageLog.limit, usageLog.total) + ' of ' + usageLog.total"></span>
-            <div class="pagination-buttons">
-                <button class="pagination-btn" :disabled="usageLog.offset === 0" @click="usageLogPrevPage()">Prev</button>
-                <button class="pagination-btn" :disabled="usageLog.offset + usageLog.limit >= usageLog.total" @click="usageLogNextPage()">Next</button>
-            </div>
-        </div>
+        {{template "pagination" "usageLog"}}
     </div>
 </div>
 
@@ -216,25 +209,8 @@
     </div>
 
     <div class="settings-panel">
-        <div class="settings-panel-header" x-data="{ timezoneHelpOpen: false }">
-            <div>
-                <div class="settings-panel-title-row">
-                    <h3>Timezone</h3>
-                    <button type="button"
-                            class="timezone-help-toggle"
-                            :class="{ 'is-open': timezoneHelpOpen }"
-                            :aria-label="timezoneHelpOpen ? 'Hide timezone help' : 'Show timezone help'"
-                            :aria-expanded="timezoneHelpOpen.toString()"
-                            aria-controls="timezone-help-copy"
-                            :title="timezoneHelpOpen ? 'Hide timezone help' : 'Show timezone help'"
-                            @click="timezoneHelpOpen = !timezoneHelpOpen">
-                        <span class="timezone-help-toggle-icon" x-text="timezoneHelpOpen ? '−' : '?'"></span>
-                    </button>
-                </div>
-                <p id="timezone-help-copy" class="settings-panel-copy settings-panel-copy-collapsible" x-show="timezoneHelpOpen" x-transition.opacity.duration.200ms>
-                    Day-based analytics, charts, and date filters use your effective timezone. Usage and audit logs keep UTC in the hover title while rendering row timestamps in your effective timezone.
-                </p>
-            </div>
+        <div class="settings-panel-header">
+            {{template "helper-disclosure" "{ heading: 'Timezone', open: false, copyId: 'timezone-help-copy', showLabel: 'Show timezone help', hideLabel: 'Hide timezone help', text: 'Day-based analytics, charts, and date filters use your effective timezone. Usage and audit logs keep UTC in the hover title while rendering row timestamps in your effective timezone.' }"}}
         </div>
 
         <div class="settings-form-grid">
@@ -254,6 +230,142 @@
     </div>
 </div>
 
+<!-- API Keys Page -->
+<div x-show="page==='auth-keys'">
+    <div class="page-header">
+        <h2>API Keys</h2>
+        <div class="page-header-controls">
+            <button type="button" class="pagination-btn pagination-btn-primary"
+                x-show="authKeysAvailable && !authError"
+                :disabled="authKeyFormSubmitting"
+                @click="if (!authKeyFormSubmitting) openAuthKeyForm()">Create API Key</button>
+        </div>
+    </div>
+
+    {{template "auth-banner" .}}
+
+    <div class="alert alert-warning" x-show="!authKeysAvailable && !authError">
+        API key management is unavailable.
+    </div>
+    <p class="alias-form-error" x-show="authKeyError && !authError" x-text="authKeyError"></p>
+    <p class="alias-form-hint" x-show="authKeyNotice && !authKeyFormOpen" x-text="authKeyNotice"></p>
+
+    <p class="alias-form-hint auth-keys-help-notice" x-show="authKeysAvailable && !authError">
+        Managed API keys authenticate requests to the gateway. Deactivation is permanent — create a new key if access needs to be restored.
+    </p>
+
+    <div class="model-alias-editor" x-show="authKeyFormOpen">
+        <form class="alias-form" @submit.prevent="submitAuthKeyForm()">
+            <div class="aliases-editor-header">
+                <div>
+                    <p class="alias-form-kicker">Managed key</p>
+                    <h3>Create API Key</h3>
+                </div>
+                <button type="button" class="table-action-btn alias-close-btn"
+                    aria-label="Close" @click="closeAuthKeyForm()">&#x2715;</button>
+            </div>
+
+            <div class="auth-key-issued-banner" x-show="authKeyIssuedValue">
+                <p class="auth-key-issued-warning">
+                    Store this key securely &mdash; it won&rsquo;t be shown again.
+                </p>
+                <div class="auth-key-issued-value-row">
+                    <code class="auth-key-issued-token" x-text="authKeyIssuedValue"></code>
+                    <button type="button" class="pagination-btn auth-key-copy-btn"
+                        :class="{ 'auth-key-copy-btn-copied': authKeyCopied }"
+                        @click="copyAuthKeyValue()">
+                        <template x-if="!authKeyCopied">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </template>
+                        <template x-if="authKeyCopied">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>
+                        </template>
+                        <span x-text="authKeyCopied ? 'Copied' : 'Copy'"></span>
+                    </button>
+                </div>
+                <p class="alias-form-error" x-show="authKeyCopyError">
+                    Unable to copy the key automatically. Copy it manually.
+                </p>
+                <div class="alias-form-actions">
+                    <button type="button" class="pagination-btn pagination-btn-primary"
+                        @click="dismissIssuedKey()">Done, I&rsquo;ve stored it</button>
+                </div>
+            </div>
+
+            <div x-show="!authKeyIssuedValue">
+                <div class="alias-form-grid">
+                    <label class="alias-form-field">
+                        <span>Name <span class="alias-form-hint">(required)</span></span>
+                        <input type="text" class="filter-input" placeholder="e.g. ci-deploy"
+                            x-model="authKeyForm.name" autocomplete="off">
+                    </label>
+                    <label class="alias-form-field">
+                        <span>Expires <span class="alias-form-hint">(optional, valid through the selected date)</span></span>
+                        <input type="date" class="filter-input" x-model="authKeyForm.expires_at">
+                    </label>
+                </div>
+                <label class="alias-form-field">
+                    <span>Description (optional)</span>
+                    <textarea rows="2" class="alias-form-textarea"
+                        placeholder="What is this key used for?"
+                        x-model="authKeyForm.description"></textarea>
+                </label>
+                <p class="alias-form-error" x-show="authKeyError" x-text="authKeyError"></p>
+                <div class="alias-form-actions">
+                    <button type="submit" class="pagination-btn pagination-btn-primary"
+                        :disabled="authKeyFormSubmitting"
+                        x-text="authKeyFormSubmitting ? 'Creating...' : 'Create API Key'"></button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <div class="table-wrapper" x-show="authKeys.length > 0 && authKeysAvailable">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Description</th>
+                    <th>Token</th>
+                    <th>Status</th>
+                    <th>Expires</th>
+                    <th>Created</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="key in authKeys" :key="key.id">
+                    <tr>
+                        <td x-text="key.name"></td>
+                        <td class="auth-key-description" x-text="key.description || '\u2014'"></td>
+                        <td><code class="auth-key-redacted" x-text="key.redacted_value"></code></td>
+                        <td>
+                            <span class="auth-key-status-badge"
+                                :class="key.active ? 'auth-key-status-active' : 'auth-key-status-inactive'"
+                                x-text="key.active ? 'Active' : 'Inactive'"></span>
+                        </td>
+                        <td :title="key.expires_at ? formatTimestampUTC(key.expires_at) : ''"
+                            x-text="key.expires_at ? formatDateUTC(key.expires_at) : '\u2014'"></td>
+                        <td x-text="formatTimestamp(key.created_at)"></td>
+                        <td>
+                            <button type="button" class="table-action-btn table-action-btn-danger"
+                                x-show="key.active"
+                                :disabled="authKeyDeactivatingID === key.id"
+                                @click="deactivateAuthKey(key)"
+                                x-text="authKeyDeactivatingID === key.id ? 'Deactivating...' : 'Deactivate'"></button>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <p class="empty-state"
+        x-show="authKeys.length === 0 && !authKeysLoading && !authError && !authKeyError && authKeysAvailable">
+        No API keys yet. Issue a key to get started.
+    </p>
+</div>
+
 <!-- Models Page -->
 <div x-show="page==='models'">
     <div class="page-header">
@@ -264,9 +376,7 @@
     </div>
 
     <!-- Auth Error Banner -->
-    <div class="alert alert-warning" x-show="authError">
-        Authentication required. Enter your API key in the sidebar to view data.
-    </div>
+    {{template "auth-banner" .}}
     <div class="alert alert-warning" x-show="!aliasesAvailable && !authError">
         Aliases feature is unavailable.
     </div>
@@ -668,13 +778,11 @@
             <p class="execution-plan-page-note">Active workflows are matched with most-specific-wins precedence: provider + model, then provider, then global.</p>
         </div>
         <div class="page-header-controls">
-            <button type="button" class="pagination-btn pagination-btn-primary" x-show="executionPlansAvailable" @click="openExecutionPlanCreate()">Create Workflow</button>
+            <button type="button" class="pagination-btn pagination-btn-primary" x-show="executionPlansAvailable" @click="openExecutionPlanCreate()">New Workflow</button>
         </div>
     </div>
 
-    <div class="alert alert-warning" x-show="authError">
-        Authentication required. Enter your API key in the sidebar to view data.
-    </div>
+    {{template "auth-banner" .}}
     <div class="alert alert-warning" x-show="!executionPlansAvailable && !authError">
         Workflows feature is unavailable.
     </div>
@@ -695,10 +803,7 @@
             <form class="alias-form" @submit.prevent="submitExecutionPlanForm()">
                 <div class="aliases-editor-header">
                     <div>
-                        <div class="execution-plan-heading">
-                            <h3>Workflow</h3>
-                            <span class="execution-plan-help" title="Create immutable version. Submitting activates it for the selected scope.">?</span>
-                        </div>
+                        {{template "helper-disclosure" "{ heading: 'Workflow', open: false, copyId: 'workflow-help-copy', showLabel: 'Show workflow help', hideLabel: 'Hide workflow help', text: 'Create immutable version. Submitting activates it for the selected scope.' }"}}
                     </div>
                     <button type="button" class="table-action-btn alias-close-btn" aria-label="Close workflow editor" @click="closeExecutionPlanForm()">
                         <span aria-hidden="true">X</span>
@@ -732,9 +837,15 @@
                         <span>Name</span>
                         <input type="text" class="filter-input execution-plan-input" placeholder="Optional. Defaults to scope label." x-model="executionPlanForm.name">
                     </label>
+
+                    <label class="alias-form-field">
+                        <span>User Path</span>
+                        <input type="text" class="filter-input execution-plan-input" placeholder="team/alpha or /team/alpha" x-model="executionPlanForm.scope_user_path">
+                    </label>
                 </div>
 
                 <p class="alias-form-hint">Leave provider empty to target all providers and models. Select a provider without a model to target all models for that provider.</p>
+                <p class="alias-form-hint">Add a path to scope the workflow to that subtree. Leading slashes are optional and will be normalized; you can enter &quot;team/alpha&quot; or &quot;/team/alpha&quot;. Matching falls back from the deepest path toward the root.</p>
                 <p class="alias-form-hint">If you leave the name empty, the workflow will display as the matched provider/model scope or “All models”.</p>
 
                 <label class="alias-form-field">
@@ -743,25 +854,69 @@
                 </label>
 
                 <div class="execution-plan-feature-toggles">
-                    <label class="execution-plan-feature-toggle">
+                    <label class="execution-plan-feature-toggle" x-show="executionPlanCacheVisible()">
                         <input type="checkbox" x-model="executionPlanForm.features.cache">
                         <span>Cache</span>
                     </label>
-                    <label class="execution-plan-feature-toggle">
+                    <label class="execution-plan-feature-toggle" x-show="executionPlanAuditVisible()">
                         <input type="checkbox" x-model="executionPlanForm.features.audit">
-                        <span>Audit</span>
+                        <span>Audit Logs</span>
                     </label>
-                    <label class="execution-plan-feature-toggle">
+                    <label class="execution-plan-feature-toggle" x-show="executionPlanUsageVisible()">
                         <input type="checkbox" x-model="executionPlanForm.features.usage">
                         <span>Usage</span>
                     </label>
-                    <label class="execution-plan-feature-toggle">
+                    <label class="execution-plan-feature-toggle" x-show="executionPlanGuardrailsVisible()">
                         <input type="checkbox" x-model="executionPlanForm.features.guardrails">
                         <span>Guardrails</span>
                     </label>
+                    <label class="execution-plan-feature-toggle" x-show="executionPlanFailoverVisible()">
+                        <input type="checkbox" x-model="executionPlanForm.features.fallback">
+                        <span>Failover</span>
+                    </label>
                 </div>
 
-                <div class="execution-plan-guardrail-editor" x-show="executionPlanForm.features.guardrails">
+                <div class="execution-plan-preview">
+                    <div class="execution-plan-section-head">
+                        <h4>Preview</h4>
+                        <span class="provider-badge">Live</span>
+                    </div>
+
+                    <article class="execution-plan-card execution-plan-preview-card">
+                        <div class="execution-plan-card-head">
+                            <div>
+                                <p class="alias-form-kicker" x-text="planScopeTypeLabel(executionPlanPreview())"></p>
+                                <h3 x-text="workflowDisplayName(executionPlanPreview())"></h3>
+                            </div>
+                            <div class="execution-plan-card-badges">
+                                <span class="provider-badge" x-text="planScopeLabel(executionPlanPreview())"></span>
+                            </div>
+                        </div>
+
+                        <p class="execution-plan-card-description" x-show="executionPlanPreview().description" x-text="executionPlanPreview().description"></p>
+                        <p class="alias-form-hint" x-show="executionPlanFailoverVisible()" x-text="'Failover: ' + executionPlanFallbackLabel(executionPlanPreview())"></p>
+
+                        {{template "execution-plan-chart" "executionPlanWorkflowChart(executionPlanPreview())"}}
+
+                        <div class="execution-plan-guardrails" x-show="executionPlanGuardrailsVisible()">
+                            <div class="execution-plan-section-head">
+                                <h4>Guardrails</h4>
+                                <span class="provider-badge" x-text="planGuardrails(executionPlanPreview()).length ? planGuardrails(executionPlanPreview()).length + ' steps' : 'None'"></span>
+                            </div>
+                            <div class="execution-plan-guardrail-list" x-show="planGuardrails(executionPlanPreview()).length > 0">
+                                <template x-for="(step, stepIndex) in planGuardrails(executionPlanPreview())" :key="'draft-workflow-preview-guardrail-' + stepIndex">
+                                    <div class="execution-plan-guardrail-item">
+                                        <span class="mono" x-text="step.ref"></span>
+                                        <span class="provider-badge" x-text="'step ' + step.step"></span>
+                                    </div>
+                                </template>
+                            </div>
+                            <p class="alias-form-hint" x-show="planGuardrails(executionPlanPreview()).length === 0">No guardrails configured for this plan.</p>
+                        </div>
+                    </article>
+                </div>
+
+	                <div class="execution-plan-guardrail-editor" x-show="executionPlanForm.features.guardrails && executionPlanGuardrailsVisible()">
                     <div class="execution-plan-section-head">
                         <div>
                             <h4>Guardrail Steps</h4>
@@ -789,7 +944,20 @@
 
                 <div class="alias-form-actions">
                     <button type="button" class="pagination-btn" @click="closeExecutionPlanForm()">Cancel</button>
-                    <button type="submit" class="pagination-btn pagination-btn-primary" :disabled="executionPlanSubmitting" x-text="executionPlanSubmitting ? 'Creating...' : 'Create Workflow'"></button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary execution-plan-submit-btn" :disabled="executionPlanSubmitting">
+                        <span class="execution-plan-submit-icon" aria-hidden="true">
+                            <svg x-show="executionPlanSubmitMode() === 'create'" viewBox="0 0 24 24">
+                                <path d="M12 5v14"></path>
+                                <path d="M5 12h14"></path>
+                            </svg>
+                            <svg x-show="executionPlanSubmitMode() === 'save'" viewBox="0 0 24 24">
+                                <path d="M5 4h11l3 3v13H5z"></path>
+                                <path d="M8 4v6h8"></path>
+                                <path d="M8 20v-6h8v6"></path>
+                            </svg>
+                        </span>
+                        <span x-text="executionPlanSubmitting ? executionPlanSubmittingLabel() : executionPlanSubmitLabel()"></span>
+                    </button>
                 </div>
             </form>
         </section>
@@ -811,93 +979,11 @@
                         </div>
 
                         <p class="execution-plan-card-description" x-show="plan.description" x-text="plan.description"></p>
+                        <p class="alias-form-hint" x-show="executionPlanFailoverVisible()" x-text="'Failover: ' + executionPlanFallbackLabel(plan)"></p>
 
-                        <!-- Execution Pipeline -->
-                        <div class="exec-pipeline">
-                            <div class="exec-pipeline-row">
+                        {{template "execution-plan-chart" "executionPlanWorkflowChart(plan)"}}
 
-                                <!-- Left half: Client + optional steps + growing connector -->
-                                <div class="ep-left">
-                                    <div class="ep-node ep-node-endpoint">
-                                        <div class="ep-node-icon ep-node-icon-endpoint">
-                                            <svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>
-                                        </div>
-                                        <span class="ep-node-label">Client</span>
-                                    </div>
-
-                                    <!-- Guardrails step (optional) -->
-                                    <div class="ep-step" x-show="epHasGuardrails(plan)">
-                                        <div class="ep-conn"></div>
-                                        <div class="ep-node ep-node-guardrails">
-                                            <div class="ep-node-icon">
-                                                <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                                            </div>
-                                            <span class="ep-node-label">Guardrails</span>
-                                            <span class="ep-node-sub" x-show="epGuardrailLabel(plan)" x-text="epGuardrailLabel(plan)"></span>
-                                        </div>
-                                    </div>
-
-                                    <!-- Cache step (optional) -->
-                                    <div class="ep-step" x-show="epHasCache(plan)">
-                                        <div class="ep-conn"></div>
-                                        <div class="ep-node ep-node-cache">
-                                            <div class="ep-node-icon">
-                                                <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-                                            </div>
-                                            <span class="ep-node-label">Cache</span>
-                                        </div>
-                                    </div>
-
-                                    <!-- Growing connector → AI -->
-                                    <div class="ep-conn ep-conn-grow"></div>
-                                </div>
-
-                                <!-- AI node (centered by equal halves) -->
-                                <div class="ep-node ep-node-ai">
-                                    <span class="ep-node-label" x-text="epAiLabel(plan, null)"></span>
-                                    <span class="ep-node-sub" x-show="epAiSublabel(plan, null)" x-text="epAiSublabel(plan, null)"></span>
-                                </div>
-
-                                <!-- Right half: growing connector + Response -->
-                                <div class="ep-right">
-                                    <div class="ep-conn ep-conn-grow"></div>
-                                    <div class="ep-node ep-node-endpoint">
-                                        <div class="ep-node-icon ep-node-icon-endpoint">
-                                            <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                                        </div>
-                                        <span class="ep-node-label">Response</span>
-                                    </div>
-                                </div>
-
-                            </div>
-
-                            <!-- Async section — inline row, branch turn, then label on the right -->
-                            <div class="ep-async-section" x-show="epHasAsync(plan)">
-                                <div class="ep-async-row">
-                                    <!-- Usage on the left (visual), Audit Log on the right -->
-                                    <div class="ep-node ep-node-async ep-node-async-usage" x-show="epHasUsage(plan)">
-                                        <div class="ep-node-icon">
-                                            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                                        </div>
-                                        <span class="ep-node-label">Usage</span>
-                                    </div>
-                                    <div class="ep-step" x-show="epHasUsage(plan) && epHasAudit(plan)">
-                                        <div class="ep-conn ep-conn-async"></div>
-                                    </div>
-                                    <div class="ep-node ep-node-async ep-node-async-audit" x-show="epHasAudit(plan)">
-                                        <div class="ep-node-icon">
-                                            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                                        </div>
-                                        <span class="ep-node-label">Audit Log</span>
-                                    </div>
-                                </div>
-                                <div class="ep-async-turn"></div>
-                                <span class="ep-async-label">Async</span>
-                            </div>
-
-                        </div>
-
-                        <div class="execution-plan-guardrails">
+	                        <div class="execution-plan-guardrails" x-show="executionPlanGuardrailsVisible()">
                             <div class="execution-plan-section-head">
                                 <h4>Guardrails</h4>
                                 <span class="provider-badge" x-text="planGuardrails(plan).length ? planGuardrails(plan).length + ' steps' : 'None'"></span>
@@ -960,9 +1046,7 @@
     </div>
 
     <!-- Auth Error Banner -->
-    <div class="alert alert-warning" x-show="authError">
-        Authentication required. Enter your API key in the sidebar to view data.
-    </div>
+    {{template "auth-banner" .}}
 
     <div class="audit-log-section">
         <div class="audit-log-toolbar">
@@ -971,6 +1055,7 @@
                 <input id="audit-filter-model" type="text" placeholder="Model" aria-label="Model filter" x-model="auditModel" @input.debounce.300ms="fetchAuditLog(true)" class="filter-input audit-filter-input">
                 <input id="audit-filter-provider" type="text" placeholder="Provider" aria-label="Provider filter" x-model="auditProvider" @input.debounce.300ms="fetchAuditLog(true)" class="filter-input audit-filter-input">
                 <input id="audit-filter-path" type="text" placeholder="Path" aria-label="Path filter" x-model="auditPath" @input.debounce.300ms="fetchAuditLog(true)" class="filter-input audit-filter-input">
+                <input id="audit-filter-user-path" type="text" placeholder="User path" aria-label="User path filter" x-model="auditUserPath" @input.debounce.300ms="fetchAuditLog(true)" class="filter-input audit-filter-input">
                 <button class="pagination-btn" @click="clearAuditFilters()">Clear</button>
             </div>
             <div class="audit-filter-row audit-filter-row-selects">
@@ -1012,6 +1097,7 @@
                             <div class="audit-entry-main">
                                 <span class="audit-status-badge" :class="statusCodeClass(entry.status_code)" x-text="entry.status_code || '-'"></span>
                             <span class="audit-method-badge" x-text="entry.method || '-'"></span>
+                            <span class="audit-provider-model mono" x-show="entry.model" x-text="entry.model"></span>
                             <span class="audit-path mono" x-text="entry.path || '-'"></span>
                             </div>
                             <div class="audit-entry-meta">
@@ -1032,107 +1118,22 @@
                         <div class="audit-entry-context">
                             <span class="provider-badge" x-text="entry.provider || '-'"></span>
                             <span class="provider-badge mono" x-text="entry.model || '-'"></span>
+                            <span class="provider-badge mono" x-text="entry.user_path || '-'"></span>
                             <span class="provider-badge audit-alias-badge" x-show="entry.alias_used">alias</span>
                             <span class="provider-badge mono" x-show="entry.alias_used && entry.resolved_model" x-text="'resolved: ' + entry.resolved_model"></span>
                             <span class="provider-badge mono" x-text="'request_id: ' + (entry.request_id || '-')"></span>
+                            <span class="provider-badge mono" x-show="entry.auth_key_id" x-text="'auth_key_id: ' + entry.auth_key_id"></span>
                             <span class="provider-badge mono" x-show="entry.client_ip" x-text="'ip: ' + entry.client_ip"></span>
                             <span class="provider-badge" x-show="entry.stream">stream</span>
                             <span class="provider-badge" x-show="entry.error_type" x-text="entry.error_type"></span>
                         </div>
 
-                        <!-- Execution Pipeline (runtime view) -->
-                        <div class="exec-pipeline">
-                            <div class="exec-pipeline-row">
-
-                                <!-- Left half: Client + optional steps + growing connector -->
-                                <div class="ep-left">
-                                    <div class="ep-node ep-node-endpoint">
-                                        <div class="ep-node-icon ep-node-icon-endpoint">
-                                            <svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>
-                                        </div>
-                                        <span class="ep-node-label">Client</span>
-                                    </div>
-
-                                    <!-- Cache step — shown when runtime has cache data -->
-                                    <div class="ep-step" x-show="epShowCacheStep(null, epRuntimeFromEntry(entry))">
-                                        <div class="ep-conn" :class="epCacheConnClass(epRuntimeFromEntry(entry))"></div>
-                                        <div class="ep-node ep-node-cache" :class="epCacheNodeClass(epRuntimeFromEntry(entry))">
-                                            <div class="ep-node-icon">
-                                                <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-                                            </div>
-                                            <span class="ep-node-label">Cache</span>
-                                            <span class="ep-node-badge" x-show="epCacheStatusLabel(epRuntimeFromEntry(entry))" x-text="epCacheStatusLabel(epRuntimeFromEntry(entry))"></span>
-                                        </div>
-                                    </div>
-
-                                    <!-- Growing connector → AI -->
-                                    <div class="ep-conn ep-conn-grow" :class="epAiConnClass(epRuntimeFromEntry(entry))"></div>
-                                </div>
-
-                                <!-- AI node (centered by equal halves) -->
-                                <div class="ep-node ep-node-ai" :class="epAiNodeClass(epRuntimeFromEntry(entry))">
-                                    <span class="ep-node-label" x-text="epAiLabel(null, epRuntimeFromEntry(entry))"></span>
-                                    <span class="ep-node-sub" x-show="epAiSublabel(null, epRuntimeFromEntry(entry))" x-text="epAiSublabel(null, epRuntimeFromEntry(entry))"></span>
-                                </div>
-
-                                <!-- Right half: growing connector + Response -->
-                                <div class="ep-right">
-                                    <div class="ep-conn ep-conn-grow"></div>
-                                    <div class="ep-node ep-node-endpoint">
-                                        <div class="ep-node-icon ep-node-icon-endpoint">
-                                            <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                                        </div>
-                                        <span class="ep-node-label">Response</span>
-                                    </div>
-                                </div>
-
-                            </div>
-                        </div>
+                        <!-- Execution Pipeline (workflow + runtime view) -->
+                        {{template "execution-plan-chart" "executionPlanAuditChart(entry)"}}
 
                         <div class="audit-request-response">
-                            <section class="audit-pane">
-                                <div class="audit-pane-head">
-                                    <h4>Request</h4>
-                                    <button class="pagination-btn" @click.prevent="copyAuditJSON(entry.data && entry.data.request_body, $event)">Copy Body</button>
-                                </div>
-                                <div class="audit-pane-block" x-show="entry.data && entry.data.request_headers">
-                                    <h5>Headers</h5>
-                                    <pre class="audit-json" x-text="formatJSON(entry.data.request_headers)"></pre>
-                                </div>
-                                <div class="audit-pane-block" x-show="entry.data && entry.data.request_body">
-                                    <h5>Body</h5>
-                                    <pre class="audit-json audit-json-body"
-                                         x-html="renderBodyWithConversationHighlights(entry, entry.data.request_body)"
-                                         @mousedown="startBodyInteraction($event)"
-                                         @click="handleBodyConversationClick($event, entry)"></pre>
-                                </div>
-                                <p class="empty-state audit-pane-empty" x-show="!entry.data || (!entry.data.request_headers && !entry.data.request_body)">Request details were not captured.</p>
-                                <p class="audit-size-warning" x-show="entry.data && entry.data.request_body_too_big_to_handle">Request body was too large to capture.</p>
-                            </section>
-
-                            <section class="audit-pane">
-                                <div class="audit-pane-head">
-                                    <h4>Response</h4>
-                                    <button class="pagination-btn" @click.prevent="copyAuditJSON(entry.data && entry.data.response_body, $event)">Copy Body</button>
-                                </div>
-                                <div class="audit-pane-block" x-show="entry.data && entry.data.error_message">
-                                    <h5>Error Message</h5>
-                                    <pre class="audit-json" x-text="entry.data.error_message"></pre>
-                                </div>
-                                <div class="audit-pane-block" x-show="entry.data && entry.data.response_headers">
-                                    <h5>Headers</h5>
-                                    <pre class="audit-json" x-text="formatJSON(entry.data.response_headers)"></pre>
-                                </div>
-                                <div class="audit-pane-block" x-show="entry.data && entry.data.response_body">
-                                    <h5>Body</h5>
-                                    <pre class="audit-json audit-json-body"
-                                         x-html="renderBodyWithConversationHighlights(entry, entry.data.response_body)"
-                                         @mousedown="startBodyInteraction($event)"
-                                         @click="handleBodyConversationClick($event, entry)"></pre>
-                                </div>
-                                <p class="empty-state audit-pane-empty" x-show="!entry.data || (!entry.data.error_message && !entry.data.response_headers && !entry.data.response_body)">Response details were not captured.</p>
-                                <p class="audit-size-warning" x-show="entry.data && entry.data.response_body_too_big_to_handle">Response body was too large to capture.</p>
-                            </section>
+                            {{template "audit-pane" "auditRequestPane(entry)"}}
+                            {{template "audit-pane" "auditResponsePane(entry)"}}
                         </div>
                     </div>
                 </details>
@@ -1141,13 +1142,7 @@
 
         <p class="empty-state" x-show="auditLog.entries.length === 0 && !loading && !authError">No audit log entries found.</p>
 
-        <div class="pagination" x-show="auditLog.total > 0">
-            <span class="pagination-info" x-text="'Showing ' + (auditLog.offset + 1) + '-' + Math.min(auditLog.offset + auditLog.limit, auditLog.total) + ' of ' + auditLog.total"></span>
-            <div class="pagination-buttons">
-                <button class="pagination-btn" :disabled="auditLog.offset === 0" @click="auditLogPrevPage()">Prev</button>
-                <button class="pagination-btn" :disabled="auditLog.offset + auditLog.limit >= auditLog.total" @click="auditLogNextPage()">Next</button>
-            </div>
-        </div>
+        {{template "pagination" "auditLog"}}
     </div>
 
     <div class="conversation-overlay" x-show="conversationOpen" x-transition.opacity.duration.160ms aria-hidden="true" @click="closeConversation()"></div>

@@ -20,6 +20,7 @@ func TestNewRequestSnapshot_DefensivelyCopiesMutableFields(t *testing.T) {
 		false,
 		"req-123",
 		traceMetadata,
+		"/team/a",
 	)
 
 	routeParams["provider"] = "anthropic"
@@ -45,6 +46,9 @@ func TestNewRequestSnapshot_DefensivelyCopiesMutableFields(t *testing.T) {
 	}
 	if got := snapshot.GetTraceMetadata()["Traceparent"]; got != "trace-1" {
 		t.Fatalf("GetTraceMetadata Traceparent = %q, want trace-1", got)
+	}
+	if got := snapshot.UserPath; got != "/team/a" {
+		t.Fatalf("UserPath = %q, want /team/a", got)
 	}
 
 	clonedHeaders := snapshot.GetHeaders()
@@ -81,11 +85,15 @@ func TestNewRequestSnapshotWithOwnedBody_TakesOwnershipOfCapturedBytes(t *testin
 		false,
 		"req-123",
 		nil,
+		"/team/a",
 	)
 
 	view := snapshot.CapturedBodyView()
 	if len(view) == 0 {
 		t.Fatal("captured body unexpectedly empty")
+	}
+	if got := snapshot.UserPath; got != "/team/a" {
+		t.Fatalf("UserPath = %q, want /team/a", got)
 	}
 	if &view[0] != &rawBody[0] {
 		t.Fatal("snapshot did not take ownership of the captured body bytes")

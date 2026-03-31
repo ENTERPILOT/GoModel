@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ type mockUsageReader struct {
 	daily         []usage.DailyUsage
 	modelUsage    []usage.ModelUsage
 	usageLog      *usage.UsageLogResult
+	lastUsageLog  usage.UsageLogParams
 	summaryErr    error
 	dailyErr      error
 	modelUsageErr error
@@ -63,7 +65,8 @@ func (m *mockUsageReader) GetUsageByModel(_ context.Context, _ usage.UsageQueryP
 	return m.modelUsage, nil
 }
 
-func (m *mockUsageReader) GetUsageLog(_ context.Context, _ usage.UsageLogParams) (*usage.UsageLogResult, error) {
+func (m *mockUsageReader) GetUsageLog(_ context.Context, params usage.UsageLogParams) (*usage.UsageLogResult, error) {
+	m.lastUsageLog = params
 	if m.usageLogErr != nil {
 		return nil, m.usageLogErr
 	}
@@ -536,13 +539,16 @@ func TestUsageLog_WithFilters(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/log?model=gpt-4&provider=openai&search=test&limit=10&offset=5")
+	c, rec := newHandlerContext("/admin/api/v1/usage/log?model=gpt-4&provider=openai&user_path=/team&search=test&limit=10&offset=5")
 
 	if err := h.UsageLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if reader.lastUsageLog.UserPath != "/team" {
+		t.Errorf("expected user_path /team, got %q", reader.lastUsageLog.UserPath)
 	}
 }
 
@@ -638,7 +644,7 @@ func TestAuditLog_WithFilters(t *testing.T) {
 	}
 
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/log?model=gpt-4&provider=openai&method=post&path=/v1/chat/completions&error_type=provider_error&status_code=502&stream=true&search=timeout&limit=10&offset=5")
+	c, rec := newHandlerContext("/admin/api/v1/audit/log?model=gpt-4&provider=openai&method=post&path=/v1/chat/completions&user_path=/team&error_type=provider_error&status_code=502&stream=true&search=timeout&limit=10&offset=5")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -658,6 +664,9 @@ func TestAuditLog_WithFilters(t *testing.T) {
 	}
 	if reader.lastQuery.Path != "/v1/chat/completions" {
 		t.Errorf("expected path filter to match, got %q", reader.lastQuery.Path)
+	}
+	if reader.lastQuery.UserPath != "/team" {
+		t.Errorf("expected user_path filter to match, got %q", reader.lastQuery.UserPath)
 	}
 	if reader.lastQuery.ErrorType != "provider_error" {
 		t.Errorf("expected error_type provider_error, got %q", reader.lastQuery.ErrorType)
@@ -1140,6 +1149,51 @@ func TestListCategories_WithModels(t *testing.T) {
 	}
 }
 
+func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
+	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
+		FeatureFallbackMode:  "auto",
+		LoggingEnabled:       "on",
+		UsageEnabled:         "off",
+		GuardrailsEnabled:    "on",
+		RedisURL:             "on",
+		SemanticCacheEnabled: "off",
+	}))
+	c, rec := newHandlerContext("/admin/api/v1/dashboard/config")
+
+	if err := h.DashboardConfig(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var body DashboardConfigResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if got := body.FeatureFallbackMode; got != "auto" {
+		t.Fatalf("FEATURE_FALLBACK_MODE = %q, want auto", got)
+	}
+	if got := body.LoggingEnabled; got != "on" {
+		t.Fatalf("LOGGING_ENABLED = %q, want on", got)
+	}
+	if got := body.UsageEnabled; got != "off" {
+		t.Fatalf("USAGE_ENABLED = %q, want off", got)
+	}
+	if got := body.GuardrailsEnabled; got != "on" {
+		t.Fatalf("GUARDRAILS_ENABLED = %q, want on", got)
+	}
+	if got := body.RedisURL; got != "on" {
+		t.Fatalf("REDIS_URL = %q, want on", got)
+	}
+	if got := body.SemanticCacheEnabled; got != "off" {
+		t.Fatalf("SEMANTIC_CACHE_ENABLED = %q, want off", got)
+	}
+	if rec.Body.String() == "" || strings.Contains(rec.Body.String(), "UNRELATED_FLAG") {
+		t.Fatal("UNRELATED_FLAG should not be exposed")
+	}
+}
+
 // --- handleError tests ---
 
 func TestHandleError_GatewayErrors(t *testing.T) {
@@ -1397,6 +1451,25 @@ func TestParseUsageParams_InvalidEndDate(t *testing.T) {
 	var gatewayErr *core.GatewayError
 	if !errors.As(err, &gatewayErr) {
 		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", gatewayErr.HTTPStatusCode())
+	}
+}
+
+func TestParseUsageParams_InvalidUserPath(t *testing.T) {
+	c := newContext("user_path=/team/../alpha")
+	_, err := parseUsageParams(c)
+	if err == nil {
+		t.Fatal("expected error for invalid user_path, got nil")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.Message != `invalid user_path: user path cannot contain '.' or '..' segments` {
+		t.Fatalf("message = %q, want invalid user_path message", gatewayErr.Message)
 	}
 	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
 		t.Errorf("expected status 400, got %d", gatewayErr.HTTPStatusCode())

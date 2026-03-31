@@ -31,6 +31,13 @@ func RequestSnapshotCapture() echo.MiddlewareFunc {
 			if err != nil {
 				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
 			}
+			userPath, err := core.NormalizeUserPath(req.Header.Get(core.UserPathHeader))
+			if err != nil {
+				return handleError(c, core.NewInvalidRequestError("invalid X-GoModel-User-Path header", err))
+			}
+			if userPath != "" {
+				req.Header.Set(core.UserPathHeader, userPath)
+			}
 
 			snapshot := core.NewRequestSnapshotWithOwnedBody(
 				req.Method,
@@ -43,6 +50,7 @@ func RequestSnapshotCapture() echo.MiddlewareFunc {
 				bodyTooLarge,
 				requestID,
 				extractTraceMetadata(req.Header),
+				userPath,
 			)
 
 			ctx := core.WithRequestSnapshot(req.Context(), snapshot)

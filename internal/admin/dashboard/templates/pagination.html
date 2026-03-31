@@ -1,0 +1,9 @@
+{{define "pagination"}}
+<div class="pagination" x-show="{{.}}.total > 0">
+    <span class="pagination-info" x-text="'Showing ' + ({{.}}.offset + 1) + '-' + Math.min({{.}}.offset + {{.}}.limit, {{.}}.total) + ' of ' + {{.}}.total"></span>
+    <div class="pagination-buttons">
+        <button type="button" class="pagination-btn" :disabled="{{.}}.offset === 0" @click="{{.}}PrevPage()">Prev</button>
+        <button type="button" class="pagination-btn" :disabled="{{.}}.offset + {{.}}.limit >= {{.}}.total" @click="{{.}}NextPage()">Next</button>
+    </div>
+</div>
+{{end}}

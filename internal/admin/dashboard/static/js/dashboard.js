@@ -64,6 +64,7 @@ function dashboard() {
         usageLogSearch: '',
         usageLogModel: '',
         usageLogProvider: '',
+        usageLogUserPath: '',
         usageBarChart: null,
 
         // Audit page state
@@ -73,6 +74,7 @@ function dashboard() {
         auditProvider: '',
         auditMethod: '',
         auditPath: '',
+        auditUserPath: '',
         auditStatusCode: '',
         auditStream: '',
         auditFetchToken: 0,
@@ -99,7 +101,7 @@ function dashboard() {
             if (page === 'audit') {
                 page = 'audit-logs';
             }
-            page = (['overview', 'usage', 'models', 'workflows', 'audit-logs', 'settings'].includes(page)) ? page : 'overview';
+            page = (['overview', 'usage', 'models', 'workflows', 'audit-logs', 'auth-keys', 'settings'].includes(page)) ? page : 'overview';
             const sub = parts[1] || null;
             return { page, sub };
         },
@@ -117,6 +119,7 @@ function dashboard() {
             this.page = page;
             if (page === 'usage' && sub === 'costs') this.usageMode = 'costs';
             if (page === 'audit-logs') this.fetchAuditLog(true);
+            if (page === 'auth-keys' && typeof this.fetchAuthKeys === 'function') this.fetchAuthKeys();
             if (page === 'settings' && typeof this.ensureTimezoneOptions === 'function') this.ensureTimezoneOptions();
 
             window.addEventListener('popstate', () => {
@@ -128,6 +131,7 @@ function dashboard() {
                 }
                 if (p === 'overview') this.renderChart();
                 if (p === 'audit-logs') this.fetchAuditLog(true);
+                if (p === 'auth-keys' && typeof this.fetchAuthKeys === 'function') this.fetchAuthKeys();
                 if (p === 'workflows' && typeof this.fetchExecutionPlansPage === 'function') {
                     this.fetchExecutionPlansPage();
                 }
@@ -159,6 +163,7 @@ function dashboard() {
             if (page === 'usage') this.fetchUsagePage();
             if (page === 'workflows' && typeof this.fetchExecutionPlansPage === 'function') this.fetchExecutionPlansPage();
             if (page === 'audit-logs') this.fetchAuditLog(true);
+            if (page === 'auth-keys' && typeof this.fetchAuthKeys === 'function') this.fetchAuthKeys();
             if (page === 'settings' && typeof this.ensureTimezoneOptions === 'function') this.ensureTimezoneOptions();
         },
 
@@ -428,6 +433,15 @@ function dashboard() {
                 String(d.getSeconds()).padStart(2, '0');
         },
 
+        formatDateUTC(ts) {
+            if (!ts) return '-';
+            const d = new Date(ts);
+            if (Number.isNaN(d.getTime())) return '-';
+            return d.getUTCFullYear() + '-' +
+                String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
+                String(d.getUTCDate()).padStart(2, '0');
+        },
+
         formatTimestampUTC(ts) {
             if (!ts) return '-';
             const d = new Date(ts);
@@ -458,6 +472,10 @@ function dashboard() {
         resolveModuleFactory(
             typeof dashboardAliasesModule === 'function' ? dashboardAliasesModule : null,
             'dashboardAliasesModule'
+        ),
+        resolveModuleFactory(
+            typeof dashboardAuthKeysModule === 'function' ? dashboardAuthKeysModule : null,
+            'dashboardAuthKeysModule'
         ),
         resolveModuleFactory(
             typeof dashboardExecutionPlansModule === 'function' ? dashboardExecutionPlansModule : null,
