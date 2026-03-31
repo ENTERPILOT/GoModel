@@ -28,10 +28,13 @@ type Compiler interface {
 }
 
 type snapshot struct {
-	global         *CompiledPlan
-	providers      map[string]*CompiledPlan
-	providerModels map[string]map[string]*CompiledPlan
-	byVersionID    map[string]*CompiledPlan
+	global             *CompiledPlan
+	paths              map[string]*CompiledPlan
+	providers          map[string]*CompiledPlan
+	providerPaths      map[string]map[string]*CompiledPlan
+	providerModels     map[string]map[string]*CompiledPlan
+	providerModelPaths map[string]map[string]map[string]*CompiledPlan
+	byVersionID        map[string]*CompiledPlan
 }
 
 // Service keeps the active execution-plan set cached in memory.
@@ -56,9 +59,12 @@ func NewService(store Store, compiler Compiler) (*Service, error) {
 		compiler: compiler,
 	}
 	service.current.Store(snapshot{
-		providers:      map[string]*CompiledPlan{},
-		providerModels: map[string]map[string]*CompiledPlan{},
-		byVersionID:    map[string]*CompiledPlan{},
+		paths:              map[string]*CompiledPlan{},
+		providers:          map[string]*CompiledPlan{},
+		providerPaths:      map[string]map[string]*CompiledPlan{},
+		providerModels:     map[string]map[string]*CompiledPlan{},
+		providerModelPaths: map[string]map[string]map[string]*CompiledPlan{},
+		byVersionID:        map[string]*CompiledPlan{},
 	})
 	return service, nil
 }
@@ -77,9 +83,12 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	}
 
 	next := snapshot{
-		providers:      make(map[string]*CompiledPlan),
-		providerModels: make(map[string]map[string]*CompiledPlan),
-		byVersionID:    make(map[string]*CompiledPlan),
+		paths:              make(map[string]*CompiledPlan),
+		providers:          make(map[string]*CompiledPlan),
+		providerPaths:      make(map[string]map[string]*CompiledPlan),
+		providerModels:     make(map[string]map[string]*CompiledPlan),
+		providerModelPaths: make(map[string]map[string]map[string]*CompiledPlan),
+		byVersionID:        make(map[string]*CompiledPlan),
 	}
 
 	for _, version := range versions {
@@ -101,17 +110,32 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 		next.byVersionID[compiled.Version.ID] = compiled
 
 		switch {
-		case scope.Provider == "":
+		case scope.Provider == "" && scope.UserPath == "":
 			if next.global != nil {
 				return fmt.Errorf("duplicate active global execution plans: %q and %q", next.global.Version.ID, version.ID)
 			}
 			next.global = compiled
-		case scope.Model == "":
+		case scope.Provider == "" && scope.UserPath != "":
+			if existing := next.paths[scope.UserPath]; existing != nil {
+				return fmt.Errorf("duplicate active path execution plans for %q: %q and %q", scope.UserPath, existing.Version.ID, version.ID)
+			}
+			next.paths[scope.UserPath] = compiled
+		case scope.Model == "" && scope.UserPath == "":
 			if existing := next.providers[scope.Provider]; existing != nil {
 				return fmt.Errorf("duplicate active provider execution plans for %q: %q and %q", scope.Provider, existing.Version.ID, version.ID)
 			}
 			next.providers[scope.Provider] = compiled
-		default:
+		case scope.Model == "" && scope.UserPath != "":
+			paths := next.providerPaths[scope.Provider]
+			if paths == nil {
+				paths = make(map[string]*CompiledPlan)
+				next.providerPaths[scope.Provider] = paths
+			}
+			if existing := paths[scope.UserPath]; existing != nil {
+				return fmt.Errorf("duplicate active provider-path execution plans for %q/%q: %q and %q", scope.Provider, scope.UserPath, existing.Version.ID, version.ID)
+			}
+			paths[scope.UserPath] = compiled
+		case scope.UserPath == "":
 			models := next.providerModels[scope.Provider]
 			if models == nil {
 				models = make(map[string]*CompiledPlan)
@@ -121,6 +145,21 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 				return fmt.Errorf("duplicate active provider-model execution plans for %q/%q: %q and %q", scope.Provider, scope.Model, existing.Version.ID, version.ID)
 			}
 			models[scope.Model] = compiled
+		default:
+			providers := next.providerModelPaths[scope.Provider]
+			if providers == nil {
+				providers = make(map[string]map[string]*CompiledPlan)
+				next.providerModelPaths[scope.Provider] = providers
+			}
+			paths := providers[scope.Model]
+			if paths == nil {
+				paths = make(map[string]*CompiledPlan)
+				providers[scope.Model] = paths
+			}
+			if existing := paths[scope.UserPath]; existing != nil {
+				return fmt.Errorf("duplicate active provider-model-path execution plans for %q/%q/%q: %q and %q", scope.Provider, scope.Model, scope.UserPath, existing.Version.ID, version.ID)
+			}
+			paths[scope.UserPath] = compiled
 		}
 	}
 
@@ -138,7 +177,7 @@ func (s *Service) EnsureDefaultGlobal(ctx context.Context, input CreateInput) er
 	if err != nil {
 		return err
 	}
-	if normalized.Scope.Provider != "" || normalized.Scope.Model != "" {
+	if normalized.Scope.Provider != "" || normalized.Scope.Model != "" || normalized.Scope.UserPath != "" {
 		return newValidationError("default execution plan must use global scope", nil)
 	}
 
@@ -151,7 +190,7 @@ func (s *Service) EnsureDefaultGlobal(ctx context.Context, input CreateInput) er
 		if err != nil {
 			return fmt.Errorf("load execution plan %q: %w", version.ID, err)
 		}
-		if scope.Provider == "" && scope.Model == "" {
+		if scope.Provider == "" && scope.Model == "" && scope.UserPath == "" {
 			return nil
 		}
 	}
@@ -219,7 +258,7 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 	version.Scope = scope
 	version.ScopeKey = scopeKey
 
-	if scope.Provider == "" && scope.Model == "" {
+	if scope.Provider == "" && scope.Model == "" && scope.UserPath == "" {
 		return newValidationError("cannot deactivate the global workflow", nil)
 	}
 	if !version.Active {
@@ -380,12 +419,40 @@ func (s *Service) matchCompiled(selector core.ExecutionPlanSelector) (*CompiledP
 	if s == nil {
 		return nil, nil
 	}
-	selector = core.NewExecutionPlanSelector(selector.Provider, selector.Model)
+	selector = core.NewExecutionPlanSelector(selector.Provider, selector.Model, selector.UserPath)
 	current := s.snapshot()
+	ancestors := core.UserPathAncestors(selector.UserPath)
 
+	if selector.Provider != "" && selector.Model != "" && len(ancestors) > 0 {
+		if models := current.providerModelPaths[selector.Provider]; models != nil {
+			if paths := models[selector.Model]; paths != nil {
+				for _, userPath := range ancestors {
+					if compiled := paths[userPath]; compiled != nil {
+						return compiled, nil
+					}
+				}
+			}
+		}
+	}
 	if selector.Provider != "" && selector.Model != "" {
 		if models := current.providerModels[selector.Provider]; models != nil {
 			if compiled := models[selector.Model]; compiled != nil {
+				return compiled, nil
+			}
+		}
+	}
+	if selector.Provider != "" && len(ancestors) > 0 {
+		if paths := current.providerPaths[selector.Provider]; paths != nil {
+			for _, userPath := range ancestors {
+				if compiled := paths[userPath]; compiled != nil {
+					return compiled, nil
+				}
+			}
+		}
+	}
+	if len(ancestors) > 0 {
+		for _, userPath := range ancestors {
+			if compiled := current.paths[userPath]; compiled != nil {
 				return compiled, nil
 			}
 		}
@@ -455,6 +522,7 @@ func viewWithError(version Version, err error) View {
 	scope := Scope{
 		Provider: strings.TrimSpace(version.Scope.Provider),
 		Model:    strings.TrimSpace(version.Scope.Model),
+		UserPath: strings.TrimSpace(version.Scope.UserPath),
 	}
 	version.Scope = scope
 
@@ -468,10 +536,17 @@ func viewWithError(version Version, err error) View {
 
 func rawScopeType(scope Scope) string {
 	switch {
-	case strings.TrimSpace(scope.Provider) == "" && strings.TrimSpace(scope.Model) == "":
+	case strings.TrimSpace(scope.Provider) == "" && strings.TrimSpace(scope.Model) == "" && strings.TrimSpace(scope.UserPath) == "":
 		return "global"
+	case strings.TrimSpace(scope.Provider) == "" && strings.TrimSpace(scope.UserPath) != "":
+		return "path"
 	case strings.TrimSpace(scope.Provider) != "" && strings.TrimSpace(scope.Model) == "":
+		if strings.TrimSpace(scope.UserPath) != "" {
+			return "provider_path"
+		}
 		return "provider"
+	case strings.TrimSpace(scope.UserPath) != "":
+		return "provider_model_path"
 	default:
 		return "provider_model"
 	}
@@ -480,14 +555,21 @@ func rawScopeType(scope Scope) string {
 func rawScopeDisplay(scope Scope) string {
 	provider := strings.TrimSpace(scope.Provider)
 	model := strings.TrimSpace(scope.Model)
+	userPath := strings.TrimSpace(scope.UserPath)
 
 	switch {
-	case provider == "" && model == "":
+	case provider == "" && model == "" && userPath == "":
 		return "global"
-	case provider != "" && model == "":
+	case provider == "" && userPath != "":
+		return userPath
+	case provider != "" && model == "" && userPath == "":
 		return provider
+	case provider != "" && model == "" && userPath != "":
+		return provider + " @ " + userPath
 	case provider == "" && model != "":
 		return model
+	case userPath != "":
+		return provider + "/" + model + " @ " + userPath
 	default:
 		return provider + "/" + model
 	}
@@ -495,10 +577,16 @@ func rawScopeDisplay(scope Scope) string {
 
 func scopeType(scope Scope) string {
 	switch {
-	case strings.TrimSpace(scope.Provider) == "":
+	case strings.TrimSpace(scope.Provider) == "" && strings.TrimSpace(scope.UserPath) == "":
 		return "global"
-	case strings.TrimSpace(scope.Model) == "":
+	case strings.TrimSpace(scope.Provider) == "" && strings.TrimSpace(scope.UserPath) != "":
+		return "path"
+	case strings.TrimSpace(scope.Model) == "" && strings.TrimSpace(scope.UserPath) == "":
 		return "provider"
+	case strings.TrimSpace(scope.Model) == "" && strings.TrimSpace(scope.UserPath) != "":
+		return "provider_path"
+	case strings.TrimSpace(scope.UserPath) != "":
+		return "provider_model_path"
 	default:
 		return "provider_model"
 	}
@@ -508,6 +596,12 @@ func scopeDisplay(scope Scope) string {
 	switch scopeType(scope) {
 	case "global":
 		return "global"
+	case "path":
+		return scope.UserPath
+	case "provider_path":
+		return scope.Provider + " @ " + scope.UserPath
+	case "provider_model_path":
+		return scope.Provider + "/" + scope.Model + " @ " + scope.UserPath
 	case "provider":
 		return scope.Provider
 	default:
@@ -519,40 +613,65 @@ func viewScopeSpecificity(scopeType string) int {
 	switch strings.TrimSpace(scopeType) {
 	case "global":
 		return 0
+	case "path":
+		return 2
 	case "provider":
 		return 1
+	case "provider_path":
+		return 3
+	case "provider_model":
+		return 4
 	default:
-		return 2
+		return 5
 	}
 }
 
 func (s *Service) snapshot() snapshot {
 	if s == nil {
 		return snapshot{
-			providers:      map[string]*CompiledPlan{},
-			providerModels: map[string]map[string]*CompiledPlan{},
-			byVersionID:    map[string]*CompiledPlan{},
+			paths:              map[string]*CompiledPlan{},
+			providers:          map[string]*CompiledPlan{},
+			providerPaths:      map[string]map[string]*CompiledPlan{},
+			providerModels:     map[string]map[string]*CompiledPlan{},
+			providerModelPaths: map[string]map[string]map[string]*CompiledPlan{},
+			byVersionID:        map[string]*CompiledPlan{},
 		}
 	}
 	if current, ok := s.current.Load().(snapshot); ok {
 		return current
 	}
 	return snapshot{
-		providers:      map[string]*CompiledPlan{},
-		providerModels: map[string]map[string]*CompiledPlan{},
-		byVersionID:    map[string]*CompiledPlan{},
+		paths:              map[string]*CompiledPlan{},
+		providers:          map[string]*CompiledPlan{},
+		providerPaths:      map[string]map[string]*CompiledPlan{},
+		providerModels:     map[string]map[string]*CompiledPlan{},
+		providerModelPaths: map[string]map[string]map[string]*CompiledPlan{},
+		byVersionID:        map[string]*CompiledPlan{},
 	}
 }
 
 func cloneSnapshot(current snapshot) snapshot {
 	next := snapshot{
-		global:         current.global,
-		providers:      make(map[string]*CompiledPlan, len(current.providers)),
-		providerModels: make(map[string]map[string]*CompiledPlan, len(current.providerModels)),
-		byVersionID:    make(map[string]*CompiledPlan, len(current.byVersionID)),
+		global:             current.global,
+		paths:              make(map[string]*CompiledPlan, len(current.paths)),
+		providers:          make(map[string]*CompiledPlan, len(current.providers)),
+		providerPaths:      make(map[string]map[string]*CompiledPlan, len(current.providerPaths)),
+		providerModels:     make(map[string]map[string]*CompiledPlan, len(current.providerModels)),
+		providerModelPaths: make(map[string]map[string]map[string]*CompiledPlan, len(current.providerModelPaths)),
+		byVersionID:        make(map[string]*CompiledPlan, len(current.byVersionID)),
+	}
+	for userPath, compiled := range current.paths {
+		next.paths[userPath] = compiled
 	}
 	for provider, compiled := range current.providers {
 		next.providers[provider] = compiled
+	}
+	for provider, paths := range current.providerPaths {
+		copied := make(map[string]*CompiledPlan, len(paths))
+		for userPath, compiled := range paths {
+			copied[userPath] = compiled
+		}
+		next.providerPaths[provider] = copied
 	}
 	for provider, models := range current.providerModels {
 		copied := make(map[string]*CompiledPlan, len(models))
@@ -560,6 +679,17 @@ func cloneSnapshot(current snapshot) snapshot {
 			copied[model] = compiled
 		}
 		next.providerModels[provider] = copied
+	}
+	for provider, models := range current.providerModelPaths {
+		modelCopy := make(map[string]map[string]*CompiledPlan, len(models))
+		for model, paths := range models {
+			pathCopy := make(map[string]*CompiledPlan, len(paths))
+			for userPath, compiled := range paths {
+				pathCopy[userPath] = compiled
+			}
+			modelCopy[model] = pathCopy
+		}
+		next.providerModelPaths[provider] = modelCopy
 	}
 	for versionID, compiled := range current.byVersionID {
 		next.byVersionID[versionID] = compiled
@@ -581,6 +711,7 @@ func compiledPlanForVersion(compiled *CompiledPlan, version Version) *CompiledPl
 		policy.Version = version.Version
 		policy.ScopeProvider = version.Scope.Provider
 		policy.ScopeModel = version.Scope.Model
+		policy.ScopeUserPath = version.Scope.UserPath
 		policy.Name = version.Name
 		policy.PlanHash = version.PlanHash
 		next.Policy = &policy
@@ -596,17 +727,32 @@ func (s *Service) storeActivatedCompiledLocked(compiled *CompiledPlan) {
 	scope := compiled.Version.Scope
 
 	switch {
-	case scope.Provider == "":
+	case scope.Provider == "" && scope.UserPath == "":
 		if next.global != nil {
 			delete(next.byVersionID, next.global.Version.ID)
 		}
 		next.global = compiled
-	case scope.Model == "":
+	case scope.Provider == "" && scope.UserPath != "":
+		if existing := next.paths[scope.UserPath]; existing != nil {
+			delete(next.byVersionID, existing.Version.ID)
+		}
+		next.paths[scope.UserPath] = compiled
+	case scope.Model == "" && scope.UserPath == "":
 		if existing := next.providers[scope.Provider]; existing != nil {
 			delete(next.byVersionID, existing.Version.ID)
 		}
 		next.providers[scope.Provider] = compiled
-	default:
+	case scope.Model == "" && scope.UserPath != "":
+		paths := next.providerPaths[scope.Provider]
+		if paths == nil {
+			paths = make(map[string]*CompiledPlan)
+			next.providerPaths[scope.Provider] = paths
+		}
+		if existing := paths[scope.UserPath]; existing != nil {
+			delete(next.byVersionID, existing.Version.ID)
+		}
+		paths[scope.UserPath] = compiled
+	case scope.UserPath == "":
 		models := next.providerModels[scope.Provider]
 		if models == nil {
 			models = make(map[string]*CompiledPlan)
@@ -616,6 +762,21 @@ func (s *Service) storeActivatedCompiledLocked(compiled *CompiledPlan) {
 			delete(next.byVersionID, existing.Version.ID)
 		}
 		models[scope.Model] = compiled
+	default:
+		providers := next.providerModelPaths[scope.Provider]
+		if providers == nil {
+			providers = make(map[string]map[string]*CompiledPlan)
+			next.providerModelPaths[scope.Provider] = providers
+		}
+		paths := providers[scope.Model]
+		if paths == nil {
+			paths = make(map[string]*CompiledPlan)
+			providers[scope.Model] = paths
+		}
+		if existing := paths[scope.UserPath]; existing != nil {
+			delete(next.byVersionID, existing.Version.ID)
+		}
+		paths[scope.UserPath] = compiled
 	}
 
 	next.byVersionID[compiled.Version.ID] = compiled
@@ -632,11 +793,22 @@ func (s *Service) storeDeactivatedVersionLocked(version Version) {
 	delete(next.byVersionID, version.ID)
 
 	switch {
-	case scope.Provider == "":
+	case scope.Provider == "" && scope.UserPath == "":
 		next.global = nil
-	case scope.Model == "":
+	case scope.Provider == "" && scope.UserPath != "":
+		delete(next.paths, scope.UserPath)
+	case scope.Model == "" && scope.UserPath == "":
 		delete(next.providers, scope.Provider)
-	default:
+	case scope.Model == "" && scope.UserPath != "":
+		paths := next.providerPaths[scope.Provider]
+		if paths == nil {
+			break
+		}
+		delete(paths, scope.UserPath)
+		if len(paths) == 0 {
+			delete(next.providerPaths, scope.Provider)
+		}
+	case scope.UserPath == "":
 		models := next.providerModels[scope.Provider]
 		if models == nil {
 			break
@@ -644,6 +816,22 @@ func (s *Service) storeDeactivatedVersionLocked(version Version) {
 		delete(models, scope.Model)
 		if len(models) == 0 {
 			delete(next.providerModels, scope.Provider)
+		}
+	default:
+		models := next.providerModelPaths[scope.Provider]
+		if models == nil {
+			break
+		}
+		paths := models[scope.Model]
+		if paths == nil {
+			break
+		}
+		delete(paths, scope.UserPath)
+		if len(paths) == 0 {
+			delete(models, scope.Model)
+		}
+		if len(models) == 0 {
+			delete(next.providerModelPaths, scope.Provider)
 		}
 	}
 

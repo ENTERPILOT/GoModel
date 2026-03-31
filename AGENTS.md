@@ -21,6 +21,7 @@ Backward compatibility is not a primary constraint in the current development st
 
 1. Make small, focused changes.
 2. Run format/lint/tests relevant to the change.
+3. Do not hide work in detached goroutines; respect context synchronously and return typed `core.GatewayError` values.
 
 ## Commit Format
 

@@ -8,6 +8,7 @@ func TestNormalizeScope_RejectsColonDelimitedFields(t *testing.T) {
 	tests := []Scope{
 		{Provider: "openai:beta"},
 		{Provider: "openai", Model: "gpt:5"},
+		{UserPath: "/team:a"},
 	}
 
 	for _, scope := range tests {
@@ -23,6 +24,21 @@ func TestNormalizeScope_RejectsColonDelimitedFields(t *testing.T) {
 				t.Fatalf("normalizeScope() error = %T, want validation error", err)
 			}
 		})
+	}
+}
+
+func TestNormalizeScope_AllowsPathOnlyScope(t *testing.T) {
+	t.Parallel()
+
+	scope, scopeKey, err := normalizeScope(Scope{UserPath: "/team/a"})
+	if err != nil {
+		t.Fatalf("normalizeScope() error = %v", err)
+	}
+	if scope.UserPath != "/team/a" {
+		t.Fatalf("scope.UserPath = %q, want /team/a", scope.UserPath)
+	}
+	if scopeKey != "path:/team/a" {
+		t.Fatalf("scopeKey = %q, want path:/team/a", scopeKey)
 	}
 }
 

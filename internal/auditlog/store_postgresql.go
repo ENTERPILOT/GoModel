@@ -14,14 +14,14 @@ import (
 )
 
 const (
-	auditLogInsertColumnCount     = 19
+	auditLogInsertColumnCount     = 20
 	postgresMaxBindParameters     = 65535
 	auditLogInsertMaxRowsPerQuery = postgresMaxBindParameters / auditLogInsertColumnCount
 )
 
 const auditLogInsertPrefix = `
 		INSERT INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, cache_type, status_code,
-			request_id, auth_key_id, auth_method, client_ip, method, path, stream, error_type, data)
+			request_id, auth_key_id, auth_method, client_ip, method, path, user_path, stream, error_type, data)
 		VALUES `
 
 const auditLogInsertSuffix = `
@@ -69,6 +69,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 			client_ip TEXT,
 			method TEXT,
 			path TEXT,
+			user_path TEXT,
 			stream BOOLEAN DEFAULT FALSE,
 			error_type TEXT,
 			data JSONB
@@ -84,6 +85,8 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS execution_plan_version_id TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS cache_type TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS auth_key_id TEXT",
+		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS auth_method TEXT",
+		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_path TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS auth_method TEXT",
 	}
 	for _, migration := range migrations {
@@ -103,6 +106,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON audit_logs(auth_key_id)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON audit_logs(client_ip)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_user_path ON audit_logs(user_path)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_error_type ON audit_logs(error_type)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_response_id ON audit_logs ((data->'response_body'->>'id'))",
 		"CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id ON audit_logs ((data->'request_body'->>'previous_response_id'))",
@@ -211,6 +215,10 @@ func buildAuditLogInsert(entries []*LogEntry) (string, []any) {
 		if cacheType := normalizeCacheType(entry.CacheType); cacheType != "" {
 			cacheTypeValue = cacheType
 		}
+		userPathValue := entry.UserPath
+		if strings.TrimSpace(userPathValue) == "" {
+			userPathValue = "/"
+		}
 		args = append(args,
 			entry.ID,
 			entry.Timestamp,
@@ -228,6 +236,7 @@ func buildAuditLogInsert(entries []*LogEntry) (string, []any) {
 			entry.ClientIP,
 			entry.Method,
 			entry.Path,
+			userPathValue,
 			entry.Stream,
 			entry.ErrorType,
 			dataJSON,

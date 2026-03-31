@@ -33,6 +33,7 @@ func (c *compiler) Compile(version Version) (*CompiledPlan, error) {
 		Version:        version.Version,
 		ScopeProvider:  version.Scope.Provider,
 		ScopeModel:     version.Scope.Model,
+		ScopeUserPath:  version.Scope.UserPath,
 		Name:           version.Name,
 		PlanHash:       version.PlanHash,
 		Features:       features,

@@ -106,7 +106,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 		markRequestFallbackUsed(c)
 	}
 
-	s.logUsage(plan, resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
+	s.logUsage(ctx, plan, resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromChatResponse(resp, requestID, providerType, "/v1/chat/completions", pricing)
 	})
 
@@ -210,7 +210,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		markRequestFallbackUsed(c)
 	}
 
-	s.logUsage(plan, resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
+	s.logUsage(ctx, plan, resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromResponsesResponse(resp, requestID, providerType, "/v1/responses", pricing)
 	})
 
@@ -329,7 +329,7 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
-	s.logUsage(plan, resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
+	s.logUsage(ctx, plan, resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromEmbeddingResponse(resp, requestID, providerType, "/v1/embeddings", pricing)
 	})
 
@@ -362,7 +362,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		observers = append(observers, auditlog.NewStreamLogObserver(s.logger, streamEntry, endpoint))
 	}
 	if s.usageLogger != nil && s.usageLogger.Config().Enabled && (plan == nil || plan.UsageEnabled()) {
-		observers = append(observers, usage.NewStreamUsageObserver(s.usageLogger, model, provider, requestID, endpoint, s.pricingResolver))
+		observers = append(observers, usage.NewStreamUsageObserver(s.usageLogger, model, provider, requestID, endpoint, s.pricingResolver, core.UserPathFromContext(c.Request().Context())))
 	}
 	wrappedStream := streaming.NewObservedSSEStream(stream, observers...)
 
@@ -510,6 +510,7 @@ func (s *translatedInferenceService) tryFallbackEmbeddings(
 }
 
 func (s *translatedInferenceService) logUsage(
+	ctx context.Context,
 	plan *core.ExecutionPlan,
 	model, providerType string,
 	extractFn func(*core.ModelPricing) *usage.UsageEntry,
@@ -522,6 +523,7 @@ func (s *translatedInferenceService) logUsage(
 		pricing = s.pricingResolver.ResolvePricing(model, providerType)
 	}
 	if entry := extractFn(pricing); entry != nil {
+		entry.UserPath = core.UserPathFromContext(ctx)
 		s.usageLogger.Write(entry)
 	}
 }

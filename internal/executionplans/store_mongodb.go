@@ -16,6 +16,7 @@ type mongoVersionDocument struct {
 	ID            string    `bson:"_id"`
 	ScopeProvider string    `bson:"scope_provider,omitempty"`
 	ScopeModel    string    `bson:"scope_model,omitempty"`
+	ScopeUserPath string    `bson:"scope_user_path,omitempty"`
 	ScopeKey      string    `bson:"scope_key"`
 	Version       int       `bson:"version"`
 	Active        bool      `bson:"active"`
@@ -146,6 +147,7 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 			ID:            version.ID,
 			ScopeProvider: version.Scope.Provider,
 			ScopeModel:    version.Scope.Model,
+			ScopeUserPath: version.Scope.UserPath,
 			ScopeKey:      version.ScopeKey,
 			Version:       version.Version,
 			Active:        version.Active,
@@ -198,6 +200,7 @@ func versionFromMongo(doc mongoVersionDocument) Version {
 		Scope: Scope{
 			Provider: doc.ScopeProvider,
 			Model:    doc.ScopeModel,
+			UserPath: doc.ScopeUserPath,
 		},
 		ScopeKey:    doc.ScopeKey,
 		Version:     doc.Version,

@@ -161,7 +161,21 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 		params.Interval = "daily"
 	}
 
+	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
+	if err != nil {
+		return params, err
+	}
+	params.UserPath = userPath
+
 	return params, nil
+}
+
+func normalizeUserPathQueryParam(fieldName, raw string) (string, error) {
+	userPath, err := core.NormalizeUserPath(raw)
+	if err != nil {
+		return "", core.NewInvalidRequestError("invalid "+fieldName+": "+err.Error(), err)
+	}
+	return userPath, nil
 }
 
 // parseDateRangeParams extracts common date range query params.
@@ -355,6 +369,7 @@ func (h *Handler) UsageByModel(c *echo.Context) error {
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
 // @Param        model       query     string  false  "Filter by model name"
 // @Param        provider    query     string  false  "Filter by provider"
+// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        search      query     string  false  "Search across model, provider, request_id, provider_id"
 // @Param        limit       query     int     false  "Page size (default 50, max 200)"
 // @Param        offset      query     int     false  "Offset for pagination"
@@ -417,6 +432,7 @@ func (h *Handler) UsageLog(c *echo.Context) error {
 // @Param        provider     query     string  false  "Filter by provider"
 // @Param        method       query     string  false  "Filter by HTTP method"
 // @Param        path         query     string  false  "Filter by request path"
+// @Param        user_path    query     string  false  "Filter by tracked user path subtree"
 // @Param        error_type   query     string  false  "Filter by error type"
 // @Param        status_code  query     int     false  "Filter by status code"
 // @Param        stream       query     bool    false  "Filter by stream mode (true/false)"
@@ -438,6 +454,10 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
+	if err != nil {
+		return handleError(c, err)
+	}
 
 	params := auditlog.LogQueryParams{
 		QueryParams: auditlog.QueryParams{
@@ -448,6 +468,7 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 		Provider:  c.QueryParam("provider"),
 		Method:    strings.ToUpper(c.QueryParam("method")),
 		Path:      c.QueryParam("path"),
+		UserPath:  userPath,
 		ErrorType: c.QueryParam("error_type"),
 		Search:    c.QueryParam("search"),
 	}
@@ -618,6 +639,7 @@ type upsertAliasRequest struct {
 type createExecutionPlanRequest struct {
 	ScopeProvider string                 `json:"scope_provider,omitempty"`
 	ScopeModel    string                 `json:"scope_model,omitempty"`
+	ScopeUserPath string                 `json:"scope_user_path,omitempty"`
 	Name          string                 `json:"name"`
 	Description   string                 `json:"description,omitempty"`
 	Payload       executionplans.Payload `json:"plan_payload"`
@@ -889,6 +911,11 @@ func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
+	scopeUserPath, err := normalizeUserPathQueryParam("scope_user_path", req.ScopeUserPath)
+	if err != nil {
+		return handleError(c, err)
+	}
+
 	if err := h.validateExecutionPlanScope(req.ScopeProvider, req.ScopeModel); err != nil {
 		return handleError(c, err)
 	}
@@ -901,6 +928,7 @@ func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
 		Scope: executionplans.Scope{
 			Provider: req.ScopeProvider,
 			Model:    req.ScopeModel,
+			UserPath: scopeUserPath,
 		},
 		Activate:    true,
 		Name:        req.Name,

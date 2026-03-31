@@ -25,11 +25,23 @@ func NewMongoDBReader(database *mongo.Database) (*MongoDBReader, error) {
 // GetSummary returns aggregated usage statistics for the given query parameters.
 func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams) (*UsageSummary, error) {
 	pipeline := bson.A{}
+	matchFilters := bson.D{}
 
 	if tsFilter := mongoDateRangeFilter(params); tsFilter != nil {
-		pipeline = append(pipeline, bson.D{{Key: "$match", Value: bson.D{
-			{Key: "timestamp", Value: tsFilter},
-		}}})
+		matchFilters = append(matchFilters, bson.E{Key: "timestamp", Value: tsFilter})
+	}
+	if userPath, err := normalizeUsageUserPathFilter(params.UserPath); err != nil {
+		return nil, err
+	} else if userPath != "" {
+		matchFilters = append(matchFilters, bson.E{
+			Key: "user_path",
+			Value: bson.D{
+				{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
+			},
+		})
+	}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
 	}
 
 	pipeline = append(pipeline, bson.D{{Key: "$group", Value: bson.D{
@@ -86,11 +98,23 @@ func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams)
 // GetUsageByModel returns token and cost totals grouped by model and provider.
 func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryParams) ([]ModelUsage, error) {
 	pipeline := bson.A{}
+	matchFilters := bson.D{}
 
 	if tsFilter := mongoDateRangeFilter(params); tsFilter != nil {
-		pipeline = append(pipeline, bson.D{{Key: "$match", Value: bson.D{
-			{Key: "timestamp", Value: tsFilter},
-		}}})
+		matchFilters = append(matchFilters, bson.E{Key: "timestamp", Value: tsFilter})
+	}
+	if userPath, err := normalizeUsageUserPathFilter(params.UserPath); err != nil {
+		return nil, err
+	} else if userPath != "" {
+		matchFilters = append(matchFilters, bson.E{
+			Key: "user_path",
+			Value: bson.D{
+				{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
+			},
+		})
+	}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
 	}
 
 	pipeline = append(pipeline, bson.D{{Key: "$group", Value: bson.D{
@@ -166,6 +190,16 @@ func (r *MongoDBReader) GetUsageLog(ctx context.Context, params UsageLogParams) 
 	if params.Provider != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "provider", Value: params.Provider})
 	}
+	if userPath, err := normalizeUsageUserPathFilter(params.UserPath); err != nil {
+		return nil, err
+	} else if userPath != "" {
+		matchFilters = append(matchFilters, bson.E{
+			Key: "user_path",
+			Value: bson.D{
+				{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
+			},
+		})
+	}
 	if params.Search != "" {
 		regex := bson.D{{Key: "$regex", Value: params.Search}, {Key: "$options", Value: "i"}}
 		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
@@ -207,6 +241,7 @@ func (r *MongoDBReader) GetUsageLog(ctx context.Context, params UsageLogParams) 
 			Model                  string         `bson:"model"`
 			Provider               string         `bson:"provider"`
 			Endpoint               string         `bson:"endpoint"`
+			UserPath               string         `bson:"user_path"`
 			InputTokens            int            `bson:"input_tokens"`
 			OutputTokens           int            `bson:"output_tokens"`
 			TotalTokens            int            `bson:"total_tokens"`
@@ -246,6 +281,7 @@ func (r *MongoDBReader) GetUsageLog(ctx context.Context, params UsageLogParams) 
 			Model:                  row.Model,
 			Provider:               row.Provider,
 			Endpoint:               row.Endpoint,
+			UserPath:               row.UserPath,
 			InputTokens:            row.InputTokens,
 			OutputTokens:           row.OutputTokens,
 			TotalTokens:            row.TotalTokens,
@@ -304,11 +340,23 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 	}
 
 	pipeline := bson.A{}
+	matchFilters := bson.D{}
 
 	if tsFilter := mongoDateRangeFilter(params); tsFilter != nil {
-		pipeline = append(pipeline, bson.D{{Key: "$match", Value: bson.D{
-			{Key: "timestamp", Value: tsFilter},
-		}}})
+		matchFilters = append(matchFilters, bson.E{Key: "timestamp", Value: tsFilter})
+	}
+	if userPath, err := normalizeUsageUserPathFilter(params.UserPath); err != nil {
+		return nil, err
+	} else if userPath != "" {
+		matchFilters = append(matchFilters, bson.E{
+			Key: "user_path",
+			Value: bson.D{
+				{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
+			},
+		})
+	}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
 	}
 
 	dateFormat := mongoDateFormat(interval)

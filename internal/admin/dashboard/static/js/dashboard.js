@@ -64,6 +64,7 @@ function dashboard() {
         usageLogSearch: '',
         usageLogModel: '',
         usageLogProvider: '',
+        usageLogUserPath: '',
         usageBarChart: null,
 
         // Audit page state
@@ -73,6 +74,7 @@ function dashboard() {
         auditProvider: '',
         auditMethod: '',
         auditPath: '',
+        auditUserPath: '',
         auditStatusCode: '',
         auditStream: '',
         auditFetchToken: 0,

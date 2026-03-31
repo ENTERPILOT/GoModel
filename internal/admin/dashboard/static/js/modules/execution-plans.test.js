@@ -93,6 +93,52 @@ test('executionPlanPreview mirrors the draft workflow card state from the editor
     );
 });
 
+test('executionPlanPreview renders path-scoped draft labels using canonical scope display', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        scope_user_path: ' team//alpha/ ',
+        name: 'Path workflow',
+        description: 'Preview should include the canonical path scope',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false,
+            fallback: false
+        },
+        guardrails: []
+    };
+
+    assert.equal(
+        JSON.stringify(module.executionPlanPreview()),
+        JSON.stringify({
+            id: 'draft-workflow-preview',
+            scope_type: 'provider_model_path',
+            scope_display: 'openai/gpt-5 @ /team/alpha',
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5',
+                scope_user_path: '/team/alpha'
+            },
+            name: 'Path workflow',
+            description: 'Preview should include the canonical path scope',
+            plan_payload: {
+                schema_version: 1,
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: false,
+                    fallback: false
+                },
+                guardrails: []
+            }
+        })
+    );
+});
+
 test('executionPlanPreview does not coerce blank guardrail steps into step zero', () => {
     const module = createExecutionPlansModule();
     module.executionPlanForm = {
@@ -347,6 +393,32 @@ test('executionPlanSubmitMode switches to save when an active workflow already m
     assert.equal(module.executionPlanSubmittingLabel(), 'Creating...');
 });
 
+test('executionPlanActiveScopeMatch treats path-only selections as scoped', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlans = [
+        {
+            id: 'global-plan',
+            scope: {
+                scope_provider: '',
+                scope_model: ''
+            }
+        },
+        {
+            id: 'team-alpha-plan',
+            scope: {
+                scope_provider: '',
+                scope_model: '',
+                scope_user_path: '/team/alpha'
+            }
+        }
+    ];
+    module.executionPlanForm = module.defaultExecutionPlanForm();
+    module.executionPlanForm.scope_user_path = 'team/alpha';
+
+    assert.equal(module.executionPlanActiveScopeMatch().id, 'team-alpha-plan');
+    assert.equal(module.executionPlanSubmitMode(), 'save');
+});
+
 test('buildExecutionPlanRequest emits provider-model payload and strips guardrails when disabled', () => {
     const module = createExecutionPlansModule();
     module.executionPlanRuntimeConfig = {
@@ -355,6 +427,7 @@ test('buildExecutionPlanRequest emits provider-model payload and strips guardrai
     module.executionPlanForm = {
         scope_provider: 'openai',
         scope_model: 'gpt-5',
+        scope_user_path: '/team/alpha',
         name: 'OpenAI GPT-5',
         description: 'Primary translated requests',
         features: {
@@ -374,6 +447,7 @@ test('buildExecutionPlanRequest emits provider-model payload and strips guardrai
         JSON.stringify({
             scope_provider: 'openai',
             scope_model: 'gpt-5',
+            scope_user_path: '/team/alpha',
             name: 'OpenAI GPT-5',
             description: 'Primary translated requests',
             plan_payload: {
@@ -408,7 +482,8 @@ test('openExecutionPlanCreate hydrates features and guardrails via shared normal
     module.openExecutionPlanCreate({
         scope: {
             scope_provider: 'openai',
-            scope_model: 'gpt-5'
+            scope_model: 'gpt-5',
+            scope_user_path: '/team/alpha'
         },
         name: 'Hydrated workflow',
         description: 'Uses helper normalization',
@@ -440,6 +515,7 @@ test('openExecutionPlanCreate hydrates features and guardrails via shared normal
         JSON.stringify(module.executionPlanForm.guardrails),
         JSON.stringify([{ ref: 'policy-system', step: 30 }])
     );
+    assert.equal(module.executionPlanForm.scope_user_path, '/team/alpha');
 });
 
 test('openExecutionPlanCreate drops blank guardrail steps instead of hydrating them as step zero', () => {
@@ -1010,6 +1086,89 @@ test('validateExecutionPlanRequest rejects duplicate guardrail refs', () => {
     assert.equal(
         module.validateExecutionPlanRequest(payload),
         'Each guardrail ref may appear only once in a plan.'
+    );
+});
+
+test('validateExecutionPlanRequest accepts slashless scope_user_path values', () => {
+    const module = createExecutionPlansModule();
+    module.models = [
+        { provider_type: 'openai', model: { id: 'gpt-5' } }
+    ];
+    module.executionPlans = [
+        {
+            id: 'openai-gpt-5-team-alpha',
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5',
+                scope_user_path: '/team/alpha'
+            }
+        }
+    ];
+    module.executionPlanForm = module.defaultExecutionPlanForm();
+    module.executionPlanForm.scope_provider = 'openai';
+    module.executionPlanForm.scope_model = 'gpt-5';
+    module.executionPlanForm.scope_user_path = 'team/alpha';
+
+    const payload = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        scope_user_path: '/team/alpha',
+        name: 'Scoped workflow',
+        plan_payload: {
+            schema_version: 1,
+            features: {
+                cache: true,
+                audit: true,
+                usage: true,
+                guardrails: false
+            },
+            guardrails: []
+        }
+    };
+
+    assert.equal(module.validateExecutionPlanRequest(payload), '');
+    assert.equal(module.executionPlanActiveScopeMatch().id, 'openai-gpt-5-team-alpha');
+    assert.equal(module.executionPlanSubmitMode(), 'save');
+});
+
+test('validateExecutionPlanRequest rejects invalid scope_user_path segments', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        module.validateExecutionPlanRequest({
+            scope_provider: '',
+            scope_model: '',
+            scope_user_path: '/team/../alpha',
+            plan_payload: {
+                schema_version: 1,
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: false
+                },
+                guardrails: []
+            }
+        }),
+        'User path cannot contain "." or ".." segments.'
+    );
+    assert.equal(
+        module.validateExecutionPlanRequest({
+            scope_provider: '',
+            scope_model: '',
+            scope_user_path: '/team:alpha',
+            plan_payload: {
+                schema_version: 1,
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: false
+                },
+                guardrails: []
+            }
+        }),
+        'User path cannot contain ":" segments.'
     );
 });
 

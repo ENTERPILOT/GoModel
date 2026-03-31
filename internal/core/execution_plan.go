@@ -72,14 +72,21 @@ func CapabilitiesForEndpoint(desc EndpointDescriptor) CapabilitySet {
 type ExecutionPlanSelector struct {
 	Provider string
 	Model    string
+	UserPath string
 }
 
 // NewExecutionPlanSelector trims selector inputs for deterministic matching.
-func NewExecutionPlanSelector(provider, model string) ExecutionPlanSelector {
-	return ExecutionPlanSelector{
+func NewExecutionPlanSelector(provider, model string, userPath ...string) ExecutionPlanSelector {
+	selector := ExecutionPlanSelector{
 		Provider: strings.TrimSpace(provider),
 		Model:    strings.TrimSpace(model),
 	}
+	if len(userPath) > 0 {
+		if normalized, err := NormalizeUserPath(userPath[0]); err == nil {
+			selector.UserPath = normalized
+		}
+	}
+	return selector
 }
 
 // ExecutionFeatures stores resolved per-request feature flags sourced from the
@@ -122,6 +129,7 @@ type ResolvedExecutionPolicy struct {
 	Version        int
 	ScopeProvider  string
 	ScopeModel     string
+	ScopeUserPath  string
 	Name           string
 	PlanHash       string
 	Features       ExecutionFeatures

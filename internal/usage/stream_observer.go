@@ -1,6 +1,10 @@
 package usage
 
-import "gomodel/internal/core"
+import (
+	"log/slog"
+
+	"gomodel/internal/core"
+)
 
 // StreamUsageObserver extracts usage data from parsed SSE JSON payloads.
 type StreamUsageObserver struct {
@@ -11,12 +15,24 @@ type StreamUsageObserver struct {
 	provider        string
 	requestID       string
 	endpoint        string
+	userPath        string
 	closed          bool
 }
 
-func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, endpoint string, pricingResolver PricingResolver) *StreamUsageObserver {
+func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, endpoint string, pricingResolver PricingResolver, userPath ...string) *StreamUsageObserver {
 	if logger == nil {
 		return nil
+	}
+	normalizedUserPath := "/"
+	if len(userPath) > 0 {
+		if normalized, err := core.NormalizeUserPath(userPath[0]); err == nil {
+			if normalized != "" {
+				normalizedUserPath = normalized
+			}
+		} else {
+			slog.Warn("stream usage observer received invalid user_path; using root fallback", "error", err)
+			normalizedUserPath = "/"
+		}
 	}
 	return &StreamUsageObserver{
 		logger:          logger,
@@ -25,6 +41,7 @@ func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, 
 		provider:        provider,
 		requestID:       requestID,
 		endpoint:        endpoint,
+		userPath:        normalizedUserPath,
 	}
 }
 
@@ -130,11 +147,15 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 		}
 	}
 
-	return ExtractFromSSEUsage(
+	entry := ExtractFromSSEUsage(
 		providerID,
 		inputTokens, outputTokens, totalTokens,
 		rawData,
 		o.requestID, model, o.provider, o.endpoint,
 		pricingArgs...,
 	)
+	if entry != nil {
+		entry.UserPath = o.userPath
+	}
+	return entry
 }

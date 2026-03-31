@@ -79,6 +79,9 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 		{
 			Keys: bson.D{{Key: "endpoint", Value: 1}},
 		},
+		{
+			Keys: bson.D{{Key: "user_path", Value: 1}},
+		},
 	}
 
 	// Add timestamp index - use TTL index if retention is configured,

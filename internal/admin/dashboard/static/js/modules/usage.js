@@ -116,6 +116,7 @@
                     if (this.usageLogSearch) qs += '&search=' + encodeURIComponent(this.usageLogSearch);
                     if (this.usageLogModel) qs += '&model=' + encodeURIComponent(this.usageLogModel);
                     if (this.usageLogProvider) qs += '&provider=' + encodeURIComponent(this.usageLogProvider);
+                    if (this.usageLogUserPath) qs += '&user_path=' + encodeURIComponent(this.usageLogUserPath);
 
                     const res = await fetch('/admin/api/v1/usage/log?' + qs, options);
                     if (!this.handleFetchResponse(res, 'usage log')) {

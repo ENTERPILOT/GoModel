@@ -18,6 +18,7 @@ type LogQueryParams struct {
 	Provider   string
 	Method     string
 	Path       string
+	UserPath   string
 	ErrorType  string
 	Search     string
 	StatusCode *int

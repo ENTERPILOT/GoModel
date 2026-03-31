@@ -5271,6 +5271,7 @@ func TestProviderPassthrough_OpenAI(t *testing.T) {
 	req.Header.Set("Connection", "X-Debug, keep-alive")
 	req.Header.Set("X-Debug", "secret")
 	req.Header.Set("X-Request-ID", "req_123")
+	req.Header.Set(core.UserPathHeader, "/team/a/user")
 
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -5322,6 +5323,9 @@ func TestProviderPassthrough_OpenAI(t *testing.T) {
 	}
 	if got := provider.lastPassthroughReq.Headers.Get("X-Request-ID"); got != "req_123" {
 		t.Fatalf("X-Request-ID = %q, want req_123", got)
+	}
+	if got := provider.lastPassthroughReq.Headers.Get(core.UserPathHeader); got != "" {
+		t.Fatalf("%s should not be forwarded, got %q", core.UserPathHeader, got)
 	}
 }
 

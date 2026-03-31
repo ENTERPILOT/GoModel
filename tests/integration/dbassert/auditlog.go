@@ -32,6 +32,7 @@ type AuditLogEntry struct {
 	ClientIP   string
 	Method     string
 	Path       string
+	UserPath   string
 	Stream     bool
 	ErrorType  string
 	Data       *auditlog.LogData
@@ -45,7 +46,7 @@ func QueryAuditLogsByRequestID(t *testing.T, pool *pgxpool.Pool, requestID strin
 
 	query := `
 		SELECT id, timestamp, duration_ns, model, provider, status_code,
-		       request_id, auth_key_id, client_ip, method, path, stream, error_type, data
+		       request_id, auth_key_id, client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs
 		WHERE request_id = $1
 		ORDER BY timestamp ASC
@@ -59,17 +60,21 @@ func QueryAuditLogsByRequestID(t *testing.T, pool *pgxpool.Pool, requestID strin
 	for rows.Next() {
 		var entry AuditLogEntry
 		var authKeyID sql.NullString
+		var userPathNull sql.NullString
 		var dataJSON []byte
 		err := rows.Scan(
 			&entry.ID, &entry.Timestamp, &entry.DurationNs,
 			&entry.Model, &entry.Provider, &entry.StatusCode,
 			&entry.RequestID, &authKeyID, &entry.ClientIP, &entry.Method,
-			&entry.Path, &entry.Stream, &entry.ErrorType, &dataJSON,
+			&entry.Path, &userPathNull, &entry.Stream, &entry.ErrorType, &dataJSON,
 		)
 		require.NoError(t, err, "failed to scan audit log row")
 
 		if authKeyID.Valid {
 			entry.AuthKeyID = authKeyID.String
+		}
+		if userPathNull.Valid {
+			entry.UserPath = userPathNull.String
 		}
 		if dataJSON != nil {
 			entry.Data = unmarshalLogData(t, dataJSON)
@@ -161,6 +166,9 @@ func bsonToAuditLogEntry(t *testing.T, doc bson.M) AuditLogEntry {
 	}
 	if v, ok := doc["path"].(string); ok {
 		entry.Path = v
+	}
+	if v, ok := doc["user_path"].(string); ok {
+		entry.UserPath = v
 	}
 	if v, ok := doc["stream"].(bool); ok {
 		entry.Stream = v

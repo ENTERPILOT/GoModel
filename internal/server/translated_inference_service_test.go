@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"testing"
 
 	"gomodel/internal/core"
@@ -27,7 +28,7 @@ func TestTranslatedInferenceService_LogUsageSkipsWhenExecutionPlanDisablesUsage(
 		usageLogger: logger,
 	}
 
-	service.logUsage(&core.ExecutionPlan{
+	service.logUsage(context.Background(), &core.ExecutionPlan{
 		Policy: &core.ResolvedExecutionPolicy{
 			VersionID: "plan-usage-off",
 			Features: core.ExecutionFeatures{
@@ -54,5 +55,29 @@ func TestTranslatedInferenceService_ProviderTypeForSelectorPrefersExplicitProvid
 	got := service.providerTypeForSelector(core.ModelSelector{Provider: "azure", Model: "gpt-4o"}, "openai")
 	if got != "azure" {
 		t.Fatalf("providerTypeForSelector() = %q, want %q", got, "azure")
+	}
+}
+
+func TestTranslatedInferenceService_LogUsageAssignsUserPathFromContext(t *testing.T) {
+	logger := &usageCaptureLogger{
+		config: usage.Config{Enabled: true},
+	}
+	service := &translatedInferenceService{
+		usageLogger: logger,
+	}
+
+	ctx := core.WithRequestSnapshot(context.Background(), &core.RequestSnapshot{
+		UserPath: "/team/alpha",
+	})
+
+	service.logUsage(ctx, nil, "gpt-5-nano", "openai", func(*core.ModelPricing) *usage.UsageEntry {
+		return &usage.UsageEntry{ID: "usage-1"}
+	})
+
+	if len(logger.entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
+	}
+	if got := logger.entries[0].UserPath; got != "/team/alpha" {
+		t.Fatalf("UserPath = %q, want /team/alpha", got)
 	}
 }
