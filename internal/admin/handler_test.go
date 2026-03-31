@@ -1457,6 +1457,25 @@ func TestParseUsageParams_InvalidEndDate(t *testing.T) {
 	}
 }
 
+func TestParseUsageParams_InvalidUserPath(t *testing.T) {
+	c := newContext("user_path=/team/../alpha")
+	_, err := parseUsageParams(c)
+	if err == nil {
+		t.Fatal("expected error for invalid user_path, got nil")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.Message != `invalid user_path: user path cannot contain '.' or '..' segments` {
+		t.Fatalf("message = %q, want invalid user_path message", gatewayErr.Message)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", gatewayErr.HTTPStatusCode())
+	}
+}
+
 func TestParseUsageParams_IntervalWeekly(t *testing.T) {
 	c := newContext("interval=weekly")
 	params, err := parseUsageParams(c)

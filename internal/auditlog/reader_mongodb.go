@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"time"
 
+	"gomodel/internal/core"
+
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -120,7 +122,7 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 		})
 	}
 	if userPath, err := normalizeAuditUserPathFilter(params.UserPath); err != nil {
-		return nil, err
+		return nil, core.NewInvalidRequestError(err.Error(), err)
 	} else if userPath != "" {
 		matchFilters = append(matchFilters, bson.E{
 			Key: "user_path",

@@ -22,6 +22,14 @@ func auditUserPathSubtreePattern(userPath string) string {
 	return escapeLikeWildcards(userPath) + "/%"
 }
 
+func auditUserPathSQLPredicate(userPath, exactExpr, subtreeExpr string) string {
+	predicate := "(" + exactExpr + " OR " + subtreeExpr
+	if userPath == "/" {
+		predicate += " OR user_path IS NULL"
+	}
+	return predicate + ")"
+}
+
 func auditUserPathSubtreeRegex(userPath string) string {
 	if userPath == "/" {
 		return "^/"

@@ -699,6 +699,31 @@ func TestMiddleware_StoresAuthKeyIDFromContext(t *testing.T) {
 	}
 }
 
+func TestMiddleware_DefaultsMissingUserPathToRoot(t *testing.T) {
+	logger := &capturingLogger{cfg: Config{Enabled: true}}
+	middleware := Middleware(logger)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := middleware(func(c *echo.Context) error {
+		return c.NoContent(http.StatusOK)
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler() error = %v", err)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("logger.entries len = %d, want 1", len(logger.entries))
+	}
+	if got := logger.entries[0].UserPath; got != "/" {
+		t.Fatalf("UserPath = %q, want /", got)
+	}
+}
+
 func TestMiddleware_SkipsWriteWhenExecutionPlanDisablesAudit(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{

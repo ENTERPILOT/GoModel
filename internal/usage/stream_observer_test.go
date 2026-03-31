@@ -190,6 +190,26 @@ func TestStreamUsageObserverNoUserPath(t *testing.T) {
 	if got := entries[0].UserPath; got != "/" {
 		t.Fatalf("UserPath = %q, want /", got)
 	}
+
+	explicitEmptyLogger := &trackingLogger{enabled: true}
+	explicitEmptyObserver := NewStreamUsageObserver(explicitEmptyLogger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "")
+	explicitEmptyObserver.OnJSONEvent(map[string]any{
+		"id": "chatcmpl-123",
+		"usage": map[string]any{
+			"prompt_tokens":     float64(10),
+			"completion_tokens": float64(5),
+			"total_tokens":      float64(15),
+		},
+	})
+	explicitEmptyObserver.OnStreamClose()
+
+	explicitEmptyEntries := explicitEmptyLogger.getEntries()
+	if len(explicitEmptyEntries) != 1 {
+		t.Fatalf("explicit empty len(entries) = %d, want 1", len(explicitEmptyEntries))
+	}
+	if got := explicitEmptyEntries[0].UserPath; got != "/" {
+		t.Fatalf("explicit empty UserPath = %q, want /", got)
+	}
 }
 
 func TestStreamUsageObserverNormalizesUserPath(t *testing.T) {

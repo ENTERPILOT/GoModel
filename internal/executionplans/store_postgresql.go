@@ -237,9 +237,7 @@ func scanPostgreSQLVersion(scanner interface {
 	if scopeModel != nil {
 		version.Scope.Model = *scopeModel
 	}
-	if scopeUserPath != nil {
-		version.Scope.UserPath = *scopeUserPath
-	}
+	version.Scope.UserPath = storedScopeUserPath(version.ScopeKey, valueOrEmpty(scopeUserPath))
 	if err := json.Unmarshal(payloadJSON, &version.Payload); err != nil {
 		return Version{}, fmt.Errorf("decode execution plan payload %q: %w", version.ID, err)
 	}
@@ -251,6 +249,13 @@ func nullIfEmpty(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func valueOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func isPostgreSQLUniqueViolation(err error) bool {

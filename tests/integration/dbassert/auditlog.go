@@ -60,17 +60,21 @@ func QueryAuditLogsByRequestID(t *testing.T, pool *pgxpool.Pool, requestID strin
 	for rows.Next() {
 		var entry AuditLogEntry
 		var authKeyID sql.NullString
+		var userPathNull sql.NullString
 		var dataJSON []byte
 		err := rows.Scan(
 			&entry.ID, &entry.Timestamp, &entry.DurationNs,
 			&entry.Model, &entry.Provider, &entry.StatusCode,
 			&entry.RequestID, &authKeyID, &entry.ClientIP, &entry.Method,
-			&entry.Path, &entry.UserPath, &entry.Stream, &entry.ErrorType, &dataJSON,
+			&entry.Path, &userPathNull, &entry.Stream, &entry.ErrorType, &dataJSON,
 		)
 		require.NoError(t, err, "failed to scan audit log row")
 
 		if authKeyID.Valid {
 			entry.AuthKeyID = authKeyID.String
+		}
+		if userPathNull.Valid {
+			entry.UserPath = userPathNull.String
 		}
 		if dataJSON != nil {
 			entry.Data = unmarshalLogData(t, dataJSON)

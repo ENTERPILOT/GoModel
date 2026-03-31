@@ -52,7 +52,7 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 		args = append(args, "%"+escapeLikeWildcards(params.Path)+"%")
 	}
 	if userPath != "" {
-		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
+		conditions = append(conditions, auditUserPathSQLPredicate(userPath, "user_path = ?", "user_path LIKE ? ESCAPE '\\'"))
 		args = append(args, userPath, auditUserPathSubtreePattern(userPath))
 	}
 	if params.ErrorType != "" {

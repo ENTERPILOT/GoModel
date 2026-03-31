@@ -57,6 +57,10 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 
 			// Read request ID (always set by the request ID middleware in http.go)
 			requestID := req.Header.Get("X-Request-ID")
+			userPath := core.UserPathFromContext(req.Context())
+			if userPath == "" {
+				userPath = "/"
+			}
 
 			// Create initial log entry
 			entry := &LogEntry{
@@ -66,7 +70,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				ClientIP:  c.RealIP(),
 				Method:    req.Method,
 				Path:      req.URL.Path,
-				UserPath:  core.UserPathFromContext(req.Context()),
+				UserPath:  userPath,
 				Data: &LogData{
 					UserAgent: req.UserAgent(),
 				},

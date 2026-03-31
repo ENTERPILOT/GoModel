@@ -1,6 +1,12 @@
 package auditlog
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"gomodel/internal/core"
+)
 
 func TestSanitizeLogDataRedactsHeaders(t *testing.T) {
 	original := &LogData{
@@ -62,5 +68,22 @@ func TestMongoLogRowToLogEntryPreservesCacheType(t *testing.T) {
 	}
 	if entry.CacheType != CacheTypeSemantic {
 		t.Fatalf("CacheType = %q, want %q", entry.CacheType, CacheTypeSemantic)
+	}
+}
+
+func TestMongoDBReader_GetLogsInvalidUserPathReturnsGatewayError(t *testing.T) {
+	reader := &MongoDBReader{}
+
+	_, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "/team/../alpha"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("gatewayErr.Type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
 	}
 }

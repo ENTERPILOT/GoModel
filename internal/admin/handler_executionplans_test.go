@@ -792,6 +792,56 @@ func TestCreateExecutionPlanRejectsUnknownProviderOrModelScope(t *testing.T) {
 	}
 }
 
+func TestCreateExecutionPlan_UsesScopeUserPathInValidationErrors(t *testing.T) {
+	store := &executionPlanTestStore{
+		versions: []executionplans.Version{
+			{
+				ID:       "global-plan",
+				Scope:    executionplans.Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: executionplans.Payload{
+					SchemaVersion: 1,
+					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+				},
+				PlanHash: "hash-global",
+			},
+		},
+	}
+	h := newExecutionPlanHandler(t, store, nil)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{
+		"scope_user_path":"/team/../alpha",
+		"name":"invalid path",
+		"plan_payload":{
+			"schema_version":1,
+			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
+			"guardrails":[]
+		}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.CreateExecutionPlan(c); err != nil {
+		t.Fatalf("CreateExecutionPlan() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+
+	body := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	if body.Error.Type != "invalid_request_error" {
+		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
+	}
+	if body.Error.Message != `invalid scope_user_path: user path cannot contain '.' or '..' segments` {
+		t.Fatalf("error message = %q, want invalid scope_user_path message", body.Error.Message)
+	}
+}
+
 func TestExecutionPlanViewReflectsFeatureCaps(t *testing.T) {
 	store := &executionPlanTestStore{
 		versions: []executionplans.Version{

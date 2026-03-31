@@ -161,7 +161,7 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 		params.Interval = "daily"
 	}
 
-	userPath, err := normalizeUserPathQueryParam(c.QueryParam("user_path"))
+	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
 	if err != nil {
 		return params, err
 	}
@@ -170,10 +170,10 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 	return params, nil
 }
 
-func normalizeUserPathQueryParam(raw string) (string, error) {
+func normalizeUserPathQueryParam(fieldName, raw string) (string, error) {
 	userPath, err := core.NormalizeUserPath(raw)
 	if err != nil {
-		return "", core.NewInvalidRequestError("invalid user_path: "+err.Error(), err)
+		return "", core.NewInvalidRequestError("invalid "+fieldName+": "+err.Error(), err)
 	}
 	return userPath, nil
 }
@@ -454,7 +454,7 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	userPath, err := normalizeUserPathQueryParam(c.QueryParam("user_path"))
+	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -911,7 +911,7 @@ func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
-	scopeUserPath, err := normalizeUserPathQueryParam(req.ScopeUserPath)
+	scopeUserPath, err := normalizeUserPathQueryParam("scope_user_path", req.ScopeUserPath)
 	if err != nil {
 		return handleError(c, err)
 	}

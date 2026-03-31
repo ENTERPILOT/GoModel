@@ -53,7 +53,11 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 		argIdx++
 	}
 	if userPath != "" {
-		conditions = append(conditions, fmt.Sprintf("(user_path = $%d OR user_path LIKE $%d ESCAPE '\\')", argIdx, argIdx+1))
+		conditions = append(conditions, auditUserPathSQLPredicate(
+			userPath,
+			fmt.Sprintf("user_path = $%d", argIdx),
+			fmt.Sprintf("user_path LIKE $%d ESCAPE '\\'", argIdx+1),
+		))
 		args = append(args, userPath, auditUserPathSubtreePattern(userPath))
 		argIdx += 2
 	}

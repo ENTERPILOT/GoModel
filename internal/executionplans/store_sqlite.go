@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,14 +51,8 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 			return nil, fmt.Errorf("initialize execution plan versions table: %w", err)
 		}
 	}
-	hasUserPathColumn, err := sqliteTableHasColumn(db, "execution_plan_versions", "scope_user_path")
-	if err != nil {
+	if _, err := db.Exec(`ALTER TABLE execution_plan_versions ADD COLUMN scope_user_path TEXT`); err != nil && !isSQLiteDuplicateColumnError(err) {
 		return nil, fmt.Errorf("initialize execution plan versions table: %w", err)
-	}
-	if !hasUserPathColumn {
-		if _, err := db.Exec(`ALTER TABLE execution_plan_versions ADD COLUMN scope_user_path TEXT`); err != nil {
-			return nil, fmt.Errorf("initialize execution plan versions table: %w", err)
-		}
 	}
 
 	return &SQLiteStore{db: db}, nil
@@ -88,6 +83,14 @@ func sqliteTableHasColumn(db *sql.DB, tableName, columnName string) (bool, error
 		return false, err
 	}
 	return false, nil
+}
+
+func isSQLiteDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "duplicate column") || strings.Contains(message, "already exists")
 }
 
 func (s *SQLiteStore) ListActive(ctx context.Context) ([]Version, error) {
@@ -266,7 +269,7 @@ func scanSQLiteVersion(scanner interface {
 	version.Scope = Scope{
 		Provider: scopeProvider.String,
 		Model:    scopeModel.String,
-		UserPath: scopeUserPath.String,
+		UserPath: storedScopeUserPath(version.ScopeKey, scopeUserPath.String),
 	}
 	version.Active = active != 0
 	version.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
