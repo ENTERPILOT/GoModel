@@ -56,7 +56,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	}
 	if !hasUserPathColumn {
 		if _, err := db.Exec(`ALTER TABLE execution_plan_versions ADD COLUMN scope_user_path TEXT`); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("initialize execution plan versions table: %w", err)
 		}
 	}
 
