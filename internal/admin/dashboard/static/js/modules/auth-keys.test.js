@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function loadAuthKeysModuleFactory(overrides = {}) {
+    const clipboardSource = fs.readFileSync(path.join(__dirname, 'clipboard.js'), 'utf8');
     const source = fs.readFileSync(path.join(__dirname, 'auth-keys.js'), 'utf8');
     const window = {
         ...(overrides.window || {})
@@ -17,6 +18,7 @@ function loadAuthKeysModuleFactory(overrides = {}) {
         window
     };
     vm.createContext(context);
+    vm.runInContext(clipboardSource, context);
     vm.runInContext(source, context);
     return context.window.dashboardAuthKeysModule;
 }
@@ -162,13 +164,13 @@ test('copyAuthKeyValue uses navigator.clipboard when available and resets feedba
     await module.copyAuthKeyValue();
 
     assert.deepEqual(writes, ['sk_gom_test']);
-    assert.equal(module.authKeyCopied, true);
-    assert.equal(module.authKeyCopyError, false);
+    assert.equal(module.authKeyCopyState.copied, true);
+    assert.equal(module.authKeyCopyState.error, false);
 
     timers.runAll();
 
-    assert.equal(module.authKeyCopied, false);
-    assert.equal(module.authKeyCopyError, false);
+    assert.equal(module.authKeyCopyState.copied, false);
+    assert.equal(module.authKeyCopyState.error, false);
 });
 
 test('copyAuthKeyValue sets an error flag when navigator.clipboard rejects', async () => {
@@ -194,13 +196,13 @@ test('copyAuthKeyValue sets an error flag when navigator.clipboard rejects', asy
 
     await module.copyAuthKeyValue();
 
-    assert.equal(module.authKeyCopied, false);
-    assert.equal(module.authKeyCopyError, true);
+    assert.equal(module.authKeyCopyState.copied, false);
+    assert.equal(module.authKeyCopyState.error, true);
 
     timers.runAll();
 
-    assert.equal(module.authKeyCopied, false);
-    assert.equal(module.authKeyCopyError, false);
+    assert.equal(module.authKeyCopyState.copied, false);
+    assert.equal(module.authKeyCopyState.error, false);
 });
 
 test('copyAuthKeyValue falls back to document.execCommand when clipboard API is unavailable', async () => {
@@ -250,8 +252,8 @@ test('copyAuthKeyValue falls back to document.execCommand when clipboard API is 
     assert.equal(appended.length, 1);
     assert.equal(removed.length, 1);
     assert.equal(appended[0].value, 'sk_gom_test');
-    assert.equal(module.authKeyCopied, true);
-    assert.equal(module.authKeyCopyError, false);
+    assert.equal(module.authKeyCopyState.copied, true);
+    assert.equal(module.authKeyCopyState.error, false);
 });
 
 test('fetchAuthKeys preserves existing rows and surfaces non-auth HTTP errors', async () => {

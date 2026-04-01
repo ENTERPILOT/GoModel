@@ -1,25 +1,35 @@
 {{define "audit-pane"}}
-<section class="audit-pane">
+<section class="audit-pane" x-data="auditPaneState({{.}})">
     <div class="audit-pane-head">
-        <h4 x-text="{{.}}.title"></h4>
-        <button type="button" class="pagination-btn" @click.prevent="copyAuditJSON({{.}}.copyBody, $event)">Copy Body</button>
+        <h4 x-text="pane.title"></h4>
+        <button type="button" class="pagination-btn copy-feedback-btn"
+            :class="{ 'copy-feedback-btn-copied': copyState.copied }"
+            @click.prevent="copyBody()">
+            <template x-if="!copyState.copied">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </template>
+            <template x-if="copyState.copied">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>
+            </template>
+            <span x-text="copyState.error ? 'Copy failed' : (copyState.copied ? 'Copied' : 'Copy Body')"></span>
+        </button>
     </div>
-    <div class="audit-pane-block" x-show="{{.}}.showErrorMessage">
+    <div class="audit-pane-block" x-show="pane.showErrorMessage">
         <h5>Error Message</h5>
-        <pre class="audit-json" x-text="{{.}}.errorMessage"></pre>
+        <pre class="audit-json" x-text="pane.errorMessage"></pre>
     </div>
-    <div class="audit-pane-block" x-show="{{.}}.showHeaders">
+    <div class="audit-pane-block" x-show="pane.showHeaders">
         <h5>Headers</h5>
-        <pre class="audit-json" x-text="formatJSON({{.}}.headers)"></pre>
+        <pre class="audit-json" x-text="formatJSON(pane.headers)"></pre>
     </div>
-    <div class="audit-pane-block" x-show="{{.}}.showBody">
+    <div class="audit-pane-block" x-show="pane.showBody">
         <h5>Body</h5>
         <pre class="audit-json audit-json-body"
-             x-html="renderBodyWithConversationHighlights({{.}}.entry, {{.}}.body)"
+             x-html="renderBodyWithConversationHighlights(pane.entry, pane.body)"
              @mousedown="startBodyInteraction($event)"
-             @click="handleBodyConversationClick($event, {{.}}.entry)"></pre>
+             @click="handleBodyConversationClick($event, pane.entry)"></pre>
     </div>
-    <p class="empty-state audit-pane-empty" x-show="{{.}}.showEmpty" x-text="{{.}}.emptyMessage"></p>
-    <p class="audit-size-warning" x-show="{{.}}.showTooLarge" x-text="{{.}}.tooLargeMessage"></p>
+    <p class="empty-state audit-pane-empty" x-show="pane.showEmpty" x-text="pane.emptyMessage"></p>
+    <p class="audit-size-warning" x-show="pane.showTooLarge" x-text="pane.tooLargeMessage"></p>
 </section>
 {{end}}

@@ -70,6 +70,10 @@ test('dashboard layout pins Chart.js to 4.5.0', () => {
         template,
         /<script src="https:\/\/unpkg\.com\/htmx\.org@2\.0\.8\/dist\/htmx\.min\.js" integrity="sha384-\/TgkGk7p307TH7EXJDuUlgG3Ce1UVolAOFopFekQkkXihi5u\/6OCvVKyz1W\+idaz" crossorigin="anonymous"><\/script>/
     );
+    assert.match(
+        template,
+        /<script src="\/admin\/static\/js\/modules\/conversation-helpers\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/clipboard\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/audit-list\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/auth-keys\.js"><\/script>/
+    );
 });
 
 test('dashboard pages reuse a shared auth banner template', () => {
@@ -128,7 +132,7 @@ test('audit request and response sections reuse a shared audit pane template', (
 
     assert.match(
         auditPaneTemplate,
-        /{{define "audit-pane"}}[\s\S]*x-text="{{\.}}\.title"[\s\S]*type="button"[\s\S]*copyAuditJSON\({{\.\}}\.copyBody, \$event\)[\s\S]*x-text="formatJSON\({{\.\}}\.headers\)"[\s\S]*renderBodyWithConversationHighlights\({{\.\}}\.entry, {{\.}}\.body\)[\s\S]*x-text="{{\.}}\.emptyMessage"[\s\S]*x-text="{{\.}}\.tooLargeMessage"[\s\S]*{{end}}/
+        /{{define "audit-pane"}}[\s\S]*x-data="auditPaneState\({{\.\}}\)"[\s\S]*x-text="pane\.title"[\s\S]*type="button"[\s\S]*@click\.prevent="copyBody\(\)"[\s\S]*x-text="formatJSON\(pane\.headers\)"[\s\S]*renderBodyWithConversationHighlights\(pane\.entry, pane\.body\)[\s\S]*x-text="pane\.emptyMessage"[\s\S]*x-text="pane\.tooLargeMessage"[\s\S]*{{end}}/
     );
     assert.match(indexTemplate, /{{template "audit-pane" "auditRequestPane\(entry\)"}}/);
     assert.match(indexTemplate, /{{template "audit-pane" "auditResponsePane\(entry\)"}}/);

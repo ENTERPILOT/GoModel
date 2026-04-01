@@ -3137,14 +3137,14 @@ body.conversation-drawer-open {
     color: var(--danger);
 }
 
-.auth-key-copy-btn {
+.copy-feedback-btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     transition: background-color 0.15s, border-color 0.15s, color 0.15s;
 }
 
-.auth-key-copy-btn-copied {
+.copy-feedback-btn-copied {
     background: color-mix(in srgb, var(--success) 12%, var(--bg));
     border-color: color-mix(in srgb, var(--success) 40%, var(--border));
     color: var(--success);

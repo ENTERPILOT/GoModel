@@ -1,5 +1,12 @@
 (function(global) {
     function dashboardAuditListModule() {
+        const clipboardModuleFactory = typeof global.dashboardClipboardModule === 'function'
+            ? global.dashboardClipboardModule
+            : null;
+        const clipboard = clipboardModuleFactory
+            ? clipboardModuleFactory()
+            : null;
+
         return {
             _auditQueryStr() {
                 if (this.customStartDate && this.customEndDate) {
@@ -182,26 +189,27 @@
                 };
             },
 
-            async copyAuditJSON(v, event) {
-                if (v == null || v === undefined || v === '') return;
-                const button = event && event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
-                if (button && !button.dataset.copyLabel) {
-                    button.dataset.copyLabel = String(button.textContent || 'Copy').trim();
-                }
-                try {
-                    const payload = this.formatJSON(v);
-                    await navigator.clipboard.writeText(payload);
-                } catch (e) {
-                    console.error('Failed to copy audit payload:', e);
-                    if (button) {
-                        button.textContent = 'Copy failed';
-                        button.disabled = true;
-                        window.setTimeout(() => {
-                            button.textContent = button.dataset.copyLabel || 'Copy';
-                            button.disabled = false;
-                        }, 2000);
+            auditPaneState(pane) {
+                const formatJSON = this.formatJSON.bind(this);
+
+                return {
+                    pane,
+                    copyState: clipboard
+                        ? clipboard.createClipboardButtonState({
+                            logPrefix: 'Failed to copy audit payload:'
+                        })
+                        : {
+                            copied: false,
+                            error: false,
+                            copy() {
+                                return Promise.resolve();
+                            }
+                        },
+
+                    copyBody() {
+                        return this.copyState.copy(this.pane.copyBody, formatJSON);
                     }
-                }
+                };
             }
         };
     }
