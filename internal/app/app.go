@@ -116,7 +116,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize usage tracking: %w", err)
 	}
 	if usageResult == nil || usageResult.Logger == nil {
-		closeErr := errors.Join(app.audit.Close(), app.providers.Close())
+		var usageCloseErr error
+		if usageResult != nil {
+			usageCloseErr = usageResult.Close()
+		}
+		closeErr := errors.Join(usageCloseErr, app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("usage tracking initialization returned nil result (also: close error: %v)", closeErr)
 		}

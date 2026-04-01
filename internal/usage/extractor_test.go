@@ -482,42 +482,93 @@ func TestExtractFromSSEUsageEmptyRawData(t *testing.T) {
 }
 
 func TestExtractFromCachedResponseBody(t *testing.T) {
-	resp := &core.ChatResponse{
-		ID:    "chatcmpl-cache",
-		Model: "gpt-4o-body",
-		Usage: core.Usage{
-			PromptTokens:     42,
-			CompletionTokens: 18,
-			TotalTokens:      60,
-		},
-	}
-	body, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
+	t.Run("parses and overrides metadata", func(t *testing.T) {
+		resp := &core.ChatResponse{
+			ID:    "chatcmpl-cache",
+			Model: "gpt-4o-body",
+			Usage: core.Usage{
+				PromptTokens:     42,
+				CompletionTokens: 18,
+				TotalTokens:      60,
+			},
+		}
+		body, err := json.Marshal(resp)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
 
-	entry := ExtractFromCachedResponseBody(body, "req-cache", "gpt-4o", "openai", "/v1/chat/completions", CacheTypeExact)
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.CacheType != CacheTypeExact {
-		t.Fatalf("CacheType = %q, want %q", entry.CacheType, CacheTypeExact)
-	}
-	if entry.RequestID != "req-cache" {
-		t.Fatalf("RequestID = %q, want %q", entry.RequestID, "req-cache")
-	}
-	if entry.Provider != "openai" {
-		t.Fatalf("Provider = %q, want %q", entry.Provider, "openai")
-	}
-	if entry.Endpoint != "/v1/chat/completions" {
-		t.Fatalf("Endpoint = %q, want %q", entry.Endpoint, "/v1/chat/completions")
-	}
-	if entry.Model != "gpt-4o" {
-		t.Fatalf("Model = %q, want %q", entry.Model, "gpt-4o")
-	}
-	if entry.InputTokens != 42 || entry.OutputTokens != 18 || entry.TotalTokens != 60 {
-		t.Fatalf("unexpected token counts: %+v", entry)
-	}
+		entry := ExtractFromCachedResponseBody(body, "req-cache", "gpt-4o", "openai", "/v1/chat/completions", CacheTypeExact)
+		if entry == nil {
+			t.Fatal("expected non-nil entry")
+		}
+		if entry.CacheType != CacheTypeExact {
+			t.Fatalf("CacheType = %q, want %q", entry.CacheType, CacheTypeExact)
+		}
+		if entry.RequestID != "req-cache" {
+			t.Fatalf("RequestID = %q, want %q", entry.RequestID, "req-cache")
+		}
+		if entry.Provider != "openai" {
+			t.Fatalf("Provider = %q, want %q", entry.Provider, "openai")
+		}
+		if entry.Endpoint != "/v1/chat/completions" {
+			t.Fatalf("Endpoint = %q, want %q", entry.Endpoint, "/v1/chat/completions")
+		}
+		if entry.Model != "gpt-4o" {
+			t.Fatalf("Model = %q, want %q", entry.Model, "gpt-4o")
+		}
+		if entry.InputTokens != 42 || entry.OutputTokens != 18 || entry.TotalTokens != 60 {
+			t.Fatalf("unexpected token counts: %+v", entry)
+		}
+	})
+
+	t.Run("normalizes equivalent endpoint paths", func(t *testing.T) {
+		resp := &core.ChatResponse{
+			ID:    "chatcmpl-cache",
+			Model: "gpt-4o-body",
+			Usage: core.Usage{
+				PromptTokens:     7,
+				CompletionTokens: 3,
+				TotalTokens:      10,
+			},
+		}
+		body, err := json.Marshal(resp)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+
+		entry := ExtractFromCachedResponseBody(body, "req-cache", "gpt-4o", "openai", "/v1/chat/completions/", CacheTypeExact)
+		if entry == nil {
+			t.Fatal("expected non-nil entry")
+		}
+		if entry.Endpoint != "/v1/chat/completions" {
+			t.Fatalf("Endpoint = %q, want %q", entry.Endpoint, "/v1/chat/completions")
+		}
+		if entry.TotalTokens != 10 {
+			t.Fatalf("TotalTokens = %d, want 10", entry.TotalTokens)
+		}
+	})
+
+	t.Run("falls back to synthetic entry when body cannot be parsed", func(t *testing.T) {
+		entry := ExtractFromCachedResponseBody([]byte("{"), "req-cache-fallback", "gpt-4o", "openai", "/v1/chat/completions", CacheTypeExact)
+		if entry == nil {
+			t.Fatal("expected non-nil entry")
+		}
+		if entry.RequestID != "req-cache-fallback" {
+			t.Fatalf("RequestID = %q, want %q", entry.RequestID, "req-cache-fallback")
+		}
+		if entry.Provider != "openai" {
+			t.Fatalf("Provider = %q, want %q", entry.Provider, "openai")
+		}
+		if entry.Endpoint != "/v1/chat/completions" {
+			t.Fatalf("Endpoint = %q, want %q", entry.Endpoint, "/v1/chat/completions")
+		}
+		if entry.Model != "gpt-4o" {
+			t.Fatalf("Model = %q, want %q", entry.Model, "gpt-4o")
+		}
+		if entry.InputTokens != 0 || entry.OutputTokens != 0 || entry.TotalTokens != 0 {
+			t.Fatalf("expected zero-token synthetic entry, got %+v", entry)
+		}
+	})
 }
 
 func TestExtractFromChatResponse_WithBatchPricingEndpoint(t *testing.T) {

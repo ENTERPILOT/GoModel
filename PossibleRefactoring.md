@@ -11,6 +11,10 @@ Why:
 - Defined in `internal/responsecache/semantic.go`.
 - No call sites found in the repo.
 
+How verified:
+- Symbol searched: `CacheTypeBoth`
+- Command: `rg -n "CacheTypeBoth" internal`
+
 Suggested action:
 - Delete the constant and let tests confirm nothing depended on it.
 
@@ -54,9 +58,17 @@ Why:
 - Production flow now uses `HandleRequest()` from `internal/server/translated_inference_service.go`.
 - `.Middleware()` in `internal/responsecache/responsecache.go` is only referenced by tests.
 
+How verified:
+- Symbols searched: `Middleware()` and `HandleRequest(`
+- Commands:
+  - `rg -n "\\.Middleware\\(\\)" internal | sort`
+  - `rg -n "HandleRequest\\(" internal | sort`
+
 Suggested action:
+- Before deleting the compatibility wrapper, keep equivalent cache-hit and cache-miss coverage around `HandleRequest()`.
+- Existing tests in `internal/responsecache/handle_request_test.go` already cover core hit/miss flows and should be expanded first if wrapper-specific assertions are still needed.
 - Delete the compatibility wrapper.
-- Migrate or remove the old middleware-focused tests in `internal/responsecache/middleware_test.go`.
+- Only remove `internal/responsecache/middleware_test.go` after `HandleRequest()`-level coverage fully preserves the hit/miss, response header/status, and cache population assertions currently carried by the middleware wrapper tests.
 
 ## 5. Centralize cache-type vocabulary across packages
 

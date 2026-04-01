@@ -1279,8 +1279,21 @@ func TestCacheOverview_ReturnsErrorWhenReaderFails(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
-	if _, ok := body["error"]; !ok {
+	errorBody, ok := body["error"].(map[string]any)
+	if !ok {
 		t.Fatalf("expected error payload, got %v", body)
+	}
+	if got, ok := errorBody["type"].(string); !ok || got == "" {
+		t.Fatalf("error.type = %#v, want non-empty string", errorBody["type"])
+	}
+	if got, ok := errorBody["message"].(string); !ok || got == "" {
+		t.Fatalf("error.message = %#v, want non-empty string", errorBody["message"])
+	}
+	if _, ok := errorBody["param"]; !ok {
+		t.Fatalf("error.param missing from payload: %v", errorBody)
+	}
+	if _, ok := errorBody["code"]; !ok {
+		t.Fatalf("error.code missing from payload: %v", errorBody)
 	}
 }
 

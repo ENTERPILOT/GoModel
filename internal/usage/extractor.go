@@ -3,6 +3,7 @@ package usage
 import (
 	"encoding/json"
 	"maps"
+	"path"
 	"strings"
 	"time"
 
@@ -245,6 +246,7 @@ func ExtractFromCachedResponseBody(
 	if cacheType == "" {
 		cacheType = CacheTypeExact
 	}
+	endpoint = normalizeCachedResponseEndpoint(endpoint)
 
 	var entry *UsageEntry
 	switch endpoint {
@@ -293,6 +295,22 @@ func ExtractFromCachedResponseBody(
 		entry.Endpoint = normalized
 	}
 	return entry
+}
+
+func normalizeCachedResponseEndpoint(endpoint string) string {
+	normalized := strings.TrimSpace(endpoint)
+	if normalized == "" {
+		return ""
+	}
+
+	cleaned := path.Clean(normalized)
+	if cleaned == "." {
+		return ""
+	}
+	if strings.HasPrefix(normalized, "/") && !strings.HasPrefix(cleaned, "/") {
+		return "/" + cleaned
+	}
+	return cleaned
 }
 
 func pricingForEndpoint(pricing *core.ModelPricing, endpoint string) *core.ModelPricing {
