@@ -9,14 +9,15 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/auditlog"
+	"gomodel/internal/authkeys"
 	"gomodel/internal/core"
 )
 
 // BearerTokenAuthenticator authenticates managed bearer tokens and returns
-// their internal auth key id on success.
+// their internal auth key metadata on success.
 type BearerTokenAuthenticator interface {
 	Enabled() bool
-	Authenticate(ctx context.Context, token string) (string, error)
+	Authenticate(ctx context.Context, token string) (authkeys.AuthenticationResult, error)
 }
 
 // AuthMiddleware creates an Echo middleware that validates the master key
@@ -75,11 +76,19 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 
 			if authenticator != nil && authenticator.Enabled() {
 				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodAPIKey)
-				authKeyID, err := authenticator.Authenticate(c.Request().Context(), token)
+				authResult, err := authenticator.Authenticate(c.Request().Context(), token)
 				if err == nil {
-					ctx := core.WithAuthKeyID(c.Request().Context(), authKeyID)
+					ctx := core.WithAuthKeyID(c.Request().Context(), authResult.ID)
+					if userPath := strings.TrimSpace(authResult.UserPath); userPath != "" {
+						ctx = core.WithEffectiveUserPath(ctx, userPath)
+						if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
+							ctx = core.WithRequestSnapshot(ctx, snapshot.WithUserPath(userPath))
+						}
+						c.Request().Header.Set(core.UserPathHeader, userPath)
+						auditlog.EnrichEntryWithUserPath(c, userPath)
+					}
 					c.SetRequest(c.Request().WithContext(ctx))
-					auditlog.EnrichEntryWithAuthKeyID(c, authKeyID)
+					auditlog.EnrichEntryWithAuthKeyID(c, authResult.ID)
 					return next(c)
 				}
 

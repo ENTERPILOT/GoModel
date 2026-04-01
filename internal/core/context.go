@@ -16,6 +16,9 @@ const (
 	executionPlanKey contextKey = "execution-plan"
 	// authKeyIDKey stores the internal managed auth key id for the request.
 	authKeyIDKey contextKey = "auth-key-id"
+	// effectiveUserPathKey stores a request-scoped user path override applied
+	// after ingress capture, for example from a managed auth key.
+	effectiveUserPathKey contextKey = "effective-user-path"
 	// batchPreparationMetadataKey stores request-scoped batch preprocessing metadata.
 	batchPreparationMetadataKey contextKey = "batch-preparation-metadata"
 
@@ -106,6 +109,21 @@ func GetAuthKeyID(ctx context.Context) string {
 	if v := ctx.Value(authKeyIDKey); v != nil {
 		if id, ok := v.(string); ok {
 			return id
+		}
+	}
+	return ""
+}
+
+// WithEffectiveUserPath returns a new context with an effective user path override attached.
+func WithEffectiveUserPath(ctx context.Context, userPath string) context.Context {
+	return context.WithValue(ctx, effectiveUserPathKey, userPath)
+}
+
+// GetEffectiveUserPath retrieves the effective user path override from context.
+func GetEffectiveUserPath(ctx context.Context) string {
+	if v := ctx.Value(effectiveUserPathKey); v != nil {
+		if userPath, ok := v.(string); ok {
+			return userPath
 		}
 	}
 	return ""

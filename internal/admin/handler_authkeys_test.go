@@ -107,7 +107,7 @@ func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
 	e := echo.New()
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/auth-keys", bytes.NewBufferString(`{"name":"primary","description":"prod key"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/auth-keys", bytes.NewBufferString(`{"name":"primary","description":"prod key","user_path":" team//alpha/service/ "}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	createCtx := e.NewContext(createReq, createRec)
@@ -126,6 +126,9 @@ func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 	if issued.Value == "" || issued.ID == "" {
 		t.Fatalf("issued response = %#v, want id and value", issued)
 	}
+	if issued.UserPath != "/team/alpha/service" {
+		t.Fatalf("issued.UserPath = %q, want /team/alpha/service", issued.UserPath)
+	}
 
 	listCtx, listRec := newHandlerContext("/admin/api/v1/auth-keys")
 	if err := h.ListAuthKeys(listCtx); err != nil {
@@ -141,6 +144,9 @@ func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 	}
 	if len(views) != 1 || !views[0].Active {
 		t.Fatalf("list response = %#v, want one active key", views)
+	}
+	if views[0].UserPath != "/team/alpha/service" {
+		t.Fatalf("views[0].UserPath = %q, want /team/alpha/service", views[0].UserPath)
 	}
 
 	deactivateReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/auth-keys/"+issued.ID+"/deactivate", nil)
@@ -164,5 +170,22 @@ func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 	}
 	if len(views) != 1 || views[0].Active {
 		t.Fatalf("list response after deactivate = %#v, want one inactive key", views)
+	}
+}
+
+func TestCreateAuthKeyRejectsInvalidUserPath(t *testing.T) {
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
+	e := echo.New()
+
+	createReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/auth-keys", bytes.NewBufferString(`{"name":"primary","user_path":"/team/../alpha"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	createCtx := e.NewContext(createReq, createRec)
+
+	if err := h.CreateAuthKey(createCtx); err != nil {
+		t.Fatalf("CreateAuthKey() error = %v", err)
+	}
+	if createRec.Code != http.StatusBadRequest {
+		t.Fatalf("CreateAuthKey() status = %d, want 400", createRec.Code)
 	}
 }

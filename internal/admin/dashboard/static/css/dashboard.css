@@ -2828,6 +2828,24 @@ body.conversation-drawer-open {
 
 /* ─── Auth node ─── */
 
+.ep-node-auth {
+    border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+}
+
+.ep-node-auth .ep-node-icon {
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg));
+    color: var(--accent);
+}
+
+.ep-node-auth .ep-node-label {
+    color: var(--accent);
+}
+
+.ep-node-auth .ep-node-sub {
+    color: color-mix(in srgb, var(--accent) 70%, var(--text-muted));
+}
+
 .ep-node-auth-success {
     border-color: color-mix(in srgb, var(--success) 52%, var(--border));
     background: color-mix(in srgb, var(--success) 9%, var(--bg-surface));

@@ -269,6 +269,57 @@ func TestServerWithMasterKeyAndMetrics(t *testing.T) {
 	})
 }
 
+func TestServer_ManagedAuthKeyUserPathOverridesHeaderBeforeExecutionPlanning(t *testing.T) {
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-5-mini"},
+		providerTypes:   map[string]string{"gpt-5-mini": "openai"},
+		response: &core.ChatResponse{
+			ID:       "chatcmpl-test",
+			Object:   "chat.completion",
+			Model:    "gpt-5-mini",
+			Provider: "openai",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					FinishReason: "stop",
+					Message: core.ResponseMessage{
+						Role:    "assistant",
+						Content: "ok",
+					},
+				},
+			},
+		},
+	}
+
+	var capturedSelector core.ExecutionPlanSelector
+	srv := New(mock, &Config{
+		Authenticator: mockAuthenticator{
+			enabled:   true,
+			tokenToID: map[string]string{"managed-token": "key-123"},
+			tokenPath: map[string]string{"managed-token": "/team/from-key"},
+		},
+		ExecutionPolicyResolver: requestExecutionPolicyResolverFunc(func(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+			capturedSelector = selector
+			return nil, nil
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer managed-token")
+	req.Header.Set(core.UserPathHeader, "/team/from-header")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if capturedSelector.UserPath != "/team/from-key" {
+		t.Fatalf("selector.UserPath = %q, want /team/from-key", capturedSelector.UserPath)
+	}
+}
+
 func newDashboardHandler(t *testing.T) *dashboard.Handler {
 	t.Helper()
 	h, err := dashboard.New()

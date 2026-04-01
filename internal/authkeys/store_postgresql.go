@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -29,6 +30,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
+			user_path TEXT,
 			redacted_value TEXT NOT NULL,
 			secret_hash TEXT NOT NULL UNIQUE,
 			enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -40,6 +42,15 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create auth_keys table: %w", err)
+	}
+
+	migrations := []string{
+		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS user_path TEXT`,
+	}
+	for _, migration := range migrations {
+		if _, err := pool.Exec(ctx, migration); err != nil {
+			return nil, fmt.Errorf("failed to run migration %q: %w", migration, err)
+		}
 	}
 	for _, index := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_auth_keys_enabled ON auth_keys(enabled)`,
@@ -54,7 +65,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 
 func (s *PostgreSQLStore) List(ctx context.Context) ([]AuthKey, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, description, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
+		SELECT id, name, description, user_path, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
 		FROM auth_keys
 		ORDER BY created_at DESC, id ASC
 	`)
@@ -71,9 +82,9 @@ func (s *PostgreSQLStore) List(ctx context.Context) ([]AuthKey, error) {
 
 func (s *PostgreSQLStore) Create(ctx context.Context, key AuthKey) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO auth_keys (id, name, description, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, key.ID, key.Name, key.Description, key.RedactedValue, key.SecretHash, key.Enabled, pgUnixOrNil(key.ExpiresAt), pgUnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
+		INSERT INTO auth_keys (id, name, description, user_path, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`, key.ID, key.Name, key.Description, pgNullableString(key.UserPath), key.RedactedValue, key.SecretHash, key.Enabled, pgUnixOrNil(key.ExpiresAt), pgUnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
 	}
@@ -103,6 +114,7 @@ func (s *PostgreSQLStore) Close() error {
 
 func scanPostgreSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	var key AuthKey
+	var userPath *string
 	var expiresAt *int64
 	var deactivatedAt *int64
 	var createdAt int64
@@ -111,6 +123,7 @@ func scanPostgreSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		&key.ID,
 		&key.Name,
 		&key.Description,
+		&userPath,
 		&key.RedactedValue,
 		&key.SecretHash,
 		&key.Enabled,
@@ -124,6 +137,7 @@ func scanPostgreSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		}
 		return AuthKey{}, err
 	}
+	key.UserPath = derefTrimmedString(userPath)
 	key.ExpiresAt = int64PtrToTime(expiresAt)
 	key.DeactivatedAt = int64PtrToTime(deactivatedAt)
 	key.CreatedAt = time.Unix(createdAt, 0).UTC()
@@ -144,4 +158,19 @@ func int64PtrToTime(value *int64) *time.Time {
 	}
 	t := time.Unix(*value, 0).UTC()
 	return &t
+}
+
+func pgNullableString(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func derefTrimmedString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }

@@ -88,8 +88,8 @@ func TestServiceCreateAuthenticateAndDeactivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Authenticate() error = %v", err)
 	}
-	if authKeyID != issued.ID {
-		t.Fatalf("Authenticate() id = %q, want %q", authKeyID, issued.ID)
+	if authKeyID.ID != issued.ID {
+		t.Fatalf("Authenticate() id = %q, want %q", authKeyID.ID, issued.ID)
 	}
 
 	if err := service.Deactivate(context.Background(), issued.ID); err != nil {
@@ -177,8 +177,8 @@ func TestServiceWriteOperationsIgnoreRefreshReconciliationFailures(t *testing.T)
 		if issued == nil {
 			t.Fatal("Create() = nil, want issued key")
 		}
-		if got, err := service.Authenticate(context.Background(), issued.Value); err != nil || got != issued.ID {
-			t.Fatalf("Authenticate() = (%q, %v), want (%q, nil)", got, err, issued.ID)
+		if got, err := service.Authenticate(context.Background(), issued.Value); err != nil || got.ID != issued.ID {
+			t.Fatalf("Authenticate() = (%q, %v), want (%q, nil)", got.ID, err, issued.ID)
 		}
 	})
 
@@ -209,4 +209,48 @@ func TestServiceWriteOperationsIgnoreRefreshReconciliationFailures(t *testing.T)
 			t.Fatalf("Authenticate() error = %v, want %v", err, ErrInactive)
 		}
 	})
+}
+
+func TestServiceCreateNormalizesUserPathAndReturnsItOnAuthenticate(t *testing.T) {
+	service, err := NewService(newTestStore())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	issued, err := service.Create(context.Background(), CreateInput{
+		Name:     "scoped",
+		UserPath: " team//alpha/service/ ",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if issued.UserPath != "/team/alpha/service" {
+		t.Fatalf("issued.UserPath = %q, want /team/alpha/service", issued.UserPath)
+	}
+
+	authenticated, err := service.Authenticate(context.Background(), issued.Value)
+	if err != nil {
+		t.Fatalf("Authenticate() error = %v", err)
+	}
+	if authenticated.UserPath != "/team/alpha/service" {
+		t.Fatalf("Authenticate().UserPath = %q, want /team/alpha/service", authenticated.UserPath)
+	}
+}
+
+func TestServiceCreateRejectsInvalidUserPath(t *testing.T) {
+	service, err := NewService(newTestStore())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	_, err = service.Create(context.Background(), CreateInput{
+		Name:     "invalid",
+		UserPath: "/team/../alpha",
+	})
+	if err == nil {
+		t.Fatal("Create() error = nil, want validation error")
+	}
+	if !IsValidationError(err) {
+		t.Fatalf("Create() error = %T, want validation error", err)
+	}
 }

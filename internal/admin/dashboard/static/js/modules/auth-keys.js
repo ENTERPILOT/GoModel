@@ -16,11 +16,58 @@
             authKeyForm: {
                 name: '',
                 description: '',
+                user_path: '',
                 expires_at: ''
             },
 
             defaultAuthKeyForm() {
-                return { name: '', description: '', expires_at: '' };
+                return { name: '', description: '', user_path: '', expires_at: '' };
+            },
+
+            authKeyUserPathValidationError(value) {
+                const trimmed = String(value || '').trim();
+                if (!trimmed) {
+                    return '';
+                }
+                const raw = trimmed.startsWith('/') ? trimmed : '/' + trimmed;
+                const segments = raw.split('/');
+                for (const part of segments) {
+                    const segment = String(part || '').trim();
+                    if (!segment) {
+                        continue;
+                    }
+                    if (segment === '.' || segment === '..') {
+                        return 'User path cannot contain "." or ".." segments.';
+                    }
+                    if (segment.includes(':')) {
+                        return 'User path cannot contain ":" segments.';
+                    }
+                }
+                return '';
+            },
+
+            normalizeAuthKeyUserPath(value) {
+                if (this.authKeyUserPathValidationError(value)) {
+                    return '';
+                }
+                const trimmed = String(value || '').trim();
+                if (!trimmed) {
+                    return '';
+                }
+                const raw = trimmed.startsWith('/') ? trimmed : '/' + trimmed;
+                const segments = raw.split('/');
+                const canonical = [];
+                for (const part of segments) {
+                    const segment = String(part || '').trim();
+                    if (!segment) {
+                        continue;
+                    }
+                    canonical.push(segment);
+                }
+                if (!canonical.length) {
+                    return '/';
+                }
+                return '/' + canonical.join('/');
             },
 
             async fetchAuthKeys() {
@@ -182,14 +229,21 @@
                     this.authKeyError = 'Name is required.';
                     return;
                 }
+                const userPathError = this.authKeyUserPathValidationError(this.authKeyForm.user_path);
+                if (userPathError) {
+                    this.authKeyError = userPathError;
+                    return;
+                }
 
                 this.authKeyError = '';
                 this.authKeyNotice = '';
                 this.authKeyFormSubmitting = true;
+                const userPath = this.normalizeAuthKeyUserPath(this.authKeyForm.user_path);
 
                 const payload = {
                     name,
-                    description: String(this.authKeyForm.description || '').trim() || undefined
+                    description: String(this.authKeyForm.description || '').trim() || undefined,
+                    user_path: userPath || undefined
                 };
                 if (this.authKeyForm.expires_at) {
                     payload.expires_at = this.authKeyForm.expires_at + 'T23:59:59Z';

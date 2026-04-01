@@ -122,3 +122,33 @@ func BenchmarkNewRequestSnapshotWithOwnedBody(b *testing.B) {
 		_ = NewRequestSnapshotWithOwnedBody("POST", "/v1/chat/completions", nil, nil, nil, "application/json", body, false, "req-123", nil)
 	}
 }
+
+func TestRequestSnapshotWithUserPath_RewritesCapturedHeader(t *testing.T) {
+	snapshot := NewRequestSnapshot(
+		"POST",
+		"/v1/chat/completions",
+		nil,
+		nil,
+		map[string][]string{UserPathHeader: {"/team/from-header"}},
+		"application/json",
+		nil,
+		false,
+		"req-123",
+		nil,
+		"/team/from-header",
+	)
+
+	updated := snapshot.WithUserPath("/team/from-auth-key")
+	if updated == nil {
+		t.Fatal("WithUserPath() = nil, want snapshot")
+	}
+	if got := updated.UserPath; got != "/team/from-auth-key" {
+		t.Fatalf("updated.UserPath = %q, want /team/from-auth-key", got)
+	}
+	if got := updated.GetHeaders()[UserPathHeader][0]; got != "/team/from-auth-key" {
+		t.Fatalf("updated header = %q, want /team/from-auth-key", got)
+	}
+	if got := snapshot.UserPath; got != "/team/from-header" {
+		t.Fatalf("original snapshot UserPath = %q, want /team/from-header", got)
+	}
+}

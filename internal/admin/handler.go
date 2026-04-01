@@ -706,6 +706,7 @@ type createExecutionPlanRequest struct {
 type createAuthKeyRequest struct {
 	Name        string     `json:"name"`
 	Description string     `json:"description,omitempty"`
+	UserPath    string     `json:"user_path,omitempty"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 }
 
@@ -806,9 +807,15 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
+	userPath, err := normalizeUserPathQueryParam("user_path", req.UserPath)
+	if err != nil {
+		return handleError(c, err)
+	}
+
 	issued, err := h.authKeys.Create(c.Request().Context(), authkeys.CreateInput{
 		Name:        req.Name,
 		Description: req.Description,
+		UserPath:    userPath,
 		ExpiresAt:   req.ExpiresAt,
 	})
 	if err != nil {

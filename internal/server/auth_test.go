@@ -13,12 +13,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"gomodel/internal/auditlog"
+	"gomodel/internal/authkeys"
 	"gomodel/internal/core"
 )
 
 type mockAuthenticator struct {
 	enabled   bool
 	tokenToID map[string]string
+	tokenPath map[string]string
 	err       error
 }
 
@@ -26,15 +28,18 @@ func (m mockAuthenticator) Enabled() bool {
 	return m.enabled
 }
 
-func (m mockAuthenticator) Authenticate(_ context.Context, token string) (string, error) {
+func (m mockAuthenticator) Authenticate(_ context.Context, token string) (authkeys.AuthenticationResult, error) {
 	if m.err != nil {
-		return "", m.err
+		return authkeys.AuthenticationResult{}, m.err
 	}
 	id, ok := m.tokenToID[token]
 	if !ok {
-		return "", assert.AnError
+		return authkeys.AuthenticationResult{}, assert.AnError
 	}
-	return id, nil
+	return authkeys.AuthenticationResult{
+		ID:       id,
+		UserPath: m.tokenPath[token],
+	}, nil
 }
 
 func TestAuthMiddleware(t *testing.T) {
@@ -210,6 +215,52 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *te
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "ok", rec.Body.String())
+}
+
+func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathOverridesHeader(t *testing.T) {
+	e := echo.New()
+	testHandler := func(c *echo.Context) error {
+		if got := core.UserPathFromContext(c.Request().Context()); got != "/team/auth-key" {
+			t.Fatalf("effective user path = %q, want /team/auth-key", got)
+		}
+		snapshot := core.GetRequestSnapshot(c.Request().Context())
+		if snapshot == nil {
+			t.Fatal("request snapshot missing from context")
+		}
+		if got := snapshot.UserPath; got != "/team/auth-key" {
+			t.Fatalf("snapshot.UserPath = %q, want /team/auth-key", got)
+		}
+		if got := c.Request().Header.Get(core.UserPathHeader); got != "/team/auth-key" {
+			t.Fatalf("%s = %q, want /team/auth-key", core.UserPathHeader, got)
+		}
+		entryVal := c.Get(string(auditlog.LogEntryKey))
+		entry, ok := entryVal.(*auditlog.LogEntry)
+		if !ok || entry == nil {
+			t.Fatal("audit log entry missing from context")
+		}
+		if got := entry.UserPath; got != "/team/auth-key" {
+			t.Fatalf("audit entry user path = %q, want /team/auth-key", got)
+		}
+		return c.String(http.StatusOK, "ok")
+	}
+
+	handler := RequestSnapshotCapture()(AuthMiddlewareWithAuthenticator("", mockAuthenticator{
+		enabled:   true,
+		tokenToID: map[string]string{"sk_gom_token": "key-123"},
+		tokenPath: map[string]string{"sk_gom_token": "/team/auth-key"},
+	}, nil)(testHandler))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(core.UserPathHeader, "/team/from-header")
+	req.Header.Set("Authorization", "Bearer sk_gom_token")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestAuthMiddlewareWithAuthenticator_ManagedKeyFailureUsesGenericClientMessage(t *testing.T) {

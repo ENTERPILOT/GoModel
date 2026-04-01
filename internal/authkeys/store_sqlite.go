@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -24,6 +25,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
+			user_path TEXT,
 			redacted_value TEXT NOT NULL,
 			secret_hash TEXT NOT NULL UNIQUE,
 			enabled INTEGER NOT NULL DEFAULT 1,
@@ -35,6 +37,15 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create auth_keys table: %w", err)
+	}
+
+	migrations := []string{
+		`ALTER TABLE auth_keys ADD COLUMN user_path TEXT`,
+	}
+	for _, migration := range migrations {
+		if _, err := db.Exec(migration); err != nil && !isSQLiteDuplicateColumnError(err) {
+			return nil, fmt.Errorf("failed to run migration %q: %w", migration, err)
+		}
 	}
 	for _, index := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_auth_keys_enabled ON auth_keys(enabled)`,
@@ -50,7 +61,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 
 func (s *SQLiteStore) List(ctx context.Context) ([]AuthKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, description, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
+		SELECT id, name, description, user_path, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
 		FROM auth_keys
 		ORDER BY created_at DESC, id ASC
 	`)
@@ -67,9 +78,9 @@ func (s *SQLiteStore) List(ctx context.Context) ([]AuthKey, error) {
 
 func (s *SQLiteStore) Create(ctx context.Context, key AuthKey) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO auth_keys (id, name, description, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, key.ID, key.Name, key.Description, key.RedactedValue, key.SecretHash, boolToSQLite(key.Enabled), unixOrNil(key.ExpiresAt), unixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
+		INSERT INTO auth_keys (id, name, description, user_path, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, key.ID, key.Name, key.Description, nullableString(key.UserPath), key.RedactedValue, key.SecretHash, boolToSQLite(key.Enabled), unixOrNil(key.ExpiresAt), unixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
 	}
@@ -103,6 +114,7 @@ func (s *SQLiteStore) Close() error {
 
 func scanSQLiteAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	var key AuthKey
+	var userPath sql.NullString
 	var enabled int
 	var expiresAt sql.NullInt64
 	var deactivatedAt sql.NullInt64
@@ -112,6 +124,7 @@ func scanSQLiteAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		&key.ID,
 		&key.Name,
 		&key.Description,
+		&userPath,
 		&key.RedactedValue,
 		&key.SecretHash,
 		&enabled,
@@ -125,12 +138,21 @@ func scanSQLiteAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		}
 		return AuthKey{}, err
 	}
+	key.UserPath = nullableStringValue(userPath)
 	key.Enabled = enabled != 0
 	key.ExpiresAt = unixPtr(expiresAt)
 	key.DeactivatedAt = unixPtr(deactivatedAt)
 	key.CreatedAt = time.Unix(createdAt, 0).UTC()
 	key.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	return key, nil
+}
+
+func isSQLiteDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "duplicate column") || strings.Contains(message, "already exists")
 }
 
 func boolToSQLite(v bool) int {
@@ -153,4 +175,19 @@ func unixPtr(value sql.NullInt64) *time.Time {
 	}
 	t := time.Unix(value.Int64, 0).UTC()
 	return &t
+}
+
+func nullableString(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func nullableStringValue(value sql.NullString) string {
+	if !value.Valid {
+		return ""
+	}
+	return strings.TrimSpace(value.String)
 }

@@ -333,6 +333,14 @@
                         placeholder="What is this key used for?"
                         x-model="authKeyForm.description"></textarea>
                 </label>
+                <label class="alias-form-field">
+                    <span>User Path (optional)</span>
+                    <input type="text" class="filter-input" placeholder="team/alpha or /team/alpha"
+                        x-model="authKeyForm.user_path" aria-label="API key user path">
+                </label>
+                <p class="alias-form-hint">
+                    When set, this key overrides <code>X-GoModel-User-Path</code> for audit logging and downstream request context.
+                </p>
                 <p class="alias-form-error" x-show="authKeyError" x-text="authKeyError"></p>
                 <div class="alias-form-actions">
                     <button type="submit" class="pagination-btn pagination-btn-primary"
@@ -349,6 +357,7 @@
                 <tr>
                     <th>Name</th>
                     <th>Description</th>
+                    <th>User Path</th>
                     <th>Token</th>
                     <th>Status</th>
                     <th>Expires</th>
@@ -361,6 +370,7 @@
                     <tr>
                         <td x-text="key.name"></td>
                         <td class="auth-key-description" x-text="key.description || '\u2014'"></td>
+                        <td x-text="key.user_path || '\u2014'"></td>
                         <td><code class="auth-key-redacted" x-text="key.redacted_value"></code></td>
                         <td>
                             <span class="auth-key-status-badge"

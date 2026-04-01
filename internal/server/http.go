@@ -217,15 +217,15 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.Use(auditlog.Middleware(cfg.AuditLogger))
 	}
 
-	// Request planning resolves the request-scoped execution plan before auth and
-	// handler execution. This keeps rejected model requests loggable and lets
-	// downstream stages consume a shared policy decision.
-	e.Use(ExecutionPlanningWithResolverAndPolicy(provider, modelResolver, executionPolicyResolver))
-
 	// Authentication (skips public paths)
 	if cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil) {
 		e.Use(AuthMiddlewareWithAuthenticator(cfg.MasterKey, cfg.Authenticator, authSkipPaths))
 	}
+
+	// Request planning resolves the request-scoped execution plan after auth so
+	// managed auth key user-path overrides are visible to policy resolution while
+	// still keeping planning failures loggable through the audit middleware.
+	e.Use(ExecutionPlanningWithResolverAndPolicy(provider, modelResolver, executionPolicyResolver))
 
 	// Public routes
 	e.GET("/health", handler.Health)

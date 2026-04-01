@@ -94,6 +94,9 @@ test('auth key expirations render as a UTC date with the full UTC timestamp in t
 
     assert.match(indexTemplate, /x-text="key\.expires_at \? formatDateUTC\(key\.expires_at\) : '\\u2014'"/);
     assert.match(indexTemplate, /:title="key\.expires_at \? formatTimestampUTC\(key\.expires_at\) : ''"/);
+    assert.match(indexTemplate, /x-model="authKeyForm\.user_path"[^>]*aria-label="API key user path"/);
+    assert.match(indexTemplate, /x-text="key\.user_path \|\| '\\u2014'"/);
+    assert.match(indexTemplate, /X-GoModel-User-Path/);
     assert.match(indexTemplate, /:disabled="authKeyFormSubmitting"/);
     assert.match(indexTemplate, /@click="if \(!authKeyFormSubmitting\) openAuthKeyForm\(\)"/);
     assert.match(indexTemplate, /x-show="authKeys\.length === 0 && !authKeysLoading && !authError && !authKeyError && authKeysAvailable"/);

@@ -176,6 +176,9 @@ func applyAuthentication(entry *LogEntry, ctx context.Context) {
 	if authKeyID := strings.TrimSpace(core.GetAuthKeyID(ctx)); authKeyID != "" {
 		entry.AuthKeyID = authKeyID
 	}
+	if userPath := strings.TrimSpace(core.UserPathFromContext(ctx)); userPath != "" {
+		entry.UserPath = userPath
+	}
 }
 
 func enrichEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
@@ -424,6 +427,25 @@ func EnrichEntryWithAuthKeyID(c *echo.Context, authKeyID string) {
 		return
 	}
 	entry.AuthKeyID = authKeyID
+}
+
+// EnrichEntryWithUserPath attaches the effective user path to the live audit entry.
+func EnrichEntryWithUserPath(c *echo.Context, userPath string) {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return
+	}
+
+	entry, ok := entryVal.(*LogEntry)
+	if !ok || entry == nil {
+		return
+	}
+
+	userPath = strings.TrimSpace(userPath)
+	if userPath == "" {
+		return
+	}
+	entry.UserPath = userPath
 }
 
 func auditEnabledForContext(ctx context.Context) bool {

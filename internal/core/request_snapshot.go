@@ -79,6 +79,28 @@ func firstUserPath(values []string) string {
 	return strings.TrimSpace(values[0])
 }
 
+// WithUserPath returns a shallow-cloned snapshot with UserPath and the captured
+// X-GoModel-User-Path header rewritten to the provided canonical value.
+func (s *RequestSnapshot) WithUserPath(userPath string) *RequestSnapshot {
+	if s == nil {
+		return nil
+	}
+	cloned := *s
+	cloned.UserPath = strings.TrimSpace(userPath)
+	cloned.headers = cloneMultiMap(s.headers)
+	if cloned.UserPath == "" {
+		if cloned.headers != nil {
+			delete(cloned.headers, UserPathHeader)
+		}
+		return &cloned
+	}
+	if cloned.headers == nil {
+		cloned.headers = make(map[string][]string, 1)
+	}
+	cloned.headers[UserPathHeader] = []string{cloned.UserPath}
+	return &cloned
+}
+
 // CapturedBody returns a defensive copy of the captured request body bytes.
 func (s *RequestSnapshot) CapturedBody() []byte {
 	if s == nil {

@@ -65,6 +65,7 @@ test('submitAuthKeyForm serializes date-only expirations to the end of the selec
     module.authKeyForm = {
         name: 'ci-deploy',
         description: '',
+        user_path: '',
         expires_at: '2026-04-01'
     };
 
@@ -76,6 +77,66 @@ test('submitAuthKeyForm serializes date-only expirations to the end of the selec
         JSON.parse(requests[0].options.body).expires_at,
         '2026-04-01T23:59:59Z'
     );
+});
+
+test('submitAuthKeyForm normalizes user paths before sending them', async () => {
+    const requests = [];
+    const module = createAuthKeysModule({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            return {
+                status: 201,
+                async json() {
+                    return { value: 'sk_gom_test' };
+                }
+            };
+        }
+    });
+
+    module.headers = () => ({ 'Content-Type': 'application/json' });
+    module.fetchAuthKeys = async () => {};
+    module.authKeyForm = {
+        name: 'ci-deploy',
+        description: '',
+        user_path: ' team//alpha/service/ ',
+        expires_at: ''
+    };
+
+    await module.submitAuthKeyForm();
+
+    assert.equal(requests.length, 1);
+    assert.equal(
+        JSON.parse(requests[0].options.body).user_path,
+        '/team/alpha/service'
+    );
+});
+
+test('submitAuthKeyForm rejects invalid user paths before sending the request', async () => {
+    let called = false;
+    const module = createAuthKeysModule({
+        fetch: async () => {
+            called = true;
+            return {
+                status: 201,
+                async json() {
+                    return { value: 'sk_gom_test' };
+                }
+            };
+        }
+    });
+
+    module.headers = () => ({ 'Content-Type': 'application/json' });
+    module.authKeyForm = {
+        name: 'ci-deploy',
+        description: '',
+        user_path: '/team/../alpha',
+        expires_at: ''
+    };
+
+    await module.submitAuthKeyForm();
+
+    assert.equal(called, false);
+    assert.equal(module.authKeyError, 'User path cannot contain "." or ".." segments.');
 });
 
 test('copyAuthKeyValue uses navigator.clipboard when available and resets feedback', async () => {
@@ -277,6 +338,7 @@ test('submitAuthKeyForm reopens the editor if issuance finishes after a manual c
     module.authKeyForm = {
         name: 'ci-deploy',
         description: '',
+        user_path: '',
         expires_at: ''
     };
 

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"gomodel/internal/core"
 )
 
 var (
@@ -72,6 +74,11 @@ func normalizeCreateInput(input CreateInput) (CreateInput, error) {
 	if input.Name == "" {
 		return CreateInput{}, newValidationError("name is required", nil)
 	}
+	userPath, err := core.NormalizeUserPath(input.UserPath)
+	if err != nil {
+		return CreateInput{}, newValidationError("invalid user_path", err)
+	}
+	input.UserPath = userPath
 	if input.ExpiresAt != nil {
 		expiresAt := input.ExpiresAt.UTC()
 		now := time.Now().UTC()

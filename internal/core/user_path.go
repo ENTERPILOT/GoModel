@@ -67,6 +67,9 @@ func UserPathAncestors(path string) []string {
 
 // UserPathFromContext returns the canonical request user path when available.
 func UserPathFromContext(ctx context.Context) string {
+	if userPath := GetEffectiveUserPath(ctx); userPath != "" {
+		return userPath
+	}
 	if snapshot := GetRequestSnapshot(ctx); snapshot != nil {
 		return snapshot.UserPath
 	}

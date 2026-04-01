@@ -72,6 +72,8 @@ test('workflow nodes use endpoint and feature color groups consistently', () => 
     assert.match(endpointRule, /background:\s*var\(--bg-surface\)/);
 
     const featureSelectors = [
+        '.ep-node-cache',
+        '.ep-node-auth',
         '.ep-node-guardrails',
         '.ep-node-async-audit',
         '.ep-node-async-usage'
@@ -83,6 +85,8 @@ test('workflow nodes use endpoint and feature color groups consistently', () => 
     }
 
     const featureIconSelectors = [
+        '.ep-node-cache .ep-node-icon',
+        '.ep-node-auth .ep-node-icon',
         '.ep-node-guardrails .ep-node-icon',
         '.ep-node-async-audit .ep-node-icon',
         '.ep-node-async-usage .ep-node-icon'
@@ -94,6 +98,8 @@ test('workflow nodes use endpoint and feature color groups consistently', () => 
     }
 
     const featureLabelSelectors = [
+        '.ep-node-cache .ep-node-label',
+        '.ep-node-auth .ep-node-label',
         '.ep-node-guardrails .ep-node-label',
         '.ep-node-async-audit .ep-node-label',
         '.ep-node-async-usage .ep-node-label'
@@ -102,6 +108,18 @@ test('workflow nodes use endpoint and feature color groups consistently', () => 
         const rule = readCSSRule(css, selector);
         assert.match(rule, /color:\s*var\(--accent\)/);
     }
+
+    const authSubRule = readCSSRule(css, '.ep-node-auth .ep-node-sub');
+    assert.match(authSubRule, /color:\s*color-mix\(in srgb, var\(--accent\) 70%, var\(--text-muted\)\)/);
+});
+
+test('auth node uses the cache iconography in execution plan charts', () => {
+    const chartTemplate = readFixture('../../../templates/execution-plan-chart.html');
+
+    assert.match(
+        chartTemplate,
+        /<div class="ep-node ep-node-auth"[\s\S]*?<svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"\/><path d="M21 12c0 1\.66-4 3-9 3s-9-1\.34-9-3"\/><path d="M3 5v14c0 1\.66 4 3 9 3s9-1\.34 9-3V5"\/><\/svg>[\s\S]*?<span class="ep-node-label">Auth<\/span>/
+    );
 });
 
 test('execution plan authoring inputs expose stable accessible names', () => {

@@ -699,6 +699,34 @@ func TestMiddleware_StoresAuthKeyIDFromContext(t *testing.T) {
 	}
 }
 
+func TestMiddleware_StoresEffectiveUserPathFromContext(t *testing.T) {
+	logger := &capturingLogger{cfg: Config{Enabled: true}}
+	middleware := Middleware(logger)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := core.WithRequestSnapshot(req.Context(), &core.RequestSnapshot{UserPath: "/team/from-header"})
+	ctx = core.WithEffectiveUserPath(ctx, "/team/from-auth-key")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := middleware(func(c *echo.Context) error {
+		return c.NoContent(http.StatusOK)
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler() error = %v", err)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("logger.entries len = %d, want 1", len(logger.entries))
+	}
+	if got := logger.entries[0].UserPath; got != "/team/from-auth-key" {
+		t.Fatalf("UserPath = %q, want /team/from-auth-key", got)
+	}
+}
+
 func TestMiddleware_DefaultsMissingUserPathToRoot(t *testing.T) {
 	logger := &capturingLogger{cfg: Config{Enabled: true}}
 	middleware := Middleware(logger)

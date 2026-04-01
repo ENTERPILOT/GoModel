@@ -25,6 +25,12 @@ type snapshot struct {
 	activeByHash map[string]AuthKey
 }
 
+// AuthenticationResult describes one successful managed auth key lookup.
+type AuthenticationResult struct {
+	ID       string
+	UserPath string
+}
+
 // Service keeps managed auth keys cached in memory for request authentication.
 type Service struct {
 	store Store
@@ -167,6 +173,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 		ID:            uuid.NewString(),
 		Name:          normalized.Name,
 		Description:   normalized.Description,
+		UserPath:      normalized.UserPath,
 		RedactedValue: redactedValue,
 		SecretHash:    secretHash,
 		Enabled:       true,
@@ -211,15 +218,15 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 }
 
 // Authenticate validates a presented bearer token against the in-memory snapshot
-// and returns the internal auth key id on success.
-func (s *Service) Authenticate(_ context.Context, token string) (string, error) {
+// and returns the matched auth key metadata on success.
+func (s *Service) Authenticate(_ context.Context, token string) (AuthenticationResult, error) {
 	if s == nil {
-		return "", ErrInvalidToken
+		return AuthenticationResult{}, ErrInvalidToken
 	}
 
 	secret, err := parseTokenSecret(token)
 	if err != nil {
-		return "", err
+		return AuthenticationResult{}, err
 	}
 	secretHash := hashSecret(secret)
 	now := time.Now().UTC()
@@ -233,7 +240,7 @@ func (s *Service) Authenticate(_ context.Context, token string) (string, error) 
 	key, exists := s.snapshot.bySecretHash[secretHash]
 	s.mu.RUnlock()
 	if !exists {
-		return "", ErrInvalidToken
+		return AuthenticationResult{}, ErrInvalidToken
 	}
 	return authenticateKey(key, now)
 }
@@ -272,17 +279,20 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 	}
 }
 
-func authenticateKey(key AuthKey, now time.Time) (string, error) {
+func authenticateKey(key AuthKey, now time.Time) (AuthenticationResult, error) {
 	if !key.Enabled || key.DeactivatedAt != nil {
-		return "", ErrInactive
+		return AuthenticationResult{}, ErrInactive
 	}
 	if key.ExpiresAt != nil && !key.ExpiresAt.After(now) {
-		return "", ErrExpired
+		return AuthenticationResult{}, ErrExpired
 	}
 	if strings.TrimSpace(key.ID) == "" {
-		return "", ErrInvalidToken
+		return AuthenticationResult{}, ErrInvalidToken
 	}
-	return key.ID, nil
+	return AuthenticationResult{
+		ID:       key.ID,
+		UserPath: strings.TrimSpace(key.UserPath),
+	}, nil
 }
 
 func (s *Service) refreshBestEffort(ctx context.Context, operation string) {

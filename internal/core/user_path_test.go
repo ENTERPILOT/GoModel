@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestNormalizeUserPath(t *testing.T) {
 	t.Parallel()
@@ -38,6 +41,15 @@ func TestNormalizeUserPath(t *testing.T) {
 				t.Fatalf("NormalizeUserPath() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestUserPathFromContext_PrefersEffectiveOverride(t *testing.T) {
+	ctx := WithRequestSnapshot(context.Background(), &RequestSnapshot{UserPath: "/team/from-header"})
+	ctx = WithEffectiveUserPath(ctx, "/team/from-auth-key")
+
+	if got := UserPathFromContext(ctx); got != "/team/from-auth-key" {
+		t.Fatalf("UserPathFromContext() = %q, want /team/from-auth-key", got)
 	}
 }
 
