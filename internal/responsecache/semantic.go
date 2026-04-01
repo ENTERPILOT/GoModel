@@ -434,7 +434,13 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.ExecutionPla
 	h.Write([]byte{0})
 
 	if len(req.Reasoning) > 0 {
-		h.Write(req.Reasoning)
+		var canonical any
+		if err := json.Unmarshal(req.Reasoning, &canonical); err == nil {
+			remarshaled, _ := json.Marshal(canonical)
+			h.Write(remarshaled)
+		} else {
+			h.Write(req.Reasoning)
+		}
 	}
 	h.Write([]byte{0})
 
