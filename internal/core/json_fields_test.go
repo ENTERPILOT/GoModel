@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestExtractUnknownJSONFieldsObjectByScan_PreservesNestedValues(t *testing.T) {
+func TestExtractUnknownJSONFields_PreservesNestedValues(t *testing.T) {
 	data := []byte(`{
 		"known":"value",
 		"x_object":{"nested":[1,{"ok":true}],"text":"hello"},
@@ -15,9 +15,9 @@ func TestExtractUnknownJSONFieldsObjectByScan_PreservesNestedValues(t *testing.T
 		"x_bool":true
 	}`)
 
-	fields, err := extractUnknownJSONFieldsObjectByScan(data, "known")
+	fields, err := extractUnknownJSONFields(data, "known")
 	if err != nil {
-		t.Fatalf("extractUnknownJSONFieldsObjectByScan() error = %v", err)
+		t.Fatalf("extractUnknownJSONFields() error = %v", err)
 	}
 
 	if fields.IsEmpty() {
@@ -36,16 +36,16 @@ func TestExtractUnknownJSONFieldsObjectByScan_PreservesNestedValues(t *testing.T
 	}
 }
 
-func TestExtractUnknownJSONFieldsObjectByScan_HandlesEscapedStrings(t *testing.T) {
+func TestExtractUnknownJSONFields_HandlesEscapedStrings(t *testing.T) {
 	data := []byte(`{
 		"model":"gpt-5-mini",
 		"x_text":"quote: \"ok\" and slash \\\\",
 		"x_json":"{\"embedded\":true}"
 	}`)
 
-	fields, err := extractUnknownJSONFieldsObjectByScan(data, "model")
+	fields, err := extractUnknownJSONFields(data, "model")
 	if err != nil {
-		t.Fatalf("extractUnknownJSONFieldsObjectByScan() error = %v", err)
+		t.Fatalf("extractUnknownJSONFields() error = %v", err)
 	}
 
 	if got := fields.Lookup("x_text"); !bytes.Equal(got, []byte(`"quote: \"ok\" and slash \\\\"`)) {
@@ -53,6 +53,21 @@ func TestExtractUnknownJSONFieldsObjectByScan_HandlesEscapedStrings(t *testing.T
 	}
 	if got := fields.Lookup("x_json"); !bytes.Equal(got, []byte(`"{\"embedded\":true}"`)) {
 		t.Fatalf("x_json = %s", got)
+	}
+}
+
+func TestExtractUnknownJSONFields_PreservesDuplicateUnknownKeys(t *testing.T) {
+	data := []byte(`{"known":"value","x_meta":1,"x_meta":2}`)
+
+	fields, err := extractUnknownJSONFields(data, "known")
+	if err != nil {
+		t.Fatalf("extractUnknownJSONFields() error = %v", err)
+	}
+	if got := string(fields.raw); got != `{"x_meta":1,"x_meta":2}` {
+		t.Fatalf("raw = %s, want duplicate keys preserved", got)
+	}
+	if got := fields.Lookup("x_meta"); !bytes.Equal(got, []byte("1")) {
+		t.Fatalf("Lookup(x_meta) = %s, want first duplicate value", got)
 	}
 }
 
@@ -70,7 +85,7 @@ func TestUnknownJSONFieldsFromMap_EmptyRawValueEncodesAsNull(t *testing.T) {
 	}
 }
 
-func TestExtractUnknownJSONFieldsObjectByScan_RejectsInvalidJSONSyntax(t *testing.T) {
+func TestExtractUnknownJSONFields_RejectsInvalidJSONSyntax(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
@@ -79,12 +94,13 @@ func TestExtractUnknownJSONFieldsObjectByScan_RejectsInvalidJSONSyntax(t *testin
 		{name: "missing object comma", body: `{"known":"value" "x":1}`},
 		{name: "trailing object comma", body: `{"known":"value","x":1,}`},
 		{name: "trailing array comma", body: `{"known":"value","x":[1,]}`},
+		{name: "trailing top-level data", body: `{"known":"value","x":1}{"extra":true}`},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := extractUnknownJSONFieldsObjectByScan([]byte(tt.body), "known"); err == nil {
-				t.Fatalf("extractUnknownJSONFieldsObjectByScan(%q) error = nil, want syntax error", tt.body)
+			if _, err := extractUnknownJSONFields([]byte(tt.body), "known"); err == nil {
+				t.Fatalf("extractUnknownJSONFields(%q) error = nil, want syntax error", tt.body)
 			}
 		})
 	}
