@@ -270,10 +270,10 @@ func ExtractFromCachedResponseBody(
 	if entry == nil {
 		entry = &UsageEntry{
 			ID:         uuid.New().String(),
-			RequestID:  requestID,
+			RequestID:  strings.TrimSpace(requestID),
 			Timestamp:  time.Now().UTC(),
-			Model:      model,
-			Provider:   provider,
+			Model:      strings.TrimSpace(model),
+			Provider:   strings.TrimSpace(provider),
 			Endpoint:   endpoint,
 			CacheType:  cacheType,
 			ProviderID: "",
@@ -291,8 +291,8 @@ func ExtractFromCachedResponseBody(
 	if normalized := strings.TrimSpace(provider); normalized != "" {
 		entry.Provider = normalized
 	}
-	if normalized := strings.TrimSpace(endpoint); normalized != "" {
-		entry.Endpoint = normalized
+	if endpoint != "" {
+		entry.Endpoint = endpoint
 	}
 	return entry
 }

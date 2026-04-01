@@ -13,7 +13,7 @@ Why:
 
 How verified:
 - Symbol searched: `CacheTypeBoth`
-- Command: `rg -n "CacheTypeBoth" internal`
+- Command: `rg -n "CacheTypeBoth"`
 
 Suggested action:
 - Delete the constant and let tests confirm nothing depended on it.
@@ -61,8 +61,8 @@ Why:
 How verified:
 - Symbols searched: `Middleware()` and `HandleRequest(`
 - Commands:
-  - `rg -n "\\.Middleware\\(\\)" internal | sort`
-  - `rg -n "HandleRequest\\(" internal | sort`
+  - `rg -n "\\.Middleware\\(\\)" | sort`
+  - `rg -n "HandleRequest\\(" | sort`
 
 Suggested action:
 - Before deleting the compatibility wrapper, keep equivalent cache-hit and cache-miss coverage around `HandleRequest()`.

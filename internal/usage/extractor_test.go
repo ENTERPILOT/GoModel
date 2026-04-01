@@ -569,6 +569,30 @@ func TestExtractFromCachedResponseBody(t *testing.T) {
 			t.Fatalf("expected zero-token synthetic entry, got %+v", entry)
 		}
 	})
+
+	t.Run("defaults unknown cache type to exact", func(t *testing.T) {
+		resp := &core.ChatResponse{
+			ID:    "chatcmpl-cache",
+			Model: "gpt-4o-body",
+			Usage: core.Usage{
+				PromptTokens:     2,
+				CompletionTokens: 1,
+				TotalTokens:      3,
+			},
+		}
+		body, err := json.Marshal(resp)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+
+		entry := ExtractFromCachedResponseBody(body, "req-cache", "gpt-4o", "openai", "/v1/chat/completions", "unknown")
+		if entry == nil {
+			t.Fatal("expected non-nil entry")
+		}
+		if entry.CacheType != CacheTypeExact {
+			t.Fatalf("CacheType = %q, want %q", entry.CacheType, CacheTypeExact)
+		}
+	})
 }
 
 func TestExtractFromChatResponse_WithBatchPricingEndpoint(t *testing.T) {

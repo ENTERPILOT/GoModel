@@ -21,17 +21,18 @@ import (
 
 // mockUsageReader implements usage.UsageReader for testing.
 type mockUsageReader struct {
-	summary       *usage.UsageSummary
-	daily         []usage.DailyUsage
-	modelUsage    []usage.ModelUsage
-	usageLog      *usage.UsageLogResult
-	cacheOverview *usage.CacheOverview
-	lastUsageLog  usage.UsageLogParams
-	summaryErr    error
-	dailyErr      error
-	modelUsageErr error
-	usageLogErr   error
-	cacheErr      error
+	summary           *usage.UsageSummary
+	daily             []usage.DailyUsage
+	modelUsage        []usage.ModelUsage
+	usageLog          *usage.UsageLogResult
+	cacheOverview     *usage.CacheOverview
+	lastUsageLog      usage.UsageLogParams
+	lastCacheOverview usage.UsageQueryParams
+	summaryErr        error
+	dailyErr          error
+	modelUsageErr     error
+	usageLogErr       error
+	cacheErr          error
 }
 
 type mockAuditReader struct {
@@ -75,7 +76,8 @@ func (m *mockUsageReader) GetUsageLog(_ context.Context, params usage.UsageLogPa
 	return m.usageLog, nil
 }
 
-func (m *mockUsageReader) GetCacheOverview(_ context.Context, _ usage.UsageQueryParams) (*usage.CacheOverview, error) {
+func (m *mockUsageReader) GetCacheOverview(_ context.Context, params usage.UsageQueryParams) (*usage.CacheOverview, error) {
+	m.lastCacheOverview = params
 	if m.cacheErr != nil {
 		return nil, m.cacheErr
 	}
@@ -1240,7 +1242,7 @@ func TestCacheOverview_ReturnsPayloadWhenEnabled(t *testing.T) {
 	h := NewHandler(reader, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		CacheEnabled: "on",
 	}))
-	c, rec := newHandlerContext("/admin/api/v1/cache/overview?days=30")
+	c, rec := newHandlerContext("/admin/api/v1/cache/overview?days=30&user_path=/team")
 
 	if err := h.CacheOverview(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1258,6 +1260,12 @@ func TestCacheOverview_ReturnsPayloadWhenEnabled(t *testing.T) {
 	}
 	if len(body.Daily) != 1 || body.Daily[0].ExactHits != 3 {
 		t.Fatalf("unexpected daily payload: %+v", body.Daily)
+	}
+	if reader.lastCacheOverview.CacheMode != usage.CacheModeCached {
+		t.Fatalf("CacheMode = %q, want %q", reader.lastCacheOverview.CacheMode, usage.CacheModeCached)
+	}
+	if reader.lastCacheOverview.UserPath != "/team" {
+		t.Fatalf("UserPath = %q, want %q", reader.lastCacheOverview.UserPath, "/team")
 	}
 }
 
@@ -1283,17 +1291,22 @@ func TestCacheOverview_ReturnsErrorWhenReaderFails(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected error payload, got %v", body)
 	}
-	if got, ok := errorBody["type"].(string); !ok || got == "" {
-		t.Fatalf("error.type = %#v, want non-empty string", errorBody["type"])
+	if got, ok := errorBody["type"].(string); !ok || got != "internal_error" {
+		t.Fatalf("error.type = %#v, want %q", errorBody["type"], "internal_error")
 	}
-	if got, ok := errorBody["message"].(string); !ok || got == "" {
-		t.Fatalf("error.message = %#v, want non-empty string", errorBody["message"])
+	if got, ok := errorBody["message"].(string); !ok || got != "an unexpected error occurred" {
+		t.Fatalf("error.message = %#v, want %q", errorBody["message"], "an unexpected error occurred")
+	} else if strings.Contains(got, "boom") {
+		t.Fatalf("error.message leaked reader error: %q", got)
 	}
 	if _, ok := errorBody["param"]; !ok {
 		t.Fatalf("error.param missing from payload: %v", errorBody)
 	}
 	if _, ok := errorBody["code"]; !ok {
 		t.Fatalf("error.code missing from payload: %v", errorBody)
+	}
+	if reader.lastCacheOverview.CacheMode != usage.CacheModeCached {
+		t.Fatalf("CacheMode = %q, want %q", reader.lastCacheOverview.CacheMode, usage.CacheModeCached)
 	}
 }
 
