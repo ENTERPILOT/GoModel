@@ -235,7 +235,7 @@ func TestServiceResolveAliasWithExplicitProviderAndSlashModel(t *testing.T) {
 	}
 }
 
-func TestServiceResolveAliasWithExplicitProviderFallbackWhenConcreteSelectorMissing(t *testing.T) {
+func TestServiceResolveAliasWithExplicitProviderPreservesRequestedSelector(t *testing.T) {
 	catalog := newTestCatalog()
 	catalog.add("anthropic/claude-3-7-sonnet", "anthropic", core.Model{ID: "claude-3-7-sonnet", Object: "model"})
 
@@ -256,11 +256,11 @@ func TestServiceResolveAliasWithExplicitProviderFallbackWhenConcreteSelectorMiss
 	if err != nil {
 		t.Fatalf("ResolveModel() error = %v", err)
 	}
-	if !changed {
-		t.Fatal("ResolveModel() changed = false, want true")
+	if changed {
+		t.Fatal("ResolveModel() changed = true, want false")
 	}
-	if got := selector.QualifiedModel(); got != "anthropic/claude-3-7-sonnet" {
-		t.Fatalf("resolved selector = %q, want anthropic/claude-3-7-sonnet", got)
+	if got := selector.QualifiedModel(); got != "openai/smart" {
+		t.Fatalf("resolved selector = %q, want openai/smart", got)
 	}
 }
 

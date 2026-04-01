@@ -94,7 +94,7 @@ func TestBatchPreparerRejectsAliasResolvedToDifferentProvider(t *testing.T) {
 	}
 }
 
-func TestBatchPreparerRejectsAliasResolvedToDifferentProviderWithExplicitProviderField(t *testing.T) {
+func TestBatchPreparerRejectsUnsupportedExplicitProviderSelector(t *testing.T) {
 	catalog := newTestCatalog()
 	catalog.add("anthropic/claude-3-7-sonnet", "anthropic", core.Model{ID: "claude-3-7-sonnet", Object: "model"})
 
@@ -121,10 +121,10 @@ func TestBatchPreparerRejectsAliasResolvedToDifferentProviderWithExplicitProvide
 		Endpoint:    "/v1/chat/completions",
 	})
 	if err == nil {
-		t.Fatal("PrepareBatchRequest() error = nil, want provider mismatch")
+		t.Fatal("PrepareBatchRequest() error = nil, want unsupported model error")
 	}
-	if !strings.Contains(err.Error(), `native batch supports a single provider per batch`) {
-		t.Fatalf("PrepareBatchRequest() error = %v, want mixed-provider validation error", err)
+	if !strings.Contains(err.Error(), `unsupported model: openai/smart`) {
+		t.Fatalf("PrepareBatchRequest() error = %v, want unsupported model: openai/smart", err)
 	}
 	if len(inner.fileCreates) != 0 {
 		t.Fatalf("len(fileCreates) = %d, want 0", len(inner.fileCreates))

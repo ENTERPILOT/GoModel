@@ -1849,6 +1849,9 @@ func TestStreamChatCompletion_GPT5Model_AdaptsParameters(t *testing.T) {
 		if _, ok := raw["max_tokens"]; ok {
 			t.Error("streaming gpt-5 request should not contain max_tokens")
 		}
+		if _, ok := raw["temperature"]; ok {
+			t.Error("streaming gpt-5 request should not contain temperature")
+		}
 		mct, ok := raw["max_completion_tokens"]
 		if !ok {
 			t.Fatal("streaming gpt-5 request should contain max_completion_tokens")

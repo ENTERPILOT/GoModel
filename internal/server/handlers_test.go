@@ -3435,7 +3435,7 @@ func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.
 	require.Equal(t, "file_rewritten", stored.RewrittenInputFileID)
 }
 
-func TestBatches_InputFileRejectsExplicitProviderAliasMismatch(t *testing.T) {
+func TestBatches_InputFileRejectsUnsupportedExplicitProviderSelector(t *testing.T) {
 	store := newAliasesTestStore(aliases.Alias{Name: "smart", TargetModel: "claude-3-7-sonnet", TargetProvider: "anthropic", Enabled: true})
 	catalog := &aliasesTestCatalog{
 		supported: map[string]bool{
@@ -3483,7 +3483,7 @@ func TestBatches_InputFileRejectsExplicitProviderAliasMismatch(t *testing.T) {
 	err = handler.Batches(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Contains(t, rec.Body.String(), "native batch supports a single provider per batch")
+	require.Contains(t, rec.Body.String(), "unsupported model: openai/smart")
 	require.Nil(t, mock.capturedBatchReq)
 	require.Empty(t, mock.capturedFileCreateReqs)
 }

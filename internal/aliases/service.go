@@ -128,12 +128,6 @@ func (s *Service) resolveRequested(requested core.RequestedModelSelector) (Resol
 	}
 
 	if requested.ExplicitProvider {
-		if !s.catalog.Supports(selector.QualifiedModel()) {
-			if resolution, ok := s.resolveAlias(requested.Model); ok {
-				resolution.Requested = selector
-				return resolution, true, nil
-			}
-		}
 		return Resolution{Requested: selector, Resolved: selector}, false, nil
 	}
 
