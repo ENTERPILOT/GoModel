@@ -89,8 +89,8 @@ func (s *qdrantStore) ensureCollection(ctx context.Context, dim int) error {
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
+	switch resp.StatusCode {
+	case http.StatusOK:
 		var info struct {
 			Result struct {
 				Config struct {
@@ -113,7 +113,7 @@ func (s *qdrantStore) ensureCollection(ctx context.Context, dim int) error {
 		s.vectorSize = dim
 		return nil
 
-	case resp.StatusCode == http.StatusNotFound:
+	case http.StatusNotFound:
 		createBody := map[string]any{
 			"vectors": map[string]any{
 				"size":     dim,
