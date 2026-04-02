@@ -951,9 +951,12 @@ func TestCreateStreamEntry(t *testing.T) {
 		CacheType:              CacheTypeSemantic,
 		StatusCode:             200,
 		RequestID:              "req-123",
+		AuthKeyID:              "auth-key-123",
+		AuthMethod:             AuthMethodAPIKey,
 		ClientIP:               "127.0.0.1",
 		Method:                 "POST",
 		Path:                   "/v1/chat/completions",
+		UserPath:               "/team/alpha",
 		Stream:                 false,
 		Data: &LogData{
 			UserAgent: "test",
@@ -994,6 +997,12 @@ func TestCreateStreamEntry(t *testing.T) {
 	if streamEntry.RequestID != baseEntry.RequestID {
 		t.Error("RequestID not copied")
 	}
+	if streamEntry.AuthKeyID != baseEntry.AuthKeyID {
+		t.Error("AuthKeyID not copied")
+	}
+	if streamEntry.AuthMethod != baseEntry.AuthMethod {
+		t.Error("AuthMethod not copied")
+	}
 	if streamEntry.ClientIP != baseEntry.ClientIP {
 		t.Error("ClientIP not copied")
 	}
@@ -1002,6 +1011,9 @@ func TestCreateStreamEntry(t *testing.T) {
 	}
 	if streamEntry.Path != baseEntry.Path {
 		t.Error("Path not copied")
+	}
+	if streamEntry.UserPath != baseEntry.UserPath {
+		t.Error("UserPath not copied")
 	}
 
 	// Verify Data fields are copied
