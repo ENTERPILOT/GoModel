@@ -211,6 +211,15 @@ func enrichEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
 	if versionID := strings.TrimSpace(plan.ExecutionPlanVersionID()); versionID != "" {
 		entry.ExecutionPlanVersionID = versionID
 	}
+	if plan.Policy != nil {
+		ensureLogData(entry).ExecutionFeatures = &ExecutionFeaturesSnapshot{
+			Cache:      plan.Policy.Features.Cache,
+			Audit:      plan.Policy.Features.Audit,
+			Usage:      plan.Policy.Features.Usage,
+			Guardrails: plan.Policy.Features.Guardrails,
+			Fallback:   plan.Policy.Features.Fallback,
+		}
+	}
 }
 
 func captureLoggedRequestBody(entry *LogEntry, bodyBytes []byte) {

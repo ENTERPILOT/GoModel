@@ -1,5 +1,8 @@
 {{define "execution-plan-chart"}}
-<div class="exec-pipeline">
+<div class="exec-pipeline" :class="{ 'exec-pipeline-has-meta': {{.}}.workflowID }">
+    <div class="exec-pipeline-meta" x-show="{{.}}.workflowID">
+        <span class="exec-pipeline-meta-chip mono" x-show="{{.}}.workflowID" x-text="'id: ' + {{.}}.workflowID"></span>
+    </div>
     <div class="exec-pipeline-row">
         <div class="ep-left">
             <div class="ep-node ep-node-endpoint">

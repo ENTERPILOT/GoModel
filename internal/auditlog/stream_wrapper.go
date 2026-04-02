@@ -112,6 +112,10 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 			ResponseHeaders: copyMap(baseEntry.Data.ResponseHeaders),
 			RequestBody:     baseEntry.Data.RequestBody,
 		}
+		if baseEntry.Data.ExecutionFeatures != nil {
+			snapshot := *baseEntry.Data.ExecutionFeatures
+			entryCopy.Data.ExecutionFeatures = &snapshot
+		}
 	}
 
 	return entryCopy

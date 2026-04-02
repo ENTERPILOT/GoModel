@@ -960,6 +960,13 @@ func TestCreateStreamEntry(t *testing.T) {
 		Stream:                 false,
 		Data: &LogData{
 			UserAgent: "test",
+			ExecutionFeatures: &ExecutionFeaturesSnapshot{
+				Cache:      false,
+				Audit:      true,
+				Usage:      true,
+				Guardrails: false,
+				Fallback:   true,
+			},
 			RequestHeaders: map[string]string{
 				"Content-Type": "application/json",
 			},
@@ -1030,6 +1037,60 @@ func TestCreateStreamEntry(t *testing.T) {
 	baseEntry.Data.RequestHeaders["New"] = "value"
 	if streamEntry.Data.RequestHeaders["New"] == "value" {
 		t.Error("Headers should be a copy, not same reference")
+	}
+	if streamEntry.Data.ExecutionFeatures == nil {
+		t.Fatal("ExecutionFeatures is nil")
+	}
+	if streamEntry.Data.ExecutionFeatures == baseEntry.Data.ExecutionFeatures {
+		t.Fatal("ExecutionFeatures should be copied, not shared")
+	}
+	if streamEntry.Data.ExecutionFeatures.Cache != baseEntry.Data.ExecutionFeatures.Cache {
+		t.Error("ExecutionFeatures.Cache mismatch")
+	}
+}
+
+func TestEnrichEntryWithExecutionPlanStoresExecutionFeatures(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	entry := &LogEntry{ID: "plan-audit-entry"}
+	c.Set(string(LogEntryKey), entry)
+
+	EnrichEntryWithExecutionPlan(c, &core.ExecutionPlan{
+		Policy: &core.ResolvedExecutionPolicy{
+			VersionID: "workflow-v3",
+			Features: core.ExecutionFeatures{
+				Cache:      false,
+				Audit:      true,
+				Usage:      false,
+				Guardrails: true,
+				Fallback:   false,
+			},
+		},
+	})
+
+	if entry.ExecutionPlanVersionID != "workflow-v3" {
+		t.Fatalf("ExecutionPlanVersionID = %q, want workflow-v3", entry.ExecutionPlanVersionID)
+	}
+	if entry.Data == nil || entry.Data.ExecutionFeatures == nil {
+		t.Fatal("expected execution feature snapshot to be stored in audit data")
+	}
+	if entry.Data.ExecutionFeatures.Cache {
+		t.Fatal("ExecutionFeatures.Cache = true, want false")
+	}
+	if !entry.Data.ExecutionFeatures.Audit {
+		t.Fatal("ExecutionFeatures.Audit = false, want true")
+	}
+	if entry.Data.ExecutionFeatures.Usage {
+		t.Fatal("ExecutionFeatures.Usage = true, want false")
+	}
+	if !entry.Data.ExecutionFeatures.Guardrails {
+		t.Fatal("ExecutionFeatures.Guardrails = false, want true")
+	}
+	if entry.Data.ExecutionFeatures.Fallback {
+		t.Fatal("ExecutionFeatures.Fallback = true, want false")
 	}
 }
 
