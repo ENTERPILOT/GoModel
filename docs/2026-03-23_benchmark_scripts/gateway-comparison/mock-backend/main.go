@@ -6,11 +6,15 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log"
+	"math"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 func main() {
@@ -24,6 +28,8 @@ func main() {
 	mux.HandleFunc("/chat/completions", handleChatCompletions) // some gateways strip /v1
 	mux.HandleFunc("/v1/responses", handleResponses)
 	mux.HandleFunc("/responses", handleResponses)
+	mux.HandleFunc("/v1/embeddings", handleEmbeddings)
+	mux.HandleFunc("/embeddings", handleEmbeddings)
 	mux.HandleFunc("/v1/models", handleModels)
 	mux.HandleFunc("/models", handleModels)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -233,6 +239,136 @@ func streamResponses(w http.ResponseWriter) {
 			"usage": map[string]any{"input_tokens": 25, "output_tokens": 35, "total_tokens": 60},
 		}))
 	flusher.Flush()
+}
+
+// ---------- Embeddings ----------
+
+func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Input any    `json:"input"`
+		Model string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	input := firstEmbeddingInput(body.Input)
+	if input == "" {
+		http.Error(w, "embedding input is required", http.StatusBadRequest)
+		return
+	}
+
+	embedding := make([]float64, 0, 16)
+	for _, v := range embedText(input) {
+		embedding = append(embedding, float64(v))
+	}
+
+	resp := map[string]any{
+		"object": "list",
+		"model":  body.Model,
+		"data": []map[string]any{
+			{
+				"object":    "embedding",
+				"index":     0,
+				"embedding": embedding,
+			},
+		},
+		"usage": map[string]any{
+			"prompt_tokens": len(normalizeEmbeddingTokens(input)),
+			"total_tokens":  len(normalizeEmbeddingTokens(input)),
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("encode embeddings response: %v", err)
+	}
+}
+
+func firstEmbeddingInput(input any) string {
+	switch v := input.(type) {
+	case string:
+		return v
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func embedText(text string) []float32 {
+	const dim = 16
+
+	tokens := normalizeEmbeddingTokens(text)
+	vec := make([]float32, dim)
+	if len(tokens) == 0 {
+		vec[0] = 1
+		return vec
+	}
+
+	for _, tok := range tokens {
+		h := fnv.New32a()
+		_, _ = h.Write([]byte(tok))
+		sum := h.Sum32()
+		idx := int(sum % dim)
+		sign := float32(1)
+		if sum&(1<<31) != 0 {
+			sign = -1
+		}
+		vec[idx] += sign
+	}
+
+	var norm float64
+	for _, v := range vec {
+		norm += float64(v * v)
+	}
+	if norm == 0 {
+		vec[0] = 1
+		return vec
+	}
+
+	scale := float32(1 / math.Sqrt(norm))
+	for i := range vec {
+		vec[i] *= scale
+	}
+	return vec
+}
+
+func normalizeEmbeddingTokens(text string) []string {
+	clean := strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			return unicode.ToLower(r)
+		case unicode.IsSpace(r):
+			return ' '
+		default:
+			return ' '
+		}
+	}, text)
+
+	stopwords := map[string]struct{}{
+		"a": {}, "an": {}, "the": {}, "is": {}, "of": {}, "what": {}, "with": {},
+		"exactly": {}, "reply": {}, "please": {}, "tell": {}, "me": {},
+	}
+
+	fields := strings.Fields(clean)
+	tokens := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if _, ok := stopwords[field]; ok {
+			continue
+		}
+		tokens = append(tokens, field)
+	}
+	sort.Strings(tokens)
+	return tokens
 }
 
 // ---------- Models ----------

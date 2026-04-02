@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 79 end-to-end curl scenarios for release validation.
+This file contains 83 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -65,13 +65,14 @@ and cover the newer workflows, managed API keys, and cache analytics features.
 
 ```bash
 set -euo pipefail
-if [ ! -r .env ]; then
-  echo "error: .env is missing or unreadable" >&2
+RELEASE_E2E_ENV_FILE="${RELEASE_E2E_ENV_FILE:-.env}"
+if [ ! -r "$RELEASE_E2E_ENV_FILE" ]; then
+  echo "error: env file is missing or unreadable: $RELEASE_E2E_ENV_FILE" >&2
   exit 1
 fi
 
 set -a
-source .env
+source "$RELEASE_E2E_ENV_FILE"
 set +a
 
 export QA_SUFFIX="${QA_SUFFIX:-$(date +%s)-$$}"
@@ -79,7 +80,7 @@ export QA_RUN_DIR="${QA_RUN_DIR:-/tmp/gomodel-release-e2e-$QA_SUFFIX}"
 
 mkdir -p "$QA_RUN_DIR"
 
-export AUTH_BASE_URL=http://localhost:8080
+export AUTH_BASE_URL="${AUTH_BASE_URL:-http://localhost:8080}"
 export ADMIN_AUTH_HEADER="Authorization: Bearer $GOMODEL_MASTER_KEY"
 
 export QA_AUTH_KEY_NAME="qa-release-auth-key-$QA_SUFFIX"
@@ -98,6 +99,10 @@ export QA_CACHE_REQ1="qa-cache-exact-$QA_SUFFIX-1"
 export QA_CACHE_REQ2="qa-cache-exact-$QA_SUFFIX-2"
 export QA_DEACTIVATED_REQ="qa-auth-deactivated-$QA_SUFFIX"
 export QA_CACHE_REPLY="QA_CACHE_EXACT_OK_$QA_SUFFIX"
+export QA_SEM_CACHE_USER_PATH="/team/semantic/e2e/$QA_SUFFIX"
+export QA_SEM_REQ1="qa-cache-semantic-$QA_SUFFIX-1"
+export QA_SEM_REQ2="qa-cache-semantic-$QA_SUFFIX-2"
+export QA_SEM_REPLY="QA_CACHE_SEMANTIC_OK_$QA_SUFFIX"
 
 cleanup_release_auth_artifacts() {
   rm -f "$QA_AUTH_KEY_JSON" "$QA_AUTH_KEY_VALUE_FILE" "$QA_WORKFLOW_JSON" "$QA_WORKFLOW_ID_FILE"
@@ -1007,4 +1012,73 @@ WORKFLOW_ID=$(cat "$QA_WORKFLOW_ID_FILE")
 curl -sS -i -X POST "$AUTH_BASE_URL/admin/api/v1/execution-plans/$WORKFLOW_ID/deactivate" \
   -H "$ADMIN_AUTH_HEADER"
 rm -f "$QA_AUTH_KEY_JSON" "$QA_AUTH_KEY_VALUE_FILE" "$QA_WORKFLOW_JSON" "$QA_WORKFLOW_ID_FILE"
+```
+
+## 14. Semantic cache validation
+
+### S80 Global semantic cache warm request
+
+Warms semantic cache on the auth-enabled gateway with a first phrasing.
+
+```bash
+HEADERS_FILE="$QA_RUN_DIR/$QA_SEM_REQ1.headers"
+BODY_FILE="$QA_RUN_DIR/$QA_SEM_REQ1.body.json"
+curl -sS -D "$HEADERS_FILE" "$AUTH_BASE_URL/v1/chat/completions" \
+  -H "$ADMIN_AUTH_HEADER" \
+  -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $QA_SEM_REQ1" \
+  -H "X-GoModel-User-Path: $QA_SEM_CACHE_USER_PATH" \
+  -d "{\"model\":\"openai/gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the capital city of France? Reply with exactly $QA_SEM_REPLY.\"}],\"max_tokens\":24}" \
+  -o "$BODY_FILE"
+if grep -qi '^X-Cache:' "$HEADERS_FILE"; then
+  echo "expected first semantic-cache request to miss, got headers:" >&2
+  cat "$HEADERS_FILE" >&2
+  exit 1
+fi
+jq -e '.choices[0].message.content | type=="string"' "$BODY_FILE" >/dev/null
+sed -n '1,20p' "$HEADERS_FILE"
+jq '{id,model,usage,answer:.choices[0].message.content}' "$BODY_FILE"
+```
+
+### S81 Paraphrased request should hit semantic cache
+
+Uses a paraphrased follow-up and requires `X-Cache: HIT (semantic)`.
+
+```bash
+HEADERS_FILE="$QA_RUN_DIR/$QA_SEM_REQ2.headers"
+BODY_FILE="$QA_RUN_DIR/$QA_SEM_REQ2.body.json"
+curl -sS -D "$HEADERS_FILE" "$AUTH_BASE_URL/v1/chat/completions" \
+  -H "$ADMIN_AUTH_HEADER" \
+  -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $QA_SEM_REQ2" \
+  -H "X-GoModel-User-Path: $QA_SEM_CACHE_USER_PATH" \
+  -d "{\"model\":\"openai/gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"France capital city. Reply with exactly $QA_SEM_REPLY.\"}],\"max_tokens\":24}" \
+  -o "$BODY_FILE"
+grep -F 'X-Cache: HIT (semantic)' "$HEADERS_FILE"
+jq -e '.choices[0].message.content | type=="string"' "$BODY_FILE" >/dev/null
+sed -n '1,20p' "$HEADERS_FILE"
+jq '{id,model,usage,answer:.choices[0].message.content}' "$BODY_FILE"
+```
+
+### S82 Cache overview shows semantic hits
+
+Reads cache analytics for the semantic-cache user path and asserts at least one semantic hit.
+
+```bash
+sleep 3
+curl -sS "$AUTH_BASE_URL/admin/api/v1/cache/overview?days=1&user_path=$QA_SEM_CACHE_USER_PATH" \
+  -H "$ADMIN_AUTH_HEADER" \
+  | tee "$QA_RUN_DIR/$QA_SEM_REQ2.cache-overview.json" \
+  | jq -e '.summary.semantic_hits >= 1 and .summary.total_hits >= .summary.semantic_hits'
+```
+
+### S83 Cached usage log shows semantic cache type
+
+Reads cached-only usage entries and requires a semantic cache hit for the tracked request.
+
+```bash
+curl -sS "$AUTH_BASE_URL/admin/api/v1/usage/log?days=1&user_path=$QA_SEM_CACHE_USER_PATH&cache_mode=cached&search=$QA_SEM_REQ2&limit=10" \
+  -H "$ADMIN_AUTH_HEADER" \
+  | tee "$QA_RUN_DIR/$QA_SEM_REQ2.usage.json" \
+  | jq -e --arg request_id "$QA_SEM_REQ2" '{total,entries:(.entries|map(select(.request_id==$request_id))|map({request_id,cache_type,model,provider,endpoint,user_path,total_tokens}))} | (.entries | length) >= 1 and ([.entries[].cache_type] | all(. == "semantic"))'
 ```

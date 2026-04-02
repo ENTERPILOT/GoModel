@@ -9,8 +9,35 @@ permissions:
   contents: write # Required to create releases
 
 jobs:
+  semantic-cache-e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.1
+          cache: true
+
+      - name: Run semantic cache release scenarios
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/release-semantic-cache
+        run: tests/e2e/run-release-semantic-cache.sh
+
+      - name: Upload semantic cache logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantic-cache-release-e2e
+          path: ${{ runner.temp }}/release-semantic-cache
+
   goreleaser:
     runs-on: ubuntu-latest
+    needs: semantic-cache-e2e
     steps:
       - name: Checkout
         uses: actions/checkout@v6
