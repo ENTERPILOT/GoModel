@@ -13,7 +13,7 @@ LDFLAGS := -X "gomodel/internal/version.Version=$(VERSION)" \
            -X "gomodel/internal/version.Date=$(DATE)"
 
 install-tools:
-	@command -v golangci-lint > /dev/null 2>&1 || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4)
+	@command -v golangci-lint > /dev/null 2>&1 || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10)
 	@command -v pre-commit > /dev/null 2>&1 || (echo "Installing pre-commit..." && pip install pre-commit==4.5.1)
 	@echo "All tools are ready"
 
