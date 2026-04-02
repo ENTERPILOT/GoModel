@@ -92,12 +92,14 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 		CacheType:              baseEntry.CacheType,
 		StatusCode:             baseEntry.StatusCode,
 		// Copy extracted fields
-		RequestID: baseEntry.RequestID,
-		AuthKeyID: baseEntry.AuthKeyID,
-		ClientIP:  baseEntry.ClientIP,
-		Method:    baseEntry.Method,
-		Path:      baseEntry.Path,
-		Stream:    true, // Mark as streaming
+		RequestID:  baseEntry.RequestID,
+		AuthKeyID:  baseEntry.AuthKeyID,
+		AuthMethod: baseEntry.AuthMethod,
+		ClientIP:   baseEntry.ClientIP,
+		Method:     baseEntry.Method,
+		Path:       baseEntry.Path,
+		UserPath:   baseEntry.UserPath,
+		Stream:     true, // Mark as streaming
 	}
 
 	if baseEntry.Data != nil {
@@ -109,6 +111,10 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 			RequestHeaders:  copyMap(baseEntry.Data.RequestHeaders),
 			ResponseHeaders: copyMap(baseEntry.Data.ResponseHeaders),
 			RequestBody:     baseEntry.Data.RequestBody,
+		}
+		if baseEntry.Data.ExecutionFeatures != nil {
+			snapshot := *baseEntry.Data.ExecutionFeatures
+			entryCopy.Data.ExecutionFeatures = &snapshot
 		}
 	}
 

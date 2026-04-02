@@ -399,6 +399,14 @@
 	                };
 	            },
 
+            executionPlanEntryFeatures(entry) {
+                const raw = entry && entry.data && entry.data.execution_features;
+                if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+                    return null;
+                }
+                return this.executionPlanNormalizedFeatures(raw);
+            },
+
             executionPlanSourceGuardrails(source) {
                 const raw = Array.isArray(source && source.plan_payload && source.plan_payload.guardrails)
                     ? source.plan_payload.guardrails
@@ -1063,33 +1071,55 @@
                 return source && source.scope && source.scope.scope_model || null;
             },
 
-	            executionPlanChartModel(source, runtime, options) {
-	                const config = options || {};
-	                const forceAudit = !!config.forceAudit;
-	                const showGuardrails = this.epHasGuardrails(source);
-	                const showUsage = this.epHasUsage(source);
-	                const showAudit = this.executionPlanAuditVisible() && (forceAudit || this.epHasAudit(source));
-	                const showAsync = !!(showUsage || showAudit);
-	                return {
-	                    showGuardrails,
-	                    guardrailLabel: showGuardrails ? this.epGuardrailLabel(source) : '',
-	                    showCache: !!config.forceCache || this.epShowCacheStep(source, runtime),
+            epTerminalKind(runtime) {
+                if (runtime && runtime.authError) return 'auth';
+                if (runtime && runtime.guardrailsBlocked) return 'guardrails';
+                if (runtime && runtime.cacheHit) return 'cache';
+                return 'ai';
+            },
+
+            executionPlanChartWorkflowID(source, entry) {
+                const sourceID = String(source && source.id || '').trim();
+                if (sourceID) {
+                    return sourceID;
+                }
+                const entryID = String(entry && entry.execution_plan_version_id || '').trim();
+                return entryID || null;
+            },
+
+            executionPlanChartModel(source, runtime, options) {
+                const config = options || {};
+                const features = config.features && typeof config.features === 'object' && !Array.isArray(config.features)
+                    ? this.executionPlanNormalizedFeatures(config.features)
+                    : this.executionPlanSourceFeatures(source);
+                const forceAudit = !!config.forceAudit;
+                const showGuardrails = !!features.guardrails;
+                const showUsage = !!features.usage;
+                const showAudit = forceAudit || !!features.audit;
+                const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
+                const workflowID = this.executionPlanChartWorkflowID(source, config.entry);
+                return {
+                    showGuardrails,
+                    guardrailLabel: showGuardrails ? this.epGuardrailLabel(source) : '',
+                    showCache: !!config.forceCache || !!features.cache || this.epRuntimeHasCache(runtime),
+                    terminalKind: this.epTerminalKind(runtime),
                     cacheNodeClass: this.epCacheNodeClass(runtime),
                     cacheConnClass: this.epCacheConnClass(runtime),
                     cacheStatusLabel: this.epCacheStatusLabel(runtime),
                     aiLabel: this.epAiLabel(source, runtime),
                     aiSublabel: this.epAiSublabel(source, runtime),
-	                    aiConnClass: this.epAiConnClass(runtime),
-	                    aiNodeClass: this.epAiNodeClass(runtime),
-	                    responseConnClass: this.epResponseConnClass(runtime),
-	                    responseNodeClass: this.epResponseNodeClass(runtime),
-				    authNodeClass: this.epAuthNodeClass(runtime),
-				    authNodeSublabel: this.epAuthNodeSublabel(runtime),
-	                    showAsync,
-	                    showUsage,
-	                    showAudit
-	                };
-	            },
+                    aiConnClass: this.epAiConnClass(runtime),
+                    aiNodeClass: this.epAiNodeClass(runtime),
+                    responseConnClass: this.epResponseConnClass(runtime),
+                    responseNodeClass: this.epResponseNodeClass(runtime),
+                    authNodeClass: this.epAuthNodeClass(runtime),
+                    authNodeSublabel: this.epAuthNodeSublabel(runtime),
+                    showAsync,
+                    showUsage,
+                    showAudit,
+                    workflowID
+                };
+            },
 
             executionPlanWorkflowChart(source) {
                 return this.executionPlanChartModel(source, null, { forceCache: false });
@@ -1098,8 +1128,10 @@
             executionPlanAuditChart(entry) {
                 const source = this.auditEntryExecutionPlan(entry);
                 const runtime = this.epRuntimeFromEntry(entry);
+                const features = this.executionPlanEntryFeatures(entry) || this.executionPlanSourceFeatures(source);
                 return this.executionPlanChartModel(source, runtime, {
-                    forceCache: true,
+                    entry,
+                    features,
                     forceAudit: true,
                     forceAsync: true
                 });
@@ -1108,6 +1140,7 @@
             // runtime shape: {
             //   cacheHit: bool,
             //   cacheType: 'exact'|'semantic'|null,
+            //   guardrailsBlocked: bool,
             //   provider,
             //   model,
             //   statusCode: number|null,
@@ -1153,7 +1186,7 @@
 
             epResponseConnClass(runtime) {
                 if (!runtime) return '';
-                if (runtime.cacheHit) return 'ep-conn-dim';
+                if (runtime.cacheHit) return 'ep-conn-hit';
                 return '';
             },
 
@@ -1199,6 +1232,7 @@
                 return {
                     cacheHit,
                     cacheType: normalizedCacheType || null,
+                    guardrailsBlocked: false,
                     provider: entry.provider || null,
                     model: entry.model || null,
                     statusCode,

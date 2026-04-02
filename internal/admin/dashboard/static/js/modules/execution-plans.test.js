@@ -169,6 +169,7 @@ test('executionPlanWorkflowChart returns the shared chart contract for workflow 
 
     assert.equal(
         JSON.stringify(module.executionPlanWorkflowChart({
+            id: 'workflow-openai-gpt-5-v7',
             scope: {
                 scope_provider: 'openai',
                 scope_model: 'gpt-5'
@@ -191,6 +192,7 @@ test('executionPlanWorkflowChart returns the shared chart contract for workflow 
             showGuardrails: true,
             guardrailLabel: '2 steps',
             showCache: true,
+            terminalKind: 'ai',
             cacheNodeClass: '',
             cacheConnClass: '',
             cacheStatusLabel: null,
@@ -204,7 +206,8 @@ test('executionPlanWorkflowChart returns the shared chart contract for workflow 
             authNodeSublabel: null,
             showAsync: true,
             showUsage: false,
-            showAudit: true
+            showAudit: true,
+            workflowID: 'workflow-openai-gpt-5-v7'
         })
     );
 });
@@ -243,6 +246,7 @@ test('executionPlanWorkflowChart masks globally disabled workflow features from 
             showGuardrails: false,
             guardrailLabel: '',
             showCache: false,
+            terminalKind: 'ai',
             cacheNodeClass: '',
             cacheConnClass: '',
             cacheStatusLabel: null,
@@ -256,7 +260,8 @@ test('executionPlanWorkflowChart masks globally disabled workflow features from 
             authNodeSublabel: null,
             showAsync: false,
             showUsage: false,
-            showAudit: false
+            showAudit: false,
+            workflowID: null
         })
     );
 });
@@ -297,6 +302,7 @@ test('executionPlanAuditChart returns the shared chart contract for audit runtim
             showGuardrails: true,
             guardrailLabel: '1 step',
             showCache: true,
+            terminalKind: 'cache',
             cacheNodeClass: 'ep-node-cache-semantic',
             cacheConnClass: 'ep-conn-hit',
             cacheStatusLabel: 'Hit (Semantic)',
@@ -304,13 +310,14 @@ test('executionPlanAuditChart returns the shared chart contract for audit runtim
             aiSublabel: 'gpt-5',
             aiConnClass: 'ep-conn-dim',
             aiNodeClass: 'ep-node-ai-skipped',
-            responseConnClass: 'ep-conn-dim',
+            responseConnClass: 'ep-conn-hit',
             responseNodeClass: 'ep-node-endpoint-success',
             authNodeClass: '',
             authNodeSublabel: null,
             showAsync: true,
             showUsage: true,
-            showAudit: true
+            showAudit: true,
+            workflowID: 'historical-v1'
         })
     );
 });
@@ -330,6 +337,7 @@ test('executionPlanAuditChart forces audit nodes even when the workflow version 
             showGuardrails: false,
             guardrailLabel: '',
             showCache: true,
+            terminalKind: 'cache',
             cacheNodeClass: 'ep-node-cache-hit',
             cacheConnClass: 'ep-conn-hit',
             cacheStatusLabel: 'Hit (Exact)',
@@ -337,13 +345,78 @@ test('executionPlanAuditChart forces audit nodes even when the workflow version 
             aiSublabel: 'gpt-5',
             aiConnClass: 'ep-conn-dim',
             aiNodeClass: 'ep-node-ai-skipped',
-            responseConnClass: 'ep-conn-dim',
+            responseConnClass: 'ep-conn-hit',
             responseNodeClass: 'ep-node-endpoint-success',
             authNodeClass: '',
             authNodeSublabel: null,
             showAsync: true,
             showUsage: false,
-            showAudit: true
+            showAudit: true,
+            workflowID: 'missing-plan'
+        })
+    );
+});
+
+test('executionPlanAuditChart prefers request-time execution features over current workflow state', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanVersionsByID = {
+        'historical-v2': {
+            id: 'historical-v2',
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            },
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: true,
+                    fallback: true
+                },
+                guardrails: [
+                    { ref: 'policy-system', step: 10 }
+                ]
+            }
+        }
+    };
+
+    assert.equal(
+        JSON.stringify(module.executionPlanAuditChart({
+            execution_plan_version_id: 'historical-v2',
+            provider: 'openai',
+            model: 'gpt-5',
+            status_code: 200,
+            data: {
+                execution_features: {
+                    cache: false,
+                    audit: true,
+                    usage: false,
+                    guardrails: false,
+                    fallback: true
+                }
+            }
+        })),
+        JSON.stringify({
+            showGuardrails: false,
+            guardrailLabel: '',
+            showCache: false,
+            terminalKind: 'ai',
+            cacheNodeClass: '',
+            cacheConnClass: '',
+            cacheStatusLabel: null,
+            aiLabel: 'openai',
+            aiSublabel: 'gpt-5',
+            aiConnClass: '',
+            aiNodeClass: 'ep-node-ai-success',
+            responseConnClass: '',
+            responseNodeClass: 'ep-node-endpoint-success',
+            authNodeClass: '',
+            authNodeSublabel: null,
+            showAsync: true,
+            showUsage: false,
+            showAudit: true,
+            workflowID: 'historical-v2'
         })
     );
 });
@@ -1411,6 +1484,7 @@ test('epRuntimeFromEntry derives cache hit state from cache_type without relying
         JSON.stringify({
             cacheHit: true,
             cacheType: 'semantic',
+            guardrailsBlocked: false,
             provider: 'openai',
             model: 'gpt-5',
             statusCode: null,
@@ -1426,6 +1500,7 @@ test('epRuntimeFromEntry derives cache hit state from cache_type without relying
         JSON.stringify({
             cacheHit: true,
             cacheType: 'exact',
+            guardrailsBlocked: false,
             provider: null,
             model: null,
             statusCode: null,
@@ -1441,6 +1516,7 @@ test('epRuntimeFromEntry derives cache hit state from cache_type without relying
         JSON.stringify({
             cacheHit: false,
             cacheType: null,
+            guardrailsBlocked: false,
             provider: null,
             model: null,
             statusCode: null,
@@ -1464,7 +1540,7 @@ test('audit runtime uses explicit cache-hit labels and highlights the uncached 2
     assert.equal(module.epCacheStatusLabel(semanticHit), 'Hit (Semantic)');
     assert.equal(module.epAiConnClass(semanticHit), 'ep-conn-dim');
     assert.equal(module.epAiNodeClass(semanticHit), 'ep-node-ai-skipped');
-    assert.equal(module.epResponseConnClass(semanticHit), 'ep-conn-dim');
+    assert.equal(module.epResponseConnClass(semanticHit), 'ep-conn-hit');
     assert.equal(module.epResponseNodeClass(semanticHit), 'ep-node-endpoint-success');
 
     const uncachedSuccess = module.epRuntimeFromEntry({
@@ -1493,6 +1569,7 @@ test('epRuntimeFromEntry treats any uncached 2xx status as a successful AI and r
         JSON.stringify({
             cacheHit: false,
             cacheType: null,
+            guardrailsBlocked: false,
             provider: 'openai',
             model: 'gpt-5',
             statusCode: 204,
@@ -1511,6 +1588,7 @@ test('auth runtime highlights auth node state from audit entries', () => {
         auth_method: 'api_key',
         error_type: 'authentication_error'
     });
+    assert.equal(module.epTerminalKind(failedAuth), 'auth');
     assert.equal(module.epAuthNodeClass(failedAuth), 'ep-node-auth-error');
     assert.equal(module.epAuthNodeSublabel(failedAuth), 'api_key');
 
@@ -1518,8 +1596,42 @@ test('auth runtime highlights auth node state from audit entries', () => {
         auth_method: 'master_key',
         status_code: 200
     });
+    assert.equal(module.epTerminalKind(masterKeyAuth), 'ai');
     assert.equal(module.epAuthNodeClass(masterKeyAuth), 'ep-node-auth-success');
     assert.equal(module.epAuthNodeSublabel(masterKeyAuth), 'master_key');
+});
+
+test('executionPlanAuditChart uses auth as the terminal column when authentication fails', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        JSON.stringify(module.executionPlanAuditChart({
+            execution_plan_version_id: 'missing-plan',
+            auth_method: 'api_key',
+            error_type: 'authentication_error'
+        })),
+        JSON.stringify({
+            showGuardrails: false,
+            guardrailLabel: '',
+            showCache: false,
+            terminalKind: 'auth',
+            cacheNodeClass: '',
+            cacheConnClass: '',
+            cacheStatusLabel: null,
+            aiLabel: 'AI',
+            aiSublabel: null,
+            aiConnClass: '',
+            aiNodeClass: '',
+            responseConnClass: '',
+            responseNodeClass: '',
+            authNodeClass: 'ep-node-auth-error',
+            authNodeSublabel: 'api_key',
+            showAsync: true,
+            showUsage: false,
+            showAudit: true,
+            workflowID: 'missing-plan'
+        })
+    );
 });
 
 test('auditEntryExecutionPlan prefers an exact historical workflow version cache over active workflows', () => {
