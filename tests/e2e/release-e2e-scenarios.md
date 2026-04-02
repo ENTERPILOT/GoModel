@@ -8,22 +8,54 @@ These scenarios are prepared for execution across these local gateways:
 - `http://localhost:18082` - MongoDB-backed smoke gateway
 - `http://localhost:18083` - SQLite-backed guardrail gateway
 
+## Recommended runner
+
+Use the checked-in runner to execute this matrix without manually replaying the
+shared setup blocks:
+
+```bash
+tests/e2e/run-release-e2e.sh
+tests/e2e/run-release-e2e.sh --list
+tests/e2e/run-release-e2e.sh --from S54 --to S58
+tests/e2e/run-release-e2e.sh --scenario S61,S62,S70 --keep-artifacts
+```
+
+The runner treats this markdown file as the source of truth, replays the setup
+blocks automatically for each scenario, writes a raw log plus a TSV summary
+under `QA_RUN_DIR` (default: `/tmp/gomodel-release-e2e-$QA_SUFFIX`), and
+supports partial reruns.
+
+Stateful note:
+
+- `S13`-`S60` mutate shared aliases/files/batches
+- `S64`-`S79` mutate managed keys, workflows, and auth artifacts
+- For stateful partial reruns, prefer a contiguous range that includes the
+  prerequisite setup scenarios, or rerun with the same `--qa-suffix` and
+  `--keep-artifacts`
+
 ## Common environment
 
 ```bash
+export QA_SUFFIX="${QA_SUFFIX:-$(date +%s)-$$}"
+export QA_RUN_DIR="${QA_RUN_DIR:-/tmp/gomodel-release-e2e-$QA_SUFFIX}"
+export QA_OPENAI_ALIAS="${QA_OPENAI_ALIAS:-qa-gpt-latest-$QA_SUFFIX}"
+export QA_ANTHROPIC_ALIAS="${QA_ANTHROPIC_ALIAS:-qa-sonnet-thinking-$QA_SUFFIX}"
+
+mkdir -p "$QA_RUN_DIR"
+
 export BASE_URL=http://localhost:18080
 export PG_BASE_URL=http://localhost:18081
 export MONGO_BASE_URL=http://localhost:18082
 export GR_BASE_URL=http://localhost:18083
 
-cat > /tmp/qa-openai-batch.jsonl <<'EOF'
+cat > "$QA_RUN_DIR/qa-openai-batch.jsonl" <<'EOF'
 {"custom_id":"qa-batch-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_BATCH_FILE_OK"}],"max_tokens":20}}
 EOF
 
-printf 'qa file payload\n' > /tmp/qa-upload.txt
+printf 'qa file payload\n' > "$QA_RUN_DIR/qa-upload.txt"
 
-export BATCH_FILE=/tmp/qa-openai-batch.jsonl
-export UPLOAD_FILE=/tmp/qa-upload.txt
+export BATCH_FILE="$QA_RUN_DIR/qa-openai-batch.jsonl"
+export UPLOAD_FILE="$QA_RUN_DIR/qa-upload.txt"
 ```
 
 ## Auth-enabled runtime environment
@@ -42,19 +74,23 @@ set -a
 source .env
 set +a
 
+export QA_SUFFIX="${QA_SUFFIX:-$(date +%s)-$$}"
+export QA_RUN_DIR="${QA_RUN_DIR:-/tmp/gomodel-release-e2e-$QA_SUFFIX}"
+
+mkdir -p "$QA_RUN_DIR"
+
 export AUTH_BASE_URL=http://localhost:8080
 export ADMIN_AUTH_HEADER="Authorization: Bearer $GOMODEL_MASTER_KEY"
 
-export QA_SUFFIX="${QA_SUFFIX:-$(date +%s)}"
 export QA_AUTH_KEY_NAME="qa-release-auth-key-$QA_SUFFIX"
 export QA_WORKFLOW_NAME="qa-release-workflow-$QA_SUFFIX"
 export QA_USER_PATH="/team/release/e2e/$QA_SUFFIX"
 export QA_CACHE_USER_PATH="/team/cache/e2e/$QA_SUFFIX"
 
-export QA_AUTH_KEY_JSON="/tmp/qa-release-auth-key-$QA_SUFFIX.json"
-export QA_AUTH_KEY_VALUE_FILE="/tmp/qa-release-auth-key-$QA_SUFFIX.token"
-export QA_WORKFLOW_JSON="/tmp/qa-release-workflow-$QA_SUFFIX.json"
-export QA_WORKFLOW_ID_FILE="/tmp/qa-release-workflow-$QA_SUFFIX.id"
+export QA_AUTH_KEY_JSON="$QA_RUN_DIR/qa-release-auth-key.json"
+export QA_AUTH_KEY_VALUE_FILE="$QA_RUN_DIR/qa-release-auth-key.token"
+export QA_WORKFLOW_JSON="$QA_RUN_DIR/qa-release-workflow.json"
+export QA_WORKFLOW_ID_FILE="$QA_RUN_DIR/qa-release-workflow.id"
 
 export QA_AUTH_REQ1="qa-auth-cacheoff-$QA_SUFFIX-1"
 export QA_AUTH_REQ2="qa-auth-cacheoff-$QA_SUFFIX-2"
@@ -68,7 +104,9 @@ cleanup_release_auth_artifacts() {
 }
 
 cleanup_release_auth_artifacts
-trap 'cleanup_release_auth_artifacts' EXIT
+if [ "${RUN_RELEASE_E2E_PERSIST_STATE:-0}" != "1" ]; then
+  trap 'cleanup_release_auth_artifacts' EXIT
+fi
 ```
 
 ## 1. Infra, discovery, observability
@@ -181,7 +219,7 @@ curl -sS "$BASE_URL/admin/api/v1/aliases" | jq '.'
 Creates an alias pointing to the newest cheap OpenAI model.
 
 ```bash
-curl -sS -X PUT "$BASE_URL/admin/api/v1/aliases/qa-gpt-latest" \
+curl -sS -X PUT "$BASE_URL/admin/api/v1/aliases/$QA_OPENAI_ALIAS" \
   -H 'Content-Type: application/json' \
   -d '{"target_model":"gpt-4.1-nano","target_provider":"openai","description":"QA alias for release e2e"}' \
   | jq '.'
@@ -192,7 +230,7 @@ curl -sS -X PUT "$BASE_URL/admin/api/v1/aliases/qa-gpt-latest" \
 Creates an alias pointing to `claude-sonnet-4-6`.
 
 ```bash
-curl -sS -X PUT "$BASE_URL/admin/api/v1/aliases/qa-sonnet-thinking" \
+curl -sS -X PUT "$BASE_URL/admin/api/v1/aliases/$QA_ANTHROPIC_ALIAS" \
   -H 'Content-Type: application/json' \
   -d '{"target_model":"claude-sonnet-4-6","target_provider":"anthropic","description":"QA alias for anthropic reasoning"}' \
   | jq '.'
@@ -204,7 +242,7 @@ Checks that aliases are discoverable through the public model list.
 
 ```bash
 curl -sS "$BASE_URL/v1/models" \
-  | jq -r '.data[] | select(.id=="qa-gpt-latest" or .id=="qa-sonnet-thinking") | {id,owned_by}'
+  | jq -r --arg openai_alias "$QA_OPENAI_ALIAS" --arg anthropic_alias "$QA_ANTHROPIC_ALIAS" '.data[] | select(.id==$openai_alias or .id==$anthropic_alias) | {id,owned_by}'
 ```
 
 ## 3. Chat completions
@@ -304,7 +342,7 @@ Checks alias resolution for OpenAI models.
 ```bash
 curl -sS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"qa-gpt-latest","messages":[{"role":"user","content":"Reply with exactly QA_ALIAS_OK"}],"max_tokens":20}' \
+  -d "{\"model\":\"$QA_OPENAI_ALIAS\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_ALIAS_OK\"}],\"max_tokens\":20}" \
   | jq '{model,provider,answer:.choices[0].message.content}'
 ```
 
@@ -315,7 +353,7 @@ Checks alias resolution for Anthropic models plus reasoning.
 ```bash
 curl -sS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"qa-sonnet-thinking","messages":[{"role":"user","content":"Reply with exactly QA_ALIAS_SONNET_OK"}],"reasoning":{"effort":"high"},"max_tokens":128}' \
+  -d "{\"model\":\"$QA_ANTHROPIC_ALIAS\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_ALIAS_SONNET_OK\"}],\"reasoning\":{\"effort\":\"high\"},\"max_tokens\":128}" \
   | jq '{model,provider,answer:.choices[0].message.content}'
 ```
 
@@ -382,7 +420,7 @@ Checks alias resolution on `/v1/responses`.
 ```bash
 curl -sS "$BASE_URL/v1/responses" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"qa-gpt-latest","input":"Reply with exactly QA_RESP_ALIAS_OK","max_output_tokens":20}' \
+  -d "{\"model\":\"$QA_OPENAI_ALIAS\",\"input\":\"Reply with exactly QA_RESP_ALIAS_OK\",\"max_output_tokens\":20}" \
   | jq '{status,model,provider,output}'
 ```
 
@@ -559,10 +597,10 @@ curl -sS "$BASE_URL/v1/batches" \
 Checks that a batch provider mismatch is rejected before upstream submission.
 
 ```bash
-cat > /tmp/qa-mixed-provider-batch.jsonl <<'EOF'
-{"custom_id":"qa-mixed-1","method":"POST","url":"/v1/chat/completions","body":{"model":"qa-sonnet-thinking","messages":[{"role":"user","content":"Reply with exactly QA_MIXED_ALIAS_BATCH"}],"max_tokens":32}}
+cat > "$QA_RUN_DIR/qa-mixed-provider-batch.jsonl" <<EOF
+{"custom_id":"qa-mixed-1","method":"POST","url":"/v1/chat/completions","body":{"model":"$QA_ANTHROPIC_ALIAS","messages":[{"role":"user","content":"Reply with exactly QA_MIXED_ALIAS_BATCH"}],"max_tokens":32}}
 EOF
-FILE_ID=$(curl -sS "$BASE_URL/v1/files?provider=openai" -F purpose=batch -F file=@/tmp/qa-mixed-provider-batch.jsonl | jq -r '.id')
+FILE_ID=$(curl -sS "$BASE_URL/v1/files?provider=openai" -F purpose=batch -F "file=@$QA_RUN_DIR/qa-mixed-provider-batch.jsonl" | jq -r '.id')
 curl -sS -i "$BASE_URL/v1/batches" \
   -H 'Content-Type: application/json' \
   -d "{\"input_file_id\":\"$FILE_ID\",\"endpoint\":\"/v1/chat/completions\",\"completion_window\":\"24h\",\"metadata\":{\"provider\":\"openai\",\"suite\":\"qa-mixed-provider\"}}"
@@ -698,50 +736,50 @@ curl -sS "$GR_BASE_URL/admin/api/v1/usage/summary" | jq '.'
 
 ### S59 Delete OpenAI alias
 
-Removes `qa-gpt-latest`.
+Removes the per-run OpenAI alias.
 
 ```bash
-curl -sS -X DELETE -i "$BASE_URL/admin/api/v1/aliases/qa-gpt-latest"
+curl -sS -X DELETE -i "$BASE_URL/admin/api/v1/aliases/$QA_OPENAI_ALIAS"
 ```
 
 ### S60 Delete Anthropic alias
 
-Removes `qa-sonnet-thinking`.
+Removes the per-run Anthropic alias.
 
 ```bash
-curl -sS -X DELETE -i "$BASE_URL/admin/api/v1/aliases/qa-sonnet-thinking"
+curl -sS -X DELETE -i "$BASE_URL/admin/api/v1/aliases/$QA_ANTHROPIC_ALIAS"
 ```
 
 ## 11. Audit failure coverage
 
-### S61 Unsupported translated model is still written to audit log
+### S61 Unsupported translated model is still visible in audit log search
 
-Checks that a rejected translated request is still visible in audit logs with the requested model and error type.
+Checks that a rejected translated request is still visible in audit-log search by request ID with the requested model and error type.
 
 ```bash
-REQUEST_ID="qa-invalid-model-$(date +%s)"
+REQUEST_ID="qa-invalid-model-$(date +%s)-$$"
 curl -sS -i "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
   -H "X-Request-ID: $REQUEST_ID" \
   -d '{"model":"does-not-exist-model","messages":[{"role":"user","content":"Reply with exactly QA_INVALID_MODEL"}],"max_tokens":20}' && echo
 sleep 6
-curl -sS "$BASE_URL/admin/api/v1/audit/log?request_id=$REQUEST_ID&limit=5" \
-  | jq '{total,entries:(.entries|map({request_id,path,model,resolved_model,provider,status_code,error_type}))}'
+curl -sS "$BASE_URL/admin/api/v1/audit/log?search=$REQUEST_ID&limit=5" \
+  | jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,model,resolved_model,provider,status_code,error_type}))}'
 ```
 
-### S62 Unsupported passthrough provider is still written to audit log
+### S62 Unsupported passthrough provider is still visible in audit log search
 
-Checks that a rejected passthrough request is still visible in audit logs with the provider parsed from the path.
+Checks that a rejected passthrough request is still visible in audit-log search by request ID with the provider parsed from the path.
 
 ```bash
-REQUEST_ID="qa-invalid-provider-$(date +%s)"
+REQUEST_ID="qa-invalid-provider-$(date +%s)-$$"
 curl -sS -i "$BASE_URL/p/not-a-real-provider/responses" \
   -H 'Content-Type: application/json' \
   -H "X-Request-ID: $REQUEST_ID" \
   -d '{"model":"gpt-4.1-nano","input":"Reply with exactly QA_INVALID_PROVIDER"}' && echo
 sleep 6
-curl -sS "$BASE_URL/admin/api/v1/audit/log?request_id=$REQUEST_ID&limit=5" \
-  | jq '{total,entries:(.entries|map({request_id,path,model,provider,status_code,error_type}))}'
+curl -sS "$BASE_URL/admin/api/v1/audit/log?search=$REQUEST_ID&limit=5" \
+  | jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,model,provider,status_code,error_type}))}'
 ```
 
 ## 12. Authenticated runtime features
@@ -758,7 +796,7 @@ curl -sS "$AUTH_BASE_URL/admin/api/v1/dashboard/config" \
 
 ### S64 Create managed API key
 
-Creates one managed API key scoped to a release-specific user path and stores the one-time secret under `/tmp`.
+Creates one managed API key scoped to a release-specific user path and stores the one-time secret under `QA_RUN_DIR`.
 
 ```bash
 AUTH_KEY_JSON=$(curl -sS -X POST "$AUTH_BASE_URL/admin/api/v1/auth-keys" \
@@ -850,12 +888,13 @@ curl -sS -D - "$AUTH_BASE_URL/v1/chat/completions" \
 
 ### S70 Audit evidence for managed-key scoped workflow
 
-Confirms that auth method, managed auth key ID, normalized user path, workflow ID, and no cache hit are all recorded together.
+Confirms through audit-log search that auth method, managed auth key ID, normalized user path, workflow ID, and no cache hit are all recorded together.
 
 ```bash
-curl -sS "$AUTH_BASE_URL/admin/api/v1/audit/log?request_id=$QA_AUTH_REQ2&limit=5" \
+sleep 6
+curl -sS "$AUTH_BASE_URL/admin/api/v1/audit/log?search=$QA_AUTH_REQ2&limit=5" \
   -H "$ADMIN_AUTH_HEADER" \
-  | jq '{total,entries:(.entries|map({request_id,status_code,auth_method,auth_key_id,user_path,execution_plan_version_id,cache_type,answer:.data.response_body.choices[0].message.content}))}'
+  | jq --arg request_id "$QA_AUTH_REQ2" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,status_code,auth_method,auth_key_id,user_path,execution_plan_version_id,cache_type,answer:.data.response_body.choices[0].message.content}))}'
 ```
 
 ### S71 Global cache warm request with explicit user path
