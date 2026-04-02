@@ -21,48 +21,74 @@ function readCSSRule(source, selector) {
     return match[1];
 }
 
-test('async pipeline branch spans full width and offsets the turn below the main row', () => {
+test('execution pipeline uses a two-row grid with a single terminal cell spanning both rows', () => {
     const template = readExecutionPlanTemplateSource();
     const css = readFixture('../../css/dashboard.css');
 
     assert.match(
         template,
-        /<div class="ep-async-section"[\s\S]*?<div class="ep-async-row">[\s\S]*?<\/div>\s*<div class="ep-async-turn"><\/div>/
+        /<div class="exec-pipeline-grid">[\s\S]*<div class="exec-pipeline-row exec-pipeline-row-request">[\s\S]*<div class="ep-terminal">[\s\S]*<div class="exec-pipeline-row exec-pipeline-row-response">/
     );
+    assert.doesNotMatch(template, /ep-downstream/);
+    assert.doesNotMatch(template, /ep-async-section|ep-async-row|ep-async-turn/);
 
-    const asyncSectionRule = readCSSRule(css, '.ep-async-section');
-    assert.match(asyncSectionRule, /width:\s*100%/);
-    assert.doesNotMatch(asyncSectionRule, /flex-direction:\s*column/);
-    assert.match(asyncSectionRule, /align-items:\s*center/);
-    assert.match(asyncSectionRule, /margin-top:\s*10px/);
+    const gridRule = readCSSRule(css, '.exec-pipeline-grid');
+    assert.match(gridRule, /display:\s*grid/);
+    assert.match(gridRule, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(120px,\s*max-content\)/);
+    assert.match(gridRule, /grid-template-rows:\s*auto auto/);
+    assert.match(gridRule, /column-gap:\s*0/);
+    assert.match(gridRule, /row-gap:\s*0/);
 
-    const asyncTurnRule = readCSSRule(css, '.ep-async-turn');
-    assert.match(asyncTurnRule, /flex:\s*0\s+0\s+60px/);
-    assert.match(asyncTurnRule, /height:\s*2px/);
-    assert.doesNotMatch(asyncTurnRule, /border-bottom:/);
-    assert.doesNotMatch(asyncTurnRule, /border-right:/);
+    const terminalRule = readCSSRule(css, '.ep-terminal');
+    assert.match(terminalRule, /grid-column:\s*2/);
+    assert.match(terminalRule, /grid-row:\s*1\s*\/\s*span 2/);
+    assert.match(terminalRule, /display:\s*flex/);
+    assert.match(terminalRule, /align-items:\s*stretch/);
+    assert.match(terminalRule, /justify-self:\s*stretch/);
+    assert.match(terminalRule, /width:\s*100%/);
+    assert.match(terminalRule, /min-width:\s*120px/);
 
-    const asyncRowRule = readCSSRule(css, '.ep-async-row');
-    assert.match(asyncRowRule, /display:\s*flex/);
-    assert.match(asyncRowRule, /margin-right:\s*7px/);
+    const requestRowRule = readCSSRule(css, '.exec-pipeline-row-request');
+    assert.match(requestRowRule, /grid-column:\s*1/);
+    assert.match(requestRowRule, /grid-row:\s*1/);
 
-    const asyncTurnVerticalRule = readCSSRule(css, '.ep-async-turn::after');
-    assert.match(asyncTurnVerticalRule, /border-right:/);
-    assert.match(asyncTurnVerticalRule, /bottom:\s*1px/);
-    assert.doesNotMatch(asyncTurnVerticalRule, /transform:/);
+    const responseRowRule = readCSSRule(css, '.exec-pipeline-row-response');
+    assert.match(responseRowRule, /grid-column:\s*1/);
+    assert.match(responseRowRule, /grid-row:\s*2/);
+    assert.match(responseRowRule, /justify-content:\s*flex-end/);
 });
 
-test('async label stays inline on the right side of the branch', () => {
+test('response row flows inline from the terminal column to response and async nodes', () => {
     const template = readExecutionPlanTemplateSource();
     const css = readFixture('../../css/dashboard.css');
 
     assert.match(
         template,
-        /<div class="ep-async-row">[\s\S]*ep-node-async-usage[\s\S]*ep-conn-async[\s\S]*ep-node-async-audit[\s\S]*<\/div>\s*<div class="ep-async-turn"><\/div>\s*<span class="ep-async-label">Async<\/span>/
+        /<div class="exec-pipeline-row exec-pipeline-row-response">[\s\S]*ep-node-async-usage[\s\S]*ep-conn-async[\s\S]*ep-node-async-audit[\s\S]*<div class="ep-step ep-step-async-branch" x-show="{{\.}}\.showAsync">[\s\S]*ep-conn-async[\s\S]*<span class="ep-async-label">Async<\/span>[\s\S]*<div class="ep-node ep-node-endpoint" :class="{{\.}}\.responseNodeClass">[\s\S]*<div class="ep-conn ep-conn-rtl ep-conn-grow" :class="{{\.}}\.responseConnClass"><\/div>/
     );
 
     const asyncLabelRule = readCSSRule(css, '.ep-async-label');
-    assert.doesNotMatch(asyncLabelRule, /position:\s*absolute/);
+    assert.match(asyncLabelRule, /position:\s*absolute/);
+    assert.match(asyncLabelRule, /left:\s*50%/);
+    assert.match(asyncLabelRule, /bottom:\s*calc\(100%\s*\+\s*6px\)/);
+    assert.match(asyncLabelRule, /transform:\s*translateX\(-50%\)/);
+
+    const rtlConnectorRule = readCSSRule(css, '.ep-conn-rtl::after');
+    assert.match(rtlConnectorRule, /left:\s*-1px/);
+    assert.match(rtlConnectorRule, /clip-path:\s*polygon\(100% 0,\s*0 50%,\s*100% 100%\)/);
+
+    const asyncConnectorRule = readCSSRule(css, '.ep-conn-async');
+    assert.match(asyncConnectorRule, /width:\s*50px/);
+    assert.match(asyncConnectorRule, /min-width:\s*50px/);
+
+    const growConnectorRule = readCSSRule(css, '.ep-conn-grow');
+    assert.match(growConnectorRule, /flex:\s*1/);
+    assert.match(growConnectorRule, /min-width:\s*16px/);
+    assert.match(growConnectorRule, /width:\s*auto/);
+
+    const terminalNodeRule = readCSSRule(css, '.ep-terminal .ep-node');
+    assert.match(terminalNodeRule, /height:\s*100%/);
+    assert.match(terminalNodeRule, /flex:\s*1\s+1\s+auto/);
 });
 
 test('workflow nodes use endpoint and feature color groups consistently', () => {
@@ -235,7 +261,7 @@ test('workflow editor renders a live preview card from the draft workflow state'
     );
     assert.match(
         chartTemplate,
-        /{{define "execution-plan-chart"}}[\s\S]*<span class="ep-node-label">Auth<\/span>[\s\S]*x-text="{{\.}}\.authNodeSublabel"[\s\S]*x-show="{{\.}}\.showGuardrails"[\s\S]*x-show="{{\.}}\.showCache"[\s\S]*x-text="{{\.}}\.aiLabel"/
+        /{{define "execution-plan-chart"}}[\s\S]*<span class="ep-node-label">Auth<\/span>[\s\S]*x-text="{{\.}}\.authNodeSublabel"[\s\S]*x-show="{{\.}}\.terminalKind === 'auth'"[\s\S]*x-show="{{\.}}\.terminalKind === 'guardrails'"[\s\S]*x-show="{{\.}}\.terminalKind === 'cache'"[\s\S]*x-show="{{\.}}\.terminalKind === 'ai'"[\s\S]*x-text="{{\.}}\.aiLabel"/
     );
 });
 
@@ -245,11 +271,11 @@ test('audit log pipeline binds cache visibility and runtime highlight classes ac
 
     assert.match(
         template,
-        /{{template "execution-plan-chart" "executionPlanAuditChart\(entry\)"}}[\s\S]*<div class="ep-step" x-show="{{\.}}\.showCache">[\s\S]*:class="{{\.}}\.cacheNodeClass"[\s\S]*x-text="{{\.}}\.cacheStatusLabel"/
+        /{{template "execution-plan-chart" "executionPlanAuditChart\(entry\)"}}[\s\S]*<div class="ep-terminal">[\s\S]*<div class="ep-node ep-node-cache ep-node-compact" :class="{{\.}}\.cacheNodeClass" x-show="{{\.}}\.terminalKind === 'cache'">[\s\S]*x-text="{{\.}}\.cacheStatusLabel"/
     );
     assert.match(
         template,
-        /:class="{{\.}}\.authNodeClass"[\s\S]*x-show="{{\.}}\.showGuardrails"[\s\S]*x-show="{{\.}}\.showUsage"[\s\S]*x-show="{{\.}}\.showAudit"/
+        /:class="{{\.}}\.authNodeClass"[\s\S]*x-show="{{\.}}\.terminalKind === 'auth'"[\s\S]*x-show="{{\.}}\.terminalKind === 'guardrails'"[\s\S]*x-show="{{\.}}\.showUsage"[\s\S]*x-show="{{\.}}\.showAudit"/
     );
     assert.match(
         template,
@@ -257,11 +283,11 @@ test('audit log pipeline binds cache visibility and runtime highlight classes ac
     );
     assert.match(
         template,
-        /<div class="ep-conn ep-conn-grow" :class="{{\.}}\.aiConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-ai" :class="{{\.}}\.aiNodeClass">/
+        /<div class="ep-node ep-node-ai ep-node-compact" :class="{{\.}}\.aiNodeClass" x-show="{{\.}}\.terminalKind === 'ai'">[\s\S]*x-text="{{\.}}\.aiLabel"/
     );
     assert.match(
         template,
-        /<div class="ep-conn ep-conn-grow" :class="{{\.}}\.responseConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-endpoint" :class="{{\.}}\.responseNodeClass">/
+        /<div class="ep-node ep-node-endpoint" :class="{{\.}}\.responseNodeClass">[\s\S]*<div class="ep-conn ep-conn-rtl ep-conn-grow" :class="{{\.}}\.responseConnClass"><\/div>/
     );
 
     const aiSuccessRule = readCSSRule(css, '.ep-node-ai-success');
@@ -360,6 +386,7 @@ test('AI node renders as a text-only card without an icon', () => {
 
     assert.doesNotMatch(template, /class="ep-node ep-node-ai[^"]*"[^>]*>\s*<div class="ep-node-icon">/);
     assert.doesNotMatch(css, /\.ep-node-ai \.ep-node-icon\s*\{/);
+    assert.doesNotMatch(css, /\.ep-terminal\s+\.ep-node-ai\s*\{/);
 });
 
 test('workflow cards reuse the extracted execution plan chart template', () => {

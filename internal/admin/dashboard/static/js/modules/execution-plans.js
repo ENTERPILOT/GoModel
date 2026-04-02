@@ -1066,10 +1066,17 @@
                 return provider || 'AI';
             },
 
-	            epAiSublabel(source, runtime) {
-	                if (runtime && runtime.model) return runtime.model;
-	                return source && source.scope && source.scope.scope_model || null;
-	            },
+            epAiSublabel(source, runtime) {
+                if (runtime && runtime.model) return runtime.model;
+                return source && source.scope && source.scope.scope_model || null;
+            },
+
+            epTerminalKind(runtime) {
+                if (runtime && runtime.authError) return 'auth';
+                if (runtime && runtime.guardrailsBlocked) return 'guardrails';
+                if (runtime && runtime.cacheHit) return 'cache';
+                return 'ai';
+            },
 
             executionPlanChartWorkflowID(source, entry) {
                 const sourceID = String(source && source.id || '').trim();
@@ -1080,38 +1087,39 @@
                 return entryID || null;
             },
 
-	            executionPlanChartModel(source, runtime, options) {
-	                const config = options || {};
-	                const features = config.features && typeof config.features === 'object' && !Array.isArray(config.features)
+            executionPlanChartModel(source, runtime, options) {
+                const config = options || {};
+                const features = config.features && typeof config.features === 'object' && !Array.isArray(config.features)
                     ? this.executionPlanNormalizedFeatures(config.features)
                     : this.executionPlanSourceFeatures(source);
-	                const forceAudit = !!config.forceAudit;
-	                const showGuardrails = !!features.guardrails;
-	                const showUsage = !!features.usage;
-	                const showAudit = forceAudit || !!features.audit;
-	                const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
-                    const workflowID = this.executionPlanChartWorkflowID(source, config.entry);
-	                return {
-	                    showGuardrails,
-	                    guardrailLabel: showGuardrails ? this.epGuardrailLabel(source) : '',
-	                    showCache: !!config.forceCache || !!features.cache || this.epRuntimeHasCache(runtime),
+                const forceAudit = !!config.forceAudit;
+                const showGuardrails = !!features.guardrails;
+                const showUsage = !!features.usage;
+                const showAudit = forceAudit || !!features.audit;
+                const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
+                const workflowID = this.executionPlanChartWorkflowID(source, config.entry);
+                return {
+                    showGuardrails,
+                    guardrailLabel: showGuardrails ? this.epGuardrailLabel(source) : '',
+                    showCache: !!config.forceCache || !!features.cache || this.epRuntimeHasCache(runtime),
+                    terminalKind: this.epTerminalKind(runtime),
                     cacheNodeClass: this.epCacheNodeClass(runtime),
                     cacheConnClass: this.epCacheConnClass(runtime),
                     cacheStatusLabel: this.epCacheStatusLabel(runtime),
                     aiLabel: this.epAiLabel(source, runtime),
                     aiSublabel: this.epAiSublabel(source, runtime),
-	                    aiConnClass: this.epAiConnClass(runtime),
-	                    aiNodeClass: this.epAiNodeClass(runtime),
-	                    responseConnClass: this.epResponseConnClass(runtime),
-	                    responseNodeClass: this.epResponseNodeClass(runtime),
-				    authNodeClass: this.epAuthNodeClass(runtime),
-				    authNodeSublabel: this.epAuthNodeSublabel(runtime),
-	                    showAsync,
-	                    showUsage,
-	                    showAudit,
-                        workflowID
-	                };
-	            },
+                    aiConnClass: this.epAiConnClass(runtime),
+                    aiNodeClass: this.epAiNodeClass(runtime),
+                    responseConnClass: this.epResponseConnClass(runtime),
+                    responseNodeClass: this.epResponseNodeClass(runtime),
+                    authNodeClass: this.epAuthNodeClass(runtime),
+                    authNodeSublabel: this.epAuthNodeSublabel(runtime),
+                    showAsync,
+                    showUsage,
+                    showAudit,
+                    workflowID
+                };
+            },
 
             executionPlanWorkflowChart(source) {
                 return this.executionPlanChartModel(source, null, { forceCache: false });
@@ -1132,6 +1140,7 @@
             // runtime shape: {
             //   cacheHit: bool,
             //   cacheType: 'exact'|'semantic'|null,
+            //   guardrailsBlocked: bool,
             //   provider,
             //   model,
             //   statusCode: number|null,
@@ -1177,7 +1186,7 @@
 
             epResponseConnClass(runtime) {
                 if (!runtime) return '';
-                if (runtime.cacheHit) return 'ep-conn-dim';
+                if (runtime.cacheHit) return 'ep-conn-hit';
                 return '';
             },
 
@@ -1223,6 +1232,7 @@
                 return {
                     cacheHit,
                     cacheType: normalizedCacheType || null,
+                    guardrailsBlocked: false,
                     provider: entry.provider || null,
                     model: entry.model || null,
                     statusCode,

@@ -3,8 +3,8 @@
     <div class="exec-pipeline-meta" x-show="{{.}}.workflowID">
         <span class="exec-pipeline-meta-chip mono" x-show="{{.}}.workflowID" x-text="'id: ' + {{.}}.workflowID"></span>
     </div>
-    <div class="exec-pipeline-row">
-        <div class="ep-left">
+    <div class="exec-pipeline-grid">
+        <div class="exec-pipeline-row exec-pipeline-row-request">
             <div class="ep-node ep-node-endpoint">
                 <div class="ep-node-icon ep-node-icon-endpoint">
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>
@@ -23,49 +23,41 @@
                 </div>
             </div>
 
-            <div class="ep-step" x-show="{{.}}.showGuardrails">
-                <div class="ep-conn"></div>
-                <div class="ep-node ep-node-guardrails">
-                    <div class="ep-node-icon">
-                        <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                    </div>
-                    <span class="ep-node-label">Guardrails</span>
-                    <span class="ep-node-sub" x-show="{{.}}.guardrailLabel" x-text="{{.}}.guardrailLabel"></span>
-                </div>
-            </div>
-
-            <div class="ep-step" x-show="{{.}}.showCache">
-                <div class="ep-conn" :class="{{.}}.cacheConnClass"></div>
-                <div class="ep-node ep-node-cache" :class="{{.}}.cacheNodeClass">
-                    <div class="ep-node-icon">
-                        <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-                    </div>
-                    <span class="ep-node-label">Cache</span>
-                    <span class="ep-node-badge" x-show="{{.}}.cacheStatusLabel" x-text="{{.}}.cacheStatusLabel"></span>
-                </div>
-            </div>
-
-            <div class="ep-conn ep-conn-grow" :class="{{.}}.aiConnClass"></div>
+            <div class="ep-conn ep-conn-grow" :class="{{.}}.cacheConnClass"></div>
         </div>
 
-        <div class="ep-node ep-node-ai" :class="{{.}}.aiNodeClass">
-            <span class="ep-node-label" x-text="{{.}}.aiLabel"></span>
-            <span class="ep-node-sub" x-show="{{.}}.aiSublabel" x-text="{{.}}.aiSublabel"></span>
-        </div>
-
-        <div class="ep-right">
-            <div class="ep-conn ep-conn-grow" :class="{{.}}.responseConnClass"></div>
-            <div class="ep-node ep-node-endpoint" :class="{{.}}.responseNodeClass">
-                <div class="ep-node-icon ep-node-icon-endpoint">
-                    <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        <div class="ep-terminal">
+            <div class="ep-node ep-node-auth ep-node-compact" :class="{{.}}.authNodeClass" x-show="{{.}}.terminalKind === 'auth'">
+                <div class="ep-node-icon">
+                    <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
                 </div>
-                <span class="ep-node-label">Response</span>
+                <span class="ep-node-label">Auth</span>
+                <span class="ep-node-sub" x-show="{{.}}.authNodeSublabel" x-text="{{.}}.authNodeSublabel"></span>
+            </div>
+
+            <div class="ep-node ep-node-guardrails ep-node-compact" x-show="{{.}}.terminalKind === 'guardrails'">
+                <div class="ep-node-icon">
+                    <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                </div>
+                <span class="ep-node-label">Guardrails</span>
+                <span class="ep-node-sub" x-show="{{.}}.guardrailLabel" x-text="{{.}}.guardrailLabel"></span>
+            </div>
+
+            <div class="ep-node ep-node-cache ep-node-compact" :class="{{.}}.cacheNodeClass" x-show="{{.}}.terminalKind === 'cache'">
+                <div class="ep-node-icon">
+                    <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                </div>
+                <span class="ep-node-label">Cache</span>
+                <span class="ep-node-badge" x-show="{{.}}.cacheStatusLabel" x-text="{{.}}.cacheStatusLabel"></span>
+            </div>
+
+            <div class="ep-node ep-node-ai ep-node-compact" :class="{{.}}.aiNodeClass" x-show="{{.}}.terminalKind === 'ai'">
+                <span class="ep-node-label" x-text="{{.}}.aiLabel"></span>
+                <span class="ep-node-sub" x-show="{{.}}.aiSublabel" x-text="{{.}}.aiSublabel"></span>
             </div>
         </div>
-    </div>
 
-    <div class="ep-async-section" x-show="{{.}}.showAsync">
-        <div class="ep-async-row">
+        <div class="exec-pipeline-row exec-pipeline-row-response">
             <div class="ep-node ep-node-async ep-node-async-usage" x-show="{{.}}.showUsage">
                 <div class="ep-node-icon">
                     <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
@@ -79,11 +71,20 @@
                 <div class="ep-node-icon">
                     <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                 </div>
-                <span class="ep-node-label">Audit Log</span>
+                <span class="ep-node-label">Audit Logs</span>
             </div>
+            <div class="ep-step ep-step-async-branch" x-show="{{.}}.showAsync">
+                <div class="ep-conn ep-conn-async"></div>
+                <span class="ep-async-label">Async</span>
+            </div>
+            <div class="ep-node ep-node-endpoint" :class="{{.}}.responseNodeClass">
+                <div class="ep-node-icon ep-node-icon-endpoint">
+                    <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                </div>
+                <span class="ep-node-label">Response</span>
+            </div>
+            <div class="ep-conn ep-conn-rtl ep-conn-grow" :class="{{.}}.responseConnClass"></div>
         </div>
-        <div class="ep-async-turn"></div>
-        <span class="ep-async-label">Async</span>
     </div>
 </div>
 {{end}}

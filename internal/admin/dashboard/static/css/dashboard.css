@@ -2575,32 +2575,55 @@ body.conversation-drawer-open {
     white-space: nowrap;
 }
 
-/* ─── Main pipeline row ─── */
+/* ─── Pipeline grid ─── */
+
+.exec-pipeline-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(120px, max-content);
+    grid-template-rows: auto auto;
+    column-gap: 0;
+    row-gap: 0;
+    align-items: stretch;
+}
 
 .exec-pipeline-row {
     display: flex;
     align-items: center;
     width: 100%;
-}
-
-/* Left/right halves — equal width keeps AI centered */
-.ep-left,
-.ep-right {
-    display: flex;
-    align-items: center;
-    flex: 1;
     min-width: 0;
 }
 
-.ep-right {
+.exec-pipeline-row-request {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.exec-pipeline-row-response {
+    grid-column: 1;
+    grid-row: 2;
+    margin-top: 20px;
     justify-content: flex-end;
 }
 
-/* Optional step wrapper (connector + node shown/hidden together) */
+.ep-terminal {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    justify-self: stretch;
+    width: 100%;
+    min-width: 120px;
+}
+
 .ep-step {
     display: flex;
     align-items: center;
     flex-shrink: 0;
+}
+
+.ep-step-async-branch {
+    position: relative;
 }
 
 /* ─── Connectors ─── */
@@ -2630,6 +2653,12 @@ body.conversation-drawer-open {
     height: 9px;
     background: color-mix(in srgb, var(--accent) 44%, var(--border));
     clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+.ep-conn-rtl::after {
+    left: -1px;
+    right: auto;
+    clip-path: polygon(100% 0, 0 50%, 100% 100%);
 }
 
 /* Green connector — cache hit path */
@@ -2666,6 +2695,22 @@ body.conversation-drawer-open {
     min-width: 72px;
     text-align: center;
     flex-shrink: 0;
+}
+
+.ep-node-compact {
+    width: 100%;
+    min-width: 0;
+}
+
+.ep-node-compact {
+    padding: 9px 12px;
+}
+
+.ep-terminal .ep-node {
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    flex: 1 1 auto;
 }
 
 .ep-node-icon {
@@ -2936,75 +2981,7 @@ body.conversation-drawer-open {
     opacity: 0.28;
 }
 
-/* ─── Async section ─── */
-
-/*
- * Async nodes fire after the response is returned to the client.
- * They drop below the main row via an L-turn from Response, then
- * flow right-to-left: Audit Log on the right, Usage on the left.
- *
- * [Client] ──→ [Cache?] ──── [AI] ──────── [Response]
- *                                               │
- *                                               │ (dashed drop)
- *                                               │
- *                         [Usage] ← ─ ─ [Audit Log]
- */
-
-/* Container — full-width branch lane below the main row */
-.ep-async-section {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0;
-    min-width: 0;
-    margin-top: 10px;
-}
-
-/* L-turn connector: centered horizontal leg plus vertical rise back to Response */
-.ep-async-turn {
-    flex: 0 0 60px;
-    position: relative; /* for arrowhead + vertical rise */
-    height: 2px;
-    background: repeating-linear-gradient(
-        to left,
-        color-mix(in srgb, var(--text-muted) 45%, var(--border)) 0,
-        color-mix(in srgb, var(--text-muted) 45%, var(--border)) 5px,
-        transparent 5px,
-        transparent 9px
-    );
-}
-
-/* Left-pointing arrowhead at the end of the horizontal L-turn line */
-.ep-async-turn::before {
-    content: "";
-    position: absolute;
-    left: -7px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 7px;
-    height: 9px;
-    background: color-mix(in srgb, var(--text-muted) 40%, var(--border));
-    clip-path: polygon(100% 0, 0 50%, 100% 100%);
-}
-
-/* Vertical dashed rise that connects the inline turn back up to Response */
-.ep-async-turn::after {
-    content: "";
-    position: absolute;
-    right: 0;
-    bottom: 1px;
-    height: 16px;
-    border-right: 2px dashed color-mix(in srgb, var(--text-muted) 40%, var(--border));
-}
-
-/* RTL async row — Audit Log right, Usage left */
-.ep-async-row {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    margin-right: 7px;
-}
+/* ─── Response row / async lane ─── */
 
 /* Dashed left-pointing connector between async nodes */
 .ep-conn-async {
@@ -3015,7 +2992,8 @@ body.conversation-drawer-open {
         transparent 5px,
         transparent 9px
     );
-    width: 24px;
+    width: 50px;
+    min-width: 50px;
     flex-shrink: 0;
 }
 
@@ -3027,7 +3005,7 @@ body.conversation-drawer-open {
     clip-path: polygon(100% 0, 0 50%, 100% 100%);
 }
 
-/* Async nodes — horizontal inline pills */
+/* Async nodes — inline lane to the left of Response */
 .ep-node-async {
     flex-direction: row;
     padding: 7px 12px;
@@ -3081,11 +3059,13 @@ body.conversation-drawer-open {
     color: var(--accent);
 }
 
-/* "ASYNC" label inline on the right of the branch */
 .ep-async-label {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 6px);
+    transform: translateX(-50%);
     display: inline-flex;
     align-items: center;
-    margin-left: 8px;
     font-size: 9px;
     font-weight: 800;
     letter-spacing: 0.1em;
@@ -3094,6 +3074,38 @@ body.conversation-drawer-open {
     opacity: 0.55;
     white-space: nowrap;
     flex-shrink: 0;
+}
+
+@media (max-width: 820px) {
+    .exec-pipeline-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .exec-pipeline-row-request {
+        grid-column: 1;
+        grid-row: 1;
+    }
+
+    .ep-terminal {
+        grid-column: 1;
+        grid-row: 2;
+    }
+
+    .exec-pipeline-row-response {
+        grid-column: 1;
+        grid-row: 3;
+        flex-wrap: wrap;
+        row-gap: 10px;
+    }
+
+    .ep-async-label {
+        bottom: calc(100% + 4px);
+    }
+
+    .exec-pipeline-row-response .ep-conn-rtl.ep-conn-grow {
+        flex: 0 0 auto;
+        width: 32px;
+    }
 }
 
 /* --- API Keys page --- */
