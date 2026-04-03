@@ -230,182 +230,187 @@
     <div class="page-header">
         <div>
             <h2>Settings</h2>
-            <p class="page-subtitle">Dashboard preferences and reusable policy objects.</p>
+            <p class="page-subtitle">Dashboard preferences.</p>
         </div>
     </div>
 
     <div class="settings-subnav">
-        <button type="button" class="settings-subnav-btn" :class="{ active: settingsSubpage === 'general' }" @click="navigateSettings('general')">General</button>
-        <button type="button" class="settings-subnav-btn" :class="{ active: settingsSubpage === 'guardrails' }" @click="navigateSettings('guardrails')">Guardrails</button>
+        <button type="button" class="settings-subnav-btn active" @click="navigateSettings('general')">General</button>
     </div>
 
-    <div x-show="settingsSubpage==='general'">
-        <div class="settings-panel">
-            <div class="settings-panel-header">
-                {{template "helper-disclosure" "{ heading: 'Timezone', open: false, copyId: 'timezone-help-copy', showLabel: 'Show timezone help', hideLabel: 'Hide timezone help', text: 'Day-based analytics, charts, and date filters use your effective timezone. Usage and audit logs keep UTC in the hover title while rendering row timestamps in your effective timezone.' }"}}
+    <div class="settings-panel">
+        <div class="settings-panel-header">
+            {{template "helper-disclosure" "{ heading: 'Timezone', open: false, copyId: 'timezone-help-copy', showLabel: 'Show timezone help', hideLabel: 'Hide timezone help', text: 'Day-based analytics, charts, and date filters use your effective timezone. Usage and audit logs keep UTC in the hover title while rendering row timestamps in your effective timezone.' }"}}
+        </div>
+
+        <div class="settings-form-grid">
+            <label class="alias-form-field">
+                <span>Timezone Override</span>
+                <select class="usage-log-select settings-select" x-ref="timezoneOverrideSelect" x-model="timezoneOverride" x-effect="timezoneOptions.length; timezoneOverride; $nextTick(() => syncTimezoneOverrideSelectValue())" @focus="ensureTimezoneOptions()" @change="saveTimezoneOverride()">
+                    <option value="" :selected="!timezoneOverride" x-text="'Automatic (' + detectedTimeZoneLabel() + ')'"></option>
+                    <template x-for="timeZone in timezoneOptions" :key="timeZone.value">
+                        <option :value="timeZone.value" :selected="timeZone.value === timezoneOverride" x-text="timeZone.label"></option>
+                    </template>
+                </select>
+            </label>
+        </div>
+        <div class="alias-form-actions">
+            <button type="button" class="pagination-btn" x-show="timezoneOverride" @click="clearTimezoneOverride()">Use Browser Timezone</button>
+        </div>
+    </div>
+</div>
+
+<!-- Guardrails Page -->
+<div x-show="page==='guardrails'">
+    <div class="page-header">
+        <div>
+            <h2>Guardrails</h2>
+            <p class="page-subtitle">Reusable policy objects stored in the database and kept hot in memory for workflow execution.</p>
+        </div>
+    </div>
+
+    <div class="settings-guardrails-hero">
+        <div>
+            <p class="settings-kicker">Reusable Policy Objects</p>
+            <h3>Guardrail Library</h3>
+            <p>Store guardrails in the database, keep them hot in memory, and attach them to workflows by reference.</p>
+        </div>
+        <div class="settings-guardrails-meta">
+            <div class="settings-guardrails-stat">
+                <span class="settings-guardrails-stat-label">Instances</span>
+                <strong x-text="formatNumber(guardrails.length)"></strong>
+            </div>
+            <div class="settings-guardrails-stat">
+                <span class="settings-guardrails-stat-label">Types</span>
+                <strong x-text="formatNumber(guardrailTypes.length)"></strong>
+            </div>
+        </div>
+    </div>
+
+    <div class="alert alert-warning" x-show="!guardrailsRuntimeEnabled() && !authError">
+        Runtime guardrail execution is currently off because <code>GUARDRAILS_ENABLED</code> is disabled. You can still manage definitions here.
+    </div>
+    <div class="alert alert-warning" x-show="!guardrailsAvailable && !authError">
+        Guardrails feature is unavailable.
+    </div>
+    <div class="alert alert-warning" x-show="guardrailError && !authError" x-text="guardrailError"></div>
+    <div class="alert alert-success" x-show="guardrailNotice && !guardrailError" x-text="guardrailNotice"></div>
+
+    <div class="settings-guardrails-layout" :class="{ 'is-editor-open': guardrailFormOpen }">
+        <section class="settings-panel settings-guardrails-list">
+            <div class="aliases-editor-header">
+                <div>
+                    <h3>Instances</h3>
+                    <p class="alias-form-hint">Each instance has a reusable name, a type, an optional user path for future UI visibility scoping, and a JSON-backed config payload for that type.</p>
+                </div>
+                <button type="button" class="pagination-btn pagination-btn-primary" :disabled="guardrailTypesLoading || guardrailFormSubmitting || !guardrailsAvailable" @click="openGuardrailCreate()">Create Guardrail</button>
             </div>
 
-            <div class="settings-form-grid">
+            <div class="table-toolbar" x-show="guardrailsAvailable">
+                <div class="table-toolbar-main">
+                    <input type="text" class="filter-input" placeholder="Filter by name, type, user path, summary..." x-model="guardrailFilter">
+                </div>
+            </div>
+
+            <div class="table-wrapper" x-show="filteredGuardrails.length > 0">
+                <table class="data-table settings-guardrails-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>User Path</th>
+                            <th>Summary</th>
+                            <th class="col-actions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="guardrail in filteredGuardrails" :key="guardrail.name">
+                            <tr>
+                                <td class="mono" x-text="guardrail.name"></td>
+                                <td><span class="settings-guardrail-type-pill" x-text="guardrailTypeLabel(guardrail.type)"></span></td>
+                                <td class="mono" x-text="guardrail.user_path || '\u2014'"></td>
+                                <td>
+                                    <div class="settings-guardrail-summary" x-text="guardrail.summary || guardrail.description || 'No summary yet.'"></div>
+                                    <div class="settings-guardrail-description" x-show="guardrail.description" x-text="guardrail.description"></div>
+                                </td>
+                                <td class="col-actions">
+                                    <div class="action-buttons">
+                                        <button type="button" class="table-action-btn" @click="openGuardrailEdit(guardrail)">Edit</button>
+                                        <button type="button" class="table-action-btn danger" :disabled="guardrailDeletingName === guardrail.name" @click="deleteGuardrail(guardrail)">Delete</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <p class="empty-state" x-show="filteredGuardrails.length === 0 && !guardrailsLoading && guardrailsAvailable && !guardrailError">
+                No guardrails defined yet.
+            </p>
+        </section>
+
+        <aside class="settings-panel settings-guardrails-editor" x-show="guardrailFormOpen">
+            <div class="aliases-editor-header">
+                <div>
+                    <h3 x-text="guardrailFormMode === 'edit' ? 'Edit Guardrail' : 'Create Guardrail'"></h3>
+                    <p class="alias-form-hint">Workflows reference these names directly, so renames are intentionally avoided after creation.</p>
+                </div>
+                <button type="button" class="table-action-btn" @click="closeGuardrailForm()">Close</button>
+            </div>
+
+            <div class="alias-form-grid">
                 <label class="alias-form-field">
-                    <span>Timezone Override</span>
-                    <select class="usage-log-select settings-select" x-ref="timezoneOverrideSelect" x-model="timezoneOverride" x-effect="timezoneOptions.length; timezoneOverride; $nextTick(() => syncTimezoneOverrideSelectValue())" @focus="ensureTimezoneOptions()" @change="saveTimezoneOverride()">
-                        <option value="" :selected="!timezoneOverride" x-text="'Automatic (' + detectedTimeZoneLabel() + ')'"></option>
-                        <template x-for="timeZone in timezoneOptions" :key="timeZone.value">
-                            <option :value="timeZone.value" :selected="timeZone.value === timezoneOverride" x-text="timeZone.label"></option>
+                    <span>Name</span>
+                    <input type="text" class="filter-input" placeholder="safety-system-prompt" x-model="guardrailForm.name" :disabled="guardrailFormMode === 'edit'">
+                </label>
+
+                <label class="alias-form-field">
+                    <span>Type</span>
+                    <select class="usage-log-select settings-select" x-model="guardrailForm.type" :disabled="guardrailFormMode === 'edit'" @change="onGuardrailTypeChange()">
+                        <template x-for="typeDef in guardrailTypes" :key="typeDef.type">
+                            <option :value="typeDef.type" x-text="typeDef.label"></option>
                         </template>
                     </select>
                 </label>
+
+                <label class="alias-form-field">
+                    <span>Description</span>
+                    <input type="text" class="filter-input" placeholder="What this guardrail is meant to do" x-model="guardrailForm.description">
+                </label>
+
+                <label class="alias-form-field">
+                    <span>User Path</span>
+                    <input type="text" class="filter-input" placeholder="/team/alpha" x-model="guardrailForm.user_path" aria-label="Guardrail user path">
+                    <small class="alias-form-hint">Reserved for future UI visibility scoping. It does not affect runtime execution yet.</small>
+                </label>
+
+                <template x-for="field in guardrailTypeFields(guardrailForm.type)" :key="field.key">
+                    <label class="alias-form-field alias-form-field-wide">
+                        <span x-text="field.label"></span>
+                        <template x-if="field.input === 'select'">
+                            <select class="usage-log-select settings-select" :value="guardrailFieldValue(field)" @change="setGuardrailFieldValue(field, $event.target.value)">
+                                <template x-for="option in field.options" :key="option.value">
+                                    <option :value="option.value" x-text="option.label"></option>
+                                </template>
+                            </select>
+                        </template>
+                        <template x-if="field.input === 'textarea'">
+                            <textarea class="settings-guardrail-textarea" :placeholder="field.placeholder || ''" :value="guardrailFieldValue(field)" @input="setGuardrailFieldValue(field, $event.target.value)"></textarea>
+                        </template>
+                        <template x-if="field.input !== 'select' && field.input !== 'textarea'">
+                            <input :type="field.input || 'text'" class="filter-input" :placeholder="field.placeholder || ''" :value="guardrailFieldValue(field)" @input="setGuardrailFieldValue(field, $event.target.value)">
+                        </template>
+                        <small class="alias-form-hint" x-show="field.help" x-text="field.help"></small>
+                    </label>
+                </template>
             </div>
+
             <div class="alias-form-actions">
-                <button type="button" class="pagination-btn" x-show="timezoneOverride" @click="clearTimezoneOverride()">Use Browser Timezone</button>
+                <button type="button" class="pagination-btn" @click="closeGuardrailForm()">Cancel</button>
+                <button type="button" class="pagination-btn pagination-btn-primary" :disabled="guardrailFormSubmitting" @click="submitGuardrailForm()">Save Guardrail</button>
             </div>
-        </div>
-    </div>
-
-    <div x-show="settingsSubpage==='guardrails'">
-        <div class="settings-guardrails-hero">
-            <div>
-                <p class="settings-kicker">Reusable Policy Objects</p>
-                <h3>Guardrail Library</h3>
-                <p>Store guardrails in the database, keep them hot in memory, and attach them to workflows by reference.</p>
-            </div>
-            <div class="settings-guardrails-meta">
-                <div class="settings-guardrails-stat">
-                    <span class="settings-guardrails-stat-label">Instances</span>
-                    <strong x-text="formatNumber(guardrails.length)"></strong>
-                </div>
-                <div class="settings-guardrails-stat">
-                    <span class="settings-guardrails-stat-label">Types</span>
-                    <strong x-text="formatNumber(guardrailTypes.length)"></strong>
-                </div>
-            </div>
-        </div>
-
-        <div class="alert alert-warning" x-show="!guardrailsRuntimeEnabled() && !authError">
-            Runtime guardrail execution is currently off because <code>GUARDRAILS_ENABLED</code> is disabled. You can still manage definitions here.
-        </div>
-        <div class="alert alert-warning" x-show="!guardrailsAvailable && !authError">
-            Guardrails feature is unavailable.
-        </div>
-        <div class="alert alert-warning" x-show="guardrailError && !authError" x-text="guardrailError"></div>
-        <div class="alert alert-success" x-show="guardrailNotice && !guardrailError" x-text="guardrailNotice"></div>
-
-        <div class="settings-guardrails-layout" :class="{ 'is-editor-open': guardrailFormOpen }">
-            <section class="settings-panel settings-guardrails-list">
-                <div class="aliases-editor-header">
-                    <div>
-                        <h3>Instances</h3>
-                        <p class="alias-form-hint">Each instance has a reusable name, a type, an optional user path for future UI visibility scoping, and a JSON-backed config payload for that type.</p>
-                    </div>
-                    <button type="button" class="pagination-btn pagination-btn-primary" :disabled="guardrailTypesLoading || guardrailFormSubmitting || !guardrailsAvailable" @click="openGuardrailCreate()">Create Guardrail</button>
-                </div>
-
-                <div class="table-toolbar" x-show="guardrailsAvailable">
-                    <div class="table-toolbar-main">
-                        <input type="text" class="filter-input" placeholder="Filter by name, type, user path, summary..." x-model="guardrailFilter">
-                    </div>
-                </div>
-
-                <div class="table-wrapper" x-show="filteredGuardrails.length > 0">
-                    <table class="data-table settings-guardrails-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Type</th>
-                                <th>User Path</th>
-                                <th>Summary</th>
-                                <th class="col-actions">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="guardrail in filteredGuardrails" :key="guardrail.name">
-                                <tr>
-                                    <td class="mono" x-text="guardrail.name"></td>
-                                    <td><span class="settings-guardrail-type-pill" x-text="guardrailTypeLabel(guardrail.type)"></span></td>
-                                    <td class="mono" x-text="guardrail.user_path || '\u2014'"></td>
-                                    <td>
-                                        <div class="settings-guardrail-summary" x-text="guardrail.summary || guardrail.description || 'No summary yet.'"></div>
-                                        <div class="settings-guardrail-description" x-show="guardrail.description" x-text="guardrail.description"></div>
-                                    </td>
-                                    <td class="col-actions">
-                                        <div class="action-buttons">
-                                            <button type="button" class="table-action-btn" @click="openGuardrailEdit(guardrail)">Edit</button>
-                                            <button type="button" class="table-action-btn danger" :disabled="guardrailDeletingName === guardrail.name" @click="deleteGuardrail(guardrail)">Delete</button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
-                </div>
-
-                <p class="empty-state" x-show="filteredGuardrails.length === 0 && !guardrailsLoading && guardrailsAvailable && !guardrailError">
-                    No guardrails defined yet.
-                </p>
-            </section>
-
-            <aside class="settings-panel settings-guardrails-editor" x-show="guardrailFormOpen">
-                <div class="aliases-editor-header">
-                    <div>
-                        <h3 x-text="guardrailFormMode === 'edit' ? 'Edit Guardrail' : 'Create Guardrail'"></h3>
-                        <p class="alias-form-hint">Workflows reference these names directly, so renames are intentionally avoided after creation.</p>
-                    </div>
-                    <button type="button" class="table-action-btn" @click="closeGuardrailForm()">Close</button>
-                </div>
-
-                <div class="alias-form-grid">
-                    <label class="alias-form-field">
-                        <span>Name</span>
-                        <input type="text" class="filter-input" placeholder="safety-system-prompt" x-model="guardrailForm.name" :disabled="guardrailFormMode === 'edit'">
-                    </label>
-
-                    <label class="alias-form-field">
-                        <span>Type</span>
-                        <select class="usage-log-select settings-select" x-model="guardrailForm.type" :disabled="guardrailFormMode === 'edit'" @change="onGuardrailTypeChange()">
-                            <template x-for="typeDef in guardrailTypes" :key="typeDef.type">
-                                <option :value="typeDef.type" x-text="typeDef.label"></option>
-                            </template>
-                        </select>
-                    </label>
-
-                    <label class="alias-form-field">
-                        <span>Description</span>
-                        <input type="text" class="filter-input" placeholder="What this guardrail is meant to do" x-model="guardrailForm.description">
-                    </label>
-
-                    <label class="alias-form-field">
-                        <span>User Path</span>
-                        <input type="text" class="filter-input" placeholder="/team/alpha" x-model="guardrailForm.user_path" aria-label="Guardrail user path">
-                        <small class="alias-form-hint">Reserved for future UI visibility scoping. It does not affect runtime execution yet.</small>
-                    </label>
-
-                    <template x-for="field in guardrailTypeFields(guardrailForm.type)" :key="field.key">
-                        <label class="alias-form-field alias-form-field-wide">
-                            <span x-text="field.label"></span>
-                            <template x-if="field.input === 'select'">
-                                <select class="usage-log-select settings-select" :value="guardrailFieldValue(field)" @change="setGuardrailFieldValue(field, $event.target.value)">
-                                    <template x-for="option in field.options" :key="option.value">
-                                        <option :value="option.value" x-text="option.label"></option>
-                                    </template>
-                                </select>
-                            </template>
-                            <template x-if="field.input === 'textarea'">
-                                <textarea class="settings-guardrail-textarea" :placeholder="field.placeholder || ''" :value="guardrailFieldValue(field)" @input="setGuardrailFieldValue(field, $event.target.value)"></textarea>
-                            </template>
-                            <template x-if="field.input !== 'select' && field.input !== 'textarea'">
-                                <input :type="field.input || 'text'" class="filter-input" :placeholder="field.placeholder || ''" :value="guardrailFieldValue(field)" @input="setGuardrailFieldValue(field, $event.target.value)">
-                            </template>
-                            <small class="alias-form-hint" x-show="field.help" x-text="field.help"></small>
-                        </label>
-                    </template>
-                </div>
-
-                <div class="alias-form-actions">
-                    <button type="button" class="pagination-btn" @click="closeGuardrailForm()">Cancel</button>
-                    <button type="button" class="pagination-btn pagination-btn-primary" :disabled="guardrailFormSubmitting" @click="submitGuardrailForm()">Save Guardrail</button>
-                </div>
-            </aside>
-        </div>
+        </aside>
     </div>
 </div>
 
@@ -1116,7 +1121,7 @@
 
                     <div class="alert alert-warning alert-inline-actions" x-show="guardrailRefs.length === 0">
                         <span>No named guardrails are currently registered on this deployment. You can still draft a plan, but guardrail-backed creation may be rejected.</span>
-                        <button type="button" class="table-action-btn" @click="navigateSettings('guardrails')">Open Guardrails</button>
+                        <button type="button" class="table-action-btn" @click="navigate('guardrails')">Open Guardrails</button>
                     </div>
 
                     <div class="execution-plan-guardrail-list-editor" x-show="executionPlanForm.guardrails.length > 0">

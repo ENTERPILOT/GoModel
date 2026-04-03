@@ -1123,10 +1123,7 @@
             },
 
             epCacheNodeClass(runtime) {
-                if (!runtime || !runtime.cacheHit) return '';
-                if (runtime.cacheHit && runtime.cacheType === 'semantic') return 'ep-node-cache-semantic';
-                if (runtime.cacheHit) return 'ep-node-cache-hit';
-                return '';
+                return runtime && runtime.cacheHit ? 'ep-node-success' : '';
             },
 
             epCacheConnClass(runtime) {
@@ -1147,8 +1144,8 @@
 
             epAiNodeClass(runtime) {
                 if (!runtime) return '';
-                if (runtime.cacheHit) return 'ep-node-ai-skipped';
-                return runtime.aiSuccess ? 'ep-node-ai-success' : '';
+                if (runtime.cacheHit) return 'ep-node-skipped';
+                return runtime.aiSuccess ? 'ep-node-success' : '';
             },
 
             epResponseConnClass(runtime) {
@@ -1159,13 +1156,13 @@
 
             epResponseNodeClass(runtime) {
                 if (!runtime) return '';
-                return runtime.responseSuccess ? 'ep-node-endpoint-success' : '';
+                return runtime.responseSuccess ? 'ep-node-success' : '';
             },
 
             epAuthNodeClass(runtime) {
                 if (!runtime) return '';
-                if (runtime.authError) return 'ep-node-auth-error';
-                if (runtime.authMethod === 'api_key' || runtime.authMethod === 'master_key') return 'ep-node-auth-success';
+                if (runtime.authError) return 'ep-node-error';
+                if (runtime.authMethod === 'api_key' || runtime.authMethod === 'master_key') return 'ep-node-success';
                 return '';
             },
 

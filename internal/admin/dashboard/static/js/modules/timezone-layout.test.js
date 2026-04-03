@@ -34,10 +34,7 @@ test('dashboard templates expose a settings page and timezone context in activit
 
     assert.match(template, /<div x-show="page==='settings'">[\s\S]*<h2>Settings<\/h2>/);
     assert.match(template, /@click="navigateSettings\('general'\)"/);
-    assert.match(template, /@click="navigateSettings\('guardrails'\)"/);
-    assert.match(template, /Guardrail Library/);
-    assert.match(template, /x-model="guardrailForm\.user_path"[^>]*aria-label="Guardrail user path"/);
-    assert.match(template, /Reserved for future UI visibility scoping\. It does not affect runtime execution yet\./);
+    assert.doesNotMatch(template, /@click="navigateSettings\('guardrails'\)"/);
     assert.match(template, /x-ref="timezoneOverrideSelect"/);
     assert.match(template, /x-model="timezoneOverride"/);
     assert.match(template, /x-effect="timezoneOptions\.length; timezoneOverride; \$nextTick\(\(\) => syncTimezoneOverrideSelectValue\(\)\)"/);
@@ -102,4 +99,14 @@ test('dashboard templates expose a settings page and timezone context in activit
     assert.doesNotMatch(copyRule, /border:/);
     assert.doesNotMatch(copyRule, /background:/);
     assert.doesNotMatch(copyRule, /padding:/);
+});
+
+test('guardrails authoring moved to a top-level page while settings keeps the general switch', () => {
+    const template = readHelperDisclosureTemplateSource();
+
+    assert.match(template, /<div class="settings-subnav">[\s\S]*class="settings-subnav-btn active"[\s\S]*>General<\/button>/);
+    assert.match(template, /<div x-show="page==='guardrails'">[\s\S]*<h2>Guardrails<\/h2>/);
+    assert.match(template, /Guardrail Library/);
+    assert.match(template, /x-model="guardrailForm\.user_path"[^>]*aria-label="Guardrail user path"/);
+    assert.match(template, /Reserved for future UI visibility scoping\. It does not affect runtime execution yet\./);
 });

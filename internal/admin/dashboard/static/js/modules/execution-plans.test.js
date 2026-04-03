@@ -297,15 +297,15 @@ test('executionPlanAuditChart returns the shared chart contract for audit runtim
             showGuardrails: true,
             guardrailLabel: '1 step',
             showCache: true,
-            cacheNodeClass: 'ep-node-cache-semantic',
+            cacheNodeClass: 'ep-node-success',
             cacheConnClass: 'ep-conn-hit',
             cacheStatusLabel: 'Hit (Semantic)',
             aiLabel: 'openai',
             aiSublabel: 'gpt-5',
             aiConnClass: 'ep-conn-dim',
-            aiNodeClass: 'ep-node-ai-skipped',
+            aiNodeClass: 'ep-node-skipped',
             responseConnClass: 'ep-conn-dim',
-            responseNodeClass: 'ep-node-endpoint-success',
+            responseNodeClass: 'ep-node-success',
             authNodeClass: '',
             authNodeSublabel: null,
             showAsync: true,
@@ -330,15 +330,15 @@ test('executionPlanAuditChart forces audit nodes even when the workflow version 
             showGuardrails: false,
             guardrailLabel: '',
             showCache: true,
-            cacheNodeClass: 'ep-node-cache-hit',
+            cacheNodeClass: 'ep-node-success',
             cacheConnClass: 'ep-conn-hit',
             cacheStatusLabel: 'Hit (Exact)',
             aiLabel: 'openai',
             aiSublabel: 'gpt-5',
             aiConnClass: 'ep-conn-dim',
-            aiNodeClass: 'ep-node-ai-skipped',
+            aiNodeClass: 'ep-node-skipped',
             responseConnClass: 'ep-conn-dim',
-            responseNodeClass: 'ep-node-endpoint-success',
+            responseNodeClass: 'ep-node-success',
             authNodeClass: '',
             authNodeSublabel: null,
             showAsync: true,
@@ -1459,13 +1459,13 @@ test('audit runtime uses explicit cache-hit labels and highlights the uncached 2
         cache_type: 'semantic',
         status_code: 200
     });
-    assert.equal(module.epCacheNodeClass(semanticHit), 'ep-node-cache-semantic');
+    assert.equal(module.epCacheNodeClass(semanticHit), 'ep-node-success');
     assert.equal(module.epCacheConnClass(semanticHit), 'ep-conn-hit');
     assert.equal(module.epCacheStatusLabel(semanticHit), 'Hit (Semantic)');
     assert.equal(module.epAiConnClass(semanticHit), 'ep-conn-dim');
-    assert.equal(module.epAiNodeClass(semanticHit), 'ep-node-ai-skipped');
+    assert.equal(module.epAiNodeClass(semanticHit), 'ep-node-skipped');
     assert.equal(module.epResponseConnClass(semanticHit), 'ep-conn-dim');
-    assert.equal(module.epResponseNodeClass(semanticHit), 'ep-node-endpoint-success');
+    assert.equal(module.epResponseNodeClass(semanticHit), 'ep-node-success');
 
     const uncachedSuccess = module.epRuntimeFromEntry({
         provider: 'openai',
@@ -1476,9 +1476,9 @@ test('audit runtime uses explicit cache-hit labels and highlights the uncached 2
     assert.equal(module.epCacheNodeClass(uncachedSuccess), '');
     assert.equal(module.epCacheStatusLabel(uncachedSuccess), null);
     assert.equal(module.epAiConnClass(uncachedSuccess), '');
-    assert.equal(module.epAiNodeClass(uncachedSuccess), 'ep-node-ai-success');
+    assert.equal(module.epAiNodeClass(uncachedSuccess), 'ep-node-success');
     assert.equal(module.epResponseConnClass(uncachedSuccess), '');
-    assert.equal(module.epResponseNodeClass(uncachedSuccess), 'ep-node-endpoint-success');
+    assert.equal(module.epResponseNodeClass(uncachedSuccess), 'ep-node-success');
 });
 
 test('epRuntimeFromEntry treats any uncached 2xx status as a successful AI and response path', () => {
@@ -1511,14 +1511,14 @@ test('auth runtime highlights auth node state from audit entries', () => {
         auth_method: 'api_key',
         error_type: 'authentication_error'
     });
-    assert.equal(module.epAuthNodeClass(failedAuth), 'ep-node-auth-error');
+    assert.equal(module.epAuthNodeClass(failedAuth), 'ep-node-error');
     assert.equal(module.epAuthNodeSublabel(failedAuth), 'api_key');
 
     const masterKeyAuth = module.epRuntimeFromEntry({
         auth_method: 'master_key',
         status_code: 200
     });
-    assert.equal(module.epAuthNodeClass(masterKeyAuth), 'ep-node-auth-success');
+    assert.equal(module.epAuthNodeClass(masterKeyAuth), 'ep-node-success');
     assert.equal(module.epAuthNodeSublabel(masterKeyAuth), 'master_key');
 });
 

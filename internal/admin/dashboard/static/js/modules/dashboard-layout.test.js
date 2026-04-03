@@ -29,6 +29,7 @@ test('sidebar and main content share the flex layout without manual content offs
 
     assert.match(template, /<aside class="sidebar"[\s\S]*<div class="sidebar-toggle"[\s\S]*<main class="content"/);
     assert.doesNotMatch(template, /content-collapsed/);
+    assert.match(template, /href="\/admin\/dashboard\/guardrails"[\s\S]*x-show="guardrailsPageVisible\(\)"[\s\S]*<span>Guardrails<\/span>[\s\S]*href="\/admin\/dashboard\/auth-keys"[\s\S]*<span>API Keys<\/span>/);
 
     const sidebarRule = readCSSRule(css, '.sidebar');
     assert.match(sidebarRule, /flex:\s*0 0 var\(--sidebar-width\)/);
@@ -106,12 +107,12 @@ test('auth key expirations render as a UTC date with the full UTC timestamp in t
     assert.match(indexTemplate, /x-show="authKeys\.length === 0 && !authKeysLoading && !authError && !authKeyError && authKeysAvailable"/);
 });
 
-test('workflow guardrail warning links directly to the guardrails settings subpage', () => {
+test('workflow guardrail warning links directly to the top-level guardrails page', () => {
     const indexTemplate = readFixture('../../../templates/index.html');
 
     assert.match(indexTemplate, /No named guardrails are currently registered on this deployment\./);
     assert.match(indexTemplate, /class="alert alert-warning alert-inline-actions" x-show="guardrailRefs\.length === 0"/);
-    assert.match(indexTemplate, /@click="navigateSettings\('guardrails'\)">Open Guardrails<\/button>/);
+    assert.match(indexTemplate, /@click="navigate\('guardrails'\)">Open Guardrails<\/button>/);
 });
 
 test('usage and audit pages reuse a shared pagination template', () => {

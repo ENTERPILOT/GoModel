@@ -114,19 +114,20 @@ function dashboard() {
             if (page === 'audit') {
                 page = 'audit-logs';
             }
-            page = (['overview', 'usage', 'models', 'workflows', 'audit-logs', 'auth-keys', 'settings'].includes(page)) ? page : 'overview';
             const sub = parts[1] || null;
+            if (page === 'settings' && sub === 'guardrails') {
+                return { page: 'guardrails', sub: null };
+            }
+            page = (['overview', 'usage', 'models', 'workflows', 'audit-logs', 'guardrails', 'auth-keys', 'settings'].includes(page)) ? page : 'overview';
             return { page, sub };
         },
 
         _normalizeSettingsSubpage(subpage) {
-            return subpage === 'guardrails' ? 'guardrails' : 'general';
+            return 'general';
         },
 
         _settingsPath(subpage) {
-            return subpage === 'guardrails'
-                ? '/admin/dashboard/settings/guardrails'
-                : '/admin/dashboard/settings';
+            return '/admin/dashboard/settings';
         },
 
         _applyRoute(page, sub) {
@@ -142,12 +143,12 @@ function dashboard() {
             if (page === 'workflows' && typeof this.fetchExecutionPlansPage === 'function') {
                 this.fetchExecutionPlansPage();
             }
+            if (page === 'guardrails' && typeof this.fetchGuardrailsPage === 'function') {
+                this.fetchGuardrailsPage();
+            }
             if (page === 'settings') {
-                if (this.settingsSubpage === 'general' && typeof this.ensureTimezoneOptions === 'function') {
+                if (typeof this.ensureTimezoneOptions === 'function') {
                     this.ensureTimezoneOptions();
-                }
-                if (this.settingsSubpage === 'guardrails' && typeof this.fetchGuardrailsPage === 'function') {
-                    this.fetchGuardrailsPage();
                 }
             }
             if (page === 'overview') this.renderChart();
@@ -200,6 +201,12 @@ function dashboard() {
             const normalized = this._normalizeSettingsSubpage(subpage);
             history.pushState(null, '', this._settingsPath(normalized));
             this._applyRoute('settings', normalized);
+        },
+
+        guardrailsPageVisible() {
+            return typeof this.executionPlanRuntimeBooleanFlag === 'function'
+                ? this.executionPlanRuntimeBooleanFlag('GUARDRAILS_ENABLED', false)
+                : false;
         },
 
         setTheme(t) {

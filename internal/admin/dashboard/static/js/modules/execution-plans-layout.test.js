@@ -71,45 +71,18 @@ test('workflow nodes use endpoint and feature color groups consistently', () => 
     const endpointRule = readCSSRule(css, '.ep-node-endpoint');
     assert.match(endpointRule, /background:\s*var\(--bg-surface\)/);
 
-    const featureSelectors = [
-        '.ep-node-cache',
-        '.ep-node-auth',
-        '.ep-node-guardrails',
-        '.ep-node-async-audit',
-        '.ep-node-async-usage'
-    ];
-    for (const selector of featureSelectors) {
-        const rule = readCSSRule(css, selector);
-        assert.match(rule, /border-color:\s*color-mix\(in srgb, var\(--accent\) 46%, var\(--border\)\)/);
-        assert.match(rule, /background:\s*color-mix\(in srgb, var\(--accent\) 8%, var\(--bg-surface\)\)/);
-    }
+    const featureRule = readCSSRule(css, '.ep-node-feature');
+    assert.match(featureRule, /border-color:\s*color-mix\(in srgb, var\(--accent\) 46%, var\(--border\)\)/);
+    assert.match(featureRule, /background:\s*color-mix\(in srgb, var\(--accent\) 8%, var\(--bg-surface\)\)/);
 
-    const featureIconSelectors = [
-        '.ep-node-cache .ep-node-icon',
-        '.ep-node-auth .ep-node-icon',
-        '.ep-node-guardrails .ep-node-icon',
-        '.ep-node-async-audit .ep-node-icon',
-        '.ep-node-async-usage .ep-node-icon'
-    ];
-    for (const selector of featureIconSelectors) {
-        const rule = readCSSRule(css, selector);
-        assert.match(rule, /background:\s*color-mix\(in srgb, var\(--accent\) 16%, var\(--bg\)\)/);
-        assert.match(rule, /color:\s*var\(--accent\)/);
-    }
+    const featureIconRule = readCSSRule(css, '.ep-node-feature .ep-node-icon');
+    assert.match(featureIconRule, /background:\s*color-mix\(in srgb, var\(--accent\) 16%, var\(--bg\)\)/);
+    assert.match(featureIconRule, /color:\s*var\(--accent\)/);
 
-    const featureLabelSelectors = [
-        '.ep-node-cache .ep-node-label',
-        '.ep-node-auth .ep-node-label',
-        '.ep-node-guardrails .ep-node-label',
-        '.ep-node-async-audit .ep-node-label',
-        '.ep-node-async-usage .ep-node-label'
-    ];
-    for (const selector of featureLabelSelectors) {
-        const rule = readCSSRule(css, selector);
-        assert.match(rule, /color:\s*var\(--accent\)/);
-    }
+    const featureLabelRule = readCSSRule(css, '.ep-node-feature .ep-node-label');
+    assert.match(featureLabelRule, /color:\s*var\(--accent\)/);
 
-    const authSubRule = readCSSRule(css, '.ep-node-auth .ep-node-sub');
+    const authSubRule = readCSSRule(css, '.ep-node-feature .ep-node-sub');
     assert.match(authSubRule, /color:\s*color-mix\(in srgb, var\(--accent\) 70%, var\(--text-muted\)\)/);
 });
 
@@ -118,7 +91,7 @@ test('auth node uses the cache iconography in execution plan charts', () => {
 
     assert.match(
         chartTemplate,
-        /<div class="ep-node ep-node-auth"[\s\S]*?<svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"\/><path d="M21 12c0 1\.66-4 3-9 3s-9-1\.34-9-3"\/><path d="M3 5v14c0 1\.66 4 3 9 3s9-1\.34 9-3V5"\/><\/svg>[\s\S]*?<span class="ep-node-label">Auth<\/span>/
+        /<div class="ep-node ep-node-feature ep-node-auth"[\s\S]*?<svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"\/><path d="M21 12c0 1\.66-4 3-9 3s-9-1\.34-9-3"\/><path d="M3 5v14c0 1\.66 4 3 9 3s9-1\.34 9-3V5"\/><\/svg>[\s\S]*?<span class="ep-node-label">Auth<\/span>/
     );
 });
 
@@ -245,7 +218,7 @@ test('audit log pipeline always renders cache and binds runtime highlight classe
 
     assert.match(
         template,
-        /{{template "execution-plan-chart" "executionPlanAuditChart\(entry\)"}}[\s\S]*<div class="ep-step" x-show="{{\.}}\.showCache">[\s\S]*:class="{{\.}}\.cacheNodeClass"[\s\S]*x-text="{{\.}}\.cacheStatusLabel"/
+        /{{template "execution-plan-chart" "executionPlanAuditChart\(entry\)"}}[\s\S]*<div class="ep-conn" x-show="{{\.}}\.showCache" :class="{{\.}}\.cacheConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-feature ep-node-cache" x-show="{{\.}}\.showCache" :class="{{\.}}\.cacheNodeClass">[\s\S]*x-text="{{\.}}\.cacheStatusLabel"/
     );
     assert.match(
         template,
@@ -253,36 +226,50 @@ test('audit log pipeline always renders cache and binds runtime highlight classe
     );
     assert.match(
         template,
-        /<div class="ep-conn ep-conn-grow" :class="{{\.}}\.aiConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-ai" :class="{{\.}}\.aiNodeClass">/
+        /<div class="ep-conn" :class="{{\.}}\.aiConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-ai" :class="{{\.}}\.aiNodeClass">/
     );
     assert.match(
         template,
-        /<div class="ep-conn ep-conn-grow" :class="{{\.}}\.responseConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-endpoint" :class="{{\.}}\.responseNodeClass">/
+        /<div class="ep-conn" :class="{{\.}}\.responseConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-endpoint" :class="{{\.}}\.responseNodeClass">/
     );
 
-    const aiSuccessRule = readCSSRule(css, '.ep-node-ai-success');
-    assert.match(aiSuccessRule, /border-color:\s*color-mix\(in srgb, var\(--success\) 52%, var\(--border\)\)/);
-    assert.match(aiSuccessRule, /background:\s*color-mix\(in srgb, var\(--success\) 9%, var\(--bg-surface\)\)/);
+    const successRule = readCSSRule(css, '.ep-node-success');
+    assert.match(successRule, /border-color:\s*color-mix\(in srgb, var\(--success\) 52%, var\(--border\)\)/);
+    assert.match(successRule, /background:\s*color-mix\(in srgb, var\(--success\) 9%, var\(--bg-surface\)\)/);
 
-    const endpointSuccessRule = readCSSRule(css, '.ep-node-endpoint-success');
-    assert.match(endpointSuccessRule, /border-color:\s*color-mix\(in srgb, var\(--success\) 52%, var\(--border\)\)/);
-    assert.match(endpointSuccessRule, /background:\s*color-mix\(in srgb, var\(--success\) 9%, var\(--bg-surface\)\)/);
+    const errorRule = readCSSRule(css, '.ep-node-error');
+    assert.match(errorRule, /border-color:\s*color-mix\(in srgb, var\(--danger\) 52%, var\(--border\)\)/);
+    assert.match(errorRule, /background:\s*color-mix\(in srgb, var\(--danger\) 9%, var\(--bg-surface\)\)/);
 
-    const semanticCacheRule = readCSSRule(css, '.ep-node-cache-semantic');
-    assert.match(semanticCacheRule, /border-color:\s*color-mix\(in srgb, var\(--success\) 52%, var\(--border\)\)/);
-    assert.match(semanticCacheRule, /background:\s*color-mix\(in srgb, var\(--success\) 9%, var\(--bg-surface\)\)/);
-
-    const authSuccessRule = readCSSRule(css, '.ep-node-auth-success');
-    assert.match(authSuccessRule, /border-color:\s*color-mix\(in srgb, var\(--success\) 52%, var\(--border\)\)/);
-    assert.match(authSuccessRule, /background:\s*color-mix\(in srgb, var\(--success\) 9%, var\(--bg-surface\)\)/);
-
-    const authErrorRule = readCSSRule(css, '.ep-node-auth-error');
-    assert.match(authErrorRule, /border-color:\s*color-mix\(in srgb, var\(--danger\) 52%, var\(--border\)\)/);
-    assert.match(authErrorRule, /background:\s*color-mix\(in srgb, var\(--danger\) 9%, var\(--bg-surface\)\)/);
-
-    const skippedAiRule = readCSSRule(css, '.ep-node-ai-skipped');
+    const skippedAiRule = readCSSRule(css, '.ep-node-skipped');
     assert.match(skippedAiRule, /position:\s*relative/);
     assert.match(skippedAiRule, /opacity:\s*0\.28/);
+});
+
+test('execution pipeline main row is flattened without ep-left or ep-right wrappers', () => {
+    const template = readFixture('../../../templates/execution-plan-chart.html');
+    const css = readFixture('../../css/dashboard.css');
+
+    assert.doesNotMatch(template, /class="ep-left"/);
+    assert.doesNotMatch(template, /class="ep-right"/);
+    assert.doesNotMatch(template, /class="ep-step"/);
+    assert.match(
+        template,
+        /<div class="exec-pipeline-row">[\s\S]*<div class="ep-node ep-node-endpoint">[\s\S]*<div class="ep-conn"><\/div>[\s\S]*<div class="ep-node ep-node-feature ep-node-auth"[\s\S]*<div class="ep-conn" :class="{{\.}}\.aiConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-ai" :class="{{\.}}\.aiNodeClass">[\s\S]*<div class="ep-conn" :class="{{\.}}\.responseConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-endpoint" :class="{{\.}}\.responseNodeClass">/
+    );
+    assert.doesNotMatch(css, /\.ep-left\s*,/);
+    assert.doesNotMatch(css, /\.ep-right\s*\{/);
+    assert.doesNotMatch(css, /\.ep-step\s*\{/);
+    assert.doesNotMatch(css, /\.ep-conn-grow\s*\{/);
+});
+
+test('execution pipeline main-row connectors share the row width evenly', () => {
+    const css = readFixture('../../css/dashboard.css');
+    const connRule = readCSSRule(css, '.ep-conn');
+
+    assert.match(connRule, /flex:\s*1 1 0/);
+    assert.match(connRule, /min-width:\s*13px/);
+    assert.match(connRule, /width:\s*auto/);
 });
 
 test('execution plan card actions expose plan-specific accessible names', () => {
