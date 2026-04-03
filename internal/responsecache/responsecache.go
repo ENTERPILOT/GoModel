@@ -23,17 +23,24 @@ type ResponseCacheMiddleware struct {
 
 // NewResponseCacheMiddleware creates middleware from config.
 // If neither simple nor semantic cache is configured, returns a no-op middleware.
-// rawProviders is threaded through to NewEmbedder for API-key credential resolution.
+// resolvedProviders must be the credential/env-resolved map from providers.InitResult
+// (same keys as live routing). Semantic embedder.provider names a key in this map.
 func NewResponseCacheMiddleware(
 	cfg config.ResponseCacheConfig,
-	rawProviders map[string]config.RawProviderConfig,
+	resolvedProviders map[string]config.RawProviderConfig,
 	usageLogger usage.LoggerInterface,
 	pricingResolver usage.PricingResolver,
 ) (*ResponseCacheMiddleware, error) {
 	m := &ResponseCacheMiddleware{}
 	hitRecorder := newUsageHitRecorder(usageLogger, pricingResolver)
 
-	if cfg.Simple.Redis != nil && cfg.Simple.Redis.URL != "" {
+	switch {
+	case cfg.Simple == nil:
+	case !config.SimpleCacheEnabled(cfg.Simple):
+		slog.Info("response cache (simple/exact) disabled by config")
+	case cfg.Simple.Redis == nil || cfg.Simple.Redis.URL == "":
+		slog.Warn("response cache (simple/exact) enabled in config but redis URL is missing; set cache.response.simple.redis.url or REDIS_URL")
+	default:
 		ttl := time.Duration(cfg.Simple.Redis.TTL) * time.Second
 		if ttl == 0 {
 			ttl = time.Hour
@@ -52,25 +59,33 @@ func NewResponseCacheMiddleware(
 		}
 		m.simple = newSimpleCacheMiddleware(store, ttl, hitRecorder)
 		slog.Info("response cache (simple/exact) enabled", "ttl_seconds", cfg.Simple.Redis.TTL, "prefix", prefix)
-	} else {
-		slog.Warn("response cache (simple/exact) is disabled; set cache.response.simple.redis.url to enable it")
 	}
 
 	sem := cfg.Semantic
-	if config.SemanticCacheActive(&sem) {
-		emb, err := embedding.NewEmbedder(sem.Embedder, rawProviders)
+	if sem != nil && config.SemanticCacheActive(sem) {
+		emb, err := embedding.NewEmbedder(sem.Embedder, resolvedProviders)
 		if err != nil {
+			if m.simple != nil {
+				_ = m.simple.close()
+			}
 			return nil, err
 		}
 		vs, err := NewVecStore(sem.VectorStore)
 		if err != nil {
 			_ = emb.Close()
+			if m.simple != nil {
+				_ = m.simple.close()
+			}
 			return nil, err
 		}
-		m.semantic = newSemanticCacheMiddleware(emb, vs, sem, hitRecorder)
+		m.semantic = newSemanticCacheMiddleware(emb, vs, *sem, hitRecorder)
+		ttlLog := 0
+		if sem.TTL != nil {
+			ttlLog = *sem.TTL
+		}
 		slog.Info("response cache (semantic) enabled",
 			"threshold", sem.SimilarityThreshold,
-			"ttl_seconds", sem.TTL,
+			"ttl_seconds", ttlLog,
 			"vector_store", sem.VectorStore.Type,
 			"embedder", sem.Embedder.Provider,
 		)

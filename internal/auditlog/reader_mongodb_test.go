@@ -68,6 +68,7 @@ func TestMongoLogRowToLogEntryPreservesCacheType(t *testing.T) {
 	entry := row.toLogEntry()
 	if entry == nil {
 		t.Fatal("expected entry, got nil")
+		return
 	}
 	if entry.CacheType != CacheTypeSemantic {
 		t.Fatalf("CacheType = %q, want %q", entry.CacheType, CacheTypeSemantic)

@@ -27,43 +27,40 @@ Current global middleware placement runs too early and can bypass guardrails —
 
 ```mermaid
 flowchart TD
-    Request([Request])
-    Request --> auth[auth]
-    auth --> planning[execution planning]
-    planning --> guardrails[guardrails]
-    guardrails --> exact[simpleCacheMiddleware]
-    exact -->|HIT| ret[return to client]
-    exact -->|MISS| semantic[semanticCacheMiddleware]
-    semantic -->|HIT| ret
-    semantic -->|MISS| LLM[LLM]
-    LLM --> store[async store]
-    store --> ret
+  Request([Request])
+  Request --> auth[auth]
+  auth --> planning[execution planning]
+  planning --> guardrails[guardrails]
+  guardrails --> exact[simpleCacheMiddleware]
+  exact -->|HIT| ret[return to client]
+  exact -->|MISS| semantic[semanticCacheMiddleware]
+  semantic -->|HIT| ret
+  semantic -->|MISS| LLM[LLM]
+  LLM --> store[async store]
+  store --> ret
 ```
 
 Exact layer: `simpleCacheMiddleware` (byte-identical body, SHA-256). Semantic layer: `semanticCacheMiddleware` (vector KNN). On exact **HIT**, respond with `X-Cache: HIT (exact)`; on semantic **HIT**, `X-Cache: HIT (semantic)`. On full miss, the handler forwards to the LLM, stores exact + semantic entries, then returns.
 
 ### Embedding
 
-Unified `Embedder` interface with two implementations:
+Unified `Embedder` interface with a single implementation: an **HTTP client** calls the OpenAI-compatible **`…/v1/embeddings`** endpoint derived from the selected provider entry’s resolved **`base_url`** (same join rule as `llmclient`: base URL plus `/embeddings` when the base already ends with `/v1`, otherwise `/v1/embeddings`).
 
-- **`MiniLMEmbedder`** (default): local `all-MiniLM-L6-v2` via ONNX Runtime (384-dim, zero external dependency). Activated when `embedder.provider` is `"local"` or absent.
-- **`APIEmbedder`**: calls `POST /v1/embeddings` on any configured OpenAI-compatible provider, reusing existing `api_key` + `base_url`. Activated when `embedder.provider` matches a named provider. Unknown provider → startup error.
-
-Local default is a key differentiator vs. Bifrost/LiteLLM.
+- **`embedder.provider`** must be set to a **key** in the top-level `providers:` map (e.g. `gemini`, `openai`, or a custom key when multiple backends share a type). There is **no default** provider and no in-process/local embedder.
+- At startup, the semantic layer receives **`CredentialResolvedProviders`** from `providers.Init` — the same **env-merged, credential-filtered** map used for routing — so YAML-only vs env-only credentials behave consistently with the rest of the gateway.
 
 ### Vector Store
 
-`VecStore` interface + `Type`-switched factory (mirrors `StorageConfig`):
+`VecStore` interface + `type`-switched factory in [`internal/responsecache/vecstore.go`](../../internal/responsecache/vecstore.go). When semantic caching is enabled, **`vector_store.type` is required** (no default). Supported values:
 
+| Type        | Notes |
+| ----------- | ----- |
+| `qdrant`    | HTTP API; `url`, `collection`, optional `api_key`. Collection is created on first insert (vector size from embedding, **Cosine** distance). |
+| `pgvector`  | PostgreSQL + `pgvector`; `url`, required `dimension` for `vector(n)`, optional `table` (default `gomodel_semantic_cache`). |
+| `pinecone`  | Data-plane HTTP (`host`, `api_key`, required `dimension`, optional `namespace`). Full response body is stored in metadata (base64); **Pinecone metadata limits** (~40KB per value) can reject very large cached payloads. |
+| `weaviate`  | HTTP GraphQL + REST; `url`, `class` (GraphQL-safe, **PascalCase**), optional `api_key`. Class is auto-created with `vectorizer: none` if missing. |
 
-| Type                   | Notes                                       |
-| ---------------------- | ------------------------------------------- |
-| `sqlite-vec` (default) | Embedded, CGO-free, file-based. Zero infra. |
-| `qdrant`               | External Qdrant (first external backend)    |
-| `pgvector`             | For PostgreSQL users                        |
-
-
-TTL implemented via `expires_at` timestamp + read-time filter + background cleanup (1h default interval).
+TTL is implemented via `expires_at` (unix seconds, `0` = no expiry) plus read-time filtering and a **background `DeleteExpired` tick** (~1 hour).
 
 ### Text Extraction
 
@@ -109,23 +106,24 @@ Bifrost's 0.80 is too aggressive for correctness-sensitive use cases.
 ### Positive
 
 - Expected 60–70% semantic hit rates in support/FAQ/classification workloads  
-- Zero extra infrastructure in default mode  
 - Strong correctness guarantees via parameter isolation & high threshold  
-- Reuses existing provider credentials for API embedding  
-- Swappable backends via interfaces
+- Reuses existing provider credentials for embeddings via the same resolved provider map as routing  
+- Swappable vector backends (`qdrant`, `pgvector`, `pinecone`, `weaviate`) behind `VecStore`
 
 ### Negative / Mitigations
 
 - ~50–100 ms added latency on semantic miss (acceptable vs LLM latency)  
-- Requires `libonnxruntime` at runtime for local embedding (documented in deployment guide)  
+- Requires a provider with a working OpenAI-compatible embeddings endpoint and credentials  
+- Semantic layer **requires external vector infrastructure** (no embedded sqlite-vec path)  
+- Pinecone metadata size caps can block caching very large JSON bodies — mitigated by clear errors / operational choice of backend  
 - False positives possible → mitigated by high default threshold + sampling of semantic hits  
 - No benefit for creative, real-time, or personalized traffic → use `no-store` header  
 - No observability yet → add structured logs for semantic hits/misses in v1
 
 ## Alternatives Considered
 
-- Redis/RediSearch as default → rejected (external dep vs sqlite-vec zero-infra)  
+- **Embedded default vector store (sqlite-vec)** — removed to reduce CGO/sqlite-vec complexity and keep one operational model: explicit choice of managed/self-hosted vector DB.  
+- Redis/RediSearch as a backend — not chosen for v1; Qdrant/pgvector/Pinecone/Weaviate cover common deployment patterns.  
 - Embed full conversation → rejected (noisy, expensive, low hit rate)  
 - Single cache store for exact + semantic → rejected (different needs & scaling)  
-- Always require external embedding API → rejected (circular dep risk, breaks zero-infra)
-
+- Optional in-process embedder (e.g. ONNX MiniLM) → removed; API-only embedding keeps one code path and avoids native runtime dependencies  

@@ -23,6 +23,10 @@ type InitResult struct {
 	Cache    modelcache.Cache
 	Factory  *ProviderFactory
 
+	// CredentialResolvedProviders is the env-merged, credential-filtered providers
+	// map (same keys as Router). Keys match top-level providers YAML names.
+	CredentialResolvedProviders map[string]config.RawProviderConfig
+
 	// stopRefresh is called to stop the background refresh goroutine
 	stopRefresh func()
 
@@ -69,7 +73,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 		return nil, fmt.Errorf("factory is required")
 	}
 
-	providerMap := resolveProviders(result.RawProviders, result.Config.Resilience, factory.discoveryConfigsSnapshot())
+	providerMap, credentialResolved := resolveProviders(result.RawProviders, result.Config.Resilience, factory.discoveryConfigsSnapshot())
 
 	modelCache, err := initCache(result.Config)
 	if err != nil {
@@ -143,11 +147,12 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	}
 
 	return &InitResult{
-		Registry:    registry,
-		Router:      router,
-		Cache:       modelCache,
-		Factory:     factory,
-		stopRefresh: stopRefresh,
+		Registry:                    registry,
+		Router:                      router,
+		Cache:                       modelCache,
+		Factory:                     factory,
+		CredentialResolvedProviders: credentialResolved,
+		stopRefresh:                 stopRefresh,
 	}, nil
 }
 

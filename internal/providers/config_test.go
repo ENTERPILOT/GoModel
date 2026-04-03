@@ -703,7 +703,7 @@ func TestResolveProviders_EndToEnd(t *testing.T) {
 		},
 	}
 
-	got := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
 
 	if _, exists := got["bad"]; exists {
 		t.Error("expected provider with unresolved placeholder to be filtered out")
@@ -717,21 +717,36 @@ func TestResolveProviders_EndToEnd(t *testing.T) {
 	if got["anthropic"].Resilience.Retry.MaxRetries != globalRetry.MaxRetries {
 		t.Errorf("anthropic should inherit global MaxRetries=%d, got %d", globalRetry.MaxRetries, got["anthropic"].Resilience.Retry.MaxRetries)
 	}
+	if _, ok := filteredRaw["bad"]; ok {
+		t.Error("expected filtered raw map to omit bad provider")
+	}
+	if filteredRaw["openai"].APIKey != "sk-openai-yaml" {
+		t.Errorf("filteredRaw openai APIKey = %q", filteredRaw["openai"].APIKey)
+	}
+	if filteredRaw["anthropic"].APIKey != "sk-ant-env" {
+		t.Errorf("filteredRaw anthropic APIKey = %q, want sk-ant-env", filteredRaw["anthropic"].APIKey)
+	}
 }
 
 func TestResolveProviders_EmptyRaw_OnlyEnvVars(t *testing.T) {
 	t.Setenv("GROQ_API_KEY", "sk-groq")
 
-	got := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
 
 	if got["groq"].APIKey != "sk-groq" {
 		t.Errorf("groq APIKey = %q, want sk-groq", got["groq"].APIKey)
 	}
+	if filteredRaw["groq"].APIKey != "sk-groq" {
+		t.Errorf("filteredRaw groq APIKey = %q, want sk-groq", filteredRaw["groq"].APIKey)
+	}
 }
 
 func TestResolveProviders_NoProvidersNoEnvVars(t *testing.T) {
-	got := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
 	if len(got) != 0 {
 		t.Errorf("expected empty result, got %d entries", len(got))
+	}
+	if len(filteredRaw) != 0 {
+		t.Errorf("expected empty filtered raw, got %d entries", len(filteredRaw))
 	}
 }

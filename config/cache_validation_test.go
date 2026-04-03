@@ -79,6 +79,8 @@ func TestValidateCacheConfig_RedisOnly(t *testing.T) {
 	}
 }
 
+func boolPtr(b bool) *bool { return &b }
+
 func TestValidateCacheConfig_SemanticDisabledIgnoresInvalidVectorStore(t *testing.T) {
 	cfg := &CacheConfig{
 		Model: ModelCacheConfig{
@@ -86,8 +88,8 @@ func TestValidateCacheConfig_SemanticDisabledIgnoresInvalidVectorStore(t *testin
 			Redis: nil,
 		},
 		Response: ResponseCacheConfig{
-			Semantic: SemanticCacheConfig{
-				Enabled: false,
+			Semantic: &SemanticCacheConfig{
+				Enabled: boolPtr(false),
 				VectorStore: VectorStoreConfig{
 					Type: "qdrant",
 					// Intentionally missing URL — valid because semantic cache is off.
@@ -107,10 +109,11 @@ func TestValidateCacheConfig_SemanticEnabledRequiresQdrantURL(t *testing.T) {
 			Redis: nil,
 		},
 		Response: ResponseCacheConfig{
-			Semantic: SemanticCacheConfig{
-				Enabled:             true,
+			Semantic: &SemanticCacheConfig{
+				Enabled:             boolPtr(true),
 				SimilarityThreshold: 0.9,
-				TTL:                 3600,
+				TTL:                 intPtr(3600),
+				Embedder:            EmbedderConfig{Provider: "openai"},
 				VectorStore: VectorStoreConfig{
 					Type: "qdrant",
 				},
@@ -122,6 +125,30 @@ func TestValidateCacheConfig_SemanticEnabledRequiresQdrantURL(t *testing.T) {
 	}
 }
 
+func TestValidateCacheConfig_SemanticEnabledRequiresQdrantCollection(t *testing.T) {
+	cfg := &CacheConfig{
+		Model: ModelCacheConfig{
+			Local: &LocalCacheConfig{CacheDir: ".cache"},
+			Redis: nil,
+		},
+		Response: ResponseCacheConfig{
+			Semantic: &SemanticCacheConfig{
+				Enabled:             boolPtr(true),
+				SimilarityThreshold: 0.9,
+				TTL:                 intPtr(3600),
+				Embedder:            EmbedderConfig{Provider: "openai"},
+				VectorStore: VectorStoreConfig{
+					Type:   "qdrant",
+					Qdrant: QdrantConfig{URL: "http://localhost:6333"},
+				},
+			},
+		},
+	}
+	if err := ValidateCacheConfig(cfg); err == nil {
+		t.Fatal("expected error when qdrant collection empty")
+	}
+}
+
 func TestValidateCacheConfig_SemanticSimilarityThresholdInvalid(t *testing.T) {
 	base := CacheConfig{
 		Model: ModelCacheConfig{
@@ -129,13 +156,16 @@ func TestValidateCacheConfig_SemanticSimilarityThresholdInvalid(t *testing.T) {
 			Redis: nil,
 		},
 		Response: ResponseCacheConfig{
-			Semantic: SemanticCacheConfig{
-				Enabled: true,
-				TTL:     3600,
+			Semantic: &SemanticCacheConfig{
+				Enabled:  boolPtr(true),
+				TTL:      intPtr(3600),
+				Embedder: EmbedderConfig{Provider: "openai"},
 				VectorStore: VectorStoreConfig{
-					Type: "sqlite-vec",
-					SQLiteVec: SQLiteVecConfig{
-						Path: ".cache/semantic.db",
+					Type: "pgvector",
+					PGVector: PGVectorConfig{
+						URL:       "postgres://localhost/test",
+						Table:     "gomodel_semantic_cache",
+						Dimension: 1536,
 					},
 				},
 			},
@@ -165,6 +195,64 @@ func TestValidateCacheConfig_SemanticSimilarityThresholdInvalid(t *testing.T) {
 	}
 }
 
+func TestValidateCacheConfig_SemanticRequiresEmbedderProvider(t *testing.T) {
+	cfg := &CacheConfig{
+		Model: ModelCacheConfig{
+			Local: &LocalCacheConfig{CacheDir: ".cache"},
+			Redis: nil,
+		},
+		Response: ResponseCacheConfig{
+			Semantic: &SemanticCacheConfig{
+				Enabled:             boolPtr(true),
+				SimilarityThreshold: 0.9,
+				TTL:                 intPtr(3600),
+				VectorStore: VectorStoreConfig{
+					Type: "pgvector",
+					PGVector: PGVectorConfig{
+						URL:       "postgres://localhost/test",
+						Dimension: 768,
+					},
+				},
+			},
+		},
+	}
+	err := ValidateCacheConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error when semantic enabled without embedder provider")
+	}
+	if !strings.Contains(err.Error(), "embedder.provider") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateCacheConfig_SemanticRejectsLocalEmbedder(t *testing.T) {
+	cfg := &CacheConfig{
+		Model: ModelCacheConfig{
+			Local: &LocalCacheConfig{CacheDir: ".cache"},
+			Redis: nil,
+		},
+		Response: ResponseCacheConfig{
+			Semantic: &SemanticCacheConfig{
+				Enabled:             boolPtr(true),
+				SimilarityThreshold: 0.9,
+				TTL:                 intPtr(3600),
+				Embedder:            EmbedderConfig{Provider: "local"},
+				VectorStore: VectorStoreConfig{
+					Type: "pgvector",
+					PGVector: PGVectorConfig{
+						URL:       "postgres://localhost/test",
+						Dimension: 768,
+					},
+				},
+			},
+		},
+	}
+	err := ValidateCacheConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for local embedder provider")
+	}
+}
+
 func TestValidateCacheConfig_SemanticNegativeTTL(t *testing.T) {
 	cfg := &CacheConfig{
 		Model: ModelCacheConfig{
@@ -172,14 +260,16 @@ func TestValidateCacheConfig_SemanticNegativeTTL(t *testing.T) {
 			Redis: nil,
 		},
 		Response: ResponseCacheConfig{
-			Semantic: SemanticCacheConfig{
-				Enabled:             true,
+			Semantic: &SemanticCacheConfig{
+				Enabled:             boolPtr(true),
 				SimilarityThreshold: 0.9,
-				TTL:                 -1,
+				TTL:                 intPtr(-1),
+				Embedder:            EmbedderConfig{Provider: "openai"},
 				VectorStore: VectorStoreConfig{
-					Type: "sqlite-vec",
-					SQLiteVec: SQLiteVecConfig{
-						Path: ".cache/semantic.db",
+					Type: "pgvector",
+					PGVector: PGVectorConfig{
+						URL:       "postgres://localhost/test",
+						Dimension: 768,
 					},
 				},
 			},

@@ -23,11 +23,13 @@ type ProviderConfig struct {
 
 // resolveProviders applies env var overrides to the raw YAML provider map, filters
 // out entries with invalid credentials, and merges each entry with the global
-// ResilienceConfig. Returns a fully resolved map ready for provider instantiation.
-func resolveProviders(raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) map[string]ProviderConfig {
+// ResilienceConfig. The second return value is the credential-filtered raw map
+// (same keys as the first); use it for auxiliary clients that need the same
+// API keys and base URLs as the live router (e.g. semantic-cache embeddings).
+func resolveProviders(raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig) {
 	merged := applyProviderEnvVars(raw, discovery)
 	filtered := filterEmptyProviders(merged, discovery)
-	return buildProviderConfigs(filtered, global)
+	return buildProviderConfigs(filtered, global), filtered
 }
 
 // applyProviderEnvVars overlays well-known provider env vars onto the raw YAML map.

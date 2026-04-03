@@ -1,5 +1,10 @@
+# Infra (redis, postgres, mongodb, adminer): `docker compose up -d`
+# App + Prometheus: `docker compose --profile app up -d`
+
 services:
   gomodel:
+    profiles:
+      - app
     build:
       context: .
       dockerfile: Dockerfile
@@ -86,6 +91,8 @@ services:
     restart: unless-stopped
 
   prometheus:
+    profiles:
+      - app
     image: prom/prometheus:latest
     ports:
       - "9090:9090"

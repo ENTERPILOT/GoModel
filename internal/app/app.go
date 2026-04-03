@@ -350,7 +350,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		slog.Info("provider passthrough disabled")
 	}
 
-	rcm, err := responsecache.NewResponseCacheMiddleware(appCfg.Cache.Response, cfg.AppConfig.RawProviders, usageResult.Logger, providerResult.Registry)
+	rcm, err := responsecache.NewResponseCacheMiddleware(appCfg.Cache.Response, providerResult.CredentialResolvedProviders, usageResult.Logger, providerResult.Registry)
 	if err != nil {
 		var (
 			executionPlansCloseErr error
@@ -850,7 +850,7 @@ func executionPlanRefreshInterval(cfg *config.Config) time.Duration {
 }
 
 func responseCacheConfigured(cfg config.ResponseCacheConfig) bool {
-	return simpleResponseCacheConfiguredFromResponse(cfg) || config.SemanticCacheActive(&cfg.Semantic)
+	return simpleResponseCacheConfiguredFromResponse(cfg) || semanticResponseCacheConfiguredFromResponse(cfg)
 }
 
 func simpleResponseCacheConfigured(cfg *config.Config) bool {
@@ -861,14 +861,19 @@ func simpleResponseCacheConfigured(cfg *config.Config) bool {
 }
 
 func simpleResponseCacheConfiguredFromResponse(cfg config.ResponseCacheConfig) bool {
-	return cfg.Simple.Redis != nil && strings.TrimSpace(cfg.Simple.Redis.URL) != ""
+	return cfg.Simple != nil && config.SimpleCacheEnabled(cfg.Simple) &&
+		cfg.Simple.Redis != nil && strings.TrimSpace(cfg.Simple.Redis.URL) != ""
 }
 
 func semanticResponseCacheConfigured(cfg *config.Config) bool {
 	if cfg == nil {
 		return false
 	}
-	return config.SemanticCacheActive(&cfg.Cache.Response.Semantic)
+	return semanticResponseCacheConfiguredFromResponse(cfg.Cache.Response)
+}
+
+func semanticResponseCacheConfiguredFromResponse(cfg config.ResponseCacheConfig) bool {
+	return cfg.Semantic != nil && config.SemanticCacheActive(cfg.Semantic)
 }
 
 func fallbackFeatureEnabledGlobally(cfg *config.Config) bool {

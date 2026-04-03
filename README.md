@@ -100,14 +100,22 @@ Example model identifiers are illustrative and subject to change; consult provid
    make run
    ```
 
-### Docker Compose (Full Stack)
+### Docker Compose
 
-Includes GOModel + Redis + PostgreSQL + MongoDB + Adminer + Prometheus:
+**Infrastructure only** (Redis, PostgreSQL, MongoDB, Adminer — no image build):
+
+```bash
+docker compose up -d
+# or: make infra
+```
+
+**Full stack** (adds GOModel + Prometheus; builds the app image):
 
 ```bash
 cp .env.template .env
 # Add your API keys to .env
-docker compose up -d
+docker compose --profile app up -d
+# or: make image
 ```
 
 | Service | URL |
@@ -204,15 +212,15 @@ Or via environment variables: `REDIS_URL`, `REDIS_KEY_RESPONSES`, `REDIS_TTL_RES
 
 Responses served from this layer carry `X-Cache: HIT (exact)`.
 
-### Layer 2 — Semantic cache *(coming soon)*
+### Layer 2 — Semantic cache
 
-Embeds the last user message with `all-MiniLM-L6-v2` (local ONNX, zero external dependency) and performs a KNN vector search. Semantically equivalent queries — e.g. *"What's the capital of France?"* vs *"Which city is France's capital?"* — return the same cached response without an upstream LLM call.
+Embeds the last user message via your configured provider’s OpenAI-compatible `/v1/embeddings` API (`cache.response.semantic.embedder.provider` must name a key in the top-level `providers` map) and performs a KNN vector search. Semantically equivalent queries — e.g. *"What's the capital of France?"* vs *"Which city is France's capital?"* — can return the same cached response without an upstream LLM call.
 
 Expected hit rates: ~60–70% in high-repetition workloads vs. ~18% for exact-match alone.
 
 Responses served from this layer carry `X-Cache: HIT (semantic)`.
 
-Supported vector backends: `sqlite-vec` (default, embedded), `pgvector`, `qdrant`.
+Supported vector backends: `qdrant`, `pgvector`, `pinecone`, `weaviate` (set `cache.response.semantic.vector_store.type` and the matching nested block).
 
 Both cache layers run **after** guardrail/execution-plan patching so they always see the final prompt. Use `Cache-Control: no-cache` or `Cache-Control: no-store` to bypass caching per-request.
 
@@ -234,12 +242,12 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for testing, linting, and pre-commit setup.
 | Administrative endpoints | ✅ | Admin API and dashboard ship with usage, audit, and model views. |
 | Guardrails | ✅ | The guardrails pipeline is implemented and can be enabled from config. |
 | System prompt guardrails | ✅ | `inject`, `override`, and `decorator` modes are supported. |
+| Semantic response cache | ✅ | Exact-match Redis plus optional semantic layer (API embeddings, `qdrant` / `pgvector` / `pinecone` / `weaviate`) — see [ADR-0006](docs/adr/0006-semantic-response-cache.md). |
 
 ## In Progress
 
 | Area | Status | Notes |
 | ---- | :----: | ----- |
-| Semantic response cache | 🚧 | Exact-match Redis cache is live. Semantic (vector KNN) layer with local `all-MiniLM-L6-v2` embedder is in progress — see [ADR-0006](docs/adr/0006-semantic-response-cache.md). |
 | Billing management | 🚧 | Usage and pricing primitives exist, but billing workflows are not complete. |
 | Budget management | 🚧 | Gateway-level budget enforcement and policy controls are not implemented yet. |
 | Guardrails depth | 🚧 | The system prompt guardrail is available today; broader guardrail types are still to come. |

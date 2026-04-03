@@ -22,6 +22,37 @@ cache:
     #   url: "redis://localhost:6379"
     #   key: "gomodel:models"
     #   ttl: 86400 # 24 hours in seconds
+  # response:
+  #   simple: # omit the whole `simple` key to disable exact-match caching (unless RESPONSE_CACHE_SIMPLE_ENABLED=true)
+  #     enabled: true # default when `simple` is present; set false to disable while keeping the block
+  #     redis:
+  #       url: "redis://localhost:6379"
+  #       key: "gomodel:response:"
+  #       ttl: 3600
+  #   semantic: # omit the whole `semantic` key to disable semantic caching (unless SEMANTIC_CACHE_ENABLED=true)
+  #     enabled: true
+  #     embedder:
+  #       provider: openai # must match a key under `providers` (openai, gemini, groq, …)
+  #       model: text-embedding-3-small # optional; provider-specific defaults apply if omitted
+  #     vector_store:
+  #       type: qdrant # required: qdrant | pgvector | pinecone | weaviate (pick one block below)
+  #       qdrant:
+  #         url: "http://localhost:6333"
+  #         collection: "gomodel_semantic"
+  #         api_key: "" # optional for local Qdrant
+  #       # pgvector:
+  #       #   url: "postgres://user:pass@localhost:5432/gomodel"
+  #       #   table: "gomodel_semantic_cache" # optional; default if omitted
+  #       #   dimension: 1536 # must match embedding model output
+  #       # pinecone:
+  #       #   host: "https://your-index.svc.region.pinecone.io" # data-plane host
+  #       #   api_key: "..."
+  #       #   namespace: "" # optional
+  #       #   dimension: 1536 # must match your Pinecone index
+  #       # weaviate:
+  #       #   url: "http://localhost:8080"
+  #       #   class: "GomodelSemanticCache" # PascalCase recommended (GraphQL)
+  #       #   api_key: "" # optional
 
 storage:
   type: "sqlite" # "sqlite", "postgresql", or "mongodb"

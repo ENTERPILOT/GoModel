@@ -1,4 +1,4 @@
-.PHONY: all build run clean tidy test test-e2e test-integration test-contract test-all lint lint-fix record-api swagger install-tools perf-check perf-bench
+.PHONY: all build run clean tidy test test-e2e test-integration test-contract test-all lint lint-fix record-api swagger install-tools perf-check perf-bench infra image
 
 all: build
 
@@ -13,7 +13,7 @@ LDFLAGS := -X "gomodel/internal/version.Version=$(VERSION)" \
            -X "gomodel/internal/version.Date=$(DATE)"
 
 install-tools:
-	@command -v golangci-lint > /dev/null 2>&1 || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10.1)
+	@command -v golangci-lint > /dev/null 2>&1 || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10)
 	@command -v pre-commit > /dev/null 2>&1 || (echo "Installing pre-commit..." && pip install pre-commit==4.5.1)
 	@echo "All tools are ready"
 
@@ -30,6 +30,14 @@ clean:
 # Tidy dependencies
 tidy:
 	go mod tidy
+
+# Docker Compose: Redis, PostgreSQL, MongoDB, Adminer (no app image build)
+infra:
+	docker compose up -d
+
+# Docker Compose: full stack (GOModel + Prometheus; builds app image when needed)
+image:
+	docker compose --profile app up -d
 
 # Run unit tests only
 test:

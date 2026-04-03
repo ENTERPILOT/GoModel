@@ -30,14 +30,18 @@ func (m *mockEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
 
 func (m *mockEmbedder) Close() error { return nil }
 
+func (m *mockEmbedder) Identity() string { return "test\x00mock-model" }
+
+func intPtr(v int) *int   { return &v }
+func boolPtr(v bool) *bool { return &v }
+
 func newTestSemanticMiddleware(threshold float64, maxConvMessages int, excludeSystem bool) (*semanticCacheMiddleware, *MapVecStore, *mockEmbedder) {
 	store := NewMapVecStore()
 	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
 	cfg := config.SemanticCacheConfig{
-		Enabled:                 true,
 		SimilarityThreshold:     threshold,
-		TTL:                     3600,
-		MaxConversationMessages: maxConvMessages,
+		TTL:                     intPtr(3600),
+		MaxConversationMessages: intPtr(maxConvMessages),
 		ExcludeSystemPrompt:     excludeSystem,
 	}
 	m := newSemanticCacheMiddleware(emb, store, cfg, nil)
@@ -159,10 +163,9 @@ func TestSemanticCacheMiddleware_CacheMissOnLowScore(t *testing.T) {
 	emb := &mockEmbedder{}
 
 	m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
-		Enabled:                 true,
 		SimilarityThreshold:     0.99,
-		TTL:                     3600,
-		MaxConversationMessages: 10,
+		TTL:                     intPtr(3600),
+		MaxConversationMessages: intPtr(10),
 	}, nil)
 
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`)
@@ -497,10 +500,9 @@ func TestSemanticCacheMiddleware_HeaderThresholdOverride(t *testing.T) {
 	emb := &mockEmbedder{}
 
 	m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
-		Enabled:                 true,
 		SimilarityThreshold:     0.99,
-		TTL:                     3600,
-		MaxConversationMessages: 10,
+		TTL:                     intPtr(3600),
+		MaxConversationMessages: intPtr(10),
 	}, nil)
 
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`)
@@ -533,10 +535,9 @@ func TestSemanticCacheMiddleware_TTLExpiry(t *testing.T) {
 	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
 
 	m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
-		Enabled:                 true,
 		SimilarityThreshold:     0.90,
-		TTL:                     1,
-		MaxConversationMessages: 10,
+		TTL:                     intPtr(1),
+		MaxConversationMessages: intPtr(10),
 	}, nil)
 
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"expiry test"}]}`)

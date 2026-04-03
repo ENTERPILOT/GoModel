@@ -31,7 +31,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.11
+          version: v2.10
           # Temporary workaround: config verification fetches the remote JSON schema and
           # intermittently times out in CI before lint runs. Re-enable by 2026-04-01 once
           # the schema fetch is reliable again; track in this PR/branch discussion.
@@ -125,6 +125,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      # To avoid possible issues related to missing libsecret binary on the runner runner
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

@@ -38,12 +38,11 @@ type semanticCacheMiddleware struct {
 }
 
 func newSemanticCacheMiddleware(emb embedding.Embedder, store VecStore, cfg config.SemanticCacheConfig, hitRecorder func(*echo.Context, []byte, string)) *semanticCacheMiddleware {
-	e := cfg.Embedder
 	return &semanticCacheMiddleware{
 		embedder:         emb,
 		store:            store,
 		cfg:              cfg,
-		embedderIdentity: e.Provider + "\x00" + e.Model + "\x00" + e.ModelPath,
+		embedderIdentity: emb.Identity(),
 		hitRecorder:      hitRecorder,
 	}
 }
@@ -77,7 +76,7 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 		threshold = v
 	}
 
-	if m.cfg.MaxConversationMessages > 0 && msgCount > m.cfg.MaxConversationMessages {
+	if m.cfg.MaxConversationMessages != nil && *m.cfg.MaxConversationMessages > 0 && msgCount > *m.cfg.MaxConversationMessages {
 		return next()
 	}
 
@@ -138,10 +137,11 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 		slog.Warn("semantic cache: failed to capture cacheable response body", "path", path)
 		return nil
 	}
-	ttl := time.Duration(m.cfg.TTL) * time.Second
-	if ttl == 0 {
-		ttl = time.Hour
+	ttlSec := 0
+	if m.cfg.TTL != nil {
+		ttlSec = *m.cfg.TTL
 	}
+	ttl := time.Duration(ttlSec) * time.Second
 	if v := headerDuration(c.Request(), "X-Cache-TTL"); v > 0 {
 		ttl = v
 	}
@@ -172,27 +172,47 @@ func (m *semanticCacheMiddleware) close() error {
 	return nil
 }
 
+type embedMessage struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"`
+}
+
 // extractEmbedText returns the text to embed and the total non-system message count.
 // When excludeSystem is true, system messages are stripped from counting and embedding.
 // Only the last user message is used as the embedding text to maximize cache hit rate.
+// Supports chat bodies with "messages" and Responses API bodies with "input" as either a
+// string or an array of {role, content} items (OpenAI-style).
 func extractEmbedText(body []byte, excludeSystem bool) (text string, nonSystemCount int) {
-	var req struct {
-		Messages []struct {
-			Role    string `json:"role"`
-			Content any    `json:"content"`
-		} `json:"messages"`
-		Input string `json:"input"`
+	var envelope struct {
+		Messages []embedMessage  `json:"messages"`
+		Input    json.RawMessage `json:"input"`
 	}
-	if err := json.Unmarshal(body, &req); err != nil {
+	if err := json.Unmarshal(body, &envelope); err != nil {
 		return "", 0
 	}
-
-	if len(req.Messages) == 0 {
-		return req.Input, 1
+	if len(envelope.Messages) > 0 {
+		return embedTextFromMessages(envelope.Messages, excludeSystem)
 	}
+	if len(envelope.Input) == 0 {
+		return "", 0
+	}
+	var s string
+	if json.Unmarshal(envelope.Input, &s) == nil {
+		if s == "" {
+			return "", 0
+		}
+		return s, 1
+	}
+	var inputMsgs []embedMessage
+	if json.Unmarshal(envelope.Input, &inputMsgs) != nil || len(inputMsgs) == 0 {
+		return "", 0
+	}
+	return embedTextFromMessages(inputMsgs, excludeSystem)
+}
 
+func embedTextFromMessages(messages []embedMessage, excludeSystem bool) (text string, nonSystemCount int) {
 	var lastUserText string
-	for _, m := range req.Messages {
+	for _, m := range messages {
 		if m.Role == "system" && excludeSystem {
 			continue
 		}
@@ -207,9 +227,9 @@ func extractEmbedText(body []byte, excludeSystem bool) (text string, nonSystemCo
 // conversationInvariantFingerprint hashes structural cache context: every message's
 // role and raw content except the last user turn, where only non-text parts (e.g.
 // image_url) are included so paraphrases of the final user text share a namespace.
-// Embeddings-style bodies with only "input" return an empty fingerprint (ok=true)
-// because wording is represented solely by the vector. ok is false if the JSON
-// envelope cannot be parsed or neither messages nor input is present.
+// For Responses API, "input" may be a string (empty fingerprint) or a message array
+// (same treatment as "messages"). ok is false if the JSON envelope cannot be parsed or
+// there is no usable messages/input payload.
 func conversationInvariantFingerprint(body []byte, excludeSystem bool) (fingerprint string, ok bool) {
 	var envelope struct {
 		Messages []json.RawMessage `json:"messages"`
@@ -218,10 +238,11 @@ func conversationInvariantFingerprint(body []byte, excludeSystem bool) (fingerpr
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return "", false
 	}
-	if len(envelope.Messages) == 0 {
-		if len(envelope.Input) == 0 {
-			return "", false
-		}
+	msgs, fpOK := messageRawListFromMessagesOrInput(envelope.Messages, envelope.Input)
+	if !fpOK {
+		return "", false
+	}
+	if len(msgs) == 0 {
 		return "", true
 	}
 
@@ -232,7 +253,7 @@ func conversationInvariantFingerprint(body []byte, excludeSystem bool) (fingerpr
 		rawMsg      json.RawMessage
 	}
 	var included []msgPart
-	for _, rawMsg := range envelope.Messages {
+	for _, rawMsg := range msgs {
 		var m struct {
 			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
@@ -280,6 +301,27 @@ func conversationInvariantFingerprint(body []byte, excludeSystem bool) (fingerpr
 		h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil)), true
+}
+
+func messageRawListFromMessagesOrInput(messages []json.RawMessage, input json.RawMessage) (msgs []json.RawMessage, ok bool) {
+	if len(messages) > 0 {
+		return messages, true
+	}
+	if len(input) == 0 {
+		return nil, false
+	}
+	var s string
+	if json.Unmarshal(input, &s) == nil {
+		return nil, true
+	}
+	var arr []json.RawMessage
+	if json.Unmarshal(input, &arr) != nil {
+		return nil, false
+	}
+	if len(arr) == 0 {
+		return nil, false
+	}
+	return arr, true
 }
 
 func writeNonTextUserContentFingerprint(h hash.Hash, content json.RawMessage) {
@@ -345,14 +387,17 @@ func extractTextFromContent(content any) string {
 // (e.g. "/v1/chat/completions") and isolates entries across distinct endpoints.
 func computeParamsHash(body []byte, endpointPath string, plan *core.ExecutionPlan, guardrailsHash, embedderIdentity string) string {
 	var req struct {
-		Model          string              `json:"model"`
-		Temperature    *float64            `json:"temperature"`
-		TopP           *float64            `json:"top_p"`
-		MaxTokens      *int                `json:"max_tokens"`
-		Tools          []map[string]any    `json:"tools"`
-		ResponseFormat any                 `json:"response_format"`
-		Stream         bool                `json:"stream,omitempty"`
-		StreamOptions  *core.StreamOptions `json:"stream_options"`
+		Model             string              `json:"model"`
+		Temperature       *float64            `json:"temperature"`
+		TopP              *float64            `json:"top_p"`
+		MaxTokens         *int                `json:"max_tokens"`
+		MaxOutputTokens   *int                `json:"max_output_tokens"`
+		Tools             []map[string]any    `json:"tools"`
+		ResponseFormat    any                 `json:"response_format"`
+		Stream            bool                `json:"stream,omitempty"`
+		StreamOptions     *core.StreamOptions `json:"stream_options"`
+		Reasoning         json.RawMessage     `json:"reasoning"`
+		Instructions      string              `json:"instructions"`
 	}
 	_ = json.Unmarshal(body, &req)
 
@@ -381,6 +426,27 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.ExecutionPla
 
 	if req.MaxTokens != nil {
 		h.Write([]byte(strconv.Itoa(*req.MaxTokens)))
+	}
+	h.Write([]byte{0})
+
+	if req.MaxOutputTokens != nil {
+		h.Write([]byte(strconv.Itoa(*req.MaxOutputTokens)))
+	}
+	h.Write([]byte{0})
+
+	if len(req.Reasoning) > 0 {
+		var canonical any
+		if err := json.Unmarshal(req.Reasoning, &canonical); err == nil {
+			remarshaled, _ := json.Marshal(canonical)
+			h.Write(remarshaled)
+		} else {
+			h.Write(req.Reasoning)
+		}
+	}
+	h.Write([]byte{0})
+
+	if req.Instructions != "" {
+		h.Write([]byte(req.Instructions))
 	}
 	h.Write([]byte{0})
 

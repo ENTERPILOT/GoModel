@@ -260,6 +260,7 @@ func TestSQLiteStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 	}
 	if logEntry == nil {
 		t.Fatal("expected log entry, got nil")
+		return
 	}
 	if logEntry.Model != entry.Model {
 		t.Fatalf("Model = %q, want %q", logEntry.Model, entry.Model)
@@ -326,6 +327,7 @@ func TestSQLiteReader_AllowsNullExecutionPlanVersionID(t *testing.T) {
 	}
 	if entry == nil {
 		t.Fatal("expected log entry, got nil")
+		return
 	}
 	if entry.ExecutionPlanVersionID != "" {
 		t.Fatalf("ExecutionPlanVersionID = %q, want empty", entry.ExecutionPlanVersionID)

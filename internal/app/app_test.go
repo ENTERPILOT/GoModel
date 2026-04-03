@@ -82,6 +82,7 @@ func TestDashboardRuntimeConfig_FallbackOverrideEnablesVisibilityWhenDefaultMode
 }
 
 func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
+	semanticOff := false
 	cfg := &config.Config{
 		Logging: config.LogConfig{
 			Enabled: true,
@@ -94,14 +95,12 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 		},
 		Cache: config.CacheConfig{
 			Response: config.ResponseCacheConfig{
-				Simple: config.SimpleCacheConfig{
+				Simple: &config.SimpleCacheConfig{
 					Redis: &config.RedisResponseConfig{
 						URL: "redis://localhost:6379",
 					},
 				},
-				Semantic: config.SemanticCacheConfig{
-					Enabled: false,
-				},
+				Semantic: &config.SemanticCacheConfig{Enabled: &semanticOff},
 			},
 		},
 	}
@@ -134,7 +133,7 @@ func TestDashboardRuntimeConfig_HidesCacheAnalyticsWhenUsageDisabled(t *testing.
 		},
 		Cache: config.CacheConfig{
 			Response: config.ResponseCacheConfig{
-				Simple: config.SimpleCacheConfig{
+				Simple: &config.SimpleCacheConfig{
 					Redis: &config.RedisResponseConfig{
 						URL: "redis://localhost:6379",
 					},
