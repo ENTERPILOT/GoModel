@@ -169,6 +169,7 @@ test('executionPlanWorkflowChart returns the shared chart contract for workflow 
 
     assert.equal(
         JSON.stringify(module.executionPlanWorkflowChart({
+            id: 'workflow-openai-gpt-5-v7',
             scope: {
                 scope_provider: 'openai',
                 scope_model: 'gpt-5'
@@ -204,7 +205,8 @@ test('executionPlanWorkflowChart returns the shared chart contract for workflow 
             authNodeSublabel: null,
             showAsync: true,
             showUsage: false,
-            showAudit: true
+            showAudit: true,
+            workflowID: 'workflow-openai-gpt-5-v7'
         })
     );
 });
@@ -256,8 +258,28 @@ test('executionPlanWorkflowChart masks globally disabled workflow features from 
             authNodeSublabel: null,
             showAsync: false,
             showUsage: false,
-            showAudit: false
+            showAudit: false,
+            workflowID: null
         })
+    );
+});
+
+test('executionPlanChartWorkflowID ignores the draft workflow preview sentinel and falls back to stored entry ids', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(
+        module.executionPlanChartWorkflowID(
+            { id: 'draft-workflow-preview' },
+            { execution_plan_version_id: 'historical-v1' }
+        ),
+        'historical-v1'
+    );
+    assert.equal(
+        module.executionPlanChartWorkflowID(
+            { id: 'draft-workflow-preview' },
+            { execution_plan_version_id: 'draft-workflow-preview' }
+        ),
+        null
     );
 });
 
@@ -310,7 +332,8 @@ test('executionPlanAuditChart returns the shared chart contract for audit runtim
             authNodeSublabel: null,
             showAsync: true,
             showUsage: true,
-            showAudit: true
+            showAudit: true,
+            workflowID: 'historical-v1'
         })
     );
 });
@@ -343,7 +366,71 @@ test('executionPlanAuditChart forces audit nodes even when the workflow version 
             authNodeSublabel: null,
             showAsync: true,
             showUsage: false,
-            showAudit: true
+            showAudit: true,
+            workflowID: 'missing-plan'
+        })
+    );
+});
+
+test('executionPlanAuditChart prefers request-time execution features over current workflow state', () => {
+    const module = createExecutionPlansModule();
+    module.executionPlanVersionsByID = {
+        'historical-v2': {
+            id: 'historical-v2',
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            },
+            plan_payload: {
+                features: {
+                    cache: true,
+                    audit: true,
+                    usage: true,
+                    guardrails: true,
+                    fallback: true
+                },
+                guardrails: [
+                    { ref: 'policy-system', step: 10 }
+                ]
+            }
+        }
+    };
+
+    assert.equal(
+        JSON.stringify(module.executionPlanAuditChart({
+            execution_plan_version_id: 'historical-v2',
+            provider: 'openai',
+            model: 'gpt-5',
+            status_code: 200,
+            data: {
+                execution_features: {
+                    cache: false,
+                    audit: true,
+                    usage: false,
+                    guardrails: false,
+                    fallback: true
+                }
+            }
+        })),
+        JSON.stringify({
+            showGuardrails: false,
+            guardrailLabel: '',
+            showCache: false,
+            cacheNodeClass: '',
+            cacheConnClass: '',
+            cacheStatusLabel: null,
+            aiLabel: 'openai',
+            aiSublabel: 'gpt-5',
+            aiConnClass: '',
+            aiNodeClass: 'ep-node-success',
+            responseConnClass: '',
+            responseNodeClass: 'ep-node-success',
+            authNodeClass: '',
+            authNodeSublabel: null,
+            showAsync: true,
+            showUsage: false,
+            showAudit: true,
+            workflowID: 'historical-v2'
         })
     );
 });

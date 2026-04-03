@@ -56,15 +56,15 @@ type LogEntry struct {
 	StatusCode             int    `json:"status_code" bson:"status_code"`
 
 	// Extracted fields for efficient filtering (indexed in relational DBs)
-	RequestID string `json:"request_id,omitempty" bson:"request_id,omitempty"`
+	RequestID  string `json:"request_id,omitempty" bson:"request_id,omitempty"`
 	AuthKeyID  string `json:"auth_key_id,omitempty" bson:"auth_key_id,omitempty"`
 	AuthMethod string `json:"auth_method,omitempty" bson:"auth_method,omitempty"`
-	ClientIP  string `json:"client_ip,omitempty" bson:"client_ip,omitempty"`
-	Method    string `json:"method,omitempty" bson:"method,omitempty"`
-	Path      string `json:"path,omitempty" bson:"path,omitempty"`
-	UserPath  string `json:"user_path,omitempty" bson:"user_path,omitempty"`
-	Stream    bool   `json:"stream,omitempty" bson:"stream,omitempty"`
-	ErrorType string `json:"error_type,omitempty" bson:"error_type,omitempty"`
+	ClientIP   string `json:"client_ip,omitempty" bson:"client_ip,omitempty"`
+	Method     string `json:"method,omitempty" bson:"method,omitempty"`
+	Path       string `json:"path,omitempty" bson:"path,omitempty"`
+	UserPath   string `json:"user_path,omitempty" bson:"user_path,omitempty"`
+	Stream     bool   `json:"stream,omitempty" bson:"stream,omitempty"`
+	ErrorType  string `json:"error_type,omitempty" bson:"error_type,omitempty"`
 
 	// Data contains flexible request/response information as JSON
 	Data *LogData `json:"data,omitempty" bson:"data,omitempty"`
@@ -77,6 +77,11 @@ type LogData struct {
 	// Identity
 	UserAgent  string `json:"user_agent,omitempty" bson:"user_agent,omitempty"`
 	APIKeyHash string `json:"api_key_hash,omitempty" bson:"api_key_hash,omitempty"`
+
+	// ExecutionFeatures captures the request-time effective workflow features
+	// after runtime caps were applied. This keeps audit views historically accurate
+	// even if the active process config changes later.
+	ExecutionFeatures *ExecutionFeaturesSnapshot `json:"execution_features,omitempty" bson:"execution_features,omitempty"`
 
 	// Request parameters
 	Temperature *float64 `json:"temperature,omitempty" bson:"temperature,omitempty"`
@@ -99,6 +104,17 @@ type LogData struct {
 	// Body capture status flags (set when body exceeds 1MB limit)
 	RequestBodyTooBigToHandle  bool `json:"request_body_too_big_to_handle,omitempty" bson:"request_body_too_big_to_handle,omitempty"`
 	ResponseBodyTooBigToHandle bool `json:"response_body_too_big_to_handle,omitempty" bson:"response_body_too_big_to_handle,omitempty"`
+}
+
+// ExecutionFeaturesSnapshot stores the effective workflow feature state that
+// applied to one request. Fields intentionally do not use omitempty so "false"
+// remains explicit once the snapshot exists.
+type ExecutionFeaturesSnapshot struct {
+	Cache      bool `json:"cache" bson:"cache"`
+	Audit      bool `json:"audit" bson:"audit"`
+	Usage      bool `json:"usage" bson:"usage"`
+	Guardrails bool `json:"guardrails" bson:"guardrails"`
+	Fallback   bool `json:"fallback" bson:"fallback"`
 }
 
 // marshalLogData marshals the Data field to JSON for SQL storage.

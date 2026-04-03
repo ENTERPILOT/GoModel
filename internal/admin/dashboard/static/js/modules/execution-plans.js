@@ -1,4 +1,6 @@
 (function(global) {
+    const DRAFT_WORKFLOW_PREVIEW_ID = 'draft-workflow-preview';
+
     function dashboardExecutionPlansModule() {
         return {
             executionPlans: [],
@@ -359,7 +361,7 @@
                 const scopeDisplay = this.executionPlanScopeDisplay(scope);
 
                 return {
-                    id: 'draft-workflow-preview',
+                    id: DRAFT_WORKFLOW_PREVIEW_ID,
                     scope_type: scopeType,
                     scope_display: scopeDisplay,
                     scope: {
@@ -398,6 +400,14 @@
 	                    fallback: this.executionPlanNormalizedFeatures(raw).fallback
 	                };
 	            },
+
+            executionPlanEntryFeatures(entry) {
+                const raw = entry && entry.data && entry.data.execution_features;
+                if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+                    return null;
+                }
+                return this.executionPlanNormalizedFeatures(raw);
+            },
 
             executionPlanSourceGuardrails(source) {
                 const raw = Array.isArray(source && source.plan_payload && source.plan_payload.guardrails)
@@ -1058,22 +1068,38 @@
                 return provider || 'AI';
             },
 
-            epAiSublabel(source, runtime) {
-                if (runtime && runtime.model) return runtime.model;
-                return source && source.scope && source.scope.scope_model || null;
+	            epAiSublabel(source, runtime) {
+	                if (runtime && runtime.model) return runtime.model;
+	                return source && source.scope && source.scope.scope_model || null;
+	            },
+
+            executionPlanChartWorkflowID(source, entry) {
+                const sourceID = String(source && source.id || '').trim();
+                if (sourceID && sourceID !== DRAFT_WORKFLOW_PREVIEW_ID) {
+                    return sourceID;
+                }
+                const entryID = String(entry && entry.execution_plan_version_id || '').trim();
+                if (entryID && entryID !== DRAFT_WORKFLOW_PREVIEW_ID) {
+                    return entryID;
+                }
+                return null;
             },
 
 	            executionPlanChartModel(source, runtime, options) {
 	                const config = options || {};
+	                const features = config.features && typeof config.features === 'object' && !Array.isArray(config.features)
+                    ? this.executionPlanNormalizedFeatures(config.features)
+                    : this.executionPlanSourceFeatures(source);
 	                const forceAudit = !!config.forceAudit;
-	                const showGuardrails = this.epHasGuardrails(source);
-	                const showUsage = this.epHasUsage(source);
-	                const showAudit = this.executionPlanAuditVisible() && (forceAudit || this.epHasAudit(source));
-	                const showAsync = !!(showUsage || showAudit);
+	                const showGuardrails = !!features.guardrails;
+	                const showUsage = !!features.usage;
+	                const showAudit = forceAudit || !!features.audit;
+	                const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
+                    const workflowID = this.executionPlanChartWorkflowID(source, config.entry);
 	                return {
 	                    showGuardrails,
 	                    guardrailLabel: showGuardrails ? this.epGuardrailLabel(source) : '',
-	                    showCache: !!config.forceCache || this.epShowCacheStep(source, runtime),
+	                    showCache: !!config.forceCache || !!features.cache || this.epRuntimeHasCache(runtime),
                     cacheNodeClass: this.epCacheNodeClass(runtime),
                     cacheConnClass: this.epCacheConnClass(runtime),
                     cacheStatusLabel: this.epCacheStatusLabel(runtime),
@@ -1087,7 +1113,8 @@
 				    authNodeSublabel: this.epAuthNodeSublabel(runtime),
 	                    showAsync,
 	                    showUsage,
-	                    showAudit
+	                    showAudit,
+                        workflowID
 	                };
 	            },
 
@@ -1098,8 +1125,10 @@
             executionPlanAuditChart(entry) {
                 const source = this.auditEntryExecutionPlan(entry);
                 const runtime = this.epRuntimeFromEntry(entry);
+                const features = this.executionPlanEntryFeatures(entry) || this.executionPlanSourceFeatures(source);
                 return this.executionPlanChartModel(source, runtime, {
-                    forceCache: true,
+                    entry,
+                    features,
                     forceAudit: true,
                     forceAsync: true
                 });

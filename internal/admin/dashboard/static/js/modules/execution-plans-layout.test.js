@@ -212,7 +212,7 @@ test('workflow editor renders a live preview card from the draft workflow state'
     );
 });
 
-test('audit log pipeline always renders cache and binds runtime highlight classes across the full path', () => {
+test('audit log pipeline binds cache visibility and runtime highlight classes across the full path', () => {
     const template = readExecutionPlanTemplateSource();
     const css = readFixture('../../css/dashboard.css');
 
@@ -230,6 +230,10 @@ test('audit log pipeline always renders cache and binds runtime highlight classe
     );
     assert.match(
         template,
+        /<div class="exec-pipeline" :class="\{ 'exec-pipeline-has-meta': {{\.}}\.workflowID \}">[\s\S]*<div class="exec-pipeline-meta" x-show="{{\.}}\.workflowID">[\s\S]*x-text="'id: ' \+ {{\.}}\.workflowID"/
+    );
+    assert.match(
+        template,
         /<div class="ep-conn" :class="{{\.}}\.responseConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-endpoint" :class="{{\.}}\.responseNodeClass">/
     );
 
@@ -240,6 +244,14 @@ test('audit log pipeline always renders cache and binds runtime highlight classe
     const errorRule = readCSSRule(css, '.ep-node-error');
     assert.match(errorRule, /border-color:\s*color-mix\(in srgb, var\(--danger\) 52%, var\(--border\)\)/);
     assert.match(errorRule, /background:\s*color-mix\(in srgb, var\(--danger\) 9%, var\(--bg-surface\)\)/);
+
+    const pipelineRule = readCSSRule(css, '.exec-pipeline');
+    assert.match(pipelineRule, /position:\s*relative/);
+
+    const metaRule = readCSSRule(css, '.exec-pipeline-meta');
+    assert.match(metaRule, /position:\s*absolute/);
+    assert.match(metaRule, /top:\s*12px/);
+    assert.match(metaRule, /right:\s*14px/);
 
     const skippedAiRule = readCSSRule(css, '.ep-node-skipped');
     assert.match(skippedAiRule, /position:\s*relative/);

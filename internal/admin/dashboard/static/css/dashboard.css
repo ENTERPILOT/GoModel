@@ -2728,6 +2728,7 @@ body.conversation-drawer-open {
    ═══════════════════════════════════════════════════════════════ */
 
 .exec-pipeline {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 0;
@@ -2736,6 +2737,35 @@ body.conversation-drawer-open {
     border-radius: var(--radius);
     border: 1px solid var(--border);
     background: var(--bg);
+}
+
+.exec-pipeline-has-meta {
+    padding-top: 42px;
+}
+
+.exec-pipeline-meta {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: calc(100% - 28px);
+}
+
+.exec-pipeline-meta-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1.2;
+    white-space: nowrap;
 }
 
 /* ─── Main pipeline row ─── */
