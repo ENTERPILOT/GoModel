@@ -806,30 +806,456 @@ func normalizeGuardrailMessageText(content any) (string, error) {
 }
 
 // responsesToMessages extracts the normalized message list from a ResponsesRequest.
-// The Instructions field maps to a system message.
-func responsesToMessages(req *core.ResponsesRequest) []Message {
+// The Instructions field maps to a system message and the input items are kept in
+// one-to-one order so content-rewriting guardrails can be applied back safely.
+func responsesToMessages(req *core.ResponsesRequest) ([]Message, error) {
 	var msgs []Message
 	if req.Instructions != "" {
 		msgs = append(msgs, Message{Role: "system", Content: req.Instructions})
 	}
-	return msgs
+
+	inputMsgs, err := responsesInputToMessages(req.Input)
+	if err != nil {
+		return nil, err
+	}
+	msgs = append(msgs, inputMsgs...)
+	return msgs, nil
 }
 
-// applyMessagesToResponses returns a shallow copy of req with system messages
-// applied back to the Instructions field.
-func applyMessagesToResponses(req *core.ResponsesRequest, msgs []Message) *core.ResponsesRequest {
+func responsesInputToMessages(input any) ([]Message, error) {
+	switch typed := input.(type) {
+	case nil:
+		return nil, nil
+	case string:
+		return []Message{{Role: "user", Content: typed}}, nil
+	}
+
+	elements, err := coerceResponsesInputElements(input)
+	if err != nil {
+		return nil, err
+	}
+	msgs := make([]Message, len(elements))
+	for i, element := range elements {
+		msg, err := responsesInputElementToGuardrailMessage(element, i)
+		if err != nil {
+			return nil, err
+		}
+		msgs[i] = msg
+	}
+	return msgs, nil
+}
+
+func coerceResponsesInputElements(input any) ([]core.ResponsesInputElement, error) {
+	switch typed := input.(type) {
+	case []core.ResponsesInputElement:
+		elements := make([]core.ResponsesInputElement, len(typed))
+		copy(elements, typed)
+		return elements, nil
+	case []map[string]any:
+		items := make([]any, 0, len(typed))
+		for _, item := range typed {
+			items = append(items, item)
+		}
+		return coerceResponsesInputElements(items)
+	case []any:
+		elements := make([]core.ResponsesInputElement, len(typed))
+		for i, item := range typed {
+			raw, err := json.Marshal(item)
+			if err != nil {
+				return nil, core.NewInvalidRequestError("invalid responses input item", err)
+			}
+			if err := json.Unmarshal(raw, &elements[i]); err != nil {
+				return nil, core.NewInvalidRequestError("invalid responses input item", err)
+			}
+		}
+		return elements, nil
+	default:
+		return nil, core.NewInvalidRequestError("invalid responses input: unsupported type", nil)
+	}
+}
+
+func responsesInputElementToGuardrailMessage(item core.ResponsesInputElement, index int) (Message, error) {
+	switch item.Type {
+	case "function_call":
+		if strings.TrimSpace(item.Name) == "" {
+			return Message{}, core.NewInvalidRequestError("invalid responses input item: function_call name is required", nil)
+		}
+		return Message{
+			Role:        "assistant",
+			Content:     "",
+			ContentNull: true,
+			ToolCalls: []core.ToolCall{
+				{
+					ID:   item.CallID,
+					Type: "function",
+					Function: core.FunctionCall{
+						Name:      item.Name,
+						Arguments: item.Arguments,
+					},
+				},
+			},
+		}, nil
+	case "function_call_output":
+		content, err := stringifyResponsesValue(item.Output)
+		if err != nil {
+			return Message{}, core.NewInvalidRequestError("invalid responses input item: function_call_output.output must be JSON-serializable", err)
+		}
+		return Message{
+			Role:       "tool",
+			ToolCallID: item.CallID,
+			Content:    content,
+		}, nil
+	default:
+		role := strings.TrimSpace(item.Role)
+		if role == "" {
+			return Message{}, core.NewInvalidRequestError("invalid responses input item: role is required", nil)
+		}
+		text, err := normalizeGuardrailMessageText(item.Content)
+		if err != nil {
+			return Message{}, core.NewInvalidRequestError("invalid responses input item: unsupported content", err)
+		}
+		return Message{
+			Role:        role,
+			Content:     text,
+			ContentNull: item.Content == nil,
+		}, nil
+	}
+}
+
+func stringifyResponsesValue(value any) (string, error) {
+	switch typed := value.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return typed, nil
+	default:
+		raw, err := json.Marshal(typed)
+		if err != nil {
+			return "", err
+		}
+		return string(raw), nil
+	}
+}
+
+// applyMessagesToResponses returns a shallow copy of req with system and input
+// messages applied back to the original Responses envelope.
+func applyMessagesToResponses(req *core.ResponsesRequest, msgs []Message) (*core.ResponsesRequest, error) {
 	result := *req
 	var instructions string
+	nonSystem := make([]Message, 0, len(msgs))
 	for _, m := range msgs {
 		if m.Role == "system" {
 			if instructions != "" {
 				instructions += "\n"
 			}
 			instructions += m.Content
+			continue
 		}
+		nonSystem = append(nonSystem, m)
 	}
 	result.Instructions = instructions
-	return &result
+
+	input, err := applyMessagesToResponsesInput(req.Input, nonSystem)
+	if err != nil {
+		return nil, err
+	}
+	result.Input = input
+	return &result, nil
+}
+
+func applyMessagesToResponsesInput(original any, msgs []Message) (any, error) {
+	switch typed := original.(type) {
+	case nil:
+		if len(msgs) != 0 {
+			return nil, core.NewInvalidRequestError("guardrails cannot add or remove responses input items", nil)
+		}
+		return nil, nil
+	case string:
+		if len(msgs) != 1 {
+			return nil, core.NewInvalidRequestError("guardrails cannot add or remove responses input items", nil)
+		}
+		if msgs[0].Role != "user" {
+			return nil, core.NewInvalidRequestError("guardrails cannot change the role of a string responses input", nil)
+		}
+		if msgs[0].ContentNull {
+			return "", nil
+		}
+		return msgs[0].Content, nil
+	default:
+		_ = typed
+	}
+
+	elements, err := coerceResponsesInputElements(original)
+	if err != nil {
+		return nil, err
+	}
+	return applyMessagesToResponsesElements(elements, msgs)
+}
+
+func applyMessagesToResponsesElements(elements []core.ResponsesInputElement, msgs []Message) ([]core.ResponsesInputElement, error) {
+	if len(msgs) != len(elements) {
+		return nil, core.NewInvalidRequestError("guardrails cannot add or remove responses input items", nil)
+	}
+
+	result := make([]core.ResponsesInputElement, len(elements))
+	for i, original := range elements {
+		patched, err := applyGuardedResponsesElementToOriginal(original, msgs[i], i)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = patched
+	}
+	return result, nil
+}
+
+func applyGuardedResponsesElementToOriginal(original core.ResponsesInputElement, modified Message, _ int) (core.ResponsesInputElement, error) {
+	preserved := original
+
+	switch original.Type {
+	case "function_call":
+		if modified.Role != "assistant" {
+			return core.ResponsesInputElement{}, core.NewInvalidRequestError("guardrails cannot reorder or retag responses input items", nil)
+		}
+		return preserved, nil
+	case "function_call_output":
+		if modified.Role != "tool" {
+			return core.ResponsesInputElement{}, core.NewInvalidRequestError("guardrails cannot reorder or retag responses input items", nil)
+		}
+		preserved.Output = modified.Content
+		return preserved, nil
+	default:
+		role := strings.TrimSpace(original.Role)
+		if role == "" {
+			return core.ResponsesInputElement{}, core.NewInvalidRequestError("invalid responses input item: role is required", nil)
+		}
+		if modified.Role != role {
+			return core.ResponsesInputElement{}, core.NewInvalidRequestError("guardrails cannot reorder or retag responses input items", nil)
+		}
+		content, err := applyGuardedResponsesContentToOriginal(original.Content, modified.Content, modified.ContentNull)
+		if err != nil {
+			return core.ResponsesInputElement{}, core.NewInvalidRequestError("guardrails cannot merge rewritten text into responses input item", err)
+		}
+		preserved.Content = content
+		return preserved, nil
+	}
+}
+
+func applyGuardedResponsesContentToOriginal(originalContent any, rewrittenText string, contentNull bool) (any, error) {
+	if isResponsesStructuredContent(originalContent) {
+		return rewriteStructuredResponsesContentWithTextRewrite(originalContent, rewrittenText)
+	}
+	if rewrittenText != "" {
+		contentNull = false
+	}
+	if contentNull {
+		return nil, nil
+	}
+	return rewrittenText, nil
+}
+
+func isResponsesStructuredContent(content any) bool {
+	switch typed := content.(type) {
+	case []any:
+		return len(typed) > 0
+	case []core.ContentPart:
+		return len(typed) > 0
+	default:
+		return false
+	}
+}
+
+func rewriteStructuredResponsesContentWithTextRewrite(originalContent any, rewrittenText string) (any, error) {
+	switch typed := originalContent.(type) {
+	case []core.ContentPart:
+		return rewriteStructuredResponsesTypedContentParts(typed, rewrittenText)
+	case []any:
+		return rewriteStructuredResponsesInterfaceContentParts(typed, rewrittenText)
+	default:
+		return nil, core.NewInvalidRequestError("unsupported structured responses content", nil)
+	}
+}
+
+func rewriteStructuredResponsesTypedContentParts(parts []core.ContentPart, rewrittenText string) (any, error) {
+	textIndexes := make([]int, 0, len(parts))
+	originalTexts := make([]string, 0, len(parts))
+	for i, part := range parts {
+		if !isResponsesTextPartType(part.Type) || part.Text == "" {
+			continue
+		}
+		textIndexes = append(textIndexes, i)
+		originalTexts = append(originalTexts, part.Text)
+	}
+
+	if len(textIndexes) == 0 {
+		if rewrittenText == "" {
+			return cloneContentParts(parts), nil
+		}
+		prepended := make([]core.ContentPart, 0, len(parts)+1)
+		prepended = append(prepended, core.ContentPart{Type: "input_text", Text: rewrittenText})
+		prepended = append(prepended, cloneContentParts(parts)...)
+		return prepended, nil
+	}
+
+	if len(textIndexes) == 1 {
+		merged := cloneContentParts(parts)
+		textIndex := textIndexes[0]
+		if rewrittenText == "" {
+			merged = append(merged[:textIndex], merged[textIndex+1:]...)
+		} else {
+			merged[textIndex].Text = rewrittenText
+		}
+		if len(merged) == 0 {
+			return nil, core.NewInvalidRequestError("guardrails produced empty structured responses content after rewrite", nil)
+		}
+		return merged, nil
+	}
+
+	if rewrittenText == strings.Join(originalTexts, " ") {
+		return cloneContentParts(parts), nil
+	}
+
+	merged := make([]core.ContentPart, 0, len(parts))
+	insertedRewrittenText := false
+	for _, part := range parts {
+		if isResponsesTextPartType(part.Type) {
+			if !insertedRewrittenText && rewrittenText != "" {
+				rewrittenPart := cloneContentPart(part)
+				rewrittenPart.Text = rewrittenText
+				merged = append(merged, rewrittenPart)
+				insertedRewrittenText = true
+			}
+			continue
+		}
+		merged = append(merged, cloneContentPart(part))
+	}
+
+	if len(merged) == 0 {
+		return nil, core.NewInvalidRequestError("guardrails produced empty structured responses content after rewrite", nil)
+	}
+	return merged, nil
+}
+
+func rewriteStructuredResponsesInterfaceContentParts(parts []any, rewrittenText string) (any, error) {
+	textIndexes := make([]int, 0, len(parts))
+	originalTexts := make([]string, 0, len(parts))
+	for i, part := range parts {
+		partMap, ok := part.(map[string]any)
+		if !ok {
+			continue
+		}
+		partType, _ := partMap["type"].(string)
+		if !isResponsesTextPartType(partType) {
+			continue
+		}
+		text, _ := partMap["text"].(string)
+		if text == "" {
+			continue
+		}
+		textIndexes = append(textIndexes, i)
+		originalTexts = append(originalTexts, text)
+	}
+
+	if len(textIndexes) == 0 {
+		if rewrittenText == "" {
+			return cloneResponsesInterfaceParts(parts), nil
+		}
+		prepended := make([]any, 0, len(parts)+1)
+		prepended = append(prepended, map[string]any{"type": "input_text", "text": rewrittenText})
+		prepended = append(prepended, cloneResponsesInterfaceParts(parts)...)
+		return prepended, nil
+	}
+
+	if len(textIndexes) == 1 {
+		merged := make([]any, 0, len(parts))
+		textIndex := textIndexes[0]
+		for i, part := range parts {
+			if i == textIndex {
+				if rewrittenText == "" {
+					continue
+				}
+				partMap, ok := part.(map[string]any)
+				if !ok {
+					return nil, core.NewInvalidRequestError("guardrails cannot rewrite non-object responses content part", nil)
+				}
+				cloned := cloneStringAnyMap(partMap)
+				cloned["text"] = rewrittenText
+				merged = append(merged, cloned)
+				continue
+			}
+			merged = append(merged, cloneResponsesInterfacePart(part))
+		}
+		if len(merged) == 0 {
+			return nil, core.NewInvalidRequestError("guardrails produced empty structured responses content after rewrite", nil)
+		}
+		return merged, nil
+	}
+
+	if rewrittenText == strings.Join(originalTexts, " ") {
+		return cloneResponsesInterfaceParts(parts), nil
+	}
+
+	merged := make([]any, 0, len(parts))
+	insertedRewrittenText := false
+	for _, part := range parts {
+		partMap, ok := part.(map[string]any)
+		if ok {
+			partType, _ := partMap["type"].(string)
+			if isResponsesTextPartType(partType) {
+				if !insertedRewrittenText && rewrittenText != "" {
+					cloned := cloneStringAnyMap(partMap)
+					cloned["text"] = rewrittenText
+					merged = append(merged, cloned)
+					insertedRewrittenText = true
+				}
+				continue
+			}
+		}
+		merged = append(merged, cloneResponsesInterfacePart(part))
+	}
+
+	if len(merged) == 0 {
+		return nil, core.NewInvalidRequestError("guardrails produced empty structured responses content after rewrite", nil)
+	}
+	return merged, nil
+}
+
+func isResponsesTextPartType(partType string) bool {
+	switch partType {
+	case "text", "input_text", "output_text":
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneResponsesInterfaceParts(parts []any) []any {
+	if len(parts) == 0 {
+		return nil
+	}
+	cloned := make([]any, len(parts))
+	for i, part := range parts {
+		cloned[i] = cloneResponsesInterfacePart(part)
+	}
+	return cloned
+}
+
+func cloneResponsesInterfacePart(part any) any {
+	partMap, ok := part.(map[string]any)
+	if !ok {
+		return part
+	}
+	return cloneStringAnyMap(partMap)
+}
+
+func cloneStringAnyMap(src map[string]any) map[string]any {
+	if src == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(src))
+	for key, value := range src {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func cloneToolCalls(toolCalls []core.ToolCall) []core.ToolCall {

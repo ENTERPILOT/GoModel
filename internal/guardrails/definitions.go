@@ -2,8 +2,10 @@ package guardrails
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -67,9 +69,18 @@ type systemPromptDefinitionConfig struct {
 	Content string `json:"content"`
 }
 
+type llmBasedAlteringDefinitionConfig struct {
+	Model             string   `json:"model"`
+	Provider          string   `json:"provider,omitempty"`
+	Prompt            string   `json:"prompt,omitempty"`
+	Roles             []string `json:"roles,omitempty"`
+	SkipContentPrefix string   `json:"skip_content_prefix,omitempty"`
+	MaxTokens         int      `json:"max_tokens,omitempty"`
+}
+
 func normalizeDefinition(def Definition) (Definition, error) {
 	def.Name = strings.TrimSpace(def.Name)
-	def.Type = strings.TrimSpace(def.Type)
+	def.Type = normalizeDefinitionType(def.Type)
 	def.Description = strings.TrimSpace(def.Description)
 	userPath, err := core.NormalizeUserPath(def.UserPath)
 	if err != nil {
@@ -95,11 +106,32 @@ func normalizeDefinition(def Definition) (Definition, error) {
 			return Definition{}, newValidationError("marshal guardrail config", err)
 		}
 		def.Config = raw
+	case "llm_based_altering":
+		cfg, err := decodeLLMBasedAlteringDefinitionConfig(def.Config)
+		if err != nil {
+			return Definition{}, err
+		}
+		raw, err := json.Marshal(cfg)
+		if err != nil {
+			return Definition{}, newValidationError("marshal guardrail config", err)
+		}
+		def.Config = raw
 	default:
 		return Definition{}, newValidationError(`unknown guardrail type: "`+def.Type+`"`, nil)
 	}
 
 	return def, nil
+}
+
+func normalizeDefinitionType(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "system-prompt":
+		return "system_prompt"
+	case "llm-based-altering":
+		return "llm_based_altering"
+	default:
+		return strings.ToLower(strings.TrimSpace(raw))
+	}
 }
 
 func cloneDefinition(def Definition) Definition {
@@ -159,7 +191,60 @@ func decodeSystemPromptDefinitionConfig(raw json.RawMessage) (systemPromptDefini
 	return cfg, nil
 }
 
-func buildDefinition(def Definition) (Guardrail, responsecache.GuardrailRuleDescriptor, error) {
+func decodeLLMBasedAlteringDefinitionConfig(raw json.RawMessage) (llmBasedAlteringDefinitionConfig, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		raw = []byte(`{}`)
+	}
+
+	var cfg llmBasedAlteringDefinitionConfig
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cfg); err != nil {
+		return llmBasedAlteringDefinitionConfig{}, newValidationError("invalid llm_based_altering config: "+err.Error(), err)
+	}
+	if decoder.More() {
+		return llmBasedAlteringDefinitionConfig{}, newValidationError("invalid llm_based_altering config: trailing data", nil)
+	}
+
+	cfg.Model = strings.TrimSpace(cfg.Model)
+	if cfg.Model == "" {
+		return llmBasedAlteringDefinitionConfig{}, newValidationError("llm_based_altering model is required", nil)
+	}
+	cfg.Provider = strings.TrimSpace(cfg.Provider)
+	selector, err := core.ParseModelSelector(cfg.Model, cfg.Provider)
+	if err != nil {
+		return llmBasedAlteringDefinitionConfig{}, newValidationError("invalid llm_based_altering model selector: "+err.Error(), err)
+	}
+	cfg.Model = selector.QualifiedModel()
+	cfg.Provider = ""
+	cfg.Prompt = strings.TrimSpace(cfg.Prompt)
+	cfg.SkipContentPrefix = strings.TrimSpace(cfg.SkipContentPrefix)
+	cfg.MaxTokens = EffectiveLLMBasedAlteringMaxTokens(cfg.MaxTokens)
+
+	roles, err := NormalizeLLMBasedAlteringRoles(cfg.Roles)
+	if err != nil {
+		return llmBasedAlteringDefinitionConfig{}, newValidationError(err.Error(), err)
+	}
+	cfg.Roles = roles
+	return cfg, nil
+}
+
+func llmBasedAlteringRuntimeConfig(cfg llmBasedAlteringDefinitionConfig) (LLMBasedAlteringConfig, error) {
+	selector, err := core.ParseModelSelector(cfg.Model, cfg.Provider)
+	if err != nil {
+		return LLMBasedAlteringConfig{}, newValidationError("invalid llm_based_altering model selector: "+err.Error(), err)
+	}
+	return NormalizeLLMBasedAlteringConfig(LLMBasedAlteringConfig{
+		Model:             selector.Model,
+		Provider:          selector.Provider,
+		Prompt:            cfg.Prompt,
+		Roles:             cfg.Roles,
+		SkipContentPrefix: cfg.SkipContentPrefix,
+		MaxTokens:         cfg.MaxTokens,
+	})
+}
+
+func buildDefinition(def Definition, executor ChatCompletionExecutor) (Guardrail, responsecache.GuardrailRuleDescriptor, error) {
 	switch def.Type {
 	case "system_prompt":
 		cfg, err := decodeSystemPromptDefinitionConfig(def.Config)
@@ -177,6 +262,31 @@ func buildDefinition(def Definition) (Guardrail, responsecache.GuardrailRuleDesc
 			Mode:    string(mode),
 			Content: cfg.Content,
 		}, nil
+	case "llm_based_altering":
+		cfg, err := decodeLLMBasedAlteringDefinitionConfig(def.Config)
+		if err != nil {
+			return nil, responsecache.GuardrailRuleDescriptor{}, err
+		}
+		runtimeCfg, err := llmBasedAlteringRuntimeConfig(cfg)
+		if err != nil {
+			return nil, responsecache.GuardrailRuleDescriptor{}, newValidationError("build llm_based_altering guardrail: "+err.Error(), err)
+		}
+		if executor == nil {
+			return &unavailableGuardrail{
+					name: def.Name,
+					message: fmt.Sprintf(
+						`guardrail %q of type "llm_based_altering" cannot execute because the auxiliary executor is not configured`,
+						def.Name,
+					),
+				},
+				llmBasedAlteringDescriptor(def.Name, runtimeCfg),
+				nil
+		}
+		instance, err := NewLLMBasedAlteringGuardrail(def.Name, runtimeCfg, executor)
+		if err != nil {
+			return nil, responsecache.GuardrailRuleDescriptor{}, newValidationError("build llm_based_altering guardrail: "+err.Error(), err)
+		}
+		return instance, llmBasedAlteringDescriptor(def.Name, runtimeCfg), nil
 	default:
 		return nil, responsecache.GuardrailRuleDescriptor{}, newValidationError(`unknown guardrail type: "`+def.Type+`"`, nil)
 	}
@@ -198,6 +308,31 @@ func summarizeDefinition(def Definition) string {
 			return cfg.Mode
 		}
 		return fmt.Sprintf("%s • %s", cfg.Mode, content)
+	case "llm_based_altering":
+		cfg, err := decodeLLMBasedAlteringDefinitionConfig(def.Config)
+		if err != nil {
+			return ""
+		}
+		runtimeCfg, err := llmBasedAlteringRuntimeConfig(cfg)
+		if err != nil {
+			return ""
+		}
+		target := runtimeCfg.Model
+		if runtimeCfg.Provider != "" {
+			target = runtimeCfg.Provider + "/" + runtimeCfg.Model
+		}
+		promptSummary := "default prompt"
+		if strings.TrimSpace(cfg.Prompt) != "" {
+			prompt := strings.Join(strings.Fields(runtimeCfg.Prompt), " ")
+			const maxLen = 48
+			if len(prompt) > maxLen {
+				prompt = prompt[:maxLen-3] + "..."
+			}
+			if prompt != "" {
+				promptSummary = prompt
+			}
+		}
+		return fmt.Sprintf("%s • %s • %s", target, strings.Join(runtimeCfg.Roles, ","), promptSummary)
 	default:
 		return ""
 	}
@@ -234,7 +369,96 @@ func TypeDefinitions() []TypeDefinition {
 				},
 			},
 		},
+		{
+			Type:        "llm_based_altering",
+			Label:       "LLM-Based Altering",
+			Description: "Uses an auxiliary model to rewrite selected message roles before the main request reaches the provider.",
+			Defaults: mustMarshalRaw(llmBasedAlteringDefinitionConfig{
+				Model:     "",
+				Prompt:    DefaultLLMBasedAlteringPrompt,
+				Roles:     []string{"user"},
+				MaxTokens: DefaultLLMBasedAlteringMaxTokens,
+			}),
+			Fields: []TypeField{
+				{
+					Key:         "model",
+					Label:       "Rewrite Model",
+					Input:       "text",
+					Required:    true,
+					Help:        "Model, alias, or {provider}/{model} selector used for the auxiliary rewrite request.",
+					Placeholder: "openai/gpt-4o-mini",
+				},
+				{
+					Key:      "roles",
+					Label:    "Roles",
+					Input:    "checkboxes",
+					Required: true,
+					Help:     "Choose which conversation roles should be rewritten.",
+					Options: []TypeOption{
+						{Value: "system", Label: "System"},
+						{Value: "user", Label: "User"},
+						{Value: "assistant", Label: "Assistant"},
+						{Value: "tool", Label: "Tool"},
+					},
+				},
+				{
+					Key:         "max_tokens",
+					Label:       "Max Tokens",
+					Input:       "number",
+					Help:        "Upper bound for the auxiliary rewrite completion.",
+					Placeholder: fmt.Sprintf("%d", DefaultLLMBasedAlteringMaxTokens),
+				},
+				{
+					Key:         "skip_content_prefix",
+					Label:       "Skip Prefix",
+					Input:       "text",
+					Help:        "If set, messages whose trimmed content starts with this prefix are left unchanged.",
+					Placeholder: "### safe",
+				},
+				{
+					Key:         "prompt",
+					Label:       "Prompt",
+					Input:       "textarea",
+					Help:        "Optional custom rewrite prompt. Leave empty to use the built-in LiteLLM-derived anonymization prompt.",
+					Placeholder: "Leave empty to use the built-in anonymization prompt.",
+				},
+			},
+		},
 	})
+}
+
+func llmBasedAlteringDescriptor(name string, cfg LLMBasedAlteringConfig) responsecache.GuardrailRuleDescriptor {
+	return responsecache.GuardrailRuleDescriptor{
+		Name: name,
+		Type: "llm_based_altering",
+		Mode: strings.Join(cfg.Roles, ","),
+		Content: strings.Join([]string{
+			cfg.Model,
+			cfg.Provider,
+			cfg.SkipContentPrefix,
+			fmt.Sprintf("%d", cfg.MaxTokens),
+			cfg.Prompt,
+		}, "\x1f"),
+	}
+}
+
+type unavailableGuardrail struct {
+	name    string
+	message string
+}
+
+func (g *unavailableGuardrail) Name() string {
+	if g == nil {
+		return ""
+	}
+	return g.name
+}
+
+func (g *unavailableGuardrail) Process(context.Context, []Message) ([]Message, error) {
+	if g == nil {
+		return nil, core.NewProviderError("", http.StatusBadGateway, "guardrail is unavailable", nil)
+	}
+	return nil, core.NewProviderError("", http.StatusBadGateway, g.message, nil)
 }
 
 func mustMarshalRaw(value any) json.RawMessage {

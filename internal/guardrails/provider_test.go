@@ -188,6 +188,46 @@ func TestGuardedProvider_ChatCompletion_AppliesGuardrails(t *testing.T) {
 	}
 }
 
+func TestGuardedProvider_ChatCompletion_AppliesLLMBasedAlteringGuardrail(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+
+	g, err := NewLLMBasedAlteringGuardrail("privacy", LLMBasedAlteringConfig{
+		Model: "gpt-4o-mini",
+	}, mockChatCompletionExecutor{
+		chatFn: func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
+			return &core.ChatResponse{
+				Choices: []core.Choice{
+					{Message: core.ResponseMessage{Role: "assistant", Content: "[|---|](PERSON_1)"}},
+				},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLLMBasedAlteringGuardrail() error = %v", err)
+	}
+	pipeline.Add(g, 0)
+
+	guarded := NewGuardedProvider(inner, pipeline)
+
+	req := &core.ChatRequest{
+		Model:    "gpt-4",
+		Messages: []core.Message{{Role: "user", Content: "John Smith"}},
+	}
+
+	_, err = guarded.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if inner.chatReq == nil {
+		t.Fatal("inner provider was not called")
+	}
+	if inner.chatReq.Messages[0].Content != "[|---|](PERSON_1)" {
+		t.Fatalf("message content = %#v, want rewritten value", inner.chatReq.Messages[0].Content)
+	}
+}
+
 func TestGuardedProvider_StreamChatCompletion_AppliesGuardrails(t *testing.T) {
 	inner := &mockRoutableProvider{}
 	pipeline := NewPipeline()
@@ -982,6 +1022,42 @@ func TestGuardedProvider_Responses_AppliesGuardrails(t *testing.T) {
 
 	if inner.responsesReq.Instructions != "guardrail instructions" {
 		t.Errorf("expected injected instructions, got %q", inner.responsesReq.Instructions)
+	}
+}
+
+func TestGuardedProvider_Responses_AppliesLLMBasedAlteringGuardrail(t *testing.T) {
+	inner := &mockRoutableProvider{}
+	pipeline := NewPipeline()
+
+	g, err := NewLLMBasedAlteringGuardrail("privacy", LLMBasedAlteringConfig{
+		Model: "gpt-4o-mini",
+	}, mockChatCompletionExecutor{
+		chatFn: func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
+			return &core.ChatResponse{
+				Choices: []core.Choice{
+					{Message: core.ResponseMessage{Role: "assistant", Content: "[|---|](PERSON_1)"}},
+				},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLLMBasedAlteringGuardrail() error = %v", err)
+	}
+	pipeline.Add(g, 0)
+
+	guarded := NewGuardedProvider(inner, pipeline)
+	req := &core.ResponsesRequest{Model: "gpt-4", Input: "John Smith"}
+
+	_, err = guarded.Responses(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if inner.responsesReq == nil {
+		t.Fatal("inner provider was not called")
+	}
+	if inner.responsesReq.Input != "[|---|](PERSON_1)" {
+		t.Fatalf("Input = %#v, want rewritten value", inner.responsesReq.Input)
 	}
 }
 
@@ -1987,20 +2063,32 @@ func TestResponsesToMessages_WithInstructions(t *testing.T) {
 		Input:        "hello",
 		Instructions: "be helpful",
 	}
-	msgs := responsesToMessages(req)
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
+	msgs, err := responsesToMessages(req)
+	if err != nil {
+		t.Fatalf("responsesToMessages() error = %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgs))
 	}
 	if msgs[0].Role != "system" || msgs[0].Content != "be helpful" {
-		t.Errorf("unexpected message: %+v", msgs[0])
+		t.Errorf("unexpected first message: %+v", msgs[0])
+	}
+	if msgs[1].Role != "user" || msgs[1].Content != "hello" {
+		t.Errorf("unexpected second message: %+v", msgs[1])
 	}
 }
 
 func TestResponsesToMessages_NoInstructions(t *testing.T) {
 	req := &core.ResponsesRequest{Model: "gpt-4", Input: "hello"}
-	msgs := responsesToMessages(req)
-	if len(msgs) != 0 {
-		t.Errorf("expected 0 messages, got %d", len(msgs))
+	msgs, err := responsesToMessages(req)
+	if err != nil {
+		t.Fatalf("responsesToMessages() error = %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Errorf("expected 1 message, got %d", len(msgs))
+	}
+	if msgs[0].Role != "user" || msgs[0].Content != "hello" {
+		t.Errorf("unexpected message: %+v", msgs[0])
 	}
 }
 
@@ -2008,10 +2096,17 @@ func TestApplyMessagesToResponses_SystemToInstructions(t *testing.T) {
 	req := &core.ResponsesRequest{Model: "gpt-4", Input: "hello"}
 	msgs := []Message{
 		{Role: "system", Content: "new instructions"},
+		{Role: "user", Content: "hello"},
 	}
-	result := applyMessagesToResponses(req, msgs)
+	result, err := applyMessagesToResponses(req, msgs)
+	if err != nil {
+		t.Fatalf("applyMessagesToResponses() error = %v", err)
+	}
 	if result.Instructions != "new instructions" {
 		t.Errorf("expected 'new instructions', got %q", result.Instructions)
+	}
+	if result.Input != "hello" {
+		t.Errorf("expected input to stay hello, got %#v", result.Input)
 	}
 	// Original untouched
 	if req.Instructions != "" {
@@ -2042,9 +2137,65 @@ func TestApplyMessagesToResponses_NoSystem_ClearsInstructions(t *testing.T) {
 		Input:        "hello",
 		Instructions: "old",
 	}
-	msgs := []Message{} // no system messages
-	result := applyMessagesToResponses(req, msgs)
+	msgs := []Message{{Role: "user", Content: "hello"}} // no system messages
+	result, err := applyMessagesToResponses(req, msgs)
+	if err != nil {
+		t.Fatalf("applyMessagesToResponses() error = %v", err)
+	}
 	if result.Instructions != "" {
 		t.Errorf("expected empty instructions, got %q", result.Instructions)
+	}
+}
+
+func TestApplyMessagesToResponses_RewritesStringInput(t *testing.T) {
+	req := &core.ResponsesRequest{Model: "gpt-4", Input: "John Smith"}
+	msgs := []Message{{Role: "user", Content: "[|---|](PERSON_1)"}}
+
+	result, err := applyMessagesToResponses(req, msgs)
+	if err != nil {
+		t.Fatalf("applyMessagesToResponses() error = %v", err)
+	}
+	if result.Input != "[|---|](PERSON_1)" {
+		t.Fatalf("Input = %#v, want rewritten string input", result.Input)
+	}
+}
+
+func TestApplyMessagesToResponses_RewritesStructuredArrayInputPreservingInputTextParts(t *testing.T) {
+	req := &core.ResponsesRequest{
+		Model: "gpt-4",
+		Input: []core.ResponsesInputElement{
+			{
+				Role: "user",
+				Content: []any{
+					map[string]any{"type": "input_text", "text": "John Smith"},
+					map[string]any{"type": "input_image", "image_url": map[string]any{"url": "https://example.com/image.png"}},
+				},
+			},
+		},
+	}
+	msgs := []Message{{Role: "user", Content: "[|---|](PERSON_1)"}}
+
+	result, err := applyMessagesToResponses(req, msgs)
+	if err != nil {
+		t.Fatalf("applyMessagesToResponses() error = %v", err)
+	}
+
+	input, ok := result.Input.([]core.ResponsesInputElement)
+	if !ok || len(input) != 1 {
+		t.Fatalf("Input = %#v, want []ResponsesInputElement len=1", result.Input)
+	}
+	parts, ok := input[0].Content.([]any)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("Content = %#v, want []any len=2", input[0].Content)
+	}
+	firstPart, ok := parts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first content part = %#v, want object", parts[0])
+	}
+	if firstPart["type"] != "input_text" {
+		t.Fatalf("first content type = %#v, want input_text", firstPart["type"])
+	}
+	if firstPart["text"] != "[|---|](PERSON_1)" {
+		t.Fatalf("first content text = %#v, want rewritten value", firstPart["text"])
 	}
 }

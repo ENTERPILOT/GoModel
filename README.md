@@ -241,7 +241,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for testing, linting, and pre-commit setup.
 | Observability | ✅ | Prometheus metrics, audit logging, usage tracking, request IDs, and trace-header capture are implemented. |
 | Administrative endpoints | ✅ | Admin API and dashboard ship with usage, audit, and model views. |
 | Guardrails | ✅ | The guardrails pipeline is implemented and can be enabled from config. |
-| System prompt guardrails | ✅ | `inject`, `override`, and `decorator` modes are supported. |
+| Guardrail types | ✅ | `system_prompt` and `llm_based_altering` guardrails are supported. |
 | Semantic response cache | ✅ | Exact-match Redis plus optional semantic layer (API embeddings, `qdrant` / `pgvector` / `pinecone` / `weaviate`) — see [ADR-0006](docs/adr/0006-semantic-response-cache.md). |
 
 ## In Progress
@@ -250,7 +250,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for testing, linting, and pre-commit setup.
 | ---- | :----: | ----- |
 | Billing management | 🚧 | Usage and pricing primitives exist, but billing workflows are not complete. |
 | Budget management | 🚧 | Gateway-level budget enforcement and policy controls are not implemented yet. |
-| Guardrails depth | 🚧 | The system prompt guardrail is available today; broader guardrail types are still to come. |
+| Guardrails depth | 🚧 | Text guardrails ship today; non-text guardrail types are still to come. |
 | Observability integrations | 🚧 | Native Prometheus support exists; OpenTelemetry and DataDog integrations are still pending. |
 
 ## Planned

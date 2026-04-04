@@ -369,7 +369,7 @@
 
                 <label class="alias-form-field">
                     <span>Type</span>
-                    <select class="usage-log-select settings-select" x-model="guardrailForm.type" :disabled="guardrailFormMode === 'edit'" @change="onGuardrailTypeChange()">
+                    <select class="usage-log-select settings-select" x-ref="guardrailTypeSelect" x-model="guardrailForm.type" x-effect="guardrailTypes.length; guardrailForm.type; $nextTick(() => syncGuardrailTypeSelectValue())" :disabled="guardrailFormMode === 'edit'" @change="onGuardrailTypeChange()">
                         <template x-for="typeDef in guardrailTypes" :key="typeDef.type">
                             <option :value="typeDef.type" x-text="typeDef.label"></option>
                         </template>
@@ -400,7 +400,17 @@
                         <template x-if="field.input === 'textarea'">
                             <textarea class="settings-guardrail-textarea" :placeholder="field.placeholder || ''" :value="guardrailFieldValue(field)" @input="setGuardrailFieldValue(field, $event.target.value)"></textarea>
                         </template>
-                        <template x-if="field.input !== 'select' && field.input !== 'textarea'">
+                        <template x-if="field.input === 'checkboxes'">
+                            <div class="execution-plan-feature-toggles">
+                                <template x-for="option in field.options" :key="field.key + '-' + option.value">
+                                    <label class="execution-plan-feature-toggle">
+                                        <input type="checkbox" :checked="guardrailArrayFieldSelected(field, option.value)" @change="toggleGuardrailArrayFieldValue(field, option.value, $event.target.checked)">
+                                        <span x-text="option.label"></span>
+                                    </label>
+                                </template>
+                            </div>
+                        </template>
+                        <template x-if="field.input !== 'select' && field.input !== 'textarea' && field.input !== 'checkboxes'">
                             <input :type="field.input || 'text'" class="filter-input" :placeholder="field.placeholder || ''" :value="guardrailFieldValue(field)" @input="setGuardrailFieldValue(field, $event.target.value)">
                         </template>
                         <small class="alias-form-hint" x-show="field.help" x-text="field.help"></small>
