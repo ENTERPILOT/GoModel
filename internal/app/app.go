@@ -763,13 +763,17 @@ func defaultExecutionPlanInput(cfg *config.Config, availableGuardrails []string,
 	if cfg.Guardrails.Enabled && len(cfg.Guardrails.Rules) > 0 {
 		payload.Guardrails = make([]executionplans.GuardrailStep, 0, len(cfg.Guardrails.Rules))
 		for _, rule := range cfg.Guardrails.Rules {
+			name := strings.TrimSpace(rule.Name)
+			if name == "" {
+				continue
+			}
 			if len(available) > 0 {
-				if _, ok := available[strings.TrimSpace(rule.Name)]; !ok {
+				if _, ok := available[name]; !ok {
 					continue
 				}
 			}
 			payload.Guardrails = append(payload.Guardrails, executionplans.GuardrailStep{
-				Ref:  rule.Name,
+				Ref:  name,
 				Step: rule.Order,
 			})
 		}

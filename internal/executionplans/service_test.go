@@ -60,6 +60,23 @@ func (s *staticStore) Create(_ context.Context, input CreateInput) (*Version, er
 	s.versions = append(s.versions, version)
 	return &version, nil
 }
+
+func (s *staticStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, planHash string) (*Version, error) {
+	for _, version := range s.versions {
+		if !version.Active || version.ScopeKey != "global" {
+			continue
+		}
+		if !version.Managed {
+			return nil, nil
+		}
+		if version.Name == input.Name && version.Description == input.Description && version.PlanHash == planHash {
+			return nil, nil
+		}
+		break
+	}
+	return s.Create(ctx, input)
+}
+
 func (s *staticStore) Deactivate(_ context.Context, id string) error {
 	for i := range s.versions {
 		if s.versions[i].ID == id && s.versions[i].Active {
@@ -107,6 +124,10 @@ func (s *concurrentStore) Create(_ context.Context, input CreateInput) (*Version
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.createLocked(input)
+}
+
+func (s *concurrentStore) createLocked(input CreateInput) (*Version, error) {
 	input, scopeKey, planHash, err := normalizeCreateInput(input)
 	if err != nil {
 		return nil, err
@@ -138,6 +159,25 @@ func (s *concurrentStore) Create(_ context.Context, input CreateInput) (*Version
 		}
 	}
 	return &version, nil
+}
+
+func (s *concurrentStore) EnsureManagedDefaultGlobal(_ context.Context, input CreateInput, planHash string) (*Version, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, version := range s.versions {
+		if !version.Active || version.ScopeKey != "global" {
+			continue
+		}
+		if !version.Managed {
+			return nil, nil
+		}
+		if version.Name == input.Name && version.Description == input.Description && version.PlanHash == planHash {
+			return nil, nil
+		}
+		break
+	}
+	return s.createLocked(input)
 }
 
 func (s *concurrentStore) Deactivate(_ context.Context, id string) error {
@@ -488,6 +528,55 @@ func TestServiceEnsureDefaultGlobal_PreservesCustomGlobal(t *testing.T) {
 	}
 	if store.versions[0].Name != "custom-global" || !store.versions[0].Active {
 		t.Fatalf("store.versions[0] = %#v, want unchanged active custom global", store.versions[0])
+	}
+}
+
+func TestServiceEnsureDefaultGlobal_LoadsPreservedCustomGlobalIntoSnapshot(t *testing.T) {
+	store := &staticStore{
+		versions: []Version{
+			{
+				ID:          "global-v1",
+				Scope:       Scope{},
+				ScopeKey:    "global",
+				Version:     1,
+				Active:      true,
+				Name:        "custom-global",
+				Description: "User managed",
+				Payload: Payload{
+					SchemaVersion: 1,
+					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+				},
+				PlanHash: "custom-hash",
+			},
+		},
+	}
+	service, err := NewService(store, NewCompiler(nil))
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	err = service.EnsureDefaultGlobal(context.Background(), CreateInput{
+		Activate:    true,
+		Name:        ManagedDefaultGlobalName,
+		Description: ManagedDefaultGlobalDescription,
+		Payload: Payload{
+			SchemaVersion: 1,
+			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+		},
+	})
+	if err != nil {
+		t.Fatalf("EnsureDefaultGlobal() error = %v", err)
+	}
+
+	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	if err != nil {
+		t.Fatalf("Match() error = %v", err)
+	}
+	if policy == nil {
+		t.Fatal("Match() returned nil policy")
+	}
+	if policy.VersionID != "global-v1" {
+		t.Fatalf("Match().VersionID = %q, want global-v1", policy.VersionID)
 	}
 }
 

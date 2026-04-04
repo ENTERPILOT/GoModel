@@ -187,42 +187,34 @@ func (s *Service) EnsureDefaultGlobal(ctx context.Context, input CreateInput) er
 		return newValidationError("default execution plan must use global scope", nil)
 	}
 
-	versions, err := s.store.ListActive(ctx)
-	if err != nil {
-		return fmt.Errorf("list active execution plans: %w", err)
-	}
-	for _, version := range versions {
-		scope, _, err := normalizeScope(version.Scope)
-		if err != nil {
-			return fmt.Errorf("load execution plan %q: %w", version.ID, err)
-		}
-		if scope.Provider == "" && scope.Model == "" && scope.UserPath == "" {
-			if !isManagedDefaultGlobal(version) {
-				return nil
-			}
-			if strings.TrimSpace(version.Name) == normalized.Name &&
-				strings.TrimSpace(version.Description) == normalized.Description &&
-				strings.TrimSpace(version.PlanHash) == planHash {
-				return nil
-			}
-			if !normalized.Activate {
-				normalized.Activate = true
-			}
-			normalized.Managed = true
-			if _, err := s.Create(ctx, normalized); err != nil {
-				return fmt.Errorf("update default global execution plan: %w", err)
-			}
-			return nil
-		}
-	}
-
 	if !normalized.Activate {
 		normalized.Activate = true
 	}
 	normalized.Managed = true
-	if _, err := s.Create(ctx, normalized); err != nil {
-		return fmt.Errorf("seed default global execution plan: %w", err)
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	version, err := s.store.EnsureManagedDefaultGlobal(ctx, normalized, planHash)
+	if err != nil {
+		return fmt.Errorf("ensure default global execution plan: %w", err)
 	}
+	if version == nil {
+		if s.snapshot().global == nil {
+			if err := s.refreshLocked(ctx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	compiled, err := s.compiler.Compile(*version)
+	if err != nil {
+		return fmt.Errorf("compile default global execution plan %q: %w", version.ID, err)
+	}
+	if compiled == nil || compiled.Policy == nil {
+		return newValidationError("compiled plan is empty or missing policy", nil)
+	}
+	s.storeActivatedCompiledLocked(compiledPlanForVersion(compiled, *version))
 	return nil
 }
 

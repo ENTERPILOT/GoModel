@@ -199,5 +199,8 @@ func isSQLiteDuplicateColumnError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "duplicate column") || strings.Contains(message, "already exists")
+	if strings.Contains(message, "duplicate column") || strings.Contains(message, "duplicate column name") {
+		return true
+	}
+	return strings.Contains(message, "already exists") && strings.Contains(message, "column")
 }

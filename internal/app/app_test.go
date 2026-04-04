@@ -69,6 +69,29 @@ func TestDefaultExecutionPlanInput_IncludesConfiguredGuardrailsMissingFromLoaded
 	}
 }
 
+func TestDefaultExecutionPlanInput_TrimsConfiguredGuardrailRefs(t *testing.T) {
+	cfg := &config.Config{
+		Guardrails: config.GuardrailsConfig{
+			Enabled: true,
+			Rules: []config.GuardrailRuleConfig{
+				{
+					Name:  "  policy-system  ",
+					Type:  "system_prompt",
+					Order: 10,
+				},
+			},
+		},
+	}
+
+	input := defaultExecutionPlanInput(cfg, []string{"policy-system"}, nil)
+	if len(input.Payload.Guardrails) != 1 {
+		t.Fatalf("len(defaultExecutionPlanInput().Payload.Guardrails) = %d, want 1", len(input.Payload.Guardrails))
+	}
+	if got := input.Payload.Guardrails[0].Ref; got != "policy-system" {
+		t.Fatalf("defaultExecutionPlanInput().Payload.Guardrails[0].Ref = %q, want policy-system", got)
+	}
+}
+
 func TestConfigGuardrailDefinitions_DisabledIgnoresInvalidRules(t *testing.T) {
 	definitions, err := configGuardrailDefinitions(config.GuardrailsConfig{
 		Enabled: false,

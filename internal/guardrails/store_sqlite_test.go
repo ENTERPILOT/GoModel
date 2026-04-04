@@ -3,6 +3,7 @@ package guardrails
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -102,5 +103,19 @@ func TestSQLiteStore_UpsertAndListRoundTripsUserPath(t *testing.T) {
 	}
 	if definitions[0].UserPath != "/team/alpha" {
 		t.Fatalf("definitions[0].UserPath = %q, want /team/alpha", definitions[0].UserPath)
+	}
+}
+
+func TestIsSQLiteDuplicateColumnError_RequiresColumnContext(t *testing.T) {
+	t.Parallel()
+
+	if !isSQLiteDuplicateColumnError(errors.New("duplicate column name: user_path")) {
+		t.Fatal("isSQLiteDuplicateColumnError() = false, want true for duplicate column")
+	}
+	if !isSQLiteDuplicateColumnError(errors.New("column user_path already exists")) {
+		t.Fatal("isSQLiteDuplicateColumnError() = false, want true for existing column")
+	}
+	if isSQLiteDuplicateColumnError(errors.New("table guardrail_definitions already exists")) {
+		t.Fatal("isSQLiteDuplicateColumnError() = true, want false for non-column already exists")
 	}
 }

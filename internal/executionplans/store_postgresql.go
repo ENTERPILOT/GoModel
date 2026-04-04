@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -120,6 +121,21 @@ func (s *PostgreSQLStore) Create(ctx context.Context, input CreateInput) (*Versi
 	return nil, fmt.Errorf("insert execution plan version after concurrent retries: %w", lastErr)
 }
 
+func (s *PostgreSQLStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, planHash string) (*Version, error) {
+	var lastErr error
+	for range 5 {
+		version, err := s.ensureManagedDefaultGlobal(ctx, input, planHash)
+		if err == nil {
+			return version, nil
+		}
+		if !isPostgreSQLUniqueViolation(err) {
+			return nil, err
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("ensure managed default execution plan after concurrent retries: %w", lastErr)
+}
+
 func (s *PostgreSQLStore) createVersion(ctx context.Context, input CreateInput, scopeKey, planHash string) (*Version, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -159,6 +175,113 @@ func (s *PostgreSQLStore) createVersion(ctx context.Context, input CreateInput, 
 		Version:     nextVersion,
 		Active:      input.Activate,
 		Managed:     input.Managed,
+		Name:        input.Name,
+		Description: input.Description,
+		Payload:     input.Payload,
+		PlanHash:    planHash,
+		CreatedAt:   now,
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO execution_plan_versions (
+			id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, plan_payload, plan_hash, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+	`,
+		version.ID,
+		nullIfEmpty(version.Scope.Provider),
+		nullIfEmpty(version.Scope.Model),
+		nullIfEmpty(version.Scope.UserPath),
+		version.ScopeKey,
+		version.Version,
+		version.Active,
+		version.Managed,
+		version.Name,
+		version.Description,
+		payloadJSON,
+		version.PlanHash,
+		version.CreatedAt,
+	); err != nil {
+		return nil, fmt.Errorf("insert execution plan version: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit execution plan version: %w", err)
+	}
+	return version, nil
+}
+
+func (s *PostgreSQLStore) ensureManagedDefaultGlobal(ctx context.Context, input CreateInput, planHash string) (*Version, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin execution plan transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	row := tx.QueryRow(ctx, `
+		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, plan_payload, plan_hash, created_at
+		FROM execution_plan_versions
+		WHERE scope_key = 'global' AND active = TRUE
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+		FOR UPDATE
+	`)
+	activeVersion, err := scanPostgreSQLVersion(row)
+	hasActive := true
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			hasActive = false
+		} else {
+			return nil, fmt.Errorf("load active global execution plan: %w", err)
+		}
+	}
+	if hasActive {
+		if !activeVersion.Managed {
+			if err := tx.Commit(ctx); err != nil {
+				return nil, fmt.Errorf("commit execution plan transaction: %w", err)
+			}
+			return nil, nil
+		}
+		if strings.TrimSpace(activeVersion.Name) == input.Name &&
+			strings.TrimSpace(activeVersion.Description) == input.Description &&
+			strings.TrimSpace(activeVersion.PlanHash) == planHash {
+			if err := tx.Commit(ctx); err != nil {
+				return nil, fmt.Errorf("commit execution plan transaction: %w", err)
+			}
+			return nil, nil
+		}
+	}
+
+	var nextVersion int
+	if err := tx.QueryRow(ctx,
+		`SELECT COALESCE(MAX(version), 0) + 1 FROM execution_plan_versions WHERE scope_key = 'global'`,
+	).Scan(&nextVersion); err != nil {
+		return nil, fmt.Errorf("select next execution plan version: %w", err)
+	}
+
+	if hasActive {
+		if _, err := tx.Exec(ctx,
+			`UPDATE execution_plan_versions SET active = FALSE WHERE id = $1 AND active = TRUE`,
+			activeVersion.ID,
+		); err != nil {
+			return nil, fmt.Errorf("deactivate current execution plan version: %w", err)
+		}
+	}
+
+	payloadJSON, err := json.Marshal(input.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal execution plan payload: %w", err)
+	}
+
+	now := time.Now().UTC()
+	version := &Version{
+		ID:          uuid.NewString(),
+		Scope:       input.Scope,
+		ScopeKey:    "global",
+		Version:     nextVersion,
+		Active:      true,
+		Managed:     true,
 		Name:        input.Name,
 		Description: input.Description,
 		Payload:     input.Payload,

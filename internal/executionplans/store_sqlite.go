@@ -202,6 +202,125 @@ func (s *SQLiteStore) Create(ctx context.Context, input CreateInput) (*Version, 
 	return version, nil
 }
 
+func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, planHash string) (*Version, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire execution plan connection: %w", err)
+	}
+	defer func() {
+		_ = conn.Close()
+	}()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, fmt.Errorf("begin execution plan transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+	}()
+
+	row := conn.QueryRowContext(ctx, `
+		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, plan_payload, plan_hash, created_at
+		FROM execution_plan_versions
+		WHERE scope_key = 'global' AND active = 1
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`)
+	activeVersion, err := scanSQLiteVersion(row)
+	hasActive := true
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			hasActive = false
+		} else {
+			return nil, fmt.Errorf("load active global execution plan: %w", err)
+		}
+	}
+	if hasActive {
+		if !activeVersion.Managed {
+			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+				return nil, fmt.Errorf("commit execution plan transaction: %w", err)
+			}
+			committed = true
+			return nil, nil
+		}
+		if strings.TrimSpace(activeVersion.Name) == input.Name &&
+			strings.TrimSpace(activeVersion.Description) == input.Description &&
+			strings.TrimSpace(activeVersion.PlanHash) == planHash {
+			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+				return nil, fmt.Errorf("commit execution plan transaction: %w", err)
+			}
+			committed = true
+			return nil, nil
+		}
+	}
+
+	var nextVersion int
+	if err := conn.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(version), 0) + 1 FROM execution_plan_versions WHERE scope_key = 'global'`,
+	).Scan(&nextVersion); err != nil {
+		return nil, fmt.Errorf("select next execution plan version: %w", err)
+	}
+
+	if hasActive {
+		if _, err := conn.ExecContext(ctx,
+			`UPDATE execution_plan_versions SET active = 0 WHERE id = ? AND active = 1`,
+			activeVersion.ID,
+		); err != nil {
+			return nil, fmt.Errorf("deactivate current execution plan version: %w", err)
+		}
+	}
+
+	payloadJSON, err := json.Marshal(input.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal execution plan payload: %w", err)
+	}
+
+	now := time.Now().UTC()
+	version := &Version{
+		ID:          uuid.NewString(),
+		Scope:       input.Scope,
+		ScopeKey:    "global",
+		Version:     nextVersion,
+		Active:      true,
+		Managed:     true,
+		Name:        input.Name,
+		Description: input.Description,
+		Payload:     input.Payload,
+		PlanHash:    planHash,
+		CreatedAt:   now,
+	}
+
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO execution_plan_versions (
+			id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, plan_payload, plan_hash, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		version.ID,
+		nullableString(version.Scope.Provider),
+		nullableString(version.Scope.Model),
+		nullableString(version.Scope.UserPath),
+		version.ScopeKey,
+		version.Version,
+		boolToSQLite(version.Active),
+		boolToSQLite(version.Managed),
+		version.Name,
+		version.Description,
+		string(payloadJSON),
+		version.PlanHash,
+		version.CreatedAt.Unix(),
+	); err != nil {
+		return nil, fmt.Errorf("insert execution plan version: %w", err)
+	}
+
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, fmt.Errorf("commit execution plan version: %w", err)
+	}
+	committed = true
+	return version, nil
+}
+
 func (s *SQLiteStore) Deactivate(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE execution_plan_versions

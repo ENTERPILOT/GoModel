@@ -43,6 +43,7 @@ type Store interface {
 	ListActive(ctx context.Context) ([]Version, error)
 	Get(ctx context.Context, id string) (*Version, error)
 	Create(ctx context.Context, input CreateInput) (*Version, error)
+	EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, planHash string) (*Version, error)
 	Deactivate(ctx context.Context, id string) error
 	Close() error
 }

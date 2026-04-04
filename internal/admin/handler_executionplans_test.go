@@ -98,6 +98,22 @@ func (s *executionPlanTestStore) Create(_ context.Context, input executionplans.
 	return &version, nil
 }
 
+func (s *executionPlanTestStore) EnsureManagedDefaultGlobal(ctx context.Context, input executionplans.CreateInput, _ string) (*executionplans.Version, error) {
+	for _, version := range s.versions {
+		if !version.Active || version.ScopeKey != "global" {
+			continue
+		}
+		if !version.Managed {
+			return nil, nil
+		}
+		if version.Name == input.Name && version.Description == input.Description {
+			return nil, nil
+		}
+		break
+	}
+	return s.Create(ctx, input)
+}
+
 func (s *executionPlanTestStore) Deactivate(_ context.Context, id string) error {
 	for i := range s.versions {
 		if s.versions[i].ID == id && s.versions[i].Active {

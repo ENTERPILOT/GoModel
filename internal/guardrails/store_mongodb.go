@@ -135,6 +135,41 @@ func (s *MongoDBStore) UpsertMany(ctx context.Context, definitions []Definition)
 		return nil
 	}
 
+	now := time.Now().UTC()
+	models := make([]mongo.WriteModel, 0, len(definitions))
+	for _, definition := range definitions {
+		normalized, err := normalizeDefinition(definition)
+		if err != nil {
+			return err
+		}
+		if normalized.CreatedAt.IsZero() {
+			normalized.CreatedAt = now
+		}
+		normalized.UpdatedAt = now
+
+		configDoc, err := mongoConfigFromRaw(normalized.Config)
+		if err != nil {
+			return fmt.Errorf("upsert guardrail %q: %w", normalized.Name, err)
+		}
+
+		update := bson.M{
+			"$set": bson.M{
+				"type":        normalized.Type,
+				"description": normalized.Description,
+				"user_path":   normalized.UserPath,
+				"config":      configDoc,
+				"updated_at":  normalized.UpdatedAt,
+			},
+			"$setOnInsert": bson.M{
+				"created_at": normalized.CreatedAt,
+			},
+		}
+		models = append(models, mongo.NewUpdateOneModel().
+			SetFilter(mongoDefinitionIDFilter{ID: normalized.Name}).
+			SetUpdate(update).
+			SetUpsert(true))
+	}
+
 	session, err := s.collection.Database().Client().StartSession()
 	if err != nil {
 		return fmt.Errorf("start guardrail upsert session: %w", err)
@@ -142,37 +177,8 @@ func (s *MongoDBStore) UpsertMany(ctx context.Context, definitions []Definition)
 	defer session.EndSession(ctx)
 
 	_, err = session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
-		now := time.Now().UTC()
-		for _, definition := range definitions {
-			normalized, err := normalizeDefinition(definition)
-			if err != nil {
-				return nil, err
-			}
-			if normalized.CreatedAt.IsZero() {
-				normalized.CreatedAt = now
-			}
-			normalized.UpdatedAt = now
-
-			configDoc, err := mongoConfigFromRaw(normalized.Config)
-			if err != nil {
-				return nil, fmt.Errorf("upsert guardrail %q: %w", normalized.Name, err)
-			}
-
-			update := bson.M{
-				"$set": bson.M{
-					"type":        normalized.Type,
-					"description": normalized.Description,
-					"user_path":   normalized.UserPath,
-					"config":      configDoc,
-					"updated_at":  normalized.UpdatedAt,
-				},
-				"$setOnInsert": bson.M{
-					"created_at": normalized.CreatedAt,
-				},
-			}
-			if _, err := s.collection.UpdateOne(sessionCtx, mongoDefinitionIDFilter{ID: normalized.Name}, update, options.UpdateOne().SetUpsert(true)); err != nil {
-				return nil, fmt.Errorf("upsert guardrail %q: %w", normalized.Name, err)
-			}
+		if _, err := s.collection.BulkWrite(sessionCtx, models, options.BulkWrite().SetOrdered(true)); err != nil {
+			return nil, fmt.Errorf("bulk upsert guardrails: %w", err)
 		}
 		return nil, nil
 	})
