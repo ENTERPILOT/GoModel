@@ -3138,14 +3138,6 @@ body.conversation-drawer-open {
     font-weight: 700;
 }
 
-.ep-node-async-usage {
-    --accent: var(--success);
-}
-
-.ep-node-async-audit {
-    --accent: var(--warning);
-}
-
 /* "ASYNC" label inline on the right of the branch */
 .ep-async-label {
     display: inline-flex;

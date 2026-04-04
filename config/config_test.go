@@ -168,8 +168,8 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Guardrails.EnableForBatchProcessing {
 		t.Error("expected Guardrails.EnableForBatchProcessing=false")
 	}
-	if cfg.Fallback.DefaultMode != FallbackModeOff {
-		t.Errorf("expected Fallback.DefaultMode=off, got %q", cfg.Fallback.DefaultMode)
+	if cfg.Fallback.DefaultMode != FallbackModeAuto {
+		t.Errorf("expected Fallback.DefaultMode=auto, got %q", cfg.Fallback.DefaultMode)
 	}
 	if cfg.Cache.Response.Simple != nil {
 		t.Errorf("expected Cache.Response.Simple=nil in defaults, got %+v", cfg.Cache.Response.Simple)

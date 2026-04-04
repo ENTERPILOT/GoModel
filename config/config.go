@@ -868,7 +868,7 @@ func buildDefaultConfig() *Config {
 			ResponseHeaderTimeout: 600,
 		},
 		Fallback: FallbackConfig{
-			DefaultMode: FallbackModeOff,
+			DefaultMode: FallbackModeAuto,
 		},
 		ExecutionPlans: ExecutionPlansConfig{
 			RefreshInterval: time.Minute,

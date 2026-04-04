@@ -38,11 +38,11 @@ test('executionPlanProviderOptions returns unique sorted provider types', () => 
     );
 });
 
-test('defaultExecutionPlanForm starts fallback disabled for new workflows', () => {
+test('defaultExecutionPlanForm starts fallback enabled for new workflows', () => {
     const module = createExecutionPlansModule();
 
-    assert.equal(module.executionPlanForm.features.fallback, false);
-    assert.equal(module.defaultExecutionPlanForm().features.fallback, false);
+    assert.equal(module.executionPlanForm.features.fallback, true);
+    assert.equal(module.defaultExecutionPlanForm().features.fallback, true);
 });
 
 test('executionPlanPreview mirrors the draft workflow card state from the editor form', () => {
@@ -203,6 +203,8 @@ test('executionPlanWorkflowChart returns the shared chart contract for workflow 
             responseNodeClass: '',
             authNodeClass: '',
             authNodeSublabel: null,
+            usageNodeClass: '',
+            auditNodeClass: '',
             showAsync: true,
             showUsage: false,
             showAudit: true,
@@ -256,6 +258,8 @@ test('executionPlanWorkflowChart masks globally disabled workflow features from 
             responseNodeClass: '',
             authNodeClass: '',
             authNodeSublabel: null,
+            usageNodeClass: '',
+            auditNodeClass: '',
             showAsync: false,
             showUsage: false,
             showAudit: false,
@@ -330,6 +334,8 @@ test('executionPlanAuditChart returns the shared chart contract for audit runtim
             responseNodeClass: 'ep-node-success',
             authNodeClass: '',
             authNodeSublabel: null,
+            usageNodeClass: 'ep-node-success',
+            auditNodeClass: 'ep-node-success',
             showAsync: true,
             showUsage: true,
             showAudit: true,
@@ -364,6 +370,8 @@ test('executionPlanAuditChart forces audit nodes even when the workflow version 
             responseNodeClass: 'ep-node-success',
             authNodeClass: '',
             authNodeSublabel: null,
+            usageNodeClass: '',
+            auditNodeClass: 'ep-node-success',
             showAsync: true,
             showUsage: false,
             showAudit: true,
@@ -427,12 +435,22 @@ test('executionPlanAuditChart prefers request-time execution features over curre
             responseNodeClass: 'ep-node-success',
             authNodeClass: '',
             authNodeSublabel: null,
+            usageNodeClass: '',
+            auditNodeClass: 'ep-node-success',
             showAsync: true,
             showUsage: false,
             showAudit: true,
             workflowID: 'historical-v2'
         })
     );
+});
+
+test('epAsyncNodeClass only marks async nodes green when the audit-log override is enabled', () => {
+    const module = createExecutionPlansModule();
+
+    assert.equal(module.epAsyncNodeClass(true, false), '');
+    assert.equal(module.epAsyncNodeClass(false, true), '');
+    assert.equal(module.epAsyncNodeClass(true, true), 'ep-node-success');
 });
 
 test('executionPlanSubmitMode switches to save when an active workflow already matches the selected scope', () => {

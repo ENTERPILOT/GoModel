@@ -62,17 +62,17 @@ test('async label stays inline on the right side of the branch', () => {
     );
     assert.match(
         template,
-        /<div class="ep-conn ep-conn-async" x-show="{{\.}}\.showAudit"><\/div>\s*<div class="ep-node ep-node-feature ep-node-async ep-node-async-audit" x-show="{{\.}}\.showAudit">/
+        /<div class="ep-conn ep-conn-async" x-show="{{\.}}\.showAudit"><\/div>\s*<div class="ep-node ep-node-feature ep-node-async ep-node-async-audit" x-show="{{\.}}\.showAudit" :class="{{\.}}\.auditNodeClass">/
+    );
+    assert.match(
+        template,
+        /<div class="ep-node ep-node-feature ep-node-async ep-node-async-usage" x-show="{{\.}}\.showUsage" :class="{{\.}}\.usageNodeClass">/
     );
 
     const asyncLabelRule = readCSSRule(css, '.ep-async-label');
     assert.doesNotMatch(asyncLabelRule, /position:\s*absolute/);
-
-    const asyncUsageRule = readCSSRule(css, '.ep-node-async-usage');
-    assert.match(asyncUsageRule, /--accent:\s*var\(--success\)/);
-
-    const asyncAuditRule = readCSSRule(css, '.ep-node-async-audit');
-    assert.match(asyncAuditRule, /--accent:\s*var\(--warning\)/);
+    assert.doesNotMatch(css, /\.ep-node-async-usage\s*\{/);
+    assert.doesNotMatch(css, /\.ep-node-async-audit\s*\{/);
 });
 
 test('workflow nodes use endpoint and feature color groups consistently', () => {

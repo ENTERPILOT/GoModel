@@ -34,7 +34,7 @@
                     audit: true,
                     usage: true,
                     guardrails: false,
-                    fallback: false
+                    fallback: true
                 },
                 guardrails: []
             },
@@ -51,7 +51,7 @@
                         audit: true,
                         usage: true,
                         guardrails: false,
-                        fallback: false
+                        fallback: true
                     },
                     guardrails: []
                 };
@@ -1091,6 +1091,7 @@
                     ? this.executionPlanNormalizedFeatures(config.features)
                     : this.executionPlanSourceFeatures(source);
 	                const forceAudit = !!config.forceAudit;
+                    const highlightAsyncPresent = !!config.highlightAsyncPresent;
 	                const showGuardrails = !!features.guardrails;
 	                const showUsage = !!features.usage;
 	                const showAudit = forceAudit || !!features.audit;
@@ -1111,6 +1112,8 @@
 	                    responseNodeClass: this.epResponseNodeClass(runtime),
 				    authNodeClass: this.epAuthNodeClass(runtime),
 				    authNodeSublabel: this.epAuthNodeSublabel(runtime),
+                        usageNodeClass: this.epAsyncNodeClass(showUsage, highlightAsyncPresent),
+                        auditNodeClass: this.epAsyncNodeClass(showAudit, highlightAsyncPresent),
 	                    showAsync,
 	                    showUsage,
 	                    showAudit,
@@ -1130,7 +1133,8 @@
                     entry,
                     features,
                     forceAudit: true,
-                    forceAsync: true
+                    forceAsync: true,
+                    highlightAsyncPresent: true
                 });
             },
 
@@ -1198,6 +1202,10 @@
             epAuthNodeSublabel(runtime) {
                 if (!runtime || !runtime.authMethod) return null;
                 return runtime.authMethod;
+            },
+
+            epAsyncNodeClass(visible, highlightPresent) {
+                return visible && highlightPresent ? 'ep-node-success' : '';
             },
 
             epRuntimeFromEntry(entry) {
