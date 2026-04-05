@@ -570,6 +570,28 @@ func TestLoad_FeatureFallbackModeEnvOverridesFallbackDefaultMode(t *testing.T) {
 	})
 }
 
+func TestLoad_BlankFallbackDefaultModeResolvesToAuto(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+fallback:
+  default_mode: ""
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		if result.Config.Fallback.DefaultMode != FallbackModeAuto {
+			t.Fatalf("Fallback.DefaultMode = %q, want %q", result.Config.Fallback.DefaultMode, FallbackModeAuto)
+		}
+	})
+}
+
 func TestLoad_PassthroughFlags_EnvOverridesYAML(t *testing.T) {
 	tests := []struct {
 		name          string

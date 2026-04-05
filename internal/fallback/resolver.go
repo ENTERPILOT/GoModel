@@ -42,10 +42,7 @@ func NewResolver(cfg config.FallbackConfig, registry Registry) *Resolver {
 		return nil
 	}
 
-	mode := cfg.DefaultMode
-	if mode == "" {
-		mode = config.FallbackModeOff
-	}
+	mode := config.ResolveFallbackDefaultMode(cfg.DefaultMode)
 	if mode == config.FallbackModeOff && len(cfg.Manual) == 0 && len(cfg.Overrides) == 0 {
 		return nil
 	}

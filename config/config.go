@@ -114,6 +114,16 @@ func normalizeFallbackMode(mode FallbackMode) FallbackMode {
 	return FallbackMode(strings.ToLower(strings.TrimSpace(string(mode))))
 }
 
+// ResolveFallbackDefaultMode canonicalizes the global fallback default mode and
+// applies the process default when unset.
+func ResolveFallbackDefaultMode(mode FallbackMode) FallbackMode {
+	mode = normalizeFallbackMode(mode)
+	if mode == "" {
+		return FallbackModeAuto
+	}
+	return mode
+}
+
 // FallbackModelOverride holds per-model mode overrides.
 type FallbackModelOverride struct {
 	Mode FallbackMode `yaml:"mode" json:"mode"`
@@ -122,7 +132,7 @@ type FallbackModelOverride struct {
 // FallbackConfig holds translated-route model fallback policy.
 type FallbackConfig struct {
 	// DefaultMode controls the fallback behavior when no per-model override exists.
-	// Supported values: "auto", "manual", "off". Default: "off".
+	// Supported values: "auto", "manual", "off". Default: "auto".
 	DefaultMode FallbackMode `yaml:"default_mode" env:"FEATURE_FALLBACK_MODE"`
 
 	// ManualRulesPath points to a JSON file that maps source model selectors to
@@ -426,11 +436,11 @@ type EmbedderConfig struct {
 // VectorStoreConfig selects the vector DB backend.
 // Type must be set when semantic caching is enabled: qdrant, pgvector, pinecone, weaviate.
 type VectorStoreConfig struct {
-	Type      string          `yaml:"type"`
-	Qdrant    QdrantConfig    `yaml:"qdrant"`
-	PGVector  PGVectorConfig  `yaml:"pgvector"`
-	Pinecone  PineconeConfig  `yaml:"pinecone"`
-	Weaviate  WeaviateConfig  `yaml:"weaviate"`
+	Type     string         `yaml:"type"`
+	Qdrant   QdrantConfig   `yaml:"qdrant"`
+	PGVector PGVectorConfig `yaml:"pgvector"`
+	Pinecone PineconeConfig `yaml:"pinecone"`
+	Weaviate WeaviateConfig `yaml:"weaviate"`
 }
 
 // QdrantConfig holds connection configuration for the Qdrant vector store.
@@ -986,10 +996,7 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 		return nil
 	}
 
-	cfg.DefaultMode = normalizeFallbackMode(cfg.DefaultMode)
-	if cfg.DefaultMode == "" {
-		cfg.DefaultMode = FallbackModeOff
-	}
+	cfg.DefaultMode = ResolveFallbackDefaultMode(cfg.DefaultMode)
 	if !cfg.DefaultMode.Valid() {
 		return fmt.Errorf("fallback.default_mode must be one of: auto, manual, off")
 	}
