@@ -299,22 +299,22 @@ func TestLLMBasedAltering_Process_FailsOpenOnToolCallCompletion(t *testing.T) {
 
 func TestLLMBasedAltering_Process_LimitsConcurrentRewrites(t *testing.T) {
 	var (
-		inFlight     int32
-		maxInFlight  int32
-		requestsSeen int32
+		inFlight     atomic.Int32
+		maxInFlight  atomic.Int32
+		requestsSeen atomic.Int32
 		messageCount = maxConcurrentRewrites*3 + 1
 	)
 	g, err := NewLLMBasedAlteringGuardrail("privacy", LLMBasedAlteringConfig{
 		Model: "gpt-4o-mini",
 	}, mockChatCompletionExecutor{
 		chatFn: func(_ context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-			current := atomic.AddInt32(&inFlight, 1)
-			defer atomic.AddInt32(&inFlight, -1)
-			atomic.AddInt32(&requestsSeen, 1)
+			current := inFlight.Add(1)
+			defer inFlight.Add(-1)
+			requestsSeen.Add(1)
 
 			for {
-				previous := atomic.LoadInt32(&maxInFlight)
-				if current <= previous || atomic.CompareAndSwapInt32(&maxInFlight, previous, current) {
+				previous := maxInFlight.Load()
+				if current <= previous || maxInFlight.CompareAndSwap(previous, current) {
 					break
 				}
 			}
@@ -339,10 +339,10 @@ func TestLLMBasedAltering_Process_LimitsConcurrentRewrites(t *testing.T) {
 	if _, err := g.Process(context.Background(), msgs); err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	if got := atomic.LoadInt32(&requestsSeen); got != int32(messageCount) {
+	if got := requestsSeen.Load(); got != int32(messageCount) {
 		t.Fatalf("requests seen = %d, want %d", got, messageCount)
 	}
-	if got := atomic.LoadInt32(&maxInFlight); got > int32(maxConcurrentRewrites) {
+	if got := maxInFlight.Load(); got > int32(maxConcurrentRewrites) {
 		t.Fatalf("max concurrent rewrites = %d, want <= %d", got, maxConcurrentRewrites)
 	}
 }

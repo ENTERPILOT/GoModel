@@ -877,11 +877,17 @@ func coerceResponsesInputElements(input any) ([]core.ResponsesInputElement, erro
 		copy(elements, typed)
 		return elements, nil
 	case []map[string]any:
-		items := make([]any, 0, len(typed))
-		for _, item := range typed {
-			items = append(items, item)
+		elements := make([]core.ResponsesInputElement, len(typed))
+		for i, item := range typed {
+			raw, err := json.Marshal(item)
+			if err != nil {
+				return nil, core.NewInvalidRequestError("invalid responses input item", err)
+			}
+			if err := json.Unmarshal(raw, &elements[i]); err != nil {
+				return nil, core.NewInvalidRequestError("invalid responses input item", err)
+			}
 		}
-		return coerceResponsesInputElements(items)
+		return elements, nil
 	case []any:
 		elements := make([]core.ResponsesInputElement, len(typed))
 		for i, item := range typed {

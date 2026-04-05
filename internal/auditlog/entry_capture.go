@@ -122,26 +122,37 @@ func internalJSONAuditRequest(ctx context.Context, method, path, requestID strin
 		Header: headers,
 	}
 	reqCtx := ctx
-	if logBodies && bodyValue != nil {
-		if body, err := json.Marshal(bodyValue); err == nil {
-			capturedBody, bodyTooBig := boundedAuditBody(body, false)
-			snapshot := core.NewRequestSnapshot(
-				method,
-				path,
-				nil,
-				nil,
-				headers,
-				headers.Get("Content-Type"),
-				capturedBody,
-				bodyTooBig,
-				requestID,
-				nil,
-				core.UserPathFromContext(ctx),
-			)
-			reqCtx = core.WithRequestSnapshot(ctx, snapshot)
-		}
+	if logBodies {
+		capturedBody, bodyTooBig := internalJSONAuditRequestBody(bodyValue)
+		snapshot := core.NewRequestSnapshot(
+			method,
+			path,
+			nil,
+			nil,
+			headers,
+			headers.Get("Content-Type"),
+			capturedBody,
+			bodyTooBig,
+			requestID,
+			nil,
+			core.UserPathFromContext(ctx),
+		)
+		reqCtx = core.WithRequestSnapshot(ctx, snapshot)
 	}
 	return req.WithContext(reqCtx)
+}
+
+func internalJSONAuditRequestBody(bodyValue any) ([]byte, bool) {
+	if bodyValue == nil {
+		return nil, false
+	}
+
+	body, err := json.Marshal(bodyValue)
+	if err != nil {
+		return nil, false
+	}
+
+	return boundedAuditBody(body, false)
 }
 
 func internalJSONAuditResponse(bodyValue any, responseErr error, requestID string, logBodies bool) (http.Header, []byte, bool) {
