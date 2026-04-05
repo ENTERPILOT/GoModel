@@ -179,7 +179,8 @@ func (m *ResponseCacheMiddleware) HandleInternalRequest(
 	var e *echo.Echo
 	switch {
 	case m == nil:
-		e = echo.New()
+		slog.Error("response cache: HandleInternalRequest called on nil middleware")
+		return nil, core.NewProviderError("", http.StatusInternalServerError, "response cache middleware is not initialized", nil)
 	case m.echo == nil:
 		slog.Error("response cache: HandleInternalRequest called with uninitialized Echo instance")
 		return nil, core.NewProviderError("", http.StatusInternalServerError, "response cache middleware is not initialized", nil)

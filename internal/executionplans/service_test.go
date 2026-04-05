@@ -2,6 +2,7 @@ package executionplans
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"gomodel/internal/core"
+	"gomodel/internal/guardrails"
 )
 
 type staticStore struct {
@@ -611,6 +613,171 @@ func TestServiceEnsureDefaultGlobal_ValidatesBeforeStoreMutation(t *testing.T) {
 	case <-store.createCalled:
 		t.Fatal("EnsureDefaultGlobal() mutated store before validation")
 	default:
+	}
+}
+
+func TestServiceRefresh_RebuildsCompiledGuardrailPipelinesAfterExecutorSwap(t *testing.T) {
+	guardrailStore := &guardrailTestStore{
+		definitions: map[string]guardrails.Definition{
+			"privacy": {
+				Name: "privacy",
+				Type: "llm_based_altering",
+				Config: mustMarshalJSON(t, map[string]any{
+					"model": "gpt-4o-mini",
+					"roles": []string{"user"},
+				}),
+			},
+		},
+	}
+	guardrailService, err := guardrails.NewService(guardrailStore, guardrailExecutorFunc(func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
+		return &core.ChatResponse{
+			Choices: []core.Choice{
+				{Message: core.ResponseMessage{Role: "assistant", Content: "[|---|](PERSON_1)"}},
+			},
+		}, nil
+	}))
+	if err != nil {
+		t.Fatalf("guardrails.NewService() error = %v", err)
+	}
+	if err := guardrailService.Refresh(context.Background()); err != nil {
+		t.Fatalf("guardrailService.Refresh() error = %v", err)
+	}
+
+	store := &staticStore{
+		versions: []Version{
+			{
+				ID:       "global-v1",
+				Scope:    Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: Payload{
+					SchemaVersion: 1,
+					Features: FeatureFlags{
+						Cache:      false,
+						Audit:      true,
+						Usage:      true,
+						Guardrails: true,
+					},
+					Guardrails: []GuardrailStep{
+						{Ref: "privacy", Step: 10},
+					},
+				},
+			},
+		},
+	}
+	service, err := NewService(store, NewCompilerWithFeatureCaps(guardrailService, core.DefaultExecutionFeatures()))
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("service.Refresh() error = %v", err)
+	}
+
+	selector := core.NewExecutionPlanSelector("", "", "/")
+	policy, err := service.Match(selector)
+	if err != nil {
+		t.Fatalf("service.Match() error = %v", err)
+	}
+	plan := &core.ExecutionPlan{Policy: policy}
+
+	assertPipelineRewrite(t, service.PipelineForExecutionPlan(plan), "[|---|](PERSON_1)")
+
+	if err := guardrailService.SetExecutor(context.Background(), guardrailExecutorFunc(func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
+		return &core.ChatResponse{
+			Choices: []core.Choice{
+				{Message: core.ResponseMessage{Role: "assistant", Content: "[|---|](PERSON_2)"}},
+			},
+		}, nil
+	})); err != nil {
+		t.Fatalf("guardrailService.SetExecutor() error = %v", err)
+	}
+
+	assertPipelineRewrite(t, service.PipelineForExecutionPlan(plan), "[|---|](PERSON_1)")
+
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("service.Refresh() after SetExecutor error = %v", err)
+	}
+	assertPipelineRewrite(t, service.PipelineForExecutionPlan(plan), "[|---|](PERSON_2)")
+}
+
+type guardrailTestStore struct {
+	definitions map[string]guardrails.Definition
+}
+
+func (s *guardrailTestStore) List(context.Context) ([]guardrails.Definition, error) {
+	result := make([]guardrails.Definition, 0, len(s.definitions))
+	for _, definition := range s.definitions {
+		result = append(result, definition)
+	}
+	return result, nil
+}
+
+func (s *guardrailTestStore) Get(_ context.Context, name string) (*guardrails.Definition, error) {
+	definition, ok := s.definitions[name]
+	if !ok {
+		return nil, guardrails.ErrNotFound
+	}
+	copy := definition
+	return &copy, nil
+}
+
+func (s *guardrailTestStore) Upsert(_ context.Context, definition guardrails.Definition) error {
+	if s.definitions == nil {
+		s.definitions = make(map[string]guardrails.Definition)
+	}
+	s.definitions[definition.Name] = definition
+	return nil
+}
+
+func (s *guardrailTestStore) UpsertMany(_ context.Context, definitions []guardrails.Definition) error {
+	if s.definitions == nil {
+		s.definitions = make(map[string]guardrails.Definition)
+	}
+	for _, definition := range definitions {
+		s.definitions[definition.Name] = definition
+	}
+	return nil
+}
+
+func (s *guardrailTestStore) Delete(_ context.Context, name string) error {
+	delete(s.definitions, name)
+	return nil
+}
+
+func (s *guardrailTestStore) Close() error { return nil }
+
+type guardrailExecutorFunc func(context.Context, *core.ChatRequest) (*core.ChatResponse, error)
+
+func (f guardrailExecutorFunc) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	return f(ctx, req)
+}
+
+func mustMarshalJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	return raw
+}
+
+func assertPipelineRewrite(t *testing.T, pipeline *guardrails.Pipeline, want string) {
+	t.Helper()
+	if pipeline == nil {
+		t.Fatal("pipeline = nil, want non-nil")
+	}
+
+	msgs, err := pipeline.Process(context.Background(), []guardrails.Message{{Role: "user", Content: "John Smith"}})
+	if err != nil {
+		t.Fatalf("pipeline.Process() error = %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("len(msgs) = %d, want 1", len(msgs))
+	}
+	if msgs[0].Content != want {
+		t.Fatalf("msgs[0].Content = %q, want %q", msgs[0].Content, want)
 	}
 }
 

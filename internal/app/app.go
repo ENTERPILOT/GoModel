@@ -415,6 +415,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		}
 		return nil, fmt.Errorf("failed to wire internal guardrail executor: %w", err)
 	}
+	if err := executionPlanResult.Service.Refresh(ctx); err != nil {
+		closeErr := errors.Join(app.executionPlans.Close(), app.guardrails.Close(), app.authKeys.Close(), app.aliases.Close(), app.batch.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to refresh execution plans after wiring internal guardrail executor: %w (also: close error: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to refresh execution plans after wiring internal guardrail executor: %w", err)
+	}
 
 	app.server = server.New(provider, serverCfg)
 

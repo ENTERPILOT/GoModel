@@ -112,6 +112,28 @@ func TestHandleInternalRequest_RejectsNilContext(t *testing.T) {
 	}
 }
 
+func TestHandleInternalRequest_RejectsNilMiddleware(t *testing.T) {
+	var m *ResponseCacheMiddleware
+
+	_, err := m.HandleInternalRequest(context.Background(), http.MethodPost, "/v1/chat/completions", []byte(`{}`), func(c *echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"ok": "1"})
+	})
+	if err == nil {
+		t.Fatal("HandleInternalRequest() error = nil, want provider error")
+	}
+
+	gatewayErr, ok := err.(*core.GatewayError)
+	if !ok {
+		t.Fatalf("HandleInternalRequest() error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeProvider {
+		t.Fatalf("error type = %q, want %q", gatewayErr.Type, core.ErrorTypeProvider)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusInternalServerError {
+		t.Fatalf("status code = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusInternalServerError)
+	}
+}
+
 func TestHandleInternalRequest_RejectsUninitializedEcho(t *testing.T) {
 	m := &ResponseCacheMiddleware{}
 

@@ -997,7 +997,7 @@ func applyMessagesToResponses(req *core.ResponsesRequest, msgs []Message) (*core
 }
 
 func applyMessagesToResponsesInput(original any, msgs []Message) (any, error) {
-	switch typed := original.(type) {
+	switch original.(type) {
 	case nil:
 		if len(msgs) != 0 {
 			return nil, core.NewInvalidRequestError("guardrails cannot add or remove responses input items", nil)
@@ -1014,8 +1014,6 @@ func applyMessagesToResponsesInput(original any, msgs []Message) (any, error) {
 			return "", nil
 		}
 		return msgs[0].Content, nil
-	default:
-		_ = typed
 	}
 
 	elements, err := coerceResponsesInputElements(original)
