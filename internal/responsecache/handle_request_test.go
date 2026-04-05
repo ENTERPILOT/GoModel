@@ -112,6 +112,61 @@ func TestHandleInternalRequest_RejectsNilContext(t *testing.T) {
 	}
 }
 
+func TestInternalRequestHeaders_AllowlistsSafeSnapshotHeaders(t *testing.T) {
+	ctx := core.WithRequestID(context.Background(), "req_123")
+	ctx = core.WithRequestSnapshot(ctx, core.NewRequestSnapshot(
+		http.MethodPost,
+		"/v1/chat/completions",
+		nil,
+		nil,
+		http.Header{
+			"Accept":       []string{"application/json"},
+			"Authorization": []string{"Bearer secret"},
+			"Baggage":      []string{"user_id=123"},
+			"Cookie":       []string{"session=secret"},
+			"Traceparent":  []string{"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"},
+			"User-Agent":   []string{"gomodel-test"},
+			"X-Api-Key":    []string{"secret-key"},
+		},
+		"application/json",
+		nil,
+		false,
+		"snapshot_req",
+		nil,
+		"/team/alpha",
+	))
+
+	headers := internalRequestHeaders(ctx)
+
+	if got := headers.Get("Accept"); got != "application/json" {
+		t.Fatalf("Accept = %q, want application/json", got)
+	}
+	if got := headers.Get("User-Agent"); got != "gomodel-test" {
+		t.Fatalf("User-Agent = %q, want gomodel-test", got)
+	}
+	if got := headers.Get("Traceparent"); got == "" {
+		t.Fatal("Traceparent = empty, want preserved trace header")
+	}
+	if got := headers.Get("Baggage"); got != "user_id=123" {
+		t.Fatalf("Baggage = %q, want user_id=123", got)
+	}
+	if got := headers.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json default", got)
+	}
+	if got := headers.Get("X-Request-ID"); got != "req_123" {
+		t.Fatalf("X-Request-ID = %q, want req_123", got)
+	}
+	if got := headers.Get("Authorization"); got != "" {
+		t.Fatalf("Authorization = %q, want omitted", got)
+	}
+	if got := headers.Get("Cookie"); got != "" {
+		t.Fatalf("Cookie = %q, want omitted", got)
+	}
+	if got := headers.Get("X-Api-Key"); got != "" {
+		t.Fatalf("X-Api-Key = %q, want omitted", got)
+	}
+}
+
 func TestHandleInternalRequest_RejectsNilMiddleware(t *testing.T) {
 	var m *ResponseCacheMiddleware
 

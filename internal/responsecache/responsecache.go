@@ -20,6 +20,21 @@ import (
 
 const responseCachePrefix = "gomodel:response:"
 
+var internalRequestHeaderAllowlist = map[string]struct{}{
+	http.CanonicalHeaderKey("Accept"):                     {},
+	http.CanonicalHeaderKey("Baggage"):                    {},
+	http.CanonicalHeaderKey("Content-Type"):               {},
+	http.CanonicalHeaderKey("Request-Id"):                 {},
+	http.CanonicalHeaderKey("Traceparent"):                {},
+	http.CanonicalHeaderKey("Tracestate"):                 {},
+	http.CanonicalHeaderKey("User-Agent"):                 {},
+	http.CanonicalHeaderKey("X-Cache-Control"):            {},
+	http.CanonicalHeaderKey("X-Cache-Semantic-Threshold"): {},
+	http.CanonicalHeaderKey("X-Cache-TTL"):                {},
+	http.CanonicalHeaderKey("X-Cache-Type"):               {},
+	http.CanonicalHeaderKey("X-Request-ID"):               {},
+}
+
 // ResponseCacheMiddleware wraps response cache logic. App and server only see this type.
 type ResponseCacheMiddleware struct {
 	simple   *simpleCacheMiddleware
@@ -222,6 +237,10 @@ func internalRequestHeaders(ctx context.Context) http.Header {
 	headers := make(http.Header)
 	if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
 		for key, values := range snapshot.GetHeaders() {
+			key = http.CanonicalHeaderKey(key)
+			if _, allowed := internalRequestHeaderAllowlist[key]; !allowed {
+				continue
+			}
 			for _, value := range values {
 				headers.Add(key, value)
 			}
