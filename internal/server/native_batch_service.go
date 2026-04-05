@@ -164,7 +164,7 @@ func (s *nativeBatchService) storeExecutionPlanForBatch(c *echo.Context, selecti
 
 	if s.executionPolicyResolver != nil {
 		selector := core.NewExecutionPlanSelector(selection.selector.Provider, selection.selector.Model, core.UserPathFromContext(c.Request().Context()))
-		if err := applyExecutionPolicy(plan, s.executionPolicyResolver, selector); err != nil {
+		if err := applyExecutionPolicy(c.Request().Context(), plan, s.executionPolicyResolver, selector); err != nil {
 			return nil, err
 		}
 	}

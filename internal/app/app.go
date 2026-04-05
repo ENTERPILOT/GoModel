@@ -169,14 +169,18 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	app.aliases = aliasResult
 
 	refreshInterval := executionPlanRefreshInterval(appCfg)
+	var guardrailExecutor guardrails.ChatCompletionExecutor = app.providers.Router
+	if app.aliases != nil && app.aliases.Service != nil {
+		guardrailExecutor = aliases.NewProviderWithOptions(app.providers.Router, app.aliases.Service, aliases.Options{})
+	}
 
 	// Initialize reusable guardrail definitions using shared storage when already available.
 	var guardrailResult *guardrails.Result
 	sharedGuardrailStorage := firstSharedStorage(auditResult.Storage, usageResult.Storage, batchResult.Storage, aliasResult.Storage)
 	if sharedGuardrailStorage != nil {
-		guardrailResult, err = guardrails.NewWithSharedStorage(ctx, sharedGuardrailStorage, refreshInterval)
+		guardrailResult, err = guardrails.NewWithSharedStorage(ctx, sharedGuardrailStorage, refreshInterval, guardrailExecutor)
 	} else {
-		guardrailResult, err = guardrails.New(ctx, appCfg, refreshInterval)
+		guardrailResult, err = guardrails.New(ctx, appCfg, refreshInterval, guardrailExecutor)
 	}
 	if err != nil {
 		closeErr := errors.Join(app.aliases.Close(), app.batch.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
@@ -270,7 +274,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	app.logStartupInfo()
 
 	if featureCaps.Guardrails {
-		if app.guardrails != nil && app.guardrails.Service != nil && app.guardrails.Service.Len() > 0 {
+		if app.guardrails != nil && app.guardrails.Service != nil {
 			translatedRequestPatcher = guardrails.NewPlannedRequestPatcher(executionPlanResult.Service)
 			if appCfg.Guardrails.EnableForBatchProcessing {
 				batchRequestPreparers = append(batchRequestPreparers, guardrails.NewPlannedBatchPreparer(provider, executionPlanResult.Service))
@@ -394,6 +398,24 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize response cache: %w", err)
 	}
 	serverCfg.ResponseCacheMiddleware = rcm
+
+	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(provider, server.InternalChatCompletionExecutorConfig{
+		ModelResolver:            app.aliases.Service,
+		ExecutionPolicyResolver:  executionPlanResult.Service,
+		FallbackResolver:         serverCfg.FallbackResolver,
+		TranslatedRequestPatcher: translatedRequestPatcher,
+		AuditLogger:              auditResult.Logger,
+		UsageLogger:              usageResult.Logger,
+		PricingResolver:          providerResult.Registry,
+		ResponseCacheMiddleware:  rcm,
+	})
+	if err := guardrailResult.Service.SetExecutor(ctx, internalGuardrailExecutor); err != nil {
+		closeErr := errors.Join(app.executionPlans.Close(), app.guardrails.Close(), app.authKeys.Close(), app.aliases.Close(), app.batch.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to wire internal guardrail executor: %w (also: close error: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to wire internal guardrail executor: %w", err)
+	}
 
 	app.server = server.New(provider, serverCfg)
 
@@ -717,6 +739,10 @@ func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Defin
 	for i, rule := range cfg.Rules {
 		name := strings.TrimSpace(rule.Name)
 		ruleType := strings.ToLower(strings.TrimSpace(rule.Type))
+		switch ruleType {
+		case "llm-based-altering":
+			ruleType = "llm_based_altering"
+		}
 		if name == "" {
 			return nil, fmt.Errorf("guardrail rule #%d: name is required", i)
 		}
@@ -732,6 +758,15 @@ func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Defin
 				"mode":    rule.SystemPrompt.Mode,
 				"content": rule.SystemPrompt.Content,
 			})
+		case "llm_based_altering":
+			rawConfig, err = json.Marshal(map[string]any{
+				"model":               rule.LLMBasedAltering.Model,
+				"provider":            rule.LLMBasedAltering.Provider,
+				"prompt":              rule.LLMBasedAltering.Prompt,
+				"roles":               rule.LLMBasedAltering.Roles,
+				"skip_content_prefix": rule.LLMBasedAltering.SkipContentPrefix,
+				"max_tokens":          rule.LLMBasedAltering.MaxTokens,
+			})
 		default:
 			return nil, fmt.Errorf("guardrail rule #%d (%q): unsupported type %q", i, name, ruleType)
 		}
@@ -739,9 +774,10 @@ func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Defin
 			return nil, fmt.Errorf("guardrail rule #%d (%q): marshal config: %w", i, name, err)
 		}
 		definitions = append(definitions, guardrails.Definition{
-			Name:   name,
-			Type:   ruleType,
-			Config: rawConfig,
+			Name:     name,
+			Type:     ruleType,
+			UserPath: strings.TrimSpace(rule.UserPath),
+			Config:   rawConfig,
 		})
 	}
 	return definitions, nil

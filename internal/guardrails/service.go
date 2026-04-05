@@ -19,7 +19,8 @@ type serviceSnapshot struct {
 
 // Service keeps reusable guardrails cached in memory and refreshes them from storage.
 type Service struct {
-	store Store
+	store    Store
+	executor ChatCompletionExecutor
 
 	refreshMu sync.Mutex
 	mu        sync.RWMutex
@@ -27,12 +28,17 @@ type Service struct {
 }
 
 // NewService creates a guardrail service backed by the provided store.
-func NewService(store Store) (*Service, error) {
+func NewService(store Store, executors ...ChatCompletionExecutor) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
+	var executor ChatCompletionExecutor
+	if len(executors) > 0 {
+		executor = executors[0]
+	}
 	return &Service{
-		store: store,
+		store:    store,
+		executor: executor,
 		snapshot: serviceSnapshot{
 			definitions: map[string]Definition{},
 			order:       []string{},
@@ -49,12 +55,38 @@ func (s *Service) Refresh(ctx context.Context) error {
 	return s.refreshLocked(ctx)
 }
 
+// SetExecutor swaps the auxiliary chat executor used by llm_based_altering
+// guardrails and rebuilds the in-memory snapshot atomically.
+func (s *Service) SetExecutor(ctx context.Context, executor ChatCompletionExecutor) error {
+	if s == nil {
+		return nil
+	}
+
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	definitions, err := s.store.List(ctx)
+	if err != nil {
+		return guardrailServiceError("list guardrails", err)
+	}
+	next, err := buildSnapshot(definitions, executor)
+	if err != nil {
+		return guardrailServiceError("load guardrails", err)
+	}
+
+	s.mu.Lock()
+	s.executor = executor
+	s.snapshot = next
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *Service) refreshLocked(ctx context.Context) error {
 	definitions, err := s.store.List(ctx)
 	if err != nil {
 		return guardrailServiceError("list guardrails", err)
 	}
-	next, err := buildSnapshot(definitions)
+	next, err := buildSnapshot(definitions, s.executor)
 	if err != nil {
 		return guardrailServiceError("load guardrails", err)
 	}
@@ -91,7 +123,7 @@ func (s *Service) UpsertDefinitions(ctx context.Context, definitions []Definitio
 	for _, definition := range normalized {
 		nextDefinitions[definition.Name] = definition
 	}
-	next, err := buildSnapshot(definitionsFromMap(nextDefinitions))
+	next, err := buildSnapshot(definitionsFromMap(nextDefinitions), s.executor)
 	if err != nil {
 		return err
 	}
@@ -159,7 +191,7 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	}
 	nextDefinitions := definitionMap(currentDefinitions)
 	nextDefinitions[normalized.Name] = normalized
-	next, err := buildSnapshot(definitionsFromMap(nextDefinitions))
+	next, err := buildSnapshot(definitionsFromMap(nextDefinitions), s.executor)
 	if err != nil {
 		return err
 	}
@@ -188,7 +220,7 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	}
 	nextDefinitions := definitionMap(currentDefinitions)
 	delete(nextDefinitions, name)
-	next, err := buildSnapshot(definitionsFromMap(nextDefinitions))
+	next, err := buildSnapshot(definitionsFromMap(nextDefinitions), s.executor)
 	if err != nil {
 		return err
 	}
@@ -235,7 +267,7 @@ func (s *Service) BuildPipeline(steps []StepReference) (*Pipeline, string, error
 	return registry.BuildPipeline(steps)
 }
 
-func buildSnapshot(definitions []Definition) (serviceSnapshot, error) {
+func buildSnapshot(definitions []Definition, executor ChatCompletionExecutor) (serviceSnapshot, error) {
 	next := serviceSnapshot{
 		definitions: make(map[string]Definition, len(definitions)),
 		order:       make([]string, 0, len(definitions)),
@@ -246,7 +278,7 @@ func buildSnapshot(definitions []Definition) (serviceSnapshot, error) {
 		if err != nil {
 			return serviceSnapshot{}, fmt.Errorf("load guardrail %q: %w", definition.Name, err)
 		}
-		instance, descriptor, err := buildDefinition(normalized)
+		instance, descriptor, err := buildDefinition(normalized, executor)
 		if err != nil {
 			return serviceSnapshot{}, fmt.Errorf("load guardrail %q: %w", normalized.Name, err)
 		}

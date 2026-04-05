@@ -107,6 +107,9 @@ test('guardrails authoring moved to a top-level page while settings keeps the ge
     assert.match(template, /<div class="settings-subnav">[\s\S]*class="settings-subnav-btn active"[\s\S]*>General<\/button>/);
     assert.match(template, /<div x-show="page==='guardrails'">[\s\S]*<h2>Guardrails<\/h2>/);
     assert.match(template, /Guardrail Library/);
+    assert.match(template, /x-ref="guardrailTypeSelect"/);
+    assert.match(template, /x-model="guardrailForm\.type"/);
+    assert.match(template, /x-effect="guardrailTypes\.length; guardrailForm\.type; \$nextTick\(\(\) => syncGuardrailTypeSelectValue\(\)\)"/);
     assert.match(template, /x-model="guardrailForm\.user_path"[^>]*aria-label="Guardrail user path"/);
-    assert.match(template, /Reserved for future UI visibility scoping\. It does not affect runtime execution yet\./);
+    assert.match(template, /Optional base user path for internal auxiliary rewrite requests\. When empty, the caller user path is reused\./);
 });

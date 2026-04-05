@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -32,7 +33,7 @@ func TestApplyExecutionPolicy_NormalizesResolverErrors(t *testing.T) {
 	t.Parallel()
 
 	plan := &core.ExecutionPlan{}
-	err := applyExecutionPolicy(plan, requestExecutionPolicyResolverFunc(func(core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+	err := applyExecutionPolicy(context.Background(), plan, requestExecutionPolicyResolverFunc(func(core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
 		return nil, errors.New("storage unavailable")
 	}), core.NewExecutionPlanSelector("openai", "gpt-4o-mini"))
 	if err == nil {

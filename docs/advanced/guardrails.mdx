@@ -91,6 +91,7 @@ guardrails:
   rules:
     - name: "rule-name"         # Unique identifier for this instance
       type: "system_prompt"     # Guardrail type
+      user_path: "/team/privacy" # Optional base path for internal auxiliary calls
       order: 0                  # Execution order
       system_prompt:            # Type-specific settings
         mode: "decorator"
@@ -109,8 +110,9 @@ export GUARDRAILS_ENABLED=true
 
 | Field  | Required | Description                                                         |
 | ------ | -------- | ------------------------------------------------------------------- |
-| `name` | Yes      | Human-readable identifier. Supports spaces and unicode.             |
-| `type` | Yes      | Guardrail type (currently: `system_prompt`).                        |
+| `name` | Yes      | Human-readable identifier. Supports spaces and unicode, but not `/`. |
+| `type` | Yes      | Guardrail type: `system_prompt` or `llm_based_altering`.            |
+| `user_path` | No  | Optional base user path for internal auxiliary guardrail requests. |
 | `order`| No       | Execution order. Default `0`. Same value = parallel, different = sequential. |
 
 ## Guardrail Types
@@ -183,6 +185,49 @@ Adds, replaces, or decorates the system prompt on every request.
   </Tab>
 </Tabs>
 
+### `llm_based_altering`
+
+Rewrites selected message roles by calling an auxiliary model before the main
+provider request runs. This is useful for PII anonymization and other
+prompt-preserving rewrites.
+
+The default `prompt` is derived from LiteLLM's `data_anonymization` guardrail,
+so a minimal config acts as an anonymizing preprocessor.
+
+#### Settings
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `model` | Yes | Auxiliary model selector used for the rewrite call. |
+| `provider` | No | Optional routing hint for `model`. |
+| `prompt` | No | Custom rewrite prompt. Defaults to the built-in anonymization prompt. |
+| `roles` | No | Message roles to rewrite. Default: `["user"]`. |
+| `skip_content_prefix` | No | Skip rewriting when the trimmed message starts with this prefix. |
+| `max_tokens` | No | `max_tokens` for the auxiliary rewrite call. Default: `4096`. |
+
+When `llm_based_altering` calls the auxiliary model, GOModel runs that call
+through the normal translated request path in-process. That means ordinary
+workflow selection, fallback, usage, audit, and cache behavior still apply.
+The internal request uses:
+
+- path: `/v1/chat/completions`
+- user path: `{guardrail.user_path or caller user path}/guardrails/{guardrail name}`
+- request origin: `guardrail`
+
+Guardrails are explicitly skipped for that internal request to avoid recursion.
+
+#### Example
+
+```yaml
+- name: "privacy-rewrite"
+  type: "llm_based_altering"
+  user_path: "/team/privacy"
+  order: 1
+  llm_based_altering:
+    model: "gpt-4o-mini"
+    roles: ["user"]
+```
+
 ## Examples
 
 ### Single Safety Guardrail
@@ -247,6 +292,14 @@ guardrails:
       system_prompt:
         mode: "decorator"
         content: "[SAFETY] Always respond within company guidelines."
+
+    # Step 3: anonymize user text before it reaches the main model
+    - name: "privacy-rewrite"
+      type: "llm_based_altering"
+      order: 2
+      llm_based_altering:
+        model: "gpt-4o-mini"
+        roles: ["user"]
 ```
 
 ### Mixed Parallel and Sequential

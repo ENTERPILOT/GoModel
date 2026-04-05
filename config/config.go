@@ -173,8 +173,12 @@ type GuardrailRuleConfig struct {
 	// Name is a unique identifier for this guardrail instance (used in logs and errors)
 	Name string `yaml:"name"`
 
-	// Type selects the guardrail implementation: "system_prompt"
+	// Type selects the guardrail implementation: "system_prompt" or "llm_based_altering"
 	Type string `yaml:"type"`
+
+	// UserPath scopes internal auxiliary guardrail requests for workflow
+	// selection and audit logging. When empty, the caller user path is used.
+	UserPath string `yaml:"user_path"`
 
 	// Order controls execution ordering relative to other guardrails.
 	// Guardrails with the same order run in parallel; different orders run sequentially.
@@ -183,6 +187,9 @@ type GuardrailRuleConfig struct {
 
 	// SystemPrompt holds settings when Type is "system_prompt"
 	SystemPrompt SystemPromptSettings `yaml:"system_prompt"`
+
+	// LLMBasedAltering holds settings when Type is "llm_based_altering"
+	LLMBasedAltering LLMBasedAlteringSettings `yaml:"llm_based_altering"`
 }
 
 // SystemPromptSettings holds the type-specific settings for a system_prompt guardrail.
@@ -196,6 +203,31 @@ type SystemPromptSettings struct {
 
 	// Content is the system prompt text to apply
 	Content string `yaml:"content"`
+}
+
+// LLMBasedAlteringSettings holds the type-specific settings for an llm_based_altering guardrail.
+type LLMBasedAlteringSettings struct {
+	// Model is the model selector used for the auxiliary rewrite call.
+	// This can be a concrete model name, provider-qualified selector, or alias.
+	Model string `yaml:"model"`
+
+	// Provider is an optional routing hint for Model.
+	Provider string `yaml:"provider"`
+
+	// Prompt is the system prompt used to rewrite targeted messages.
+	// When empty, the built-in LiteLLM-derived anonymization prompt is used.
+	Prompt string `yaml:"prompt"`
+
+	// Roles selects which message roles are rewritten.
+	// Default: ["user"]
+	Roles []string `yaml:"roles"`
+
+	// SkipContentPrefix skips rewriting for messages whose trimmed text begins with this prefix.
+	SkipContentPrefix string `yaml:"skip_content_prefix"`
+
+	// MaxTokens limits the auxiliary rewrite completion.
+	// Default: 4096
+	MaxTokens int `yaml:"max_tokens"`
 }
 
 // HTTPConfig holds HTTP client configuration for upstream API requests.
@@ -426,11 +458,11 @@ type EmbedderConfig struct {
 // VectorStoreConfig selects the vector DB backend.
 // Type must be set when semantic caching is enabled: qdrant, pgvector, pinecone, weaviate.
 type VectorStoreConfig struct {
-	Type      string          `yaml:"type"`
-	Qdrant    QdrantConfig    `yaml:"qdrant"`
-	PGVector  PGVectorConfig  `yaml:"pgvector"`
-	Pinecone  PineconeConfig  `yaml:"pinecone"`
-	Weaviate  WeaviateConfig  `yaml:"weaviate"`
+	Type     string         `yaml:"type"`
+	Qdrant   QdrantConfig   `yaml:"qdrant"`
+	PGVector PGVectorConfig `yaml:"pgvector"`
+	Pinecone PineconeConfig `yaml:"pinecone"`
+	Weaviate WeaviateConfig `yaml:"weaviate"`
 }
 
 // QdrantConfig holds connection configuration for the Qdrant vector store.

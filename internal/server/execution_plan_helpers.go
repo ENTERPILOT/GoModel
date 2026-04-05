@@ -126,7 +126,7 @@ func translatedExecutionPlanForRequest(
 	plan.Capabilities = core.CapabilitiesForEndpoint(desc)
 	plan.ProviderType = strings.TrimSpace(resolution.ProviderType)
 	plan.Resolution = resolution
-	if err := applyExecutionPolicy(plan, policyResolver, core.NewExecutionPlanSelector(plan.ProviderType, resolution.ResolvedSelector.Model, core.UserPathFromContext(c.Request().Context()))); err != nil {
+	if err := applyExecutionPolicy(c.Request().Context(), plan, policyResolver, core.NewExecutionPlanSelector(plan.ProviderType, resolution.ResolvedSelector.Model, core.UserPathFromContext(c.Request().Context()))); err != nil {
 		return nil, err
 	}
 

@@ -124,10 +124,13 @@ func processGuardedResponses(ctx context.Context, pipeline *Pipeline, req *core.
 	if pipeline == nil || pipeline.Len() == 0 || req == nil {
 		return req, nil
 	}
-	msgs := responsesToMessages(req)
+	msgs, err := responsesToMessages(req)
+	if err != nil {
+		return nil, err
+	}
 	modified, err := pipeline.Process(ctx, msgs)
 	if err != nil {
 		return nil, err
 	}
-	return applyMessagesToResponses(req, modified), nil
+	return applyMessagesToResponses(req, modified)
 }

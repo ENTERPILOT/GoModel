@@ -129,6 +129,143 @@ func TestServiceRefreshBuildsPipelineFromDefinitions(t *testing.T) {
 	}
 }
 
+func TestServiceRefreshBuildsLLMBasedAlteringPipelineFromDefinitions(t *testing.T) {
+	store := newTestStore(
+		Definition{
+			Name: "privacy",
+			Type: "llm_based_altering",
+			Config: rawConfig(t, map[string]any{
+				"model": "gpt-4o-mini",
+				"roles": []string{"user"},
+			}),
+		},
+	)
+
+	service, err := NewService(store, mockChatCompletionExecutor{
+		chatFn: func(_ context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+			if req.Model != "gpt-4o-mini" {
+				t.Fatalf("auxiliary model = %q, want gpt-4o-mini", req.Model)
+			}
+			return &core.ChatResponse{
+				Choices: []core.Choice{
+					{Message: core.ResponseMessage{Role: "assistant", Content: "[|---|](PERSON_1)"}},
+				},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	pipeline, _, err := service.BuildPipeline([]StepReference{{Ref: "privacy", Step: 10}})
+	if err != nil {
+		t.Fatalf("BuildPipeline() error = %v", err)
+	}
+
+	msgs, err := pipeline.Process(context.Background(), []Message{{Role: "user", Content: "John Smith"}})
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	if msgs[0].Content != "[|---|](PERSON_1)" {
+		t.Fatalf("Process() messages = %#v, want rewritten content", msgs)
+	}
+}
+
+func TestServiceRefreshNormalizesLLMBasedAlteringSelectorForViews(t *testing.T) {
+	store := newTestStore(
+		Definition{
+			Name: "privacy",
+			Type: "llm_based_altering",
+			Config: rawConfig(t, map[string]any{
+				"model":    "gpt-4o-mini",
+				"provider": "openai",
+				"roles":    []string{"user"},
+			}),
+		},
+	)
+
+	service, err := NewService(store)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	definition, ok := service.Get("privacy")
+	if !ok || definition == nil {
+		t.Fatal("Get(privacy) = missing, want normalized guardrail")
+	}
+
+	var cfg map[string]any
+	if err := json.Unmarshal(definition.Config, &cfg); err != nil {
+		t.Fatalf("json.Unmarshal(definition.Config) error = %v", err)
+	}
+	if cfg["model"] != "openai/gpt-4o-mini" {
+		t.Fatalf("config.model = %#v, want openai/gpt-4o-mini", cfg["model"])
+	}
+	if _, ok := cfg["provider"]; ok {
+		t.Fatalf("config.provider = %#v, want omitted after normalization", cfg["provider"])
+	}
+}
+
+func TestServiceSetExecutor_RebuildsLLMBasedAlteringInstances(t *testing.T) {
+	store := newTestStore(
+		Definition{
+			Name: "privacy",
+			Type: "llm_based_altering",
+			Config: rawConfig(t, map[string]any{
+				"model": "gpt-4o-mini",
+				"roles": []string{"user"},
+			}),
+		},
+	)
+
+	service, err := NewService(store, mockChatCompletionExecutor{
+		chatFn: func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
+			return &core.ChatResponse{
+				Choices: []core.Choice{
+					{Message: core.ResponseMessage{Role: "assistant", Content: "[|---|](PERSON_1)"}},
+				},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	if err := service.SetExecutor(context.Background(), mockChatCompletionExecutor{
+		chatFn: func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
+			return &core.ChatResponse{
+				Choices: []core.Choice{
+					{Message: core.ResponseMessage{Role: "assistant", Content: "[|---|](PERSON_2)"}},
+				},
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("SetExecutor() error = %v", err)
+	}
+
+	pipeline, _, err := service.BuildPipeline([]StepReference{{Ref: "privacy", Step: 10}})
+	if err != nil {
+		t.Fatalf("BuildPipeline() error = %v", err)
+	}
+
+	msgs, err := pipeline.Process(context.Background(), []Message{{Role: "user", Content: "John Smith"}})
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	if msgs[0].Content != "[|---|](PERSON_2)" {
+		t.Fatalf("Process() messages = %#v, want rewritten content from updated executor", msgs)
+	}
+}
+
 func TestServiceRefresh_ReturnsGatewayErrorOnStoreFailure(t *testing.T) {
 	store := &testStore{
 		definitions: map[string]Definition{},

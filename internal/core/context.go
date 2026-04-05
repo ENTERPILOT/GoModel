@@ -36,7 +36,32 @@ const (
 	// Response cache writers use this to avoid storing fallback responses under
 	// the primary request key.
 	fallbackUsedKey contextKey = "fallback-used"
+
+	// requestOriginKey stores the logical request origin for internal execution
+	// flows that still reuse the translated request pipeline.
+	requestOriginKey contextKey = "request-origin"
 )
+
+// RequestOrigin identifies whether a request came from an external caller or an
+// internal gateway-owned workflow.
+type RequestOrigin string
+
+const (
+	RequestOriginExternal  RequestOrigin = "external"
+	RequestOriginGuardrail RequestOrigin = "guardrail"
+)
+
+type maskedContext struct {
+	context.Context
+	masked map[any]struct{}
+}
+
+func (c maskedContext) Value(key any) any {
+	if _, ok := c.masked[key]; ok {
+		return nil
+	}
+	return c.Context.Value(key)
+}
 
 // WithRequestID returns a new context with the request ID attached.
 func WithRequestID(ctx context.Context, requestID string) context.Context {
@@ -191,4 +216,39 @@ func GetFallbackUsed(ctx context.Context) bool {
 		}
 	}
 	return false
+}
+
+// WithRequestOrigin returns a new context with the logical request origin attached.
+func WithRequestOrigin(ctx context.Context, origin RequestOrigin) context.Context {
+	return context.WithValue(ctx, requestOriginKey, origin)
+}
+
+// GetRequestOrigin retrieves the request origin from context.
+// When unset, external traffic is assumed.
+func GetRequestOrigin(ctx context.Context) RequestOrigin {
+	if v := ctx.Value(requestOriginKey); v != nil {
+		if origin, ok := v.(RequestOrigin); ok && origin != "" {
+			return origin
+		}
+	}
+	return RequestOriginExternal
+}
+
+// WithoutRequestExecutionState masks request-local execution state so nested
+// internal requests inherit cancellation and identity metadata without
+// reusing the caller's resolved plan, cache markers, or batch prep state.
+func WithoutRequestExecutionState(ctx context.Context) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	return maskedContext{
+		Context: ctx,
+		masked: map[any]struct{}{
+			executionPlanKey:             {},
+			batchPreparationMetadataKey:  {},
+			enforceReturningUsageDataKey: {},
+			guardrailsHashKey:            {},
+			fallbackUsedKey:              {},
+		},
+	}
 }

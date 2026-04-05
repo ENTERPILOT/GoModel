@@ -37,6 +37,29 @@
                 return 'system_prompt';
             },
 
+            resolvedGuardrailType(type) {
+                const normalized = String(type || '').trim();
+                if (normalized && this.guardrailTypeDefinition(normalized)) {
+                    return normalized;
+                }
+                return this.defaultGuardrailType();
+            },
+
+            normalizeGuardrailArrayValue(value) {
+                if (Array.isArray(value)) {
+                    return value
+                        .map((item) => String(item || '').trim())
+                        .filter((item) => item);
+                }
+                if (value === null || value === undefined) {
+                    return [];
+                }
+                return String(value)
+                    .split(',')
+                    .map((item) => item.trim())
+                    .filter((item) => item);
+            },
+
             guardrailTypeDefinition(type) {
                 const normalized = String(type || '').trim();
                 return (this.guardrailTypes || []).find((item) => String(item && item.type || '').trim() === normalized) || null;
@@ -58,7 +81,7 @@
             },
 
             defaultGuardrailForm(type) {
-                const resolvedType = String(type || '').trim() || this.defaultGuardrailType();
+                const resolvedType = this.resolvedGuardrailType(type);
                 return {
                     name: '',
                     type: resolvedType,
@@ -101,7 +124,10 @@
                 }
                 const value = this.guardrailForm.config[field.key];
                 if (value === null || value === undefined) {
-                    return '';
+                    return field.input === 'checkboxes' ? [] : '';
+                }
+                if (field.input === 'checkboxes') {
+                    return this.normalizeGuardrailArrayValue(value);
                 }
                 return value;
             },
@@ -119,6 +145,8 @@
                         const parsed = Number(trimmed);
                         nextConfig[field.key] = Number.isFinite(parsed) ? parsed : trimmed;
                     }
+                } else if (field.input === 'checkboxes') {
+                    nextConfig[field.key] = this.normalizeGuardrailArrayValue(value);
                 } else {
                     nextConfig[field.key] = value;
                 }
@@ -126,6 +154,35 @@
                     ...this.guardrailForm,
                     config: nextConfig
                 };
+            },
+
+            syncGuardrailTypeSelectValue() {
+                const select = this.$refs && this.$refs.guardrailTypeSelect;
+                if (!select) {
+                    return;
+                }
+
+                const resolvedType = this.resolvedGuardrailType(this.guardrailForm && this.guardrailForm.type);
+                if (select.value !== resolvedType) {
+                    select.value = resolvedType;
+                }
+            },
+
+            guardrailArrayFieldSelected(field, optionValue) {
+                return this.guardrailFieldValue(field).includes(String(optionValue || '').trim());
+            },
+
+            toggleGuardrailArrayFieldValue(field, optionValue, checked) {
+                const selected = this.normalizeGuardrailArrayValue(this.guardrailFieldValue(field));
+                const normalizedValue = String(optionValue || '').trim();
+                if (!normalizedValue) {
+                    return;
+                }
+
+                const next = checked
+                    ? Array.from(new Set([...selected, normalizedValue]))
+                    : selected.filter((item) => item !== normalizedValue);
+                this.setGuardrailFieldValue(field, next);
             },
 
             guardrailsRuntimeEnabled() {
@@ -145,7 +202,7 @@
             },
 
             openGuardrailEdit(guardrail) {
-                const resolvedType = String(guardrail && guardrail.type || '').trim() || this.defaultGuardrailType();
+                const resolvedType = this.resolvedGuardrailType(guardrail && guardrail.type);
                 this.guardrailFormMode = 'edit';
                 this.guardrailFormOriginalName = String(guardrail && guardrail.name || '').trim();
                 this.guardrailError = '';
@@ -169,7 +226,7 @@
             },
 
             onGuardrailTypeChange() {
-                const resolvedType = String(this.guardrailForm.type || '').trim() || this.defaultGuardrailType();
+                const resolvedType = this.resolvedGuardrailType(this.guardrailForm.type);
                 this.guardrailForm = {
                     ...this.guardrailForm,
                     type: resolvedType,
@@ -205,9 +262,12 @@
                     }
                     const payload = await res.json();
                     this.guardrailTypes = Array.isArray(payload) ? payload : [];
-                    if (!this.guardrailForm.type) {
-                        this.guardrailForm = this.defaultGuardrailForm(this.defaultGuardrailType());
-                    }
+                    const resolvedType = this.resolvedGuardrailType(this.guardrailForm.type);
+                    this.guardrailForm = {
+                        ...this.guardrailForm,
+                        type: resolvedType,
+                        config: this.normalizeGuardrailConfig(this.guardrailForm.config, resolvedType)
+                    };
                 } catch (e) {
                     console.error('Failed to fetch guardrail types:', e);
                     this.guardrailTypes = [];

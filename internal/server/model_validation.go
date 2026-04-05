@@ -95,21 +95,21 @@ func deriveExecutionPlanWithPolicy(
 		plan.Mode = core.ExecutionModePassthrough
 		plan.ProviderType = providerType
 		plan.Passthrough = passthrough
-		if err := applyExecutionPolicy(plan, policyResolver, core.NewExecutionPlanSelector(providerType, passthrough.Model, userPath)); err != nil {
+		if err := applyExecutionPolicy(c.Request().Context(), plan, policyResolver, core.NewExecutionPlanSelector(providerType, passthrough.Model, userPath)); err != nil {
 			return nil, err
 		}
 		return plan, nil
 
 	case core.OperationBatches:
 		plan.Mode = core.ExecutionModeNativeBatch
-		if err := applyExecutionPolicy(plan, policyResolver, core.ExecutionPlanSelector{}); err != nil {
+		if err := applyExecutionPolicy(c.Request().Context(), plan, policyResolver, core.ExecutionPlanSelector{}); err != nil {
 			return nil, err
 		}
 		return plan, nil
 
 	case core.OperationFiles:
 		plan.Mode = core.ExecutionModeNativeFile
-		if err := applyExecutionPolicy(plan, policyResolver, core.ExecutionPlanSelector{}); err != nil {
+		if err := applyExecutionPolicy(c.Request().Context(), plan, policyResolver, core.ExecutionPlanSelector{}); err != nil {
 			return nil, err
 		}
 		return plan, nil
@@ -121,14 +121,14 @@ func deriveExecutionPlanWithPolicy(
 			return nil, err
 		}
 		if !parsed || resolution == nil {
-			if err := applyExecutionPolicy(plan, policyResolver, core.ExecutionPlanSelector{}); err != nil {
+			if err := applyExecutionPolicy(c.Request().Context(), plan, policyResolver, core.ExecutionPlanSelector{}); err != nil {
 				return nil, err
 			}
 			return plan, nil
 		}
 		plan.ProviderType = resolution.ProviderType
 		plan.Resolution = resolution
-		if err := applyExecutionPolicy(plan, policyResolver, core.NewExecutionPlanSelector(resolution.ProviderType, resolution.ResolvedSelector.Model, userPath)); err != nil {
+		if err := applyExecutionPolicy(c.Request().Context(), plan, policyResolver, core.NewExecutionPlanSelector(resolution.ProviderType, resolution.ResolvedSelector.Model, userPath)); err != nil {
 			return nil, err
 		}
 		return plan, nil

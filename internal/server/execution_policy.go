@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -14,7 +15,7 @@ type RequestExecutionPolicyResolver interface {
 	Match(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error)
 }
 
-func applyExecutionPolicy(plan *core.ExecutionPlan, resolver RequestExecutionPolicyResolver, selector core.ExecutionPlanSelector) error {
+func applyExecutionPolicy(ctx context.Context, plan *core.ExecutionPlan, resolver RequestExecutionPolicyResolver, selector core.ExecutionPlanSelector) error {
 	if plan == nil || resolver == nil {
 		return nil
 	}
@@ -23,7 +24,25 @@ func applyExecutionPolicy(plan *core.ExecutionPlan, resolver RequestExecutionPol
 		return normalizeExecutionPolicyError(err)
 	}
 	plan.Policy = policy
+	applyExecutionContextOverrides(ctx, plan)
 	return nil
+}
+
+func applyExecutionContextOverrides(ctx context.Context, plan *core.ExecutionPlan) {
+	if plan == nil || ctx == nil {
+		return
+	}
+	if core.GetRequestOrigin(ctx) != core.RequestOriginGuardrail {
+		return
+	}
+	if plan.Policy == nil {
+		return
+	}
+
+	cloned := *plan.Policy
+	cloned.Features.Guardrails = false
+	cloned.GuardrailsHash = ""
+	plan.Policy = &cloned
 }
 
 func normalizeExecutionPolicyError(err error) error {
