@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"gomodel/internal/core"
 	"gomodel/internal/executionplans"
 	"gomodel/internal/guardrails"
 )
@@ -312,6 +313,20 @@ func TestUpsertGuardrailRejectsSlashInName(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+
+	envelope := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	if envelope.Error.Type != string(core.ErrorTypeInvalidRequest) {
+		t.Fatalf("error type = %q, want %q", envelope.Error.Type, core.ErrorTypeInvalidRequest)
+	}
+	if envelope.Error.Message != "guardrail name cannot contain '/'" {
+		t.Fatalf("error message = %q, want guardrail name validation failure", envelope.Error.Message)
+	}
+	if envelope.Error.Param != nil {
+		t.Fatalf("error param = %v, want nil", *envelope.Error.Param)
+	}
+	if envelope.Error.Code != nil {
+		t.Fatalf("error code = %v, want nil", *envelope.Error.Code)
 	}
 }
 

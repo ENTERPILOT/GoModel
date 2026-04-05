@@ -2,6 +2,7 @@ package responsecache
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -88,6 +89,26 @@ func TestHandleRequest_SemanticMissPopulatesExactCache(t *testing.T) {
 	}
 	if handlerCalls != 1 {
 		t.Fatalf("exact hit should not call handler again, handlerCalls=%d", handlerCalls)
+	}
+}
+
+func TestHandleInternalRequest_RejectsNilContext(t *testing.T) {
+	m := NewResponseCacheMiddlewareWithStore(cache.NewMapStore(), time.Hour)
+	var nilCtx context.Context
+
+	_, err := m.HandleInternalRequest(nilCtx, http.MethodPost, "/v1/chat/completions", []byte(`{}`), func(c *echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"ok": "1"})
+	})
+	if err == nil {
+		t.Fatal("HandleInternalRequest() error = nil, want invalid request error")
+	}
+
+	gatewayErr, ok := err.(*core.GatewayError)
+	if !ok {
+		t.Fatalf("HandleInternalRequest() error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("error type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
 	}
 }
 

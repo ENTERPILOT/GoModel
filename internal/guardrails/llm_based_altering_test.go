@@ -2,6 +2,7 @@ package guardrails
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -213,6 +214,41 @@ func TestLLMBasedAltering_Process_PropagatesContextCancellation(t *testing.T) {
 	_, err = g.Process(ctx, []Message{{Role: "user", Content: "John says hello"}})
 	if err == nil {
 		t.Fatal("expected context cancellation error")
+	}
+}
+
+func TestLLMBasedAltering_Process_PropagatesMidFlightCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+
+	g, err := NewLLMBasedAlteringGuardrail("privacy", LLMBasedAlteringConfig{
+		Model: "gpt-4o-mini",
+	}, mockChatCompletionExecutor{
+		chatFn: func(ctx context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
+			close(started)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLLMBasedAlteringGuardrail() error = %v", err)
+	}
+
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := g.Process(ctx, []Message{{Role: "user", Content: "John says hello"}})
+		resultCh <- err
+	}()
+
+	<-started
+	cancel()
+
+	err = <-resultCh
+	if err == nil {
+		t.Fatal("expected context cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }
 

@@ -1420,6 +1420,9 @@ func cloneResponsesInterfacePart(part any) any {
 	return cloneStringAnyMap(partMap)
 }
 
+// cloneStringAnyMap performs a shallow copy of the map. Nested maps/slices are
+// intentionally shared; callers are expected to either preserve them as-is or
+// replace whole top-level values instead of mutating nested structures in place.
 func cloneStringAnyMap(src map[string]any) map[string]any {
 	if src == nil {
 		return nil

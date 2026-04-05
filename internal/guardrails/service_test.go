@@ -129,6 +129,18 @@ func TestServiceRefreshBuildsPipelineFromDefinitions(t *testing.T) {
 	}
 }
 
+func TestNewServiceRejectsMultipleExecutors(t *testing.T) {
+	store := newTestStore()
+
+	_, err := NewService(store, mockChatCompletionExecutor{}, mockChatCompletionExecutor{})
+	if err == nil {
+		t.Fatal("NewService() error = nil, want multiple executor validation error")
+	}
+	if err.Error() != "only one ChatCompletionExecutor is supported" {
+		t.Fatalf("NewService() error = %q, want multiple executor validation error", err)
+	}
+}
+
 func TestServiceRefreshBuildsLLMBasedAlteringPipelineFromDefinitions(t *testing.T) {
 	store := newTestStore(
 		Definition{

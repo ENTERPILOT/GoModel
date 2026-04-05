@@ -61,6 +61,9 @@ func New(ctx context.Context, cfg *config.Config, refreshInterval time.Duration,
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
+	if err := validateExecutorCount(executors); err != nil {
+		return nil, err
+	}
 	storeConn, err := storage.New(ctx, cfg.Storage.BackendConfig())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
@@ -79,10 +82,16 @@ func NewWithSharedStorage(ctx context.Context, shared storage.Storage, refreshIn
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
+	if err := validateExecutorCount(executors); err != nil {
+		return nil, err
+	}
 	return newResult(ctx, shared, refreshInterval, executors...)
 }
 
 func newResult(ctx context.Context, storeConn storage.Storage, refreshInterval time.Duration, executors ...ChatCompletionExecutor) (*Result, error) {
+	if err := validateExecutorCount(executors); err != nil {
+		return nil, err
+	}
 	store, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
@@ -155,4 +164,11 @@ func startGuardrailRefreshLoop(parent context.Context, service *Service, interva
 			<-done
 		})
 	}, errs
+}
+
+func validateExecutorCount(executors []ChatCompletionExecutor) error {
+	if len(executors) > 1 {
+		return fmt.Errorf("only one ChatCompletionExecutor is supported")
+	}
+	return nil
 }

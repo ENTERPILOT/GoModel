@@ -384,7 +384,7 @@
                 <label class="alias-form-field">
                     <span>User Path</span>
                     <input type="text" class="filter-input" placeholder="/team/alpha" x-model="guardrailForm.user_path" aria-label="Guardrail user path">
-                    <small class="alias-form-hint">Optional base user path for internal auxiliary rewrite requests. When empty, the caller user path is reused.</small>
+                    <small class="alias-form-hint">Only used for auxiliary rewrite (llm_based_altering) guardrails; ignored for other guardrail types.</small>
                 </label>
 
                 <template x-for="field in guardrailTypeFields(guardrailForm.type)" :key="field.key">
@@ -409,8 +409,8 @@
                             </label>
                         </template>
                         <template x-if="field.input === 'checkboxes'">
-                            <div class="alias-form-field alias-form-field-wide">
-                                <span x-text="field.label"></span>
+                            <fieldset class="alias-form-field alias-form-field-wide alias-form-field-fieldset" :aria-describedby="field.help ? 'guardrail-field-help-' + field.key : null">
+                                <legend class="alias-form-field-legend" x-text="field.label"></legend>
                                 <div class="execution-plan-feature-toggles">
                                     <template x-for="option in field.options" :key="field.key + '-' + option.value">
                                         <label class="execution-plan-feature-toggle">
@@ -419,8 +419,8 @@
                                         </label>
                                     </template>
                                 </div>
-                                <small class="alias-form-hint" x-show="field.help" x-text="field.help"></small>
-                            </div>
+                                <small class="alias-form-hint" :id="'guardrail-field-help-' + field.key" x-show="field.help" x-text="field.help"></small>
+                            </fieldset>
                         </template>
                     </div>
                 </template>

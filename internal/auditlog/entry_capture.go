@@ -201,10 +201,10 @@ func internalJSONAuditHeaders(ctx context.Context, requestID string) http.Header
 }
 
 func boundedAuditBody(body []byte, truncate bool) ([]byte, bool) {
+	if body == nil {
+		return []byte{}, false
+	}
 	if len(body) <= MaxBodyCapture {
-		if body == nil {
-			return []byte{}, false
-		}
 		cloned := make([]byte, len(body))
 		copy(cloned, body)
 		return cloned, false

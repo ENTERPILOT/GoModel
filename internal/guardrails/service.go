@@ -32,6 +32,9 @@ func NewService(store Store, executors ...ChatCompletionExecutor) (*Service, err
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
+	if len(executors) > 1 {
+		return nil, fmt.Errorf("only one ChatCompletionExecutor is supported")
+	}
 	var executor ChatCompletionExecutor
 	if len(executors) > 0 {
 		executor = executors[0]

@@ -24,6 +24,7 @@ const responseCachePrefix = "gomodel:response:"
 type ResponseCacheMiddleware struct {
 	simple   *simpleCacheMiddleware
 	semantic *semanticCacheMiddleware
+	echo     *echo.Echo
 }
 
 // InternalHandleResult is the buffered result of running the cache middleware
@@ -46,6 +47,7 @@ func NewResponseCacheMiddleware(
 	pricingResolver usage.PricingResolver,
 ) (*ResponseCacheMiddleware, error) {
 	m := &ResponseCacheMiddleware{}
+	m.echo = echo.New()
 	hitRecorder := newUsageHitRecorder(usageLogger, pricingResolver)
 
 	switch {
@@ -166,7 +168,7 @@ func (m *ResponseCacheMiddleware) HandleInternalRequest(
 	next func(*echo.Context) error,
 ) (*InternalHandleResult, error) {
 	if ctx == nil {
-		ctx = context.Background()
+		return nil, core.NewInvalidRequestError("context is required", nil)
 	}
 
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
@@ -174,7 +176,14 @@ func (m *ResponseCacheMiddleware) HandleInternalRequest(
 	req = req.WithContext(ctx)
 
 	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
+	var e *echo.Echo
+	if m != nil {
+		e = m.echo
+	}
+	if e == nil {
+		e = echo.New()
+	}
+	c := e.NewContext(req, rec)
 
 	var err error
 	if m == nil {
@@ -246,5 +255,6 @@ func internalCacheType(headerValue string) string {
 func NewResponseCacheMiddlewareWithStore(store cache.Store, ttl time.Duration) *ResponseCacheMiddleware {
 	return &ResponseCacheMiddleware{
 		simple: newSimpleCacheMiddleware(store, ttl, nil),
+		echo:   echo.New(),
 	}
 }

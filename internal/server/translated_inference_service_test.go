@@ -81,3 +81,28 @@ func TestTranslatedInferenceService_LogUsageAssignsUserPathFromContext(t *testin
 		t.Fatalf("UserPath = %q, want /team/alpha", got)
 	}
 }
+
+func TestTranslatedInferenceService_WithCacheRequestContextClearsInheritedGuardrailsHash(t *testing.T) {
+	service := &translatedInferenceService{
+		guardrailsHash: "service-default",
+	}
+	ctx := core.WithGuardrailsHash(context.Background(), "caller-hash")
+	plan := &core.ExecutionPlan{
+		Policy: &core.ResolvedExecutionPolicy{
+			VersionID:      "plan-1",
+			GuardrailsHash: "",
+			Features: core.ExecutionFeatures{
+				Cache:      true,
+				Audit:      true,
+				Usage:      true,
+				Guardrails: false,
+				Fallback:   true,
+			},
+		},
+	}
+
+	got := service.withCacheRequestContext(ctx, plan)
+	if hash := core.GetGuardrailsHash(got); hash != "" {
+		t.Fatalf("guardrails hash = %q, want cleared hash", hash)
+	}
+}
