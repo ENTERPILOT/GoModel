@@ -297,6 +297,20 @@ func TestLLMBasedAltering_Process_FailsOpenOnToolCallCompletion(t *testing.T) {
 	}
 }
 
+func TestUnwrapAlteredText_StripsOnlyOuterWrapper(t *testing.T) {
+	wrapped := wrapAlteringText("sensitive text")
+	if got := unwrapAlteredText(wrapped); got != "sensitive text" {
+		t.Fatalf("unwrapAlteredText(wrapped) = %q, want sensitive text", got)
+	}
+}
+
+func TestUnwrapAlteredText_PreservesInteriorWrapperTokens(t *testing.T) {
+	text := `code sample: "<TEXT_TO_ALTER>\nkeep this literal\n</TEXT_TO_ALTER>"`
+	if got := unwrapAlteredText(text); got != text {
+		t.Fatalf("unwrapAlteredText() = %q, want original text", got)
+	}
+}
+
 func TestLLMBasedAltering_Process_LimitsConcurrentRewrites(t *testing.T) {
 	var (
 		inFlight     atomic.Int32

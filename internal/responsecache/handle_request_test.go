@@ -156,6 +156,29 @@ func TestHandleInternalRequest_RejectsUninitializedEcho(t *testing.T) {
 	}
 }
 
+func TestInternalCacheType_ParsesHeaderShapes(t *testing.T) {
+	cases := []struct {
+		headerValue string
+		want        string
+	}{
+		{headerValue: CacheHeaderExact, want: CacheTypeExact},
+		{headerValue: CacheHeaderSemantic, want: CacheTypeSemantic},
+		{headerValue: "HIT ( semantic )", want: CacheTypeSemantic},
+		{headerValue: "  HIT (exact)  ", want: CacheTypeExact},
+		{headerValue: CacheTypeExact, want: CacheTypeExact},
+		{headerValue: CacheTypeSemantic, want: CacheTypeSemantic},
+		{headerValue: "HIT (unknown-cache)", want: ""},
+		{headerValue: "MISS", want: ""},
+		{headerValue: "", want: ""},
+	}
+
+	for _, tc := range cases {
+		if got := internalCacheType(tc.headerValue); got != tc.want {
+			t.Fatalf("internalCacheType(%q) = %q, want %q", tc.headerValue, got, tc.want)
+		}
+	}
+}
+
 func TestHandleRequest_FallbackUsedSkipsCacheWrites(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()

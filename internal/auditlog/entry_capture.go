@@ -96,7 +96,7 @@ func CaptureInternalJSONExchange(
 	if req := internalJSONAuditRequest(ctx, method, path, requestIDForEntry(entry), requestBody, cfg.LogBodies); req != nil {
 		PopulateRequestData(entry, req, cfg)
 	}
-	headers, body, truncated := internalJSONAuditResponse(responseBody, responseErr, requestIDForEntry(entry), cfg.LogBodies)
+	headers, body, truncated := internalJSONAuditResponse(ctx, responseBody, responseErr, requestIDForEntry(entry), cfg.LogBodies)
 	PopulateResponseData(entry, headers, body, truncated, cfg)
 }
 
@@ -155,12 +155,8 @@ func internalJSONAuditRequestBody(bodyValue any) ([]byte, bool) {
 	return boundedAuditBody(body, false)
 }
 
-func internalJSONAuditResponse(bodyValue any, responseErr error, requestID string, logBodies bool) (http.Header, []byte, bool) {
-	headers := make(http.Header)
-	headers.Set("Content-Type", "application/json")
-	if requestID != "" {
-		headers.Set("X-Request-ID", requestID)
-	}
+func internalJSONAuditResponse(ctx context.Context, bodyValue any, responseErr error, requestID string, logBodies bool) (http.Header, []byte, bool) {
+	headers := internalJSONAuditHeaders(ctx, requestID)
 
 	if !logBodies {
 		return headers, nil, false

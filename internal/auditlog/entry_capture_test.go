@@ -105,8 +105,14 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456_err" {
 			t.Fatalf("RequestHeaders[X-Request-ID] = %q, want req_456_err", got)
 		}
+		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/beta" {
+			t.Fatalf("RequestHeaders[%s] = %q, want /team/beta", core.UserPathHeader, got)
+		}
 		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456_err" {
 			t.Fatalf("ResponseHeaders[X-Request-ID] = %q, want req_456_err", got)
+		}
+		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/beta" {
+			t.Fatalf("ResponseHeaders[%s] = %q, want /team/beta", core.UserPathHeader, got)
 		}
 		body, ok := entry.Data.ResponseBody.(map[string]any)
 		if !ok {
@@ -118,6 +124,15 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 		}
 		if got := errorBody["message"]; got != "upstream failed" {
 			t.Fatalf("ResponseBody.error.message = %#v, want upstream failed", got)
+		}
+		if got := errorBody["type"]; got != string(core.ErrorTypeProvider) {
+			t.Fatalf("ResponseBody.error.type = %#v, want %q", got, core.ErrorTypeProvider)
+		}
+		if got, ok := errorBody["param"]; !ok || got != nil {
+			t.Fatalf("ResponseBody.error.param = %#v (present=%t), want nil present field", got, ok)
+		}
+		if got, ok := errorBody["code"]; !ok || got != nil {
+			t.Fatalf("ResponseBody.error.code = %#v (present=%t), want nil present field", got, ok)
 		}
 	})
 
@@ -148,6 +163,9 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456_big" {
 			t.Fatalf("ResponseHeaders[X-Request-ID] = %q, want req_456_big", got)
 		}
+		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/beta" {
+			t.Fatalf("ResponseHeaders[%s] = %q, want /team/beta", core.UserPathHeader, got)
+		}
 		if !entry.Data.RequestBodyTooBigToHandle {
 			t.Fatal("RequestBodyTooBigToHandle = false, want true")
 		}
@@ -157,8 +175,15 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 		if !entry.Data.ResponseBodyTooBigToHandle {
 			t.Fatal("ResponseBodyTooBigToHandle = false, want true")
 		}
-		if entry.Data.ResponseBody == nil {
-			t.Fatal("ResponseBody = nil, want truncated captured payload")
+		responseBody, ok := entry.Data.ResponseBody.(string)
+		if !ok {
+			t.Fatalf("ResponseBody = %T, want truncated string payload", entry.Data.ResponseBody)
+		}
+		if responseBody == "" {
+			t.Fatal("ResponseBody = empty, want truncated captured payload")
+		}
+		if strings.Contains(responseBody, `"`+large+`"`) {
+			t.Fatal("ResponseBody retained the full oversized payload, want truncated body")
 		}
 	})
 }

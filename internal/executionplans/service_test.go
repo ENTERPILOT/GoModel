@@ -622,9 +622,12 @@ func TestServiceRefresh_RebuildsCompiledGuardrailPipelinesAfterExecutorSwap(t *t
 			"privacy": {
 				Name: "privacy",
 				Type: "llm_based_altering",
-				Config: mustMarshalJSON(t, map[string]any{
-					"model": "gpt-4o-mini",
-					"roles": []string{"user"},
+				Config: mustMarshalJSON(t, struct {
+					Model string   `json:"model"`
+					Roles []string `json:"roles"`
+				}{
+					Model: "gpt-4o-mini",
+					Roles: []string{"user"},
 				}),
 			},
 		},

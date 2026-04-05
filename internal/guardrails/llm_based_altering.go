@@ -545,13 +545,10 @@ func wrapAlteringText(text string) string {
 }
 
 func unwrapAlteredText(text string) string {
-	if strings.Contains(text, alteringTextWrapperStart) {
-		text = strings.Replace(text, alteringTextWrapperStart, "", 1)
-		text = strings.TrimPrefix(text, "\n")
-	}
-	if strings.Contains(text, alteringTextWrapperEnd) {
-		text = strings.Replace(text, alteringTextWrapperEnd, "", 1)
-		text = strings.TrimSuffix(text, "\n")
+	prefix := alteringTextWrapperStart + "\n"
+	suffix := "\n" + alteringTextWrapperEnd
+	if strings.HasPrefix(text, prefix) && strings.HasSuffix(text, suffix) {
+		return strings.TrimSuffix(strings.TrimPrefix(text, prefix), suffix)
 	}
 	return text
 }

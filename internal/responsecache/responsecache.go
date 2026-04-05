@@ -238,10 +238,13 @@ func internalRequestHeaders(ctx context.Context) http.Header {
 
 func internalCacheType(headerValue string) string {
 	headerValue = strings.TrimSpace(headerValue)
+	if strings.HasPrefix(headerValue, "HIT (") && strings.HasSuffix(headerValue, ")") {
+		headerValue = strings.TrimSpace(headerValue[len("HIT (") : len(headerValue)-1])
+	}
 	switch headerValue {
-	case CacheHeaderExact:
+	case CacheTypeExact, CacheHeaderExact:
 		return CacheTypeExact
-	case CacheHeaderSemantic:
+	case CacheTypeSemantic, CacheHeaderSemantic:
 		return CacheTypeSemantic
 	default:
 		return ""
