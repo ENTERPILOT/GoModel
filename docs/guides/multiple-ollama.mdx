@@ -1,0 +1,85 @@
+---
+title: "Running Multiple Ollama Backends"
+description: "Use one GoModel instance with multiple Ollama providers by mounting a YAML config and selecting provider-qualified model IDs."
+---
+
+GoModel can register multiple Ollama providers when each one has its own key in
+the top-level `providers:` map.
+
+Flow:
+
+`Client -> GoModel -> ollama-a / ollama-b`
+
+## 1. Create a host-side `config.yml`
+
+```yaml
+providers:
+  ollama-a:
+    type: ollama
+    base_url: "http://host.docker.internal:11434/v1"
+
+  ollama-b:
+    type: ollama
+    base_url: "http://host.docker.internal:11435/v1"
+```
+
+Use different ports or hostnames for each Ollama instance.
+
+## 2. Run GoModel and mount the config
+
+```bash
+docker run --rm --name gomodel \
+  -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -v "$PWD/config.yml:/app/config/config.yaml:ro" \
+  enterpilot/gomodel:latest
+```
+
+<Note>
+  The file can be named `config.yml` on the host. The important part is the
+  bind mount target: GoModel reads `/app/config/config.yaml` inside the
+  container.
+</Note>
+
+<Tip>
+  On Linux, you may need to add
+  `--add-host=host.docker.internal:host-gateway` so the container can reach
+  Ollama running on the host.
+</Tip>
+
+## 3. Verify the model registry
+
+```bash
+curl -s http://localhost:8080/v1/models \
+  -H "Authorization: Bearer change-me"
+```
+
+Expected model IDs will be provider-qualified, for example:
+
+- `ollama-a/llama3.2`
+- `ollama-b/llama3.2`
+
+## 4. Route to a specific Ollama backend
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "ollama-a/llama3.2",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+If you send only the bare model name such as `llama3.2` and both providers
+expose it, GoModel will route the request to one provider based on provider
+registration order. To choose a specific Ollama backend, use the qualified form
+such as `ollama-a/llama3.2` or `ollama-b/llama3.2`.
+
+## Validated on April 6, 2026
+
+This guide was validated with:
+
+- `enterpilot/gomodel:latest`
+- a bind-mounted host `config.yml`
+- two Ollama-compatible upstream endpoints exposed as separate provider names

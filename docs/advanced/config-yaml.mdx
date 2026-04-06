@@ -1,0 +1,82 @@
+---
+title: "config.yaml"
+description: "When to use config.yaml, when not to, and how it interacts with environment variables and Docker."
+---
+
+The goal in GoModel is to make `config.yaml` optional as much as possible.
+Prefer environment variables for normal deployments, CI, containers, and secret
+injection.
+
+Use `config.yaml` when you need structure that env vars cannot express cleanly,
+especially:
+
+- multiple providers with the same type
+- custom provider instance names such as `ollama-a`, `ollama-b`, or `my-openai`
+- larger nested config that is easier to review in one file
+
+## Priority Order
+
+Effective precedence is:
+
+1. environment variables
+2. optional `config/config.yaml` or `config.yaml`
+3. built-in defaults from code
+
+`.env` is not a separate priority layer. It is just a convenient way to load
+environment variables before startup.
+
+## When `config.yaml` Is Better
+
+YAML is the current way to define multiple providers of the same type with
+flexible names:
+
+```yaml
+providers:
+  ollama-a:
+    type: ollama
+    base_url: "http://host.docker.internal:11434/v1"
+
+  ollama-b:
+    type: ollama
+    base_url: "http://host.docker.internal:11435/v1"
+```
+
+That gives you provider-qualified model IDs such as `ollama-a/llama3.2` and
+`ollama-b/llama3.2`.
+
+## Current Schema
+
+The current source of truth lives in the main codebase:
+
+- [config/config.go](https://github.com/ENTERPILOT/GoModel/blob/main/config/config.go)
+- [config/config.example.yaml](https://github.com/ENTERPILOT/GoModel/blob/main/config/config.example.yaml)
+
+## Docker
+
+GoModel reads `config/config.yaml` first, then `config.yaml`.
+
+With `docker run`, you can keep a host file named `config.yml` and mount it to
+the in-container path GoModel expects:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$PWD/config.yml:/app/config/config.yaml:ro" \
+  enterpilot/gomodel:latest
+```
+
+With Docker Compose:
+
+```yaml
+services:
+  gomodel:
+    image: enterpilot/gomodel:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yml:/app/config/config.yaml:ro
+```
+
+<Tip>
+  If env vars and YAML both define the same setting, the environment variable
+  wins.
+</Tip>

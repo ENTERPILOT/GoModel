@@ -24,6 +24,7 @@
                 "pages": [
                     "guides/openclaw",
                     "guides/oracle",
+                    "guides/multiple-ollama",
                     "guides/claude-code",
                     "guides/codex",
                     "guides/opencode-and-other-agents"
@@ -31,7 +32,7 @@
             },
             {
                 "group": "Advanced",
-                "pages": ["advanced/configuration", "advanced/guardrails", "advanced/admin-endpoints"]
+                "pages": ["advanced/configuration", "advanced/config-yaml", "advanced/guardrails", "advanced/admin-endpoints"]
             },
             {
                 "group": "About",
