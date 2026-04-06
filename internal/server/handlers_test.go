@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -229,12 +230,21 @@ func setPathParam(c *echo.Context, name, value string) {
 }
 
 type capturingAuditLogger struct {
+	mu      sync.Mutex
 	config  auditlog.Config
 	entries []*auditlog.LogEntry
 }
 
 func (l *capturingAuditLogger) Write(entry *auditlog.LogEntry) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.entries = append(l.entries, entry)
+}
+
+func (l *capturingAuditLogger) Entries() []*auditlog.LogEntry {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.entries)
 }
 
 func (l *capturingAuditLogger) Config() auditlog.Config {
@@ -4173,15 +4183,24 @@ func (c *capturingUsageLogger) Config() usage.Config          { return c.config 
 func (c *capturingUsageLogger) Close() error                  { return nil }
 
 type collectingUsageLogger struct {
+	mu      sync.Mutex
 	config  usage.Config
 	entries []*usage.UsageEntry
 }
 
 func (c *collectingUsageLogger) Write(entry *usage.UsageEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if entry == nil {
 		return
 	}
 	c.entries = append(c.entries, entry)
+}
+
+func (c *collectingUsageLogger) Entries() []*usage.UsageEntry {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.entries)
 }
 
 func (c *collectingUsageLogger) Config() usage.Config { return c.config }

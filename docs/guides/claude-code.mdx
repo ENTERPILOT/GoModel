@@ -1,45 +1,34 @@
 ---
 title: "Using GoModel with Claude Code"
-description: "Step-by-step guide for routing Claude Code through GoModel with Anthropic passthrough."
+description: "Step-by-step guide for using Claude Code with GoModel in gateway mode or subscription proxy mode."
 ---
 
-GoModel can sit in front of Claude Code so every request goes through your own
-gateway first.
+GoModel supports two different Claude Code setups:
+
+| Goal | Mode | Upstream auth |
+| --- | --- | --- |
+| Use Claude Code through an Anthropic-compatible gateway | Gateway mode | GoModel's `ANTHROPIC_API_KEY` |
+| Keep Claude.ai subscription auth and still capture traffic in GoModel | Subscription proxy mode | Claude Code's own `claude.ai` or enterprise session |
+
+If you want company-wide Claude Code observability without moving users onto API
+keys, use **subscription proxy mode**.
+
+## Mode 1: Gateway mode
 
 Flow:
 
-`Claude Code -> GoModel -> Anthropic`
+`Claude Code -> GoModel /p/anthropic -> Anthropic`
 
-## Before you start
-
-- Install Claude Code on your machine.
-- Choose a GoModel master key, for example `change-me`.
-- Make sure GoModel has an Anthropic upstream credential.
-
-<Note>
-  Claude Code can be routed through GoModel whether or not you personally use a
-  Claude Code subscription. For gateway mode, Claude Code talks to GoModel with
-  `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`. GoModel still needs its own
-  `ANTHROPIC_API_KEY` to reach Anthropic upstream.
-</Note>
-
-## How to get `ANTHROPIC_API_KEY`
-
-1. Open the Claude Console and sign in to your API account.
-2. Go to account settings in Console, then create an API key.
-3. Copy the key once and set it for GoModel as `ANTHROPIC_API_KEY`.
-
-Anthropic's API docs state that API keys are created in Console account
-settings.
+This is the standard Anthropic-compatible gateway setup. Claude Code talks to
+GoModel with `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`, and GoModel calls
+Anthropic with its own `ANTHROPIC_API_KEY`.
 
 <Warning>
-  Claude paid plans (Pro, Max, Team, Enterprise) and Claude API Console billing
-  are separate. API key usage is billed as API usage.
+  Gateway mode does not use a user's Claude subscription allowance. It uses
+  GoModel's upstream Anthropic API credentials.
 </Warning>
 
-## 1. Run GoModel
-
-Start GoModel with a master key and an Anthropic provider key:
+### 1. Run GoModel
 
 ```bash
 docker run --rm -p 8080:8080 \
@@ -48,16 +37,12 @@ docker run --rm -p 8080:8080 \
   enterpilot/gomodel
 ```
 
-## 2. Confirm Anthropic passthrough with curl
-
-Check that the Anthropic passthrough models endpoint responds:
+### 2. Confirm Anthropic passthrough
 
 ```bash
 curl -s http://localhost:8080/p/anthropic/v1/models \
   -H "Authorization: Bearer change-me"
 ```
-
-Then send one small test message:
 
 ```bash
 curl -s http://localhost:8080/p/anthropic/v1/messages \
@@ -76,11 +61,7 @@ curl -s http://localhost:8080/p/anthropic/v1/messages \
   }'
 ```
 
-If the gateway is wired correctly, the response will contain `ok`.
-
-## 3. Configure Claude Code to use GoModel
-
-Point Claude Code at GoModel's Anthropic passthrough:
+### 3. Point Claude Code at GoModel
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:8080/p/anthropic
@@ -88,55 +69,142 @@ export ANTHROPIC_AUTH_TOKEN=change-me
 export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
 ```
 
-Short Claude Code doc summary: for gateway mode, set `ANTHROPIC_BASE_URL` to
-your gateway URL and `ANTHROPIC_AUTH_TOKEN` to your gateway token, then run
-Claude Code normally. See the official guide:
-[Claude Code LLM gateway docs](https://code.claude.com/docs/en/llm-gateway).
-
-If GoModel is not running on your local machine, replace `localhost:8080` with
-the correct host and port.
-
-## 4. Run a Claude Code test prompt
-
 ```bash
 claude -p --output-format text --model claude-3-haiku-20240307 \
   'Reply with exactly ok and no punctuation.'
 ```
 
-The validated result was:
+## Mode 2: Subscription proxy mode
 
-```text
-ok
+Flow:
+
+`Claude Code -> GoModel forward proxy -> Anthropic`
+
+This mode keeps Claude Code signed in with `claude.ai` or enterprise auth and
+places GoModel in the middle as an HTTP(S) proxy. It is the mode to use when
+you want GoModel `audit_logs` and `usage` for real Claude Code subscription
+traffic.
+
+<Note>
+  Validated on March 23, 2026 with Claude Code `2.1.81`, `authMethod:
+  claude.ai`, and GoModel's experimental forward proxy.
+</Note>
+
+<Warning>
+  The forward proxy is experimental and intended for local or tightly controlled
+  internal use. Do not expose it directly to the internet in its current form.
+</Warning>
+
+### 1. Generate a local MITM CA
+
+```bash
+mkdir -p proxy-certs
+
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout proxy-certs/ca-key.pem \
+  -out proxy-certs/ca-cert.pem \
+  -days 30 \
+  -subj "/CN=GoModel Claude Proxy CA"
 ```
 
-## 5. Check the traffic in GoModel
+### 2. Run GoModel with the forward proxy enabled
 
-Open the GoModel dashboard audit logs:
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$PWD/proxy-certs:/certs" \
+  -e OPENAI_API_KEY="dummy" \
+  -e LOGGING_ENABLED=true \
+  -e LOGGING_LOG_BODIES=true \
+  -e LOGGING_LOG_HEADERS=true \
+  -e USAGE_ENABLED=true \
+  -e EXPERIMENTAL_FORWARD_PROXY_ENABLED=true \
+  -e EXPERIMENTAL_FORWARD_PROXY_MITM_HOSTS="api.anthropic.com" \
+  -e EXPERIMENTAL_FORWARD_PROXY_CA_CERT_FILE="/certs/ca-cert.pem" \
+  -e EXPERIMENTAL_FORWARD_PROXY_CA_KEY_FILE="/certs/ca-key.pem" \
+  enterpilot/gomodel
+```
+
+<Note>
+  The forward proxy path itself does not use `OPENAI_API_KEY`. The example sets
+  `OPENAI_API_KEY=dummy` only because GoModel currently expects at least one
+  configured provider at startup. If you already run GoModel with a real
+  provider credential, keep using that instead.
+</Note>
+
+### 3. Point Claude Code at GoModel as an HTTP proxy
+
+Keep Claude Code logged in normally, then export:
+
+```bash
+export HTTPS_PROXY=http://localhost:8080
+export HTTP_PROXY=http://localhost:8080
+export NODE_EXTRA_CA_CERTS="$PWD/proxy-certs/ca-cert.pem"
+export NO_PROXY=127.0.0.1,localhost
+```
+
+You can confirm the client is still using subscription auth with:
+
+```bash
+claude auth status
+```
+
+### 4. Run a real Claude Code prompt
+
+```bash
+claude -p --output-format json \
+  --setting-sources user \
+  --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
+  --disable-slash-commands \
+  --no-chrome \
+  --no-session-persistence \
+  'Respond with exactly the word THROUGHPROXY.'
+```
+
+A successful run returns JSON with:
+
+```json
+{
+  "result": "THROUGHPROXY"
+}
+```
+
+### 5. Verify audit and usage in GoModel
+
+Open the dashboard audit view:
 
 [http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
 
-This is the easiest place to confirm that Claude Code is reaching GoModel and
-to inspect the full request and response trail. From the same dashboard, you
-can keep following your GoModel traffic and usage.
+For a successful proxied subscription request, you should see:
+
+- startup requests such as `/api/oauth/claude_cli/client_data`
+- a model request row for `/v1/messages`
+- `usage` data for that `/v1/messages` call
+
+The admin APIs are also available directly:
+
+- `GET /admin/api/v1/audit/log`
+- `GET /admin/api/v1/usage/log`
 
 ## References
 
 - Anthropic Claude Code gateway docs: [LLM gateway](https://code.claude.com/docs/en/llm-gateway)
 - Anthropic Claude Code settings: [Settings](https://code.claude.com/docs/en/settings)
+- Anthropic Claude Code enterprise network config: [Network configuration](https://code.claude.com/docs/en/network-config)
 - Claude Help: [Managing API key environment variables in Claude Code](https://support.claude.com/en/articles/12304248-managing-api-key-environment-variables-in-claude-code)
 - Claude Help: [Paid Claude plans vs API Console billing](https://support.claude.com/en/articles/9876003-i-have-a-paid-claude-subscription-pro-max-team-or-enterprise-plans-why-do-i-have-to-pay-separately-to-use-the-claude-api-and-console)
-- Claude API docs: [API overview (keys from Console account settings)](https://docs.anthropic.com/en/api/getting-started)
 
-## Validated on March 10, 2026
+## Validation summary
 
-This guide was validated against:
+Validated on March 23, 2026 against:
 
-- a local GoModel instance on `http://localhost:8080`
-- a GoModel branch exposing `/p/{provider}/v1/...`
-- Claude Code `2.1.72`
+- GoModel running locally on `http://localhost:8080`
+- Claude Code `2.1.81`
+- Anthropic gateway mode through `/p/anthropic`
+- subscription proxy mode through `HTTP_PROXY` / `HTTPS_PROXY`
 
 Local validation confirmed:
 
-- `GET /p/anthropic/v1/models` returned `200 OK`
-- `POST /p/anthropic/v1/messages` returned `200 OK`
-- `claude` returned `ok` when pointed at GoModel
+- gateway mode returned successful Anthropic passthrough responses
+- subscription proxy mode returned `THROUGHPROXY`
+- GoModel stored `/v1/messages` in `audit_logs`
+- GoModel stored token and cost data for `/v1/messages` in `usage`

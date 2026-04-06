@@ -23,6 +23,9 @@ type streamResponseBuilder struct {
 	CreatedAt      int64
 	Status         string
 
+	// Anthropic Messages fields
+	IsAnthropicMessages bool
+
 	// Tracking
 	contentLen int // track content length to enforce limit
 	truncated  bool
@@ -68,6 +71,22 @@ func (b *streamResponseBuilder) buildResponsesAPIResponse() map[string]any {
 				},
 			},
 		},
+	}
+}
+
+func (b *streamResponseBuilder) buildAnthropicMessageResponse() map[string]any {
+	return map[string]any{
+		"id":    b.ID,
+		"type":  "message",
+		"role":  b.Role,
+		"model": b.Model,
+		"content": []map[string]any{
+			{
+				"type": "text",
+				"text": b.Content.String(),
+			},
+		},
+		"stop_reason": b.FinishReason,
 	}
 }
 

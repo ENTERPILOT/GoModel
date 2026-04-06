@@ -24,8 +24,10 @@ func NewStreamLogObserver(logger LoggerInterface, entry *LogEntry, path string) 
 	logBodies := logger.Config().LogBodies
 	var builder *streamResponseBuilder
 	if logBodies {
+		isResponsesAPI := strings.HasPrefix(path, "/v1/responses")
 		builder = &streamResponseBuilder{
-			IsResponsesAPI: strings.HasPrefix(path, "/v1/responses"),
+			IsResponsesAPI:      isResponsesAPI,
+			IsAnthropicMessages: !isResponsesAPI && strings.HasPrefix(path, "/v1/messages"),
 		}
 	}
 
@@ -46,6 +48,10 @@ func (o *StreamLogObserver) OnJSONEvent(event map[string]any) {
 		o.parseResponsesAPIEvent(event)
 		return
 	}
+	if o.builder.IsAnthropicMessages {
+		o.parseAnthropicMessagesEvent(event)
+		return
+	}
 	o.parseChatCompletionEvent(event)
 }
 
@@ -62,6 +68,8 @@ func (o *StreamLogObserver) OnStreamClose() {
 	if o.logBodies && o.builder != nil && o.entry != nil && o.entry.Data != nil {
 		if o.builder.IsResponsesAPI {
 			o.entry.Data.ResponseBody = o.builder.buildResponsesAPIResponse()
+		} else if o.builder.IsAnthropicMessages {
+			o.entry.Data.ResponseBody = o.builder.buildAnthropicMessageResponse()
 		} else {
 			o.entry.Data.ResponseBody = o.builder.buildChatCompletionResponse()
 		}
@@ -133,6 +141,42 @@ func (o *StreamLogObserver) parseResponsesAPIEvent(event map[string]any) {
 	case "response.output_text.delta":
 		if delta, ok := event["delta"].(string); ok && delta != "" {
 			o.appendContent(delta)
+		}
+	}
+}
+
+func (o *StreamLogObserver) parseAnthropicMessagesEvent(event map[string]any) {
+	if o.builder == nil {
+		return
+	}
+
+	eventType, _ := event["type"].(string)
+	switch eventType {
+	case "message_start":
+		if message, ok := event["message"].(map[string]any); ok {
+			if id, ok := message["id"].(string); ok {
+				o.builder.ID = id
+			}
+			if model, ok := message["model"].(string); ok {
+				o.builder.Model = model
+			}
+			if role, ok := message["role"].(string); ok {
+				o.builder.Role = role
+			}
+		}
+	case "content_block_delta":
+		if delta, ok := event["delta"].(map[string]any); ok {
+			if deltaType, _ := delta["type"].(string); deltaType == "text_delta" {
+				if text, ok := delta["text"].(string); ok && text != "" {
+					o.appendContent(text)
+				}
+			}
+		}
+	case "message_delta":
+		if delta, ok := event["delta"].(map[string]any); ok {
+			if stopReason, ok := delta["stop_reason"].(string); ok && stopReason != "" {
+				o.builder.FinishReason = stopReason
+			}
 		}
 	}
 }

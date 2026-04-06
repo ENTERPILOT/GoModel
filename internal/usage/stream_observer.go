@@ -48,7 +48,7 @@ func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, 
 func (o *StreamUsageObserver) OnJSONEvent(chunk map[string]any) {
 	entry := o.extractUsageFromEvent(chunk)
 	if entry != nil {
-		o.cachedEntry = entry
+		o.cachedEntry = mergeUsageEntries(o.cachedEntry, entry)
 	}
 }
 
@@ -71,6 +71,19 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 	}
 
 	usageRaw, ok := chunk["usage"]
+	if !ok {
+		if eventType, _ := chunk["type"].(string); eventType == "message_start" {
+			if message, msgOK := chunk["message"].(map[string]any); msgOK {
+				usageRaw, ok = message["usage"]
+				if id, idOK := message["id"].(string); idOK && id != "" {
+					providerID = id
+				}
+				if m, modelOK := message["model"].(string); modelOK && m != "" {
+					model = m
+				}
+			}
+		}
+	}
 	if !ok {
 		if eventType, _ := chunk["type"].(string); eventType == "response.completed" || eventType == "response.done" {
 			if response, respOK := chunk["response"].(map[string]any); respOK {
@@ -158,4 +171,70 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 		entry.UserPath = o.userPath
 	}
 	return entry
+}
+
+func mergeUsageEntries(prev, next *UsageEntry) *UsageEntry {
+	if prev == nil {
+		return next
+	}
+	if next == nil {
+		return prev
+	}
+
+	merged := *prev
+
+	if next.ProviderID != "" {
+		merged.ProviderID = next.ProviderID
+	}
+	if next.Model != "" {
+		merged.Model = next.Model
+	}
+	if next.Provider != "" {
+		merged.Provider = next.Provider
+	}
+	if next.Endpoint != "" {
+		merged.Endpoint = next.Endpoint
+	}
+	if next.RequestID != "" {
+		merged.RequestID = next.RequestID
+	}
+	if next.Timestamp.After(merged.Timestamp) {
+		merged.Timestamp = next.Timestamp
+	}
+
+	if next.InputTokens > 0 {
+		merged.InputTokens = next.InputTokens
+	}
+	if next.OutputTokens > 0 {
+		merged.OutputTokens = next.OutputTokens
+	}
+	if next.TotalTokens > 0 {
+		merged.TotalTokens = next.TotalTokens
+	} else if merged.InputTokens > 0 || merged.OutputTokens > 0 {
+		merged.TotalTokens = merged.InputTokens + merged.OutputTokens
+	}
+
+	switch {
+	case merged.RawData == nil && next.RawData != nil:
+		merged.RawData = cloneRawData(next.RawData)
+	case merged.RawData != nil && next.RawData != nil:
+		for key, value := range next.RawData {
+			merged.RawData[key] = value
+		}
+	}
+
+	if next.InputCost != nil {
+		merged.InputCost = next.InputCost
+	}
+	if next.OutputCost != nil {
+		merged.OutputCost = next.OutputCost
+	}
+	if next.TotalCost != nil {
+		merged.TotalCost = next.TotalCost
+	}
+	if next.CostsCalculationCaveat != "" {
+		merged.CostsCalculationCaveat = next.CostsCalculationCaveat
+	}
+
+	return &merged
 }

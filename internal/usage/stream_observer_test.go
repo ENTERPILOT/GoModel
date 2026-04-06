@@ -438,3 +438,61 @@ data: [DONE]
 		t.Errorf("TotalTokens = %d, want 8", entry.TotalTokens)
 	}
 }
+
+func TestStreamUsageObserverAnthropicMessagesMergesUsageAcrossEvents(t *testing.T) {
+	streamData := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"usage":{"input_tokens":10,"output_tokens":0,"cache_read_input_tokens":6}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}
+
+data: [DONE]
+
+`
+	logger := &trackingLogger{enabled: true}
+	stream := streaming.NewObservedSSEStream(
+		io.NopCloser(strings.NewReader(streamData)),
+		NewStreamUsageObserver(logger, "claude-sonnet-4-5", "anthropic", "req-anthropic", "/v1/messages", nil),
+	)
+
+	data, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if string(data) != streamData {
+		t.Fatalf("stream passthrough mismatch")
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+
+	entries := logger.getEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.ProviderID != "msg_123" {
+		t.Fatalf("ProviderID = %q, want msg_123", entry.ProviderID)
+	}
+	if entry.Model != "claude-sonnet-4-5" {
+		t.Fatalf("Model = %q, want claude-sonnet-4-5", entry.Model)
+	}
+	if entry.InputTokens != 10 {
+		t.Fatalf("InputTokens = %d, want 10", entry.InputTokens)
+	}
+	if entry.OutputTokens != 2 {
+		t.Fatalf("OutputTokens = %d, want 2", entry.OutputTokens)
+	}
+	if entry.TotalTokens != 12 {
+		t.Fatalf("TotalTokens = %d, want 12", entry.TotalTokens)
+	}
+	if entry.RawData == nil {
+		t.Fatal("RawData = nil")
+	}
+	if entry.RawData["cache_read_input_tokens"] != 6 {
+		t.Fatalf("RawData[cache_read_input_tokens] = %v, want 6", entry.RawData["cache_read_input_tokens"])
+	}
+}
