@@ -364,6 +364,7 @@ for index in "${SELECTED_INDEXES[@]}"; do
   {
     printf '#!/usr/bin/env bash\n'
     printf 'set -euo pipefail\n'
+    printf 'shopt -s inherit_errexit 2>/dev/null || true\n'
     printf 'cd %q\n' "$REPO_ROOT"
     printf 'export QA_SUFFIX=%q\n' "$QA_SUFFIX"
     printf 'export QA_RUN_DIR=%q\n' "$OUTPUT_DIR"
