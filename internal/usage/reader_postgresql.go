@@ -54,10 +54,11 @@ func (r *PostgreSQLReader) GetUsageByModel(ctx context.Context, params UsageQuer
 		return nil, err
 	}
 	where := buildWhereClause(conditions)
+	providerNameExpr := usageGroupedProviderNameSQL("provider_name", "provider")
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
-	query := `SELECT model, provider, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)` + costCols + `
-			FROM "usage"` + where + ` GROUP BY model, provider`
+	query := `SELECT model, provider, ` + providerNameExpr + ` AS provider_name, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)` + costCols + `
+			FROM "usage"` + where + ` GROUP BY model, provider, ` + providerNameExpr
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -68,7 +69,7 @@ func (r *PostgreSQLReader) GetUsageByModel(ctx context.Context, params UsageQuer
 	result := make([]ModelUsage, 0)
 	for rows.Next() {
 		var m ModelUsage
-		if err := rows.Scan(&m.Model, &m.Provider, &m.InputTokens, &m.OutputTokens, &m.InputCost, &m.OutputCost, &m.TotalCost); err != nil {
+		if err := rows.Scan(&m.Model, &m.Provider, &m.ProviderName, &m.InputTokens, &m.OutputTokens, &m.InputCost, &m.OutputCost, &m.TotalCost); err != nil {
 			return nil, fmt.Errorf("failed to scan usage by model row: %w", err)
 		}
 		result = append(result, m)
@@ -96,13 +97,13 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 		argIdx++
 	}
 	if params.Provider != "" {
-		conditions = append(conditions, fmt.Sprintf("provider = $%d", argIdx))
-		args = append(args, params.Provider)
-		argIdx++
+		conditions = append(conditions, fmt.Sprintf("(provider = $%d OR provider_name = $%d)", argIdx, argIdx+1))
+		args = append(args, params.Provider, params.Provider)
+		argIdx += 2
 	}
 	if params.Search != "" {
 		s := "%" + escapeLikeWildcards(params.Search) + "%"
-		conditions = append(conditions, fmt.Sprintf("(model ILIKE $%d ESCAPE '\\' OR provider ILIKE $%d ESCAPE '\\' OR request_id ILIKE $%d ESCAPE '\\' OR provider_id ILIKE $%d ESCAPE '\\')", argIdx, argIdx, argIdx, argIdx))
+		conditions = append(conditions, fmt.Sprintf("(model ILIKE $%d ESCAPE '\\' OR provider ILIKE $%d ESCAPE '\\' OR provider_name ILIKE $%d ESCAPE '\\' OR request_id ILIKE $%d ESCAPE '\\' OR provider_id ILIKE $%d ESCAPE '\\')", argIdx, argIdx, argIdx, argIdx, argIdx))
 		args = append(args, s)
 		argIdx++
 	}
@@ -117,7 +118,7 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 	}
 
 	// Fetch page
-	dataQuery := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, endpoint, user_path, cache_type,
+	dataQuery := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type,
 		input_tokens, output_tokens, total_tokens, COALESCE(input_cost, 0), COALESCE(output_cost, 0), COALESCE(total_cost, 0), raw_data, COALESCE(costs_calculation_caveat, '')
 		FROM "usage"%s ORDER BY timestamp DESC LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
 	dataArgs := append(append([]any(nil), args...), limit, offset)
@@ -132,9 +133,10 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 	for rows.Next() {
 		var e UsageLogEntry
 		var rawDataJSON *string
+		var providerName *string
 		var userPath *string
 		var cacheType *string
-		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &e.Timestamp, &e.Model, &e.Provider, &e.Endpoint, &userPath, &cacheType,
+		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &e.Timestamp, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &cacheType,
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &rawDataJSON, &e.CostsCalculationCaveat); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
 		}
@@ -145,6 +147,11 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 		}
 		if userPath != nil {
 			e.UserPath = *userPath
+		}
+		if providerName != nil {
+			e.ProviderName = displayUsageProviderName(*providerName, e.Provider)
+		} else {
+			e.ProviderName = displayUsageProviderName("", e.Provider)
 		}
 		if cacheType != nil {
 			e.CacheType = normalizeCacheType(*cacheType)

@@ -28,6 +28,7 @@ func TestMongoUsageLogMatchFiltersAndSearchWithCacheMode(t *testing.T) {
 		bson.D{{Key: "$or", Value: bson.A{
 			bson.D{{Key: "model", Value: regex}},
 			bson.D{{Key: "provider", Value: regex}},
+			bson.D{{Key: "provider_name", Value: regex}},
 			bson.D{{Key: "request_id", Value: regex}},
 			bson.D{{Key: "provider_id", Value: regex}},
 		}}},
@@ -53,6 +54,7 @@ func TestMongoUsageLogMatchFiltersEscapesSearchRegex(t *testing.T) {
 	want := bson.D{{Key: "$or", Value: bson.A{
 		bson.D{{Key: "model", Value: regex}},
 		bson.D{{Key: "provider", Value: regex}},
+		bson.D{{Key: "provider_name", Value: regex}},
 		bson.D{{Key: "request_id", Value: regex}},
 		bson.D{{Key: "provider_id", Value: regex}},
 	}}}

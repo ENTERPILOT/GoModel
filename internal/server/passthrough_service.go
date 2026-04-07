@@ -49,5 +49,5 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	} else {
 		auditlog.EnrichEntry(c, info.Model, providerType)
 	}
-	return s.proxyPassthroughResponse(c, providerType, endpoint, info, resp)
+	return s.proxyPassthroughResponse(c, providerType, providerNameFromPlan(plan), endpoint, info, resp)
 }

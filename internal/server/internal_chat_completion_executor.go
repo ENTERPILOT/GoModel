@@ -81,8 +81,10 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 	entry := e.newAuditEntry(ctx, requestID, requested)
 	var plan *core.ExecutionPlan
 	var cacheType string
+	var providerType string
+	var providerName string
 	defer func() {
-		e.finishAuditEntry(ctx, entry, start, plan, req, resp, err, cacheType)
+		e.finishAuditEntry(ctx, entry, start, plan, req, resp, err, cacheType, providerType, providerName)
 	}()
 
 	resolution, err := resolveRequestModel(e.provider, e.modelResolver, requested)
@@ -102,13 +104,13 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 
 	ctx = e.service.withCacheRequestContext(ctx, plan)
 	execReq := cloneChatRequestForSelector(req, resolution.ResolvedSelector)
-	resp, providerType, _, cacheType, err := e.executeChatCompletion(ctx, plan, execReq)
+	resp, providerType, providerName, _, cacheType, err = e.executeChatCompletion(ctx, plan, execReq)
 	if err != nil {
 		return nil, err
 	}
 
 	if cacheType == "" {
-		e.service.logUsage(ctx, plan, resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
+		e.service.logUsage(ctx, plan, resp.Model, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
 			return usage.ExtractFromChatResponse(resp, requestID, providerType, "/v1/chat/completions", pricing)
 		})
 	}
@@ -119,29 +121,30 @@ func (e *InternalChatCompletionExecutor) executeChatCompletion(
 	ctx context.Context,
 	plan *core.ExecutionPlan,
 	req *core.ChatRequest,
-) (*core.ChatResponse, string, bool, string, error) {
+) (*core.ChatResponse, string, string, bool, string, error) {
 	if e.service.responseCache == nil || (plan != nil && !plan.CacheEnabled()) {
-		resp, providerType, usedFallback, err := e.service.executeChatCompletion(ctx, plan, req)
-		return resp, providerType, usedFallback, "", err
+		resp, providerType, providerName, usedFallback, err := e.service.executeChatCompletion(ctx, plan, req)
+		return resp, providerType, providerName, usedFallback, "", err
 	}
 
 	body, err := marshalRequestBody(req)
 	if err != nil {
-		resp, providerType, usedFallback, execErr := e.service.executeChatCompletion(ctx, plan, req)
+		resp, providerType, providerName, usedFallback, execErr := e.service.executeChatCompletion(ctx, plan, req)
 		if execErr != nil {
-			return nil, "", false, "", execErr
+			return nil, "", "", false, "", execErr
 		}
-		return resp, providerType, usedFallback, "", nil
+		return resp, providerType, providerName, usedFallback, "", nil
 	}
 
 	var (
 		resp         *core.ChatResponse
 		providerType string
+		providerName string
 		usedFallback bool
 	)
 	result, err := e.service.responseCache.HandleInternalRequest(ctx, http.MethodPost, "/v1/chat/completions", body, func(c *echo.Context) error {
 		var execErr error
-		resp, providerType, usedFallback, execErr = e.service.executeChatCompletion(c.Request().Context(), plan, req)
+		resp, providerType, providerName, usedFallback, execErr = e.service.executeChatCompletion(c.Request().Context(), plan, req)
 		if execErr != nil {
 			return execErr
 		}
@@ -151,16 +154,16 @@ func (e *InternalChatCompletionExecutor) executeChatCompletion(
 		return c.JSON(http.StatusOK, resp)
 	})
 	if err != nil {
-		return nil, "", false, "", err
+		return nil, "", "", false, "", err
 	}
 	if result != nil && result.CacheType != "" {
 		var cached core.ChatResponse
 		if err := json.Unmarshal(result.Body, &cached); err != nil {
-			return nil, "", false, "", err
+			return nil, "", "", false, "", err
 		}
-		return &cached, plan.ProviderType, false, result.CacheType, nil
+		return &cached, plan.ProviderType, providerNameFromPlan(plan), false, result.CacheType, nil
 	}
-	return resp, providerType, usedFallback, "", nil
+	return resp, providerType, providerName, usedFallback, "", nil
 }
 
 func (e *InternalChatCompletionExecutor) newAuditEntry(
@@ -187,7 +190,7 @@ func (e *InternalChatCompletionExecutor) newAuditEntry(
 		Data:      &auditlog.LogData{},
 	}
 	if requestedModel := requested.RequestedQualifiedModel(); requestedModel != "" {
-		entry.Model = requestedModel
+		entry.RequestedModel = requestedModel
 	}
 	return entry
 }
@@ -201,6 +204,8 @@ func (e *InternalChatCompletionExecutor) finishAuditEntry(
 	resp *core.ChatResponse,
 	err error,
 	cacheType string,
+	providerType string,
+	providerName string,
 ) {
 	if entry == nil || e.logger == nil || !e.logger.Config().Enabled {
 		return
@@ -208,6 +213,7 @@ func (e *InternalChatCompletionExecutor) finishAuditEntry(
 
 	entry.DurationNs = time.Since(start).Nanoseconds()
 	auditlog.EnrichLogEntryWithExecutionPlan(entry, plan)
+	auditlog.EnrichLogEntryWithResolvedRoute(entry, qualifyExecutedModel(plan, chatResponseModel(resp), providerName), providerType, providerName)
 	auditlog.EnrichLogEntryWithRequestContext(entry, ctx)
 	if plan != nil && !plan.AuditEnabled() {
 		return
@@ -239,4 +245,11 @@ func (e *InternalChatCompletionExecutor) finishAuditEntry(
 	}
 
 	e.logger.Write(entry)
+}
+
+func chatResponseModel(resp *core.ChatResponse) string {
+	if resp == nil {
+		return ""
+	}
+	return resp.Model
 }

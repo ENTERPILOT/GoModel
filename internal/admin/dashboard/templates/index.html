@@ -195,9 +195,11 @@
                     <template x-for="entry in usageLog.entries" :key="entry.id">
                         <tr>
                             <td class="mono usage-ts" x-text="formatTimestamp(entry.timestamp)" :title="timestampTitle(entry.timestamp)"></td>
-                            <td class="mono" x-text="entry.model"></td>
-                            <td><span class="provider-badge" x-text="entry.provider"></span></td>
-                            <td class="mono" x-text="entry.user_path || '-'"></td>
+                            <td class="mono font-size-md" x-text="entry.model"></td>
+                            <td>
+                                <span class="provider-badge" x-text="providerDisplayValue(entry) || '-'"></span>
+                            </td>
+                            <td class="mono font-size-md" x-text="entry.user_path || '-'"></td>
                             <td class="col-price"
                                 x-text="usageMode === 'costs' ? formatCost(entry.input_cost) : formatNumber(entry.input_tokens)"
                                 :title="usageMode === 'costs' ? formatNumber(entry.input_tokens) + ' tokens' : ''"></td>
@@ -298,67 +300,16 @@
     <div class="alert alert-warning" x-show="!authError && guardrailError" x-text="guardrailError"></div>
     <div class="alert alert-success" x-show="!authError && guardrailNotice && !guardrailError" x-text="guardrailNotice"></div>
 
-    <div class="settings-guardrails-layout" :class="{ 'is-editor-open': guardrailFormOpen }">
-        <section class="settings-panel settings-guardrails-list">
-            <div class="aliases-editor-header">
-                <div>
-                    <h3>Instances</h3>
-                    <p class="alias-form-hint">Each instance has a reusable name, a type, an optional user path for future UI visibility scoping, and a JSON-backed config payload for that type.</p>
-                </div>
-                <button type="button" class="pagination-btn pagination-btn-primary" :disabled="guardrailTypesLoading || guardrailFormSubmitting || !guardrailsAvailable" @click="openGuardrailCreate()">Create Guardrail</button>
-            </div>
-
-            <div class="table-toolbar" x-show="guardrailsAvailable">
-                <div class="table-toolbar-main">
-                    <input type="text" id="guardrail-filter" class="filter-input" placeholder="Filter by name, type, user path, summary..." aria-label="Guardrail filter" x-model="guardrailFilter">
-                </div>
-            </div>
-
-            <div class="table-wrapper" x-show="filteredGuardrails.length > 0">
-                <table class="data-table settings-guardrails-table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Type</th>
-                            <th>User Path</th>
-                            <th>Summary</th>
-                            <th class="col-actions">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="guardrail in filteredGuardrails" :key="guardrail.name">
-                            <tr>
-                                <td class="mono" x-text="guardrail.name"></td>
-                                <td><span class="settings-guardrail-type-pill" x-text="guardrailTypeLabel(guardrail.type)"></span></td>
-                                <td class="mono" x-text="guardrail.user_path || '\u2014'"></td>
-                                <td>
-                                    <div class="settings-guardrail-summary" x-text="guardrail.summary || guardrail.description || 'No summary yet.'"></div>
-                                    <div class="settings-guardrail-description" x-show="guardrail.description" x-text="guardrail.description"></div>
-                                </td>
-                                <td class="col-actions">
-                                    <div class="action-buttons">
-                                        <button type="button" class="table-action-btn" @click="openGuardrailEdit(guardrail)">Edit</button>
-                                        <button type="button" class="table-action-btn danger" :disabled="guardrailDeletingName === guardrail.name" @click="deleteGuardrail(guardrail)">Delete</button>
-                                    </div>
-                                </td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
-            </div>
-
-            <p class="empty-state" x-show="filteredGuardrails.length === 0 && !guardrailsLoading && guardrailsAvailable && !guardrailError && !authError">
-                No guardrails defined yet.
-            </p>
-        </section>
-
-        <aside class="settings-panel settings-guardrails-editor" x-show="guardrailFormOpen">
+    <div class="model-alias-editor" x-show="guardrailFormOpen">
+        <div class="alias-form">
             <div class="aliases-editor-header">
                 <div>
                     <h3 x-text="guardrailFormMode === 'edit' ? 'Edit Guardrail' : 'Create Guardrail'"></h3>
                     <p class="alias-form-hint">Workflows reference these names directly, so renames are intentionally avoided after creation.</p>
                 </div>
-                <button type="button" class="table-action-btn" @click="closeGuardrailForm()">Close</button>
+                <button type="button" class="table-action-btn alias-close-btn table-icon-btn" aria-label="Close guardrail editor" @click="closeGuardrailForm()">
+                    {{template "x-icon"}}
+                </button>
             </div>
 
             <div class="alias-form-grid">
@@ -430,7 +381,73 @@
                 <button type="button" class="pagination-btn" @click="closeGuardrailForm()">Cancel</button>
                 <button type="button" class="pagination-btn pagination-btn-primary" :disabled="guardrailFormSubmitting" @click="submitGuardrailForm()">Save Guardrail</button>
             </div>
-        </aside>
+        </div>
+    </div>
+
+    <div class="settings-guardrails-layout">
+        <section class="settings-panel settings-guardrails-list">
+            <div class="aliases-editor-header">
+                <div>
+                    <h3>Instances</h3>
+                    <p class="alias-form-hint">Each instance has a reusable name, a type, an optional user path for future UI visibility scoping, and a JSON-backed config payload for that type.</p>
+                </div>
+                <button type="button" class="pagination-btn pagination-btn-primary" :disabled="guardrailTypesLoading || guardrailFormSubmitting || !guardrailsAvailable" @click="openGuardrailCreate()">Create Guardrail</button>
+            </div>
+
+            <div class="table-toolbar" x-show="guardrailsAvailable">
+                <div class="table-toolbar-main">
+                    <input type="text" id="guardrail-filter" class="filter-input" placeholder="Filter by name, type, user path, summary..." aria-label="Guardrail filter" x-model="guardrailFilter">
+                </div>
+            </div>
+
+            <div class="table-wrapper" x-show="filteredGuardrails.length > 0">
+                <table class="data-table settings-guardrails-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>User Path</th>
+                            <th>Summary</th>
+                            <th class="col-actions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="guardrail in filteredGuardrails" :key="guardrail.name">
+                            <tr>
+                                <td class="mono font-size-md" x-text="guardrail.name"></td>
+                                <td><span class="settings-guardrail-type-pill" x-text="guardrailTypeLabel(guardrail.type)"></span></td>
+                                <td class="mono font-size-md" x-text="guardrail.user_path || '\u2014'"></td>
+                                <td>
+                                    <div class="settings-guardrail-summary" x-text="guardrail.summary || guardrail.description || 'No summary yet.'"></div>
+                                    <div class="settings-guardrail-description" x-show="guardrail.description" x-text="guardrail.description"></div>
+                                </td>
+                                <td class="col-actions">
+                                    <div class="alias-actions-cell">
+                                        <button type="button" class="table-action-btn table-icon-btn"
+                                            :aria-label="'Edit guardrail ' + guardrail.name"
+                                            :title="'Edit guardrail ' + guardrail.name"
+                                            @click="openGuardrailEdit(guardrail)">
+                                            {{template "edit-icon"}}
+                                        </button>
+                                        <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                            :disabled="guardrailDeletingName === guardrail.name"
+                                            :aria-label="guardrailDeletingName === guardrail.name ? 'Deleting guardrail ' + guardrail.name : 'Delete guardrail ' + guardrail.name"
+                                            :title="guardrailDeletingName === guardrail.name ? 'Deleting guardrail ' + guardrail.name : 'Delete guardrail ' + guardrail.name"
+                                            @click="deleteGuardrail(guardrail)">
+                                            {{template "x-icon"}}
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <p class="empty-state" x-show="filteredGuardrails.length === 0 && !guardrailsLoading && guardrailsAvailable && !guardrailError && !authError">
+                No guardrails defined yet.
+            </p>
+        </section>
     </div>
 </div>
 
@@ -610,7 +627,7 @@
     <!-- Filter -->
     <div class="table-toolbar" x-show="displayModels.length > 0 || modelFilter || aliasesAvailable">
         <div class="table-toolbar-main">
-            <input type="text" placeholder="Filter by provider/model, alias, or owner..." x-model="modelFilter" class="filter-input">
+            <input type="text" placeholder="Filter by provider/model, alias, or owner..." x-model="modelFilter" class="filter-input models-filter-input">
         </div>
         <div class="table-toolbar-actions">
             <button type="button" class="pagination-btn pagination-btn-primary" x-show="aliasesAvailable" @click="openAliasCreate()">Create Alias</button>
@@ -624,8 +641,8 @@
                     <p class="alias-form-kicker" x-text="aliasFormMode === 'edit' ? 'Edit alias' : 'Create alias'"></p>
                     <h3 x-text="aliasFormMode === 'edit' ? (aliasForm.name || aliasFormOriginalName) : 'New Alias'"></h3>
                 </div>
-                <button type="button" class="table-action-btn alias-close-btn" aria-label="Close alias editor" @click="closeAliasForm()">
-                    <span aria-hidden="true">X</span>
+                <button type="button" class="table-action-btn alias-close-btn table-icon-btn" aria-label="Close alias editor" @click="closeAliasForm()">
+                    {{template "x-icon"}}
                 </button>
             </div>
 
@@ -692,14 +709,14 @@
                         <td>
                             <div class="model-name-cell">
                                 <div class="model-name-primary">
-                                    <span class="mono" x-text="row.display_name"></span>
+                                    <span class="mono font-size-md" x-text="row.display_name"></span>
                                     <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
                                 </div>
                                 <div class="model-name-secondary" x-show="row.is_alias">
-                                    Targets <span class="mono" x-text="row.secondary_name"></span>
+                                    Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
                                 </div>
                                 <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                                    Masked by alias to <span class="mono" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                                    Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
                                 </div>
                             </div>
                         </td>
@@ -714,8 +731,19 @@
                                         <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
                                         <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
                                     </button>
-                                    <button type="button" class="table-action-btn" @click="openAliasEdit(row.alias)">Edit</button>
-                                    <button type="button" class="table-action-btn table-action-btn-danger" :disabled="aliasDeletingName === row.alias.name" @click="deleteAlias(row.alias)" x-text="aliasDeletingName === row.alias.name ? 'Removing...' : 'Remove'"></button>
+                                    <button type="button" class="table-action-btn table-icon-btn"
+                                        :aria-label="'Edit alias ' + row.alias.name"
+                                        :title="'Edit alias ' + row.alias.name"
+                                        @click="openAliasEdit(row.alias)">
+                                        {{template "edit-icon"}}
+                                    </button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                        :disabled="aliasDeletingName === row.alias.name"
+                                        :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                        :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                        @click="deleteAlias(row.alias)">
+                                        {{template "x-icon"}}
+                                    </button>
                                 </div>
                             </template>
                             <template x-if="!row.is_alias">
@@ -744,14 +772,14 @@
                         <td>
                             <div class="model-name-cell">
                                 <div class="model-name-primary">
-                                    <span class="mono" x-text="row.display_name"></span>
+                                    <span class="mono font-size-md" x-text="row.display_name"></span>
                                     <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
                                 </div>
                                 <div class="model-name-secondary" x-show="row.is_alias">
-                                    Targets <span class="mono" x-text="row.secondary_name"></span>
+                                    Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
                                 </div>
                                 <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                                    Masked by alias to <span class="mono" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                                    Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
                                 </div>
                             </div>
                         </td>
@@ -763,8 +791,19 @@
                                         <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
                                         <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
                                     </button>
-                                    <button type="button" class="table-action-btn" @click="openAliasEdit(row.alias)">Edit</button>
-                                    <button type="button" class="table-action-btn table-action-btn-danger" :disabled="aliasDeletingName === row.alias.name" @click="deleteAlias(row.alias)" x-text="aliasDeletingName === row.alias.name ? 'Removing...' : 'Remove'"></button>
+                                    <button type="button" class="table-action-btn table-icon-btn"
+                                        :aria-label="'Edit alias ' + row.alias.name"
+                                        :title="'Edit alias ' + row.alias.name"
+                                        @click="openAliasEdit(row.alias)">
+                                        {{template "edit-icon"}}
+                                    </button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                        :disabled="aliasDeletingName === row.alias.name"
+                                        :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                        :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                        @click="deleteAlias(row.alias)">
+                                        {{template "x-icon"}}
+                                    </button>
                                 </div>
                             </template>
                             <template x-if="!row.is_alias">
@@ -793,14 +832,14 @@
                         <td>
                             <div class="model-name-cell">
                                 <div class="model-name-primary">
-                                    <span class="mono" x-text="row.display_name"></span>
+                                    <span class="mono font-size-md" x-text="row.display_name"></span>
                                     <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
                                 </div>
                                 <div class="model-name-secondary" x-show="row.is_alias">
-                                    Targets <span class="mono" x-text="row.secondary_name"></span>
+                                    Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
                                 </div>
                                 <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                                    Masked by alias to <span class="mono" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                                    Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
                                 </div>
                             </div>
                         </td>
@@ -812,8 +851,19 @@
                                         <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
                                         <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
                                     </button>
-                                    <button type="button" class="table-action-btn" @click="openAliasEdit(row.alias)">Edit</button>
-                                    <button type="button" class="table-action-btn table-action-btn-danger" :disabled="aliasDeletingName === row.alias.name" @click="deleteAlias(row.alias)" x-text="aliasDeletingName === row.alias.name ? 'Removing...' : 'Remove'"></button>
+                                    <button type="button" class="table-action-btn table-icon-btn"
+                                        :aria-label="'Edit alias ' + row.alias.name"
+                                        :title="'Edit alias ' + row.alias.name"
+                                        @click="openAliasEdit(row.alias)">
+                                        {{template "edit-icon"}}
+                                    </button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                        :disabled="aliasDeletingName === row.alias.name"
+                                        :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                        :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                        @click="deleteAlias(row.alias)">
+                                        {{template "x-icon"}}
+                                    </button>
                                 </div>
                             </template>
                             <template x-if="!row.is_alias">
@@ -843,14 +893,14 @@
                         <td>
                             <div class="model-name-cell">
                                 <div class="model-name-primary">
-                                    <span class="mono" x-text="row.display_name"></span>
+                                    <span class="mono font-size-md" x-text="row.display_name"></span>
                                     <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
                                 </div>
                                 <div class="model-name-secondary" x-show="row.is_alias">
-                                    Targets <span class="mono" x-text="row.secondary_name"></span>
+                                    Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
                                 </div>
                                 <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                                    Masked by alias to <span class="mono" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                                    Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
                                 </div>
                             </div>
                         </td>
@@ -863,8 +913,19 @@
                                         <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
                                         <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
                                     </button>
-                                    <button type="button" class="table-action-btn" @click="openAliasEdit(row.alias)">Edit</button>
-                                    <button type="button" class="table-action-btn table-action-btn-danger" :disabled="aliasDeletingName === row.alias.name" @click="deleteAlias(row.alias)" x-text="aliasDeletingName === row.alias.name ? 'Removing...' : 'Remove'"></button>
+                                    <button type="button" class="table-action-btn table-icon-btn"
+                                        :aria-label="'Edit alias ' + row.alias.name"
+                                        :title="'Edit alias ' + row.alias.name"
+                                        @click="openAliasEdit(row.alias)">
+                                        {{template "edit-icon"}}
+                                    </button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                        :disabled="aliasDeletingName === row.alias.name"
+                                        :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                        :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                        @click="deleteAlias(row.alias)">
+                                        {{template "x-icon"}}
+                                    </button>
                                 </div>
                             </template>
                             <template x-if="!row.is_alias">
@@ -894,14 +955,14 @@
                         <td>
                             <div class="model-name-cell">
                                 <div class="model-name-primary">
-                                    <span class="mono" x-text="row.display_name"></span>
+                                    <span class="mono font-size-md" x-text="row.display_name"></span>
                                     <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
                                 </div>
                                 <div class="model-name-secondary" x-show="row.is_alias">
-                                    Targets <span class="mono" x-text="row.secondary_name"></span>
+                                    Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
                                 </div>
                                 <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                                    Masked by alias to <span class="mono" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                                    Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
                                 </div>
                             </div>
                         </td>
@@ -914,8 +975,19 @@
                                         <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
                                         <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
                                     </button>
-                                    <button type="button" class="table-action-btn" @click="openAliasEdit(row.alias)">Edit</button>
-                                    <button type="button" class="table-action-btn table-action-btn-danger" :disabled="aliasDeletingName === row.alias.name" @click="deleteAlias(row.alias)" x-text="aliasDeletingName === row.alias.name ? 'Removing...' : 'Remove'"></button>
+                                    <button type="button" class="table-action-btn table-icon-btn"
+                                        :aria-label="'Edit alias ' + row.alias.name"
+                                        :title="'Edit alias ' + row.alias.name"
+                                        @click="openAliasEdit(row.alias)">
+                                        {{template "edit-icon"}}
+                                    </button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                        :disabled="aliasDeletingName === row.alias.name"
+                                        :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                        :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                        @click="deleteAlias(row.alias)">
+                                        {{template "x-icon"}}
+                                    </button>
                                 </div>
                             </template>
                             <template x-if="!row.is_alias">
@@ -945,14 +1017,14 @@
                         <td>
                             <div class="model-name-cell">
                                 <div class="model-name-primary">
-                                    <span class="mono" x-text="row.display_name"></span>
+                                    <span class="mono font-size-md" x-text="row.display_name"></span>
                                     <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
                                 </div>
                                 <div class="model-name-secondary" x-show="row.is_alias">
-                                    Targets <span class="mono" x-text="row.secondary_name"></span>
+                                    Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
                                 </div>
                                 <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                                    Masked by alias to <span class="mono" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                                    Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
                                 </div>
                             </div>
                         </td>
@@ -965,8 +1037,19 @@
                                         <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
                                         <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
                                     </button>
-                                    <button type="button" class="table-action-btn" @click="openAliasEdit(row.alias)">Edit</button>
-                                    <button type="button" class="table-action-btn table-action-btn-danger" :disabled="aliasDeletingName === row.alias.name" @click="deleteAlias(row.alias)" x-text="aliasDeletingName === row.alias.name ? 'Removing...' : 'Remove'"></button>
+                                    <button type="button" class="table-action-btn table-icon-btn"
+                                        :aria-label="'Edit alias ' + row.alias.name"
+                                        :title="'Edit alias ' + row.alias.name"
+                                        @click="openAliasEdit(row.alias)">
+                                        {{template "edit-icon"}}
+                                    </button>
+                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                        :disabled="aliasDeletingName === row.alias.name"
+                                        :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                        :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                        @click="deleteAlias(row.alias)">
+                                        {{template "x-icon"}}
+                                    </button>
                                 </div>
                             </template>
                             <template x-if="!row.is_alias">
@@ -1019,8 +1102,8 @@
                     <div>
                         {{template "helper-disclosure" "{ heading: 'Workflow', open: false, copyId: 'workflow-help-copy', showLabel: 'Show workflow help', hideLabel: 'Hide workflow help', text: 'Create immutable version. Submitting activates it for the selected scope.' }"}}
                     </div>
-                    <button type="button" class="table-action-btn alias-close-btn" aria-label="Close workflow editor" @click="closeExecutionPlanForm()">
-                        <span aria-hidden="true">X</span>
+                    <button type="button" class="table-action-btn alias-close-btn table-icon-btn" aria-label="Close workflow editor" @click="closeExecutionPlanForm()">
+                        {{template "x-icon"}}
                     </button>
                 </div>
 
@@ -1120,7 +1203,7 @@
                             <div class="execution-plan-guardrail-list" x-show="planGuardrails(executionPlanPreview()).length > 0">
                                 <template x-for="(step, stepIndex) in planGuardrails(executionPlanPreview())" :key="'draft-workflow-preview-guardrail-' + stepIndex">
                                     <div class="execution-plan-guardrail-item">
-                                        <span class="mono" x-text="step.ref"></span>
+                                        <span class="mono font-size-md" x-text="step.ref"></span>
                                         <span class="provider-badge" x-text="'step ' + step.step"></span>
                                     </div>
                                 </template>
@@ -1206,7 +1289,7 @@
                             <div class="execution-plan-guardrail-list" x-show="planGuardrails(plan).length > 0">
                                 <template x-for="(step, stepIndex) in planGuardrails(plan)" :key="plan.id + '-guardrail-' + stepIndex">
                                     <div class="execution-plan-guardrail-item">
-                                        <span class="mono" x-text="step.ref"></span>
+                                        <span class="mono font-size-md" x-text="step.ref"></span>
                                         <span class="provider-badge" x-text="'step ' + step.step"></span>
                                     </div>
                                 </template>
@@ -1224,9 +1307,12 @@
                                         @click="deactivateExecutionPlan(plan)"
                                         x-text="executionPlanDeactivatingID === plan.id ? 'Deactivating...' : 'Deactivate'"></button>
                                 <button type="button"
-                                        class="table-action-btn"
+                                        class="table-action-btn table-icon-btn"
                                         :aria-label="'Edit workflow ' + workflowDisplayName(plan)"
-                                        @click="openExecutionPlanCreate(plan)">Edit</button>
+                                        :title="'Edit workflow ' + workflowDisplayName(plan)"
+                                        @click="openExecutionPlanCreate(plan)">
+                                    {{template "edit-icon"}}
+                                </button>
                             </div>
                             <div class="execution-plan-card-meta execution-plan-card-meta-footer">
                                 <span class="provider-badge mono" x-text="'version: v' + plan.version"></span>
@@ -1265,15 +1351,10 @@
 
     <div class="audit-log-section">
         <div class="audit-log-toolbar">
-            <div class="audit-filter-row">
-                <input id="audit-filter-search" type="text" placeholder="Search by request ID, path, provider, error..." aria-label="Search by request ID, path, provider, or error" x-model="auditSearch" @input.debounce.300ms="fetchAuditLog(true)" class="filter-input">
-                <input id="audit-filter-model" type="text" placeholder="Model" aria-label="Model filter" x-model="auditModel" @input.debounce.300ms="fetchAuditLog(true)" class="filter-input audit-filter-input">
-                <input id="audit-filter-provider" type="text" placeholder="Provider" aria-label="Provider filter" x-model="auditProvider" @input.debounce.300ms="fetchAuditLog(true)" class="filter-input audit-filter-input">
-                <input id="audit-filter-path" type="text" placeholder="Path" aria-label="Path filter" x-model="auditPath" @input.debounce.300ms="fetchAuditLog(true)" class="filter-input audit-filter-input">
-                <input id="audit-filter-user-path" type="text" placeholder="User path" aria-label="User path filter" x-model="auditUserPath" @input.debounce.300ms="fetchAuditLog(true)" class="filter-input audit-filter-input">
-                <button class="pagination-btn" @click="clearAuditFilters()">Clear</button>
+            <div class="audit-filter-row audit-filter-row-search">
+                <input id="audit-filter-search" type="text" placeholder="Search by request ID, model, provider, path, user path, or error..." aria-label="Search by request ID, model, provider, path, user path, or error" x-model="auditSearch" @input.debounce.300ms="fetchAuditLog(true)" class="filter-input">
             </div>
-            <div class="audit-filter-row audit-filter-row-selects">
+            <div class="audit-filter-row audit-filter-row-controls">
                 <select id="audit-filter-method" aria-label="HTTP method filter" x-model="auditMethod" @change="fetchAuditLog(true)" class="usage-log-select audit-filter-select">
                     <option value="">All Methods</option>
                     <option value="GET">GET</option>
@@ -1300,6 +1381,10 @@
                     <option value="true">Streaming</option>
                     <option value="false">Non-streaming</option>
                 </select>
+                <button type="button" class="pagination-btn audit-clear-btn" @click="clearAuditFilters()">
+                    {{template "x-icon"}}
+                    <span>Clear</span>
+                </button>
             </div>
         </div>
 
@@ -1312,12 +1397,12 @@
                             <div class="audit-entry-main">
                                 <span class="audit-status-badge" :class="statusCodeClass(entry.status_code)" x-text="entry.status_code || '-'"></span>
                             <span class="audit-method-badge" x-text="entry.method || '-'"></span>
-                            <span class="audit-provider-model mono" x-show="entry.model" x-text="entry.model"></span>
+                            <span class="audit-provider-model mono" x-show="entry.requested_model || entry.model" x-text="entry.requested_model || entry.model"></span>
                             <span class="audit-path mono" x-text="entry.path || '-'"></span>
                             </div>
                             <div class="audit-entry-meta">
-                                <span class="mono" x-text="formatTimestamp(entry.timestamp)" :title="timestampTitle(entry.timestamp)"></span>
-                                <span class="mono" x-text="formatDurationNs(entry.duration_ns)"></span>
+                                <span class="mono font-size-md" x-text="formatTimestamp(entry.timestamp)" :title="timestampTitle(entry.timestamp)"></span>
+                                <span class="mono font-size-md" x-text="formatDurationNs(entry.duration_ns)"></span>
                                 <button type="button" class="audit-conversation-trigger"
                                     x-show="canShowConversation(entry)"
                                     title="Open interactions"
@@ -1331,11 +1416,11 @@
                     </summary>
                     <div class="audit-entry-details">
                         <div class="audit-entry-context">
-                            <span class="provider-badge" x-text="entry.provider || '-'"></span>
-                            <span class="provider-badge mono" x-text="entry.model || '-'"></span>
+                            <span class="provider-badge" x-text="providerDisplayValue(entry) || '-'"></span>
+                            <span class="provider-badge mono" x-text="entry.requested_model || entry.model || '-'"></span>
                             <span class="provider-badge mono" x-text="entry.user_path || '-'"></span>
                             <span class="provider-badge audit-alias-badge" x-show="entry.alias_used">alias</span>
-                            <span class="provider-badge mono" x-show="entry.alias_used && entry.resolved_model" x-text="'resolved: ' + entry.resolved_model"></span>
+                            <span class="provider-badge mono" x-show="entry.alias_used && entry.resolved_model" x-text="'resolved: ' + qualifiedResolvedModelDisplay(entry)"></span>
                             <span class="provider-badge mono" x-text="'request_id: ' + (entry.request_id || '-')"></span>
                             <span class="provider-badge mono" x-show="entry.auth_key_id" x-text="'auth_key_id: ' + entry.auth_key_id"></span>
                             <span class="provider-badge mono" x-show="entry.client_ip" x-text="'ip: ' + entry.client_ip"></span>

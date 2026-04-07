@@ -18,22 +18,22 @@ func TestSQLiteReaderGetLogs_IncludesFractionalStartBoundaryAndExcludesFractiona
 	ctx := context.Background()
 	err = store.WriteBatch(ctx, []*LogEntry{
 		{
-			ID:        "start-boundary",
-			Timestamp: time.Date(2026, 1, 15, 23, 0, 0, 123_000_000, time.UTC),
-			Model:     "gpt-5",
-			Provider:  "openai",
+			ID:             "start-boundary",
+			Timestamp:      time.Date(2026, 1, 15, 23, 0, 0, 123_000_000, time.UTC),
+			RequestedModel: "gpt-5",
+			Provider:       "openai",
 		},
 		{
-			ID:        "inside-range",
-			Timestamp: time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
-			Model:     "gpt-5",
-			Provider:  "openai",
+			ID:             "inside-range",
+			Timestamp:      time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
+			RequestedModel: "gpt-5",
+			Provider:       "openai",
 		},
 		{
-			ID:        "after-end-boundary",
-			Timestamp: time.Date(2026, 1, 16, 23, 0, 0, 123_000_000, time.UTC),
-			Model:     "gpt-5",
-			Provider:  "openai",
+			ID:             "after-end-boundary",
+			Timestamp:      time.Date(2026, 1, 16, 23, 0, 0, 123_000_000, time.UTC),
+			RequestedModel: "gpt-5",
+			Provider:       "openai",
 		},
 	})
 	if err != nil {
@@ -73,5 +73,58 @@ func TestSQLiteReaderGetLogs_IncludesFractionalStartBoundaryAndExcludesFractiona
 	}
 	if result.Entries[1].ID != "start-boundary" {
 		t.Fatalf("expected boundary entry %q, got %q", "start-boundary", result.Entries[1].ID)
+	}
+}
+
+func TestSQLiteReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := store.WriteBatch(ctx, []*LogEntry{
+		{
+			ID:             "team-match",
+			Timestamp:      time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
+			RequestedModel: "gpt-5",
+			Provider:       "openai",
+			UserPath:       "/team/alpha",
+		},
+		{
+			ID:             "other-team",
+			Timestamp:      time.Date(2026, 1, 16, 11, 0, 0, 0, time.UTC),
+			RequestedModel: "gpt-5",
+			Provider:       "openai",
+			UserPath:       "/org/beta",
+		},
+	}); err != nil {
+		t.Fatalf("failed to seed audit logs: %v", err)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create reader: %v", err)
+	}
+
+	result, err := reader.GetLogs(ctx, LogQueryParams{
+		Search: "team/alpha",
+		Limit:  10,
+	})
+	if err != nil {
+		t.Fatalf("GetLogs returned error: %v", err)
+	}
+
+	if result.Total != 1 {
+		t.Fatalf("expected 1 log in search result, got %d", result.Total)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("expected 1 returned entry, got %d", len(result.Entries))
+	}
+	if result.Entries[0].ID != "team-match" {
+		t.Fatalf("expected matching entry %q, got %q", "team-match", result.Entries[0].ID)
 	}
 }

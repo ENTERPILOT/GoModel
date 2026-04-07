@@ -613,7 +613,7 @@ func TestAuditLogErrorCapture(t *testing.T) {
 		entry := entries[0]
 		assert.Equal(t, http.StatusBadRequest, entry.StatusCode)
 		assert.Equal(t, "/v1/chat/completions", entry.Path)
-		assert.Equal(t, "unsupported-model-xyz", entry.Model)
+		assert.Equal(t, "unsupported-model-xyz", entry.RequestedModel)
 		assert.Equal(t, "invalid_request_error", entry.ErrorType)
 		assert.Equal(t, "", entry.Provider)
 	})
@@ -647,7 +647,7 @@ func TestAuditLogErrorCapture(t *testing.T) {
 		entry := entries[0]
 		assert.Equal(t, http.StatusBadRequest, entry.StatusCode)
 		assert.Equal(t, "/p/unknown/responses", entry.Path)
-		assert.Equal(t, "gpt-4.1-nano", entry.Model)
+		assert.Equal(t, "gpt-4.1-nano", entry.RequestedModel)
 		assert.Equal(t, "unknown", entry.Provider)
 		assert.Equal(t, "invalid_request_error", entry.ErrorType)
 	})

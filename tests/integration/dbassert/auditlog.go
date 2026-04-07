@@ -45,7 +45,7 @@ func QueryAuditLogsByRequestID(t *testing.T, pool *pgxpool.Pool, requestID strin
 	defer cancel()
 
 	query := `
-		SELECT id, timestamp, duration_ns, model, provider, status_code,
+		SELECT id, timestamp, duration_ns, requested_model, provider, status_code,
 		       request_id, auth_key_id, client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs
 		WHERE request_id = $1
@@ -141,7 +141,9 @@ func bsonToAuditLogEntry(t *testing.T, doc bson.M) AuditLogEntry {
 	} else if v, ok := doc["duration_ns"].(int32); ok {
 		entry.DurationNs = int64(v)
 	}
-	if v, ok := doc["model"].(string); ok {
+	if v, ok := doc["requested_model"].(string); ok {
+		entry.Model = v
+	} else if v, ok := doc["model"].(string); ok {
 		entry.Model = v
 	}
 	if v, ok := doc["provider"].(string); ok {

@@ -31,6 +31,42 @@ func newMockLookup() *mockModelLookup {
 	}
 }
 
+type registryModelEntry struct {
+	provider     core.Provider
+	providerName string
+	providerType string
+	modelID      string
+}
+
+func newTestRegistryWithModels(entries ...registryModelEntry) *ModelRegistry {
+	registry := NewModelRegistry()
+	for _, entry := range entries {
+		registry.RegisterProviderWithNameAndType(entry.provider, entry.providerName, entry.providerType)
+	}
+
+	registry.models = make(map[string]*ModelInfo)
+	registry.modelsByProvider = make(map[string]map[string]*ModelInfo)
+	for _, entry := range entries {
+		info := &ModelInfo{
+			Model: core.Model{
+				ID:     entry.modelID,
+				Object: "model",
+			},
+			Provider:     entry.provider,
+			ProviderName: entry.providerName,
+			ProviderType: entry.providerType,
+		}
+		if _, ok := registry.modelsByProvider[entry.providerName]; !ok {
+			registry.modelsByProvider[entry.providerName] = make(map[string]*ModelInfo)
+		}
+		registry.modelsByProvider[entry.providerName][entry.modelID] = info
+		if _, exists := registry.models[entry.modelID]; !exists {
+			registry.models[entry.modelID] = info
+		}
+	}
+	return registry
+}
+
 func (m *mockModelLookup) addModel(model string, provider core.Provider, providerType string) {
 	m.models[model] = provider
 	m.providerTypes[model] = providerType
@@ -479,6 +515,91 @@ func TestRouterChatCompletion_PrefixedModelSelector(t *testing.T) {
 	}
 	if west.lastChatReq == nil || west.lastChatReq.Model != "gpt-4o" {
 		t.Fatalf("expected upstream model to be unqualified gpt-4o, got %#v", west.lastChatReq)
+	}
+}
+
+func TestRouterChatCompletion_PrefersProviderTypeSelectorOverRawSlashModel(t *testing.T) {
+	openAIResp := &core.ChatResponse{ID: "openai-test", Model: "gpt-5-nano"}
+	openRouterResp := &core.ChatResponse{ID: "openrouter", Model: "openai/gpt-5-nano"}
+	openAI := &mockProvider{name: "openai_test", chatResponse: openAIResp}
+	openRouter := &mockProvider{name: "openrouter", chatResponse: openRouterResp}
+
+	registry := newTestRegistryWithModels(
+		registryModelEntry{
+			provider:     openAI,
+			providerName: "openai_test",
+			providerType: "openai",
+			modelID:      "gpt-5-nano",
+		},
+		registryModelEntry{
+			provider:     openRouter,
+			providerName: "openrouter",
+			providerType: "openrouter",
+			modelID:      "openai/gpt-5-nano",
+		},
+	)
+
+	router, _ := NewRouter(registry)
+
+	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "openai/gpt-5-nano"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != "openai-test" {
+		t.Fatalf("expected openai_test response, got %q", resp.ID)
+	}
+	if openAI.lastChatReq == nil || openAI.lastChatReq.Model != "gpt-5-nano" {
+		t.Fatalf("expected openai provider to receive raw model gpt-5-nano, got %#v", openAI.lastChatReq)
+	}
+	if openAI.lastChatReq.Provider != "" {
+		t.Fatalf("expected provider field to be stripped upstream, got %q", openAI.lastChatReq.Provider)
+	}
+	if openRouter.lastChatReq != nil {
+		t.Fatalf("expected openrouter provider to be bypassed, got %#v", openRouter.lastChatReq)
+	}
+	if got := router.GetProviderType("openai/gpt-5-nano"); got != "openai" {
+		t.Fatalf("GetProviderType() = %q, want %q", got, "openai")
+	}
+	if got := router.GetProviderName("openai/gpt-5-nano"); got != "openai_test" {
+		t.Fatalf("GetProviderName() = %q, want %q", got, "openai_test")
+	}
+}
+
+func TestRouterChatCompletion_ProviderQualifiedRawSlashModelStillWorks(t *testing.T) {
+	openAIResp := &core.ChatResponse{ID: "openai-test", Model: "gpt-5-nano"}
+	openRouterResp := &core.ChatResponse{ID: "openrouter", Model: "openai/gpt-5-nano"}
+	openAI := &mockProvider{name: "openai_test", chatResponse: openAIResp}
+	openRouter := &mockProvider{name: "openrouter", chatResponse: openRouterResp}
+
+	registry := newTestRegistryWithModels(
+		registryModelEntry{
+			provider:     openAI,
+			providerName: "openai_test",
+			providerType: "openai",
+			modelID:      "gpt-5-nano",
+		},
+		registryModelEntry{
+			provider:     openRouter,
+			providerName: "openrouter",
+			providerType: "openrouter",
+			modelID:      "openai/gpt-5-nano",
+		},
+	)
+
+	router, _ := NewRouter(registry)
+
+	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "openrouter/openai/gpt-5-nano"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != "openrouter" {
+		t.Fatalf("expected openrouter response, got %q", resp.ID)
+	}
+	if openRouter.lastChatReq == nil || openRouter.lastChatReq.Model != "openai/gpt-5-nano" {
+		t.Fatalf("expected openrouter provider to receive raw slash model, got %#v", openRouter.lastChatReq)
+	}
+	if openRouter.lastChatReq.Provider != "" {
+		t.Fatalf("expected provider field to be stripped upstream, got %q", openRouter.lastChatReq.Provider)
 	}
 }
 

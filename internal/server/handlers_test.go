@@ -306,6 +306,7 @@ type mockProvider struct {
 	streamData        string
 	supportedModels   []string
 	providerTypes     map[string]string
+	providerNames     map[string]string
 
 	batchCreateResponse         *core.BatchResponse
 	batchCreateHints            map[string]string
@@ -397,6 +398,25 @@ func (m *mockProvider) GetProviderType(model string) string {
 	}
 	if m.Supports(model) {
 		return "mock"
+	}
+	return ""
+}
+
+func (m *mockProvider) GetProviderName(model string) string {
+	selector, err := core.ParseModelSelector(model, "")
+	if err == nil && selector.Provider != "" {
+		if m.providerNames != nil {
+			if providerName, ok := m.providerNames[selector.QualifiedModel()]; ok {
+				return providerName
+			}
+		}
+		model = selector.Model
+	}
+
+	if m.providerNames != nil {
+		if providerName, ok := m.providerNames[model]; ok {
+			return providerName
+		}
 	}
 	return ""
 }
@@ -2041,6 +2061,53 @@ func TestChatCompletionStreaming_FastPathUsesPassthroughForOpenAICompatibleProvi
 	}
 }
 
+func TestChatCompletionStreaming_FastPathUsageCarriesResolvedProviderName(t *testing.T) {
+	streamData := "data: {\"id\":\"chatcmpl-123\",\"model\":\"gpt-4o-mini\",\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\ndata: [DONE]\n\n"
+	usageLog := &collectingUsageLogger{
+		config: usage.Config{Enabled: true},
+	}
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini"},
+		providerTypes: map[string]string{
+			"gpt-4o-mini": "openai",
+		},
+		providerNames: map[string]string{
+			"gpt-4o-mini": "openai_test",
+		},
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers: map[string][]string{
+				"Content-Type": {"text/event-stream"},
+			},
+			Body: io.NopCloser(strings.NewReader(streamData)),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, usageLog, nil)
+
+	reqBody := `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler.ChatCompletion(c)
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(usageLog.entries) != 1 {
+		t.Fatalf("usage entries = %d, want 1", len(usageLog.entries))
+	}
+	if got := usageLog.entries[0].ProviderName; got != "openai_test" {
+		t.Fatalf("ProviderName = %q, want openai_test", got)
+	}
+}
+
 func TestChatCompletionStreaming_FastPathSkipsQualifiedModelRewrite(t *testing.T) {
 	streamData := "data: {\"id\":\"chatcmpl-123\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n"
 	provider := &capturingProvider{
@@ -2154,7 +2221,7 @@ func TestHandleStreamingResponse_FlushesEachChunk(t *testing.T) {
 		},
 	}
 
-	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", func() (io.ReadCloser, error) {
+	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", "primary-openai", func() (io.ReadCloser, error) {
 		return stream, nil
 	})
 	if err != nil {
@@ -2246,7 +2313,7 @@ func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 		Data:      &auditlog.LogData{},
 	})
 
-	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", func() (io.ReadCloser, error) {
+	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", "primary-openai", func() (io.ReadCloser, error) {
 		return &erroringReadCloser{
 			data: []byte("data: {\"id\":\"1\"}\n\n"),
 			err:  expectedErr,
@@ -5550,8 +5617,8 @@ func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if entry.Model != "gpt-5-mini" {
-		t.Fatalf("audit entry model = %q, want gpt-5-mini", entry.Model)
+	if entry.RequestedModel != "gpt-5-mini" {
+		t.Fatalf("audit entry requested model = %q, want gpt-5-mini", entry.RequestedModel)
 	}
 	if entry.Provider != "openai" {
 		t.Fatalf("audit entry provider = %q, want openai", entry.Provider)

@@ -835,6 +835,10 @@ body {
     border-color: var(--accent);
 }
 
+.models-filter-input {
+    max-width: 840px;
+}
+
 .table-wrapper {
     background: var(--bg-surface);
     border: 1px solid var(--border);
@@ -875,6 +879,9 @@ body {
 
 .mono {
     font-family: 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.font-size-md {
     font-size: 13px;
 }
 
@@ -940,6 +947,21 @@ td.col-price {
 .table-action-btn-danger {
     color: var(--danger);
     border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+}
+
+.table-icon-btn {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    padding: 0;
+    gap: 0;
+    border-radius: 999px;
+}
+
+.table-icon-svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
 }
 
 .model-alias-editor {
@@ -1487,27 +1509,44 @@ td.col-price {
     gap: 10px;
 }
 
-.audit-filter-row .filter-input:first-child {
-    grid-column: span 4;
-}
-
-.audit-filter-input {
-    grid-column: span 2;
-    max-width: none;
-}
-
 .audit-filter-select {
     grid-column: span 2;
     min-width: 0;
 }
 
-.audit-filter-row .pagination-btn {
-    grid-column: span 1;
-    min-width: 84px;
+.audit-filter-row-search .filter-input {
+    grid-column: 1 / -1;
+    max-width: none;
 }
 
-.audit-filter-row-selects .audit-filter-select {
+.audit-filter-row-controls .audit-filter-select {
     grid-column: span 2;
+}
+
+.audit-filter-row-controls .pagination-btn {
+    grid-column: 11 / -1;
+    justify-self: end;
+    min-width: 108px;
+}
+
+.audit-clear-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #fff;
+    border-color: color-mix(in srgb, #fff 80%, var(--border));
+    color: #111110;
+    font-weight: 600;
+}
+
+.audit-clear-btn:hover:not(:disabled) {
+    background: #f5f5f5;
+}
+
+.audit-clear-btn .table-icon-svg {
+    width: 12px;
+    height: 12px;
 }
 
 .audit-log-summary {
@@ -2661,6 +2700,10 @@ body.conversation-drawer-open {
     .aliases-editor-header .table-action-btn {
         width: 100%;
     }
+    .alias-actions-cell .table-icon-btn,
+    .aliases-editor-header .table-icon-btn {
+        width: 36px;
+    }
 
     /* Audit page mobile */
     .audit-log-toolbar {
@@ -2669,8 +2712,7 @@ body.conversation-drawer-open {
     .audit-filter-row {
         grid-template-columns: 1fr;
     }
-    .audit-filter-row .filter-input:first-child,
-    .audit-filter-input,
+    .audit-filter-row .filter-input,
     .audit-filter-select,
     .audit-filter-row .pagination-btn {
         grid-column: auto;
@@ -2763,25 +2805,130 @@ body.conversation-drawer-open {
     position: absolute;
     top: 12px;
     right: 14px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    max-width: calc(100% - 28px);
-}
-
-.exec-pipeline-meta-chip {
     display: inline-flex;
     align-items: center;
-    padding: 3px 8px;
-    border-radius: 999px;
+    gap: 0;
+    min-width: 0;
+    max-width: calc(100% - 28px);
+    padding: 2px 10px;
+    border-radius: 12px;
     border: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: 12px;
+    font-weight: 500;
     line-height: 1.2;
     white-space: nowrap;
+}
+
+.exec-pipeline-meta-copy {
+    appearance: none;
+    cursor: pointer;
+    text-align: left;
+    overflow: hidden;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.exec-pipeline-meta-copy:hover,
+.exec-pipeline-meta-copy:focus-visible {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+    color: color-mix(in srgb, var(--accent) 74%, var(--text));
+}
+
+.exec-pipeline-meta-copy:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.exec-pipeline-meta-label {
+    flex: 0 0 auto;
+    font-weight: 700;
+}
+
+.exec-pipeline-meta-placeholder {
+    flex: 0 0 auto;
+    max-width: 3ch;
+    margin-left: 4px;
+    overflow: hidden;
+    opacity: 1;
+    transition: max-width 0.18s ease, margin-left 0.18s ease, opacity 0.15s ease;
+}
+
+.exec-pipeline-meta-value {
+    flex: 0 1 auto;
+    max-width: 0;
+    margin-left: 0;
+    overflow: hidden;
+    opacity: 0;
+    text-overflow: clip;
+    transition: max-width 0.22s ease, margin-left 0.18s ease, opacity 0.15s ease;
+}
+
+.exec-pipeline-meta-copy:hover .exec-pipeline-meta-placeholder,
+.exec-pipeline-meta-copy:focus-visible .exec-pipeline-meta-placeholder,
+.exec-pipeline-meta-copied .exec-pipeline-meta-placeholder,
+.exec-pipeline-meta-error .exec-pipeline-meta-placeholder {
+    max-width: 0;
+    margin-left: 0;
+    opacity: 0;
+}
+
+.exec-pipeline-meta-copy:hover .exec-pipeline-meta-value,
+.exec-pipeline-meta-copy:focus-visible .exec-pipeline-meta-value,
+.exec-pipeline-meta-copied .exec-pipeline-meta-value,
+.exec-pipeline-meta-error .exec-pipeline-meta-value {
+    max-width: 42ch;
+    margin-left: 4px;
+    opacity: 1;
+}
+
+.exec-pipeline-meta-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 0;
+    height: 14px;
+    margin-left: 0;
+    overflow: hidden;
+    opacity: 0;
+    line-height: 0;
+    transform: translateX(4px) translateY(1px) scale(0.84);
+    transition: width 0.18s ease, margin-left 0.18s ease, opacity 0.15s ease, transform 0.18s ease;
+}
+
+.exec-pipeline-meta-icon svg {
+    width: 14px;
+    height: 14px;
+    stroke: currentcolor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.exec-pipeline-meta-copied,
+.exec-pipeline-meta-copied:hover,
+.exec-pipeline-meta-copied:focus-visible {
+    background: color-mix(in srgb, var(--success) 12%, var(--bg));
+    border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+    color: var(--success);
+}
+
+.exec-pipeline-meta-copied .exec-pipeline-meta-icon {
+    width: 14px;
+    margin-left: 6px;
+    opacity: 1;
+    transform: translateY(1px);
+}
+
+.exec-pipeline-meta-error,
+.exec-pipeline-meta-error:hover,
+.exec-pipeline-meta-error:focus-visible {
+    background: color-mix(in srgb, var(--danger) 10%, var(--bg));
+    border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
+    color: var(--danger);
 }
 
 /* ─── Main pipeline row ─── */

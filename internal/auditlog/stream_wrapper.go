@@ -84,7 +84,7 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 		ID:                     baseEntry.ID,
 		Timestamp:              baseEntry.Timestamp,
 		DurationNs:             baseEntry.DurationNs,
-		Model:                  baseEntry.Model,
+		RequestedModel:         baseEntry.RequestedModel,
 		ResolvedModel:          baseEntry.ResolvedModel,
 		Provider:               baseEntry.Provider,
 		AliasUsed:              baseEntry.AliasUsed,

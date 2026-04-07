@@ -57,8 +57,9 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 			continue
 		}
 
-		existing, exists := result[providerType]
-		if exists {
+		targetKey, matched, ambiguous := findEnvOverlayTarget(result, providerType)
+		if matched {
+			existing := result[targetKey]
 			if apiKey != "" {
 				existing.APIKey = apiKey
 			}
@@ -70,7 +71,9 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 			if apiVersion != "" {
 				existing.APIVersion = apiVersion
 			}
-			result[providerType] = existing
+			result[targetKey] = existing
+		} else if ambiguous {
+			continue
 		} else {
 			if spec.RequireBaseURL && explicitBaseURL == "" {
 				continue
@@ -85,6 +88,34 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 	}
 
 	return result
+}
+
+func findEnvOverlayTarget(raw map[string]config.RawProviderConfig, providerType string) (string, bool, bool) {
+	if existing, ok := raw[providerType]; ok && rawProviderMatchesType(existing, providerType) {
+		return providerType, true, false
+	}
+
+	var matchedKey string
+	var matches int
+	for name, cfg := range raw {
+		if !rawProviderMatchesType(cfg, providerType) {
+			continue
+		}
+		matchedKey = name
+		matches++
+		if matches > 1 {
+			return "", false, true
+		}
+	}
+
+	if matches == 1 {
+		return matchedKey, true, false
+	}
+	return "", false, false
+}
+
+func rawProviderMatchesType(cfg config.RawProviderConfig, providerType string) bool {
+	return strings.TrimSpace(cfg.Type) == strings.TrimSpace(providerType)
 }
 
 type providerEnvNames struct {

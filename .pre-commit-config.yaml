@@ -33,10 +33,9 @@ repos:
         language: system
         pass_filenames: false
         files: '^(internal/(auditlog|core|providers|server|usage)/.*\.go|tests/perf/.*\.go|Makefile|\.github/workflows/test\.yml)$'
-
-  # 3. High-Performance Go Linter (golangci-lint)
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v2.7.2 # Latest stable version (Dec 2025)
-    hooks:
-      - id: golangci-lint
-        args: [--fix=false, --timeout=5m] # Optional: increase timeout if project is large
+      - id: go-lint
+        name: make lint
+        entry: make lint
+        language: system
+        pass_filenames: false
+        files: '^(\.golangci\.yml|Makefile|\.github/workflows/test\.yml|.*\.go)$'

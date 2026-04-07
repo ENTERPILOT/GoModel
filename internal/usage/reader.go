@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -30,6 +31,7 @@ type UsageSummary struct {
 type ModelUsage struct {
 	Model        string   `json:"model"`
 	Provider     string   `json:"provider"`
+	ProviderName string   `json:"provider_name,omitempty"`
 	InputTokens  int64    `json:"input_tokens"`
 	OutputTokens int64    `json:"output_tokens"`
 	InputCost    *float64 `json:"input_cost"`
@@ -55,7 +57,7 @@ type DailyUsage struct {
 type UsageLogParams struct {
 	UsageQueryParams        // embed date range
 	Model            string // filter by model (optional)
-	Provider         string // filter by provider (optional)
+	Provider         string // filter by provider name or provider type (optional)
 	Search           string // free-text search on model/provider/request_id
 	Limit            int    // page size (default 50, max 200)
 	Offset           int    // pagination offset
@@ -69,6 +71,7 @@ type UsageLogEntry struct {
 	Timestamp              time.Time      `json:"timestamp"`
 	Model                  string         `json:"model"`
 	Provider               string         `json:"provider"`
+	ProviderName           string         `json:"provider_name,omitempty"`
 	Endpoint               string         `json:"endpoint"`
 	UserPath               string         `json:"user_path,omitempty"`
 	CacheType              string         `json:"cache_type,omitempty"`
@@ -137,4 +140,11 @@ type UsageReader interface {
 
 	// GetCacheOverview returns cached-only aggregates for the admin dashboard.
 	GetCacheOverview(ctx context.Context, params UsageQueryParams) (*CacheOverview, error)
+}
+
+func displayUsageProviderName(providerName, provider string) string {
+	if trimmed := strings.TrimSpace(providerName); trimmed != "" {
+		return trimmed
+	}
+	return strings.TrimSpace(provider)
 }

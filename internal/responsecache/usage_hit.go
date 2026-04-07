@@ -28,10 +28,12 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 
 		model := ""
 		provider := ""
+		providerName := ""
 		if plan != nil {
 			provider = strings.TrimSpace(plan.ProviderType)
 			if plan.Resolution != nil {
 				model = strings.TrimSpace(plan.Resolution.ResolvedSelector.Model)
+				providerName = strings.TrimSpace(plan.Resolution.ProviderName)
 			}
 		}
 		if provider == "" {
@@ -54,6 +56,7 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 		if entry == nil {
 			return
 		}
+		entry.ProviderName = providerName
 		entry.UserPath = core.UserPathFromContext(ctx)
 		logger.Write(entry)
 	}

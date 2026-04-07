@@ -22,6 +22,12 @@ func buildWhereClause(conditions []string) string {
 	return " WHERE " + strings.Join(conditions, " AND ")
 }
 
+// usageGroupedProviderNameSQL returns a SQL expression that collapses blank
+// provider_name values to the canonical provider before grouping.
+func usageGroupedProviderNameSQL(providerNameColumn, providerColumn string) string {
+	return "COALESCE(NULLIF(TRIM(" + providerNameColumn + "), ''), " + providerColumn + ")"
+}
+
 // clampLimitOffset normalises pagination parameters:
 //   - limit defaults to 50 and is capped at 200
 //   - offset floors at 0

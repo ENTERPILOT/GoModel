@@ -705,7 +705,7 @@ func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t
 	assert.False(t, handlerCalled)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "unsupported model: smart")
-	assert.Equal(t, "smart", entry.Model)
+	assert.Equal(t, "smart", entry.RequestedModel)
 	assert.Equal(t, "", entry.ResolvedModel)
 	assert.Equal(t, "", entry.Provider)
 	assert.Equal(t, "invalid_request_error", entry.ErrorType)

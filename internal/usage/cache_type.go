@@ -46,11 +46,13 @@ func normalizedUsageEntryForStorage(entry *UsageEntry) *UsageEntry {
 	}
 
 	normalized := normalizeCacheType(entry.CacheType)
-	if normalized == entry.CacheType {
+	providerName := strings.TrimSpace(entry.ProviderName)
+	if normalized == entry.CacheType && providerName == entry.ProviderName {
 		return entry
 	}
 
 	cloned := *entry
 	cloned.CacheType = normalized
+	cloned.ProviderName = providerName
 	return &cloned
 }

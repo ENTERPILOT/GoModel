@@ -14,17 +14,17 @@ type QueryParams struct {
 // LogQueryParams specifies query parameters for paginated audit log retrieval.
 type LogQueryParams struct {
 	QueryParams
-	Model      string
-	Provider   string
-	Method     string
-	Path       string
-	UserPath   string
-	ErrorType  string
-	Search     string
-	StatusCode *int
-	Stream     *bool
-	Limit      int
-	Offset     int
+	RequestedModel string
+	Provider       string // filter by provider name or provider type
+	Method         string
+	Path           string
+	UserPath       string
+	ErrorType      string
+	Search         string
+	StatusCode     *int
+	Stream         *bool
+	Limit          int
+	Offset         int
 }
 
 // LogListResult holds a paginated list of audit log entries.

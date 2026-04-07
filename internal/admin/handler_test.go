@@ -441,6 +441,37 @@ func TestUsageByModel_Success(t *testing.T) {
 	}
 }
 
+func TestUsageByModel_PreservesProviderName(t *testing.T) {
+	reader := &mockUsageReader{
+		modelUsage: []usage.ModelUsage{
+			{Model: "gpt-4o", Provider: "openai", ProviderName: "primary-openai", InputTokens: 100, OutputTokens: 25},
+		},
+	}
+	h := NewHandler(reader, nil)
+	c, rec := newHandlerContext("/admin/api/v1/usage/models?days=30")
+
+	if err := h.UsageByModel(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var models []usage.ModelUsage
+	if err := json.Unmarshal(rec.Body.Bytes(), &models); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(models))
+	}
+	if models[0].ProviderName != "primary-openai" {
+		t.Fatalf("ProviderName = %q, want %q", models[0].ProviderName, "primary-openai")
+	}
+	if models[0].Provider != "openai" {
+		t.Fatalf("Provider = %q, want %q", models[0].Provider, "openai")
+	}
+}
+
 func TestUsageByModel_Error(t *testing.T) {
 	reader := &mockUsageReader{
 		modelUsageErr: errors.New("db failure"),
@@ -525,6 +556,51 @@ func TestUsageLog_Success(t *testing.T) {
 	}
 }
 
+func TestUsageLog_PreservesProviderName(t *testing.T) {
+	now := time.Now().UTC()
+	reader := &mockUsageReader{
+		usageLog: &usage.UsageLogResult{
+			Entries: []usage.UsageLogEntry{
+				{
+					ID:           "1",
+					RequestID:    "req-1",
+					Model:        "gpt-4o",
+					Provider:     "openai",
+					ProviderName: "primary-openai",
+					Timestamp:    now,
+					InputTokens:  100,
+					TotalTokens:  100,
+				},
+			},
+			Total: 1,
+			Limit: 50,
+		},
+	}
+	h := NewHandler(reader, nil)
+	c, rec := newHandlerContext("/admin/api/v1/usage/log?days=30")
+
+	if err := h.UsageLog(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result usage.UsageLogResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(result.Entries))
+	}
+	if result.Entries[0].ProviderName != "primary-openai" {
+		t.Fatalf("ProviderName = %q, want %q", result.Entries[0].ProviderName, "primary-openai")
+	}
+	if result.Entries[0].Provider != "openai" {
+		t.Fatalf("Provider = %q, want %q", result.Entries[0].Provider, "openai")
+	}
+}
+
 func TestUsageLog_Error(t *testing.T) {
 	reader := &mockUsageReader{
 		usageLogErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
@@ -591,15 +667,15 @@ func TestAuditLog_Success(t *testing.T) {
 		logResult: &auditlog.LogListResult{
 			Entries: []auditlog.LogEntry{
 				{
-					ID:         "log-1",
-					Timestamp:  now,
-					DurationNs: 12_000_000,
-					Model:      "gpt-4o",
-					Provider:   "openai",
-					StatusCode: 200,
-					RequestID:  "req-1",
-					Method:     http.MethodPost,
-					Path:       "/v1/chat/completions",
+					ID:             "log-1",
+					Timestamp:      now,
+					DurationNs:     12_000_000,
+					RequestedModel: "gpt-4o",
+					Provider:       "openai",
+					StatusCode:     200,
+					RequestID:      "req-1",
+					Method:         http.MethodPost,
+					Path:           "/v1/chat/completions",
 					Data: &auditlog.LogData{
 						RequestBody: map[string]any{
 							"model": "gpt-4o",
@@ -644,6 +720,50 @@ func TestAuditLog_Success(t *testing.T) {
 	}
 }
 
+func TestAuditLog_PreservesProviderName(t *testing.T) {
+	now := time.Now().UTC()
+	reader := &mockAuditReader{
+		logResult: &auditlog.LogListResult{
+			Entries: []auditlog.LogEntry{
+				{
+					ID:             "log-1",
+					Timestamp:      now,
+					RequestedModel: "smart",
+					ResolvedModel:  "primary-openai/gpt-4o",
+					Provider:       "openai",
+					ProviderName:   "primary-openai",
+					StatusCode:     200,
+				},
+			},
+			Total: 1,
+			Limit: 25,
+		},
+	}
+	h := NewHandler(nil, nil, WithAuditReader(reader))
+	c, rec := newHandlerContext("/admin/api/v1/audit/log?days=7")
+
+	if err := h.AuditLog(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result auditlog.LogListResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(result.Entries))
+	}
+	if result.Entries[0].ProviderName != "primary-openai" {
+		t.Fatalf("ProviderName = %q, want %q", result.Entries[0].ProviderName, "primary-openai")
+	}
+	if result.Entries[0].Provider != "openai" {
+		t.Fatalf("Provider = %q, want %q", result.Entries[0].Provider, "openai")
+	}
+}
+
 func TestAuditLog_WithFilters(t *testing.T) {
 	reader := &mockAuditReader{
 		logResult: &auditlog.LogListResult{
@@ -664,8 +784,8 @@ func TestAuditLog_WithFilters(t *testing.T) {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
 
-	if reader.lastQuery.Model != "gpt-4" {
-		t.Errorf("expected model filter gpt-4, got %q", reader.lastQuery.Model)
+	if reader.lastQuery.RequestedModel != "gpt-4" {
+		t.Errorf("expected requested model filter gpt-4, got %q", reader.lastQuery.RequestedModel)
 	}
 	if reader.lastQuery.Provider != "openai" {
 		t.Errorf("expected provider filter openai, got %q", reader.lastQuery.Provider)
@@ -792,6 +912,42 @@ func TestAuditConversation_Success(t *testing.T) {
 	}
 	if reader.lastConversationID != "log-2" || reader.lastConversationLim != 80 {
 		t.Errorf("expected call with log-2/80, got %q/%d", reader.lastConversationID, reader.lastConversationLim)
+	}
+}
+
+func TestAuditConversation_PreservesProviderName(t *testing.T) {
+	now := time.Now().UTC()
+	reader := &mockAuditReader{
+		conversationResult: &auditlog.ConversationResult{
+			AnchorID: "log-2",
+			Entries: []auditlog.LogEntry{
+				{ID: "log-1", Timestamp: now.Add(-time.Minute), ResolvedModel: "primary-openai/gpt-4o", Provider: "openai", ProviderName: "primary-openai", Path: "/v1/responses"},
+				{ID: "log-2", Timestamp: now, ResolvedModel: "primary-openai/gpt-4o", Provider: "openai", ProviderName: "primary-openai", Path: "/v1/responses"},
+			},
+		},
+	}
+	h := NewHandler(nil, nil, WithAuditReader(reader))
+	c, rec := newHandlerContext("/admin/api/v1/audit/conversation?log_id=log-2")
+
+	if err := h.AuditConversation(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result auditlog.ConversationResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(result.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(result.Entries))
+	}
+	if result.Entries[0].ProviderName != "primary-openai" {
+		t.Fatalf("ProviderName = %q, want %q", result.Entries[0].ProviderName, "primary-openai")
+	}
+	if result.Entries[0].Provider != "openai" {
+		t.Fatalf("Provider = %q, want %q", result.Entries[0].Provider, "openai")
 	}
 }
 

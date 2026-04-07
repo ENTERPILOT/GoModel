@@ -226,7 +226,7 @@ func passthroughAuditPath(c *echo.Context, providerType, endpoint string, info *
 	return passthroughStreamAuditPath("", providerType, endpoint)
 }
 
-func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerType, endpoint string, info *core.PassthroughRouteInfo, resp *core.PassthroughResponse) error {
+func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerType, providerName, endpoint string, info *core.PassthroughRouteInfo, resp *core.PassthroughResponse) error {
 	if resp == nil || resp.Body == nil {
 		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty passthrough response", nil))
 	}
@@ -282,6 +282,7 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 		}
 		if s.usageLogger != nil && s.usageLogger.Config().Enabled && (plan == nil || plan.UsageEnabled()) {
 			if observer := usage.NewStreamUsageObserver(s.usageLogger, model, providerType, requestID, usagePath, s.pricingResolver, core.UserPathFromContext(c.Request().Context())); observer != nil {
+				observer.SetProviderName(providerName)
 				observers = append(observers, observer)
 			}
 		}

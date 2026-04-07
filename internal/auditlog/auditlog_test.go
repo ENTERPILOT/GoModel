@@ -119,20 +119,20 @@ func TestRedactHeaders(t *testing.T) {
 
 func TestLogEntryJSON(t *testing.T) {
 	entry := &LogEntry{
-		ID:            "test-id-123",
-		Timestamp:     time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
-		DurationNs:    1500000,
-		Model:         "friendly-alias",
-		ResolvedModel: "openai/gpt-4",
-		Provider:      "openai",
-		AliasUsed:     true,
-		CacheType:     CacheTypeExact,
-		StatusCode:    200,
-		RequestID:     "req-123",
-		ClientIP:      "192.168.1.1",
-		Method:        "POST",
-		Path:          "/v1/chat/completions",
-		Stream:        false,
+		ID:             "test-id-123",
+		Timestamp:      time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
+		DurationNs:     1500000,
+		RequestedModel: "friendly-alias",
+		ResolvedModel:  "openai/gpt-4",
+		Provider:       "openai",
+		AliasUsed:      true,
+		CacheType:      CacheTypeExact,
+		StatusCode:     200,
+		RequestID:      "req-123",
+		ClientIP:       "192.168.1.1",
+		Method:         "POST",
+		Path:           "/v1/chat/completions",
+		Stream:         false,
 		Data: &LogData{
 			UserAgent: "test-agent",
 		},
@@ -154,8 +154,8 @@ func TestLogEntryJSON(t *testing.T) {
 	if decoded.ID != entry.ID {
 		t.Errorf("ID mismatch: expected %q, got %q", entry.ID, decoded.ID)
 	}
-	if decoded.Model != entry.Model {
-		t.Errorf("Model mismatch: expected %q, got %q", entry.Model, decoded.Model)
+	if decoded.RequestedModel != entry.RequestedModel {
+		t.Errorf("RequestedModel mismatch: expected %q, got %q", entry.RequestedModel, decoded.RequestedModel)
 	}
 	if decoded.Provider != entry.Provider {
 		t.Errorf("Provider mismatch: expected %q, got %q", entry.Provider, decoded.Provider)
@@ -308,9 +308,9 @@ func TestLogger(t *testing.T) {
 	// Write some entries
 	for i := range 5 {
 		logger.Write(&LogEntry{
-			ID:        fmt.Sprintf("entry-%d", i),
-			Timestamp: time.Now(),
-			Model:     "test-model",
+			ID:             fmt.Sprintf("entry-%d", i),
+			Timestamp:      time.Now(),
+			RequestedModel: "test-model",
 		})
 	}
 
@@ -498,8 +498,8 @@ func TestMiddleware_PrefersExecutionPlanOverLegacyResolution(t *testing.T) {
 	}
 
 	entry := logger.entries[0]
-	if entry.Model != "anthropic/claude-opus-4-6" {
-		t.Fatalf("Model = %q, want requested alias", entry.Model)
+	if entry.RequestedModel != "anthropic/claude-opus-4-6" {
+		t.Fatalf("RequestedModel = %q, want requested alias", entry.RequestedModel)
 	}
 	if entry.ResolvedModel != "openai/gpt-5-nano" {
 		t.Fatalf("ResolvedModel = %q, want openai/gpt-5-nano", entry.ResolvedModel)
@@ -573,8 +573,8 @@ func TestMiddleware_DoesNotApplyModelMetadataWithoutExecutionPlan(t *testing.T) 
 	}
 
 	entry := logger.entries[0]
-	if entry.Model != "" {
-		t.Fatalf("Model = %q, want empty", entry.Model)
+	if entry.RequestedModel != "" {
+		t.Fatalf("RequestedModel = %q, want empty", entry.RequestedModel)
 	}
 	if entry.ResolvedModel != "" {
 		t.Fatalf("ResolvedModel = %q, want empty", entry.ResolvedModel)
@@ -619,8 +619,8 @@ func TestMiddleware_PassthroughExecutionPlanUsesPassthroughModel(t *testing.T) {
 	}
 
 	entry := logger.entries[0]
-	if entry.Model != "gpt-4.1-nano" {
-		t.Fatalf("Model = %q, want gpt-4.1-nano", entry.Model)
+	if entry.RequestedModel != "gpt-4.1-nano" {
+		t.Fatalf("RequestedModel = %q, want gpt-4.1-nano", entry.RequestedModel)
 	}
 	if entry.Provider != "openai" {
 		t.Fatalf("Provider = %q, want openai", entry.Provider)
@@ -890,10 +890,10 @@ data: [DONE]
 	logger := NewLogger(store, cfg)
 
 	entry := &LogEntry{
-		ID:        "test-entry",
-		Timestamp: time.Now(),
-		Model:     "gpt-4",
-		Data:      &LogData{},
+		ID:             "test-entry",
+		Timestamp:      time.Now(),
+		RequestedModel: "gpt-4",
+		Data:           &LogData{},
 	}
 
 	observedStream := streaming.NewObservedSSEStream(
@@ -943,7 +943,7 @@ func TestCreateStreamEntry(t *testing.T) {
 		ID:                     "test-id",
 		Timestamp:              time.Now(),
 		DurationNs:             1000,
-		Model:                  "claude-opus-4-6",
+		RequestedModel:         "claude-opus-4-6",
 		ResolvedModel:          "openai/gpt-5-nano",
 		Provider:               "openai",
 		AliasUsed:              true,
@@ -983,8 +983,8 @@ func TestCreateStreamEntry(t *testing.T) {
 	if streamEntry.ID != baseEntry.ID {
 		t.Errorf("ID mismatch")
 	}
-	if streamEntry.Model != baseEntry.Model {
-		t.Errorf("Model mismatch")
+	if streamEntry.RequestedModel != baseEntry.RequestedModel {
+		t.Errorf("RequestedModel mismatch")
 	}
 	if streamEntry.ResolvedModel != baseEntry.ResolvedModel {
 		t.Errorf("ResolvedModel mismatch")

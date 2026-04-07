@@ -37,11 +37,12 @@ type UsageEntry struct {
 	Timestamp time.Time `json:"timestamp" bson:"timestamp"`
 
 	// Request context
-	Model     string `json:"model" bson:"model"`
-	Provider  string `json:"provider" bson:"provider"`
-	Endpoint  string `json:"endpoint" bson:"endpoint"`
-	UserPath  string `json:"user_path,omitempty" bson:"user_path,omitempty"`
-	CacheType string `json:"cache_type,omitempty" bson:"cache_type,omitempty"`
+	Model        string `json:"model" bson:"model"`
+	Provider     string `json:"provider" bson:"provider"` // canonical provider type used for routing, filters, and pricing
+	ProviderName string `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
+	Endpoint     string `json:"endpoint" bson:"endpoint"`
+	UserPath     string `json:"user_path,omitempty" bson:"user_path,omitempty"`
+	CacheType    string `json:"cache_type,omitempty" bson:"cache_type,omitempty"`
 
 	// Standard token counts (normalized across providers)
 	InputTokens  int `json:"input_tokens" bson:"input_tokens"`

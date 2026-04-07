@@ -65,13 +65,16 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 	// Create indexes for common queries
 	indexes := []mongo.IndexModel{
 		{
-			Keys: bson.D{{Key: "model", Value: 1}},
+			Keys: bson.D{{Key: "requested_model", Value: 1}},
 		},
 		{
 			Keys: bson.D{{Key: "status_code", Value: 1}},
 		},
 		{
 			Keys: bson.D{{Key: "provider", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "provider_name", Value: 1}},
 		},
 		{
 			Keys: bson.D{{Key: "execution_plan_version_id", Value: 1}},

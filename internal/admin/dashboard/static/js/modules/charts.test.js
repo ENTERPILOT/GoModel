@@ -67,6 +67,7 @@ function createChartsContext() {
     module.interval = 'weekly';
     module.page = 'overview';
     module.formatTokensShort = (value) => String(value);
+    module.qualifiedModelDisplay = (value) => value && value.model ? value.model : '-';
 
     return { module, canvas };
 }
@@ -124,4 +125,21 @@ test('renderBarChart recreates the usage bar chart instance on refresh', () => {
     assert.equal(JSON.stringify(module.usageBarChart.data.labels), JSON.stringify(['gpt-5']));
     assert.equal(JSON.stringify(module.usageBarChart.data.datasets[0].data), JSON.stringify([55]));
     assert.equal(JSON.stringify(firstChart.updateCalls), JSON.stringify([]));
+});
+
+test('renderBarChart prefers provider_name in model labels when available', () => {
+    FakeChart.instances = [];
+    const { module } = createChartsContext();
+    module.page = 'usage';
+    module.usageMode = 'tokens';
+    module.qualifiedModelDisplay = (value) => value.provider_name
+        ? value.provider_name + '/' + value.model
+        : value.model;
+    module.modelUsage = [
+        { model: 'gpt-4o', provider_name: 'primary-openai', input_tokens: 5, output_tokens: 7, total_cost: 0.01 }
+    ];
+
+    module.renderBarChart();
+
+    assert.equal(JSON.stringify(module.usageBarChart.data.labels), JSON.stringify(['primary-openai/gpt-4o']));
 });

@@ -79,7 +79,7 @@ func (s *translatedInferenceService) ChatCompletion(c *echo.Context) error {
 
 func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req *core.ChatRequest, plan *core.ExecutionPlan) error {
 	ctx := c.Request().Context()
-	streamReq, providerType, usageModel := s.resolveProviderAndModelFromPlan(c, plan, req.Model, req)
+	streamReq, providerType, providerName, usageModel := s.resolveProviderAndModelFromPlan(c, plan, req.Model, req)
 	requestID := requestIDFromContextOrHeader(c.Request())
 
 	if req.Stream {
@@ -88,25 +88,26 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 				return err
 			}
 		}
-		stream, resolvedProviderType, resolvedUsageModel, usedFallback, err := s.streamChatCompletion(ctx, plan, streamReq, providerType, usageModel)
+		stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, usedFallback, err := s.streamChatCompletion(ctx, plan, streamReq, providerType, providerName, usageModel)
 		if err != nil {
 			return handleError(c, err)
 		}
 		if usedFallback {
 			markRequestFallbackUsed(c)
 		}
-		return s.handleStreamingReadCloser(c, plan, resolvedUsageModel, resolvedProviderType, stream)
+		return s.handleStreamingReadCloser(c, plan, resolvedUsageModel, resolvedProviderType, resolvedProviderName, stream)
 	}
 
-	resp, providerType, usedFallback, err := s.executeChatCompletion(ctx, plan, req)
+	resp, providerType, providerName, usedFallback, err := s.executeChatCompletion(ctx, plan, req)
 	if err != nil {
 		return handleError(c, err)
 	}
 	if usedFallback {
 		markRequestFallbackUsed(c)
 	}
+	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(plan, resp.Model, providerName), providerType, providerName)
 
-	s.logUsage(ctx, plan, resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
+	s.logUsage(ctx, plan, resp.Model, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromChatResponse(resp, requestID, providerType, "/v1/chat/completions", pricing)
 	})
 
@@ -196,32 +197,33 @@ func (s *translatedInferenceService) withCacheRequestContext(ctx context.Context
 
 func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *core.ResponsesRequest, plan *core.ExecutionPlan) error {
 	ctx := c.Request().Context()
-	_, providerType, usageModel := s.resolveProviderAndModelFromPlan(c, plan, req.Model, nil)
+	_, providerType, providerName, usageModel := s.resolveProviderAndModelFromPlan(c, plan, req.Model, nil)
 	requestID := requestIDFromContextOrHeader(c.Request())
 
 	if req.Stream {
 		if (plan == nil || plan.UsageEnabled()) && s.shouldEnforceReturningUsageData() {
 			ctx = core.WithEnforceReturningUsageData(ctx, true)
 		}
-		stream, resolvedProviderType, resolvedUsageModel, usedFallback, err := s.streamResponses(ctx, plan, req, providerType, usageModel)
+		stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, usedFallback, err := s.streamResponses(ctx, plan, req, providerType, providerName, usageModel)
 		if err != nil {
 			return handleError(c, err)
 		}
 		if usedFallback {
 			markRequestFallbackUsed(c)
 		}
-		return s.handleStreamingReadCloser(c, plan, resolvedUsageModel, resolvedProviderType, stream)
+		return s.handleStreamingReadCloser(c, plan, resolvedUsageModel, resolvedProviderType, resolvedProviderName, stream)
 	}
 
-	resp, providerType, usedFallback, err := s.executeResponses(ctx, plan, req)
+	resp, providerType, providerName, usedFallback, err := s.executeResponses(ctx, plan, req)
 	if err != nil {
 		return handleError(c, err)
 	}
 	if usedFallback {
 		markRequestFallbackUsed(c)
 	}
+	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(plan, resp.Model, providerName), providerType, providerName)
 
-	s.logUsage(ctx, plan, resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
+	s.logUsage(ctx, plan, resp.Model, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromResponsesResponse(resp, requestID, providerType, "/v1/responses", pricing)
 	})
 
@@ -265,7 +267,7 @@ func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo
 		usageLogger:     s.usageLogger,
 		pricingResolver: s.pricingResolver,
 	}
-	return true, passthrough.proxyPassthroughResponse(c, providerType, endpoint, info, resp)
+	return true, passthrough.proxyPassthroughResponse(c, providerType, providerNameFromPlan(plan), endpoint, info, resp)
 }
 
 func (s *translatedInferenceService) canFastPathStreamingChatPassthrough(plan *core.ExecutionPlan, req *core.ChatRequest) bool {
@@ -335,12 +337,13 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
-	resp, providerType, err := s.executeEmbeddings(ctx, plan, req)
+	resp, providerType, providerName, err := s.executeEmbeddings(ctx, plan, req)
 	if err != nil {
 		return handleError(c, err)
 	}
+	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(plan, resp.Model, providerName), providerType, providerName)
 
-	s.logUsage(ctx, plan, resp.Model, providerType, func(pricing *core.ModelPricing) *usage.UsageEntry {
+	s.logUsage(ctx, plan, resp.Model, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromEmbeddingResponse(resp, requestID, providerType, "/v1/embeddings", pricing)
 	})
 
@@ -350,11 +353,12 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 func (s *translatedInferenceService) handleStreamingReadCloser(
 	c *echo.Context,
 	plan *core.ExecutionPlan,
-	model, provider string,
+	model, provider, providerName string,
 	stream io.ReadCloser,
 ) error {
 	auditlog.MarkEntryAsStreaming(c, true)
 	auditlog.EnrichEntryWithStream(c, true)
+	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(plan, model, providerName), provider, providerName)
 
 	entry := auditlog.GetStreamEntryFromContext(c)
 	auditEnabled := s.logger != nil && s.logger.Config().Enabled && (plan == nil || plan.AuditEnabled())
@@ -373,7 +377,11 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		observers = append(observers, auditlog.NewStreamLogObserver(s.logger, streamEntry, endpoint))
 	}
 	if s.usageLogger != nil && s.usageLogger.Config().Enabled && (plan == nil || plan.UsageEnabled()) {
-		observers = append(observers, usage.NewStreamUsageObserver(s.usageLogger, model, provider, requestID, endpoint, s.pricingResolver, core.UserPathFromContext(c.Request().Context())))
+		usageObserver := usage.NewStreamUsageObserver(s.usageLogger, model, provider, requestID, endpoint, s.pricingResolver, core.UserPathFromContext(c.Request().Context()))
+		if usageObserver != nil {
+			usageObserver.SetProviderName(providerName)
+			observers = append(observers, usageObserver)
+		}
 	}
 	wrappedStream := streaming.NewObservedSSEStream(stream, observers...)
 
@@ -399,14 +407,14 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 func (s *translatedInferenceService) handleStreamingResponse(
 	c *echo.Context,
 	plan *core.ExecutionPlan,
-	model, provider string,
+	model, provider, providerName string,
 	streamFn func() (io.ReadCloser, error),
 ) error {
 	stream, err := streamFn()
 	if err != nil {
 		return handleError(c, err)
 	}
-	return s.handleStreamingReadCloser(c, plan, model, provider, stream)
+	return s.handleStreamingReadCloser(c, plan, model, provider, providerName, stream)
 }
 
 //nolint:dupl // typed wrapper over the shared translated fallback executor
@@ -414,7 +422,7 @@ func (s *translatedInferenceService) executeChatCompletion(
 	ctx context.Context,
 	plan *core.ExecutionPlan,
 	req *core.ChatRequest,
-) (*core.ChatResponse, string, bool, error) {
+) (*core.ChatResponse, string, string, bool, error) {
 	return executeTranslatedWithFallback(ctx, s, plan, req, req.Model, req.Provider, cloneChatRequestForSelector,
 		func(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, string, error) {
 			resp, err := s.provider.ChatCompletion(ctx, req)
@@ -430,15 +438,15 @@ func (s *translatedInferenceService) streamChatCompletion(
 	ctx context.Context,
 	plan *core.ExecutionPlan,
 	req *core.ChatRequest,
-	providerType, usageModel string,
-) (io.ReadCloser, string, string, bool, error) {
+	providerType, providerName, usageModel string,
+) (io.ReadCloser, string, string, string, bool, error) {
 	stream, err := s.provider.StreamChatCompletion(ctx, req)
 	if err == nil {
-		return stream, providerType, usageModel, false, nil
+		return stream, providerType, providerName, usageModel, false, nil
 	}
 
-	stream, resolvedProviderType, resolvedUsageModel, err := tryFallbackStream(ctx, s, plan, req.Model, req.Provider, err,
-		func(selector core.ModelSelector, providerType string) (io.ReadCloser, string, string, error) {
+	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, err := tryFallbackStream(ctx, s, plan, req.Model, req.Provider, err,
+		func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error) {
 			stream, err := s.provider.StreamChatCompletion(ctx, cloneChatRequestForSelector(req, selector))
 			if err != nil {
 				return nil, "", "", err
@@ -447,9 +455,9 @@ func (s *translatedInferenceService) streamChatCompletion(
 		},
 	)
 	if err != nil {
-		return nil, "", "", false, err
+		return nil, "", "", "", false, err
 	}
-	return stream, resolvedProviderType, resolvedUsageModel, true, nil
+	return stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, true, nil
 }
 
 //nolint:dupl // typed wrapper over the shared translated fallback executor
@@ -457,7 +465,7 @@ func (s *translatedInferenceService) executeResponses(
 	ctx context.Context,
 	plan *core.ExecutionPlan,
 	req *core.ResponsesRequest,
-) (*core.ResponsesResponse, string, bool, error) {
+) (*core.ResponsesResponse, string, string, bool, error) {
 	return executeTranslatedWithFallback(ctx, s, plan, req, req.Model, req.Provider, cloneResponsesRequestForSelector,
 		func(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, string, error) {
 			resp, err := s.provider.Responses(ctx, req)
@@ -473,15 +481,15 @@ func (s *translatedInferenceService) streamResponses(
 	ctx context.Context,
 	plan *core.ExecutionPlan,
 	req *core.ResponsesRequest,
-	providerType, usageModel string,
-) (io.ReadCloser, string, string, bool, error) {
+	providerType, providerName, usageModel string,
+) (io.ReadCloser, string, string, string, bool, error) {
 	stream, err := s.provider.StreamResponses(ctx, req)
 	if err == nil {
-		return stream, providerType, usageModel, false, nil
+		return stream, providerType, providerName, usageModel, false, nil
 	}
 
-	stream, resolvedProviderType, resolvedUsageModel, err := tryFallbackStream(ctx, s, plan, req.Model, req.Provider, err,
-		func(selector core.ModelSelector, providerType string) (io.ReadCloser, string, string, error) {
+	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, err := tryFallbackStream(ctx, s, plan, req.Model, req.Provider, err,
+		func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error) {
 			stream, err := s.provider.StreamResponses(ctx, cloneResponsesRequestForSelector(req, selector))
 			if err != nil {
 				return nil, "", "", err
@@ -490,20 +498,21 @@ func (s *translatedInferenceService) streamResponses(
 		},
 	)
 	if err != nil {
-		return nil, "", "", false, err
+		return nil, "", "", "", false, err
 	}
-	return stream, resolvedProviderType, resolvedUsageModel, true, nil
+	return stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, true, nil
 }
 
 func (s *translatedInferenceService) executeEmbeddings(
 	ctx context.Context,
 	plan *core.ExecutionPlan,
 	req *core.EmbeddingRequest,
-) (*core.EmbeddingResponse, string, error) {
+) (*core.EmbeddingResponse, string, string, error) {
 	providerType := providerTypeFromPlan(plan)
+	providerName := providerNameFromPlan(plan)
 	resp, err := s.provider.Embeddings(ctx, req)
 	if err == nil {
-		return resp, responseProviderType(providerType, resp.Provider), nil
+		return resp, responseProviderType(providerType, resp.Provider), providerName, nil
 	}
 
 	return s.tryFallbackEmbeddings(ctx, plan, req, err)
@@ -514,16 +523,16 @@ func (s *translatedInferenceService) tryFallbackEmbeddings(
 	plan *core.ExecutionPlan,
 	req *core.EmbeddingRequest,
 	primaryErr error,
-) (*core.EmbeddingResponse, string, error) {
+) (*core.EmbeddingResponse, string, string, error) {
 	// Embeddings fallback is intentionally disabled until the shared model
 	// contract can prove vector-size compatibility for alternates.
-	return nil, "", primaryErr
+	return nil, "", "", primaryErr
 }
 
 func (s *translatedInferenceService) logUsage(
 	ctx context.Context,
 	plan *core.ExecutionPlan,
-	model, providerType string,
+	model, providerType, providerName string,
 	extractFn func(*core.ModelPricing) *usage.UsageEntry,
 ) {
 	if s.usageLogger == nil || !s.usageLogger.Config().Enabled || (plan != nil && !plan.UsageEnabled()) {
@@ -534,6 +543,7 @@ func (s *translatedInferenceService) logUsage(
 		pricing = s.pricingResolver.ResolvePricing(model, providerType)
 	}
 	if entry := extractFn(pricing); entry != nil {
+		entry.ProviderName = strings.TrimSpace(providerName)
 		entry.UserPath = core.UserPathFromContext(ctx)
 		s.usageLogger.Write(entry)
 	}
@@ -552,14 +562,17 @@ func (s *translatedInferenceService) fallbackSelectors(plan *core.ExecutionPlan)
 
 func (s *translatedInferenceService) providerTypeForSelector(selector core.ModelSelector, fallback string) string {
 	fallback = strings.TrimSpace(fallback)
-	if provider := strings.TrimSpace(selector.Provider); provider != "" {
-		return provider
-	}
 	if s.provider == nil {
+		if provider := strings.TrimSpace(selector.Provider); provider != "" {
+			return provider
+		}
 		return fallback
 	}
 	if providerType := strings.TrimSpace(s.provider.GetProviderType(selector.QualifiedModel())); providerType != "" {
 		return providerType
+	}
+	if provider := strings.TrimSpace(selector.Provider); provider != "" {
+		return provider
 	}
 	return fallback
 }
@@ -569,8 +582,9 @@ func (s *translatedInferenceService) resolveProviderAndModelFromPlan(
 	plan *core.ExecutionPlan,
 	fallbackModel string,
 	req *core.ChatRequest,
-) (*core.ChatRequest, string, string) {
+) (*core.ChatRequest, string, string, string) {
 	providerType := GetProviderType(c)
+	providerName := providerNameFromPlan(plan)
 	if plan != nil {
 		if plannedProviderType := strings.TrimSpace(plan.ProviderType); plannedProviderType != "" {
 			providerType = plannedProviderType
@@ -579,7 +593,7 @@ func (s *translatedInferenceService) resolveProviderAndModelFromPlan(
 
 	model := resolvedModelFromPlan(plan, fallbackModel)
 	if req == nil || !req.Stream || (plan != nil && !plan.UsageEnabled()) || !s.shouldEnforceReturningUsageData() {
-		return req, providerType, model
+		return req, providerType, providerName, model
 	}
 
 	streamReq := cloneChatRequestForStreamUsage(req)
@@ -587,7 +601,7 @@ func (s *translatedInferenceService) resolveProviderAndModelFromPlan(
 		streamReq.StreamOptions = &core.StreamOptions{}
 	}
 	streamReq.StreamOptions.IncludeUsage = true
-	return streamReq, providerType, model
+	return streamReq, providerType, providerName, model
 }
 
 func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, err error) {
@@ -648,6 +662,42 @@ func cloneResponsesRequestForSelector(req *core.ResponsesRequest, selector core.
 	return &cloned
 }
 
+func providerNameFromPlan(plan *core.ExecutionPlan) string {
+	if plan == nil || plan.Resolution == nil {
+		return ""
+	}
+	return strings.TrimSpace(plan.Resolution.ProviderName)
+}
+
+func resolvedModelPrefix(plan *core.ExecutionPlan, providerName string) string {
+	if providerName = strings.TrimSpace(providerName); providerName != "" {
+		return providerName
+	}
+	if plan == nil || plan.Resolution == nil {
+		return ""
+	}
+	if providerName = strings.TrimSpace(plan.Resolution.ProviderName); providerName != "" {
+		return providerName
+	}
+	return strings.TrimSpace(plan.Resolution.ResolvedSelector.Provider)
+}
+
+func qualifyModelWithProvider(model, providerName string) string {
+	model = strings.TrimSpace(model)
+	providerName = strings.TrimSpace(providerName)
+	if model == "" {
+		return ""
+	}
+	if providerName == "" || strings.HasPrefix(model, providerName+"/") {
+		return model
+	}
+	return providerName + "/" + model
+}
+
+func qualifyExecutedModel(plan *core.ExecutionPlan, model, providerName string) string {
+	return qualifyModelWithProvider(model, resolvedModelPrefix(plan, providerName))
+}
+
 func markRequestFallbackUsed(c *echo.Context) {
 	if c == nil || c.Request() == nil {
 		return
@@ -706,13 +756,13 @@ func tryFallbackResponse[T any](
 	plan *core.ExecutionPlan,
 	model, provider string,
 	primaryErr error,
-	call func(selector core.ModelSelector, providerType string) (T, string, error),
-) (T, string, bool, error) {
+	call func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
+) (T, string, string, bool, error) {
 	var zero T
 
 	fallbacks := s.fallbackSelectors(plan)
 	if len(fallbacks) == 0 || !shouldAttemptFallback(primaryErr) {
-		return zero, "", false, primaryErr
+		return zero, "", "", false, primaryErr
 	}
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
@@ -721,6 +771,7 @@ func tryFallbackResponse[T any](
 	for _, selector := range fallbacks {
 		qualified := selector.QualifiedModel()
 		providerType := s.providerTypeForSelector(selector, providerTypeFromPlan(plan))
+		providerName := resolvedProviderName(s.provider, selector, providerNameFromPlan(plan))
 		slog.Warn("primary model attempt failed, trying fallback",
 			"request_id", requestID,
 			"from", primaryModel,
@@ -729,7 +780,7 @@ func tryFallbackResponse[T any](
 			"error", lastErr,
 		)
 
-		resp, resolvedProviderType, err := call(selector, providerType)
+		resp, resolvedProviderType, err := call(selector, providerType, providerName)
 		if err == nil {
 			slog.Info("fallback model attempt succeeded",
 				"request_id", requestID,
@@ -737,12 +788,12 @@ func tryFallbackResponse[T any](
 				"to", qualified,
 				"provider_type", resolvedProviderType,
 			)
-			return resp, resolvedProviderType, true, nil
+			return resp, resolvedProviderType, providerName, true, nil
 		}
 		lastErr = err
 	}
 
-	return zero, "", false, lastErr
+	return zero, "", "", false, lastErr
 }
 
 func executeWithFallbackResponse[T any](
@@ -750,12 +801,12 @@ func executeWithFallbackResponse[T any](
 	s *translatedInferenceService,
 	plan *core.ExecutionPlan,
 	model, provider string,
-	primary func() (T, string, error),
-	fallback func(selector core.ModelSelector, providerType string) (T, string, error),
-) (T, string, bool, error) {
-	resp, resolvedProviderType, err := primary()
+	primary func() (T, string, string, error),
+	fallback func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
+) (T, string, string, bool, error) {
+	resp, resolvedProviderType, resolvedProviderName, err := primary()
 	if err == nil {
-		return resp, resolvedProviderType, false, nil
+		return resp, resolvedProviderType, resolvedProviderName, false, nil
 	}
 	return tryFallbackResponse(ctx, s, plan, model, provider, err, fallback)
 }
@@ -768,17 +819,17 @@ func executeTranslatedWithFallback[Req any, Resp any](
 	model, provider string,
 	cloneForSelector func(Req, core.ModelSelector) Req,
 	call func(context.Context, Req) (Resp, string, error),
-) (Resp, string, bool, error) {
+) (Resp, string, string, bool, error) {
 	return executeWithFallbackResponse(ctx, s, plan, model, provider,
-		func() (Resp, string, error) {
+		func() (Resp, string, string, error) {
 			resp, responseProvider, err := call(ctx, req)
 			if err != nil {
 				var zero Resp
-				return zero, "", err
+				return zero, "", "", err
 			}
-			return resp, responseProviderType(providerTypeFromPlan(plan), responseProvider), nil
+			return resp, responseProviderType(providerTypeFromPlan(plan), responseProvider), providerNameFromPlan(plan), nil
 		},
-		func(selector core.ModelSelector, providerType string) (Resp, string, error) {
+		func(selector core.ModelSelector, providerType, providerName string) (Resp, string, error) {
 			resp, responseProvider, err := call(ctx, cloneForSelector(req, selector))
 			if err != nil {
 				var zero Resp
@@ -795,11 +846,11 @@ func tryFallbackStream(
 	plan *core.ExecutionPlan,
 	model, provider string,
 	primaryErr error,
-	call func(selector core.ModelSelector, providerType string) (io.ReadCloser, string, string, error),
-) (io.ReadCloser, string, string, error) {
+	call func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error),
+) (io.ReadCloser, string, string, string, error) {
 	fallbacks := s.fallbackSelectors(plan)
 	if len(fallbacks) == 0 || !shouldAttemptFallback(primaryErr) {
-		return nil, "", "", primaryErr
+		return nil, "", "", "", primaryErr
 	}
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
@@ -808,6 +859,7 @@ func tryFallbackStream(
 	for _, selector := range fallbacks {
 		qualified := selector.QualifiedModel()
 		providerType := s.providerTypeForSelector(selector, providerTypeFromPlan(plan))
+		providerName := resolvedProviderName(s.provider, selector, providerNameFromPlan(plan))
 		slog.Warn("primary model attempt failed, trying fallback stream",
 			"request_id", requestID,
 			"from", primaryModel,
@@ -816,7 +868,7 @@ func tryFallbackStream(
 			"error", lastErr,
 		)
 
-		stream, resolvedProviderType, usageModel, err := call(selector, providerType)
+		stream, resolvedProviderType, usageModel, err := call(selector, providerType, providerName)
 		if err == nil {
 			slog.Info("fallback stream attempt succeeded",
 				"request_id", requestID,
@@ -824,12 +876,12 @@ func tryFallbackStream(
 				"to", qualified,
 				"provider_type", resolvedProviderType,
 			)
-			return stream, resolvedProviderType, usageModel, nil
+			return stream, resolvedProviderType, providerName, usageModel, nil
 		}
 		lastErr = err
 	}
 
-	return nil, "", "", lastErr
+	return nil, "", "", "", lastErr
 }
 
 func shouldAttemptFallback(err error) bool {

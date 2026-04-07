@@ -156,6 +156,13 @@ func (p *Provider) GetProviderType(model string) string {
 	return p.inner.GetProviderType(model)
 }
 
+func (p *Provider) GetProviderName(model string) string {
+	if named, ok := p.inner.(core.ProviderNameResolver); ok {
+		return strings.TrimSpace(named.GetProviderName(model))
+	}
+	return ""
+}
+
 func (p *Provider) ModelCount() int {
 	if counted, ok := p.inner.(interface{ ModelCount() int }); ok {
 		return counted.ModelCount()

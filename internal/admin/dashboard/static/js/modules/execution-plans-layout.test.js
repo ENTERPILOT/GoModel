@@ -240,11 +240,15 @@ test('audit log pipeline binds cache visibility and runtime highlight classes ac
     );
     assert.match(
         template,
-        /<div class="exec-pipeline" :class="\{ 'exec-pipeline-has-meta': {{\.}}\.workflowID \}">[\s\S]*<div class="exec-pipeline-meta" x-show="{{\.}}\.workflowID">[\s\S]*x-text="'id: ' \+ {{\.}}\.workflowID"/
+        /<div class="exec-pipeline" :class="\{ 'exec-pipeline-has-meta': {{\.}}\.workflowID \}">[\s\S]*<button type="button"[\s\S]*class="exec-pipeline-meta exec-pipeline-meta-copy mono"[\s\S]*x-show="{{\.}}\.workflowID"[\s\S]*x-data="executionPlanWorkflowIDChip\({{\.\}}\.workflowID\)"[\s\S]*@click\.prevent="copyWorkflowID\(\)"[\s\S]*<span class="exec-pipeline-meta-label">id:<\/span>[\s\S]*<span class="exec-pipeline-meta-placeholder">\.\.\.<\/span>[\s\S]*x-text="workflowID"/
     );
     assert.match(
         template,
         /<div class="ep-conn" :class="{{\.}}\.responseConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-endpoint" :class="{{\.}}\.responseNodeClass">/
+    );
+    assert.doesNotMatch(
+        template,
+        /<div class="exec-pipeline-meta" x-show="{{\.}}\.workflowID">/
     );
 
     const successRule = readCSSRule(css, '.ep-node-success');
@@ -262,10 +266,63 @@ test('audit log pipeline binds cache visibility and runtime highlight classes ac
     assert.match(metaRule, /position:\s*absolute/);
     assert.match(metaRule, /top:\s*12px/);
     assert.match(metaRule, /right:\s*14px/);
+    assert.match(metaRule, /font-size:\s*12px/);
+    assert.match(metaRule, /font-weight:\s*500/);
 
     const skippedAiRule = readCSSRule(css, '.ep-node-skipped');
     assert.match(skippedAiRule, /position:\s*relative/);
     assert.match(skippedAiRule, /opacity:\s*0\.28/);
+});
+
+test('workflow id pill expands on hover and turns green with a clipboard icon after copy', () => {
+    const template = readExecutionPlanTemplateSource();
+    const css = readFixture('../../css/dashboard.css');
+
+    assert.match(
+        template,
+        /class="exec-pipeline-meta exec-pipeline-meta-copy mono"[\s\S]*:class="\{ 'exec-pipeline-meta-copied': copyState\.copied, 'exec-pipeline-meta-error': copyState\.error \}"[\s\S]*:title="copyTitle\(\)"[\s\S]*:aria-label="copyAriaLabel\(\)"[\s\S]*<span class="exec-pipeline-meta-label">id:<\/span>[\s\S]*<span class="exec-pipeline-meta-placeholder">\.\.\.<\/span>[\s\S]*<span class="exec-pipeline-meta-value" x-text="workflowID"><\/span>[\s\S]*<span class="exec-pipeline-meta-icon" aria-hidden="true">[\s\S]*<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"\/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"\/><\/svg>/
+    );
+
+    const copyRule = readCSSRule(css, '.exec-pipeline-meta-copy');
+    assert.match(copyRule, /cursor:\s*pointer/);
+    assert.match(copyRule, /overflow:\s*hidden/);
+    assert.match(copyRule, /transition:\s*background-color 0\.15s/);
+
+    const placeholderRule = readCSSRule(css, '.exec-pipeline-meta-placeholder');
+    assert.match(placeholderRule, /max-width:\s*3ch/);
+    assert.match(placeholderRule, /margin-left:\s*4px/);
+    assert.match(placeholderRule, /opacity:\s*1/);
+
+    const labelRule = readCSSRule(css, '.exec-pipeline-meta-label');
+    assert.match(labelRule, /font-weight:\s*700/);
+
+    const valueRule = readCSSRule(css, '.exec-pipeline-meta-value');
+    assert.match(valueRule, /max-width:\s*0/);
+    assert.match(valueRule, /margin-left:\s*0/);
+    assert.match(valueRule, /opacity:\s*0/);
+
+    const expandedPlaceholderRule = readCSSRule(css, '.exec-pipeline-meta-copy:hover .exec-pipeline-meta-placeholder,\n.exec-pipeline-meta-copy:focus-visible .exec-pipeline-meta-placeholder,\n.exec-pipeline-meta-copied .exec-pipeline-meta-placeholder,\n.exec-pipeline-meta-error .exec-pipeline-meta-placeholder');
+    assert.match(expandedPlaceholderRule, /max-width:\s*0/);
+    assert.match(expandedPlaceholderRule, /opacity:\s*0/);
+
+    const expandedValueRule = readCSSRule(css, '.exec-pipeline-meta-copy:hover .exec-pipeline-meta-value,\n.exec-pipeline-meta-copy:focus-visible .exec-pipeline-meta-value,\n.exec-pipeline-meta-copied .exec-pipeline-meta-value,\n.exec-pipeline-meta-error .exec-pipeline-meta-value');
+    assert.match(expandedValueRule, /max-width:\s*42ch/);
+    assert.match(expandedValueRule, /margin-left:\s*4px/);
+    assert.match(expandedValueRule, /opacity:\s*1/);
+
+    const copiedRule = readCSSRule(css, '.exec-pipeline-meta-copied,\n.exec-pipeline-meta-copied:hover,\n.exec-pipeline-meta-copied:focus-visible');
+    assert.match(copiedRule, /color:\s*var\(--success\)/);
+
+    const baseIconRule = readCSSRule(css, '.exec-pipeline-meta-icon');
+    assert.match(baseIconRule, /display:\s*inline-flex/);
+    assert.match(baseIconRule, /align-items:\s*center/);
+    assert.match(baseIconRule, /height:\s*14px/);
+    assert.match(baseIconRule, /transform:\s*translateX\(4px\) translateY\(1px\) scale\(0\.84\)/);
+
+    const iconRule = readCSSRule(css, '.exec-pipeline-meta-copied .exec-pipeline-meta-icon');
+    assert.match(iconRule, /opacity:\s*1/);
+    assert.match(iconRule, /width:\s*14px/);
+    assert.match(iconRule, /transform:\s*translateY\(1px\)/);
 });
 
 test('execution pipeline main row is flattened without ep-left or ep-right wrappers', () => {
@@ -303,7 +360,7 @@ test('execution plan card actions expose plan-specific accessible names', () => 
     );
     assert.match(
         template,
-        /class="table-action-btn"[^>]*:aria-label="'Edit workflow ' \+ workflowDisplayName\(plan\)"/
+        /class="table-action-btn table-icon-btn"[\s\S]*:aria-label="'Edit workflow ' \+ workflowDisplayName\(plan\)"[\s\S]*{{template "edit-icon"}}/
     );
 });
 

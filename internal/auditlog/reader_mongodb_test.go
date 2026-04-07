@@ -59,10 +59,10 @@ func TestSanitizeLogDataNilSafe(t *testing.T) {
 
 func TestMongoLogRowToLogEntryPreservesCacheType(t *testing.T) {
 	row := mongoLogRow{
-		ID:        "log-1",
-		Model:     "gpt-4",
-		Provider:  "openai",
-		CacheType: CacheTypeSemantic,
+		ID:             "log-1",
+		RequestedModel: "gpt-4",
+		Provider:       "openai",
+		CacheType:      CacheTypeSemantic,
 	}
 
 	entry := row.toLogEntry()

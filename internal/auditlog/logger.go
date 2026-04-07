@@ -79,7 +79,7 @@ func (l *Logger) Write(entry *LogEntry) {
 		}
 		slog.Warn("audit log buffer full, dropping entry",
 			"request_id", requestID,
-			"model", entry.Model,
+			"requested_model", entry.RequestedModel,
 		)
 	}
 }

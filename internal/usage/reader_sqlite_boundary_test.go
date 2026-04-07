@@ -492,6 +492,73 @@ func TestSQLiteReaderGetUsageLog_OrdersMixedTimestampFormatsByAbsoluteTime(t *te
 	}
 }
 
+func TestSQLiteReaderGetUsageByModel_CollapsesBlankProviderNameIntoProviderGroup(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite database: %v", err)
+	}
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create sqlite store: %v", err)
+	}
+
+	ctx := context.Background()
+	err = store.WriteBatch(ctx, []*UsageEntry{
+		{
+			ID:           "usage-1",
+			RequestID:    "req-1",
+			ProviderID:   "provider-1",
+			Timestamp:    time.Date(2026, 4, 7, 10, 0, 0, 0, time.UTC),
+			Model:        "gpt-5",
+			Provider:     "openai",
+			ProviderName: "",
+			Endpoint:     "/v1/chat/completions",
+			InputTokens:  10,
+			OutputTokens: 20,
+		},
+		{
+			ID:           "usage-2",
+			RequestID:    "req-2",
+			ProviderID:   "provider-2",
+			Timestamp:    time.Date(2026, 4, 7, 10, 1, 0, 0, time.UTC),
+			Model:        "gpt-5",
+			Provider:     "openai",
+			ProviderName: " openai ",
+			Endpoint:     "/v1/chat/completions",
+			InputTokens:  30,
+			OutputTokens: 40,
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to seed usage entries: %v", err)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create sqlite reader: %v", err)
+	}
+
+	got, err := reader.GetUsageByModel(ctx, UsageQueryParams{})
+	if err != nil {
+		t.Fatalf("GetUsageByModel returned error: %v", err)
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 grouped usage row, got %d: %#v", len(got), got)
+	}
+	if got[0].ProviderName != "openai" {
+		t.Fatalf("expected provider_name %q, got %q", "openai", got[0].ProviderName)
+	}
+	if got[0].InputTokens != 40 {
+		t.Fatalf("expected 40 input tokens, got %d", got[0].InputTokens)
+	}
+	if got[0].OutputTokens != 60 {
+		t.Fatalf("expected 60 output tokens, got %d", got[0].OutputTokens)
+	}
+}
+
 func TestSQLiteStoreCleanup_KeepsNewerLegacyOffsetRows(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {

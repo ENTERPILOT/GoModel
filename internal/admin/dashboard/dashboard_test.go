@@ -3,6 +3,7 @@ package dashboard
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -58,6 +59,9 @@ func TestIndex_ReturnsHTML(t *testing.T) {
 	}
 	if strings.Contains(body, `x-init="init()"`) {
 		t.Errorf("expected dashboard HTML not to call init() explicitly")
+	}
+	if !regexp.MustCompile(`/admin/static/css/dashboard\.css\?v=[0-9a-f]+`).MatchString(rec.Body.String()) {
+		t.Errorf("expected versioned dashboard CSS link in page HTML")
 	}
 }
 

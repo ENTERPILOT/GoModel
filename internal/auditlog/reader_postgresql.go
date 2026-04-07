@@ -32,15 +32,15 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 		return nil, err
 	}
 
-	if params.Model != "" {
-		conditions = append(conditions, fmt.Sprintf("model ILIKE $%d ESCAPE '\\'", argIdx))
-		args = append(args, "%"+escapeLikeWildcards(params.Model)+"%")
+	if params.RequestedModel != "" {
+		conditions = append(conditions, fmt.Sprintf("requested_model ILIKE $%d ESCAPE '\\'", argIdx))
+		args = append(args, "%"+escapeLikeWildcards(params.RequestedModel)+"%")
 		argIdx++
 	}
 	if params.Provider != "" {
-		conditions = append(conditions, fmt.Sprintf("provider ILIKE $%d ESCAPE '\\'", argIdx))
-		args = append(args, "%"+escapeLikeWildcards(params.Provider)+"%")
-		argIdx++
+		conditions = append(conditions, fmt.Sprintf("(provider ILIKE $%d ESCAPE '\\' OR provider_name ILIKE $%d ESCAPE '\\')", argIdx, argIdx+1))
+		args = append(args, "%"+escapeLikeWildcards(params.Provider)+"%", "%"+escapeLikeWildcards(params.Provider)+"%")
+		argIdx += 2
 	}
 	if params.Method != "" {
 		conditions = append(conditions, fmt.Sprintf("method = $%d", argIdx))
@@ -78,7 +78,7 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 	}
 	if params.Search != "" {
 		s := "%" + escapeLikeWildcards(params.Search) + "%"
-		conditions = append(conditions, fmt.Sprintf("(request_id ILIKE $%d ESCAPE '\\' OR auth_key_id ILIKE $%d ESCAPE '\\' OR model ILIKE $%d ESCAPE '\\' OR provider ILIKE $%d ESCAPE '\\' OR method ILIKE $%d ESCAPE '\\' OR path ILIKE $%d ESCAPE '\\' OR error_type ILIKE $%d ESCAPE '\\')", argIdx, argIdx, argIdx, argIdx, argIdx, argIdx, argIdx))
+		conditions = append(conditions, fmt.Sprintf("(request_id ILIKE $%d ESCAPE '\\' OR auth_key_id ILIKE $%d ESCAPE '\\' OR requested_model ILIKE $%d ESCAPE '\\' OR provider ILIKE $%d ESCAPE '\\' OR provider_name ILIKE $%d ESCAPE '\\' OR method ILIKE $%d ESCAPE '\\' OR path ILIKE $%d ESCAPE '\\' OR user_path ILIKE $%d ESCAPE '\\' OR error_type ILIKE $%d ESCAPE '\\')", argIdx, argIdx, argIdx, argIdx, argIdx, argIdx, argIdx, argIdx, argIdx))
 		args = append(args, s)
 		argIdx++
 	}
@@ -91,7 +91,7 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 		return nil, fmt.Errorf("failed to count audit log entries: %w", err)
 	}
 
-	dataQuery := fmt.Sprintf(`SELECT id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	dataQuery := fmt.Sprintf(`SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, execution_plan_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
 		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs%s ORDER BY timestamp DESC LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
 	dataArgs := append(append([]any(nil), args...), limit, offset)
@@ -106,13 +106,14 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 	for rows.Next() {
 		var e LogEntry
 		var dataJSON *string
+		var providerName *string
 		var executionPlanVersionID *string
 		var cacheType *string
 		var authKeyID *string
 		var authMethod *string
 		var userPath *string
 
-		if err := rows.Scan(&e.ID, &e.Timestamp, &e.DurationNs, &e.Model, &e.ResolvedModel, &e.Provider, &e.AliasUsed, &executionPlanVersionID, &cacheType, &e.StatusCode,
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &e.AliasUsed, &executionPlanVersionID, &cacheType, &e.StatusCode,
 			&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &e.Stream, &e.ErrorType, &dataJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 		}
@@ -127,6 +128,11 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 		}
 		if cacheType != nil {
 			e.CacheType = normalizeCacheType(*cacheType)
+		}
+		if providerName != nil {
+			e.ProviderName = displayAuditProviderName(*providerName, e.Provider)
+		} else {
+			e.ProviderName = displayAuditProviderName("", e.Provider)
 		}
 		if userPath != nil {
 			e.UserPath = *userPath
@@ -158,7 +164,7 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 
 // GetLogByID returns a single audit log entry by ID.
 func (r *PostgreSQLReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error) {
-	query := `SELECT id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	query := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, execution_plan_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
 		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs WHERE id::text = $1 LIMIT 1`
 
@@ -200,7 +206,7 @@ func pgDateRangeConditions(params QueryParams, argIdx int) (conditions []string,
 }
 
 func (r *PostgreSQLReader) findByResponseID(ctx context.Context, responseID string) (*LogEntry, error) {
-	query := `SELECT id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	query := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, execution_plan_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
 		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs
 		WHERE data->'response_body'->>'id' = $1
@@ -219,7 +225,7 @@ func (r *PostgreSQLReader) findByResponseID(ctx context.Context, responseID stri
 }
 
 func (r *PostgreSQLReader) findByPreviousResponseID(ctx context.Context, previousResponseID string) (*LogEntry, error) {
-	query := `SELECT id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	query := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, execution_plan_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
 		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs
 		WHERE data->'request_body'->>'previous_response_id' = $1
@@ -242,13 +248,14 @@ func scanPostgreSQLLogEntry(rows interface {
 }) (*LogEntry, error) {
 	var e LogEntry
 	var dataJSON *string
+	var providerName *string
 	var executionPlanVersionID *string
 	var cacheType *string
 	var authKeyID *string
 	var authMethod *string
 	var userPath *string
 
-	if err := rows.Scan(&e.ID, &e.Timestamp, &e.DurationNs, &e.Model, &e.ResolvedModel, &e.Provider, &e.AliasUsed, &executionPlanVersionID, &cacheType, &e.StatusCode,
+	if err := rows.Scan(&e.ID, &e.Timestamp, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &e.AliasUsed, &executionPlanVersionID, &cacheType, &e.StatusCode,
 		&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &e.Stream, &e.ErrorType, &dataJSON); err != nil {
 		return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 	}
@@ -263,6 +270,11 @@ func scanPostgreSQLLogEntry(rows interface {
 	}
 	if cacheType != nil {
 		e.CacheType = normalizeCacheType(*cacheType)
+	}
+	if providerName != nil {
+		e.ProviderName = displayAuditProviderName(*providerName, e.Provider)
+	} else {
+		e.ProviderName = displayAuditProviderName("", e.Provider)
 	}
 	if userPath != nil {
 		e.UserPath = *userPath

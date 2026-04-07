@@ -14,13 +14,13 @@ import (
 )
 
 const (
-	auditLogInsertColumnCount     = 20
+	auditLogInsertColumnCount     = 21
 	postgresMaxBindParameters     = 65535
 	auditLogInsertMaxRowsPerQuery = postgresMaxBindParameters / auditLogInsertColumnCount
 )
 
 const auditLogInsertPrefix = `
-		INSERT INTO audit_logs (id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id, cache_type, status_code,
+		INSERT INTO audit_logs (id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, execution_plan_version_id, cache_type, status_code,
 			request_id, auth_key_id, auth_method, client_ip, method, path, user_path, stream, error_type, data)
 		VALUES `
 
@@ -56,9 +56,10 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 			id UUID PRIMARY KEY,
 			timestamp TIMESTAMPTZ NOT NULL,
 			duration_ns BIGINT DEFAULT 0,
-			model TEXT,
+			requested_model TEXT,
 			resolved_model TEXT,
 			provider TEXT,
+			provider_name TEXT,
 			alias_used BOOLEAN DEFAULT FALSE,
 			execution_plan_version_id TEXT,
 			cache_type TEXT,
@@ -79,8 +80,14 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		return nil, fmt.Errorf("failed to create audit_logs table: %w", err)
 	}
 
+	if err := renamePostgreSQLAuditColumn(ctx, pool, "audit_logs", "model", "requested_model"); err != nil {
+		return nil, fmt.Errorf("failed to rename audit_logs.model to requested_model: %w", err)
+	}
+
 	migrations := []string{
+		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS requested_model TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resolved_model TEXT",
+		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS provider_name TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS alias_used BOOLEAN DEFAULT FALSE",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS execution_plan_version_id TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS cache_type TEXT",
@@ -97,9 +104,11 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 	// Create indexes for common queries
 	indexes := []string{
 		"CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)",
-		"CREATE INDEX IF NOT EXISTS idx_audit_model ON audit_logs(model)",
+		"DROP INDEX IF EXISTS idx_audit_model",
+		"CREATE INDEX IF NOT EXISTS idx_audit_requested_model ON audit_logs(requested_model)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status_code)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_provider ON audit_logs(provider)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_provider_name ON audit_logs(provider_name)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON audit_logs(auth_key_id)",
@@ -222,9 +231,10 @@ func buildAuditLogInsert(entries []*LogEntry) (string, []any) {
 			entry.ID,
 			entry.Timestamp,
 			entry.DurationNs,
-			entry.Model,
+			entry.RequestedModel,
 			entry.ResolvedModel,
 			entry.Provider,
+			entry.ProviderName,
 			entry.AliasUsed,
 			entry.ExecutionPlanVersionID,
 			cacheTypeValue,
@@ -244,6 +254,33 @@ func buildAuditLogInsert(entries []*LogEntry) (string, []any) {
 
 	builder.WriteString(auditLogInsertSuffix)
 	return builder.String(), args
+}
+
+func renamePostgreSQLAuditColumn(ctx context.Context, pool *pgxpool.Pool, tableName, from, to string) error {
+	fromExists, err := postgresqlColumnExists(ctx, pool, tableName, from)
+	if err != nil || !fromExists {
+		return err
+	}
+	toExists, err := postgresqlColumnExists(ctx, pool, tableName, to)
+	if err != nil || toExists {
+		return err
+	}
+	_, err = pool.Exec(ctx, fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s", tableName, from, to))
+	return err
+}
+
+func postgresqlColumnExists(ctx context.Context, pool *pgxpool.Pool, tableName, columnName string) (bool, error) {
+	var exists bool
+	err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = current_schema()
+			  AND table_name = $1
+			  AND column_name = $2
+		)
+	`, tableName, columnName).Scan(&exists)
+	return exists, err
 }
 
 // Flush is a no-op for PostgreSQL as writes are synchronous.

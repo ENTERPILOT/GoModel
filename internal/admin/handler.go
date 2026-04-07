@@ -377,9 +377,23 @@ func (h *Handler) DailyUsage(c *echo.Context) error {
 // @Failure      401  {object}  core.GatewayError
 // @Router       /admin/api/v1/usage/models [get]
 func (h *Handler) UsageByModel(c *echo.Context) error {
-	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.ModelUsage, error) {
-		return h.usageReader.GetUsageByModel(ctx, params)
-	})
+	if h.usageReader == nil {
+		return c.JSON(http.StatusOK, []usage.ModelUsage{})
+	}
+
+	params, err := parseUsageParams(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	values, err := h.usageReader.GetUsageByModel(c.Request().Context(), params)
+	if err != nil {
+		return handleError(c, err)
+	}
+	if values == nil {
+		values = []usage.ModelUsage{}
+	}
+	return c.JSON(http.StatusOK, values)
 }
 
 // UsageLog handles GET /admin/api/v1/usage/log
@@ -392,7 +406,7 @@ func (h *Handler) UsageByModel(c *echo.Context) error {
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
 // @Param        model       query     string  false  "Filter by model name"
-// @Param        provider    query     string  false  "Filter by provider"
+// @Param        provider    query     string  false  "Filter by provider name or provider type"
 // @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Param        search      query     string  false  "Search across model, provider, request_id, provider_id"
@@ -500,15 +514,15 @@ func (h *Handler) CacheOverview(c *echo.Context) error {
 // @Param        days         query     int     false  "Number of days (default 30)"
 // @Param        start_date   query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date     query     string  false  "End date (YYYY-MM-DD)"
-// @Param        model        query     string  false  "Filter by model name"
-// @Param        provider     query     string  false  "Filter by provider"
+// @Param        requested_model  query     string  false  "Filter by requested model selector"
+// @Param        provider     query     string  false  "Filter by provider name or provider type"
 // @Param        method       query     string  false  "Filter by HTTP method"
 // @Param        path         query     string  false  "Filter by request path"
 // @Param        user_path    query     string  false  "Filter by tracked user path subtree"
 // @Param        error_type   query     string  false  "Filter by error type"
 // @Param        status_code  query     int     false  "Filter by status code"
 // @Param        stream       query     bool    false  "Filter by stream mode (true/false)"
-// @Param        search       query     string  false  "Search across request_id/model/provider/method/path/error_type"
+// @Param        search       query     string  false  "Search across request_id/requested_model/provider/method/path/error_type"
 // @Param        limit        query     int     false  "Page size (default 25, max 100)"
 // @Param        offset       query     int     false  "Offset for pagination"
 // @Success      200  {object}  auditlog.LogListResult
@@ -531,18 +545,23 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
+	requestedModel := c.QueryParam("requested_model")
+	if requestedModel == "" {
+		requestedModel = c.QueryParam("model")
+	}
+
 	params := auditlog.LogQueryParams{
 		QueryParams: auditlog.QueryParams{
 			StartDate: dateRange.StartDate,
 			EndDate:   dateRange.EndDate,
 		},
-		Model:     c.QueryParam("model"),
-		Provider:  c.QueryParam("provider"),
-		Method:    strings.ToUpper(c.QueryParam("method")),
-		Path:      c.QueryParam("path"),
-		UserPath:  userPath,
-		ErrorType: c.QueryParam("error_type"),
-		Search:    c.QueryParam("search"),
+		RequestedModel: requestedModel,
+		Provider:       c.QueryParam("provider"),
+		Method:         strings.ToUpper(c.QueryParam("method")),
+		Path:           c.QueryParam("path"),
+		UserPath:       userPath,
+		ErrorType:      c.QueryParam("error_type"),
+		Search:         c.QueryParam("search"),
 	}
 
 	if sc := c.QueryParam("status_code"); sc != "" {

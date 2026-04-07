@@ -35,17 +35,17 @@ func TestSQLiteStore_WriteBatch_NullDataPreservation(t *testing.T) {
 	// Create entries - one with nil Data, one with Data
 	entries := []*LogEntry{
 		{
-			ID:        "entry-nil-data",
-			Timestamp: time.Now(),
-			Model:     "gpt-4",
-			Provider:  "openai",
-			Data:      nil, // This should become SQL NULL
+			ID:             "entry-nil-data",
+			Timestamp:      time.Now(),
+			RequestedModel: "gpt-4",
+			Provider:       "openai",
+			Data:           nil, // This should become SQL NULL
 		},
 		{
-			ID:        "entry-with-data",
-			Timestamp: time.Now(),
-			Model:     "gpt-4",
-			Provider:  "openai",
+			ID:             "entry-with-data",
+			Timestamp:      time.Now(),
+			RequestedModel: "gpt-4",
+			Provider:       "openai",
 			Data: &LogData{
 				UserAgent: "test-agent",
 			},
@@ -104,11 +104,11 @@ func TestSQLiteStore_WriteBatch_Chunking(t *testing.T) {
 	entries := make([]*LogEntry, numEntries)
 	for i := range numEntries {
 		entries[i] = &LogEntry{
-			ID:         fmt.Sprintf("entry-%03d", i),
-			Timestamp:  time.Now(),
-			Model:      "gpt-4",
-			Provider:   "openai",
-			StatusCode: 200,
+			ID:             fmt.Sprintf("entry-%03d", i),
+			Timestamp:      time.Now(),
+			RequestedModel: "gpt-4",
+			Provider:       "openai",
+			StatusCode:     200,
 		}
 	}
 
@@ -183,9 +183,9 @@ func TestSQLiteStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 	entries := make([]*LogEntry, numEntries)
 	for i := range numEntries {
 		entries[i] = &LogEntry{
-			ID:        fmt.Sprintf("exact-%03d", i),
-			Timestamp: time.Now(),
-			Model:     "gpt-4",
+			ID:             fmt.Sprintf("exact-%03d", i),
+			Timestamp:      time.Now(),
+			RequestedModel: "gpt-4",
 		}
 	}
 
@@ -205,9 +205,9 @@ func TestSQLiteStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 	entries = make([]*LogEntry, maxEntriesPerBatch+1)
 	for i := 0; i <= maxEntriesPerBatch; i++ {
 		entries[i] = &LogEntry{
-			ID:        fmt.Sprintf("boundary-%03d", i),
-			Timestamp: time.Now(),
-			Model:     "gpt-4",
+			ID:             fmt.Sprintf("boundary-%03d", i),
+			Timestamp:      time.Now(),
+			RequestedModel: "gpt-4",
 		}
 	}
 
@@ -236,13 +236,13 @@ func TestSQLiteStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 
 	ctx := context.Background()
 	entry := &LogEntry{
-		ID:            "alias-entry",
-		Timestamp:     time.Now(),
-		Model:         "anthropic/claude-opus-4-6",
-		ResolvedModel: "openai/gpt-5-nano",
-		Provider:      "openai",
-		AliasUsed:     true,
-		StatusCode:    200,
+		ID:             "alias-entry",
+		Timestamp:      time.Now(),
+		RequestedModel: "anthropic/claude-opus-4-6",
+		ResolvedModel:  "openai/gpt-5-nano",
+		Provider:       "openai",
+		AliasUsed:      true,
+		StatusCode:     200,
 	}
 
 	if err := store.WriteBatch(ctx, []*LogEntry{entry}); err != nil {
@@ -262,8 +262,8 @@ func TestSQLiteStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 		t.Fatal("expected log entry, got nil")
 		return
 	}
-	if logEntry.Model != entry.Model {
-		t.Fatalf("Model = %q, want %q", logEntry.Model, entry.Model)
+	if logEntry.RequestedModel != entry.RequestedModel {
+		t.Fatalf("RequestedModel = %q, want %q", logEntry.RequestedModel, entry.RequestedModel)
 	}
 	if logEntry.ResolvedModel != entry.ResolvedModel {
 		t.Fatalf("ResolvedModel = %q, want %q", logEntry.ResolvedModel, entry.ResolvedModel)
@@ -292,7 +292,7 @@ func TestSQLiteReader_AllowsNullExecutionPlanVersionID(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := db.Exec(`
 		INSERT INTO audit_logs (
-			id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id,
+			id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, execution_plan_version_id,
 			status_code, request_id, client_ip, method, path, stream, error_type, data
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
@@ -358,7 +358,7 @@ func TestSQLiteReader_GetLogsFiltersByUserPathSubtree(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = db.Exec(`
 		INSERT INTO audit_logs (
-			id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id,
+			id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, execution_plan_version_id,
 			status_code, request_id, client_ip, method, path, user_path, stream, error_type, data
 		) VALUES
 			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
@@ -436,7 +436,7 @@ func TestSQLiteReader_GetLogsRootUserPathIncludesLegacyNullRows(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = db.Exec(`
 		INSERT INTO audit_logs (
-			id, timestamp, duration_ns, model, resolved_model, provider, alias_used, execution_plan_version_id,
+			id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, execution_plan_version_id,
 			status_code, request_id, client_ip, method, path, user_path, stream, error_type, data
 		) VALUES
 			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
@@ -509,17 +509,17 @@ func TestSQLiteStoreAndReader_PreserveCacheType(t *testing.T) {
 	now := time.Now()
 	if err := store.WriteBatch(ctx, []*LogEntry{
 		{
-			ID:        "cache-exact",
-			Timestamp: now,
-			Model:     "gpt-4",
-			Provider:  "openai",
-			CacheType: CacheTypeExact,
+			ID:             "cache-exact",
+			Timestamp:      now,
+			RequestedModel: "gpt-4",
+			Provider:       "openai",
+			CacheType:      CacheTypeExact,
 		},
 		{
-			ID:        "cache-none",
-			Timestamp: now.Add(time.Second),
-			Model:     "gpt-4",
-			Provider:  "openai",
+			ID:             "cache-none",
+			Timestamp:      now.Add(time.Second),
+			RequestedModel: "gpt-4",
+			Provider:       "openai",
 		},
 	}); err != nil {
 		t.Fatalf("WriteBatch failed: %v", err)

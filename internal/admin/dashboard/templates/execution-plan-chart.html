@@ -1,8 +1,20 @@
 {{define "execution-plan-chart"}}
 <div class="exec-pipeline" :class="{ 'exec-pipeline-has-meta': {{.}}.workflowID }">
-    <div class="exec-pipeline-meta" x-show="{{.}}.workflowID">
-        <span class="exec-pipeline-meta-chip mono" x-show="{{.}}.workflowID" x-text="'id: ' + {{.}}.workflowID"></span>
-    </div>
+    <button type="button"
+        class="exec-pipeline-meta exec-pipeline-meta-copy mono"
+        x-show="{{.}}.workflowID"
+        x-data="executionPlanWorkflowIDChip({{.}}.workflowID)"
+        :class="{ 'exec-pipeline-meta-copied': copyState.copied, 'exec-pipeline-meta-error': copyState.error }"
+        :title="copyTitle()"
+        :aria-label="copyAriaLabel()"
+        @click.prevent="copyWorkflowID()">
+        <span class="exec-pipeline-meta-label">id:</span>
+        <span class="exec-pipeline-meta-placeholder">...</span>
+        <span class="exec-pipeline-meta-value" x-text="workflowID"></span>
+        <span class="exec-pipeline-meta-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </span>
+    </button>
     <div class="exec-pipeline-row">
         <div class="ep-node ep-node-endpoint">
             <div class="ep-node-icon ep-node-icon-endpoint">

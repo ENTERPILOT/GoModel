@@ -38,7 +38,7 @@ func TestTranslatedInferenceService_LogUsageSkipsWhenExecutionPlanDisablesUsage(
 				Guardrails: true,
 			},
 		},
-	}, "gpt-5-nano", "openai", func(*core.ModelPricing) *usage.UsageEntry {
+	}, "gpt-5-nano", "openai", "primary-openai", func(*core.ModelPricing) *usage.UsageEntry {
 		return &usage.UsageEntry{ID: "usage-1"}
 	})
 
@@ -58,6 +58,39 @@ func TestTranslatedInferenceService_ProviderTypeForSelectorPrefersExplicitProvid
 	}
 }
 
+func TestTranslatedInferenceService_ProviderTypeForSelectorCanonicalizesProviderNameSelectors(t *testing.T) {
+	service := &translatedInferenceService{
+		provider: &mockProvider{
+			supportedModels: []string{"gpt-4o"},
+			providerTypes: map[string]string{
+				"openai_test/gpt-4o": "openai",
+			},
+			providerNames: map[string]string{
+				"openai_test/gpt-4o": "openai_test",
+			},
+		},
+	}
+
+	got := service.providerTypeForSelector(core.ModelSelector{Provider: "openai_test", Model: "gpt-4o"}, "anthropic")
+	if got != "openai" {
+		t.Fatalf("providerTypeForSelector() = %q, want %q", got, "openai")
+	}
+}
+
+func TestQualifyModelWithProvider_PrefixesSlashModelIDs(t *testing.T) {
+	got := qualifyModelWithProvider("openai/gpt-4o-mini", "openrouter")
+	if got != "openrouter/openai/gpt-4o-mini" {
+		t.Fatalf("qualifyModelWithProvider() = %q, want %q", got, "openrouter/openai/gpt-4o-mini")
+	}
+}
+
+func TestQualifyModelWithProvider_KeepsAlreadyQualifiedModelIDs(t *testing.T) {
+	got := qualifyModelWithProvider("openrouter/openai/gpt-4o-mini", "openrouter")
+	if got != "openrouter/openai/gpt-4o-mini" {
+		t.Fatalf("qualifyModelWithProvider() = %q, want unchanged model", got)
+	}
+}
+
 func TestTranslatedInferenceService_LogUsageAssignsUserPathFromContext(t *testing.T) {
 	logger := &usageCaptureLogger{
 		config: usage.Config{Enabled: true},
@@ -70,7 +103,7 @@ func TestTranslatedInferenceService_LogUsageAssignsUserPathFromContext(t *testin
 		UserPath: "/team/alpha",
 	})
 
-	service.logUsage(ctx, nil, "gpt-5-nano", "openai", func(*core.ModelPricing) *usage.UsageEntry {
+	service.logUsage(ctx, nil, "gpt-5-nano", "openai", "primary-openai", func(*core.ModelPricing) *usage.UsageEntry {
 		return &usage.UsageEntry{ID: "usage-1"}
 	})
 
@@ -79,6 +112,9 @@ func TestTranslatedInferenceService_LogUsageAssignsUserPathFromContext(t *testin
 	}
 	if got := logger.entries[0].UserPath; got != "/team/alpha" {
 		t.Fatalf("UserPath = %q, want /team/alpha", got)
+	}
+	if got := logger.entries[0].ProviderName; got != "primary-openai" {
+		t.Fatalf("ProviderName = %q, want primary-openai", got)
 	}
 }
 

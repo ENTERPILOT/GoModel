@@ -197,8 +197,8 @@ func TestInternalChatCompletionExecutor_DoesNotReuseParentExecutionPlanResolutio
 		t.Fatalf("audit entries = %d, want 1", len(logger.entries))
 	}
 	entry := logger.entries[0]
-	if entry.Model != "openai/gpt-4o-mini" {
-		t.Fatalf("audit requested model = %q, want openai/gpt-4o-mini", entry.Model)
+	if entry.RequestedModel != "openai/gpt-4o-mini" {
+		t.Fatalf("audit requested model = %q, want openai/gpt-4o-mini", entry.RequestedModel)
 	}
 	if entry.ResolvedModel != "openai/gpt-4o-mini" {
 		t.Fatalf("audit resolved model = %q, want openai/gpt-4o-mini", entry.ResolvedModel)

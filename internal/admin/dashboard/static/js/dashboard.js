@@ -83,11 +83,7 @@ function dashboard() {
         // Audit page state
         auditLog: { entries: [], total: 0, limit: 25, offset: 0 },
         auditSearch: '',
-        auditModel: '',
-        auditProvider: '',
         auditMethod: '',
-        auditPath: '',
-        auditUserPath: '',
         auditStatusCode: '',
         auditStream: '',
         auditFetchToken: 0,
@@ -407,11 +403,41 @@ function dashboard() {
             const f = this.modelFilter.toLowerCase();
             return this.models.filter((m) =>
                 (m.model?.id ?? '').toLowerCase().includes(f) ||
+                (m.provider_name ?? '').toLowerCase().includes(f) ||
                 (m.provider_type ?? '').toLowerCase().includes(f) ||
+                (m.selector ?? '').toLowerCase().includes(f) ||
                 (m.model?.owned_by ?? '').toLowerCase().includes(f) ||
                 (m.model?.metadata?.modes ?? []).join(',').toLowerCase().includes(f) ||
                 (m.model?.metadata?.categories ?? []).join(',').toLowerCase().includes(f)
             );
+        },
+
+        providerTypeValue(value) {
+            return String(value && value.provider || '').trim();
+        },
+
+        providerDisplayValue(value) {
+            const providerName = String(value && value.provider_name || '').trim();
+            if (providerName) return providerName;
+            return this.providerTypeValue(value);
+        },
+
+        qualifiedModelDisplay(value) {
+            const model = String(value && value.model || '').trim();
+            if (!model) return '-';
+            if (model.includes('/')) return model;
+            const provider = this.providerDisplayValue(value);
+            if (!provider) return model;
+            return provider + '/' + model;
+        },
+
+        qualifiedResolvedModelDisplay(value) {
+            const model = String(value && value.resolved_model || '').trim();
+            if (!model) return '-';
+            if (model.includes('/')) return model;
+            const provider = this.providerDisplayValue(value);
+            if (!provider) return model;
+            return provider + '/' + model;
         },
 
         formatNumber(n) {
