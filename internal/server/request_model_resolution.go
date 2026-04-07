@@ -31,22 +31,31 @@ func effectiveRequestModelResolver(provider core.RoutableProvider, resolver Requ
 	return nil
 }
 
+func resolvedProviderName(provider core.RoutableProvider, selector core.ModelSelector, fallback string) string {
+	fallback = strings.TrimSpace(fallback)
+	if provider == nil {
+		return fallback
+	}
+	if named, ok := provider.(core.ProviderNameResolver); ok {
+		if providerName := strings.TrimSpace(named.GetProviderName(selector.QualifiedModel())); providerName != "" {
+			return providerName
+		}
+	}
+	return fallback
+}
+
 func resolveRequestModel(provider core.RoutableProvider, resolver RequestModelResolver, requested core.RequestedModelSelector) (*core.RequestModelResolution, error) {
 	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
 
-	var (
-		resolvedSelector core.ModelSelector
-		aliasApplied     bool
-		err              error
-	)
-
-	if effectiveResolver := effectiveRequestModelResolver(provider, resolver); effectiveResolver != nil {
-		resolvedSelector, aliasApplied, err = effectiveResolver.ResolveModel(requested)
-	} else {
-		resolvedSelector, err = requested.Normalize()
-	}
+	resolvedSelector, aliasApplied, err := resolveExecutionSelector(provider, resolver, requested)
 	if err != nil {
 		return nil, core.NewInvalidRequestError(err.Error(), err)
+	}
+	if resolvedSelector == (core.ModelSelector{}) {
+		resolvedSelector, err = requested.Normalize()
+		if err != nil {
+			return nil, core.NewInvalidRequestError(err.Error(), err)
+		}
 	}
 
 	resolvedModel := resolvedSelector.QualifiedModel()
@@ -61,8 +70,47 @@ func resolveRequestModel(provider core.RoutableProvider, resolver RequestModelRe
 		Requested:        requested,
 		ResolvedSelector: resolvedSelector,
 		ProviderType:     strings.TrimSpace(provider.GetProviderType(resolvedModel)),
+		ProviderName:     resolvedProviderName(provider, resolvedSelector, ""),
 		AliasApplied:     aliasApplied,
 	}, nil
+}
+
+func resolveExecutionSelector(
+	provider core.RoutableProvider,
+	resolver RequestModelResolver,
+	requested core.RequestedModelSelector,
+) (core.ModelSelector, bool, error) {
+	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
+
+	var (
+		resolvedSelector core.ModelSelector
+		aliasApplied     bool
+		err              error
+	)
+
+	if resolver != nil {
+		resolvedSelector, aliasApplied, err = resolver.ResolveModel(requested)
+		if err != nil {
+			return core.ModelSelector{}, false, err
+		}
+		requested = core.NewRequestedModelSelector(resolvedSelector.QualifiedModel(), "")
+	}
+
+	if providerResolver, ok := provider.(RequestModelResolver); ok {
+		var providerChanged bool
+		resolvedSelector, providerChanged, err = providerResolver.ResolveModel(requested)
+		if err != nil {
+			return core.ModelSelector{}, false, err
+		}
+		return resolvedSelector, aliasApplied || providerChanged, nil
+	}
+
+	if resolvedSelector != (core.ModelSelector{}) {
+		return resolvedSelector, aliasApplied, nil
+	}
+
+	resolvedSelector, err = requested.Normalize()
+	return resolvedSelector, aliasApplied, err
 }
 
 func storeRequestModelResolution(c *echo.Context, resolution *core.RequestModelResolution) {

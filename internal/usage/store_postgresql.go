@@ -14,13 +14,13 @@ import (
 )
 
 const (
-	usageInsertColumnCount     = 17
+	usageInsertColumnCount     = 18
 	postgresMaxBindParameters  = 65535
 	usageInsertMaxRowsPerQuery = postgresMaxBindParameters / usageInsertColumnCount
 )
 
 const usageInsertPrefix = `
-		INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider,
+		INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name,
 			endpoint, user_path, cache_type, input_tokens, output_tokens, total_tokens, raw_data,
 			input_cost, output_cost, total_cost, costs_calculation_caveat)
 		VALUES `
@@ -60,6 +60,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 			timestamp TIMESTAMPTZ NOT NULL,
 			model TEXT NOT NULL,
 			provider TEXT NOT NULL,
+			provider_name TEXT,
 			endpoint TEXT NOT NULL,
 			user_path TEXT,
 			cache_type TEXT,
@@ -79,6 +80,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS output_cost DOUBLE PRECISION",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS total_cost DOUBLE PRECISION",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS costs_calculation_caveat TEXT DEFAULT ''",
+		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS provider_name TEXT",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS user_path TEXT",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS cache_type TEXT",
 	}
@@ -95,6 +97,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"CREATE INDEX IF NOT EXISTS idx_usage_provider_id ON usage(provider_id)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_model ON usage(model)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage(provider)",
+		"CREATE INDEX IF NOT EXISTS idx_usage_provider_name ON usage(provider_name)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_user_path ON usage(user_path)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_cache_type ON usage(cache_type)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_raw_data_gin ON usage USING GIN (raw_data)",
@@ -206,6 +209,7 @@ func buildUsageInsert(entries []*UsageEntry) (string, []any) {
 			entry.Timestamp,
 			entry.Model,
 			entry.Provider,
+			entry.ProviderName,
 			entry.Endpoint,
 			entry.UserPath,
 			cacheTypeValue(entry.CacheType),

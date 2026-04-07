@@ -35,8 +35,16 @@ type providerTypeLister interface {
 	ProviderTypes() []string
 }
 
+type providerNameLister interface {
+	ProviderNames() []string
+}
+
 type publicModelLister interface {
 	ListPublicModels() []core.Model
+}
+
+type modelWithProviderLister interface {
+	ListModelsWithProvider() []ModelWithProvider
 }
 
 func registryUnavailableError(err error) error {
@@ -64,14 +72,139 @@ func (r *Router) checkReady() error {
 	return nil
 }
 
+// ResolveModel canonicalizes a requested selector into the concrete
+// provider-name-qualified selector used for execution.
+//
+// Resolution precedence is:
+//  1. configured provider name + model ID
+//  2. provider type + model ID
+//  3. raw slash-shaped model ID (only when provider was not explicit)
+//  4. default normalization fallback
+func (r *Router) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	if err := r.checkReady(); err != nil {
+		return core.ModelSelector{}, false, registryUnavailableError(err)
+	}
+
+	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
+	selector, err := requested.Normalize()
+	if err != nil {
+		return core.ModelSelector{}, false, core.NewInvalidRequestError(err.Error(), err)
+	}
+
+	resolved := selector
+	if selector.Provider == "" {
+		if concrete, ok := r.resolveUnqualifiedSelector(selector); ok {
+			resolved = concrete
+		}
+	} else if concrete, ok := r.resolveQualifiedSelector(requested, selector); ok {
+		resolved = concrete
+	}
+
+	return resolved, resolved.QualifiedModel() != selector.QualifiedModel(), nil
+}
+
+func (r *Router) resolveUnqualifiedSelector(selector core.ModelSelector) (core.ModelSelector, bool) {
+	if selector.Provider != "" || strings.TrimSpace(selector.Model) == "" {
+		return core.ModelSelector{}, false
+	}
+
+	named, ok := r.lookup.(core.ProviderNameResolver)
+	if !ok {
+		return core.ModelSelector{}, false
+	}
+	providerName := strings.TrimSpace(named.GetProviderName(selector.Model))
+	if providerName == "" {
+		return core.ModelSelector{}, false
+	}
+	return core.ModelSelector{Provider: providerName, Model: selector.Model}, true
+}
+
+func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector, selector core.ModelSelector) (core.ModelSelector, bool) {
+	models, ok := r.lookup.(modelWithProviderLister)
+	if !ok {
+		return core.ModelSelector{}, false
+	}
+
+	providerSegment := strings.TrimSpace(selector.Provider)
+	modelID := strings.TrimSpace(selector.Model)
+	if providerSegment == "" || modelID == "" {
+		return core.ModelSelector{}, false
+	}
+
+	entries := models.ListModelsWithProvider()
+
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.ProviderName) != providerSegment {
+			continue
+		}
+		if strings.TrimSpace(entry.Model.ID) != modelID {
+			continue
+		}
+		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
+	}
+
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.ProviderType) != providerSegment {
+			continue
+		}
+		if strings.TrimSpace(entry.Model.ID) != modelID {
+			continue
+		}
+		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
+	}
+
+	if requested.ExplicitProvider {
+		return core.ModelSelector{}, false
+	}
+	if r.hasConfiguredProviderName(providerSegment) {
+		return core.ModelSelector{}, false
+	}
+	if r.providerByTypeRegistry(providerSegment) != nil {
+		return core.ModelSelector{}, false
+	}
+
+	rawModelID := strings.TrimSpace(requested.Model)
+	if rawModelID == "" {
+		return core.ModelSelector{}, false
+	}
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Model.ID) != rawModelID {
+			continue
+		}
+		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
+	}
+
+	return core.ModelSelector{}, false
+}
+
+func (r *Router) hasConfiguredProviderName(providerName string) bool {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return false
+	}
+	if named, ok := r.lookup.(providerNameLister); ok {
+		for _, candidate := range named.ProviderNames() {
+			if strings.TrimSpace(candidate) == providerName {
+				return true
+			}
+		}
+		return false
+	}
+	if models, ok := r.lookup.(modelWithProviderLister); ok {
+		for _, entry := range models.ListModelsWithProvider() {
+			if strings.TrimSpace(entry.ProviderName) == providerName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // resolveProvider validates readiness, parses the model selector, and finds the target provider.
 func (r *Router) resolveProvider(model, providerHint string) (core.Provider, core.ModelSelector, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, core.ModelSelector{}, registryUnavailableError(err)
-	}
-	selector, err := core.ParseModelSelector(model, providerHint)
+	selector, _, err := r.ResolveModel(core.NewRequestedModelSelector(model, providerHint))
 	if err != nil {
-		return nil, core.ModelSelector{}, core.NewInvalidRequestError(err.Error(), err)
+		return nil, core.ModelSelector{}, err
 	}
 	lookupModel := selector.QualifiedModel()
 	p := r.lookup.GetProvider(lookupModel)
@@ -259,10 +392,11 @@ func callEmbeddings(ctx context.Context, provider core.Provider, req *core.Embed
 // Supports returns true if any provider supports the given model.
 // Returns false if the lookup has no models loaded.
 func (r *Router) Supports(model string) bool {
-	if r.lookup.ModelCount() == 0 {
+	selector, _, err := r.ResolveModel(core.NewRequestedModelSelector(model, ""))
+	if err != nil {
 		return false
 	}
-	return r.lookup.Supports(model)
+	return r.lookup.Supports(selector.QualifiedModel())
 }
 
 // ModelCount returns the number of models currently loaded into the router lookup.
@@ -374,7 +508,30 @@ func (r *Router) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*c
 // GetProviderType returns the provider type string for the given model.
 // Returns empty string if the model is not found.
 func (r *Router) GetProviderType(model string) string {
-	return r.lookup.GetProviderType(model)
+	selector, _, err := r.ResolveModel(core.NewRequestedModelSelector(model, ""))
+	if err != nil {
+		return ""
+	}
+	return r.lookup.GetProviderType(selector.QualifiedModel())
+}
+
+// GetProviderName returns the concrete configured provider instance name for
+// the given model selector. Returns empty string when unavailable.
+func (r *Router) GetProviderName(model string) string {
+	selector, _, err := r.ResolveModel(core.NewRequestedModelSelector(model, ""))
+	if err != nil {
+		return ""
+	}
+	if !r.lookup.Supports(selector.QualifiedModel()) {
+		return ""
+	}
+	if selector.Provider != "" {
+		return selector.Provider
+	}
+	if named, ok := r.lookup.(core.ProviderNameResolver); ok {
+		return named.GetProviderName(selector.QualifiedModel())
+	}
+	return ""
 }
 
 func (r *Router) providerByType(providerType string) core.Provider {

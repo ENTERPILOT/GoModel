@@ -245,7 +245,9 @@
                 const top = sorted.slice(0, 10);
                 const rest = sorted.slice(10);
 
-                const labels = top.map((m) => m.model);
+                const labels = top.map((m) => typeof this.qualifiedModelDisplay === 'function'
+                    ? this.qualifiedModelDisplay(m)
+                    : m.model);
                 const values = top.map((m) => {
                     if (this.usageMode === 'costs') return m.total_cost || 0;
                     return m.input_tokens + m.output_tokens;

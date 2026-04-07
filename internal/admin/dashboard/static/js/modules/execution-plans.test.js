@@ -5,16 +5,20 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function loadExecutionPlansModuleFactory(overrides = {}) {
+    const clipboardSource = fs.readFileSync(path.join(__dirname, 'clipboard.js'), 'utf8');
     const source = fs.readFileSync(path.join(__dirname, 'execution-plans.js'), 'utf8');
     const window = {
         ...(overrides.window || {})
     };
     const context = {
         console,
+        setTimeout,
+        clearTimeout,
         ...overrides,
         window
     };
     vm.createContext(context);
+    vm.runInContext(clipboardSource, context);
     vm.runInContext(source, context);
     return context.window.dashboardExecutionPlansModule;
 }
@@ -22,6 +26,26 @@ function loadExecutionPlansModuleFactory(overrides = {}) {
 function createExecutionPlansModule(overrides) {
     const factory = loadExecutionPlansModuleFactory(overrides);
     return factory();
+}
+
+function createTimerHarness() {
+    let nextID = 1;
+    const timers = new Map();
+    return {
+        setTimeout(callback, _delay) {
+            const id = nextID++;
+            timers.set(id, callback);
+            return id;
+        },
+        clearTimeout(id) {
+            timers.delete(id);
+        },
+        runAll() {
+            const callbacks = Array.from(timers.values());
+            timers.clear();
+            callbacks.forEach((callback) => callback());
+        }
+    };
 }
 
 test('executionPlanProviderOptions returns unique sorted provider types', () => {
@@ -285,6 +309,74 @@ test('executionPlanChartWorkflowID ignores the draft workflow preview sentinel a
         ),
         null
     );
+});
+
+test('executionPlanWorkflowIDChip copies the raw workflow id and resets copied feedback', async () => {
+    const timers = createTimerHarness();
+    const clipboardWrites = [];
+    const module = createExecutionPlansModule({
+        setTimeout: timers.setTimeout.bind(timers),
+        clearTimeout: timers.clearTimeout.bind(timers),
+        window: {
+            navigator: {
+                clipboard: {
+                    writeText(value) {
+                        clipboardWrites.push(value);
+                        return Promise.resolve();
+                    }
+                }
+            }
+        }
+    });
+
+    const chip = module.executionPlanWorkflowIDChip('workflow-openai-gpt-5-v7');
+
+    await chip.copyWorkflowID();
+
+    assert.equal(
+        JSON.stringify(clipboardWrites),
+        JSON.stringify(['workflow-openai-gpt-5-v7'])
+    );
+    assert.equal(chip.copyState.copied, true);
+    assert.equal(chip.copyState.error, false);
+    assert.equal(chip.copyTitle(), 'Workflow ID copied');
+    assert.equal(chip.copyAriaLabel(), 'Workflow ID copied workflow-openai-gpt-5-v7');
+
+    timers.runAll();
+
+    assert.equal(chip.copyState.copied, false);
+    assert.equal(chip.copyState.error, false);
+    assert.equal(chip.copyTitle(), 'Copy workflow ID');
+});
+
+test('executionPlanWorkflowIDChip marks clipboard failures as errors', async () => {
+    const timers = createTimerHarness();
+    const module = createExecutionPlansModule({
+        setTimeout: timers.setTimeout.bind(timers),
+        clearTimeout: timers.clearTimeout.bind(timers),
+        window: {
+            navigator: {
+                clipboard: {
+                    writeText() {
+                        return Promise.reject(new Error('clipboard rejected'));
+                    }
+                }
+            }
+        }
+    });
+
+    const chip = module.executionPlanWorkflowIDChip('workflow-openai-gpt-5-v7');
+
+    await chip.copyWorkflowID();
+
+    assert.equal(chip.copyState.copied, false);
+    assert.equal(chip.copyState.error, true);
+    assert.equal(chip.copyTitle(), 'Unable to copy workflow ID');
+    assert.equal(chip.copyAriaLabel(), 'Unable to copy workflow ID workflow-openai-gpt-5-v7');
+
+    timers.runAll();
+
+    assert.equal(chip.copyState.error, false);
 });
 
 test('executionPlanAuditChart returns the shared chart contract for audit runtime entries', () => {

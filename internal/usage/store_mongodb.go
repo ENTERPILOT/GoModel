@@ -77,6 +77,9 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 			Keys: bson.D{{Key: "provider", Value: 1}},
 		},
 		{
+			Keys: bson.D{{Key: "provider_name", Value: 1}},
+		},
+		{
 			Keys: bson.D{{Key: "endpoint", Value: 1}},
 		},
 		{

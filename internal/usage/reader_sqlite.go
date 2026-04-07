@@ -56,8 +56,8 @@ func (r *SQLiteReader) GetUsageByModel(ctx context.Context, params UsageQueryPar
 	where := buildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
-	query := `SELECT model, provider, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)` + costCols + `
-			FROM usage` + where + ` GROUP BY model, provider`
+	query := `SELECT model, provider, provider_name, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)` + costCols + `
+			FROM usage` + where + ` GROUP BY model, provider, provider_name`
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -68,8 +68,14 @@ func (r *SQLiteReader) GetUsageByModel(ctx context.Context, params UsageQueryPar
 	result := make([]ModelUsage, 0)
 	for rows.Next() {
 		var m ModelUsage
-		if err := rows.Scan(&m.Model, &m.Provider, &m.InputTokens, &m.OutputTokens, &m.InputCost, &m.OutputCost, &m.TotalCost); err != nil {
+		var providerName sql.NullString
+		if err := rows.Scan(&m.Model, &m.Provider, &providerName, &m.InputTokens, &m.OutputTokens, &m.InputCost, &m.OutputCost, &m.TotalCost); err != nil {
 			return nil, fmt.Errorf("failed to scan usage by model row: %w", err)
+		}
+		if providerName.Valid {
+			m.ProviderName = displayUsageProviderName(providerName.String, m.Provider)
+		} else {
+			m.ProviderName = displayUsageProviderName("", m.Provider)
 		}
 		result = append(result, m)
 	}
@@ -95,13 +101,13 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 		args = append(args, params.Model)
 	}
 	if params.Provider != "" {
-		conditions = append(conditions, "provider = ?")
-		args = append(args, params.Provider)
+		conditions = append(conditions, "(provider = ? OR provider_name = ?)")
+		args = append(args, params.Provider, params.Provider)
 	}
 	if params.Search != "" {
-		conditions = append(conditions, "(model LIKE ? ESCAPE '\\' OR provider LIKE ? ESCAPE '\\' OR request_id LIKE ? ESCAPE '\\' OR provider_id LIKE ? ESCAPE '\\')")
+		conditions = append(conditions, "(model LIKE ? ESCAPE '\\' OR provider LIKE ? ESCAPE '\\' OR provider_name LIKE ? ESCAPE '\\' OR request_id LIKE ? ESCAPE '\\' OR provider_id LIKE ? ESCAPE '\\')")
 		s := "%" + escapeLikeWildcards(params.Search) + "%"
-		args = append(args, s, s, s, s)
+		args = append(args, s, s, s, s, s)
 	}
 
 	where := buildWhereClause(conditions)
@@ -114,7 +120,7 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 	}
 
 	// Fetch page
-	dataQuery := `SELECT id, request_id, provider_id, timestamp, model, provider, endpoint, user_path, cache_type,
+	dataQuery := `SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type,
 		input_tokens, output_tokens, total_tokens, COALESCE(input_cost, 0), COALESCE(output_cost, 0), COALESCE(total_cost, 0), raw_data, COALESCE(costs_calculation_caveat, '')
 		FROM usage` + where + ` ORDER BY ` + sqliteTimestampEpochExpr() + ` DESC, id DESC LIMIT ? OFFSET ?`
 	dataArgs := append(append([]any(nil), args...), limit, offset)
@@ -131,9 +137,10 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 		var ts string
 		var caveat *string
 		var rawDataJSON *string
+		var providerName sql.NullString
 		var userPath sql.NullString
 		var cacheType sql.NullString
-		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &ts, &e.Model, &e.Provider, &e.Endpoint, &userPath, &cacheType,
+		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &ts, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &cacheType,
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &rawDataJSON, &caveat); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
 		}
@@ -153,6 +160,11 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 		}
 		if userPath.Valid {
 			e.UserPath = userPath.String
+		}
+		if providerName.Valid {
+			e.ProviderName = displayUsageProviderName(providerName.String, e.Provider)
+		} else {
+			e.ProviderName = displayUsageProviderName("", e.Provider)
 		}
 		if cacheType.Valid {
 			e.CacheType = normalizeCacheType(cacheType.String)

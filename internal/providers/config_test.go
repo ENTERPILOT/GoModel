@@ -470,6 +470,49 @@ func TestApplyProviderEnvVars_EnvWinsOverYAML(t *testing.T) {
 	}
 }
 
+func TestApplyProviderEnvVars_SingleCustomNamedProviderUsesTypeEnvVars(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-env-key")
+
+	raw := map[string]config.RawProviderConfig{
+		"openai_name": {Type: "openai"},
+	}
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+
+	provider, exists := got["openai_name"]
+	if !exists {
+		t.Fatal("expected custom-named openai provider to be preserved")
+	}
+	if provider.APIKey != "sk-env-key" {
+		t.Errorf("APIKey = %q, want sk-env-key", provider.APIKey)
+	}
+	if provider.BaseURL != testDiscoveryConfigs["openai"].DefaultBaseURL {
+		t.Errorf("BaseURL = %q, want %q", provider.BaseURL, testDiscoveryConfigs["openai"].DefaultBaseURL)
+	}
+	if _, exists := got["openai"]; exists {
+		t.Fatal("expected no duplicate auto-discovered openai provider")
+	}
+}
+
+func TestApplyProviderEnvVars_AmbiguousCustomNamedProvidersSkipTypeEnvOverlay(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-env-key")
+
+	raw := map[string]config.RawProviderConfig{
+		"openai-east": {Type: "openai", APIKey: "east-key", BaseURL: "https://east.example.com/v1"},
+		"openai-west": {Type: "openai", APIKey: "west-key", BaseURL: "https://west.example.com/v1"},
+	}
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+
+	if got["openai-east"].APIKey != "east-key" {
+		t.Errorf("openai-east APIKey = %q, want east-key", got["openai-east"].APIKey)
+	}
+	if got["openai-west"].APIKey != "west-key" {
+		t.Errorf("openai-west APIKey = %q, want west-key", got["openai-west"].APIKey)
+	}
+	if _, exists := got["openai"]; exists {
+		t.Fatal("expected no duplicate auto-discovered openai provider when multiple YAML providers share the type")
+	}
+}
+
 func TestApplyProviderEnvVars_BaseURLEnvWinsOverYAML(t *testing.T) {
 	t.Setenv("OPENAI_BASE_URL", "https://env-override.com")
 
@@ -738,6 +781,33 @@ func TestResolveProviders_EmptyRaw_OnlyEnvVars(t *testing.T) {
 	}
 	if filteredRaw["groq"].APIKey != "sk-groq" {
 		t.Errorf("filteredRaw groq APIKey = %q, want sk-groq", filteredRaw["groq"].APIKey)
+	}
+}
+
+func TestResolveProviders_SingleCustomNamedProviderDoesNotDuplicateTypeKey(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+
+	raw := map[string]config.RawProviderConfig{
+		"openai_name": {Type: "openai"},
+	}
+
+	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
+
+	provider, exists := got["openai_name"]
+	if !exists {
+		t.Fatal("expected openai_name provider in resolved providers")
+	}
+	if provider.APIKey != "sk-openai" {
+		t.Errorf("APIKey = %q, want sk-openai", provider.APIKey)
+	}
+	if provider.BaseURL != testDiscoveryConfigs["openai"].DefaultBaseURL {
+		t.Errorf("BaseURL = %q, want %q", provider.BaseURL, testDiscoveryConfigs["openai"].DefaultBaseURL)
+	}
+	if _, exists := got["openai"]; exists {
+		t.Fatal("expected no duplicate openai provider in resolved providers")
+	}
+	if _, exists := filteredRaw["openai"]; exists {
+		t.Fatal("expected no duplicate openai provider in filtered raw providers")
 	}
 }
 

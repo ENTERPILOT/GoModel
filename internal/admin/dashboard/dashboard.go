@@ -3,10 +3,13 @@ package dashboard
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"html/template"
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 )
@@ -22,7 +25,16 @@ type Handler struct {
 
 // New creates a new dashboard handler with parsed templates and static file server.
 func New() (*Handler, error) {
-	tmpl, err := template.ParseFS(content, "templates/*.html")
+	assetVersions, err := buildAssetVersions("css/dashboard.css")
+	if err != nil {
+		return nil, err
+	}
+
+	tmpl, err := template.New("layout").Funcs(template.FuncMap{
+		"assetURL": func(path string) string {
+			return assetURL(path, assetVersions)
+		},
+	}).ParseFS(content, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
@@ -54,4 +66,33 @@ func (h *Handler) Index(c *echo.Context) error {
 func (h *Handler) Static(c *echo.Context) error {
 	h.staticFS.ServeHTTP(c.Response(), c.Request())
 	return nil
+}
+
+func buildAssetVersions(paths ...string) (map[string]string, error) {
+	versions := make(map[string]string, len(paths))
+	for _, path := range paths {
+		normalizedPath := strings.TrimLeft(strings.TrimSpace(path), "/")
+		if normalizedPath == "" {
+			continue
+		}
+		data, err := content.ReadFile("static/" + normalizedPath)
+		if err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256(data)
+		versions[normalizedPath] = hex.EncodeToString(sum[:6])
+	}
+	return versions, nil
+}
+
+func assetURL(path string, versions map[string]string) string {
+	normalizedPath := strings.TrimLeft(strings.TrimSpace(path), "/")
+	if normalizedPath == "" {
+		return "/admin/static/"
+	}
+	urlPath := "/admin/static/" + normalizedPath
+	if version := versions[normalizedPath]; version != "" {
+		return urlPath + "?v=" + version
+	}
+	return urlPath
 }

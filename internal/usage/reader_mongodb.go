@@ -100,6 +100,7 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 		{Key: "_id", Value: bson.D{
 			{Key: "model", Value: "$model"},
 			{Key: "provider", Value: "$provider"},
+			{Key: "provider_name", Value: "$provider_name"},
 		}},
 		{Key: "input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
 		{Key: "output_tokens", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
@@ -119,8 +120,9 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 	for cursor.Next(ctx) {
 		var row struct {
 			ID struct {
-				Model    string `bson:"model"`
-				Provider string `bson:"provider"`
+				Model        string `bson:"model"`
+				Provider     string `bson:"provider"`
+				ProviderName string `bson:"provider_name"`
 			} `bson:"_id"`
 			InputTokens  int64   `bson:"input_tokens"`
 			OutputTokens int64   `bson:"output_tokens"`
@@ -135,6 +137,7 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 		m := ModelUsage{
 			Model:        row.ID.Model,
 			Provider:     row.ID.Provider,
+			ProviderName: displayUsageProviderName(row.ID.ProviderName, row.ID.Provider),
 			InputTokens:  row.InputTokens,
 			OutputTokens: row.OutputTokens,
 		}
@@ -192,6 +195,7 @@ func (r *MongoDBReader) GetUsageLog(ctx context.Context, params UsageLogParams) 
 			Timestamp              time.Time      `bson:"timestamp"`
 			Model                  string         `bson:"model"`
 			Provider               string         `bson:"provider"`
+			ProviderName           string         `bson:"provider_name"`
 			Endpoint               string         `bson:"endpoint"`
 			UserPath               string         `bson:"user_path"`
 			CacheType              string         `bson:"cache_type"`
@@ -233,6 +237,7 @@ func (r *MongoDBReader) GetUsageLog(ctx context.Context, params UsageLogParams) 
 			Timestamp:              row.Timestamp,
 			Model:                  row.Model,
 			Provider:               row.Provider,
+			ProviderName:           displayUsageProviderName(row.ProviderName, row.Provider),
 			Endpoint:               row.Endpoint,
 			UserPath:               row.UserPath,
 			CacheType:              normalizeCacheType(row.CacheType),
@@ -526,13 +531,17 @@ func mongoUsageLogMatchFilters(params UsageLogParams) (bson.D, error) {
 		matchFilters = append(matchFilters, bson.E{Key: "model", Value: params.Model})
 	}
 	if params.Provider != "" {
-		matchFilters = append(matchFilters, bson.E{Key: "provider", Value: params.Provider})
+		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "$or", Value: bson.A{
+			bson.D{{Key: "provider", Value: params.Provider}},
+			bson.D{{Key: "provider_name", Value: params.Provider}},
+		}}})
 	}
 	if params.Search != "" {
 		regex := bson.D{{Key: "$regex", Value: regexp.QuoteMeta(params.Search)}, {Key: "$options", Value: "i"}}
 		searchFilter := bson.D{{Key: "$or", Value: bson.A{
 			bson.D{{Key: "model", Value: regex}},
 			bson.D{{Key: "provider", Value: regex}},
+			bson.D{{Key: "provider_name", Value: regex}},
 			bson.D{{Key: "request_id", Value: regex}},
 			bson.D{{Key: "provider_id", Value: regex}},
 		}}}

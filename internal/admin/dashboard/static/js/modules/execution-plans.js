@@ -2,6 +2,26 @@
     const DRAFT_WORKFLOW_PREVIEW_ID = 'draft-workflow-preview';
 
     function dashboardExecutionPlansModule() {
+        const clipboardModuleFactory = typeof global.dashboardClipboardModule === 'function'
+            ? global.dashboardClipboardModule
+            : null;
+        const clipboard = clipboardModuleFactory
+            ? clipboardModuleFactory()
+            : null;
+
+        function createWorkflowIDCopyState() {
+            if (clipboard && typeof clipboard.createClipboardButtonState === 'function') {
+                return clipboard.createClipboardButtonState({
+                    logPrefix: 'Failed to copy workflow ID:'
+                });
+            }
+            return {
+                copied: false,
+                error: false,
+                async copy() {}
+            };
+        }
+
         return {
             executionPlans: [],
             executionPlanVersionsByID: {},
@@ -1083,6 +1103,34 @@
                     return entryID;
                 }
                 return null;
+            },
+
+            executionPlanWorkflowIDChip(workflowID) {
+                const normalizedWorkflowID = String(workflowID || '').trim();
+                return {
+                    workflowID: normalizedWorkflowID,
+                    copyState: createWorkflowIDCopyState(),
+
+                    copyTitle() {
+                        if (this.copyState.error) return 'Unable to copy workflow ID';
+                        if (this.copyState.copied) return 'Workflow ID copied';
+                        return 'Copy workflow ID';
+                    },
+
+                    copyAriaLabel() {
+                        if (!this.workflowID) return 'Copy workflow ID';
+                        if (this.copyState.error) return 'Unable to copy workflow ID ' + this.workflowID;
+                        if (this.copyState.copied) return 'Workflow ID copied ' + this.workflowID;
+                        return 'Copy workflow ID ' + this.workflowID;
+                    },
+
+                    async copyWorkflowID() {
+                        if (!this.workflowID) {
+                            return;
+                        }
+                        await this.copyState.copy(this.workflowID);
+                    }
+                };
             },
 
 	            executionPlanChartModel(source, runtime, options) {

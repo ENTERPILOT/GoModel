@@ -103,6 +103,12 @@ type RoutableProvider interface {
 	GetProviderType(model string) string
 }
 
+// ProviderNameResolver is an optional interface for components that can map a
+// routed model selector back to the concrete configured provider instance name.
+type ProviderNameResolver interface {
+	GetProviderName(model string) string
+}
+
 // AvailabilityChecker is an optional interface for providers that need
 // to verify service availability before registration.
 type AvailabilityChecker interface {

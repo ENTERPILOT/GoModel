@@ -2,6 +2,7 @@ package usage
 
 import (
 	"log/slog"
+	"strings"
 
 	"gomodel/internal/core"
 )
@@ -13,6 +14,7 @@ type StreamUsageObserver struct {
 	cachedEntry     *UsageEntry
 	model           string
 	provider        string
+	providerName    string
 	requestID       string
 	endpoint        string
 	userPath        string
@@ -43,6 +45,13 @@ func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, 
 		endpoint:        endpoint,
 		userPath:        normalizedUserPath,
 	}
+}
+
+func (o *StreamUsageObserver) SetProviderName(providerName string) {
+	if o == nil {
+		return
+	}
+	o.providerName = strings.TrimSpace(providerName)
 }
 
 func (o *StreamUsageObserver) OnJSONEvent(chunk map[string]any) {
@@ -155,6 +164,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 		pricingArgs...,
 	)
 	if entry != nil {
+		entry.ProviderName = o.providerName
 		entry.UserPath = o.userPath
 	}
 	return entry

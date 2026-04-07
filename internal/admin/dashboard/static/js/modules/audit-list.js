@@ -23,11 +23,7 @@
                     let qs = this._auditQueryStr();
                     qs += '&limit=' + this.auditLog.limit + '&offset=' + this.auditLog.offset;
                     if (this.auditSearch) qs += '&search=' + encodeURIComponent(this.auditSearch);
-                    if (this.auditModel) qs += '&model=' + encodeURIComponent(this.auditModel);
-                    if (this.auditProvider) qs += '&provider=' + encodeURIComponent(this.auditProvider);
                     if (this.auditMethod) qs += '&method=' + encodeURIComponent(this.auditMethod);
-                    if (this.auditPath) qs += '&path=' + encodeURIComponent(this.auditPath);
-                    if (this.auditUserPath) qs += '&user_path=' + encodeURIComponent(this.auditUserPath);
                     if (this.auditStatusCode) qs += '&status_code=' + encodeURIComponent(this.auditStatusCode);
                     if (this.auditStream) qs += '&stream=' + encodeURIComponent(this.auditStream);
 
@@ -57,11 +53,7 @@
 
             clearAuditFilters() {
                 this.auditSearch = '';
-                this.auditModel = '';
-                this.auditProvider = '';
                 this.auditMethod = '';
-                this.auditPath = '';
-                this.auditUserPath = '';
                 this.auditStatusCode = '';
                 this.auditStream = '';
                 this.fetchAuditLog(true);

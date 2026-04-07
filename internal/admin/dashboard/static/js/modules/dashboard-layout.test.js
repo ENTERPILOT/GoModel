@@ -56,9 +56,24 @@ test('sidebar and main content share the flex layout without manual content offs
     assert.match(collapsedSidebarRule, /flex-basis:\s*60px/);
 });
 
+test('mono utility only sets the font family and font-size-md carries the 13px size', () => {
+    const css = readFixture('../../css/dashboard.css');
+
+    const monoRule = readCSSRule(css, '.mono');
+    assert.match(monoRule, /font-family:\s*'SF Mono', Menlo, Consolas, monospace/);
+    assert.doesNotMatch(monoRule, /font-size:/);
+
+    const fontSizeMdRule = readCSSRule(css, '.font-size-md');
+    assert.match(fontSizeMdRule, /font-size:\s*13px/);
+});
+
 test('dashboard layout pins Chart.js to 4.5.0', () => {
     const template = readFixture('../../../templates/layout.html');
 
+    assert.match(
+        template,
+        /<link rel="stylesheet" href="{{assetURL "css\/dashboard\.css"}}">/
+    );
     assert.match(
         template,
         /<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/chart\.js@4\.5\.0\/dist\/chart\.umd\.min\.js" integrity="sha384-XcdcwHqIPULERb2yDEM4R0XaQKU3YnDsrTmjACBZyfdVVqjh6xQ4\/DCMd7XLcA6Y" crossorigin="anonymous"><\/script>/
@@ -115,6 +130,45 @@ test('workflow guardrail warning links directly to the top-level guardrails page
     assert.match(indexTemplate, /class="alert alert-warning alert-inline-actions" x-show="guardrailRefs\.length === 0"/);
     assert.match(indexTemplate, /@click="navigate\('guardrails'\)">Open Guardrails<\/button>/);
     assert.match(indexTemplate, /id="guardrail-filter"[^>]*aria-label="Guardrail filter"[^>]*x-model="guardrailFilter"/);
+});
+
+test('audit toolbar uses a single broad search input plus a white clear button below the select row', () => {
+    const indexTemplate = readFixture('../../../templates/index.html');
+    const iconTemplate = readFixture('../../../templates/x-icon.html');
+    const css = readFixture('../../css/dashboard.css');
+
+    assert.match(
+        indexTemplate,
+        /<div class="audit-filter-row audit-filter-row-selects">[\s\S]*id="audit-filter-method"[\s\S]*id="audit-filter-status"[\s\S]*id="audit-filter-stream"[\s\S]*<\/div>\s*<div class="audit-filter-row audit-filter-row-search">/
+    );
+    assert.match(
+        indexTemplate,
+        /id="audit-filter-search"[^>]*placeholder="Search by request ID, model, provider, path, user path, or error\.\.\."/
+    );
+    assert.doesNotMatch(indexTemplate, /id="audit-filter-model"/);
+    assert.doesNotMatch(indexTemplate, /id="audit-filter-provider"/);
+    assert.doesNotMatch(indexTemplate, /id="audit-filter-path"/);
+    assert.doesNotMatch(indexTemplate, /id="audit-filter-user-path"/);
+    assert.match(indexTemplate, /class="pagination-btn audit-clear-btn" @click="clearAuditFilters\(\)">[\s\S]*{{template "x-icon"}}[\s\S]*<span>Clear<\/span>/);
+    assert.match(iconTemplate, /{{define "x-icon"}}/);
+
+    const clearRule = readCSSRule(css, '.audit-clear-btn');
+    assert.match(clearRule, /background:\s*#fff/);
+    assert.match(clearRule, /color:\s*#111110/);
+
+    const modelsFilterRule = readCSSRule(css, '.models-filter-input');
+    assert.match(modelsFilterRule, /max-width:\s*840px/);
+});
+
+test('alias rows use a shared icon-only edit action', () => {
+    const indexTemplate = readFixture('../../../templates/index.html');
+    const editIconTemplate = readFixture('../../../templates/edit-icon.html');
+
+    assert.match(
+        indexTemplate,
+        /class="table-action-btn table-icon-btn"[\s\S]*:aria-label="'Edit alias ' \+ row\.alias\.name"[\s\S]*@click="openAliasEdit\(row\.alias\)"[\s\S]*{{template "edit-icon"}}/
+    );
+    assert.match(editIconTemplate, /{{define "edit-icon"}}/);
 });
 
 test('usage and audit pages reuse a shared pagination template', () => {

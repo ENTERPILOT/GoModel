@@ -306,6 +306,7 @@ type mockProvider struct {
 	streamData        string
 	supportedModels   []string
 	providerTypes     map[string]string
+	providerNames     map[string]string
 
 	batchCreateResponse         *core.BatchResponse
 	batchCreateHints            map[string]string
@@ -397,6 +398,25 @@ func (m *mockProvider) GetProviderType(model string) string {
 	}
 	if m.Supports(model) {
 		return "mock"
+	}
+	return ""
+}
+
+func (m *mockProvider) GetProviderName(model string) string {
+	selector, err := core.ParseModelSelector(model, "")
+	if err == nil && selector.Provider != "" {
+		if m.providerNames != nil {
+			if providerName, ok := m.providerNames[selector.QualifiedModel()]; ok {
+				return providerName
+			}
+		}
+		model = selector.Model
+	}
+
+	if m.providerNames != nil {
+		if providerName, ok := m.providerNames[model]; ok {
+			return providerName
+		}
 	}
 	return ""
 }
@@ -2154,7 +2174,7 @@ func TestHandleStreamingResponse_FlushesEachChunk(t *testing.T) {
 		},
 	}
 
-	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", func() (io.ReadCloser, error) {
+	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", "primary-openai", func() (io.ReadCloser, error) {
 		return stream, nil
 	})
 	if err != nil {
@@ -2246,7 +2266,7 @@ func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 		Data:      &auditlog.LogData{},
 	})
 
-	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", func() (io.ReadCloser, error) {
+	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", "primary-openai", func() (io.ReadCloser, error) {
 		return &erroringReadCloser{
 			data: []byte("data: {\"id\":\"1\"}\n\n"),
 			err:  expectedErr,

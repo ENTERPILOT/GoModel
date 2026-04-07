@@ -192,7 +192,7 @@ func enrichEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
 	if requestedModel := plan.RequestedQualifiedModel(); requestedModel != "" {
 		entry.Model = requestedModel
 	}
-	if resolvedModel := plan.ResolvedQualifiedModel(); resolvedModel != "" {
+	if resolvedModel := resolvedModelForAuditLog(plan); resolvedModel != "" {
 		entry.ResolvedModel = resolvedModel
 	}
 	if plan.Mode == core.ExecutionModePassthrough && plan.Passthrough != nil {
@@ -206,6 +206,9 @@ func enrichEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
 		entry.Provider = strings.TrimSpace(plan.Resolution.ProviderType)
 	}
 	if plan.Resolution != nil {
+		if providerName := strings.TrimSpace(plan.Resolution.ProviderName); providerName != "" {
+			entry.ProviderName = providerName
+		}
 		entry.AliasUsed = plan.Resolution.AliasApplied
 	}
 	if versionID := strings.TrimSpace(plan.ExecutionPlanVersionID()); versionID != "" {
@@ -220,6 +223,23 @@ func enrichEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
 			Fallback:   plan.Policy.Features.Fallback,
 		}
 	}
+}
+
+func resolvedModelForAuditLog(plan *core.ExecutionPlan) string {
+	if plan == nil || plan.Resolution == nil {
+		return ""
+	}
+	model := strings.TrimSpace(plan.Resolution.ResolvedSelector.Model)
+	if model == "" {
+		return ""
+	}
+	if providerName := strings.TrimSpace(plan.Resolution.ProviderName); providerName != "" {
+		return providerName + "/" + model
+	}
+	if provider := strings.TrimSpace(plan.Resolution.ResolvedSelector.Provider); provider != "" {
+		return provider + "/" + model
+	}
+	return model
 }
 
 func captureLoggedRequestBody(entry *LogEntry, bodyBytes []byte) {
@@ -390,6 +410,43 @@ func EnrichEntryWithExecutionPlan(c *echo.Context, plan *core.ExecutionPlan) {
 // depending on Echo middleware state.
 func EnrichLogEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
 	enrichEntryWithExecutionPlan(entry, plan)
+}
+
+// EnrichEntryWithResolvedRoute attaches the final executed route to the live
+// audit entry after execution resolved to a concrete provider/model.
+func EnrichEntryWithResolvedRoute(c *echo.Context, resolvedModel, providerType, providerName string) {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return
+	}
+
+	entry, ok := entryVal.(*LogEntry)
+	if !ok || entry == nil {
+		return
+	}
+
+	enrichEntryWithResolvedRoute(entry, resolvedModel, providerType, providerName)
+}
+
+// EnrichLogEntryWithResolvedRoute attaches the final executed route directly to
+// an existing audit log entry.
+func EnrichLogEntryWithResolvedRoute(entry *LogEntry, resolvedModel, providerType, providerName string) {
+	enrichEntryWithResolvedRoute(entry, resolvedModel, providerType, providerName)
+}
+
+func enrichEntryWithResolvedRoute(entry *LogEntry, resolvedModel, providerType, providerName string) {
+	if entry == nil {
+		return
+	}
+	if resolvedModel = strings.TrimSpace(resolvedModel); resolvedModel != "" {
+		entry.ResolvedModel = resolvedModel
+	}
+	if providerType = strings.TrimSpace(providerType); providerType != "" {
+		entry.Provider = providerType
+	}
+	if providerName = strings.TrimSpace(providerName); providerName != "" {
+		entry.ProviderName = providerName
+	}
 }
 
 // EnrichEntryWithCacheType attaches cache-hit metadata to the live audit entry.

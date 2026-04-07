@@ -49,7 +49,8 @@ type LogEntry struct {
 	// Core fields (indexed for queries)
 	Model                  string `json:"model" bson:"model"`
 	ResolvedModel          string `json:"resolved_model,omitempty" bson:"resolved_model,omitempty"`
-	Provider               string `json:"provider" bson:"provider"`
+	Provider               string `json:"provider" bson:"provider"` // canonical provider type used for routing and filters
+	ProviderName           string `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
 	AliasUsed              bool   `json:"alias_used,omitempty" bson:"alias_used,omitempty"`
 	ExecutionPlanVersionID string `json:"execution_plan_version_id,omitempty" bson:"execution_plan_version_id,omitempty"`
 	CacheType              string `json:"cache_type,omitempty" bson:"cache_type,omitempty"`
@@ -141,6 +142,13 @@ func normalizeCacheType(value string) string {
 	default:
 		return ""
 	}
+}
+
+func displayAuditProviderName(providerName, provider string) string {
+	if trimmed := strings.TrimSpace(providerName); trimmed != "" {
+		return trimmed
+	}
+	return strings.TrimSpace(provider)
 }
 
 // RedactedHeaders contains headers that should be automatically redacted.

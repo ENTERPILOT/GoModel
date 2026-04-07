@@ -636,6 +636,30 @@ func (r *ModelRegistry) GetProviderType(model string) string {
 	return ""
 }
 
+// GetProviderName returns the concrete configured provider instance name for
+// the given model selector. Returns empty string if the model is not found.
+func (r *ModelRegistry) GetProviderName(model string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	providerName, modelID := splitModelSelector(model)
+	if providerName != "" {
+		if providerModels, ok := r.modelsByProvider[providerName]; ok {
+			if info, exists := providerModels[modelID]; exists {
+				return strings.TrimSpace(info.ProviderName)
+			}
+		}
+		if r.hasConfiguredProviderNameLocked(providerName) {
+			return ""
+		}
+	}
+
+	if info, ok := r.models[model]; ok {
+		return strings.TrimSpace(info.ProviderName)
+	}
+	return ""
+}
+
 // ProviderByType returns the first registered provider for the given provider type.
 // This lookup is independent of discovered models so provider-typed routes keep
 // working even when a provider currently exposes zero models.
@@ -675,6 +699,22 @@ func (r *ModelRegistry) ProviderTypes() []string {
 		result = append(result, providerType)
 	}
 	sort.Strings(result)
+	return result
+}
+
+// ProviderNames returns the configured provider instance names in registration order.
+func (r *ModelRegistry) ProviderNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]string, 0, len(r.providers))
+	for _, provider := range r.providers {
+		providerName := strings.TrimSpace(r.providerNames[provider])
+		if providerName == "" {
+			continue
+		}
+		result = append(result, providerName)
+	}
 	return result
 }
 

@@ -38,7 +38,7 @@ func TestTranslatedInferenceService_LogUsageSkipsWhenExecutionPlanDisablesUsage(
 				Guardrails: true,
 			},
 		},
-	}, "gpt-5-nano", "openai", func(*core.ModelPricing) *usage.UsageEntry {
+	}, "gpt-5-nano", "openai", "primary-openai", func(*core.ModelPricing) *usage.UsageEntry {
 		return &usage.UsageEntry{ID: "usage-1"}
 	})
 
@@ -70,7 +70,7 @@ func TestTranslatedInferenceService_LogUsageAssignsUserPathFromContext(t *testin
 		UserPath: "/team/alpha",
 	})
 
-	service.logUsage(ctx, nil, "gpt-5-nano", "openai", func(*core.ModelPricing) *usage.UsageEntry {
+	service.logUsage(ctx, nil, "gpt-5-nano", "openai", "primary-openai", func(*core.ModelPricing) *usage.UsageEntry {
 		return &usage.UsageEntry{ID: "usage-1"}
 	})
 
@@ -79,6 +79,9 @@ func TestTranslatedInferenceService_LogUsageAssignsUserPathFromContext(t *testin
 	}
 	if got := logger.entries[0].UserPath; got != "/team/alpha" {
 		t.Fatalf("UserPath = %q, want /team/alpha", got)
+	}
+	if got := logger.entries[0].ProviderName; got != "primary-openai" {
+		t.Fatalf("ProviderName = %q, want primary-openai", got)
 	}
 }
 

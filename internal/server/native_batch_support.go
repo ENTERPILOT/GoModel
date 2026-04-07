@@ -59,21 +59,14 @@ func determineBatchExecutionSelection(provider core.RoutableProvider, resolver R
 		commonModel    string
 		hasCommonModel = true
 	)
-	resolver = effectiveRequestModelResolver(provider, resolver)
 	for i, item := range req.Requests {
 		requested, err := core.BatchItemRequestedModelSelector(req.Endpoint, item)
 		if err != nil {
 			return batchExecutionSelection{}, core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
 		}
-		resolvedSelector, err := requested.Normalize()
+		resolvedSelector, _, err := resolveExecutionSelector(provider, resolver, requested)
 		if err != nil {
 			return batchExecutionSelection{}, core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
-		}
-		if resolver != nil {
-			resolvedSelector, _, err = resolver.ResolveModel(requested)
-			if err != nil {
-				return batchExecutionSelection{}, core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
-			}
 		}
 		model := resolvedSelector.QualifiedModel()
 		if model == "" {

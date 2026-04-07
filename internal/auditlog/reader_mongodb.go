@@ -25,6 +25,7 @@ type mongoLogRow struct {
 	Model                  string    `bson:"model"`
 	ResolvedModel          string    `bson:"resolved_model"`
 	Provider               string    `bson:"provider"`
+	ProviderName           string    `bson:"provider_name"`
 	AliasUsed              bool      `bson:"alias_used"`
 	ExecutionPlanVersionID string    `bson:"execution_plan_version_id"`
 	CacheType              string    `bson:"cache_type"`
@@ -49,6 +50,7 @@ func (r mongoLogRow) toLogEntry() *LogEntry {
 		Model:                  r.Model,
 		ResolvedModel:          r.ResolvedModel,
 		Provider:               r.Provider,
+		ProviderName:           displayAuditProviderName(r.ProviderName, r.Provider),
 		AliasUsed:              r.AliasUsed,
 		ExecutionPlanVersionID: r.ExecutionPlanVersionID,
 		CacheType:              normalizeCacheType(r.CacheType),
@@ -123,13 +125,14 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 		})
 	}
 	if params.Provider != "" {
-		matchFilters = append(matchFilters, bson.E{
-			Key: "provider",
-			Value: bson.D{
-				{Key: "$regex", Value: regexp.QuoteMeta(params.Provider)},
-				{Key: "$options", Value: "i"},
-			},
-		})
+		regex := bson.D{
+			{Key: "$regex", Value: regexp.QuoteMeta(params.Provider)},
+			{Key: "$options", Value: "i"},
+		}
+		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
+			bson.D{{Key: "provider", Value: regex}},
+			bson.D{{Key: "provider_name", Value: regex}},
+		}})
 	}
 	if params.Method != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "method", Value: params.Method})
@@ -171,8 +174,10 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 			bson.D{{Key: "auth_key_id", Value: regex}},
 			bson.D{{Key: "model", Value: regex}},
 			bson.D{{Key: "provider", Value: regex}},
+			bson.D{{Key: "provider_name", Value: regex}},
 			bson.D{{Key: "method", Value: regex}},
 			bson.D{{Key: "path", Value: regex}},
+			bson.D{{Key: "user_path", Value: regex}},
 			bson.D{{Key: "error_type", Value: regex}},
 			bson.D{{Key: "data.error_message", Value: regex}},
 		}})

@@ -125,6 +125,62 @@ test('fetchAuditLog preserves a successful payload when workflow prefetch fails'
     assert.match(String(loggedErrors[0][0]), /Failed to prefetch audit workflows:/);
 });
 
+test('fetchAuditLog sends the consolidated audit search and select filters only', async () => {
+    const requests = [];
+    const module = createAuditListModule({
+        fetch(url) {
+            requests.push(url);
+            return Promise.resolve({
+                ok: true,
+                json: async () => ({
+                    entries: [],
+                    total: 0,
+                    limit: 25,
+                    offset: 0
+                })
+            });
+        }
+    });
+    module.auditFetchToken = 0;
+    module.auditLog = { entries: [], total: 0, limit: 25, offset: 0 };
+    module.days = 30;
+    module.auditSearch = 'team/alpha';
+    module.auditMethod = 'POST';
+    module.auditStatusCode = '500';
+    module.auditStream = 'true';
+    module.headers = () => ({});
+    module.handleFetchResponse = () => true;
+
+    await module.fetchAuditLog(true);
+
+    assert.equal(requests.length, 1);
+    assert.match(requests[0], /search=team%2Falpha/);
+    assert.match(requests[0], /method=POST/);
+    assert.match(requests[0], /status_code=500/);
+    assert.match(requests[0], /stream=true/);
+    assert.doesNotMatch(requests[0], /[?&](model|provider|path|user_path)=/);
+});
+
+test('clearAuditFilters resets the consolidated audit controls', () => {
+    const module = createAuditListModule();
+    let fetchCalled = false;
+    module.auditSearch = 'req_123';
+    module.auditMethod = 'DELETE';
+    module.auditStatusCode = '404';
+    module.auditStream = 'false';
+    module.fetchAuditLog = (resetOffset) => {
+        fetchCalled = resetOffset === true;
+    };
+
+    module.clearAuditFilters();
+
+    assert.equal(module.auditSearch, '');
+    assert.equal(module.auditMethod, '');
+    assert.equal(module.auditStatusCode, '');
+    assert.equal(module.auditStream, '');
+    assert.equal(fetchCalled, true);
+});
+
 test('auditPaneState copies the formatted body and resets success feedback', async () => {
     let resetCallback = null;
     const writes = [];

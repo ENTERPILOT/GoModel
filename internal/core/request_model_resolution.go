@@ -6,6 +6,7 @@ type RequestModelResolution struct {
 	Requested        RequestedModelSelector
 	ResolvedSelector ModelSelector
 	ProviderType     string
+	ProviderName     string
 	AliasApplied     bool
 }
 

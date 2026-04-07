@@ -15,7 +15,7 @@ type QueryParams struct {
 type LogQueryParams struct {
 	QueryParams
 	Model      string
-	Provider   string
+	Provider   string // filter by provider name or provider type
 	Method     string
 	Path       string
 	UserPath   string

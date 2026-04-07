@@ -256,7 +256,14 @@
 
             usageLogProviderOptions() {
                 const set = new Set();
-                this.modelUsage.forEach((m) => { set.add(m.provider); });
+                this.modelUsage.forEach((m) => {
+                    const provider = typeof this.providerDisplayValue === 'function'
+                        ? this.providerDisplayValue(m)
+                        : String((m && (m.provider_name || m.provider)) || '').trim();
+                    if (provider) {
+                        set.add(provider);
+                    }
+                });
                 return [...set].sort();
             }
         };
