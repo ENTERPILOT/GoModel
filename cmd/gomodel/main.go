@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -29,7 +28,7 @@ import (
 	"gomodel/internal/providers/xai"
 	"gomodel/internal/version"
 
-	"github.com/lmittmann/tint"
+	"github.com/joho/godotenv"
 	"golang.org/x/term"
 )
 
@@ -87,20 +86,12 @@ func main() {
 		os.Exit(0)
 	}
 
-	isTTYTerminal := term.IsTerminal(int(os.Stderr.Fd()))
+	_ = godotenv.Load()
 
-	logFormat := strings.ToLower(os.Getenv("LOG_FORMAT"))
-
-	var handler slog.Handler = slog.NewJSONHandler(os.Stderr, nil)
-
-	if (isTTYTerminal && logFormat != "json") || logFormat == "text" {
-		handler = tint.NewHandler(os.Stderr, &tint.Options{
-			TimeFormat: time.Kitchen,
-			NoColor:    !isTTYTerminal,
-		})
+	if err := configureLogging(os.Stderr, term.IsTerminal(int(os.Stderr.Fd()))); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to configure logging: %v\n", err)
+		os.Exit(1)
 	}
-
-	slog.SetDefault(slog.New(handler))
 
 	slog.Info("starting gomodel",
 		"version", version.Version,

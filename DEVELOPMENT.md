@@ -67,7 +67,7 @@ Log format is chosen automatically based on the environment:
 12:12PM INFO  starting server address=:8080
 ```
 
-Override the auto-detection with `LOG_FORMAT`:
+Override the auto-detection with `LOG_FORMAT`, and the verbosity with `LOG_LEVEL`:
 
 | Value     | Effect                                          |
 | --------- | ----------------------------------------------- |
@@ -75,7 +75,15 @@ Override the auto-detection with `LOG_FORMAT`:
 | `text`    | Always text (no colors if not a TTY)            |
 | `json`    | Always JSON, even on a TTY                      |
 
+| `LOG_LEVEL` value | Effect |
+| ----------------- | ------ |
+| `debug`           | Include debug, info, warn, and error logs |
+| `info`            | Include info, warn, and error logs (default) |
+| `warn`            | Include only warn and error logs |
+| `error`           | Include only error logs |
+
 ```bash
 LOG_FORMAT=text make run   # force text output
 LOG_FORMAT=json make run   # force JSON output
+LOG_LEVEL=debug make run   # include debug logs
 ```

@@ -61,8 +61,8 @@ func getEnvDuration(key string, defaultVal time.Duration) time.Duration {
 //   - HTTP_RESPONSE_HEADER_TIMEOUT: time to wait for response headers (default: 600)
 //
 // Note: These env vars are also documented in config.HTTPConfig. The env var bridge
-// here works correctly because godotenv.Load() in config.Load() ensures .env values
-// are available in the process environment before providers are initialized.
+// here works correctly because the gomodel entrypoint loads .env before config and
+// providers are initialized.
 func DefaultConfig() ClientConfig {
 	return ClientConfig{
 		MaxIdleConns:          100,

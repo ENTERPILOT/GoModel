@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v3"
 
 	"gomodel/internal/storage"
@@ -932,8 +931,6 @@ func buildDefaultConfig() *Config {
 // provider map parsed from YAML. Provider env var discovery, credential filtering,
 // and resilience merging are handled by the providers package.
 func Load() (*LoadResult, error) {
-	_ = godotenv.Load()
-
 	cfg := buildDefaultConfig()
 
 	rawProviders, err := applyYAML(cfg)
