@@ -32,7 +32,7 @@
             },
             {
                 "group": "Advanced",
-                "pages": ["advanced/configuration", "advanced/config-yaml", "advanced/guardrails", "advanced/admin-endpoints"]
+                "pages": ["advanced/configuration", "advanced/config-yaml", "advanced/guardrails", "advanced/workflows", "advanced/admin-endpoints"]
             },
             {
                 "group": "About",

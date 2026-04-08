@@ -46,7 +46,7 @@ func determineBatchExecutionSelection(provider core.RoutableProvider, resolver R
 		}
 		return batchExecutionSelection{
 			providerType: providerType,
-			selector:     core.NewExecutionPlanSelector(providerType, ""),
+			selector:     core.NewExecutionPlanSelector(workflowProviderNameForType(provider, providerType), ""),
 		}, nil
 	}
 
@@ -56,6 +56,7 @@ func determineBatchExecutionSelection(provider core.RoutableProvider, resolver R
 
 	var (
 		providerType   string
+		providerName   string
 		commonModel    string
 		hasCommonModel = true
 	)
@@ -81,6 +82,12 @@ func determineBatchExecutionSelection(provider core.RoutableProvider, resolver R
 		} else if providerType != itemProvider {
 			return batchExecutionSelection{}, core.NewInvalidRequestError("native batch supports a single provider per batch; split mixed-provider requests", nil)
 		}
+		itemProviderName := resolvedProviderName(provider, resolvedSelector, resolvedSelector.Provider)
+		if providerName == "" {
+			providerName = itemProviderName
+		} else if itemProviderName != "" && providerName != itemProviderName {
+			return batchExecutionSelection{}, core.NewInvalidRequestError("native batch supports a single configured provider per batch; split mixed-provider requests", nil)
+		}
 
 		if !hasCommonModel {
 			continue
@@ -102,12 +109,15 @@ func determineBatchExecutionSelection(provider core.RoutableProvider, resolver R
 	if providerType == "" {
 		return batchExecutionSelection{}, core.NewInvalidRequestError("unable to resolve provider for batch", nil)
 	}
+	if providerName == "" {
+		providerName = workflowProviderNameForType(provider, providerType)
+	}
 	if !hasCommonModel {
 		commonModel = ""
 	}
 	return batchExecutionSelection{
 		providerType: providerType,
-		selector:     core.NewExecutionPlanSelector(providerType, commonModel),
+		selector:     core.NewExecutionPlanSelector(providerName, commonModel),
 	}, nil
 }
 

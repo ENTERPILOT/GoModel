@@ -220,7 +220,7 @@
                         plan.description,
                         plan.scope_display,
                         plan.scope_type,
-                        plan.scope && plan.scope.scope_provider,
+                        this.executionPlanScopeProviderValue(plan && plan.scope),
                         plan.scope && plan.scope.scope_model,
                         plan.scope && plan.scope.scope_user_path,
                         plan.plan_hash,
@@ -232,6 +232,18 @@
                 });
             },
 
+            executionPlanScopeProviderValue(scope) {
+                return String(
+                    scope && (scope.scope_provider_name || scope.scope_provider) || ''
+                ).trim();
+            },
+
+            executionPlanModelProviderValue(model) {
+                return String(
+                    model && (model.provider_name || model.provider_type) || ''
+                ).trim();
+            },
+
             executionPlanProviderOptions() {
                 const options = new Set();
                 const preservedProvider = String(this.executionPlanHydratedScope && this.executionPlanHydratedScope.scope_provider || '').trim();
@@ -240,16 +252,16 @@
                 }
                 const models = Array.isArray(this.models) ? this.models : [];
                 models.forEach((model) => {
-                    const providerType = String(model && model.provider_type || '').trim();
-                    if (providerType) {
-                        options.add(providerType);
+                    const providerName = this.executionPlanModelProviderValue(model);
+                    if (providerName) {
+                        options.add(providerName);
                     }
                 });
                 return [...options].sort();
             },
 
-            executionPlanModelOptions(providerType) {
-                const wantedProvider = String(providerType || '').trim();
+            executionPlanModelOptions(providerName) {
+                const wantedProvider = String(providerName || '').trim();
                 const options = new Set();
                 const preservedProvider = String(this.executionPlanHydratedScope && this.executionPlanHydratedScope.scope_provider || '').trim();
                 const preservedModel = String(this.executionPlanHydratedScope && this.executionPlanHydratedScope.scope_model || '').trim();
@@ -258,7 +270,7 @@
                 }
                 const models = Array.isArray(this.models) ? this.models : [];
                 models.forEach((model) => {
-                    if (wantedProvider && String(model && model.provider_type || '').trim() !== wantedProvider) {
+                    if (wantedProvider && this.executionPlanModelProviderValue(model) !== wantedProvider) {
                         return;
                     }
                     const modelID = String(model && model.model && model.model.id || '').trim();
@@ -271,11 +283,11 @@
 
             planScopeTypeLabel(plan) {
                 const scopeType = String(plan && plan.scope_type || '').trim();
-                if (scopeType === 'provider_model') return 'Provider + Model';
-                if (scopeType === 'provider_model_path') return 'Provider + Model + Path';
-                if (scopeType === 'provider_path') return 'Provider + Path';
+                if (scopeType === 'provider_model') return 'Provider Name + Model';
+                if (scopeType === 'provider_model_path') return 'Provider Name + Model + Path';
+                if (scopeType === 'provider_path') return 'Provider Name + Path';
                 if (scopeType === 'path') return 'Path';
-                if (scopeType === 'provider') return 'Provider';
+                if (scopeType === 'provider') return 'Provider Name';
                 return 'Global';
             },
 
@@ -337,7 +349,7 @@
 
             executionPlanScopeMatches(plan, scope) {
                 const normalized = scope || { scope_provider: '', scope_model: '', scope_user_path: '' };
-                const provider = String(plan && plan.scope && plan.scope.scope_provider || '').trim();
+                const provider = this.executionPlanScopeProviderValue(plan && plan.scope);
                 const model = provider ? String(plan && plan.scope && plan.scope.scope_model || '').trim() : '';
                 const userPath = this.normalizeExecutionPlanScopeUserPath(plan && plan.scope && plan.scope.scope_user_path);
                 return provider === String(normalized.scope_provider || '').trim()
@@ -385,7 +397,7 @@
                     scope_type: scopeType,
                     scope_display: scopeDisplay,
                     scope: {
-                        scope_provider: scope.scope_provider,
+                        scope_provider_name: scope.scope_provider,
                         scope_model: scope.scope_model,
                         ...(scope.scope_user_path ? { scope_user_path: scope.scope_user_path } : {})
                     },
@@ -504,14 +516,14 @@
 
                 this.executionPlanFormHydrated = true;
                 this.executionPlanHydratedScope = {
-                    scope_provider: String(plan.scope && plan.scope.scope_provider || '').trim(),
+                    scope_provider: this.executionPlanScopeProviderValue(plan.scope),
                     scope_model: String(plan.scope && plan.scope.scope_model || '').trim(),
                     scope_user_path: String(plan.scope && plan.scope.scope_user_path || '').trim()
                 };
                 const features = this.executionPlanSourceFeatures(plan);
                 const guardrails = this.executionPlanSourceGuardrails(plan);
                 this.executionPlanForm = {
-                    scope_provider: String(plan.scope && plan.scope.scope_provider || ''),
+                    scope_provider: this.executionPlanScopeProviderValue(plan.scope),
                     scope_model: String(plan.scope && plan.scope.scope_model || ''),
                     scope_user_path: String(plan.scope && plan.scope.scope_user_path || ''),
                     name: String(plan.name || ''),
@@ -656,7 +668,7 @@
                     : [];
 
                 const payload = {
-                    scope_provider: provider,
+                    scope_provider_name: provider,
                     scope_model: model,
                     ...(userPath ? { scope_user_path: userPath } : {}),
                     name: String(form.name || '').trim(),
@@ -742,21 +754,23 @@
             validateExecutionPlanRequest(payload) {
                 const preservedProvider = String(this.executionPlanHydratedScope && this.executionPlanHydratedScope.scope_provider || '').trim();
                 const preservedModel = String(this.executionPlanHydratedScope && this.executionPlanHydratedScope.scope_model || '').trim();
+                const providerName = String(payload && (payload.scope_provider_name || payload.scope_provider) || '').trim();
+                const scopeModel = String(payload && payload.scope_model || '').trim();
 
-                if (payload.scope_provider) {
+                if (providerName) {
                     const providers = this.executionPlanProviderOptions();
-                    if (!providers.includes(payload.scope_provider) && payload.scope_provider !== preservedProvider) {
-                        return 'Choose a registered provider.';
+                    if (!providers.includes(providerName) && providerName !== preservedProvider) {
+                        return 'Choose a registered provider name.';
                     }
                 }
-                if (payload.scope_model && !payload.scope_provider) {
-                    return 'Model selection requires a provider.';
+                if (scopeModel && !providerName) {
+                    return 'Model selection requires a provider name.';
                 }
-                if (payload.scope_model) {
-                    const models = this.executionPlanModelOptions(payload.scope_provider);
-                    const isPreservedModel = payload.scope_provider === preservedProvider && payload.scope_model === preservedModel;
-                    if (!models.includes(payload.scope_model) && !isPreservedModel) {
-                        return 'Choose a registered model for the selected provider.';
+                if (scopeModel) {
+                    const models = this.executionPlanModelOptions(providerName);
+                    const isPreservedModel = providerName === preservedProvider && scopeModel === preservedModel;
+                    if (!models.includes(scopeModel) && !isPreservedModel) {
+                        return 'Choose a registered model for the selected provider name.';
                     }
                 }
                 const userPathError = this.executionPlanScopeUserPathValidationError(payload.scope_user_path);
@@ -1084,7 +1098,7 @@
 
             epAiLabel(source, runtime) {
                 if (runtime && runtime.provider) return runtime.provider;
-                const provider = source && source.scope && source.scope.scope_provider;
+                const provider = this.executionPlanScopeProviderValue(source && source.scope);
                 return provider || 'AI';
             },
 

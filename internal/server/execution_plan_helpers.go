@@ -139,7 +139,7 @@ func translatedExecutionPlan(
 	selector := core.ExecutionPlanSelector{}
 	if resolution != nil {
 		selector = core.NewExecutionPlanSelector(
-			plan.ProviderType,
+			resolvedWorkflowProviderName(resolution),
 			resolution.ResolvedSelector.Model,
 			core.UserPathFromContext(ctx),
 		)

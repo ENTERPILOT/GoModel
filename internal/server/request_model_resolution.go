@@ -34,6 +34,27 @@ func resolvedProviderName(provider core.RoutableProvider, selector core.ModelSel
 	return fallback
 }
 
+func resolvedWorkflowProviderName(resolution *core.RequestModelResolution) string {
+	if resolution == nil {
+		return ""
+	}
+	if providerName := strings.TrimSpace(resolution.ProviderName); providerName != "" {
+		return providerName
+	}
+	return strings.TrimSpace(resolution.ResolvedSelector.Provider)
+}
+
+func workflowProviderNameForType(provider core.RoutableProvider, providerType string) string {
+	providerType = strings.TrimSpace(providerType)
+	if providerType == "" || provider == nil {
+		return ""
+	}
+	if named, ok := provider.(core.ProviderTypeNameResolver); ok {
+		return strings.TrimSpace(named.GetProviderNameForType(providerType))
+	}
+	return ""
+}
+
 func resolveRequestModel(provider core.RoutableProvider, resolver RequestModelResolver, requested core.RequestedModelSelector) (*core.RequestModelResolution, error) {
 	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
 

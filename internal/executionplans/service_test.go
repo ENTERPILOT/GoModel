@@ -384,6 +384,7 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 	}
 
 	assertMatch("provider+model+path", core.NewExecutionPlanSelector("openai", "gpt-5", "/team/a/user"), "provider-model-path")
+	assertMatch("path beats provider+model", core.NewExecutionPlanSelector("openai", "gpt-5", "/team/user"), "path-team")
 	assertMatch("provider+model", core.NewExecutionPlanSelector("openai", "gpt-5"), "provider-model")
 	assertMatch("path", core.NewExecutionPlanSelector("anthropic", "claude-sonnet-4", "/team/a/user"), "path-team")
 	assertMatch("provider", core.NewExecutionPlanSelector("openai", "gpt-4o"), "provider")
@@ -956,11 +957,8 @@ func TestServiceListViews_AnnotatesCompileFailuresPerRow(t *testing.T) {
 }
 
 func TestViewScopeSpecificity_PathExceedsProvider(t *testing.T) {
-	if got, want := viewScopeSpecificity("path"), 2; got != want {
-		t.Fatalf("viewScopeSpecificity(path) = %d, want %d", got, want)
-	}
-	if got, want := viewScopeSpecificity("provider"), 1; got != want {
-		t.Fatalf("viewScopeSpecificity(provider) = %d, want %d", got, want)
+	if got, provider := viewScopeSpecificity("path"), viewScopeSpecificity("provider"); got <= provider {
+		t.Fatalf("viewScopeSpecificity(path) = %d, want > provider specificity %d", got, provider)
 	}
 }
 

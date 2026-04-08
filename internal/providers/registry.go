@@ -660,6 +660,26 @@ func (r *ModelRegistry) GetProviderName(model string) string {
 	return ""
 }
 
+// GetProviderNameForType returns the first registered configured provider name
+// for the given provider type. This follows the same first-registered behavior
+// used when provider-typed routes resolve a concrete provider instance.
+func (r *ModelRegistry) GetProviderNameForType(providerType string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	providerType = strings.TrimSpace(providerType)
+	if providerType == "" {
+		return ""
+	}
+	for _, provider := range r.providers {
+		if strings.TrimSpace(r.providerTypes[provider]) != providerType {
+			continue
+		}
+		return strings.TrimSpace(r.providerNames[provider])
+	}
+	return ""
+}
+
 // ProviderByType returns the first registered provider for the given provider type.
 // This lookup is independent of discovered models so provider-typed routes keep
 // working even when a provider currently exposes zero models.

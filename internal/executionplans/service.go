@@ -434,36 +434,32 @@ func (s *Service) matchCompiled(selector core.ExecutionPlanSelector) (*CompiledP
 	current := s.snapshot()
 	ancestors := core.UserPathAncestors(selector.UserPath)
 
-	if selector.Provider != "" && selector.Model != "" && len(ancestors) > 0 {
-		if models := current.providerModelPaths[selector.Provider]; models != nil {
-			if paths := models[selector.Model]; paths != nil {
-				for _, userPath := range ancestors {
+	if len(ancestors) > 0 {
+		for _, userPath := range ancestors {
+			if selector.Provider != "" && selector.Model != "" {
+				if models := current.providerModelPaths[selector.Provider]; models != nil {
+					if paths := models[selector.Model]; paths != nil {
+						if compiled := paths[userPath]; compiled != nil {
+							return compiled, nil
+						}
+					}
+				}
+			}
+			if selector.Provider != "" {
+				if paths := current.providerPaths[selector.Provider]; paths != nil {
 					if compiled := paths[userPath]; compiled != nil {
 						return compiled, nil
 					}
 				}
+			}
+			if compiled := current.paths[userPath]; compiled != nil {
+				return compiled, nil
 			}
 		}
 	}
 	if selector.Provider != "" && selector.Model != "" {
 		if models := current.providerModels[selector.Provider]; models != nil {
 			if compiled := models[selector.Model]; compiled != nil {
-				return compiled, nil
-			}
-		}
-	}
-	if selector.Provider != "" && len(ancestors) > 0 {
-		if paths := current.providerPaths[selector.Provider]; paths != nil {
-			for _, userPath := range ancestors {
-				if compiled := paths[userPath]; compiled != nil {
-					return compiled, nil
-				}
-			}
-		}
-	}
-	if len(ancestors) > 0 {
-		for _, userPath := range ancestors {
-			if compiled := current.paths[userPath]; compiled != nil {
 				return compiled, nil
 			}
 		}
@@ -624,13 +620,13 @@ func viewScopeSpecificity(scopeType string) int {
 	switch strings.TrimSpace(scopeType) {
 	case "global":
 		return 0
-	case "path":
-		return 2
 	case "provider":
 		return 1
-	case "provider_path":
-		return 3
 	case "provider_model":
+		return 2
+	case "path":
+		return 3
+	case "provider_path":
 		return 4
 	default:
 		return 5

@@ -70,6 +70,7 @@ func CapabilitiesForEndpoint(desc EndpointDescriptor) CapabilitySet {
 // ExecutionPlanSelector contains the request facts used to match one persisted
 // execution-plan version.
 type ExecutionPlanSelector struct {
+	// Provider is the configured provider instance name used for workflow matching.
 	Provider string
 	Model    string
 	UserPath string
@@ -125,8 +126,9 @@ func DefaultExecutionFeatures() ExecutionFeatures {
 // ResolvedExecutionPolicy is the request-scoped runtime projection of one
 // matched persisted execution-plan version.
 type ResolvedExecutionPolicy struct {
-	VersionID      string
-	Version        int
+	VersionID string
+	Version   int
+	// ScopeProvider is the configured provider instance name stored on the matched workflow.
 	ScopeProvider  string
 	ScopeModel     string
 	ScopeUserPath  string

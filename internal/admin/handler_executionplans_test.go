@@ -456,7 +456,7 @@ func TestCreateExecutionPlan_NormalizesScopeUserPath(t *testing.T) {
 	e := echo.New()
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{
-		"scope_provider":"openai",
+		"scope_provider_name":"openai",
 		"scope_model":"gpt-5",
 		"scope_user_path":" team//alpha/user/ ",
 		"name":"Scoped workflow",
@@ -770,7 +770,7 @@ func TestCreateExecutionPlanRejectsUnknownProviderOrModelScope(t *testing.T) {
 					"guardrails":[]
 				}
 			}`,
-			wantMessage: "unknown provider type: anthropic",
+			wantMessage: "unknown provider name: anthropic",
 		},
 		{
 			name: "unknown model for provider",
@@ -784,7 +784,7 @@ func TestCreateExecutionPlanRejectsUnknownProviderOrModelScope(t *testing.T) {
 					"guardrails":[]
 				}
 			}`,
-			wantMessage: "unknown model for provider openai: gpt-4o-mini",
+			wantMessage: "unknown model for provider name openai: gpt-4o-mini",
 		},
 	}
 

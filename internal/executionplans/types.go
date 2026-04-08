@@ -14,10 +14,44 @@ import (
 const currentSchemaVersion = 1
 
 // Scope identifies the request selector a persisted execution plan applies to.
+// Provider stores the configured provider instance name, not the provider type.
 type Scope struct {
-	Provider string `json:"scope_provider,omitempty" bson:"scope_provider,omitempty"`
+	Provider string `json:"-" bson:"scope_provider,omitempty"`
 	Model    string `json:"scope_model,omitempty" bson:"scope_model,omitempty"`
 	UserPath string `json:"scope_user_path,omitempty" bson:"scope_user_path,omitempty"`
+}
+
+type scopeJSON struct {
+	ProviderName   string `json:"scope_provider_name,omitempty"`
+	LegacyProvider string `json:"scope_provider,omitempty"`
+	Model          string `json:"scope_model,omitempty"`
+	UserPath       string `json:"scope_user_path,omitempty"`
+}
+
+func (s Scope) MarshalJSON() ([]byte, error) {
+	return json.Marshal(scopeJSON{
+		ProviderName: strings.TrimSpace(s.Provider),
+		Model:        strings.TrimSpace(s.Model),
+		UserPath:     strings.TrimSpace(s.UserPath),
+	})
+}
+
+func (s *Scope) UnmarshalJSON(data []byte) error {
+	if s == nil {
+		return nil
+	}
+	var raw scopeJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	providerName := strings.TrimSpace(raw.ProviderName)
+	if providerName == "" {
+		providerName = strings.TrimSpace(raw.LegacyProvider)
+	}
+	s.Provider = providerName
+	s.Model = strings.TrimSpace(raw.Model)
+	s.UserPath = strings.TrimSpace(raw.UserPath)
+	return nil
 }
 
 // Payload is the immutable persisted execution-plan JSON document.
@@ -100,7 +134,7 @@ func normalizeScope(scope Scope) (Scope, string, error) {
 	}
 	scope.UserPath = userPath
 	if scope.Provider == "" && scope.Model != "" {
-		return Scope{}, "", newValidationError("scope_model requires scope_provider", nil)
+		return Scope{}, "", newValidationError("scope_model requires scope_provider_name", nil)
 	}
 	if strings.Contains(scope.Provider, ":") || strings.Contains(scope.Model, ":") || strings.Contains(scope.UserPath, ":") {
 		return Scope{}, "", newValidationError("scope fields cannot contain ':'", nil)

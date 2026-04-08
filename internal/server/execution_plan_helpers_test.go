@@ -58,6 +58,6 @@ func TestEnsureTranslatedRequestPlan_CompletesPartialPlanFromDecodedSelector(t *
 		}
 	}
 	assert.Equal(t, "gpt-4o-mini", entry.RequestedModel)
-	assert.Equal(t, "gpt-4o-mini", entry.ResolvedModel)
+	assert.Equal(t, "mock/gpt-4o-mini", entry.ResolvedModel)
 	assert.Equal(t, "mock", entry.Provider)
 }

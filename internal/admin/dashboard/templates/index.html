@@ -1072,7 +1072,7 @@
     <div class="page-header">
         <div>
             <h2>Workflows</h2>
-            <p class="execution-plan-page-note">Active workflows are matched with most-specific-wins precedence: provider + model, then provider, then global.</p>
+            <p class="execution-plan-page-note">Active workflows are matched path-first: deepest user path wins first, then provider name and model specificity, then broader matches, then global.</p>
         </div>
         <div class="page-header-controls">
             <button type="button" class="pagination-btn pagination-btn-primary" x-show="executionPlansAvailable" @click="openExecutionPlanCreate()">New Workflow</button>
@@ -1111,11 +1111,11 @@
 
                 <div class="alias-form-grid">
                     <label class="alias-form-field">
-                        <span>Provider</span>
+                        <span>Provider Name</span>
                         <select class="usage-log-select execution-plan-input" x-model="executionPlanForm.scope_provider" @change="setExecutionPlanProvider(executionPlanForm.scope_provider)">
                             <option value="">All providers and models</option>
-                            <template x-for="providerType in executionPlanProviderOptions()" :key="providerType">
-                                <option :value="providerType" x-text="providerType"></option>
+                            <template x-for="providerName in executionPlanProviderOptions()" :key="providerName">
+                                <option :value="providerName" x-text="providerName"></option>
                             </template>
                         </select>
                     </label>
@@ -1141,8 +1141,8 @@
                     </label>
                 </div>
 
-                <p class="alias-form-hint">Leave provider empty to target all providers and models. Select a provider without a model to target all models for that provider.</p>
-                <p class="alias-form-hint">Add a path to scope the workflow to that subtree. Leading slashes are optional and will be normalized; you can enter &quot;team/alpha&quot; or &quot;/team/alpha&quot;. Matching falls back from the deepest path toward the root.</p>
+                <p class="alias-form-hint">Leave provider name empty to target all providers and models. Select a provider name without a model to target all models for that configured provider.</p>
+                <p class="alias-form-hint">Add a path to scope the workflow to that subtree. Leading slashes are optional and will be normalized; you can enter &quot;team/alpha&quot; or &quot;/team/alpha&quot;. Matching checks the deepest user path first, then falls back toward the root.</p>
                 <p class="alias-form-hint">If you leave the name empty, the workflow will display as the matched provider/model scope or “All models”.</p>
 
                 <label class="alias-form-field">

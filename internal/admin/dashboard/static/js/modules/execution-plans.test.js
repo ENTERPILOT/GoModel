@@ -48,7 +48,7 @@ function createTimerHarness() {
     };
 }
 
-test('executionPlanProviderOptions returns unique sorted provider types', () => {
+test('executionPlanProviderOptions returns unique sorted provider names', () => {
     const module = createExecutionPlansModule();
     module.models = [
         { provider_type: 'anthropic', model: { id: 'claude-3-7' } },
@@ -95,7 +95,7 @@ test('executionPlanPreview mirrors the draft workflow card state from the editor
             scope_type: 'provider_model',
             scope_display: 'openai/gpt-5',
             scope: {
-                scope_provider: 'openai',
+                scope_provider_name: 'openai',
                 scope_model: 'gpt-5'
             },
             name: 'Draft workflow',
@@ -142,7 +142,7 @@ test('executionPlanPreview renders path-scoped draft labels using canonical scop
             scope_type: 'provider_model_path',
             scope_display: 'openai/gpt-5 @ /team/alpha',
             scope: {
-                scope_provider: 'openai',
+                scope_provider_name: 'openai',
                 scope_model: 'gpt-5',
                 scope_user_path: '/team/alpha'
             },
@@ -642,7 +642,7 @@ test('buildExecutionPlanRequest emits provider-model payload and strips guardrai
     assert.equal(
         JSON.stringify(module.buildExecutionPlanRequest()),
         JSON.stringify({
-            scope_provider: 'openai',
+            scope_provider_name: 'openai',
             scope_model: 'gpt-5',
             scope_user_path: '/team/alpha',
             name: 'OpenAI GPT-5',
@@ -807,7 +807,7 @@ test('editing a cloned workflow preserves retired provider and model options', (
     invalidPayload.scope_model = 'different-retired-model';
     assert.equal(
         module.validateExecutionPlanRequest(invalidPayload),
-        'Choose a registered model for the selected provider.'
+        'Choose a registered model for the selected provider name.'
     );
 });
 
@@ -1215,7 +1215,7 @@ test('buildExecutionPlanRequest clamps globally disabled workflow features off e
     assert.equal(
         JSON.stringify(module.buildExecutionPlanRequest()),
         JSON.stringify({
-            scope_provider: 'openai',
+            scope_provider_name: 'openai',
             scope_model: 'gpt-5',
             name: 'OpenAI GPT-5',
             description: 'Globally disabled features should be forced off',
@@ -1401,7 +1401,7 @@ test('validateExecutionPlanRequest rejects unregistered provider-model selection
                 guardrails: []
             }
         }),
-        'Choose a registered provider.'
+        'Choose a registered provider name.'
     );
 
     assert.equal(
@@ -1414,7 +1414,7 @@ test('validateExecutionPlanRequest rejects unregistered provider-model selection
                 guardrails: []
             }
         }),
-        'Choose a registered model for the selected provider.'
+        'Choose a registered model for the selected provider name.'
     );
 });
 

@@ -123,7 +123,7 @@ Returns an empty array if usage tracking is disabled or no data exists for the p
 
 ### GET /admin/api/v1/models
 
-Returns all registered models with their provider type.
+Returns all registered models with both provider type and configured provider name.
 
 **Response:**
 
@@ -136,7 +136,9 @@ Returns all registered models with their provider type.
       "created": 1715367049,
       "owned_by": "system"
     },
-    "provider_type": "openai"
+    "provider_type": "openai",
+    "provider_name": "openai_primary",
+    "selector": "openai_primary/gpt-4o"
   },
   {
     "model": {
@@ -145,12 +147,14 @@ Returns all registered models with their provider type.
       "created": 1727568000,
       "owned_by": "system"
     },
-    "provider_type": "anthropic"
+    "provider_type": "anthropic",
+    "provider_name": "anthropic_main",
+    "selector": "anthropic_main/claude-sonnet-4-5-20250929"
   }
 ]
 ```
 
-This differs from the standard `/v1/models` endpoint: the admin version includes `provider_type` for each model, making it useful for understanding which provider serves which model.
+This differs from the standard `/v1/models` endpoint: the admin version includes both `provider_type` and `provider_name` for each model, making it useful for understanding both the provider family and the concrete configured provider instance that serves the model.
 
 ## Admin Dashboard
 

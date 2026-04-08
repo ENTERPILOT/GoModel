@@ -534,6 +534,15 @@ func (r *Router) GetProviderName(model string) string {
 	return ""
 }
 
+// GetProviderNameForType returns the concrete configured provider instance name
+// chosen for a provider-typed route.
+func (r *Router) GetProviderNameForType(providerType string) string {
+	if named, ok := r.lookup.(core.ProviderTypeNameResolver); ok {
+		return strings.TrimSpace(named.GetProviderNameForType(providerType))
+	}
+	return ""
+}
+
 func (r *Router) providerByType(providerType string) core.Provider {
 	models := r.lookup.ListModels()
 	for _, model := range models {

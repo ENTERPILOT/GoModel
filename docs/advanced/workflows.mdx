@@ -1,0 +1,124 @@
+---
+title: "Workflows"
+description: "How workflow matching works, including user_path-first precedence and provider-name scoping."
+---
+
+## Overview
+
+Workflows are immutable execution-policy versions stored in the gateway and matched per request.
+
+They currently control gateway-owned behavior such as:
+
+- cache
+- audit logging
+- usage tracking
+- guardrails
+- translated-route fallback
+
+Each request matches exactly one active workflow.
+
+## Scope Fields
+
+Workflow scope is defined by these fields:
+
+- `scope_provider_name`
+- `scope_model`
+- `scope_user_path`
+
+`scope_provider_name` is the configured provider instance name, not the provider type.
+
+Examples:
+
+- provider type: `openai`
+- provider name: `openai_primary`
+
+If you have multiple configured providers of the same type, workflows can target them independently by provider name.
+
+## Matching Precedence
+
+Workflow matching is user-path first.
+
+For a request with `user_path=/team/team1/user`, the gateway checks path-scoped candidates from deepest to root first:
+
+1. `provider_name + model + /team/team1/user`
+2. `provider_name + /team/team1/user`
+3. `/team/team1/user`
+4. `provider_name + model + /team/team1`
+5. `provider_name + /team/team1`
+6. `/team/team1`
+7. `provider_name + model + /team`
+8. `provider_name + /team`
+9. `/team`
+10. `provider_name + model + /`
+11. `provider_name + /`
+12. `/`
+13. `provider_name + model`
+14. `provider_name`
+15. `global`
+
+In practice:
+
+- a deeper `user_path` workflow beats a broader provider-only or provider+model workflow
+- within the same path depth, provider+model is more specific than provider-only
+- if no path-scoped workflow matches, the gateway falls back to provider+model, then provider, then global
+
+## Examples
+
+### Path Inheritance
+
+If you have:
+
+- workflow A: `scope_user_path=/team`
+- workflow B: `scope_user_path=/team/team1`
+
+and the API key uses `user_path=/team/team1/user`, workflow B wins.
+
+If workflow B does not exist, workflow A wins.
+
+### Provider-Name Scoping
+
+If you have two OpenAI providers:
+
+- `openai_primary`
+- `openai_backup`
+
+you can create separate workflows for:
+
+- `scope_provider_name=openai_primary`
+- `scope_provider_name=openai_backup`
+
+Even though both have provider type `openai`, they are different workflow scopes.
+
+## API Example
+
+Create a workflow scoped to one configured provider name, one model, and one user-path subtree:
+
+```bash
+curl -X POST http://localhost:8080/admin/api/v1/execution-plans \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope_provider_name": "openai_primary",
+    "scope_model": "gpt-5",
+    "scope_user_path": "/team/alpha",
+    "name": "team-alpha-openai-primary",
+    "description": "Disable cache for this tenant on the primary OpenAI provider",
+    "plan_payload": {
+      "schema_version": 1,
+      "features": {
+        "cache": false,
+        "audit": true,
+        "usage": true,
+        "guardrails": false,
+        "fallback": true
+      },
+      "guardrails": []
+    }
+  }'
+```
+
+## Notes
+
+- `scope_model` requires `scope_provider_name`
+- `scope_user_path` is normalized to canonical slash form
+- managed API keys can override the request `X-GoModel-User-Path`; workflow matching uses the effective request user path

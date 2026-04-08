@@ -395,6 +395,9 @@ func (m *mockProvider) GetProviderType(model string) string {
 		if providerType, ok := m.providerTypes[model]; ok {
 			return providerType
 		}
+		if providerType, ok := inferQualifiedProviderValue(m.providerTypes, model); ok {
+			return providerType
+		}
 	}
 	if m.Supports(model) {
 		return "mock"
@@ -417,8 +420,59 @@ func (m *mockProvider) GetProviderName(model string) string {
 		if providerName, ok := m.providerNames[model]; ok {
 			return providerName
 		}
+		if providerName, ok := inferQualifiedProviderValue(m.providerNames, model); ok {
+			return providerName
+		}
+	}
+	if providerType := m.GetProviderType(model); providerType != "" {
+		return providerType
+	}
+	if m.Supports(model) {
+		return "mock"
 	}
 	return ""
+}
+
+func (m *mockProvider) GetProviderNameForType(providerType string) string {
+	providerType = strings.TrimSpace(providerType)
+	if providerType == "" {
+		return ""
+	}
+	if len(m.providerNames) == 0 {
+		return providerType
+	}
+	for qualifiedModel, providerName := range m.providerNames {
+		if providerName == "" {
+			continue
+		}
+		if strings.TrimSpace(m.providerTypes[qualifiedModel]) == providerType {
+			return providerName
+		}
+	}
+	return providerType
+}
+
+func inferQualifiedProviderValue(values map[string]string, model string) (string, bool) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "", false
+	}
+
+	match := ""
+	for qualifiedModel, value := range values {
+		selector, err := core.ParseModelSelector(qualifiedModel, "")
+		if err != nil || selector.Provider == "" || selector.Model != model || strings.TrimSpace(value) == "" {
+			continue
+		}
+		if match != "" && match != value {
+			return "", false
+		}
+		match = value
+	}
+	if match == "" {
+		return "", false
+	}
+	return match, true
 }
 
 func (m *mockProvider) NativeFileProviderTypes() []string {

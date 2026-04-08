@@ -95,7 +95,12 @@ func deriveExecutionPlanWithPolicy(
 		plan.Mode = core.ExecutionModePassthrough
 		plan.ProviderType = providerType
 		plan.Passthrough = passthrough
-		if err := applyExecutionPolicy(c.Request().Context(), plan, policyResolver, core.NewExecutionPlanSelector(providerType, passthrough.Model, userPath)); err != nil {
+		if err := applyExecutionPolicy(
+			c.Request().Context(),
+			plan,
+			policyResolver,
+			core.NewExecutionPlanSelector(workflowProviderNameForType(provider, providerType), passthrough.Model, userPath),
+		); err != nil {
 			return nil, err
 		}
 		return plan, nil
