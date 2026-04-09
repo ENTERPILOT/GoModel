@@ -425,6 +425,55 @@ func TestExecutionPlanning_StoresPassthroughRouteInfo(t *testing.T) {
 	}
 }
 
+func TestExecutionPlanning_PassthroughProviderNameRouteUsesCanonicalProviderNameForPolicy(t *testing.T) {
+	provider := &mockProvider{
+		providerTypes: map[string]string{
+			"openai_test/gpt-5-mini": "openai",
+		},
+		providerNames: map[string]string{
+			"openai_test/gpt-5-mini": "openai_test",
+		},
+	}
+
+	e := echo.New()
+	var capturedSelector core.ExecutionPlanSelector
+	var capturedPlan *core.ExecutionPlan
+
+	policyResolver := &staticExecutionPolicyResolver{
+		match: func(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+			capturedSelector = selector
+			return &core.ResolvedExecutionPolicy{
+				VersionID: "plan-passthrough-v1",
+				Version:   1,
+				Name:      "passthrough",
+				Features:  core.DefaultExecutionFeatures(),
+			}, nil
+		},
+	}
+
+	middleware := RequestSnapshotCapture()
+	handler := middleware(ExecutionPlanningWithResolverAndPolicy(provider, nil, policyResolver)(func(c *echo.Context) error {
+		capturedPlan = core.GetExecutionPlan(c.Request().Context())
+		return c.String(http.StatusOK, "ok")
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/p/openai_test/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, "openai_test", capturedSelector.Provider)
+	assert.Equal(t, "gpt-5-mini", capturedSelector.Model)
+	if assert.NotNil(t, capturedPlan) {
+		assert.Equal(t, "openai", capturedPlan.ProviderType)
+		if assert.NotNil(t, capturedPlan.Passthrough) {
+			assert.Equal(t, "openai", capturedPlan.Passthrough.Provider)
+		}
+	}
+}
+
 func TestExecutionPlanning_PopulatesPassthroughProviderFromPathFallback(t *testing.T) {
 	provider := &mockProvider{}
 

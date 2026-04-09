@@ -11,6 +11,11 @@ type ExposedModelLister interface {
 	ExposedModels() []core.Model
 }
 
+// FilteredExposedModelLister optionally filters exposed models using their concrete targets.
+type FilteredExposedModelLister interface {
+	ExposedModelsFiltered(allow func(core.ModelSelector) bool) []core.Model
+}
+
 func mergeExposedModelsResponse(base *core.ModelsResponse, exposed []core.Model) *core.ModelsResponse {
 	if base == nil {
 		base = &core.ModelsResponse{Object: "list", Data: []core.Model{}}

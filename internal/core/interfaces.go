@@ -116,6 +116,13 @@ type ProviderTypeNameResolver interface {
 	GetProviderNameForType(providerType string) string
 }
 
+// ProviderNameTypeResolver is an optional interface for components that can map
+// a concrete configured provider instance name such as "openai_primary" back to
+// its provider type, such as "openai".
+type ProviderNameTypeResolver interface {
+	GetProviderTypeForName(providerName string) string
+}
+
 // AvailabilityChecker is an optional interface for providers that need
 // to verify service availability before registration.
 type AvailabilityChecker interface {

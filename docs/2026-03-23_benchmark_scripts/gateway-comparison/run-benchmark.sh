@@ -231,7 +231,6 @@ LOGGING_ENABLED=false \
 USAGE_ENABLED=false \
 STORAGE_TYPE=sqlite \
 SQLITE_PATH="/tmp/gomodel-bench.db" \
-CACHE_TYPE=local \
 GOMODEL_CACHE_DIR="/tmp/gomodel-bench-cache" \
 ADMIN_ENDPOINTS_ENABLED=false \
 ADMIN_UI_ENABLED=false \

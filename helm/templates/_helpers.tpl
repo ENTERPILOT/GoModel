@@ -85,17 +85,6 @@ Determine the Redis URL - either from values or auto-generated for subchart
 {{- end }}
 
 {{/*
-Determine the cache type - auto-set to redis if subchart is enabled
-*/}}
-{{- define "gomodel.cacheType" -}}
-{{- if .Values.redis.enabled }}
-{{- "redis" }}
-{{- else }}
-{{- .Values.cache.type }}
-{{- end }}
-{{- end }}
-
-{{/*
 Create the image reference
 */}}
 {{- define "gomodel.image" -}}

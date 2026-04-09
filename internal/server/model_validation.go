@@ -80,18 +80,16 @@ func deriveExecutionPlanWithPolicy(
 	switch desc.Operation {
 	case core.OperationProviderPassthrough:
 		passthrough := passthroughRouteInfo(c)
-		providerType, ok := providerPassthroughType(c)
+		providerType, providerName, ok := providerPassthroughType(c, provider)
 		if !ok {
 			return nil, nil
 		}
 		if passthrough == nil {
 			passthrough = &core.PassthroughRouteInfo{}
 		}
-		if strings.TrimSpace(passthrough.Provider) == "" {
-			cloned := *passthrough
-			cloned.Provider = providerType
-			passthrough = &cloned
-		}
+		cloned := *passthrough
+		cloned.Provider = providerType
+		passthrough = &cloned
 		plan.Mode = core.ExecutionModePassthrough
 		plan.ProviderType = providerType
 		plan.Passthrough = passthrough
@@ -99,7 +97,7 @@ func deriveExecutionPlanWithPolicy(
 			c.Request().Context(),
 			plan,
 			policyResolver,
-			core.NewExecutionPlanSelector(workflowProviderNameForType(provider, providerType), passthrough.Model, userPath),
+			core.NewExecutionPlanSelector(providerName, passthrough.Model, userPath),
 		); err != nil {
 			return nil, err
 		}
@@ -215,23 +213,26 @@ func selectorHintValueAllowed(result gjson.Result) bool {
 	return result.Type == gjson.String || result.Type == gjson.Null
 }
 
-func providerPassthroughType(c *echo.Context) (string, bool) {
+func providerPassthroughType(c *echo.Context, provider core.RoutableProvider) (string, string, bool) {
 	if info := passthroughRouteInfo(c); info != nil {
-		providerType := strings.TrimSpace(info.Provider)
-		if providerType != "" {
-			return providerType, true
+		resolved := resolvePassthroughProvider(provider, info.Provider)
+		if providerType := strings.TrimSpace(resolved.ProviderType); providerType != "" {
+			return providerType, strings.TrimSpace(resolved.ProviderName), true
 		}
 	}
 	if env := core.GetWhiteBoxPrompt(c.Request().Context()); env != nil && env.OperationType == string(core.OperationProviderPassthrough) {
-		providerType := strings.TrimSpace(env.RouteHints.Provider)
-		if providerType != "" {
-			return providerType, true
+		resolved := resolvePassthroughProvider(provider, env.RouteHints.Provider)
+		if providerType := strings.TrimSpace(resolved.ProviderType); providerType != "" {
+			return providerType, strings.TrimSpace(resolved.ProviderName), true
 		}
 	}
-	if providerType, _, ok := core.ParseProviderPassthroughPath(c.Request().URL.Path); ok {
-		return providerType, true
+	if routeProvider, _, ok := core.ParseProviderPassthroughPath(c.Request().URL.Path); ok {
+		resolved := resolvePassthroughProvider(provider, routeProvider)
+		if providerType := strings.TrimSpace(resolved.ProviderType); providerType != "" {
+			return providerType, strings.TrimSpace(resolved.ProviderName), true
+		}
 	}
-	return "", false
+	return "", "", false
 }
 
 func passthroughRouteInfo(c *echo.Context) *core.PassthroughRouteInfo {

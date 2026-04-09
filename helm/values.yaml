@@ -91,12 +91,10 @@ providers:
 
 # Cache configuration
 cache:
-  # -- Cache type: "local" or "redis"
-  type: "redis"
-
   redis:
     # -- Redis connection URL (e.g., "redis://redis:6379")
-    # If redis.enabled is true, this is auto-configured to use the subchart
+    # If redis.enabled is true, this is auto-configured to use the subchart.
+    # Set this explicitly to use an external Redis instance instead.
     url: ""
     # -- Redis key prefix for storing the model cache
     keyModels: "gomodel:models"

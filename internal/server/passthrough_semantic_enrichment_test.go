@@ -40,7 +40,7 @@ func TestPassthroughSemanticEnrichment_EnrichesPromptBeforePlanning(t *testing.T
 	c := e.NewContext(req, rec)
 
 	var capturedPlan *core.ExecutionPlan
-	handler := PassthroughSemanticEnrichment([]core.PassthroughSemanticEnricher{
+	handler := PassthroughSemanticEnrichment(provider, []core.PassthroughSemanticEnricher{
 		passthroughSemanticEnricherStub{providerType: "openai"},
 	}, true)(ExecutionPlanning(provider)(func(c *echo.Context) error {
 		capturedPlan = core.GetExecutionPlan(c.Request().Context())

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	"gomodel/internal/core"
@@ -34,6 +35,20 @@ func (p *canonicalizingProvider) GetProviderType(model string) string {
 
 func (p *canonicalizingProvider) GetProviderName(model string) string {
 	return p.names[model]
+}
+
+func (p *canonicalizingProvider) GetProviderTypeForName(providerName string) string {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return ""
+	}
+	for qualifiedModel, candidate := range p.names {
+		if strings.TrimSpace(candidate) != providerName {
+			continue
+		}
+		return strings.TrimSpace(p.types[qualifiedModel])
+	}
+	return ""
 }
 
 func (p *canonicalizingProvider) ChatCompletion(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {

@@ -17,6 +17,18 @@ func ensureTranslatedRequestPlan(
 	model,
 	providerHint *string,
 ) (*core.ExecutionPlan, error) {
+	return ensureTranslatedRequestPlanWithAuthorizer(c, provider, resolver, nil, policyResolver, model, providerHint)
+}
+
+func ensureTranslatedRequestPlanWithAuthorizer(
+	c *echo.Context,
+	provider core.RoutableProvider,
+	resolver RequestModelResolver,
+	authorizer RequestModelAuthorizer,
+	policyResolver RequestExecutionPolicyResolver,
+	model,
+	providerHint *string,
+) (*core.ExecutionPlan, error) {
 	if model == nil || providerHint == nil {
 		return nil, core.NewInvalidRequestError("model selector targets are required", nil)
 	}
@@ -27,8 +39,13 @@ func ensureTranslatedRequestPlan(
 	}
 
 	resolution := translatedPlanResolution(plan)
+	if resolution != nil && authorizer != nil {
+		if err := authorizer.ValidateModelAccess(c.Request().Context(), resolution.ResolvedSelector); err != nil {
+			return nil, err
+		}
+	}
 	if resolution == nil {
-		resolution, err = resolveAndStoreRequestModelResolution(c, provider, resolver, *model, *providerHint)
+		resolution, err = resolveAndStoreRequestModelResolution(c, provider, resolver, authorizer, *model, *providerHint)
 		if err != nil {
 			return nil, err
 		}

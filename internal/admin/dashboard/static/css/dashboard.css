@@ -1199,6 +1199,34 @@ td.col-price {
     color: var(--text-muted);
 }
 
+.model-access-state-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.model-access-state-badge.is-enabled {
+    border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+    color: color-mix(in srgb, var(--success) 70%, var(--text));
+}
+
+.model-access-state-badge.is-restricted {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    color: color-mix(in srgb, var(--accent) 70%, var(--text));
+}
+
+.model-access-state-badge.is-disabled {
+    border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+    color: color-mix(in srgb, var(--danger) 70%, var(--text));
+}
+
 .data-table tr.alias-row.is-valid td {
     background: var(--alias-row-valid-bg);
 }
@@ -1231,6 +1259,14 @@ td.col-price {
 
 .data-table tr.masked-model-row:hover td {
     opacity: 0.72;
+}
+
+.data-table tr.model-access-disabled-row td {
+    background: color-mix(in srgb, var(--danger) 6%, var(--bg-surface));
+}
+
+.data-table tr.model-access-disabled-row:hover td {
+    background: color-mix(in srgb, var(--danger) 10%, var(--bg-surface-hover));
 }
 
 /* Execution Plans */

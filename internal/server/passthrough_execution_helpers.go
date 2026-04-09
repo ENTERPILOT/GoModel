@@ -8,7 +8,7 @@ import (
 	"gomodel/internal/core"
 )
 
-func passthroughExecutionTarget(c *echo.Context, allowPassthroughV1Alias bool) (string, string, *core.PassthroughRouteInfo, error) {
+func passthroughExecutionTarget(c *echo.Context, provider core.RoutableProvider, allowPassthroughV1Alias bool) (string, string, *core.PassthroughRouteInfo, error) {
 	if c == nil {
 		return "", "", nil, core.NewInvalidRequestError("invalid provider passthrough path", nil)
 	}
@@ -18,7 +18,7 @@ func passthroughExecutionTarget(c *echo.Context, allowPassthroughV1Alias bool) (
 		return "", "", nil, core.NewInvalidRequestError("invalid provider passthrough path", nil)
 	}
 
-	providerType := strings.TrimSpace(info.Provider)
+	providerType := strings.TrimSpace(resolvePassthroughProvider(provider, info.Provider).ProviderType)
 	if providerType == "" {
 		if plan := core.GetExecutionPlan(c.Request().Context()); plan != nil {
 			providerType = strings.TrimSpace(plan.ProviderType)

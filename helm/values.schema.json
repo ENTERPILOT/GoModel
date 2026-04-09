@@ -30,33 +30,6 @@
     {
       "if": {
         "properties": {
-          "cache": {
-            "properties": { "type": { "const": "redis" } }
-          },
-          "redis": {
-            "properties": { "enabled": { "const": false } }
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "cache": {
-            "properties": {
-              "redis": {
-                "properties": {
-                  "url": { "minLength": 1 }
-                },
-                "required": ["url"]
-              }
-            },
-            "required": ["redis"]
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
           "providers": {
             "properties": {
               "oracle": {
@@ -262,10 +235,6 @@
     "cache": {
       "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "enum": ["local", "redis"]
-        },
         "redis": {
           "type": "object",
           "properties": {

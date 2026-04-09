@@ -3,6 +3,7 @@
         return {
             aliases: [],
             aliasesAvailable: true,
+            modelOverridesAvailable: true,
             displayModels: [],
             aliasLoading: false,
             aliasError: '',
@@ -20,6 +21,20 @@
                 description: '',
                 enabled: true
             },
+            modelOverrideFormOpen: false,
+            modelOverrideSubmitting: false,
+            modelOverrideError: '',
+            modelOverrideNotice: '',
+            modelOverrideFormHasExistingOverride: false,
+            modelOverrideFormDefaultEnabled: true,
+            modelOverrideFormEffectiveEnabled: true,
+            modelOverrideFormDisplayName: '',
+            modelOverrideForm: {
+                selector: '',
+                enabled: false,
+                force_disabled: false,
+                allowed_only_for_user_paths: ''
+            },
 
             buildDisplayModels() {
                 const rows = this.models.map((model) => ({
@@ -31,6 +46,7 @@
                     model: model.model,
                     is_alias: false,
                     alias: null,
+                    access: model && model.access ? model.access : null,
                     kind_badge: '',
                     masking_alias: null,
                     alias_state_class: '',
@@ -79,6 +95,7 @@
                         model: targetModel ? targetModel.model : { id: alias.name, object: 'model' },
                         is_alias: true,
                         alias,
+                        access: null,
                         kind_badge: 'Alias',
                         masking_alias: null,
                         alias_state_class: this.aliasStateClass(alias),
@@ -187,6 +204,9 @@
                 if (!row.is_alias && row.masking_alias) {
                     classes.push('masked-model-row');
                 }
+                if (!row.is_alias && row.access && row.access.effective_enabled === false) {
+                    classes.push('model-access-disabled-row');
+                }
                 return classes.join(' ');
             },
 
@@ -236,6 +256,59 @@
                 this.aliasForm = this.defaultAliasForm();
             },
 
+            defaultModelOverrideForm() {
+                return {
+                    selector: '',
+                    enabled: false,
+                    force_disabled: false,
+                    allowed_only_for_user_paths: ''
+                };
+            },
+
+            normalizeModelOverridePaths(raw) {
+                return String(raw || '')
+                    .split(/\r?\n|,/)
+                    .map((value) => String(value || '').trim())
+                    .filter(Boolean);
+            },
+
+            openModelOverrideEdit(row) {
+                if (!row || row.is_alias) {
+                    return;
+                }
+
+                const access = row.access || {};
+                const override = access.override || null;
+                const allowedPaths = override && Array.isArray(override.allowed_only_for_user_paths)
+                    ? override.allowed_only_for_user_paths
+                    : (Array.isArray(access.allowed_only_for_user_paths) ? access.allowed_only_for_user_paths : []);
+
+                this.modelOverrideFormOpen = true;
+                this.modelOverrideError = '';
+                this.modelOverrideNotice = '';
+                this.modelOverrideFormHasExistingOverride = Boolean(override);
+                this.modelOverrideFormDefaultEnabled = access.default_enabled !== false;
+                this.modelOverrideFormEffectiveEnabled = access.effective_enabled !== false;
+                this.modelOverrideFormDisplayName = row.display_name || this.qualifiedModelName(row) || '';
+                this.modelOverrideForm = {
+                    selector: access.selector || this.qualifiedModelName(row),
+                    enabled: Boolean(override && override.enabled === true),
+                    force_disabled: Boolean(override && override.force_disabled),
+                    allowed_only_for_user_paths: allowedPaths.join('\n')
+                };
+            },
+
+            closeModelOverrideForm() {
+                this.modelOverrideFormOpen = false;
+                this.modelOverrideSubmitting = false;
+                this.modelOverrideError = '';
+                this.modelOverrideFormHasExistingOverride = false;
+                this.modelOverrideFormDefaultEnabled = true;
+                this.modelOverrideFormEffectiveEnabled = true;
+                this.modelOverrideFormDisplayName = '';
+                this.modelOverrideForm = this.defaultModelOverrideForm();
+            },
+
             async aliasResponseMessage(res, fallback) {
                 try {
                     const payload = await res.json();
@@ -265,6 +338,52 @@
                 if (alias.enabled === false) return 'Disabled';
                 if (!alias.valid) return 'Invalid';
                 return 'Active';
+            },
+
+            modelAccessStateText(access) {
+                if (!access) return 'Default';
+                if (access.force_disabled) return 'Force Disabled';
+                if (access.effective_enabled === false) {
+                    return access.default_enabled === false ? 'Disabled by Default' : 'Disabled';
+                }
+                if (access.override && access.override.enabled === true && access.default_enabled === false) {
+                    return 'Explicitly Enabled';
+                }
+                if (Array.isArray(access.allowed_only_for_user_paths) && access.allowed_only_for_user_paths.length > 0) {
+                    return 'Restricted';
+                }
+                return 'Enabled';
+            },
+
+            modelAccessStateClass(access) {
+                if (!access) return '';
+                if (access.force_disabled || access.effective_enabled === false) return 'is-disabled';
+                if (Array.isArray(access.allowed_only_for_user_paths) && access.allowed_only_for_user_paths.length > 0) {
+                    return 'is-restricted';
+                }
+                return 'is-enabled';
+            },
+
+            modelAccessSummary(access) {
+                if (!access) {
+                    return '';
+                }
+
+                const parts = [];
+                if (access.force_disabled) {
+                    parts.push('Force disabled globally');
+                } else if (access.effective_enabled === false) {
+                    parts.push(access.default_enabled === false ? 'Disabled until explicitly enabled' : 'Disabled');
+                } else if (access.override && access.override.enabled === true && access.default_enabled === false) {
+                    parts.push('Explicitly enabled');
+                }
+
+                const allowed = Array.isArray(access.allowed_only_for_user_paths) ? access.allowed_only_for_user_paths : [];
+                if (allowed.length > 0) {
+                    parts.push('Allowed only for ' + allowed.join(', '));
+                }
+
+                return parts.join(' · ');
             },
 
             async toggleAliasEnabled(alias) {
@@ -572,6 +691,115 @@
                     this.aliasError = 'Failed to remove alias.';
                 } finally {
                     this.aliasDeletingName = '';
+                }
+            },
+
+            async submitModelOverrideForm() {
+                const selector = String(this.modelOverrideForm.selector || '').trim();
+                const allowedOnlyForUserPaths = this.normalizeModelOverridePaths(this.modelOverrideForm.allowed_only_for_user_paths);
+                const forceDisabled = Boolean(this.modelOverrideForm.force_disabled);
+                const enabled = Boolean(this.modelOverrideForm.enabled) && !forceDisabled;
+
+                if (!selector) {
+                    this.modelOverrideError = 'Model selector is required.';
+                    return;
+                }
+                if (!enabled && !forceDisabled && allowedOnlyForUserPaths.length === 0) {
+                    this.modelOverrideError = this.modelOverrideFormHasExistingOverride
+                        ? 'Choose an access policy or remove the override.'
+                        : 'Choose an access policy before saving.';
+                    return;
+                }
+
+                this.modelOverrideSubmitting = true;
+                this.modelOverrideError = '';
+                this.modelOverrideNotice = '';
+
+                const payload = {
+                    force_disabled: forceDisabled,
+                    allowed_only_for_user_paths: allowedOnlyForUserPaths
+                };
+                if (enabled) {
+                    payload.enabled = true;
+                }
+
+                try {
+                    const res = await fetch('/admin/api/v1/model-overrides/' + encodeURIComponent(selector), {
+                        method: 'PUT',
+                        headers: this.headers(),
+                        body: JSON.stringify(payload)
+                    });
+                    if (res.status === 503) {
+                        this.modelOverridesAvailable = false;
+                        this.modelOverrideError = 'Model overrides feature is unavailable.';
+                        return;
+                    }
+                    this.modelOverridesAvailable = true;
+                    if (res.status === 401) {
+                        this.authError = true;
+                        this.needsAuth = true;
+                        this.modelOverrideError = 'Authentication required.';
+                        return;
+                    }
+                    if (!res.ok) {
+                        this.modelOverrideError = await this.aliasResponseMessage(res, 'Failed to save model access.');
+                        return;
+                    }
+
+                    await this.fetchModels();
+                    this.closeModelOverrideForm();
+                    this.modelOverrideNotice = 'Model access saved.';
+                } catch (e) {
+                    console.error('Failed to save model override:', e);
+                    this.modelOverrideError = 'Failed to save model access.';
+                } finally {
+                    this.modelOverrideSubmitting = false;
+                }
+            },
+
+            async deleteModelOverride() {
+                const selector = String(this.modelOverrideForm.selector || '').trim();
+                if (!selector || !this.modelOverrideFormHasExistingOverride) {
+                    return;
+                }
+                if (!window.confirm('Remove the model override for "' + selector + '"?')) {
+                    return;
+                }
+
+                this.modelOverrideSubmitting = true;
+                this.modelOverrideError = '';
+                this.modelOverrideNotice = '';
+
+                try {
+                    const res = await fetch('/admin/api/v1/model-overrides/' + encodeURIComponent(selector), {
+                        method: 'DELETE',
+                        headers: this.headers()
+                    });
+                    if (res.status === 503) {
+                        this.modelOverridesAvailable = false;
+                        this.modelOverrideError = 'Model overrides feature is unavailable.';
+                        return;
+                    }
+                    this.modelOverridesAvailable = true;
+                    if (res.status === 401) {
+                        this.authError = true;
+                        this.needsAuth = true;
+                        this.modelOverrideError = 'Authentication required.';
+                        return;
+                    }
+                    if (res.status !== 404 && !res.ok) {
+                        this.modelOverrideError = await this.aliasResponseMessage(res, 'Failed to remove model override.');
+                        return;
+                    }
+
+                    await this.fetchModels();
+                    this.closeModelOverrideForm();
+                    this.modelOverrideNotice = 'Model override removed.';
+                } catch (e) {
+                    console.error('Failed to delete model override:', e);
+                    this.modelOverrideError = 'Failed to remove model override.';
+                } finally {
+                    this.modelOverrideSubmitting = false;
                 }
             }
         };

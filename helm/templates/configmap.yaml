@@ -7,8 +7,7 @@ metadata:
 data:
   PORT: {{ .Values.server.port | quote }}
   BODY_SIZE_LIMIT: {{ .Values.server.bodySizeLimit | quote }}
-  CACHE_TYPE: {{ include "gomodel.cacheType" . | quote }}
-  {{- if or .Values.redis.enabled (eq .Values.cache.type "redis") }}
+  {{- if or .Values.redis.enabled .Values.cache.redis.url }}
   REDIS_KEY_MODELS: {{ .Values.cache.redis.keyModels | default "gomodel:models" | quote }}
   REDIS_KEY_RESPONSES: {{ .Values.cache.redis.keyResponses | default "gomodel:response:" | quote }}
   REDIS_TTL_MODELS: {{ .Values.cache.redis.ttlModels | default 86400 | quote }}

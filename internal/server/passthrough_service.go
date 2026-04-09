@@ -10,6 +10,7 @@ import (
 
 type passthroughService struct {
 	provider                     core.RoutableProvider
+	modelAuthorizer              RequestModelAuthorizer
 	logger                       auditlog.LoggerInterface
 	usageLogger                  usage.LoggerInterface
 	pricingResolver              usage.PricingResolver
@@ -23,12 +24,19 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("provider passthrough is not supported by the current provider router", nil))
 	}
 
-	providerType, endpoint, info, err := passthroughExecutionTarget(c, s.normalizePassthroughV1Prefix)
+	providerType, endpoint, info, err := passthroughExecutionTarget(c, s.provider, s.normalizePassthroughV1Prefix)
 	if err != nil {
 		return handleError(c, err)
 	}
 	if !isEnabledPassthroughProvider(providerType, s.enabledPassthroughProviders) {
 		return handleError(c, s.unsupportedPassthroughProviderError(providerType))
+	}
+	if s.modelAuthorizer != nil {
+		if selector, ok := passthroughAccessSelector(s.provider, info); ok {
+			if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {
+				return handleError(c, err)
+			}
+		}
 	}
 
 	ctx, _ := requestContextWithRequestID(c.Request())

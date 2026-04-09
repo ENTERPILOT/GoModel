@@ -357,6 +357,36 @@ type fileListCall struct {
 	after    string
 }
 
+type recordingModelAuthorizer struct {
+	lastSelector core.ModelSelector
+	err          error
+	allow        func(core.ModelSelector) bool
+}
+
+func (a *recordingModelAuthorizer) ValidateModelAccess(_ context.Context, selector core.ModelSelector) error {
+	a.lastSelector = selector
+	return a.err
+}
+
+func (a *recordingModelAuthorizer) AllowsModel(_ context.Context, selector core.ModelSelector) bool {
+	if a.allow != nil {
+		return a.allow(selector)
+	}
+	return true
+}
+
+func (a *recordingModelAuthorizer) FilterPublicModels(_ context.Context, models []core.Model) []core.Model {
+	return models
+}
+
+type staticExposedModelLister struct {
+	models []core.Model
+}
+
+func (l staticExposedModelLister) ExposedModels() []core.Model {
+	return append([]core.Model(nil), l.models...)
+}
+
 func readPassthroughRequestBody(t *testing.T, body io.ReadCloser) string {
 	t.Helper()
 	if body == nil {
@@ -438,6 +468,22 @@ func (m *mockProvider) GetProviderNameForType(providerType string) string {
 	for qualifiedModel, providerName := range m.providerNames {
 		if strings.TrimSpace(m.providerTypes[qualifiedModel]) == providerType {
 			return providerName
+		}
+	}
+	return ""
+}
+
+func (m *mockProvider) GetProviderTypeForName(providerName string) string {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" || len(m.providerNames) == 0 {
+		return ""
+	}
+	for qualifiedModel, candidate := range m.providerNames {
+		if strings.TrimSpace(candidate) != providerName {
+			continue
+		}
+		if providerType := strings.TrimSpace(m.providerTypes[qualifiedModel]); providerType != "" {
+			return providerType
 		}
 	}
 	return ""
@@ -2583,6 +2629,45 @@ func TestListModels_MergesExposedModelsWithoutAliasProviderDecorator(t *testing.
 	body := rec.Body.String()
 	require.Contains(t, body, `"id":"gpt-4o"`)
 	require.Contains(t, body, `"id":"smart"`)
+}
+
+func TestListModels_FiltersExposedModelsWhenAuthorizerIsPresent(t *testing.T) {
+	mock := &mockProvider{
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-4o", Object: "model", OwnedBy: "openai"},
+			},
+		},
+	}
+	authorizer := &recordingModelAuthorizer{
+		allow: func(selector core.ModelSelector) bool {
+			return selector.QualifiedModel() != "openai/gpt-5"
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+	handler.modelAuthorizer = authorizer
+	handler.exposedModelLister = staticExposedModelLister{
+		models: []core.Model{
+			{ID: "openai/gpt-5", Object: "model", OwnedBy: "openai"},
+			{ID: "openai/gpt-4o-mini", Object: "model", OwnedBy: "openai"},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler.ListModels(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	require.Contains(t, body, `"id":"gpt-4o"`)
+	require.Contains(t, body, `"id":"openai/gpt-4o-mini"`)
+	require.NotContains(t, body, `"id":"openai/gpt-5"`)
 }
 
 func TestListModelsError(t *testing.T) {
@@ -5667,6 +5752,102 @@ func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
 	}
 	if entry.Provider != "openai" {
 		t.Fatalf("audit entry provider = %q, want openai", entry.Provider)
+	}
+}
+
+func TestProviderPassthrough_UsesConfiguredProviderNameForAccessValidation(t *testing.T) {
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers:    http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
+		providerTypes: map[string]string{
+			"openai_test/gpt-5-mini": "openai",
+		},
+		providerNames: map[string]string{
+			"openai_test/gpt-5-mini": "openai_test",
+		},
+	}
+	authorizer := &recordingModelAuthorizer{}
+
+	e := echo.New()
+	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, authorizer, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/p/openai_test/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+		Mode:         core.ExecutionModePassthrough,
+		ProviderType: "openai",
+		Passthrough: &core.PassthroughRouteInfo{
+			Provider:           "openai_test",
+			RawEndpoint:        "chat/completions",
+			NormalizedEndpoint: "chat/completions",
+			Model:              "gpt-5-mini",
+			AuditPath:          "/p/openai_test/chat/completions",
+		},
+	}))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.ProviderPassthrough(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if provider.lastPassthroughProvider != "openai" {
+		t.Fatalf("providerType = %q, want openai", provider.lastPassthroughProvider)
+	}
+	if authorizer.lastSelector.Provider != "openai_test" || authorizer.lastSelector.Model != "gpt-5-mini" {
+		t.Fatalf("validated selector = %#v, want openai_test/gpt-5-mini", authorizer.lastSelector)
+	}
+}
+
+func TestProviderPassthrough_FallsBackFromProviderTypeToCanonicalProviderNameForAccessValidation(t *testing.T) {
+	provider := &mockProvider{
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers:    http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
+		providerTypes: map[string]string{
+			"openai_test/gpt-5-mini": "openai",
+		},
+		providerNames: map[string]string{
+			"openai_test/gpt-5-mini": "openai_test",
+		},
+	}
+	authorizer := &recordingModelAuthorizer{}
+
+	e := echo.New()
+	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, authorizer, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+		Mode:         core.ExecutionModePassthrough,
+		ProviderType: "openai",
+		Passthrough: &core.PassthroughRouteInfo{
+			Provider:           "openai",
+			RawEndpoint:        "chat/completions",
+			NormalizedEndpoint: "chat/completions",
+			Model:              "gpt-5-mini",
+			AuditPath:          "/p/openai/chat/completions",
+		},
+	}))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handler.ProviderPassthrough(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if provider.lastPassthroughProvider != "openai" {
+		t.Fatalf("providerType = %q, want openai", provider.lastPassthroughProvider)
+	}
+	if authorizer.lastSelector.Provider != "openai_test" || authorizer.lastSelector.Model != "gpt-5-mini" {
+		t.Fatalf("validated selector = %#v, want openai_test/gpt-5-mini", authorizer.lastSelector)
 	}
 }
 

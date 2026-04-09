@@ -10,7 +10,7 @@ import (
 
 // PassthroughSemanticEnrichment applies provider-owned passthrough metadata
 // enrichment before execution planning runs.
-func PassthroughSemanticEnrichment(enrichers []core.PassthroughSemanticEnricher, allowPassthroughV1Alias bool) echo.MiddlewareFunc {
+func PassthroughSemanticEnrichment(provider core.RoutableProvider, enrichers []core.PassthroughSemanticEnricher, allowPassthroughV1Alias bool) echo.MiddlewareFunc {
 	byProvider := make(map[string]core.PassthroughSemanticEnricher, len(enrichers))
 	for _, enricher := range enrichers {
 		if enricher == nil {
@@ -40,6 +40,9 @@ func PassthroughSemanticEnrichment(enrichers []core.PassthroughSemanticEnricher,
 				return next(c)
 			}
 			info.NormalizedEndpoint = normalized
+			if resolved := resolvePassthroughProvider(provider, info.Provider); resolved.ProviderType != "" {
+				info.Provider = resolved.ProviderType
+			}
 
 			if enricher := byProvider[strings.TrimSpace(info.Provider)]; enricher != nil {
 				if enriched := enricher.Enrich(core.GetRequestSnapshot(c.Request().Context()), env, info); enriched != nil {

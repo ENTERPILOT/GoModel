@@ -23,6 +23,7 @@ import (
 type translatedInferenceService struct {
 	provider                 core.RoutableProvider
 	modelResolver            RequestModelResolver
+	modelAuthorizer          RequestModelAuthorizer
 	executionPolicyResolver  RequestExecutionPolicyResolver
 	fallbackResolver         RequestFallbackResolver
 	translatedRequestPatcher TranslatedRequestPatcher
@@ -134,7 +135,7 @@ func handleTranslatedInference[R any](
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 	modelPtr, providerPtr := modelProvider(req)
-	plan, err := ensureTranslatedRequestPlan(c, s.provider, s.modelResolver, s.executionPolicyResolver, modelPtr, providerPtr)
+	plan, err := ensureTranslatedRequestPlanWithAuthorizer(c, s.provider, s.modelResolver, s.modelAuthorizer, s.executionPolicyResolver, modelPtr, providerPtr)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -329,7 +330,7 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	plan, err := ensureTranslatedRequestPlan(c, s.provider, s.modelResolver, s.executionPolicyResolver, &req.Model, &req.Provider)
+	plan, err := ensureTranslatedRequestPlanWithAuthorizer(c, s.provider, s.modelResolver, s.modelAuthorizer, s.executionPolicyResolver, &req.Model, &req.Provider)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -769,6 +770,9 @@ func tryFallbackResponse[T any](
 	primaryModel := currentSelectorForPlan(plan, model, provider)
 	lastErr := primaryErr
 	for _, selector := range fallbacks {
+		if s.modelAuthorizer != nil && !s.modelAuthorizer.AllowsModel(ctx, selector) {
+			continue
+		}
 		qualified := selector.QualifiedModel()
 		providerType := s.providerTypeForSelector(selector, providerTypeFromPlan(plan))
 		providerName := resolvedProviderName(s.provider, selector, providerNameFromPlan(plan))
@@ -857,6 +861,9 @@ func tryFallbackStream(
 	primaryModel := currentSelectorForPlan(plan, model, provider)
 	lastErr := primaryErr
 	for _, selector := range fallbacks {
+		if s.modelAuthorizer != nil && !s.modelAuthorizer.AllowsModel(ctx, selector) {
+			continue
+		}
 		qualified := selector.QualifiedModel()
 		providerType := s.providerTypeForSelector(selector, providerTypeFromPlan(plan))
 		providerName := resolvedProviderName(s.provider, selector, providerNameFromPlan(plan))

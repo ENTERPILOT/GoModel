@@ -249,6 +249,9 @@ func buildAppConfig(t *testing.T, cfg TestServerConfig, mockLLMURL string, port 
 			Port:      fmt.Sprintf("%d", port),
 			MasterKey: cfg.MasterKey,
 		},
+		Models: config.ModelsConfig{
+			EnabledByDefault: true,
+		},
 		Admin: config.AdminConfig{
 			EndpointsEnabled: cfg.AdminEndpointsEnabled,
 			UIEnabled:        cfg.AdminUIEnabled,

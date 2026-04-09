@@ -12,6 +12,9 @@ server:
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
   enabled_passthrough_providers: ["openai", "anthropic"] # providers enabled on /p/{provider}/...
 
+models:
+  enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, concrete models stay unavailable until explicitly enabled by a model override
+
 cache:
   model:
     refresh_interval: 3600 # how often to refresh the model registry (seconds, default: 3600)

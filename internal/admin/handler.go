@@ -23,21 +23,23 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/executionplans"
 	"gomodel/internal/guardrails"
+	"gomodel/internal/modeloverrides"
 	"gomodel/internal/providers"
 	"gomodel/internal/usage"
 )
 
 // Handler serves admin API endpoints.
 type Handler struct {
-	usageReader   usage.UsageReader
-	auditReader   auditlog.Reader
-	registry      *providers.ModelRegistry
-	authKeys      *authkeys.Service
-	aliases       *aliases.Service
-	plans         *executionplans.Service
-	guardrails    guardrails.Catalog
-	guardrailDefs *guardrails.Service
-	runtimeConfig DashboardConfigResponse
+	usageReader    usage.UsageReader
+	auditReader    auditlog.Reader
+	registry       *providers.ModelRegistry
+	authKeys       *authkeys.Service
+	aliases        *aliases.Service
+	modelOverrides *modeloverrides.Service
+	plans          *executionplans.Service
+	guardrails     guardrails.Catalog
+	guardrailDefs  *guardrails.Service
+	runtimeConfig  DashboardConfigResponse
 
 	mutationMu sync.Mutex
 }
@@ -84,6 +86,13 @@ func WithAliases(service *aliases.Service) Option {
 func WithAuthKeys(service *authkeys.Service) Option {
 	return func(h *Handler) {
 		h.authKeys = service
+	}
+}
+
+// WithModelOverrides enables model override administration endpoints.
+func WithModelOverrides(service *modeloverrides.Service) Option {
+	return func(h *Handler) {
+		h.modelOverrides = service
 	}
 }
 
@@ -667,9 +676,23 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 // @Success      200  {array}  providers.ModelWithProvider
 // @Failure      401  {object}  core.GatewayError
 // @Router       /admin/api/v1/models [get]
+type modelAccessResponse struct {
+	Selector                string                   `json:"selector"`
+	DefaultEnabled          bool                     `json:"default_enabled"`
+	EffectiveEnabled        bool                     `json:"effective_enabled"`
+	ForceDisabled           bool                     `json:"force_disabled"`
+	AllowedOnlyForUserPaths []string                 `json:"allowed_only_for_user_paths,omitempty"`
+	Override                *modeloverrides.Override `json:"override,omitempty"`
+}
+
+type modelInventoryResponse struct {
+	providers.ModelWithProvider
+	Access modelAccessResponse `json:"access"`
+}
+
 func (h *Handler) ListModels(c *echo.Context) error {
 	if h.registry == nil {
-		return c.JSON(http.StatusOK, []providers.ModelWithProvider{})
+		return c.JSON(http.StatusOK, []modelInventoryResponse{})
 	}
 
 	cat := core.ModelCategory(c.QueryParam("category"))
@@ -689,8 +712,50 @@ func (h *Handler) ListModels(c *echo.Context) error {
 	if models == nil {
 		models = []providers.ModelWithProvider{}
 	}
+	if h.modelOverrides == nil {
+		response := make([]modelInventoryResponse, 0, len(models))
+		for _, model := range models {
+			selector := core.ModelSelector{
+				Provider: strings.TrimSpace(model.ProviderName),
+				Model:    strings.TrimSpace(model.Model.ID),
+			}
+			response = append(response, modelInventoryResponse{
+				ModelWithProvider: model,
+				Access: modelAccessResponse{
+					Selector:         selector.QualifiedModel(),
+					DefaultEnabled:   true,
+					EffectiveEnabled: true,
+				},
+			})
+		}
+		return c.JSON(http.StatusOK, response)
+	}
 
-	return c.JSON(http.StatusOK, models)
+	response := make([]modelInventoryResponse, 0, len(models))
+	for _, model := range models {
+		selector := core.ModelSelector{
+			Provider: strings.TrimSpace(model.ProviderName),
+			Model:    strings.TrimSpace(model.Model.ID),
+		}
+		effective := h.modelOverrides.EffectiveState(selector)
+		access := modelAccessResponse{
+			Selector:                effective.Selector,
+			DefaultEnabled:          effective.DefaultEnabled,
+			EffectiveEnabled:        effective.Enabled,
+			ForceDisabled:           effective.ForceDisabled,
+			AllowedOnlyForUserPaths: append([]string(nil), effective.AllowedOnlyForUserPaths...),
+		}
+		if override, ok := h.modelOverrides.Get(selector.QualifiedModel()); ok && override != nil {
+			overrideCopy := *override
+			access.Override = &overrideCopy
+		}
+		response = append(response, modelInventoryResponse{
+			ModelWithProvider: model,
+			Access:            access,
+		})
+	}
+
+	return c.JSON(http.StatusOK, response)
 }
 
 // isValidCategory returns true if cat is a recognized model category.
@@ -727,6 +792,12 @@ type upsertAliasRequest struct {
 	Enabled        *bool  `json:"enabled,omitempty"`
 }
 
+type upsertModelOverrideRequest struct {
+	Enabled                 *bool    `json:"enabled,omitempty"`
+	ForceDisabled           bool     `json:"force_disabled,omitempty"`
+	AllowedOnlyForUserPaths []string `json:"allowed_only_for_user_paths,omitempty"`
+}
+
 type upsertGuardrailRequest struct {
 	Type        string          `json:"type"`
 	Description string          `json:"description,omitempty"`
@@ -760,6 +831,10 @@ func (h *Handler) aliasesUnavailableError() error {
 	return featureUnavailableError("aliases feature is unavailable")
 }
 
+func (h *Handler) modelOverridesUnavailableError() error {
+	return featureUnavailableError("model overrides feature is unavailable")
+}
+
 func (h *Handler) authKeysUnavailableError() error {
 	return featureUnavailableError("auth keys feature is unavailable")
 }
@@ -777,6 +852,16 @@ func aliasWriteError(err error) error {
 		return nil
 	}
 	if aliases.IsValidationError(err) {
+		return core.NewInvalidRequestError(err.Error(), err)
+	}
+	return err
+}
+
+func modelOverrideWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if modeloverrides.IsValidationError(err) {
 		return core.NewInvalidRequestError(err.Error(), err)
 	}
 	return err
@@ -837,6 +922,100 @@ func deactivateByID(
 		return handleError(c, writeError(err))
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+func deleteByName(
+	c *echo.Context,
+	unavailableErr error,
+	paramName string,
+	decode func(string) (string, error),
+	deleteFunc func(context.Context, string) error,
+	notFoundErr error,
+	notFoundMessage string,
+	writeError func(error) error,
+) error {
+	if unavailableErr != nil {
+		return handleError(c, unavailableErr)
+	}
+
+	name, err := decode(c.Param(paramName))
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	if err := deleteFunc(c.Request().Context(), name); err != nil {
+		if errors.Is(err, notFoundErr) {
+			return handleError(c, core.NewNotFoundError(notFoundMessage+name))
+		}
+		return handleError(c, writeError(err))
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// ListModelOverrides handles GET /admin/api/v1/model-overrides.
+func (h *Handler) ListModelOverrides(c *echo.Context) error {
+	if h.modelOverrides == nil {
+		return handleError(c, h.modelOverridesUnavailableError())
+	}
+	views := h.modelOverrides.ListViews()
+	if views == nil {
+		views = []modeloverrides.View{}
+	}
+	return c.JSON(http.StatusOK, views)
+}
+
+// UpsertModelOverride handles PUT /admin/api/v1/model-overrides/{selector}.
+func (h *Handler) UpsertModelOverride(c *echo.Context) error {
+	if h.modelOverrides == nil {
+		return handleError(c, h.modelOverridesUnavailableError())
+	}
+
+	selector, err := decodeModelOverridePathSelector(c.Param("selector"))
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	var req upsertModelOverrideRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+
+	if err := h.modelOverrides.Upsert(c.Request().Context(), modeloverrides.Override{
+		Selector:                selector,
+		Enabled:                 req.Enabled,
+		ForceDisabled:           req.ForceDisabled,
+		AllowedOnlyForUserPaths: req.AllowedOnlyForUserPaths,
+	}); err != nil {
+		return handleError(c, modelOverrideWriteError(err))
+	}
+
+	override, ok := h.modelOverrides.Get(selector)
+	if !ok || override == nil {
+		slog.Error("model override service returned no override after upsert", "selector", selector)
+		return handleError(c, core.NewProviderError("model_overrides", http.StatusInternalServerError, "model override update failed unexpectedly", nil))
+	}
+	return c.JSON(http.StatusOK, override)
+}
+
+// DeleteModelOverride handles DELETE /admin/api/v1/model-overrides/{selector}.
+func (h *Handler) DeleteModelOverride(c *echo.Context) error {
+	var unavailableErr error
+	var deleteFunc func(context.Context, string) error
+	if h.modelOverrides == nil {
+		unavailableErr = h.modelOverridesUnavailableError()
+	} else {
+		deleteFunc = h.modelOverrides.Delete
+	}
+	return deleteByName(
+		c,
+		unavailableErr,
+		"selector",
+		decodeModelOverridePathSelector,
+		deleteFunc,
+		modeloverrides.ErrNotFound,
+		"model override not found: ",
+		modelOverrideWriteError,
+	)
 }
 
 // ListAuthKeys handles GET /admin/api/v1/auth-keys
@@ -955,22 +1134,23 @@ func (h *Handler) UpsertAlias(c *echo.Context) error {
 
 // DeleteAlias handles DELETE /admin/api/v1/aliases/{name}
 func (h *Handler) DeleteAlias(c *echo.Context) error {
+	var unavailableErr error
+	var deleteFunc func(context.Context, string) error
 	if h.aliases == nil {
-		return handleError(c, h.aliasesUnavailableError())
+		unavailableErr = h.aliasesUnavailableError()
+	} else {
+		deleteFunc = h.aliases.Delete
 	}
-
-	name, err := decodeAliasPathName(c.Param("name"))
-	if err != nil {
-		return handleError(c, err)
-	}
-
-	if err := h.aliases.Delete(c.Request().Context(), name); err != nil {
-		if errors.Is(err, aliases.ErrNotFound) {
-			return handleError(c, core.NewNotFoundError("alias not found: "+name))
-		}
-		return handleError(c, aliasWriteError(err))
-	}
-	return c.NoContent(http.StatusNoContent)
+	return deleteByName(
+		c,
+		unavailableErr,
+		"name",
+		decodeAliasPathName,
+		deleteFunc,
+		aliases.ErrNotFound,
+		"alias not found: ",
+		aliasWriteError,
+	)
 }
 
 // ListGuardrailTypes handles GET /admin/api/v1/guardrails/types
@@ -1304,4 +1484,16 @@ func decodeAliasPathName(raw string) (string, error) {
 		return "", core.NewInvalidRequestError("alias name is required", nil)
 	}
 	return name, nil
+}
+
+func decodeModelOverridePathSelector(raw string) (string, error) {
+	selector, err := url.PathUnescape(strings.TrimSpace(raw))
+	if err != nil {
+		return "", core.NewInvalidRequestError("invalid model override selector", err)
+	}
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return "", core.NewInvalidRequestError("model override selector is required", nil)
+	}
+	return selector, nil
 }

@@ -21,6 +21,7 @@ import (
 // chat execution path used by gateway-owned workflows such as guardrails.
 type InternalChatCompletionExecutorConfig struct {
 	ModelResolver           RequestModelResolver
+	ModelAuthorizer         RequestModelAuthorizer
 	ExecutionPolicyResolver RequestExecutionPolicyResolver
 	FallbackResolver        RequestFallbackResolver
 	AuditLogger             auditlog.LoggerInterface
@@ -37,6 +38,7 @@ type InternalChatCompletionExecutor struct {
 	executionPolicyResolver RequestExecutionPolicyResolver
 	logger                  auditlog.LoggerInterface
 	service                 *translatedInferenceService
+	modelAuthorizer         RequestModelAuthorizer
 }
 
 // NewInternalChatCompletionExecutor creates a transport-free translated chat
@@ -45,6 +47,7 @@ func NewInternalChatCompletionExecutor(provider core.RoutableProvider, cfg Inter
 	service := &translatedInferenceService{
 		provider:                provider,
 		modelResolver:           cfg.ModelResolver,
+		modelAuthorizer:         cfg.ModelAuthorizer,
 		executionPolicyResolver: cfg.ExecutionPolicyResolver,
 		fallbackResolver:        cfg.FallbackResolver,
 		logger:                  cfg.AuditLogger,
@@ -56,6 +59,7 @@ func NewInternalChatCompletionExecutor(provider core.RoutableProvider, cfg Inter
 	return &InternalChatCompletionExecutor{
 		provider:                provider,
 		modelResolver:           cfg.ModelResolver,
+		modelAuthorizer:         cfg.ModelAuthorizer,
 		executionPolicyResolver: cfg.ExecutionPolicyResolver,
 		logger:                  cfg.AuditLogger,
 		service:                 service,
@@ -87,7 +91,7 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 		e.finishAuditEntry(ctx, entry, start, plan, req, resp, err, cacheType, providerType, providerName)
 	}()
 
-	resolution, err := resolveRequestModel(e.provider, e.modelResolver, requested)
+	resolution, err := resolveRequestModelWithAuthorizer(ctx, e.provider, e.modelResolver, e.modelAuthorizer, requested)
 	if err != nil {
 		return nil, err
 	}

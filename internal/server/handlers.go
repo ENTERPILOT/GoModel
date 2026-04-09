@@ -18,6 +18,7 @@ import (
 type Handler struct {
 	provider                     core.RoutableProvider
 	modelResolver                RequestModelResolver
+	modelAuthorizer              RequestModelAuthorizer
 	fallbackResolver             RequestFallbackResolver
 	executionPolicyResolver      RequestExecutionPolicyResolver
 	translatedRequestPatcher     TranslatedRequestPatcher
@@ -51,9 +52,34 @@ func newHandler(
 	fallbackResolver RequestFallbackResolver,
 	translatedRequestPatcher TranslatedRequestPatcher,
 ) *Handler {
+	return newHandlerWithAuthorizer(
+		provider,
+		logger,
+		usageLogger,
+		pricingResolver,
+		modelResolver,
+		nil,
+		executionPolicyResolver,
+		fallbackResolver,
+		translatedRequestPatcher,
+	)
+}
+
+func newHandlerWithAuthorizer(
+	provider core.RoutableProvider,
+	logger auditlog.LoggerInterface,
+	usageLogger usage.LoggerInterface,
+	pricingResolver usage.PricingResolver,
+	modelResolver RequestModelResolver,
+	modelAuthorizer RequestModelAuthorizer,
+	executionPolicyResolver RequestExecutionPolicyResolver,
+	fallbackResolver RequestFallbackResolver,
+	translatedRequestPatcher TranslatedRequestPatcher,
+) *Handler {
 	return &Handler{
 		provider:                     provider,
 		modelResolver:                modelResolver,
+		modelAuthorizer:              modelAuthorizer,
 		fallbackResolver:             fallbackResolver,
 		executionPolicyResolver:      executionPolicyResolver,
 		translatedRequestPatcher:     translatedRequestPatcher,
@@ -80,6 +106,7 @@ func (h *Handler) translatedInference() *translatedInferenceService {
 		s := &translatedInferenceService{
 			provider:                 h.provider,
 			modelResolver:            h.modelResolver,
+			modelAuthorizer:          h.modelAuthorizer,
 			executionPolicyResolver:  h.executionPolicyResolver,
 			fallbackResolver:         h.fallbackResolver,
 			translatedRequestPatcher: h.translatedRequestPatcher,
@@ -99,6 +126,7 @@ func (h *Handler) nativeBatch() *nativeBatchService {
 	return &nativeBatchService{
 		provider:                             h.provider,
 		modelResolver:                        h.modelResolver,
+		modelAuthorizer:                      h.modelAuthorizer,
 		executionPolicyResolver:              h.executionPolicyResolver,
 		batchRequestPreparer:                 h.batchRequestPreparer,
 		batchStore:                           h.batchStore,
@@ -116,6 +144,7 @@ func (h *Handler) nativeFiles() *nativeFileService {
 func (h *Handler) passthrough() *passthroughService {
 	return &passthroughService{
 		provider:                     h.provider,
+		modelAuthorizer:              h.modelAuthorizer,
 		logger:                       h.logger,
 		usageLogger:                  h.usageLogger,
 		pricingResolver:              h.pricingResolver,
@@ -207,8 +236,32 @@ func (h *Handler) ListModels(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	if h.modelAuthorizer != nil && resp != nil {
+		resp = &core.ModelsResponse{
+			Object: resp.Object,
+			Data:   h.modelAuthorizer.FilterPublicModels(c.Request().Context(), resp.Data),
+		}
+	}
 	if h.exposedModelLister != nil {
-		resp = mergeExposedModelsResponse(resp, h.exposedModelLister.ExposedModels())
+		if filtered, ok := h.exposedModelLister.(FilteredExposedModelLister); ok && h.modelAuthorizer != nil {
+			resp = mergeExposedModelsResponse(resp, filtered.ExposedModelsFiltered(func(selector core.ModelSelector) bool {
+				return h.modelAuthorizer.AllowsModel(c.Request().Context(), selector)
+			}))
+		} else {
+			exposed := h.exposedModelLister.ExposedModels()
+			if h.modelAuthorizer != nil {
+				filtered := make([]core.Model, 0, len(exposed))
+				for _, model := range exposed {
+					selector, err := core.ParseModelSelector(model.ID, "")
+					if err != nil || !h.modelAuthorizer.AllowsModel(c.Request().Context(), selector) {
+						continue
+					}
+					filtered = append(filtered, model)
+				}
+				exposed = filtered
+			}
+			resp = mergeExposedModelsResponse(resp, exposed)
+		}
 	}
 
 	return c.JSON(http.StatusOK, resp)
