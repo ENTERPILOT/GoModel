@@ -165,6 +165,16 @@ func (s *Service) GetProviderType(model string) string {
 
 // ExposedModels returns enabled aliases projected as model-list entries.
 func (s *Service) ExposedModels() []core.Model {
+	return s.exposedModelsFiltered(nil)
+}
+
+// ExposedModelsFiltered returns enabled aliases projected as model-list entries
+// while allowing callers to filter by the concrete target selector.
+func (s *Service) ExposedModelsFiltered(allow func(core.ModelSelector) bool) []core.Model {
+	return s.exposedModelsFiltered(allow)
+}
+
+func (s *Service) exposedModelsFiltered(allow func(core.ModelSelector) bool) []core.Model {
 	aliases := s.List()
 	result := make([]core.Model, 0, len(aliases))
 	for _, alias := range aliases {
@@ -173,6 +183,9 @@ func (s *Service) ExposedModels() []core.Model {
 		}
 		selector, err := alias.TargetSelector()
 		if err != nil {
+			continue
+		}
+		if allow != nil && !allow(selector) {
 			continue
 		}
 		model, ok := s.catalog.LookupModel(selector.QualifiedModel())

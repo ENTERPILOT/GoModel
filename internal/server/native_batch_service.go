@@ -22,6 +22,7 @@ import (
 type nativeBatchService struct {
 	provider                             core.RoutableProvider
 	modelResolver                        RequestModelResolver
+	modelAuthorizer                      RequestModelAuthorizer
 	executionPolicyResolver              RequestExecutionPolicyResolver
 	batchRequestPreparer                 BatchRequestPreparer
 	batchStore                           batchstore.Store
@@ -46,7 +47,7 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("batch routing is not supported by the current provider router", nil))
 	}
 
-	selection, err := determineBatchExecutionSelection(s.provider, s.modelResolver, req)
+	selection, err := determineBatchExecutionSelectionWithAuthorizer(ctx, s.provider, s.modelResolver, s.modelAuthorizer, req)
 	if err != nil {
 		return handleError(c, err)
 	}

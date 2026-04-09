@@ -44,6 +44,7 @@ type Config struct {
 	UsageLogger                  usage.LoggerInterface                  // Optional: Usage logger for token tracking
 	PricingResolver              usage.PricingResolver                  // Optional: Resolves pricing for cost calculation
 	ModelResolver                RequestModelResolver                   // Optional: explicit model resolver used during request planning
+	ModelAuthorizer              RequestModelAuthorizer                 // Optional: request-scoped concrete model access controller
 	ExecutionPolicyResolver      RequestExecutionPolicyResolver         // Optional: persisted execution-plan resolver used during request planning
 	FallbackResolver             RequestFallbackResolver                // Optional: translated-route fallback resolver
 	TranslatedRequestPatcher     TranslatedRequestPatcher               // Optional: request patcher for translated routes after planning
@@ -80,17 +81,19 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	var modelResolver RequestModelResolver
+	var modelAuthorizer RequestModelAuthorizer
 	var executionPolicyResolver RequestExecutionPolicyResolver
 	var fallbackResolver RequestFallbackResolver
 	var translatedRequestPatcher TranslatedRequestPatcher
 	if cfg != nil {
 		modelResolver = cfg.ModelResolver
+		modelAuthorizer = cfg.ModelAuthorizer
 		executionPolicyResolver = cfg.ExecutionPolicyResolver
 		fallbackResolver = cfg.FallbackResolver
 		translatedRequestPatcher = cfg.TranslatedRequestPatcher
 	}
 
-	handler := newHandler(provider, auditLogger, usageLogger, pricingResolver, modelResolver, executionPolicyResolver, fallbackResolver, translatedRequestPatcher)
+	handler := newHandlerWithAuthorizer(provider, auditLogger, usageLogger, pricingResolver, modelResolver, modelAuthorizer, executionPolicyResolver, fallbackResolver, translatedRequestPatcher)
 	if cfg != nil {
 		handler.batchRequestPreparer = cfg.BatchRequestPreparer
 		handler.exposedModelLister = cfg.ExposedModelLister
@@ -286,6 +289,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		adminAPI.GET("/audit/conversation", cfg.AdminHandler.AuditConversation)
 		adminAPI.GET("/models", cfg.AdminHandler.ListModels)
 		adminAPI.GET("/models/categories", cfg.AdminHandler.ListCategories)
+		adminAPI.GET("/model-overrides", cfg.AdminHandler.ListModelOverrides)
+		adminAPI.PUT("/model-overrides/:selector", cfg.AdminHandler.UpsertModelOverride)
+		adminAPI.DELETE("/model-overrides/:selector", cfg.AdminHandler.DeleteModelOverride)
 		adminAPI.GET("/auth-keys", cfg.AdminHandler.ListAuthKeys)
 		adminAPI.POST("/auth-keys", cfg.AdminHandler.CreateAuthKey)
 		adminAPI.POST("/auth-keys/:id/deactivate", cfg.AdminHandler.DeactivateAuthKey)

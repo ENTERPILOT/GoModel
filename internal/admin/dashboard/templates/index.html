@@ -611,8 +611,13 @@
     <div class="alert alert-warning" x-show="!aliasesAvailable && !authError">
         Aliases feature is unavailable.
     </div>
+    <div class="alert alert-warning" x-show="!modelOverridesAvailable && !authError">
+        Model overrides feature is unavailable.
+    </div>
     <div class="alert alert-warning" x-show="aliasError && !authError" x-text="aliasError"></div>
     <div class="alert alert-success" x-show="aliasNotice" x-text="aliasNotice"></div>
+    <div class="alert alert-warning" x-show="modelOverrideError && !authError" x-text="modelOverrideError"></div>
+    <div class="alert alert-success" x-show="modelOverrideNotice && !modelOverrideError" x-text="modelOverrideNotice"></div>
 
     <!-- Category Tabs -->
     <div class="category-tabs" x-show="categories.length > 0">
@@ -690,6 +695,57 @@
         </form>
     </div>
 
+    <div class="model-alias-editor" x-show="modelOverrideFormOpen">
+        <form class="alias-form" @submit.prevent="submitModelOverrideForm()">
+            <div class="aliases-editor-header">
+                <div>
+                    <p class="alias-form-kicker">Model access override</p>
+                    <h3 x-text="modelOverrideFormDisplayName || modelOverrideForm.selector || 'Model Access'"></h3>
+                </div>
+                <button type="button" class="table-action-btn alias-close-btn table-icon-btn" aria-label="Close model access editor" @click="closeModelOverrideForm()">
+                    {{template "x-icon"}}
+                </button>
+            </div>
+
+            <label class="alias-form-field">
+                <span>Selector</span>
+                <input type="text" class="filter-input mono" x-model="modelOverrideForm.selector" disabled>
+            </label>
+
+            <p class="alias-form-hint">
+                The selector uses the concrete <code>{provider_name}/{model}</code> shape shown in the models list. <code>allowed_only_for_user_paths</code> is matched against the effective managed API key <code>user_path</code>.
+            </p>
+            <p class="alias-form-hint" x-text="'Default enabled: ' + (modelOverrideFormDefaultEnabled ? 'yes' : 'no') + ' · Effective now: ' + (modelOverrideFormEffectiveEnabled ? 'yes' : 'no')"></p>
+
+            <label class="alias-checkbox">
+                <input type="checkbox" x-model="modelOverrideForm.enabled" :disabled="modelOverrideForm.force_disabled">
+                <span>Explicitly enable this model</span>
+            </label>
+
+            <label class="alias-checkbox">
+                <input type="checkbox" x-model="modelOverrideForm.force_disabled">
+                <span>Force disable globally</span>
+            </label>
+
+            <label class="alias-form-field">
+                <span>Allowed Only For User Paths</span>
+                <textarea rows="4" class="alias-form-textarea mono" placeholder="/team/alpha&#10;/team/beta" x-model="modelOverrideForm.allowed_only_for_user_paths"></textarea>
+            </label>
+
+            <p class="alias-form-hint">
+                Leave blank to allow every user path. When set, descendant paths are also allowed.
+            </p>
+
+            <div class="alert alert-warning" x-show="modelOverrideError" x-text="modelOverrideError"></div>
+
+            <div class="alias-form-actions">
+                <button type="button" class="pagination-btn" @click="closeModelOverrideForm()">Cancel</button>
+                <button type="button" class="pagination-btn" x-show="modelOverrideFormHasExistingOverride" :disabled="modelOverrideSubmitting" @click="deleteModelOverride()">Remove Override</button>
+                <button type="submit" class="pagination-btn pagination-btn-primary" :disabled="modelOverrideSubmitting" x-text="modelOverrideSubmitting ? 'Saving...' : 'Save Access'"></button>
+            </div>
+        </form>
+    </div>
+
     <!-- Models Table: All / Text Generation -->
     <div class="table-wrapper" x-show="(displayModels.length > 0 || modelFilter) && (activeCategory === 'all' || activeCategory === 'text_generation')">
         <table class="data-table">
@@ -747,7 +803,16 @@
                                 </div>
                             </template>
                             <template x-if="!row.is_alias">
-                                <span class="model-row-actions-empty">—</span>
+                                <div class="alias-actions-cell">
+                                    <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
+                                    <button type="button" class="table-action-btn table-icon-btn"
+                                        x-show="modelOverridesAvailable"
+                                        :aria-label="'Edit model access for ' + row.display_name"
+                                        :title="'Edit model access for ' + row.display_name"
+                                        @click="openModelOverrideEdit(row)">
+                                        {{template "edit-icon"}}
+                                    </button>
+                                </div>
                             </template>
                         </td>
                     </tr>
@@ -807,7 +872,16 @@
                                 </div>
                             </template>
                             <template x-if="!row.is_alias">
-                                <span class="model-row-actions-empty">—</span>
+                                <div class="alias-actions-cell">
+                                    <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
+                                    <button type="button" class="table-action-btn table-icon-btn"
+                                        x-show="modelOverridesAvailable"
+                                        :aria-label="'Edit model access for ' + row.display_name"
+                                        :title="'Edit model access for ' + row.display_name"
+                                        @click="openModelOverrideEdit(row)">
+                                        {{template "edit-icon"}}
+                                    </button>
+                                </div>
                             </template>
                         </td>
                     </tr>
@@ -867,7 +941,16 @@
                                 </div>
                             </template>
                             <template x-if="!row.is_alias">
-                                <span class="model-row-actions-empty">—</span>
+                                <div class="alias-actions-cell">
+                                    <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
+                                    <button type="button" class="table-action-btn table-icon-btn"
+                                        x-show="modelOverridesAvailable"
+                                        :aria-label="'Edit model access for ' + row.display_name"
+                                        :title="'Edit model access for ' + row.display_name"
+                                        @click="openModelOverrideEdit(row)">
+                                        {{template "edit-icon"}}
+                                    </button>
+                                </div>
                             </template>
                         </td>
                     </tr>
@@ -929,7 +1012,16 @@
                                 </div>
                             </template>
                             <template x-if="!row.is_alias">
-                                <span class="model-row-actions-empty">—</span>
+                                <div class="alias-actions-cell">
+                                    <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
+                                    <button type="button" class="table-action-btn table-icon-btn"
+                                        x-show="modelOverridesAvailable"
+                                        :aria-label="'Edit model access for ' + row.display_name"
+                                        :title="'Edit model access for ' + row.display_name"
+                                        @click="openModelOverrideEdit(row)">
+                                        {{template "edit-icon"}}
+                                    </button>
+                                </div>
                             </template>
                         </td>
                     </tr>
@@ -991,7 +1083,16 @@
                                 </div>
                             </template>
                             <template x-if="!row.is_alias">
-                                <span class="model-row-actions-empty">—</span>
+                                <div class="alias-actions-cell">
+                                    <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
+                                    <button type="button" class="table-action-btn table-icon-btn"
+                                        x-show="modelOverridesAvailable"
+                                        :aria-label="'Edit model access for ' + row.display_name"
+                                        :title="'Edit model access for ' + row.display_name"
+                                        @click="openModelOverrideEdit(row)">
+                                        {{template "edit-icon"}}
+                                    </button>
+                                </div>
                             </template>
                         </td>
                     </tr>
@@ -1053,7 +1154,16 @@
                                 </div>
                             </template>
                             <template x-if="!row.is_alias">
-                                <span class="model-row-actions-empty">—</span>
+                                <div class="alias-actions-cell">
+                                    <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
+                                    <button type="button" class="table-action-btn table-icon-btn"
+                                        x-show="modelOverridesAvailable"
+                                        :aria-label="'Edit model access for ' + row.display_name"
+                                        :title="'Edit model access for ' + row.display_name"
+                                        @click="openModelOverrideEdit(row)">
+                                        {{template "edit-icon"}}
+                                    </button>
+                                </div>
                             </template>
                         </td>
                     </tr>

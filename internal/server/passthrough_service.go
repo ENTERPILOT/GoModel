@@ -10,6 +10,7 @@ import (
 
 type passthroughService struct {
 	provider                     core.RoutableProvider
+	modelAuthorizer              RequestModelAuthorizer
 	logger                       auditlog.LoggerInterface
 	usageLogger                  usage.LoggerInterface
 	pricingResolver              usage.PricingResolver
@@ -29,6 +30,14 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	}
 	if !isEnabledPassthroughProvider(providerType, s.enabledPassthroughProviders) {
 		return handleError(c, s.unsupportedPassthroughProviderError(providerType))
+	}
+	if s.modelAuthorizer != nil && info != nil && info.Model != "" {
+		if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), core.ModelSelector{
+			Provider: info.Provider,
+			Model:    info.Model,
+		}); err != nil {
+			return handleError(c, err)
+		}
 	}
 
 	ctx, _ := requestContextWithRequestID(c.Request())

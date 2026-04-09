@@ -31,6 +31,7 @@ var bodySizeLimitRegex = regexp.MustCompile(`(?i)^(\d+)([KMG])?B?$`)
 // Config holds the application configuration.
 type Config struct {
 	Server         ServerConfig         `yaml:"server"`
+	Models         ModelsConfig         `yaml:"models"`
 	Cache          CacheConfig          `yaml:"cache"`
 	Storage        StorageConfig        `yaml:"storage"`
 	Logging        LogConfig            `yaml:"logging"`
@@ -126,6 +127,13 @@ func ResolveFallbackDefaultMode(mode FallbackMode) FallbackMode {
 // FallbackModelOverride holds per-model mode overrides.
 type FallbackModelOverride struct {
 	Mode FallbackMode `yaml:"mode" json:"mode"`
+}
+
+// ModelsConfig holds global model access defaults.
+type ModelsConfig struct {
+	// EnabledByDefault controls whether concrete provider models are available
+	// when no persisted override exists. Default: true.
+	EnabledByDefault bool `yaml:"enabled_by_default" env:"MODELS_ENABLED_BY_DEFAULT"`
 }
 
 // FallbackConfig holds translated-route model fallback policy.
@@ -862,6 +870,9 @@ func buildDefaultConfig() *Config {
 				"openai",
 				"anthropic",
 			},
+		},
+		Models: ModelsConfig{
+			EnabledByDefault: true,
 		},
 		Cache: CacheConfig{
 			Model: ModelCacheConfig{

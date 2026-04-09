@@ -31,7 +31,21 @@ type batchExecutionSelection struct {
 	selector     core.ExecutionPlanSelector
 }
 
-func determineBatchExecutionSelection(provider core.RoutableProvider, resolver RequestModelResolver, req *core.BatchRequest) (batchExecutionSelection, error) {
+func determineBatchExecutionSelection(
+	provider core.RoutableProvider,
+	resolver RequestModelResolver,
+	req *core.BatchRequest,
+) (batchExecutionSelection, error) {
+	return determineBatchExecutionSelectionWithAuthorizer(context.Background(), provider, resolver, nil, req)
+}
+
+func determineBatchExecutionSelectionWithAuthorizer(
+	ctx context.Context,
+	provider core.RoutableProvider,
+	resolver RequestModelResolver,
+	authorizer RequestModelAuthorizer,
+	req *core.BatchRequest,
+) (batchExecutionSelection, error) {
 	if provider == nil {
 		return batchExecutionSelection{}, core.NewInvalidRequestError("provider is not configured", nil)
 	}
@@ -74,6 +88,11 @@ func determineBatchExecutionSelection(provider core.RoutableProvider, resolver R
 		}
 		if !provider.Supports(model) {
 			return batchExecutionSelection{}, core.NewInvalidRequestError("unsupported model: "+model, nil)
+		}
+		if authorizer != nil {
+			if err := authorizer.ValidateModelAccess(ctx, resolvedSelector); err != nil {
+				return batchExecutionSelection{}, err
+			}
 		}
 		itemProvider := provider.GetProviderType(model)
 		if providerType == "" {

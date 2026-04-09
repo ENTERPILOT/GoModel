@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -34,7 +35,21 @@ func resolvedProviderName(provider core.RoutableProvider, selector core.ModelSel
 	return fallback
 }
 
-func resolveRequestModel(provider core.RoutableProvider, resolver RequestModelResolver, requested core.RequestedModelSelector) (*core.RequestModelResolution, error) {
+func resolveRequestModel(
+	provider core.RoutableProvider,
+	resolver RequestModelResolver,
+	requested core.RequestedModelSelector,
+) (*core.RequestModelResolution, error) {
+	return resolveRequestModelWithAuthorizer(context.Background(), provider, resolver, nil, requested)
+}
+
+func resolveRequestModelWithAuthorizer(
+	ctx context.Context,
+	provider core.RoutableProvider,
+	resolver RequestModelResolver,
+	authorizer RequestModelAuthorizer,
+	requested core.RequestedModelSelector,
+) (*core.RequestModelResolution, error) {
 	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
 
 	resolvedSelector, aliasApplied, err := resolveExecutionSelector(provider, resolver, requested)
@@ -54,6 +69,11 @@ func resolveRequestModel(provider core.RoutableProvider, resolver RequestModelRe
 	}
 	if !provider.Supports(resolvedModel) {
 		return nil, core.NewInvalidRequestError("unsupported model: "+resolvedModel, nil)
+	}
+	if authorizer != nil {
+		if err := authorizer.ValidateModelAccess(ctx, resolvedSelector); err != nil {
+			return nil, err
+		}
 	}
 
 	return &core.RequestModelResolution{
@@ -135,7 +155,7 @@ func ensureRequestModelResolution(c *echo.Context, provider core.RoutableProvide
 	if err != nil || !parsed {
 		return nil, parsed, err
 	}
-	resolution, err := resolveAndStoreRequestModelResolution(c, provider, resolver, model, providerHint)
+	resolution, err := resolveAndStoreRequestModelResolution(c, provider, resolver, nil, model, providerHint)
 	return resolution, true, err
 }
 
@@ -153,12 +173,13 @@ func resolveAndStoreRequestModelResolution(
 	c *echo.Context,
 	provider core.RoutableProvider,
 	resolver RequestModelResolver,
+	authorizer RequestModelAuthorizer,
 	model, providerHint string,
 ) (*core.RequestModelResolution, error) {
 	requested := core.NewRequestedModelSelector(model, providerHint)
 	enrichAuditEntryWithRequestedModel(c, requested)
 
-	resolution, err := resolveRequestModel(provider, resolver, requested)
+	resolution, err := resolveRequestModelWithAuthorizer(c.Request().Context(), provider, resolver, authorizer, requested)
 	if err != nil {
 		return nil, err
 	}
