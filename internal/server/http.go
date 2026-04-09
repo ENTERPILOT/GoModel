@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	httppprof "net/http/pprof"
 	"path"
 	"strings"
+	"time"
 
 	"gomodel/config"
 
@@ -31,6 +33,12 @@ type Server struct {
 	handler                 *Handler
 	responseCacheMiddleware *responsecache.ResponseCacheMiddleware
 }
+
+const (
+	inboundServerReadTimeout       = 30 * time.Second
+	inboundServerReadHeaderTimeout = 10 * time.Second
+	inboundServerWriteTimeout      = 30 * time.Second
+)
 
 // Config holds server configuration options
 type Config struct {
@@ -201,6 +209,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 			return next(c)
 		}
 	})
+	e.Use(modelInteractionWriteDeadlineMiddleware())
 
 	// Ingress capture (before auth/audit/model validation so they can consume shared raw request state)
 	e.Use(RequestSnapshotCapture())
@@ -330,11 +339,7 @@ func passthroughV1PrefixNormalizationEnabled(cfg *Config) bool {
 
 // Start starts the HTTP server on the given address and exits when ctx is canceled.
 func (s *Server) Start(ctx context.Context, addr string) error {
-	sc := echo.StartConfig{
-		Address:    addr,
-		HideBanner: true,
-	}
-	return sc.Start(ctx, s.echo)
+	return newGatewayStartConfig(addr).Start(ctx, s.echo)
 }
 
 // Shutdown releases server resources. The HTTP server itself is stopped by
@@ -350,6 +355,47 @@ func (s *Server) Shutdown(_ context.Context) error {
 // ServeHTTP implements the http.Handler interface, allowing Server to be used with httptest
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.echo.ServeHTTP(w, r)
+}
+
+func newGatewayStartConfig(addr string) echo.StartConfig {
+	return echo.StartConfig{
+		Address:    addr,
+		HideBanner: true,
+		BeforeServeFunc: func(server *http.Server) error {
+			return configureGatewayHTTPServer(server)
+		},
+	}
+}
+
+func configureGatewayHTTPServer(server *http.Server) error {
+	if server == nil {
+		return nil
+	}
+
+	// Keep an explicit server-wide write timeout for ordinary routes. Long-lived
+	// model interaction routes clear it per request before provider work begins.
+	server.ReadTimeout = inboundServerReadTimeout
+	server.ReadHeaderTimeout = inboundServerReadHeaderTimeout
+	server.WriteTimeout = inboundServerWriteTimeout
+	return nil
+}
+
+func modelInteractionWriteDeadlineMiddleware() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			if !core.IsModelInteractionPath(c.Request().URL.Path) {
+				return next(c)
+			}
+			if err := http.NewResponseController(c.Response()).SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+				slog.Warn("failed to clear write deadline for model interaction",
+					"path", c.Request().URL.Path,
+					"request_id", requestIDFromContextOrHeader(c.Request()),
+					"error", err,
+				)
+			}
+			return next(c)
+		}
+	}
 }
 
 func parseBodySizeLimitBytes(limit string) int64 {
