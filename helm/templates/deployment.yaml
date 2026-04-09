@@ -54,12 +54,7 @@ spec:
                   name: {{ include "gomodel.fullname" . }}
                   key: BODY_SIZE_LIMIT
             # Cache configuration
-            - name: CACHE_TYPE
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "gomodel.fullname" . }}
-                  key: CACHE_TYPE
-            {{- if or .Values.redis.enabled (eq .Values.cache.type "redis") }}
+            {{- if or .Values.redis.enabled .Values.cache.redis.url }}
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef:

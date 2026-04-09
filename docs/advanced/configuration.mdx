@@ -47,7 +47,6 @@ The most common way to configure GOModel. Set any of the variables below to over
 
 | Variable            | Description                       | Default          |
 | ------------------- | --------------------------------- | ---------------- |
-| `CACHE_TYPE`        | Cache backend: `local` or `redis` | `local`          |
 | `GOMODEL_CACHE_DIR` | Directory for local cache files   | `.cache`         |
 | `REDIS_URL`         | Redis connection URL              | _(empty)_        |
 | `REDIS_KEY_MODELS`     | Redis key for model cache           | `gomodel:models`    |
@@ -192,9 +191,9 @@ server:
   master_key: "my-secret-key"
 
 cache:
-  type: redis
-  redis:
-    url: "redis://my-redis:6379"
+  model:
+    redis:
+      url: "redis://my-redis:6379"
 
 providers:
   openai:

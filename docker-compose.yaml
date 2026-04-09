@@ -14,7 +14,6 @@ services:
       - .env
     environment:
       # Cache configuration
-      - CACHE_TYPE=redis
       - REDIS_URL=redis://redis:6379
       # Metrics
       - METRICS_ENABLED=true
