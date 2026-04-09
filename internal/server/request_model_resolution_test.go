@@ -46,7 +46,7 @@ func (p *canonicalizingProvider) GetProviderTypeForName(providerName string) str
 		if strings.TrimSpace(candidate) != providerName {
 			continue
 		}
-		return p.types[qualifiedModel]
+		return strings.TrimSpace(p.types[qualifiedModel])
 	}
 	return ""
 }

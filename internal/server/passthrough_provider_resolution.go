@@ -37,6 +37,14 @@ func resolvePassthroughProvider(provider core.RoutableProvider, routeProvider st
 	}
 }
 
+// passthroughAccessSelector derives an authorization selector from provider,
+// which supplies provider name/type canonicalization, and info, which carries
+// the passthrough route provider/model; it returns the selector and whether one
+// could be built. It may intentionally return a core.ModelSelector with an
+// empty Provider when resolvePassthroughProvider leaves ProviderName empty and
+// none of the ProviderNameResolver.GetProviderName candidates resolve to a
+// non-empty canonical name; downstream authorization/validation is expected to
+// handle empty Provider values.
 func passthroughAccessSelector(provider core.RoutableProvider, info *core.PassthroughRouteInfo) (core.ModelSelector, bool) {
 	if info == nil {
 		return core.ModelSelector{}, false
