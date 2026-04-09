@@ -7,6 +7,7 @@ import (
 	httppprof "net/http/pprof"
 	"path"
 	"strings"
+	"time"
 
 	"gomodel/config"
 
@@ -31,6 +32,11 @@ type Server struct {
 	handler                 *Handler
 	responseCacheMiddleware *responsecache.ResponseCacheMiddleware
 }
+
+const (
+	inboundServerReadTimeout       = 30 * time.Second
+	inboundServerReadHeaderTimeout = 10 * time.Second
+)
 
 // Config holds server configuration options
 type Config struct {
@@ -330,11 +336,7 @@ func passthroughV1PrefixNormalizationEnabled(cfg *Config) bool {
 
 // Start starts the HTTP server on the given address and exits when ctx is canceled.
 func (s *Server) Start(ctx context.Context, addr string) error {
-	sc := echo.StartConfig{
-		Address:    addr,
-		HideBanner: true,
-	}
-	return sc.Start(ctx, s.echo)
+	return newGatewayStartConfig(addr, 0).Start(ctx, s.echo)
 }
 
 // Shutdown releases server resources. The HTTP server itself is stopped by
@@ -350,6 +352,30 @@ func (s *Server) Shutdown(_ context.Context) error {
 // ServeHTTP implements the http.Handler interface, allowing Server to be used with httptest
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.echo.ServeHTTP(w, r)
+}
+
+func newGatewayStartConfig(addr string, writeTimeout time.Duration) echo.StartConfig {
+	return echo.StartConfig{
+		Address:    addr,
+		HideBanner: true,
+		BeforeServeFunc: func(server *http.Server) error {
+			return configureGatewayHTTPServer(server, writeTimeout)
+		},
+	}
+}
+
+func configureGatewayHTTPServer(server *http.Server, writeTimeout time.Duration) error {
+	if server == nil {
+		return nil
+	}
+
+	// Long-running model inference and SSE streams regularly exceed Echo's
+	// default 30s write deadline, which causes clients to see "empty reply from
+	// server" even after the provider has produced a valid response.
+	server.ReadTimeout = inboundServerReadTimeout
+	server.ReadHeaderTimeout = inboundServerReadHeaderTimeout
+	server.WriteTimeout = writeTimeout
+	return nil
 }
 
 func parseBodySizeLimitBytes(limit string) int64 {
