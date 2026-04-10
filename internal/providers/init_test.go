@@ -5,9 +5,14 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"gomodel/config"
 	"gomodel/internal/cache/modelcache"
@@ -166,6 +171,105 @@ func TestInit_AllowsStartupWhenProviderIsUnavailable(t *testing.T) {
 	}
 	if got := result.Registry.ProviderByType("test"); got != provider {
 		t.Fatal("ProviderByType(test) = nil or wrong provider, want registered unavailable provider")
+	}
+}
+
+func TestInit_NormalizesNilContext(t *testing.T) {
+	nilInitContext := func() context.Context {
+		return nil
+	}
+
+	cacheDir, err := os.MkdirTemp("", "gomodel-init-nil-context-*")
+	if err != nil {
+		t.Fatalf("os.MkdirTemp() error = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(cacheDir)
+	})
+
+	modelListFetched := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case modelListFetched <- struct{}{}:
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"version":1,"updated_at":"2026-04-10T00:00:00Z","providers":{},"models":{},"provider_models":{}}`)
+	}))
+	defer server.Close()
+
+	provider := &initTestProvider{
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "test-model", Object: "model", OwnedBy: "test"},
+			},
+		},
+	}
+
+	factory := NewProviderFactory()
+	factory.Add(Registration{
+		Type: "test",
+		New: func(ProviderConfig, ProviderOptions) core.Provider {
+			return provider
+		},
+	})
+
+	result, err := Init(nilInitContext(), &config.LoadResult{
+		Config: &config.Config{
+			Cache: config.CacheConfig{
+				Model: config.ModelCacheConfig{
+					RefreshInterval: 1,
+					ModelList: config.ModelListConfig{
+						URL: server.URL,
+					},
+					Local: &config.LocalCacheConfig{
+						CacheDir: cacheDir,
+					},
+				},
+			},
+		},
+		RawProviders: map[string]config.RawProviderConfig{
+			"test": {
+				Type:   "test",
+				APIKey: "sk-test",
+			},
+		},
+	}, factory)
+	if err != nil {
+		t.Fatalf("Init() error = %v, want nil", err)
+	}
+	defer func() {
+		_ = result.Close()
+	}()
+
+	select {
+	case <-modelListFetched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected Init(nil, ...) to fetch the model list without a nil-context panic")
+	}
+
+	cacheFile := filepath.Join(cacheDir, "models.json")
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if result.Registry.IsInitialized() {
+			if _, err := os.Stat(cacheFile); err == nil {
+				if _, err := os.Stat(cacheFile + ".tmp"); os.IsNotExist(err) {
+					return
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !result.Registry.IsInitialized() {
+		t.Fatal("expected Init(nil, ...) to complete background registry initialization")
+	}
+	if _, err := os.Stat(cacheFile); err != nil {
+		t.Fatalf("expected Init(nil, ...) to persist the cache file, stat error = %v", err)
+	}
+	if _, err := os.Stat(cacheFile + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("expected no in-progress cache temp file, stat error = %v", err)
 	}
 }
 

@@ -72,6 +72,9 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	if factory == nil {
 		return nil, fmt.Errorf("factory is required")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	providerMap, credentialResolved := resolveProviders(result.RawProviders, result.Config.Resilience, factory.discoveryConfigsSnapshot())
 
@@ -217,11 +220,7 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 		// Availability checks are diagnostics only. Providers stay registered so
 		// async initialization and periodic refresh can discover them later.
 		if checker, ok := p.(core.AvailabilityChecker); ok {
-			probeParent := ctx
-			if probeParent == nil {
-				probeParent = context.Background()
-			}
-			probeCtx, cancel := context.WithTimeout(probeParent, 5*time.Second)
+			probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			if err := checker.CheckAvailability(probeCtx); err != nil {
 				slog.Warn("provider unavailable at startup; keeping registered for refresh",
 					"name", name,
