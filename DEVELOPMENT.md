@@ -22,9 +22,11 @@ pre-commit install
 ## Testing
 
 ```bash
-make test          # Unit tests
-make test-e2e      # End-to-end tests (requires -tags=e2e; uses in-process mock servers, no Docker)
-make test-all      # All tests
+make test            # Go unit tests
+make test-race       # Go unit tests with race detection and coverage
+make test-dashboard  # Dashboard JavaScript unit tests
+make test-e2e        # End-to-end tests (requires -tags=e2e; uses in-process mock servers, no Docker)
+make test-all        # All tests
 ```
 
 ## Linting

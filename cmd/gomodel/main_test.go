@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
 
 type stubLifecycleApp struct {
+	mu            sync.Mutex
 	startErr      error
 	shutdownErr   error
 	startCalls    int
@@ -17,17 +19,39 @@ type stubLifecycleApp struct {
 }
 
 func (s *stubLifecycleApp) Start(_ context.Context, _ string) error {
+	s.mu.Lock()
 	s.startCalls++
+	s.mu.Unlock()
 	return s.startErr
 }
 
 func (s *stubLifecycleApp) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
 	s.shutdownCalls++
 	s.shutdownCtx = ctx
+	s.mu.Unlock()
 	if s.shutdownBlock != nil {
 		<-s.shutdownBlock
 	}
 	return s.shutdownErr
+}
+
+func (s *stubLifecycleApp) startCallCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.startCalls
+}
+
+func (s *stubLifecycleApp) shutdownCallCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.shutdownCalls
+}
+
+func (s *stubLifecycleApp) capturedShutdownContext() context.Context {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.shutdownCtx
 }
 
 func TestStartApplication_ShutsDownOnStartFailure(t *testing.T) {
@@ -38,16 +62,17 @@ func TestStartApplication_ShutsDownOnStartFailure(t *testing.T) {
 	if !errors.Is(err, startErr) {
 		t.Fatalf("error = %v, want start error %v", err, startErr)
 	}
-	if app.startCalls != 1 {
-		t.Fatalf("startCalls = %d, want 1", app.startCalls)
+	if calls := app.startCallCount(); calls != 1 {
+		t.Fatalf("startCalls = %d, want 1", calls)
 	}
-	if app.shutdownCalls != 1 {
-		t.Fatalf("shutdownCalls = %d, want 1", app.shutdownCalls)
+	if calls := app.shutdownCallCount(); calls != 1 {
+		t.Fatalf("shutdownCalls = %d, want 1", calls)
 	}
-	if app.shutdownCtx == nil {
+	shutdownCtx := app.capturedShutdownContext()
+	if shutdownCtx == nil {
 		t.Fatal("shutdown context was not captured")
 	}
-	deadline, ok := app.shutdownCtx.Deadline()
+	deadline, ok := shutdownCtx.Deadline()
 	if !ok {
 		t.Fatal("shutdown context should have a deadline")
 	}
@@ -71,8 +96,8 @@ func TestStartApplication_ReportsShutdownFailure(t *testing.T) {
 	if !errors.Is(err, shutdownErr) {
 		t.Fatalf("error = %v, want shutdown error %v", err, shutdownErr)
 	}
-	if app.shutdownCalls != 1 {
-		t.Fatalf("shutdownCalls = %d, want 1", app.shutdownCalls)
+	if calls := app.shutdownCallCount(); calls != 1 {
+		t.Fatalf("shutdownCalls = %d, want 1", calls)
 	}
 }
 
@@ -82,11 +107,11 @@ func TestStartApplication_DoesNotShutdownOnSuccess(t *testing.T) {
 	if err := startApplication(app, ":8080"); err != nil {
 		t.Fatalf("startApplication() error = %v, want nil", err)
 	}
-	if app.startCalls != 1 {
-		t.Fatalf("startCalls = %d, want 1", app.startCalls)
+	if calls := app.startCallCount(); calls != 1 {
+		t.Fatalf("startCalls = %d, want 1", calls)
 	}
-	if app.shutdownCalls != 0 {
-		t.Fatalf("shutdownCalls = %d, want 0", app.shutdownCalls)
+	if calls := app.shutdownCallCount(); calls != 0 {
+		t.Fatalf("shutdownCalls = %d, want 0", calls)
 	}
 }
 
@@ -113,7 +138,7 @@ func TestStartApplication_StopsWaitingWhenShutdownTimesOut(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("error = %v, want context deadline exceeded", err)
 	}
-	if app.shutdownCalls != 1 {
-		t.Fatalf("shutdownCalls = %d, want 1", app.shutdownCalls)
+	if calls := app.shutdownCallCount(); calls != 1 {
+		t.Fatalf("shutdownCalls = %d, want 1", calls)
 	}
 }

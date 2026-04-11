@@ -50,7 +50,7 @@ jobs:
           cache: true
 
       - name: Run unit tests
-        run: go test -v -race -coverprofile=coverage.out ./internal/... ./config/...
+        run: make test-race
 
       - name: Upload coverage
         uses: codecov/codecov-action@v6
@@ -58,6 +58,20 @@ jobs:
           files: ./coverage.out
           fail_ci_if_error: false
         continue-on-error: true
+
+  test-dashboard:
+    name: Dashboard Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Run dashboard JavaScript tests
+        run: make test-dashboard
 
   test-e2e:
     name: E2E Tests
@@ -142,7 +156,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [lint, test-unit, test-e2e, integration, test-contract, performance]
+    needs: [lint, test-unit, test-dashboard, test-e2e, integration, test-contract, performance]
     steps:
       - uses: actions/checkout@v6
 
