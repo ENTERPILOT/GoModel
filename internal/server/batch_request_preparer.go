@@ -2,9 +2,9 @@ package server
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 
+	"gomodel/internal/batchrewrite"
 	"gomodel/internal/core"
 )
 
@@ -45,7 +45,7 @@ func (c *batchRequestPreparerChain) PrepareBatchRequest(ctx context.Context, pro
 	for _, preparer := range c.preparers {
 		result, err := preparer.PrepareBatchRequest(ctx, providerType, current)
 		if err != nil {
-			c.cleanupBatchRewriteFile(ctx, providerType, activeRewrittenFileID)
+			batchrewrite.CleanupFile(ctx, c.fileTransport, providerType, activeRewrittenFileID, "failed to delete superseded batch input file")
 			return nil, err
 		}
 		if result == nil {
@@ -59,27 +59,14 @@ func (c *batchRequestPreparerChain) PrepareBatchRequest(ctx context.Context, pro
 		}
 		if rewritten := strings.TrimSpace(result.RewrittenInputFileID); rewritten != "" {
 			if activeRewrittenFileID != "" && activeRewrittenFileID != rewritten {
-				c.cleanupBatchRewriteFile(ctx, providerType, activeRewrittenFileID)
+				batchrewrite.CleanupFile(ctx, c.fileTransport, providerType, activeRewrittenFileID, "failed to delete superseded batch input file")
 			}
 			activeRewrittenFileID = rewritten
 			aggregate.RewrittenInputFileID = rewritten
 		}
-		aggregate.RequestEndpointHints = mergeBatchRequestEndpointHints(aggregate.RequestEndpointHints, result.RequestEndpointHints)
+		aggregate.RequestEndpointHints = batchrewrite.MergeEndpointHints(aggregate.RequestEndpointHints, result.RequestEndpointHints)
 	}
 
 	aggregate.Request = current
 	return aggregate, nil
-}
-
-func (c *batchRequestPreparerChain) cleanupBatchRewriteFile(ctx context.Context, providerType, fileID string) {
-	if c == nil || c.fileTransport == nil {
-		return
-	}
-	fileID = strings.TrimSpace(fileID)
-	if fileID == "" {
-		return
-	}
-	if _, err := c.fileTransport.DeleteFile(ctx, providerType, fileID); err != nil {
-		slog.Warn("failed to delete superseded batch input file", "provider", providerType, "file_id", fileID, "error", err)
-	}
 }
