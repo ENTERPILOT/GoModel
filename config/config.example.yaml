@@ -13,7 +13,7 @@ server:
   enabled_passthrough_providers: ["openai", "anthropic"] # providers enabled on /p/{provider}/...
 
 models:
-  enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false and overrides are enabled, concrete models stay unavailable until explicitly enabled by a model override
+  enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false and overrides are enabled, concrete models stay unavailable until an override allows one or more user paths
   overrides_enabled: false # env: MODEL_OVERRIDES_ENABLED; set true to load/enforce persisted model overrides and enable dashboard editing
 
 cache:

@@ -16,22 +16,23 @@ import (
 
 // Handler holds the HTTP handlers
 type Handler struct {
-	provider                     core.RoutableProvider
-	modelResolver                RequestModelResolver
-	modelAuthorizer              RequestModelAuthorizer
-	fallbackResolver             RequestFallbackResolver
-	executionPolicyResolver      RequestExecutionPolicyResolver
-	translatedRequestPatcher     TranslatedRequestPatcher
-	batchRequestPreparer         BatchRequestPreparer
-	exposedModelLister           ExposedModelLister
-	logger                       auditlog.LoggerInterface
-	usageLogger                  usage.LoggerInterface
-	pricingResolver              usage.PricingResolver
-	batchStore                   batchstore.Store
-	normalizePassthroughV1Prefix bool
-	enabledPassthroughProviders  map[string]struct{}
-	responseCache                *responsecache.ResponseCacheMiddleware
-	guardrailsHash               string
+	provider                        core.RoutableProvider
+	modelResolver                   RequestModelResolver
+	modelAuthorizer                 RequestModelAuthorizer
+	fallbackResolver                RequestFallbackResolver
+	executionPolicyResolver         RequestExecutionPolicyResolver
+	translatedRequestPatcher        TranslatedRequestPatcher
+	batchRequestPreparer            BatchRequestPreparer
+	exposedModelLister              ExposedModelLister
+	keepOnlyAliasesAtModelsEndpoint bool
+	logger                          auditlog.LoggerInterface
+	usageLogger                     usage.LoggerInterface
+	pricingResolver                 usage.PricingResolver
+	batchStore                      batchstore.Store
+	normalizePassthroughV1Prefix    bool
+	enabledPassthroughProviders     map[string]struct{}
+	responseCache                   *responsecache.ResponseCacheMiddleware
+	guardrailsHash                  string
 
 	translatedSvc     *translatedInferenceService // snapshot of handler fields at first use; server.New sets cache/hash before traffic
 	translatedSvcOnce sync.Once
@@ -235,6 +236,13 @@ func (h *Handler) ListModels(c *echo.Context) error {
 	resp, err := h.provider.ListModels(ctx)
 	if err != nil {
 		return handleError(c, err)
+	}
+	if h.keepOnlyAliasesAtModelsEndpoint {
+		object := "list"
+		if resp != nil && resp.Object != "" {
+			object = resp.Object
+		}
+		resp = &core.ModelsResponse{Object: object, Data: []core.Model{}}
 	}
 	if h.modelAuthorizer != nil && resp != nil {
 		resp = &core.ModelsResponse{

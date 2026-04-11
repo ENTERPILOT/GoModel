@@ -32,9 +32,7 @@
             modelOverrideFormDisplayName: '',
             modelOverrideForm: {
                 selector: '',
-                enabled: false,
-                force_disabled: false,
-                allowed_only_for_user_paths: ''
+                user_paths: ''
             },
 
             buildDisplayModels() {
@@ -355,47 +353,16 @@
                 const globalOverride = overridesBySelector ? (overridesBySelector.get(this.globalOverrideSelector()) || null) : null;
                 const override = selector && overridesBySelector ? (overridesBySelector.get(selector) || null) : null;
                 const defaultEnabled = this.providerGroupDefaultEnabled(providerName, providerType);
-                const allowedOnlyForUserPaths = [];
-                const seenAllowedOnlyForUserPaths = new Set();
-                const addAllowedOnlyForUserPaths = (paths) => {
-                    if (!Array.isArray(paths)) {
-                        return;
-                    }
-                    for (const path of paths) {
-                        if (seenAllowedOnlyForUserPaths.has(path)) {
-                            continue;
-                        }
-                        seenAllowedOnlyForUserPaths.add(path);
-                        allowedOnlyForUserPaths.push(path);
-                    }
-                };
-                let forceDisabled = false;
-                let effectiveEnabled = defaultEnabled;
-                const applyRule = (rule) => {
-                    if (!rule) {
-                        return;
-                    }
-                    if (rule.enabled === true) {
-                        effectiveEnabled = true;
-                        forceDisabled = false;
-                    }
-                    if (rule.force_disabled) {
-                        effectiveEnabled = false;
-                        forceDisabled = true;
-                    }
-                    addAllowedOnlyForUserPaths(rule.allowed_only_for_user_paths);
-                };
-
-                applyRule(globalOverride);
-                applyRule(override);
-                allowedOnlyForUserPaths.sort();
+                const inheritedOverride = override || globalOverride;
+                const userPaths = inheritedOverride && Array.isArray(inheritedOverride.user_paths)
+                    ? Array.from(new Set(inheritedOverride.user_paths)).sort()
+                    : [];
 
                 return {
                     selector,
                     default_enabled: defaultEnabled,
-                    effective_enabled: effectiveEnabled,
-                    force_disabled: forceDisabled,
-                    allowed_only_for_user_paths: allowedOnlyForUserPaths,
+                    effective_enabled: Boolean(inheritedOverride) || defaultEnabled,
+                    user_paths: userPaths,
                     override
                 };
             },
@@ -516,9 +483,7 @@
             defaultModelOverrideForm() {
                 return {
                     selector: '',
-                    enabled: false,
-                    force_disabled: false,
-                    allowed_only_for_user_paths: ''
+                    user_paths: ''
                 };
             },
 
@@ -561,9 +526,9 @@
 
                 const access = row.access || {};
                 const override = access.override || null;
-                const allowedPaths = override && Array.isArray(override.allowed_only_for_user_paths)
-                    ? override.allowed_only_for_user_paths
-                    : (Array.isArray(access.allowed_only_for_user_paths) ? access.allowed_only_for_user_paths : []);
+                const userPaths = override && Array.isArray(override.user_paths)
+                    ? override.user_paths
+                    : (Array.isArray(access.user_paths) ? access.user_paths : []);
 
                 this.modelOverrideFormOpen = true;
                 this.modelOverrideError = '';
@@ -574,9 +539,7 @@
                 this.modelOverrideFormDisplayName = row.access_display_name || row.display_name || this.qualifiedModelName(row) || '';
                 this.modelOverrideForm = {
                     selector: this.rowAccessSelector(row),
-                    enabled: Boolean(override && override.enabled === true),
-                    force_disabled: Boolean(override && override.force_disabled),
-                    allowed_only_for_user_paths: allowedPaths.join('\n')
+                    user_paths: userPaths.join('\n')
                 };
                 this.scrollToModelOverrideForm();
             },
@@ -584,26 +547,21 @@
             openGlobalModelOverrideEdit() {
                 const selector = this.globalOverrideSelector();
                 const override = this.findModelOverrideView(selector);
-                const allowedPaths = override && Array.isArray(override.allowed_only_for_user_paths)
-                    ? override.allowed_only_for_user_paths
+                const userPaths = override && Array.isArray(override.user_paths)
+                    ? override.user_paths
                     : [];
                 const defaultEnabled = this.modelOverridesDefaultEnabled();
-                const forceDisabled = Boolean(override && override.force_disabled);
 
                 this.modelOverrideFormOpen = true;
                 this.modelOverrideError = '';
                 this.modelOverrideNotice = '';
                 this.modelOverrideFormHasExistingOverride = Boolean(override);
                 this.modelOverrideFormDefaultEnabled = defaultEnabled;
-                this.modelOverrideFormEffectiveEnabled = forceDisabled
-                    ? false
-                    : Boolean(override && override.enabled === true) || defaultEnabled;
+                this.modelOverrideFormEffectiveEnabled = Boolean(override) || defaultEnabled;
                 this.modelOverrideFormDisplayName = 'All providers and models';
                 this.modelOverrideForm = {
                     selector,
-                    enabled: Boolean(override && override.enabled === true),
-                    force_disabled: forceDisabled,
-                    allowed_only_for_user_paths: allowedPaths.join('\n')
+                    user_paths: userPaths.join('\n')
                 };
                 this.scrollToModelOverrideForm();
             },
@@ -666,17 +624,17 @@
                 return 'Active';
             },
 
+            modelAccessUserPathsRestrict(paths) {
+                return Array.isArray(paths) && paths.length > 0 && paths.indexOf('/') === -1;
+            },
+
             modelAccessStateText(access) {
                 if (!this.modelOverridesAvailable) return '';
                 if (!access) return 'Default';
-                if (access.force_disabled) return 'Force Disabled';
                 if (access.effective_enabled === false) {
                     return access.default_enabled === false ? 'Disabled by Default' : 'Disabled';
                 }
-                if (access.override && access.override.enabled === true && access.default_enabled === false) {
-                    return 'Explicitly Enabled';
-                }
-                if (Array.isArray(access.allowed_only_for_user_paths) && access.allowed_only_for_user_paths.length > 0) {
+                if (this.modelAccessUserPathsRestrict(access.user_paths)) {
                     return 'Restricted';
                 }
                 return 'Enabled';
@@ -685,8 +643,8 @@
             modelAccessStateClass(access) {
                 if (!this.modelOverridesAvailable) return '';
                 if (!access) return '';
-                if (access.force_disabled || access.effective_enabled === false) return 'is-disabled';
-                if (Array.isArray(access.allowed_only_for_user_paths) && access.allowed_only_for_user_paths.length > 0) {
+                if (access.effective_enabled === false) return 'is-disabled';
+                if (this.modelAccessUserPathsRestrict(access.user_paths)) {
                     return 'is-restricted';
                 }
                 return 'is-enabled';
@@ -698,17 +656,13 @@
                 }
 
                 const parts = [];
-                if (access.force_disabled) {
-                    parts.push('Force disabled globally');
-                } else if (access.effective_enabled === false) {
-                    parts.push(access.default_enabled === false ? 'Disabled until explicitly enabled' : 'Disabled');
-                } else if (access.override && access.override.enabled === true && access.default_enabled === false) {
-                    parts.push('Explicitly enabled');
+                if (access.effective_enabled === false) {
+                    parts.push(access.default_enabled === false ? 'Disabled by default' : 'Disabled');
                 }
 
-                const allowed = Array.isArray(access.allowed_only_for_user_paths) ? access.allowed_only_for_user_paths : [];
-                if (allowed.length > 0) {
-                    parts.push('Allowed only for ' + allowed.join(', '));
+                const userPaths = Array.isArray(access.user_paths) ? access.user_paths : [];
+                if (userPaths.length > 0) {
+                    parts.push('Allowed for ' + userPaths.join(', '));
                 }
 
                 return parts.join(' · ');
@@ -1024,18 +978,16 @@
 
             async submitModelOverrideForm() {
                 const selector = String(this.modelOverrideForm.selector || '').trim();
-                const allowedOnlyForUserPaths = this.normalizeModelOverridePaths(this.modelOverrideForm.allowed_only_for_user_paths);
-                const forceDisabled = Boolean(this.modelOverrideForm.force_disabled);
-                const enabled = Boolean(this.modelOverrideForm.enabled) && !forceDisabled;
+                const userPaths = this.normalizeModelOverridePaths(this.modelOverrideForm.user_paths);
 
                 if (!selector) {
                     this.modelOverrideError = 'Model selector is required.';
                     return;
                 }
-                if (!enabled && !forceDisabled && allowedOnlyForUserPaths.length === 0) {
+                if (userPaths.length === 0) {
                     this.modelOverrideError = this.modelOverrideFormHasExistingOverride
-                        ? 'Choose an access policy or remove the override.'
-                        : 'Choose an access policy before saving.';
+                        ? 'Enter at least one user path or remove the override.'
+                        : 'Enter at least one user path before saving.';
                     return;
                 }
 
@@ -1043,13 +995,7 @@
                 this.modelOverrideError = '';
                 this.modelOverrideNotice = '';
 
-                const payload = {
-                    force_disabled: forceDisabled,
-                    allowed_only_for_user_paths: allowedOnlyForUserPaths
-                };
-                if (enabled) {
-                    payload.enabled = true;
-                }
+                const payload = { user_paths: userPaths };
 
                 try {
                     const res = await fetch('/admin/api/v1/model-overrides/' + encodeURIComponent(selector), {

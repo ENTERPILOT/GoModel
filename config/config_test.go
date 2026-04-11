@@ -54,7 +54,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"USAGE_BUFFER_SIZE", "USAGE_FLUSH_INTERVAL", "USAGE_RETENTION_DAYS",
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING",
 		"FEATURE_FALLBACK_MODE", "FALLBACK_MANUAL_RULES_PATH",
-		"MODEL_OVERRIDES_ENABLED", "MODELS_ENABLED_BY_DEFAULT",
+		"MODEL_OVERRIDES_ENABLED", "MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT",
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
 		"EXECUTION_PLAN_REFRESH_INTERVAL",
 	} {
@@ -172,6 +172,9 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Models.OverridesEnabled {
 		t.Error("expected Models.OverridesEnabled=false")
 	}
+	if cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
+		t.Error("expected Models.KeepOnlyAliasesAtModelsEndpoint=false")
+	}
 	if cfg.Guardrails.EnableForBatchProcessing {
 		t.Error("expected Guardrails.EnableForBatchProcessing=false")
 	}
@@ -225,6 +228,7 @@ server:
 models:
   enabled_by_default: false
   overrides_enabled: true
+  keep_only_aliases_at_models_endpoint: true
 cache:
   model:
     redis:
@@ -257,6 +261,9 @@ logging:
 		}
 		if !cfg.Models.OverridesEnabled {
 			t.Error("expected Models.OverridesEnabled=true from YAML")
+		}
+		if !cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
+			t.Error("expected Models.KeepOnlyAliasesAtModelsEndpoint=true from YAML")
 		}
 		if cfg.Cache.Model.Redis == nil {
 			t.Fatal("expected Cache.Model.Redis to be set")
@@ -837,6 +844,7 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 		t.Setenv("PORT", "5555")
 		t.Setenv("MODEL_OVERRIDES_ENABLED", "true")
 		t.Setenv("MODELS_ENABLED_BY_DEFAULT", "false")
+		t.Setenv("KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "true")
 		t.Setenv("STORAGE_TYPE", "postgresql")
 		t.Setenv("POSTGRES_URL", "postgres://localhost/test")
 		t.Setenv("POSTGRES_MAX_CONNS", "20")
@@ -855,6 +863,9 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 		}
 		if cfg.Models.EnabledByDefault {
 			t.Error("expected models enabled-by-default to be disabled from env")
+		}
+		if !cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
+			t.Error("expected aliases-only models endpoint from env")
 		}
 		if cfg.Storage.Type != "postgresql" {
 			t.Errorf("expected storage type postgresql, got %s", cfg.Storage.Type)

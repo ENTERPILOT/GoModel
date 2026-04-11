@@ -20,10 +20,6 @@ type modelOverrideTestStore struct {
 	items map[string]modeloverrides.Override
 }
 
-func modelOverrideBoolPtr(value bool) *bool {
-	return &value
-}
-
 func newModelOverrideTestStore(items ...modeloverrides.Override) *modelOverrideTestStore {
 	store := &modelOverrideTestStore{items: make(map[string]modeloverrides.Override, len(items))}
 	for _, item := range items {
@@ -108,9 +104,8 @@ func newModelOverrideService(t *testing.T, store modeloverrides.Store, defaultEn
 func TestListModels_IncludesModelAccessState(t *testing.T) {
 	registry := newModelOverrideRegistry(t)
 	service := newModelOverrideService(t, newModelOverrideTestStore(modeloverrides.Override{
-		Selector:                "openai/gpt-4o",
-		Enabled:                 modelOverrideBoolPtr(true),
-		AllowedOnlyForUserPaths: []string{"/team/alpha"},
+		Selector:  "openai/gpt-4o",
+		UserPaths: []string{"/team/alpha"},
 	}), false)
 
 	h := NewHandler(nil, registry, WithModelOverrides(service))
@@ -144,8 +139,8 @@ func TestListModels_IncludesModelAccessState(t *testing.T) {
 	if !row.Access.EffectiveEnabled {
 		t.Fatal("row.Access.EffectiveEnabled = false, want true")
 	}
-	if len(row.Access.AllowedOnlyForUserPaths) != 1 || row.Access.AllowedOnlyForUserPaths[0] != "/team/alpha" {
-		t.Fatalf("row.Access.AllowedOnlyForUserPaths = %#v, want [/team/alpha]", row.Access.AllowedOnlyForUserPaths)
+	if len(row.Access.UserPaths) != 1 || row.Access.UserPaths[0] != "/team/alpha" {
+		t.Fatalf("row.Access.UserPaths = %#v, want [/team/alpha]", row.Access.UserPaths)
 	}
 	if row.Access.Override == nil || row.Access.Override.Selector != "openai/gpt-4o" {
 		t.Fatalf("row.Access.Override = %#v, want exact override", row.Access.Override)
@@ -155,8 +150,8 @@ func TestListModels_IncludesModelAccessState(t *testing.T) {
 func TestListModels_AppliesProviderWideOverrideToConcreteModels(t *testing.T) {
 	registry := newModelOverrideRegistry(t)
 	service := newModelOverrideService(t, newModelOverrideTestStore(modeloverrides.Override{
-		Selector:      "openai/",
-		ForceDisabled: true,
+		Selector:  "openai/",
+		UserPaths: []string{"/team/provider"},
 	}), true)
 
 	h := NewHandler(nil, registry, WithModelOverrides(service))
@@ -184,11 +179,11 @@ func TestListModels_AppliesProviderWideOverrideToConcreteModels(t *testing.T) {
 	if row.Access.DefaultEnabled != true {
 		t.Fatal("row.Access.DefaultEnabled = false, want true")
 	}
-	if row.Access.EffectiveEnabled {
-		t.Fatal("row.Access.EffectiveEnabled = true, want false")
+	if !row.Access.EffectiveEnabled {
+		t.Fatal("row.Access.EffectiveEnabled = false, want true")
 	}
-	if !row.Access.ForceDisabled {
-		t.Fatal("row.Access.ForceDisabled = false, want true")
+	if len(row.Access.UserPaths) != 1 || row.Access.UserPaths[0] != "/team/provider" {
+		t.Fatalf("row.Access.UserPaths = %#v, want [/team/provider]", row.Access.UserPaths)
 	}
 	if row.Access.Override != nil {
 		t.Fatalf("row.Access.Override = %#v, want nil for provider-wide override", row.Access.Override)
@@ -198,8 +193,8 @@ func TestListModels_AppliesProviderWideOverrideToConcreteModels(t *testing.T) {
 func TestListModels_AppliesGlobalOverrideToConcreteModels(t *testing.T) {
 	registry := newModelOverrideRegistry(t)
 	service := newModelOverrideService(t, newModelOverrideTestStore(modeloverrides.Override{
-		Selector:      "/",
-		ForceDisabled: true,
+		Selector:  "/",
+		UserPaths: []string{"/team/global"},
 	}), true)
 
 	h := NewHandler(nil, registry, WithModelOverrides(service))
@@ -227,11 +222,11 @@ func TestListModels_AppliesGlobalOverrideToConcreteModels(t *testing.T) {
 	if row.Access.DefaultEnabled != true {
 		t.Fatal("row.Access.DefaultEnabled = false, want true")
 	}
-	if row.Access.EffectiveEnabled {
-		t.Fatal("row.Access.EffectiveEnabled = true, want false")
+	if !row.Access.EffectiveEnabled {
+		t.Fatal("row.Access.EffectiveEnabled = false, want true")
 	}
-	if !row.Access.ForceDisabled {
-		t.Fatal("row.Access.ForceDisabled = false, want true")
+	if len(row.Access.UserPaths) != 1 || row.Access.UserPaths[0] != "/team/global" {
+		t.Fatalf("row.Access.UserPaths = %#v, want [/team/global]", row.Access.UserPaths)
 	}
 	if row.Access.Override != nil {
 		t.Fatalf("row.Access.Override = %#v, want nil for global override", row.Access.Override)
@@ -263,7 +258,7 @@ func TestModelOverrideEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	listCtx, listRec := newHandlerContext("/admin/api/v1/model-overrides")
 	assertUnavailable("ListModelOverrides", h.ListModelOverrides(listCtx), listRec)
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"enabled":true}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"user_paths":["/"]}`))
 	putReq.Header.Set("Content-Type", "application/json")
 	putRec := httptest.NewRecorder()
 	putCtx := e.NewContext(putReq, putRec)
@@ -282,7 +277,7 @@ func TestUpsertAndDeleteModelOverride(t *testing.T) {
 	h := NewHandler(nil, nil, WithModelOverrides(service))
 	e := echo.New()
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"enabled":true,"allowed_only_for_user_paths":["team/alpha"]}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"user_paths":["team/alpha"]}`))
 	putReq.Header.Set("Content-Type", "application/json")
 	putRec := httptest.NewRecorder()
 	putCtx := e.NewContext(putReq, putRec)
@@ -302,11 +297,8 @@ func TestUpsertAndDeleteModelOverride(t *testing.T) {
 	if body.Selector != "openai/gpt-4o" {
 		t.Fatalf("body.Selector = %q, want openai/gpt-4o", body.Selector)
 	}
-	if body.Enabled == nil || !*body.Enabled {
-		t.Fatalf("body.Enabled = %#v, want true", body.Enabled)
-	}
-	if len(body.AllowedOnlyForUserPaths) != 1 || body.AllowedOnlyForUserPaths[0] != "/team/alpha" {
-		t.Fatalf("body.AllowedOnlyForUserPaths = %#v, want [/team/alpha]", body.AllowedOnlyForUserPaths)
+	if len(body.UserPaths) != 1 || body.UserPaths[0] != "/team/alpha" {
+		t.Fatalf("body.UserPaths = %#v, want [/team/alpha]", body.UserPaths)
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", nil)
@@ -327,7 +319,7 @@ func TestUpsertAndDeleteProviderWideModelOverride(t *testing.T) {
 	h := NewHandler(nil, nil, WithModelOverrides(service))
 	e := echo.New()
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2F", bytes.NewBufferString(`{"force_disabled":true}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2F", bytes.NewBufferString(`{"user_paths":["/non-existing"]}`))
 	putReq.Header.Set("Content-Type", "application/json")
 	putRec := httptest.NewRecorder()
 	putCtx := e.NewContext(putReq, putRec)
@@ -347,8 +339,8 @@ func TestUpsertAndDeleteProviderWideModelOverride(t *testing.T) {
 	if body.Selector != "openai/" {
 		t.Fatalf("body.Selector = %q, want openai/", body.Selector)
 	}
-	if !body.ForceDisabled {
-		t.Fatal("body.ForceDisabled = false, want true")
+	if len(body.UserPaths) != 1 || body.UserPaths[0] != "/non-existing" {
+		t.Fatalf("body.UserPaths = %#v, want [/non-existing]", body.UserPaths)
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides/openai%2F", nil)
@@ -369,7 +361,7 @@ func TestUpsertAndDeleteGlobalModelOverride(t *testing.T) {
 	h := NewHandler(nil, nil, WithModelOverrides(service))
 	e := echo.New()
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/%2F", bytes.NewBufferString(`{"force_disabled":true}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/%2F", bytes.NewBufferString(`{"user_paths":["/"]}`))
 	putReq.Header.Set("Content-Type", "application/json")
 	putRec := httptest.NewRecorder()
 	putCtx := e.NewContext(putReq, putRec)
@@ -389,8 +381,8 @@ func TestUpsertAndDeleteGlobalModelOverride(t *testing.T) {
 	if body.Selector != "/" {
 		t.Fatalf("body.Selector = %q, want /", body.Selector)
 	}
-	if !body.ForceDisabled {
-		t.Fatal("body.ForceDisabled = false, want true")
+	if len(body.UserPaths) != 1 || body.UserPaths[0] != "/" {
+		t.Fatalf("body.UserPaths = %#v, want [/]", body.UserPaths)
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides/%2F", nil)
@@ -411,7 +403,7 @@ func TestUpsertModelOverrideReturnsBadRequestForValidationErrors(t *testing.T) {
 	h := NewHandler(nil, nil, WithModelOverrides(service))
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"enabled":false}`))
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"user_paths":[]}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -432,7 +424,7 @@ func TestModelOverrideWriteErrorsBubbleProviderErrors(t *testing.T) {
 	h := NewHandler(nil, nil, WithModelOverrides(service))
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"enabled":true}`))
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"user_paths":["/"]}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)

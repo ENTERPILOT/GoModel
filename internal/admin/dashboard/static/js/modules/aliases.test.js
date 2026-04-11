@@ -110,13 +110,12 @@ test('filteredDisplayModelGroups groups rows by provider_name and applies provid
         {
             selector: 'openai-backup/',
             provider_name: 'openai-backup',
-            force_disabled: true
+            user_paths: ['/non-existing']
         },
         {
             selector: 'openai-primary/',
             provider_name: 'openai-primary',
-            enabled: true,
-            allowed_only_for_user_paths: ['/team/alpha']
+            user_paths: ['/team/alpha']
         }
     ];
     module.aliases = [];
@@ -133,14 +132,14 @@ test('filteredDisplayModelGroups groups rows by provider_name and applies provid
     assert.equal(primary.access.selector, 'openai-primary/');
     assert.equal(primary.access.default_enabled, false);
     assert.equal(primary.access.effective_enabled, true);
-    assert.deepEqual(Array.from(primary.access.allowed_only_for_user_paths), ['/team/alpha']);
+    assert.deepEqual(Array.from(primary.access.user_paths), ['/team/alpha']);
     assert.equal(primary.item_count_label, '1 model');
     assert.equal(backup.access.selector, 'openai-backup/');
-    assert.equal(backup.access.force_disabled, true);
-    assert.equal(backup.access.effective_enabled, false);
+    assert.equal(backup.access.effective_enabled, true);
+    assert.deepEqual(Array.from(backup.access.user_paths), ['/non-existing']);
 });
 
-test('filteredDisplayModelGroups applies global overrides before provider-wide overrides', () => {
+test('filteredDisplayModelGroups lets provider-wide overrides replace global paths', () => {
     const module = createAliasesModule();
     module.models = [
         {
@@ -175,13 +174,12 @@ test('filteredDisplayModelGroups applies global overrides before provider-wide o
     module.modelOverrideViews = [
         {
             selector: '/',
-            enabled: true,
-            allowed_only_for_user_paths: ['/team/alpha']
+            user_paths: ['/team/alpha']
         },
         {
             selector: 'openai-primary/',
             provider_name: 'openai-primary',
-            force_disabled: true
+            user_paths: ['/team/openai']
         }
     ];
     module.aliases = [];
@@ -194,10 +192,9 @@ test('filteredDisplayModelGroups applies global overrides before provider-wide o
     const openai = groups.find((group) => group.provider_name === 'openai-primary');
 
     assert.equal(anthropic.access.effective_enabled, true);
-    assert.deepEqual(Array.from(anthropic.access.allowed_only_for_user_paths), ['/team/alpha']);
-    assert.equal(openai.access.effective_enabled, false);
-    assert.equal(openai.access.force_disabled, true);
-    assert.deepEqual(Array.from(openai.access.allowed_only_for_user_paths), ['/team/alpha']);
+    assert.deepEqual(Array.from(anthropic.access.user_paths), ['/team/alpha']);
+    assert.equal(openai.access.effective_enabled, true);
+    assert.deepEqual(Array.from(openai.access.user_paths), ['/team/openai']);
 });
 
 test('override button helpers mark configured selectors', () => {
@@ -237,8 +234,7 @@ test('openProviderOverrideEdit opens the access editor with provider_name slash 
             selector: 'openai-primary/',
             default_enabled: true,
             effective_enabled: true,
-            force_disabled: false,
-            allowed_only_for_user_paths: [],
+            user_paths: [],
             override: null
         }
     });
@@ -299,8 +295,7 @@ test('openGlobalModelOverrideEdit opens the access editor with slash selector', 
     module.modelOverrideViews = [
         {
             selector: '/',
-            enabled: true,
-            allowed_only_for_user_paths: ['/team/alpha']
+            user_paths: ['/team/alpha']
         }
     ];
 
@@ -311,5 +306,5 @@ test('openGlobalModelOverrideEdit opens the access editor with slash selector', 
     assert.equal(module.modelOverrideFormDisplayName, 'All providers and models');
     assert.equal(module.modelOverrideFormDefaultEnabled, false);
     assert.equal(module.modelOverrideFormEffectiveEnabled, true);
-    assert.equal(module.modelOverrideForm.allowed_only_for_user_paths, '/team/alpha');
+    assert.equal(module.modelOverrideForm.user_paths, '/team/alpha');
 });

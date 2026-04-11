@@ -132,7 +132,7 @@ type FallbackModelOverride struct {
 // ModelsConfig holds global model access defaults.
 type ModelsConfig struct {
 	// EnabledByDefault controls whether concrete provider models are available
-	// when no persisted override exists and model overrides are enabled.
+	// when no persisted user-path override exists and model overrides are enabled.
 	// Default: true.
 	EnabledByDefault bool `yaml:"enabled_by_default" env:"MODELS_ENABLED_BY_DEFAULT"`
 
@@ -140,6 +140,11 @@ type ModelsConfig struct {
 	// loaded, enforced, and exposed through the admin dashboard/API.
 	// Default: false.
 	OverridesEnabled bool `yaml:"overrides_enabled" env:"MODEL_OVERRIDES_ENABLED"`
+
+	// KeepOnlyAliasesAtModelsEndpoint controls whether GET /v1/models hides
+	// concrete provider models and returns only alias-projected model entries.
+	// Default: false.
+	KeepOnlyAliasesAtModelsEndpoint bool `yaml:"keep_only_aliases_at_models_endpoint" env:"KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT"`
 }
 
 // FallbackConfig holds translated-route model fallback policy.
@@ -878,8 +883,9 @@ func buildDefaultConfig() *Config {
 			},
 		},
 		Models: ModelsConfig{
-			EnabledByDefault: true,
-			OverridesEnabled: false,
+			EnabledByDefault:                true,
+			OverridesEnabled:                false,
+			KeepOnlyAliasesAtModelsEndpoint: false,
 		},
 		Cache: CacheConfig{
 			Model: ModelCacheConfig{

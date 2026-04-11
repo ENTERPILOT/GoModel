@@ -807,27 +807,17 @@
             </label>
 
             <p class="alias-form-hint">
-                The selector uses <code>/</code> for all providers and models, <code>{provider_name}/</code> for one provider, or <code>{provider_name}/{model}</code> for one model. <code>allowed_only_for_user_paths</code> is matched against the effective managed API key <code>user_path</code>.
+                The selector uses <code>/</code> for all providers and models, <code>{provider_name}/</code> for one provider, or <code>{provider_name}/{model}</code> for one model. <code>user_paths</code> is matched against the effective managed API key <code>user_path</code>.
             </p>
             <p class="alias-form-hint" x-text="'Default enabled: ' + (modelOverrideFormDefaultEnabled ? 'yes' : 'no') + ' · Effective now: ' + (modelOverrideFormEffectiveEnabled ? 'yes' : 'no')"></p>
 
-            <label class="alias-checkbox">
-                <input type="checkbox" x-model="modelOverrideForm.enabled" :disabled="modelOverrideForm.force_disabled">
-                <span>Explicitly enable this selector</span>
-            </label>
-
-            <label class="alias-checkbox">
-                <input type="checkbox" x-model="modelOverrideForm.force_disabled">
-                <span>Force disable globally</span>
-            </label>
-
             <label class="alias-form-field">
-                <span>Allowed Only For User Paths</span>
-                <textarea rows="4" class="alias-form-textarea mono" placeholder="/team/alpha&#10;/team/beta" x-model="modelOverrideForm.allowed_only_for_user_paths"></textarea>
+                <span>User Paths</span>
+                <textarea rows="4" class="alias-form-textarea mono" placeholder="/&#10;/team/alpha&#10;/non-existing" x-model="modelOverrideForm.user_paths"></textarea>
             </label>
 
             <p class="alias-form-hint">
-                Leave blank to allow every user path. When set, descendant paths are also allowed.
+                Use <code>/</code> to allow every user path. Use a team path to restrict to that subtree, or an unused path to make the selector unavailable.
             </p>
 
             <div class="alert alert-warning" x-show="modelOverrideError" x-text="modelOverrideError"></div>

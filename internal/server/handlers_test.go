@@ -2631,6 +2631,52 @@ func TestListModels_MergesExposedModelsWithoutAliasProviderDecorator(t *testing.
 	require.Contains(t, body, `"id":"smart"`)
 }
 
+func TestListModels_KeepOnlyAliasesOmitsProviderModels(t *testing.T) {
+	catalog := &aliasesTestCatalog{
+		supported: map[string]bool{
+			"openai/gpt-4o": true,
+		},
+		providerTypes: map[string]string{
+			"openai/gpt-4o": "openai",
+		},
+		models: map[string]core.Model{
+			"openai/gpt-4o": {ID: "gpt-4o", Object: "model", OwnedBy: "openai"},
+		},
+	}
+	service, err := aliases.NewService(newAliasesTestStore(
+		aliases.Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: true},
+	), catalog)
+	require.NoError(t, err)
+	require.NoError(t, service.Refresh(context.Background()))
+
+	mock := &mockProvider{
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-4o", Object: "model", OwnedBy: "openai"},
+			},
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+	handler.exposedModelLister = service
+	handler.keepOnlyAliasesAtModelsEndpoint = true
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err = handler.ListModels(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp core.ModelsResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Data, 1)
+	require.Equal(t, "smart", resp.Data[0].ID)
+}
+
 func TestListModels_FiltersExposedModelsWhenAuthorizerIsPresent(t *testing.T) {
 	mock := &mockProvider{
 		modelsResponse: &core.ModelsResponse{

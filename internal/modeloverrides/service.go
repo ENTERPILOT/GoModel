@@ -148,8 +148,7 @@ func (s *Service) buildSnapshot(overrides []Override) (snapshot, error) {
 }
 
 func cloneOverride(override Override) Override {
-	override.Enabled = cloneEnabled(override.Enabled)
-	override.AllowedOnlyForUserPaths = append([]string(nil), override.AllowedOnlyForUserPaths...)
+	override.UserPaths = append([]string(nil), override.UserPaths...)
 	return override
 }
 
@@ -192,8 +191,7 @@ func (s *Service) List() []Override {
 	result := make([]Override, 0, len(snap.order))
 	for _, selector := range snap.order {
 		override := snap.bySelector[selector]
-		override.Enabled = cloneEnabled(override.Enabled)
-		override.AllowedOnlyForUserPaths = append([]string(nil), override.AllowedOnlyForUserPaths...)
+		override.UserPaths = append([]string(nil), override.UserPaths...)
 		result = append(result, override)
 	}
 	return result
@@ -222,8 +220,7 @@ func (s *Service) Get(selector string) (*Override, bool) {
 	if !ok {
 		return nil, false
 	}
-	override.Enabled = cloneEnabled(override.Enabled)
-	override.AllowedOnlyForUserPaths = append([]string(nil), override.AllowedOnlyForUserPaths...)
+	override.UserPaths = append([]string(nil), override.UserPaths...)
 	return &override, true
 }
 
@@ -236,12 +233,6 @@ func (s *Service) Upsert(ctx context.Context, override Override) error {
 	normalized, err := normalizeOverrideInput(s.catalog, override)
 	if err != nil {
 		return err
-	}
-	if normalized.Enabled == nil && !normalized.ForceDisabled && len(normalized.AllowedOnlyForUserPaths) == 0 {
-		return newValidationError("override must enable, force disable, or set allowed_only_for_user_paths", nil)
-	}
-	if normalized.Enabled != nil && !*normalized.Enabled {
-		return newValidationError("enabled=false is not supported; use force_disabled=true or omit enabled", nil)
 	}
 
 	s.refreshMu.Lock()
@@ -357,10 +348,10 @@ func (s *Service) AllowsModel(ctx context.Context, selector core.ModelSelector) 
 	if !state.Enabled {
 		return false
 	}
-	if len(state.AllowedOnlyForUserPaths) == 0 {
+	if len(state.UserPaths) == 0 {
 		return true
 	}
-	return userPathAllowed(core.UserPathFromContext(ctx), state.AllowedOnlyForUserPaths)
+	return userPathAllowed(core.UserPathFromContext(ctx), state.UserPaths)
 }
 
 // ValidateModelAccess returns a typed request error when selector is not available.
@@ -373,10 +364,10 @@ func (s *Service) ValidateModelAccess(ctx context.Context, selector core.ModelSe
 			nil,
 		).WithCode("model_access_denied")
 	}
-	if len(state.AllowedOnlyForUserPaths) == 0 {
+	if len(state.UserPaths) == 0 {
 		return nil
 	}
-	if userPathAllowed(core.UserPathFromContext(ctx), state.AllowedOnlyForUserPaths) {
+	if userPathAllowed(core.UserPathFromContext(ctx), state.UserPaths) {
 		return nil
 	}
 	return core.NewInvalidRequestErrorWithStatus(
@@ -420,52 +411,41 @@ func (snap snapshot) effectiveState(selector core.ModelSelector) EffectiveState 
 		return state
 	}
 
-	allowed := make([]string, 0)
-	seenAllowed := make(map[string]struct{})
-	addAllowed := func(paths []string) {
-		for _, path := range paths {
-			if _, exists := seenAllowed[path]; exists {
-				continue
-			}
-			seenAllowed[path] = struct{}{}
-			allowed = append(allowed, path)
-		}
-	}
-	apply := func(rule compiledOverride, ok bool) {
-		if !ok {
-			return
-		}
-		if rule.override.Enabled != nil && *rule.override.Enabled {
-			state.Enabled = true
-			state.ForceDisabled = false
-		}
-		if rule.override.ForceDisabled {
-			state.Enabled = false
-			state.ForceDisabled = true
-		}
-		addAllowed(rule.override.AllowedOnlyForUserPaths)
+	if rule, ok := snap.matchingOverride(providerName, model); ok {
+		state.Enabled = true
+		state.UserPaths = append([]string(nil), rule.override.UserPaths...)
 	}
 
-	if snap.hasGlobal {
-		apply(snap.global, true)
-	}
-	if modelWide, ok := snap.modelWide[model]; ok {
-		apply(modelWide, true)
-	}
-	if providerWide, ok := snap.providerWide[providerName]; ok {
-		apply(providerWide, true)
-	}
-	if exact, ok := snap.exact[exactMatchKey(providerName, model)]; ok {
-		apply(exact, true)
-	}
-
-	sort.Strings(allowed)
-	state.AllowedOnlyForUserPaths = allowed
 	return state
+}
+
+func (snap snapshot) matchingOverride(providerName, model string) (compiledOverride, bool) {
+	if key := exactMatchKey(providerName, model); key != "" {
+		if exact, ok := snap.exact[key]; ok {
+			return exact, true
+		}
+	}
+	if providerName != "" {
+		if providerWide, ok := snap.providerWide[providerName]; ok {
+			return providerWide, true
+		}
+	}
+	if model != "" {
+		if modelWide, ok := snap.modelWide[model]; ok {
+			return modelWide, true
+		}
+	}
+	if snap.hasGlobal {
+		return snap.global, true
+	}
+	return compiledOverride{}, false
 }
 
 func userPathAllowed(userPath string, allowed []string) bool {
 	if len(allowed) == 0 {
+		return true
+	}
+	if _, ok := slices.BinarySearch(allowed, "/"); ok {
 		return true
 	}
 	userPath, err := core.NormalizeUserPath(userPath)

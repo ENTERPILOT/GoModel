@@ -176,6 +176,38 @@ func (r *ModelRegistry) Initialize(ctx context.Context) error {
 			}
 			continue
 		}
+
+		if resp == nil {
+			err := errors.New("provider returned nil model list")
+			slog.Warn("failed to fetch models from provider",
+				"provider", providerName,
+				"error", err,
+			)
+			failedProviders++
+			runtimeUpdates[providerName] = providerRuntimeState{
+				registered:          true,
+				lastModelFetchAt:    fetchAt,
+				lastModelFetchError: err.Error(),
+			}
+			continue
+		}
+
+		if len(resp.Data) == 0 {
+			err := errors.New("provider returned empty model list")
+			slog.Warn("provider returned empty model list",
+				"provider", providerName,
+			)
+			runtimeUpdates[providerName] = providerRuntimeState{
+				registered:          true,
+				lastModelFetchAt:    fetchAt,
+				lastModelFetchError: err.Error(),
+			}
+			if _, ok := newModelsByProvider[providerName]; !ok {
+				newModelsByProvider[providerName] = make(map[string]*ModelInfo)
+			}
+			continue
+		}
+
 		runtimeUpdates[providerName] = providerRuntimeState{
 			registered:              true,
 			lastModelFetchAt:        fetchAt,
@@ -212,6 +244,7 @@ func (r *ModelRegistry) Initialize(ctx context.Context) error {
 	}
 
 	if totalModels == 0 {
+		r.applyProviderRuntimeUpdates(runtimeUpdates)
 		if failedProviders == len(providers) {
 			return fmt.Errorf("failed to fetch models from any provider")
 		}
@@ -231,20 +264,7 @@ func (r *ModelRegistry) Initialize(ctx context.Context) error {
 	r.mu.Lock()
 	r.models = newModels
 	r.modelsByProvider = newModelsByProvider
-	for providerName, update := range runtimeUpdates {
-		current := r.providerRuntime[providerName]
-		current.registered = update.registered || current.registered
-		if !update.lastModelFetchAt.IsZero() {
-			current.lastModelFetchAt = update.lastModelFetchAt
-		}
-		if !update.lastModelFetchSuccessAt.IsZero() {
-			current.lastModelFetchSuccessAt = update.lastModelFetchSuccessAt
-			current.lastModelFetchError = ""
-		} else if strings.TrimSpace(update.lastModelFetchError) != "" {
-			current.lastModelFetchError = update.lastModelFetchError
-		}
-		r.providerRuntime[providerName] = current
-	}
+	r.applyProviderRuntimeUpdatesLocked(runtimeUpdates)
 	r.invalidateSortedCaches()
 	r.mu.Unlock()
 
@@ -262,6 +282,34 @@ func (r *ModelRegistry) Initialize(ctx context.Context) error {
 	slog.Info("model registry initialized", attrs...)
 
 	return nil
+}
+
+func (r *ModelRegistry) applyProviderRuntimeUpdates(updates map[string]providerRuntimeState) {
+	if len(updates) == 0 {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.applyProviderRuntimeUpdatesLocked(updates)
+}
+
+func (r *ModelRegistry) applyProviderRuntimeUpdatesLocked(updates map[string]providerRuntimeState) {
+	for providerName, update := range updates {
+		current := r.providerRuntime[providerName]
+		current.registered = update.registered || current.registered
+		if !update.lastModelFetchAt.IsZero() {
+			current.lastModelFetchAt = update.lastModelFetchAt
+		}
+		if !update.lastModelFetchSuccessAt.IsZero() {
+			current.lastModelFetchSuccessAt = update.lastModelFetchSuccessAt
+			current.lastModelFetchError = ""
+		} else if strings.TrimSpace(update.lastModelFetchError) != "" {
+			current.lastModelFetchError = update.lastModelFetchError
+		}
+		r.providerRuntime[providerName] = current
+	}
 }
 
 // Refresh updates the model registry by fetching fresh model lists from providers.

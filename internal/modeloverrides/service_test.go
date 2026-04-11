@@ -68,10 +68,6 @@ func (c testCatalog) ProviderNames() []string {
 	return append([]string(nil), c.providerNames...)
 }
 
-func boolPtr(value bool) *bool {
-	return &value
-}
-
 func TestNormalizeSelectorInput_UsesFirstSlashOnlyForKnownProviders(t *testing.T) {
 	providerNames := []string{"openai", "anthropic"}
 
@@ -116,106 +112,11 @@ func TestNormalizeSelectorInput_UsesFirstSlashOnlyForKnownProviders(t *testing.T
 	})
 }
 
-func TestService_DefaultDisabledRequiresExplicitEnableAndHonorsUserPaths(t *testing.T) {
-	service, err := NewService(
-		newTestStore(Override{
-			Selector:                "openai/gpt-4o",
-			Enabled:                 boolPtr(true),
-			AllowedOnlyForUserPaths: []string{"/team/alpha"},
-		}),
-		testCatalog{providerNames: []string{"openai"}},
-		false,
-	)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-
-	enabledSelector := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
-	disabledSelector := core.ModelSelector{Provider: "openai", Model: "gpt-5"}
-
-	state := service.EffectiveState(enabledSelector)
-	if !state.Enabled {
-		t.Fatal("EffectiveState().Enabled = false, want true")
-	}
-	if !state.DefaultEnabled {
-		// false is expected; explicit assertion below for clarity.
-	} else {
-		t.Fatal("EffectiveState().DefaultEnabled = true, want false")
-	}
-	if len(state.AllowedOnlyForUserPaths) != 1 || state.AllowedOnlyForUserPaths[0] != "/team/alpha" {
-		t.Fatalf("EffectiveState().AllowedOnlyForUserPaths = %#v, want [/team/alpha]", state.AllowedOnlyForUserPaths)
-	}
-
-	allowedCtx := core.WithEffectiveUserPath(context.Background(), "/team/alpha/project-x")
-	if !service.AllowsModel(allowedCtx, enabledSelector) {
-		t.Fatal("AllowsModel() = false, want true for descendant user path")
-	}
-	if err := service.ValidateModelAccess(allowedCtx, enabledSelector); err != nil {
-		t.Fatalf("ValidateModelAccess() error = %v, want nil", err)
-	}
-
-	deniedCtx := core.WithEffectiveUserPath(context.Background(), "/team/beta")
-	if service.AllowsModel(deniedCtx, enabledSelector) {
-		t.Fatal("AllowsModel() = true, want false for mismatched user path")
-	}
-	err = service.ValidateModelAccess(deniedCtx, enabledSelector)
-	if err == nil {
-		t.Fatal("ValidateModelAccess() error = nil, want access denial")
-	}
-	gatewayErr, ok := err.(*core.GatewayError)
-	if !ok {
-		t.Fatalf("ValidateModelAccess() error type = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.StatusCode != http.StatusBadRequest || gatewayErr.Code == nil || *gatewayErr.Code != "model_access_denied" {
-		t.Fatalf("ValidateModelAccess() = status %d code %#v, want 400/model_access_denied", gatewayErr.StatusCode, gatewayErr.Code)
-	}
-
-	if service.AllowsModel(allowedCtx, disabledSelector) {
-		t.Fatal("AllowsModel() = true, want false for model without explicit enable when defaults are disabled")
-	}
-}
-
-func TestService_ForceDisabledOverridesBroaderEnable(t *testing.T) {
+func TestService_DefaultEnabledRestrictsMatchingOverrideByUserPath(t *testing.T) {
 	service, err := NewService(
 		newTestStore(
-			Override{Selector: "openai/", Enabled: boolPtr(true)},
-			Override{Selector: "openai/gpt-4o", ForceDisabled: true},
-		),
-		testCatalog{providerNames: []string{"openai"}},
-		false,
-	)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-
-	blocked := service.EffectiveState(core.ModelSelector{Provider: "openai", Model: "gpt-4o"})
-	if blocked.Enabled {
-		t.Fatal("EffectiveState().Enabled = true, want false when exact force_disabled applies")
-	}
-	if !blocked.ForceDisabled {
-		t.Fatal("EffectiveState().ForceDisabled = false, want true")
-	}
-
-	allowed := service.EffectiveState(core.ModelSelector{Provider: "openai", Model: "gpt-4.1"})
-	if !allowed.Enabled {
-		t.Fatal("EffectiveState().Enabled = false, want true for provider-wide enable")
-	}
-	if allowed.ForceDisabled {
-		t.Fatal("EffectiveState().ForceDisabled = true, want false")
-	}
-}
-
-func TestService_ExactEnableClearsBroaderForceDisabled(t *testing.T) {
-	service, err := NewService(
-		newTestStore(
-			Override{Selector: "openai/", ForceDisabled: true},
-			Override{Selector: "openai/gpt-4o", Enabled: boolPtr(true)},
+			Override{Selector: "openai/gpt-4o", UserPaths: []string{"/team/alpha"}},
+			Override{Selector: "openai/gpt-5", UserPaths: []string{"/non-existing"}},
 		),
 		testCatalog{providerNames: []string{"openai"}},
 		true,
@@ -227,26 +128,57 @@ func TestService_ExactEnableClearsBroaderForceDisabled(t *testing.T) {
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	state := service.EffectiveState(core.ModelSelector{Provider: "openai", Model: "gpt-4o"})
+	restrictedSelector := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
+	state := service.EffectiveState(restrictedSelector)
 	if !state.Enabled {
-		t.Fatal("EffectiveState().Enabled = false, want true when exact enable overrides broader force_disabled")
+		t.Fatal("EffectiveState().Enabled = false, want true")
 	}
-	if state.ForceDisabled {
-		t.Fatal("EffectiveState().ForceDisabled = true, want false after exact enable override")
+	if !state.DefaultEnabled {
+		t.Fatal("EffectiveState().DefaultEnabled = false, want true")
 	}
-	if err := service.ValidateModelAccess(context.Background(), core.ModelSelector{Provider: "openai", Model: "gpt-4o"}); err != nil {
+	if len(state.UserPaths) != 1 || state.UserPaths[0] != "/team/alpha" {
+		t.Fatalf("EffectiveState().UserPaths = %#v, want [/team/alpha]", state.UserPaths)
+	}
+
+	allowedCtx := core.WithEffectiveUserPath(context.Background(), "/team/alpha/project-x")
+	if !service.AllowsModel(allowedCtx, restrictedSelector) {
+		t.Fatal("AllowsModel() = false, want true for descendant user path")
+	}
+	if err := service.ValidateModelAccess(allowedCtx, restrictedSelector); err != nil {
 		t.Fatalf("ValidateModelAccess() error = %v, want nil", err)
+	}
+
+	deniedCtx := core.WithEffectiveUserPath(context.Background(), "/team/beta")
+	if service.AllowsModel(deniedCtx, restrictedSelector) {
+		t.Fatal("AllowsModel() = true, want false for mismatched user path")
+	}
+	err = service.ValidateModelAccess(deniedCtx, restrictedSelector)
+	if err == nil {
+		t.Fatal("ValidateModelAccess() error = nil, want access denial")
+	}
+	gatewayErr, ok := err.(*core.GatewayError)
+	if !ok {
+		t.Fatalf("ValidateModelAccess() error type = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.StatusCode != http.StatusBadRequest || gatewayErr.Code == nil || *gatewayErr.Code != "model_access_denied" {
+		t.Fatalf("ValidateModelAccess() = status %d code %#v, want 400/model_access_denied", gatewayErr.StatusCode, gatewayErr.Code)
+	}
+
+	if service.AllowsModel(allowedCtx, core.ModelSelector{Provider: "openai", Model: "gpt-5"}) {
+		t.Fatal("AllowsModel() = true, want false for non-existing sentinel path")
+	}
+	if !service.AllowsModel(context.Background(), core.ModelSelector{Provider: "openai", Model: "gpt-4.1"}) {
+		t.Fatal("AllowsModel() = false, want true for model without override when defaults are enabled")
 	}
 }
 
-func TestService_GlobalOverrideActsAsBroadestMatch(t *testing.T) {
+func TestService_DefaultDisabledAllowsRootAndSpecificUserPathOverrides(t *testing.T) {
 	service, err := NewService(
 		newTestStore(
-			Override{Selector: "/", Enabled: boolPtr(true)},
-			Override{Selector: "openai/", ForceDisabled: true},
-			Override{Selector: "openai/gpt-4o", Enabled: boolPtr(true)},
+			Override{Selector: "openai/gpt-4o", UserPaths: []string{"/"}},
+			Override{Selector: "openai/gpt-5", UserPaths: []string{"/team/alpha"}},
 		),
-		testCatalog{providerNames: []string{"openai", "anthropic"}},
+		testCatalog{providerNames: []string{"openai"}},
 		false,
 	)
 	if err != nil {
@@ -256,34 +188,103 @@ func TestService_GlobalOverrideActsAsBroadestMatch(t *testing.T) {
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	globalOnly := service.EffectiveState(core.ModelSelector{Provider: "anthropic", Model: "claude-3-7-sonnet"})
-	if !globalOnly.Enabled {
-		t.Fatal("EffectiveState().Enabled = false, want true when global enable applies")
+	rootAllowedSelector := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
+	if !service.AllowsModel(context.Background(), rootAllowedSelector) {
+		t.Fatal("AllowsModel() = false, want true for root user_path override without request user path")
 	}
-	if globalOnly.ForceDisabled {
-		t.Fatal("EffectiveState().ForceDisabled = true, want false for global enable")
-	}
-
-	providerWide := service.EffectiveState(core.ModelSelector{Provider: "openai", Model: "gpt-5"})
-	if providerWide.Enabled {
-		t.Fatal("EffectiveState().Enabled = true, want false when provider-wide force_disabled overrides global enable")
-	}
-	if !providerWide.ForceDisabled {
-		t.Fatal("EffectiveState().ForceDisabled = false, want true for provider-wide force_disabled")
+	if !service.AllowsModel(core.WithEffectiveUserPath(context.Background(), "/team/beta"), rootAllowedSelector) {
+		t.Fatal("AllowsModel() = false, want true for root user_path override with any request user path")
 	}
 
-	exact := service.EffectiveState(core.ModelSelector{Provider: "openai", Model: "gpt-4o"})
-	if !exact.Enabled {
-		t.Fatal("EffectiveState().Enabled = false, want true when exact enable overrides broader rules")
+	teamSelector := core.ModelSelector{Provider: "openai", Model: "gpt-5"}
+	if !service.AllowsModel(core.WithEffectiveUserPath(context.Background(), "/team/alpha/service"), teamSelector) {
+		t.Fatal("AllowsModel() = false, want true for matching subtree")
 	}
-	if exact.ForceDisabled {
-		t.Fatal("EffectiveState().ForceDisabled = true, want false after exact enable override")
+	if service.AllowsModel(core.WithEffectiveUserPath(context.Background(), "/team/beta"), teamSelector) {
+		t.Fatal("AllowsModel() = true, want false for mismatched subtree")
+	}
+	if service.AllowsModel(context.Background(), teamSelector) {
+		t.Fatal("AllowsModel() = true, want false without request user path")
+	}
+
+	if service.AllowsModel(context.Background(), core.ModelSelector{Provider: "openai", Model: "gpt-4.1"}) {
+		t.Fatal("AllowsModel() = true, want false for model without override when defaults are disabled")
+	}
+}
+
+func TestService_MostSpecificOverrideWins(t *testing.T) {
+	service, err := NewService(
+		newTestStore(
+			Override{Selector: "/", UserPaths: []string{"/team/global"}},
+			Override{Selector: "gpt-4o", UserPaths: []string{"/team/model"}},
+			Override{Selector: "openai/", UserPaths: []string{"/team/provider"}},
+			Override{Selector: "openai/gpt-4o", UserPaths: []string{"/team/exact"}},
+		),
+		testCatalog{providerNames: []string{"openai", "anthropic"}},
+		true,
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		selector core.ModelSelector
+		wantPath string
+	}{
+		{
+			name:     "exact provider model wins",
+			selector: core.ModelSelector{Provider: "openai", Model: "gpt-4o"},
+			wantPath: "/team/exact",
+		},
+		{
+			name:     "provider-wide beats global",
+			selector: core.ModelSelector{Provider: "openai", Model: "gpt-4.1"},
+			wantPath: "/team/provider",
+		},
+		{
+			name:     "model-wide beats global",
+			selector: core.ModelSelector{Provider: "anthropic", Model: "gpt-4o"},
+			wantPath: "/team/model",
+		},
+		{
+			name:     "global applies last",
+			selector: core.ModelSelector{Provider: "anthropic", Model: "claude-3-7-sonnet"},
+			wantPath: "/team/global",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := service.EffectiveState(tt.selector)
+			if len(state.UserPaths) != 1 || state.UserPaths[0] != tt.wantPath {
+				t.Fatalf("EffectiveState().UserPaths = %#v, want [%s]", state.UserPaths, tt.wantPath)
+			}
+		})
+	}
+}
+
+func TestService_UpsertRejectsEmptyUserPaths(t *testing.T) {
+	service, err := NewService(newTestStore(), testCatalog{providerNames: []string{"openai"}}, true)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	err = service.Upsert(context.Background(), Override{Selector: "openai/gpt-4o"})
+	if err == nil {
+		t.Fatal("Upsert() error = nil, want validation error")
+	}
+	if !IsValidationError(err) {
+		t.Fatalf("Upsert() error type = %T, want validation error", err)
 	}
 }
 
 func TestService_UpsertRollsBackStorageOnRefreshFailure(t *testing.T) {
 	store := newFlakyListStore(
-		Override{Selector: "openai/gpt-4o", Enabled: boolPtr(true)},
+		Override{Selector: "openai/gpt-4o", UserPaths: []string{"/"}},
 	)
 	service, err := NewService(store, testCatalog{providerNames: []string{"openai"}}, true)
 	if err != nil {
@@ -294,7 +295,7 @@ func TestService_UpsertRollsBackStorageOnRefreshFailure(t *testing.T) {
 	}
 
 	store.listErr = errors.New("list failed")
-	err = service.Upsert(context.Background(), Override{Selector: "openai/gpt-5", Enabled: boolPtr(true)})
+	err = service.Upsert(context.Background(), Override{Selector: "openai/gpt-5", UserPaths: []string{"/"}})
 	if err == nil {
 		t.Fatal("Upsert() error = nil, want refresh failure")
 	}
@@ -308,7 +309,7 @@ func TestService_UpsertRollsBackStorageOnRefreshFailure(t *testing.T) {
 
 func TestService_DeleteRollsBackStorageOnRefreshFailure(t *testing.T) {
 	store := newFlakyListStore(
-		Override{Selector: "openai/gpt-4o", Enabled: boolPtr(true)},
+		Override{Selector: "openai/gpt-4o", UserPaths: []string{"/"}},
 	)
 	service, err := NewService(store, testCatalog{providerNames: []string{"openai"}}, true)
 	if err != nil {

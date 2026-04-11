@@ -2,8 +2,10 @@ package modeloverrides
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ErrNotFound indicates a requested override was not found.
@@ -63,4 +65,23 @@ func collectOverrides(next func() (Override, bool, error), rowsErr func() error)
 		return nil, fmt.Errorf("iterate model overrides: %w", err)
 	}
 	return result, nil
+}
+
+func prepareOverrideUpsert(override Override) (Override, string, error) {
+	override, err := normalizeStoredOverride(override)
+	if err != nil {
+		return Override{}, "", err
+	}
+
+	pathsJSON, err := json.Marshal(override.UserPaths)
+	if err != nil {
+		return Override{}, "", fmt.Errorf("encode user_paths: %w", err)
+	}
+
+	now := time.Now().UTC()
+	if override.CreatedAt.IsZero() {
+		override.CreatedAt = now
+	}
+	override.UpdatedAt = now
+	return override, string(pathsJSON), nil
 }

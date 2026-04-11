@@ -723,12 +723,11 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 // @Failure      401  {object}  core.GatewayError
 // @Router       /admin/api/v1/models [get]
 type modelAccessResponse struct {
-	Selector                string                   `json:"selector"`
-	DefaultEnabled          bool                     `json:"default_enabled"`
-	EffectiveEnabled        bool                     `json:"effective_enabled"`
-	ForceDisabled           bool                     `json:"force_disabled"`
-	AllowedOnlyForUserPaths []string                 `json:"allowed_only_for_user_paths,omitempty"`
-	Override                *modeloverrides.Override `json:"override,omitempty"`
+	Selector         string                   `json:"selector"`
+	DefaultEnabled   bool                     `json:"default_enabled"`
+	EffectiveEnabled bool                     `json:"effective_enabled"`
+	UserPaths        []string                 `json:"user_paths,omitempty"`
+	Override         *modeloverrides.Override `json:"override,omitempty"`
 }
 
 type modelInventoryResponse struct {
@@ -785,11 +784,10 @@ func (h *Handler) ListModels(c *echo.Context) error {
 		}
 		effective := h.modelOverrides.EffectiveState(selector)
 		access := modelAccessResponse{
-			Selector:                effective.Selector,
-			DefaultEnabled:          effective.DefaultEnabled,
-			EffectiveEnabled:        effective.Enabled,
-			ForceDisabled:           effective.ForceDisabled,
-			AllowedOnlyForUserPaths: append([]string(nil), effective.AllowedOnlyForUserPaths...),
+			Selector:         effective.Selector,
+			DefaultEnabled:   effective.DefaultEnabled,
+			EffectiveEnabled: effective.Enabled,
+			UserPaths:        append([]string(nil), effective.UserPaths...),
 		}
 		if override, ok := h.modelOverrides.Get(selector.QualifiedModel()); ok && override != nil {
 			overrideCopy := *override
@@ -966,9 +964,7 @@ type upsertAliasRequest struct {
 }
 
 type upsertModelOverrideRequest struct {
-	Enabled                 *bool    `json:"enabled,omitempty"`
-	ForceDisabled           bool     `json:"force_disabled,omitempty"`
-	AllowedOnlyForUserPaths []string `json:"allowed_only_for_user_paths,omitempty"`
+	UserPaths []string `json:"user_paths,omitempty"`
 }
 
 type upsertGuardrailRequest struct {
@@ -1154,10 +1150,8 @@ func (h *Handler) UpsertModelOverride(c *echo.Context) error {
 	}
 
 	if err := h.modelOverrides.Upsert(c.Request().Context(), modeloverrides.Override{
-		Selector:                selector,
-		Enabled:                 req.Enabled,
-		ForceDisabled:           req.ForceDisabled,
-		AllowedOnlyForUserPaths: req.AllowedOnlyForUserPaths,
+		Selector:  selector,
+		UserPaths: req.UserPaths,
 	}); err != nil {
 		return handleError(c, modelOverrideWriteError(err))
 	}

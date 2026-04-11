@@ -20,14 +20,12 @@ import (
 // configured provider name, the full value is treated as a raw model ID. The
 // bare slash selects every configured provider and model.
 type Override struct {
-	Selector                string    `json:"selector" bson:"_id"`
-	ProviderName            string    `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
-	Model                   string    `json:"model,omitempty" bson:"model,omitempty"`
-	Enabled                 *bool     `json:"enabled,omitempty" bson:"enabled,omitempty"`
-	ForceDisabled           bool      `json:"force_disabled,omitempty" bson:"force_disabled,omitempty"`
-	AllowedOnlyForUserPaths []string  `json:"allowed_only_for_user_paths,omitempty" bson:"allowed_only_for_user_paths,omitempty"`
-	CreatedAt               time.Time `json:"created_at" bson:"created_at"`
-	UpdatedAt               time.Time `json:"updated_at" bson:"updated_at"`
+	Selector     string    `json:"selector" bson:"_id"`
+	ProviderName string    `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
+	Model        string    `json:"model,omitempty" bson:"model,omitempty"`
+	UserPaths    []string  `json:"user_paths,omitempty" bson:"user_paths,omitempty"`
+	CreatedAt    time.Time `json:"created_at" bson:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" bson:"updated_at"`
 }
 
 // ScopeKind identifies how broadly an override applies.
@@ -62,13 +60,12 @@ type View struct {
 
 // EffectiveState is the compiled access decision for one concrete selector.
 type EffectiveState struct {
-	Selector                string   `json:"selector"`
-	ProviderName            string   `json:"provider_name,omitempty"`
-	Model                   string   `json:"model,omitempty"`
-	DefaultEnabled          bool     `json:"default_enabled"`
-	Enabled                 bool     `json:"enabled"`
-	ForceDisabled           bool     `json:"force_disabled"`
-	AllowedOnlyForUserPaths []string `json:"allowed_only_for_user_paths,omitempty"`
+	Selector       string   `json:"selector"`
+	ProviderName   string   `json:"provider_name,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	DefaultEnabled bool     `json:"default_enabled"`
+	Enabled        bool     `json:"enabled"`
+	UserPaths      []string `json:"user_paths,omitempty"`
 }
 
 // Catalog is the minimal configured-provider surface needed for selector validation.
@@ -86,15 +83,14 @@ func normalizeOverrideInput(catalog Catalog, override Override) (Override, error
 	override.ProviderName = providerName
 	override.Model = model
 
-	if override.ForceDisabled && override.Enabled != nil && *override.Enabled {
-		return Override{}, newValidationError("force_disabled cannot be combined with enabled=true", nil)
-	}
-
-	paths, err := normalizeUserPaths(override.AllowedOnlyForUserPaths)
+	paths, err := normalizeUserPaths(override.UserPaths)
 	if err != nil {
 		return Override{}, err
 	}
-	override.AllowedOnlyForUserPaths = paths
+	if len(paths) == 0 {
+		return Override{}, newValidationError("user_paths is required", nil)
+	}
+	override.UserPaths = paths
 	return override, nil
 }
 
@@ -122,11 +118,14 @@ func normalizeStoredOverride(override Override) (Override, error) {
 		override.Selector = normalized
 	}
 
-	paths, err := normalizeUserPaths(override.AllowedOnlyForUserPaths)
+	paths, err := normalizeUserPaths(override.UserPaths)
 	if err != nil {
 		return Override{}, err
 	}
-	override.AllowedOnlyForUserPaths = paths
+	if len(paths) == 0 {
+		return Override{}, newValidationError("user_paths is required", nil)
+	}
+	override.UserPaths = paths
 	return override, nil
 }
 
@@ -187,7 +186,7 @@ func normalizeUserPaths(paths []string) ([]string, error) {
 	for _, raw := range paths {
 		path, err := core.NormalizeUserPath(raw)
 		if err != nil {
-			return nil, newValidationError("invalid allowed_only_for_user_paths value", err)
+			return nil, newValidationError("invalid user_paths value", err)
 		}
 		if path == "" {
 			continue
@@ -261,12 +260,4 @@ func parseStoredSelectorParts(selector string) (providerName, model string) {
 		return providerName, model
 	}
 	return "", selector
-}
-
-func cloneEnabled(value *bool) *bool {
-	if value == nil {
-		return nil
-	}
-	enabled := *value
-	return &enabled
 }
