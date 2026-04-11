@@ -172,18 +172,23 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	app.aliases = aliasResult
 
 	var modelOverrideResult *modeloverrides.Result
-	sharedModelOverrideStorage := firstSharedStorage(auditResult.Storage, usageResult.Storage, batchResult.Storage, aliasResult.Storage)
-	if sharedModelOverrideStorage != nil {
-		modelOverrideResult, err = modeloverrides.NewWithSharedStorage(ctx, appCfg, sharedModelOverrideStorage, providerResult.Registry)
-	} else {
-		modelOverrideResult, err = modeloverrides.New(ctx, appCfg, providerResult.Registry)
-	}
-	if err != nil {
-		closeErr := errors.Join(app.aliases.Close(), app.batch.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
-		if closeErr != nil {
-			return nil, fmt.Errorf("failed to initialize model overrides: %w (also: close error: %v)", err, closeErr)
+	if appCfg.Models.OverridesEnabled {
+		sharedModelOverrideStorage := firstSharedStorage(auditResult.Storage, usageResult.Storage, batchResult.Storage, aliasResult.Storage)
+		if sharedModelOverrideStorage != nil {
+			modelOverrideResult, err = modeloverrides.NewWithSharedStorage(ctx, appCfg, sharedModelOverrideStorage, providerResult.Registry)
+		} else {
+			modelOverrideResult, err = modeloverrides.New(ctx, appCfg, providerResult.Registry)
 		}
-		return nil, fmt.Errorf("failed to initialize model overrides: %w", err)
+		if err != nil {
+			closeErr := errors.Join(app.aliases.Close(), app.batch.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+			if closeErr != nil {
+				return nil, fmt.Errorf("failed to initialize model overrides: %w (also: close error: %v)", err, closeErr)
+			}
+			return nil, fmt.Errorf("failed to initialize model overrides: %w", err)
+		}
+	} else {
+		modelOverrideResult = &modeloverrides.Result{}
+		slog.Info("model overrides disabled")
 	}
 	app.modelOverrides = modelOverrideResult
 
@@ -319,29 +324,30 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// Create server
 	allowPassthroughV1Alias := appCfg.Server.AllowPassthroughV1Alias
 	serverCfg := &server.Config{
-		MasterKey:                    appCfg.Server.MasterKey,
-		Authenticator:                authKeyResult.Service,
-		MetricsEnabled:               appCfg.Metrics.Enabled,
-		MetricsEndpoint:              appCfg.Metrics.Endpoint,
-		BodySizeLimit:                appCfg.Server.BodySizeLimit,
-		PprofEnabled:                 appCfg.Server.PprofEnabled,
-		AuditLogger:                  auditResult.Logger,
-		UsageLogger:                  usageResult.Logger,
-		PricingResolver:              providerResult.Registry,
-		ModelResolver:                app.aliases.Service,
-		ModelAuthorizer:              app.modelOverrides.Service,
-		FallbackResolver:             fallback.NewResolver(appCfg.Fallback, providerResult.Registry),
-		ExecutionPolicyResolver:      executionPlanResult.Service,
-		TranslatedRequestPatcher:     translatedRequestPatcher,
-		BatchRequestPreparer:         batchRequestPreparer,
-		ExposedModelLister:           app.aliases.Service,
-		PassthroughSemanticEnrichers: cfg.Factory.PassthroughSemanticEnrichers(),
-		BatchStore:                   batchResult.Store,
-		LogOnlyModelInteractions:     appCfg.Logging.OnlyModelInteractions,
-		DisablePassthroughRoutes:     !appCfg.Server.EnablePassthroughRoutes,
-		EnabledPassthroughProviders:  appCfg.Server.EnabledPassthroughProviders,
-		AllowPassthroughV1Alias:      &allowPassthroughV1Alias,
-		SwaggerEnabled:               appCfg.Server.SwaggerEnabled,
+		MasterKey:                       appCfg.Server.MasterKey,
+		Authenticator:                   authKeyResult.Service,
+		MetricsEnabled:                  appCfg.Metrics.Enabled,
+		MetricsEndpoint:                 appCfg.Metrics.Endpoint,
+		BodySizeLimit:                   appCfg.Server.BodySizeLimit,
+		PprofEnabled:                    appCfg.Server.PprofEnabled,
+		AuditLogger:                     auditResult.Logger,
+		UsageLogger:                     usageResult.Logger,
+		PricingResolver:                 providerResult.Registry,
+		ModelResolver:                   app.aliases.Service,
+		ModelAuthorizer:                 app.modelOverrides.Service,
+		FallbackResolver:                fallback.NewResolver(appCfg.Fallback, providerResult.Registry),
+		ExecutionPolicyResolver:         executionPlanResult.Service,
+		TranslatedRequestPatcher:        translatedRequestPatcher,
+		BatchRequestPreparer:            batchRequestPreparer,
+		ExposedModelLister:              app.aliases.Service,
+		KeepOnlyAliasesAtModelsEndpoint: appCfg.Models.KeepOnlyAliasesAtModelsEndpoint,
+		PassthroughSemanticEnrichers:    cfg.Factory.PassthroughSemanticEnrichers(),
+		BatchStore:                      batchResult.Store,
+		LogOnlyModelInteractions:        appCfg.Logging.OnlyModelInteractions,
+		DisablePassthroughRoutes:        !appCfg.Server.EnablePassthroughRoutes,
+		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,
+		AllowPassthroughV1Alias:         &allowPassthroughV1Alias,
+		SwaggerEnabled:                  appCfg.Server.SwaggerEnabled,
 	}
 
 	// Initialize admin API and dashboard (behind separate feature flags)
@@ -356,6 +362,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			auditResult.Storage,
 			usageResult.Storage,
 			providerResult.Registry,
+			providerResult.ConfiguredProviders,
 			authKeyResult.Service,
 			app.aliases.Service,
 			app.modelOverrides.Service,
@@ -733,6 +740,7 @@ func (a *App) logStartupInfo() {
 func initAdmin(
 	auditStorage, usageStorage storage.Storage,
 	registry *providers.ModelRegistry,
+	configuredProviders []providers.SanitizedProviderConfig,
 	authKeyService *authkeys.Service,
 	aliasService *aliases.Service,
 	modelOverrideService *modeloverrides.Service,
@@ -773,6 +781,7 @@ func initAdmin(
 	adminHandler := admin.NewHandler(
 		reader,
 		registry,
+		admin.WithConfiguredProviders(configuredProviders),
 		admin.WithAuditReader(auditReader),
 		admin.WithAuthKeys(authKeyService),
 		admin.WithAliases(aliasService),

@@ -90,7 +90,7 @@ func TestResolverAutoModeAppendsRankingCandidates(t *testing.T) {
 	}
 }
 
-func TestResolverBlankDefaultModeUsesAutoFallback(t *testing.T) {
+func TestResolverBlankDefaultModeUsesManualFallback(t *testing.T) {
 	registry := newFakeRegistry(
 		modelInfo("gpt-4o", "openai", "openai", 1287, "gpt-4o"),
 		modelInfo("gpt-4o", "azure", "azure", 1287, "gpt-4o"),
@@ -99,7 +99,7 @@ func TestResolverBlankDefaultModeUsesAutoFallback(t *testing.T) {
 
 	resolver := NewResolver(config.FallbackConfig{}, registry)
 	if resolver == nil {
-		t.Fatal("NewResolver() = nil, want auto-enabled resolver")
+		t.Fatal("NewResolver() = nil, want manual-enabled resolver")
 	}
 
 	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
@@ -108,11 +108,8 @@ func TestResolverBlankDefaultModeUsesAutoFallback(t *testing.T) {
 		ProviderType:     "openai",
 	}, core.OperationChatCompletions)
 
-	if len(got) == 0 {
-		t.Fatal("len(got) = 0, want auto fallback candidates")
-	}
-	if got[0].QualifiedModel() != "azure/gpt-4o" {
-		t.Fatalf("got[0] = %q, want %q", got[0].QualifiedModel(), "azure/gpt-4o")
+	if len(got) != 0 {
+		t.Fatalf("len(got) = %d, want 0 without manual rules", len(got))
 	}
 }
 

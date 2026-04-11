@@ -523,6 +523,82 @@ func TestModelRegistry(t *testing.T) {
 		}
 	})
 
+	t.Run("FailedRefreshRecordsRuntimeErrorAndKeepsInventory", func(t *testing.T) {
+		registry := NewModelRegistry()
+		mock := &registryMockProvider{
+			name: "test",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{ID: "test-model", Object: "model", OwnedBy: "test"},
+				},
+			},
+		}
+		registry.RegisterProviderWithNameAndType(mock, "test", "test")
+		if err := registry.Initialize(context.Background()); err != nil {
+			t.Fatalf("initial Initialize() error = %v", err)
+		}
+
+		mock.err = errors.New("refresh error")
+		err := registry.Initialize(context.Background())
+		if err == nil {
+			t.Fatal("expected failed refresh to return an error")
+		}
+
+		snapshots := registry.ProviderRuntimeSnapshots()
+		if len(snapshots) != 1 {
+			t.Fatalf("expected 1 provider runtime snapshot, got %d", len(snapshots))
+		}
+		snapshot := snapshots[0]
+		if snapshot.DiscoveredModelCount != 1 {
+			t.Fatalf("expected previous model inventory to remain available, got %d models", snapshot.DiscoveredModelCount)
+		}
+		if !strings.Contains(snapshot.LastModelFetchError, "refresh error") {
+			t.Fatalf("LastModelFetchError = %q, want refresh error", snapshot.LastModelFetchError)
+		}
+		if snapshot.LastModelFetchAt == nil {
+			t.Fatal("expected LastModelFetchAt to be recorded")
+		}
+	})
+
+	t.Run("EmptyRefreshRecordsRuntimeErrorAndKeepsInventory", func(t *testing.T) {
+		registry := NewModelRegistry()
+		mock := &registryMockProvider{
+			name: "test",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{ID: "test-model", Object: "model", OwnedBy: "test"},
+				},
+			},
+		}
+		registry.RegisterProviderWithNameAndType(mock, "test", "test")
+		if err := registry.Initialize(context.Background()); err != nil {
+			t.Fatalf("initial Initialize() error = %v", err)
+		}
+
+		mock.modelsResponse = &core.ModelsResponse{Object: "list"}
+		err := registry.Initialize(context.Background())
+		if err == nil {
+			t.Fatal("expected empty refresh to return an error")
+		}
+
+		snapshots := registry.ProviderRuntimeSnapshots()
+		if len(snapshots) != 1 {
+			t.Fatalf("expected 1 provider runtime snapshot, got %d", len(snapshots))
+		}
+		snapshot := snapshots[0]
+		if snapshot.DiscoveredModelCount != 1 {
+			t.Fatalf("expected previous model inventory to remain available, got %d models", snapshot.DiscoveredModelCount)
+		}
+		if !strings.Contains(snapshot.LastModelFetchError, "empty model list") {
+			t.Fatalf("LastModelFetchError = %q, want empty model list error", snapshot.LastModelFetchError)
+		}
+		if snapshot.LastModelFetchAt == nil {
+			t.Fatal("expected LastModelFetchAt to be recorded")
+		}
+	})
+
 	t.Run("ListModelsOrdering", func(t *testing.T) {
 		registry := NewModelRegistry()
 		mock := &registryMockProvider{

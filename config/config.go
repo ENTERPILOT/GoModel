@@ -119,7 +119,7 @@ func normalizeFallbackMode(mode FallbackMode) FallbackMode {
 func ResolveFallbackDefaultMode(mode FallbackMode) FallbackMode {
 	mode = normalizeFallbackMode(mode)
 	if mode == "" {
-		return FallbackModeAuto
+		return FallbackModeManual
 	}
 	return mode
 }
@@ -132,14 +132,25 @@ type FallbackModelOverride struct {
 // ModelsConfig holds global model access defaults.
 type ModelsConfig struct {
 	// EnabledByDefault controls whether concrete provider models are available
-	// when no persisted override exists. Default: true.
+	// when no persisted user-path override exists and model overrides are enabled.
+	// Default: true.
 	EnabledByDefault bool `yaml:"enabled_by_default" env:"MODELS_ENABLED_BY_DEFAULT"`
+
+	// OverridesEnabled controls whether persisted model access overrides are
+	// loaded, enforced, and exposed through the admin dashboard/API.
+	// Default: false.
+	OverridesEnabled bool `yaml:"overrides_enabled" env:"MODEL_OVERRIDES_ENABLED"`
+
+	// KeepOnlyAliasesAtModelsEndpoint controls whether GET /v1/models hides
+	// concrete provider models and returns only alias-projected model entries.
+	// Default: false.
+	KeepOnlyAliasesAtModelsEndpoint bool `yaml:"keep_only_aliases_at_models_endpoint" env:"KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT"`
 }
 
 // FallbackConfig holds translated-route model fallback policy.
 type FallbackConfig struct {
 	// DefaultMode controls the fallback behavior when no per-model override exists.
-	// Supported values: "auto", "manual", "off". Default: "auto".
+	// Supported values: "auto", "manual", "off". Default: "manual".
 	DefaultMode FallbackMode `yaml:"default_mode" env:"FEATURE_FALLBACK_MODE"`
 
 	// ManualRulesPath points to a JSON file that maps source model selectors to
@@ -872,7 +883,9 @@ func buildDefaultConfig() *Config {
 			},
 		},
 		Models: ModelsConfig{
-			EnabledByDefault: true,
+			EnabledByDefault:                true,
+			OverridesEnabled:                false,
+			KeepOnlyAliasesAtModelsEndpoint: false,
 		},
 		Cache: CacheConfig{
 			Model: ModelCacheConfig{
@@ -920,7 +933,7 @@ func buildDefaultConfig() *Config {
 			ResponseHeaderTimeout: 600,
 		},
 		Fallback: FallbackConfig{
-			DefaultMode: FallbackModeAuto,
+			DefaultMode: FallbackModeManual,
 		},
 		ExecutionPlans: ExecutionPlansConfig{
 			RefreshInterval: time.Minute,
@@ -1064,16 +1077,6 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 	}
 
 	path := strings.TrimSpace(cfg.ManualRulesPath)
-	if path == "" {
-		if cfg.DefaultMode == FallbackModeManual {
-			return fmt.Errorf("fallback.manual_rules_path must be set when fallback.default_mode or any fallback.overrides[].mode is 'manual'")
-		}
-		for _, override := range cfg.Overrides {
-			if override.Mode == FallbackModeManual {
-				return fmt.Errorf("fallback.manual_rules_path must be set when fallback.default_mode or any fallback.overrides[].mode is 'manual'")
-			}
-		}
-	}
 	if path == "" {
 		cfg.Manual = nil
 		return nil

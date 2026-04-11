@@ -56,7 +56,8 @@ test('dashboard templates expose a settings page and timezone context in activit
     assert.doesNotMatch(template, /Detected: /);
     assert.doesNotMatch(template, /Effective: /);
     assert.doesNotMatch(template, /Mode: /);
-    assert.match(template, /x-text="calendarTimeZoneText\(\)"/);
+    assert.doesNotMatch(template, /x-text="calendarTimeZoneText\(\)"/);
+    assert.doesNotMatch(template, /class="contribution-calendar-timezone"/);
     assert.match(template, /class="mono usage-ts"/);
     assert.match(template, /x-text="formatTimestamp\(entry\.timestamp\)"/);
     assert.match(template, /:title="timestampTitle\(entry\.timestamp\)"/);

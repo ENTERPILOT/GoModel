@@ -51,6 +51,18 @@
             <div class="card-label">Local Cache Output Tokens</div>
             <div class="card-value" x-text="formatNumber(cacheOverview.summary.total_output_tokens)">-</div>
         </div>
+        <div class="card provider-status-flag" x-show="providerStatus.summary.total > 0" :class="providerStatusSummaryClass()">
+            <div class="card-label">Provider Status</div>
+            <div class="card-value provider-status-value" x-text="providerStatusRatioText()">-</div>
+            <button type="button"
+                    class="provider-status-card-link"
+                    x-show="providerStatusHasIssues()"
+                    aria-label="View providers overview"
+                    title="View providers overview"
+                    x-text="providerStatusSummaryText()"
+                    @click="scrollToProviderStatusSection()"></button>
+            <span class="provider-status-card-note" x-show="!providerStatusHasIssues()" x-text="providerStatusSummaryText()"></span>
+        </div>
     </div>
 
     <!-- Usage Chart -->
@@ -104,7 +116,6 @@
         <div class="contribution-calendar-footer">
             <div class="contribution-calendar-meta">
                 <span class="contribution-calendar-summary" x-text="calendarSummaryText()"></span>
-                <span class="contribution-calendar-timezone" x-text="calendarTimeZoneText()"></span>
             </div>
             <div class="contribution-calendar-legend">
                 <span>Less</span>
@@ -121,6 +132,85 @@
          x-show="calendarTooltip.show"
          x-text="calendarTooltip.text"
          :style="'left: ' + calendarTooltip.x + 'px; top: ' + (calendarTooltip.y - 40) + 'px'"></div>
+
+    <div id="provider-status-section" class="provider-status-section" tabindex="-1" x-show="providerStatus.providers.length > 0">
+        <div class="provider-status-section-header">
+            <div>
+                <h3>Providers Overview</h3>
+            </div>
+            <button type="button"
+                    class="provider-status-toggle"
+                    role="switch"
+                    :aria-checked="providerStatusDetailsExpanded ? 'true' : 'false'"
+                    :title="providerStatusDetailsToggleLabel()"
+                    @click="toggleProviderStatusDetails()">
+                <span class="provider-status-toggle-copy" x-text="providerStatusDetailsToggleLabel()"></span>
+                <span class="provider-status-toggle-track" :class="{ 'is-active': providerStatusDetailsExpanded }">
+                    <span class="provider-status-toggle-thumb"></span>
+                </span>
+            </button>
+        </div>
+        <div class="provider-status-grid">
+            <template x-for="provider in providerStatus.providers" :key="provider.name">
+                <article class="provider-status-card">
+                    <div class="provider-status-card-head">
+                        <div>
+                            <h4 class="provider-status-name">
+                                <span x-text="provider.name"></span>
+                                <span class="provider-status-name-type" x-show="providerTypeLabel(provider)" x-text="'(' + providerTypeLabel(provider) + ')'"></span>
+                            </h4>
+                        </div>
+                        <span class="provider-status-pill" :class="providerStatusBadgeClass(provider.status)" x-text="provider.status_label"></span>
+                    </div>
+
+                    <div class="provider-status-meta">
+                        <div class="provider-status-meta-item">
+                            <span class="provider-status-meta-label">Models Available</span>
+                            <span class="provider-status-meta-value mono" x-text="formatNumber(provider.runtime.discovered_model_count)"></span>
+                        </div>
+                        <div class="provider-status-meta-item">
+                            <span class="provider-status-meta-label">Last Checked</span>
+                            <span class="provider-status-meta-value mono"
+                                  x-text="providerLastCheckedTime(provider)"
+                                  :title="providerLastCheckedTitle(provider)"></span>
+                        </div>
+                    </div>
+
+                    <div class="provider-status-details"
+                         :class="{ 'is-expanded': providerStatusDetailsExpanded, 'is-collapsed': !providerStatusDetailsExpanded }"
+                         :aria-hidden="providerStatusDetailsExpanded ? 'false' : 'true'">
+                        <div class="provider-status-details-inner">
+                            <p class="provider-status-reason" x-text="provider.status_reason"></p>
+                            <p class="provider-status-error" x-show="provider.last_error" x-text="provider.last_error"></p>
+
+                            <div class="provider-status-config">
+                                <div class="provider-status-config-row" x-show="provider.config.base_url">
+                                    <span class="provider-status-config-label">Base URL</span>
+                                    <code class="provider-status-config-value" x-text="provider.config.base_url"></code>
+                                </div>
+                                <div class="provider-status-config-row" x-show="provider.config.api_version">
+                                    <span class="provider-status-config-label">API Version</span>
+                                    <code class="provider-status-config-value" x-text="provider.config.api_version"></code>
+                                </div>
+                                <div class="provider-status-config-row">
+                                    <span class="provider-status-config-label">Configured Models</span>
+                                    <span class="provider-status-config-value" x-text="providerModelsSummary(provider)"></span>
+                                </div>
+                                <div class="provider-status-config-row">
+                                    <span class="provider-status-config-label">Retry</span>
+                                    <span class="provider-status-config-value" x-text="providerRetrySummary(provider)"></span>
+                                </div>
+                                <div class="provider-status-config-row">
+                                    <span class="provider-status-config-label">Circuit Breaker</span>
+                                    <span class="provider-status-config-value" x-text="providerCircuitBreakerSummary(provider)"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+            </template>
+        </div>
+    </div>
 </div>
 
 <!-- Usage Page -->
@@ -456,10 +546,13 @@
     <div class="page-header">
         <h2>API Keys</h2>
         <div class="page-header-controls">
-            <button type="button" class="pagination-btn pagination-btn-primary"
+            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
                 x-show="authKeysAvailable && !authError"
                 :disabled="authKeyFormSubmitting"
-                @click="if (!authKeyFormSubmitting) openAuthKeyForm()">Create API Key</button>
+                @click="if (!authKeyFormSubmitting) openAuthKeyForm()">
+                {{template "plus-icon"}}
+                <span>Create API Key</span>
+            </button>
         </div>
     </div>
 
@@ -475,7 +568,7 @@
         Managed API keys authenticate requests to the gateway. Deactivation is permanent — create a new key if access needs to be restored.
     </p>
 
-    <div class="model-alias-editor" x-show="authKeyFormOpen">
+    <div class="model-alias-editor auth-key-editor" x-show="authKeyFormOpen">
         <form class="alias-form" @submit.prevent="submitAuthKeyForm()">
             <div class="aliases-editor-header">
                 <div>
@@ -513,7 +606,7 @@
                 </div>
             </div>
 
-            <div x-show="!authKeyIssuedValue">
+            <div class="auth-key-form-fields" x-show="!authKeyIssuedValue">
                 <div class="alias-form-grid">
                     <label class="alias-form-field">
                         <span>Name <span class="alias-form-hint">(required)</span></span>
@@ -526,24 +619,28 @@
                     </label>
                 </div>
                 <label class="alias-form-field">
+                    <span>User Path (optional)</span>
+                    <input type="text" class="filter-input" placeholder="ex. /department1/team-a"
+                        x-model="authKeyForm.user_path" aria-label="API key user path" aria-describedby="auth-key-user-path-help-copy">
+                </label>
+                <div class="auth-key-inline-help">
+                    {{template "helper-disclosure" "{ heading: 'User Path Override', open: false, copyId: 'auth-key-user-path-help-copy', showLabel: 'Show API key user path help', hideLabel: 'Hide API key user path help', text: 'When set, this key overrides X-GoModel-User-Path for audit logging and downstream request context.' }"}}
+                </div>
+                <label class="alias-form-field">
                     <span>Description (optional)</span>
                     <textarea rows="2" class="alias-form-textarea"
                         placeholder="What is this key used for?"
                         x-model="authKeyForm.description"></textarea>
                 </label>
-                <label class="alias-form-field">
-                    <span>User Path (optional)</span>
-                    <input type="text" class="filter-input" placeholder="team/alpha or /team/alpha"
-                        x-model="authKeyForm.user_path" aria-label="API key user path">
-                </label>
-                <p class="alias-form-hint">
-                    When set, this key overrides <code>X-GoModel-User-Path</code> for audit logging and downstream request context.
-                </p>
                 <p class="alias-form-error" x-show="authKeyError" x-text="authKeyError"></p>
                 <div class="alias-form-actions">
-                    <button type="submit" class="pagination-btn pagination-btn-primary"
-                        :disabled="authKeyFormSubmitting"
-                        x-text="authKeyFormSubmitting ? 'Creating...' : 'Create API Key'"></button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+                        :disabled="authKeyFormSubmitting">
+                        <span x-show="!authKeyFormSubmitting" aria-hidden="true">
+                            {{template "plus-icon"}}
+                        </span>
+                        <span x-text="authKeyFormSubmitting ? 'Creating...' : 'Create API Key'"></span>
+                    </button>
                 </div>
             </div>
         </form>
@@ -611,9 +708,6 @@
     <div class="alert alert-warning" x-show="!aliasesAvailable && !authError">
         Aliases feature is unavailable.
     </div>
-    <div class="alert alert-warning" x-show="!modelOverridesAvailable && !authError">
-        Model overrides feature is unavailable.
-    </div>
     <div class="alert alert-warning" x-show="aliasError && !authError" x-text="aliasError"></div>
     <div class="alert alert-success" x-show="aliasNotice" x-text="aliasNotice"></div>
     <div class="alert alert-warning" x-show="modelOverrideError && !authError" x-text="modelOverrideError"></div>
@@ -632,7 +726,7 @@
     <!-- Filter -->
     <div class="table-toolbar" x-show="displayModels.length > 0 || modelFilter || aliasesAvailable">
         <div class="table-toolbar-main">
-            <input type="text" placeholder="Filter by provider/model, alias, or owner..." x-model="modelFilter" class="filter-input models-filter-input">
+            <input type="text" placeholder="Filter by provider, provider/model, alias, or owner..." x-model="modelFilter" class="filter-input models-filter-input">
         </div>
         <div class="table-toolbar-actions">
             <button type="button" class="pagination-btn pagination-btn-primary" x-show="aliasesAvailable" @click="openAliasCreate()">Create Alias</button>
@@ -695,16 +789,16 @@
         </form>
     </div>
 
-    <div class="model-alias-editor" x-show="modelOverrideFormOpen">
+    <div class="model-alias-editor" x-show="modelOverrideFormOpen" x-ref="modelOverrideEditor">
         <form class="alias-form" @submit.prevent="submitModelOverrideForm()">
-            <div class="aliases-editor-header">
-                <div>
-                    <p class="alias-form-kicker">Model access override</p>
-                    <h3 x-text="modelOverrideFormDisplayName || modelOverrideForm.selector || 'Model Access'"></h3>
-                </div>
-                <button type="button" class="table-action-btn alias-close-btn table-icon-btn" aria-label="Close model access editor" @click="closeModelOverrideForm()">
-                    {{template "x-icon"}}
-                </button>
+                <div class="aliases-editor-header">
+                    <div>
+                    <p class="alias-form-kicker">Access override</p>
+                    <h3 x-text="modelOverrideFormDisplayName || modelOverrideForm.selector || 'Access'"></h3>
+                    </div>
+                    <button type="button" class="table-action-btn alias-close-btn table-icon-btn" aria-label="Close model access editor" @click="closeModelOverrideForm()">
+                        {{template "x-icon"}}
+                    </button>
             </div>
 
             <label class="alias-form-field">
@@ -713,34 +807,24 @@
             </label>
 
             <p class="alias-form-hint">
-                The selector uses the concrete <code>{provider_name}/{model}</code> shape shown in the models list. <code>allowed_only_for_user_paths</code> is matched against the effective managed API key <code>user_path</code>.
+                The selector uses <code>/</code> for all providers and models, <code>{provider_name}/</code> for one provider, or <code>{provider_name}/{model}</code> for one model. <code>user_paths</code> is matched against the effective managed API key <code>user_path</code>.
             </p>
             <p class="alias-form-hint" x-text="'Default enabled: ' + (modelOverrideFormDefaultEnabled ? 'yes' : 'no') + ' · Effective now: ' + (modelOverrideFormEffectiveEnabled ? 'yes' : 'no')"></p>
 
-            <label class="alias-checkbox">
-                <input type="checkbox" x-model="modelOverrideForm.enabled" :disabled="modelOverrideForm.force_disabled">
-                <span>Explicitly enable this model</span>
-            </label>
-
-            <label class="alias-checkbox">
-                <input type="checkbox" x-model="modelOverrideForm.force_disabled">
-                <span>Force disable globally</span>
-            </label>
-
             <label class="alias-form-field">
-                <span>Allowed Only For User Paths</span>
-                <textarea rows="4" class="alias-form-textarea mono" placeholder="/team/alpha&#10;/team/beta" x-model="modelOverrideForm.allowed_only_for_user_paths"></textarea>
+                <span>User Paths</span>
+                <textarea rows="4" class="alias-form-textarea mono" placeholder="/&#10;/team/alpha&#10;/non-existing" x-model="modelOverrideForm.user_paths"></textarea>
             </label>
 
             <p class="alias-form-hint">
-                Leave blank to allow every user path. When set, descendant paths are also allowed.
+                Use <code>/</code> to allow every user path. Use a team path to restrict to that subtree, or an unused path to make the selector unavailable.
             </p>
 
             <div class="alert alert-warning" x-show="modelOverrideError" x-text="modelOverrideError"></div>
 
             <div class="alias-form-actions">
                 <button type="button" class="pagination-btn" @click="closeModelOverrideForm()">Cancel</button>
-                <button type="button" class="pagination-btn" x-show="modelOverrideFormHasExistingOverride" :disabled="modelOverrideSubmitting" @click="deleteModelOverride()">Remove Override</button>
+                <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="modelOverrideFormHasExistingOverride" :disabled="modelOverrideSubmitting" @click="deleteModelOverride()">Remove Override</button>
                 <button type="submit" class="pagination-btn pagination-btn-primary" :disabled="modelOverrideSubmitting" x-text="modelOverrideSubmitting ? 'Saving...' : 'Save Access'"></button>
             </div>
         </form>
@@ -756,68 +840,19 @@
                     <th class="col-price">Input<br>$/MTok</th>
                     <th class="col-price">Output<br>$/MTok</th>
                     <th class="col-price" x-show="activeCategory === 'text_generation'">Cached $/MTok</th>
-                    <th>Actions</th>
+                    <th class="model-actions-header">
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable"
+                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            @click="openGlobalModelOverrideEdit()">
+                            {{template "edit-icon"}}
+                        </button>
+                    </th>
                 </tr>
             </thead>
-            <tbody>
-                <template x-for="row in filteredDisplayModels" :key="row.key">
-                    <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
-                        <td>
-                            <div class="model-name-cell">
-                                <div class="model-name-primary">
-                                    <span class="mono font-size-md" x-text="row.display_name"></span>
-                                    <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
-                                </div>
-                                <div class="model-name-secondary" x-show="row.is_alias">
-                                    Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
-                                </div>
-                                <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                                    Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
-                                </div>
-                            </div>
-                        </td>
-                        <td x-text="(row.model.metadata?.modes ?? []).join(', ') || '-'"></td>
-                        <td class="col-price" x-text="formatPrice(row.model.metadata?.pricing?.input_per_mtok)"></td>
-                        <td class="col-price" x-text="formatPrice(row.model.metadata?.pricing?.output_per_mtok)"></td>
-                        <td class="col-price" x-show="activeCategory === 'text_generation'" x-text="formatPrice(row.model.metadata?.pricing?.cached_input_per_mtok)"></td>
-                        <td class="model-row-actions">
-                            <template x-if="row.is_alias">
-                                <div class="alias-actions-cell">
-                                    <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
-                                        <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
-                                        <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
-                                    </button>
-                                    <button type="button" class="table-action-btn table-icon-btn"
-                                        :aria-label="'Edit alias ' + row.alias.name"
-                                        :title="'Edit alias ' + row.alias.name"
-                                        @click="openAliasEdit(row.alias)">
-                                        {{template "edit-icon"}}
-                                    </button>
-                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
-                                        :disabled="aliasDeletingName === row.alias.name"
-                                        :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                        :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                        @click="deleteAlias(row.alias)">
-                                        {{template "x-icon"}}
-                                    </button>
-                                </div>
-                            </template>
-                            <template x-if="!row.is_alias">
-                                <div class="alias-actions-cell">
-                                    <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
-                                    <button type="button" class="table-action-btn table-icon-btn"
-                                        x-show="modelOverridesAvailable"
-                                        :aria-label="'Edit model access for ' + row.display_name"
-                                        :title="'Edit model access for ' + row.display_name"
-                                        @click="openModelOverrideEdit(row)">
-                                        {{template "edit-icon"}}
-                                    </button>
-                                </div>
-                            </template>
-                        </td>
-                    </tr>
-                </template>
-            </tbody>
+            {{template "model-table-body" .}}
         </table>
     </div>
 
@@ -828,65 +863,19 @@
                 <tr>
                     <th>Model</th>
                     <th class="col-price">Input<br>$/MTok</th>
-                    <th>Actions</th>
+                    <th class="model-actions-header">
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable"
+                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            @click="openGlobalModelOverrideEdit()">
+                            {{template "edit-icon"}}
+                        </button>
+                    </th>
                 </tr>
             </thead>
-            <tbody>
-                <template x-for="row in filteredDisplayModels" :key="row.key">
-                    <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
-                        <td>
-                            <div class="model-name-cell">
-                                <div class="model-name-primary">
-                                    <span class="mono font-size-md" x-text="row.display_name"></span>
-                                    <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
-                                </div>
-                                <div class="model-name-secondary" x-show="row.is_alias">
-                                    Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
-                                </div>
-                                <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                                    Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="col-price" x-text="formatPrice(row.model.metadata?.pricing?.input_per_mtok)"></td>
-                        <td class="model-row-actions">
-                            <template x-if="row.is_alias">
-                                <div class="alias-actions-cell">
-                                    <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
-                                        <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
-                                        <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
-                                    </button>
-                                    <button type="button" class="table-action-btn table-icon-btn"
-                                        :aria-label="'Edit alias ' + row.alias.name"
-                                        :title="'Edit alias ' + row.alias.name"
-                                        @click="openAliasEdit(row.alias)">
-                                        {{template "edit-icon"}}
-                                    </button>
-                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
-                                        :disabled="aliasDeletingName === row.alias.name"
-                                        :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                        :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                        @click="deleteAlias(row.alias)">
-                                        {{template "x-icon"}}
-                                    </button>
-                                </div>
-                            </template>
-                            <template x-if="!row.is_alias">
-                                <div class="alias-actions-cell">
-                                    <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
-                                    <button type="button" class="table-action-btn table-icon-btn"
-                                        x-show="modelOverridesAvailable"
-                                        :aria-label="'Edit model access for ' + row.display_name"
-                                        :title="'Edit model access for ' + row.display_name"
-                                        @click="openModelOverrideEdit(row)">
-                                        {{template "edit-icon"}}
-                                    </button>
-                                </div>
-                            </template>
-                        </td>
-                    </tr>
-                </template>
-            </tbody>
+            {{template "model-table-body" .}}
         </table>
     </div>
 
@@ -897,65 +886,19 @@
                 <tr>
                     <th>Model</th>
                     <th class="col-price">$/Image</th>
-                    <th>Actions</th>
+                    <th class="model-actions-header">
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable"
+                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            @click="openGlobalModelOverrideEdit()">
+                            {{template "edit-icon"}}
+                        </button>
+                    </th>
                 </tr>
             </thead>
-            <tbody>
-                <template x-for="row in filteredDisplayModels" :key="row.key">
-                    <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
-                        <td>
-                            <div class="model-name-cell">
-                                <div class="model-name-primary">
-                                    <span class="mono font-size-md" x-text="row.display_name"></span>
-                                    <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
-                                </div>
-                                <div class="model-name-secondary" x-show="row.is_alias">
-                                    Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
-                                </div>
-                                <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                                    Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_image)"></td>
-                        <td class="model-row-actions">
-                            <template x-if="row.is_alias">
-                                <div class="alias-actions-cell">
-                                    <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
-                                        <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
-                                        <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
-                                    </button>
-                                    <button type="button" class="table-action-btn table-icon-btn"
-                                        :aria-label="'Edit alias ' + row.alias.name"
-                                        :title="'Edit alias ' + row.alias.name"
-                                        @click="openAliasEdit(row.alias)">
-                                        {{template "edit-icon"}}
-                                    </button>
-                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
-                                        :disabled="aliasDeletingName === row.alias.name"
-                                        :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                        :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                        @click="deleteAlias(row.alias)">
-                                        {{template "x-icon"}}
-                                    </button>
-                                </div>
-                            </template>
-                            <template x-if="!row.is_alias">
-                                <div class="alias-actions-cell">
-                                    <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
-                                    <button type="button" class="table-action-btn table-icon-btn"
-                                        x-show="modelOverridesAvailable"
-                                        :aria-label="'Edit model access for ' + row.display_name"
-                                        :title="'Edit model access for ' + row.display_name"
-                                        @click="openModelOverrideEdit(row)">
-                                        {{template "edit-icon"}}
-                                    </button>
-                                </div>
-                            </template>
-                        </td>
-                    </tr>
-                </template>
-            </tbody>
+            {{template "model-table-body" .}}
         </table>
     </div>
 
@@ -967,66 +910,19 @@
                     <th>Model</th>
                     <th class="col-price">$/Second</th>
                     <th class="col-price">$/Character</th>
-                    <th>Actions</th>
+                    <th class="model-actions-header">
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable"
+                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            @click="openGlobalModelOverrideEdit()">
+                            {{template "edit-icon"}}
+                        </button>
+                    </th>
                 </tr>
             </thead>
-            <tbody>
-                <template x-for="row in filteredDisplayModels" :key="row.key">
-                    <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
-                        <td>
-                            <div class="model-name-cell">
-                                <div class="model-name-primary">
-                                    <span class="mono font-size-md" x-text="row.display_name"></span>
-                                    <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
-                                </div>
-                                <div class="model-name-secondary" x-show="row.is_alias">
-                                    Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
-                                </div>
-                                <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                                    Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_second_input)"></td>
-                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_character_input)"></td>
-                        <td class="model-row-actions">
-                            <template x-if="row.is_alias">
-                                <div class="alias-actions-cell">
-                                    <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
-                                        <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
-                                        <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
-                                    </button>
-                                    <button type="button" class="table-action-btn table-icon-btn"
-                                        :aria-label="'Edit alias ' + row.alias.name"
-                                        :title="'Edit alias ' + row.alias.name"
-                                        @click="openAliasEdit(row.alias)">
-                                        {{template "edit-icon"}}
-                                    </button>
-                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
-                                        :disabled="aliasDeletingName === row.alias.name"
-                                        :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                        :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                        @click="deleteAlias(row.alias)">
-                                        {{template "x-icon"}}
-                                    </button>
-                                </div>
-                            </template>
-                            <template x-if="!row.is_alias">
-                                <div class="alias-actions-cell">
-                                    <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
-                                    <button type="button" class="table-action-btn table-icon-btn"
-                                        x-show="modelOverridesAvailable"
-                                        :aria-label="'Edit model access for ' + row.display_name"
-                                        :title="'Edit model access for ' + row.display_name"
-                                        @click="openModelOverrideEdit(row)">
-                                        {{template "edit-icon"}}
-                                    </button>
-                                </div>
-                            </template>
-                        </td>
-                    </tr>
-                </template>
-            </tbody>
+            {{template "model-table-body" .}}
         </table>
     </div>
 
@@ -1038,66 +934,19 @@
                     <th>Model</th>
                     <th class="col-price">$/Second (In)</th>
                     <th class="col-price">$/Second (Out)</th>
-                    <th>Actions</th>
+                    <th class="model-actions-header">
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable"
+                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            @click="openGlobalModelOverrideEdit()">
+                            {{template "edit-icon"}}
+                        </button>
+                    </th>
                 </tr>
             </thead>
-            <tbody>
-                <template x-for="row in filteredDisplayModels" :key="row.key">
-                    <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
-                        <td>
-                            <div class="model-name-cell">
-                                <div class="model-name-primary">
-                                    <span class="mono font-size-md" x-text="row.display_name"></span>
-                                    <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
-                                </div>
-                                <div class="model-name-secondary" x-show="row.is_alias">
-                                    Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
-                                </div>
-                                <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                                    Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_second_input)"></td>
-                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_second_output)"></td>
-                        <td class="model-row-actions">
-                            <template x-if="row.is_alias">
-                                <div class="alias-actions-cell">
-                                    <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
-                                        <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
-                                        <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
-                                    </button>
-                                    <button type="button" class="table-action-btn table-icon-btn"
-                                        :aria-label="'Edit alias ' + row.alias.name"
-                                        :title="'Edit alias ' + row.alias.name"
-                                        @click="openAliasEdit(row.alias)">
-                                        {{template "edit-icon"}}
-                                    </button>
-                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
-                                        :disabled="aliasDeletingName === row.alias.name"
-                                        :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                        :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                        @click="deleteAlias(row.alias)">
-                                        {{template "x-icon"}}
-                                    </button>
-                                </div>
-                            </template>
-                            <template x-if="!row.is_alias">
-                                <div class="alias-actions-cell">
-                                    <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
-                                    <button type="button" class="table-action-btn table-icon-btn"
-                                        x-show="modelOverridesAvailable"
-                                        :aria-label="'Edit model access for ' + row.display_name"
-                                        :title="'Edit model access for ' + row.display_name"
-                                        @click="openModelOverrideEdit(row)">
-                                        {{template "edit-icon"}}
-                                    </button>
-                                </div>
-                            </template>
-                        </td>
-                    </tr>
-                </template>
-            </tbody>
+            {{template "model-table-body" .}}
         </table>
     </div>
 
@@ -1109,66 +958,19 @@
                     <th>Model</th>
                     <th class="col-price">$/Page</th>
                     <th class="col-price">$/Request</th>
-                    <th>Actions</th>
+                    <th class="model-actions-header">
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable"
+                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            @click="openGlobalModelOverrideEdit()">
+                            {{template "edit-icon"}}
+                        </button>
+                    </th>
                 </tr>
             </thead>
-            <tbody>
-                <template x-for="row in filteredDisplayModels" :key="row.key">
-                    <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
-                        <td>
-                            <div class="model-name-cell">
-                                <div class="model-name-primary">
-                                    <span class="mono font-size-md" x-text="row.display_name"></span>
-                                    <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
-                                </div>
-                                <div class="model-name-secondary" x-show="row.is_alias">
-                                    Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
-                                </div>
-                                <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                                    Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_page)"></td>
-                        <td class="col-price" x-text="formatPriceFine(row.model.metadata?.pricing?.per_request)"></td>
-                        <td class="model-row-actions">
-                            <template x-if="row.is_alias">
-                                <div class="alias-actions-cell">
-                                    <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
-                                        <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
-                                        <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
-                                    </button>
-                                    <button type="button" class="table-action-btn table-icon-btn"
-                                        :aria-label="'Edit alias ' + row.alias.name"
-                                        :title="'Edit alias ' + row.alias.name"
-                                        @click="openAliasEdit(row.alias)">
-                                        {{template "edit-icon"}}
-                                    </button>
-                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
-                                        :disabled="aliasDeletingName === row.alias.name"
-                                        :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                        :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                        @click="deleteAlias(row.alias)">
-                                        {{template "x-icon"}}
-                                    </button>
-                                </div>
-                            </template>
-                            <template x-if="!row.is_alias">
-                                <div class="alias-actions-cell">
-                                    <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
-                                    <button type="button" class="table-action-btn table-icon-btn"
-                                        x-show="modelOverridesAvailable"
-                                        :aria-label="'Edit model access for ' + row.display_name"
-                                        :title="'Edit model access for ' + row.display_name"
-                                        @click="openModelOverrideEdit(row)">
-                                        {{template "edit-icon"}}
-                                    </button>
-                                </div>
-                            </template>
-                        </td>
-                    </tr>
-                </template>
-            </tbody>
+            {{template "model-table-body" .}}
         </table>
     </div>
 
@@ -1525,25 +1327,28 @@
                         </div>
                     </summary>
                     <div class="audit-entry-details">
-                        <div class="audit-entry-context">
-                            <span class="provider-badge" x-text="providerDisplayValue(entry) || '-'"></span>
-                            <span class="provider-badge mono" x-text="entry.requested_model || entry.model || '-'"></span>
-                            <span class="provider-badge mono" x-text="entry.user_path || '-'"></span>
-                            <span class="provider-badge audit-alias-badge" x-show="entry.alias_used">alias</span>
-                            <span class="provider-badge mono" x-show="entry.alias_used && entry.resolved_model" x-text="'resolved: ' + qualifiedResolvedModelDisplay(entry)"></span>
-                            <span class="provider-badge mono" x-text="'request_id: ' + (entry.request_id || '-')"></span>
-                            <span class="provider-badge mono" x-show="entry.auth_key_id" x-text="'auth_key_id: ' + entry.auth_key_id"></span>
-                            <span class="provider-badge mono" x-show="entry.client_ip" x-text="'ip: ' + entry.client_ip"></span>
-                            <span class="provider-badge" x-show="entry.stream">stream</span>
-                            <span class="provider-badge" x-show="entry.error_type" x-text="entry.error_type"></span>
-                        </div>
-
                         <!-- Execution Pipeline (workflow + runtime view) -->
                         {{template "execution-plan-chart" "executionPlanAuditChart(entry)"}}
 
                         <div class="audit-request-response">
                             {{template "audit-pane" "auditRequestPane(entry)"}}
                             {{template "audit-pane" "auditResponsePane(entry)"}}
+                        </div>
+
+                        <div class="audit-entry-metadata">
+                            <span class="audit-entry-metadata-label">Metadata:</span>
+                            <div class="audit-entry-context">
+                                <span class="provider-badge" x-text="providerDisplayValue(entry) || '-'"></span>
+                                <span class="provider-badge mono" x-text="entry.requested_model || entry.model || '-'"></span>
+                                <span class="provider-badge mono" x-show="entry.user_path" x-text="entry.user_path"></span>
+                                <span class="provider-badge mono" x-text="'request_id: ' + (entry.request_id || '-')"></span>
+                                <span class="provider-badge mono" x-show="entry.client_ip" x-text="'ip: ' + entry.client_ip"></span>
+                                <span class="provider-badge mono" x-show="entry.auth_key_id" x-text="'auth_key_id: ' + entry.auth_key_id"></span>
+                                <span class="provider-badge audit-alias-badge" x-show="entry.alias_used">alias</span>
+                                <span class="provider-badge mono" x-show="entry.alias_used && entry.resolved_model" x-text="'resolved: ' + qualifiedResolvedModelDisplay(entry)"></span>
+                                <span class="provider-badge" x-show="entry.stream">stream</span>
+                                <span class="provider-badge" x-show="entry.error_type" x-text="entry.error_type"></span>
+                            </div>
                         </div>
                     </div>
                 </details>

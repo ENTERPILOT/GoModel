@@ -29,7 +29,10 @@ test('sidebar and main content share the flex layout without manual content offs
 
     assert.match(template, /<aside class="sidebar"[\s\S]*<div class="sidebar-toggle"[\s\S]*<main class="content"/);
     assert.doesNotMatch(template, /content-collapsed/);
-    assert.match(template, /href="\/admin\/dashboard\/guardrails"[\s\S]*x-show="guardrailsPageVisible\(\)"[\s\S]*<span>Guardrails<\/span>[\s\S]*href="\/admin\/dashboard\/auth-keys"[\s\S]*<span>API Keys<\/span>/);
+    assert.match(
+        template,
+        /href="\/admin\/dashboard\/overview"[\s\S]*<span>Overview<\/span>[\s\S]*href="\/admin\/dashboard\/models"[\s\S]*<span>Models<\/span>[\s\S]*href="\/admin\/dashboard\/audit-logs"[\s\S]*<span>Audit Logs<\/span>[\s\S]*href="\/admin\/dashboard\/usage"[\s\S]*<span>Usage<\/span>[\s\S]*href="\/admin\/dashboard\/auth-keys"[\s\S]*<span>API Keys<\/span>[\s\S]*href="\/admin\/dashboard\/workflows"[\s\S]*<span>Workflows<\/span>[\s\S]*href="\/admin\/dashboard\/guardrails"[\s\S]*x-show="guardrailsPageVisible\(\)"[\s\S]*<span>Guardrails \(experimental\)<\/span>[\s\S]*href="\/admin\/dashboard\/settings"[\s\S]*<span>Settings<\/span>/
+    );
 
     const sidebarRule = readCSSRule(css, '.sidebar');
     assert.match(sidebarRule, /flex:\s*0 0 var\(--sidebar-width\)/);
@@ -88,8 +91,48 @@ test('dashboard layout pins Chart.js to 4.5.0', () => {
     );
     assert.match(
         template,
-        /<script src="\/admin\/static\/js\/modules\/conversation-helpers\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/clipboard\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/audit-list\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/auth-keys\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/guardrails\.js"><\/script>/
+        /<script src="\/admin\/static\/js\/modules\/conversation-helpers\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/clipboard\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/providers\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/audit-list\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/auth-keys\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/guardrails\.js"><\/script>/
     );
+});
+
+test('overview page shows provider status summary and per-provider cards keyed by configured provider name', () => {
+    const indexTemplate = readFixture('../../../templates/index.html');
+    const css = readFixture('../../css/dashboard.css');
+
+    assert.doesNotMatch(indexTemplate, /class="provider-status-strip"/);
+    assert.match(indexTemplate, /class="card provider-status-flag" x-show="providerStatus\.summary\.total > 0"/);
+    assert.match(indexTemplate, /Local Cache Output Tokens[\s\S]*class="card provider-status-flag"[\s\S]*<!-- Usage Chart -->/);
+    assert.match(indexTemplate, /<div class="card-label">Provider Status<\/div>[\s\S]*class="card-value provider-status-value"[\s\S]*providerStatusRatioText\(\)/);
+    assert.match(indexTemplate, /class="provider-status-card-link"[\s\S]*x-show="providerStatusHasIssues\(\)"[\s\S]*@click="scrollToProviderStatusSection\(\)"/);
+    assert.doesNotMatch(indexTemplate, /Counted by configured provider name, not provider type\./);
+    assert.match(indexTemplate, /@click="scrollToProviderStatusSection\(\)"/);
+    assert.match(indexTemplate, /id="provider-status-section" class="provider-status-section" tabindex="-1" x-show="providerStatus\.providers\.length > 0"/);
+    assert.match(indexTemplate, /<h3>Providers Overview<\/h3>/);
+    assert.match(indexTemplate, /class="provider-status-toggle"[\s\S]*role="switch"[\s\S]*@click="toggleProviderStatusDetails\(\)"/);
+    assert.match(indexTemplate, /class="provider-status-name"[\s\S]*x-text="provider\.name"[\s\S]*class="provider-status-name-type"[\s\S]*providerTypeLabel\(provider\)/);
+    assert.doesNotMatch(indexTemplate, /class="provider-status-type"/);
+    assert.match(indexTemplate, /x-text="providerLastCheckedTime\(provider\)"/);
+    assert.match(indexTemplate, /:title="providerLastCheckedTitle\(provider\)"/);
+    assert.match(indexTemplate, /class="provider-status-details"[\s\S]*providerStatusDetailsExpanded/);
+
+    const stripRule = readCSSRule(css, '.provider-status-flag');
+    assert.match(stripRule, /grid-column:\s*span 2/);
+
+    const linkRule = readCSSRule(css, '.provider-status-card-link');
+    assert.match(linkRule, /background:\s*transparent/);
+    assert.match(linkRule, /text-align:\s*left/);
+
+    const gridRule = readCSSRule(css, '.provider-status-grid');
+    assert.match(gridRule, /display:\s*grid/);
+    assert.match(gridRule, /grid-template-columns:\s*repeat\(auto-fit, minmax\(280px, 1fr\)\)/);
+
+    const toggleRule = readCSSRule(css, '.provider-status-toggle');
+    assert.match(toggleRule, /display:\s*inline-flex/);
+    assert.match(toggleRule, /border-radius:\s*999px/);
+
+    const detailsRule = readCSSRule(css, '.provider-status-details');
+    assert.match(detailsRule, /grid-template-rows:\s*0fr/);
+    assert.match(detailsRule, /transition:\s*grid-template-rows 0\.28s ease, opacity 0\.22s ease/);
 });
 
 test('dashboard pages reuse a shared auth banner template', () => {
@@ -112,15 +155,57 @@ test('dashboard pages reuse a shared auth banner template', () => {
 
 test('auth key expirations render as a UTC date with the full UTC timestamp in the hover title', () => {
     const indexTemplate = readFixture('../../../templates/index.html');
+    const css = readFixture('../../css/dashboard.css');
+    const plusIconTemplate = readFixture('../../../templates/plus-icon.html');
+    const authKeyFormMatch = indexTemplate.match(/<div class="model-alias-editor auth-key-editor"[\s\S]*?<\/form>/);
+
+    assert.ok(authKeyFormMatch, 'Expected auth key editor block');
+
+    const authKeyForm = authKeyFormMatch[0];
+    const userPathIndex = authKeyForm.indexOf('<span>User Path (optional)</span>');
+    const helperIndex = authKeyForm.indexOf("{{template \"helper-disclosure\" \"{ heading: 'User Path Override'");
+    const descriptionIndex = authKeyForm.indexOf('<span>Description (optional)</span>');
 
     assert.match(indexTemplate, /x-text="key\.expires_at \? formatDateUTC\(key\.expires_at\) : '\\u2014'"/);
     assert.match(indexTemplate, /:title="key\.expires_at \? formatTimestampUTC\(key\.expires_at\) : ''"/);
     assert.match(indexTemplate, /x-model="authKeyForm\.user_path"[^>]*aria-label="API key user path"/);
+    assert.match(indexTemplate, /class="model-alias-editor auth-key-editor"/);
+    assert.match(plusIconTemplate, /{{define "plus-icon"}}[\s\S]*<path d="M12 5v14"><\/path>[\s\S]*<path d="M5 12h14"><\/path>[\s\S]*{{end}}/);
+    assert.match(indexTemplate, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon"[\s\S]*{{template "plus-icon"}}[\s\S]*<span>Create API Key<\/span>/);
+    assert.match(authKeyForm, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon"[\s\S]*x-show="!authKeyFormSubmitting"[\s\S]*{{template "plus-icon"}}[\s\S]*x-text="authKeyFormSubmitting \? 'Creating\.\.\.' : 'Create API Key'"/);
+    assert.notEqual(userPathIndex, -1);
+    assert.notEqual(helperIndex, -1);
+    assert.notEqual(descriptionIndex, -1);
+    assert.ok(userPathIndex < helperIndex);
+    assert.ok(helperIndex < descriptionIndex);
+    assert.match(authKeyForm, /placeholder="ex\. \/department1\/team-a"/);
+    assert.match(authKeyForm, /copyId: 'auth-key-user-path-help-copy'/);
+    assert.match(authKeyForm, /When set, this key overrides X-GoModel-User-Path for audit logging and downstream request context\./);
+    assert.doesNotMatch(
+        indexTemplate,
+        /<p class="alias-form-hint">\s*When set, this key overrides <code>X-GoModel-User-Path<\/code> for audit logging and downstream request context\.\s*<\/p>/
+    );
     assert.match(indexTemplate, /x-text="key\.user_path \|\| '\\u2014'"/);
     assert.match(indexTemplate, /X-GoModel-User-Path/);
     assert.match(indexTemplate, /:disabled="authKeyFormSubmitting"/);
     assert.match(indexTemplate, /@click="if \(!authKeyFormSubmitting\) openAuthKeyForm\(\)"/);
     assert.match(indexTemplate, /x-show="authKeys\.length === 0 && !authKeysLoading && !authError && !authKeyError && authKeysAvailable"/);
+
+    const authKeyEditorRule = readCSSRule(css, '.auth-key-editor');
+    assert.match(authKeyEditorRule, /background:\s*color-mix\(in srgb, var\(--bg-surface\) 82%, var\(--bg\) 18%\)/);
+
+    const authKeyInputRule = readCSSRule(css, '.auth-key-editor .filter-input');
+    assert.match(authKeyInputRule, /background:\s*var\(--bg-surface\)/);
+
+    const authKeyTextareaRule = readCSSRule(css, '.auth-key-editor .alias-form-textarea');
+    assert.match(authKeyTextareaRule, /background:\s*var\(--bg-surface\)/);
+
+    const authKeyFieldSpacingRule = readCSSRule(css, '.auth-key-form-fields > .alias-form-field');
+    assert.match(authKeyFieldSpacingRule, /margin-bottom:\s*4px/);
+
+    const paginationBtnWithIconRule = readCSSRule(css, '.pagination-btn-with-icon');
+    assert.match(paginationBtnWithIconRule, /display:\s*inline-flex/);
+    assert.match(paginationBtnWithIconRule, /gap:\s*8px/);
 });
 
 test('workflow guardrail warning links directly to the top-level guardrails page', () => {
@@ -167,6 +252,40 @@ test('audit toolbar uses a full-width search row above the select row with a rig
     assert.match(modelsFilterRule, /max-width:\s*840px/);
 });
 
+test('audit entry metadata is rendered as a labeled pill row at the bottom of the expanded entry', () => {
+    const indexTemplate = readFixture('../../../templates/index.html');
+    const css = readFixture('../../css/dashboard.css');
+    const auditEntryMatch = indexTemplate.match(/<div class="audit-entry-details">[\s\S]*?<\/div>\s*<\/details>/);
+
+    assert.ok(auditEntryMatch, 'Expected audit entry details block');
+
+    const auditEntry = auditEntryMatch[0];
+    const requestResponseIndex = auditEntry.indexOf('<div class="audit-request-response">');
+    const metadataIndex = auditEntry.indexOf('<div class="audit-entry-metadata">');
+
+    assert.notEqual(requestResponseIndex, -1);
+    assert.notEqual(metadataIndex, -1);
+    assert.ok(requestResponseIndex < metadataIndex);
+    assert.match(auditEntry, /<span class="audit-entry-metadata-label">Metadata:<\/span>/);
+    assert.match(auditEntry, /<span class="provider-badge" x-text="providerDisplayValue\(entry\) \|\| '-'"><\/span>/);
+    assert.match(auditEntry, /<span class="provider-badge mono" x-text="entry\.requested_model \|\| entry\.model \|\| '-'"><\/span>/);
+    assert.match(auditEntry, /<span class="provider-badge mono" x-text="'request_id: ' \+ \(entry\.request_id \|\| '-'\)"><\/span>/);
+    assert.match(auditEntry, /<span class="provider-badge mono" x-show="entry\.client_ip" x-text="'ip: ' \+ entry\.client_ip"><\/span>/);
+
+    const metadataRule = readCSSRule(css, '.audit-entry-metadata');
+    assert.match(metadataRule, /display:\s*flex/);
+    assert.match(metadataRule, /margin-top:\s*12px/);
+    assert.match(metadataRule, /padding-top:\s*12px/);
+    assert.match(metadataRule, /border-top:\s*1px solid var\(--border\)/);
+
+    const metadataLabelRule = readCSSRule(css, '.audit-entry-metadata-label');
+    assert.match(metadataLabelRule, /text-transform:\s*uppercase/);
+    assert.match(metadataLabelRule, /letter-spacing:\s*0\.08em/);
+
+    const metadataContextRule = readCSSRule(css, '.audit-entry-context');
+    assert.match(metadataContextRule, /flex-wrap:\s*wrap/);
+});
+
 test('alias rows use a shared icon-only edit action', () => {
     const indexTemplate = readFixture('../../../templates/index.html');
     const editIconTemplate = readFixture('../../../templates/edit-icon.html');
@@ -175,6 +294,9 @@ test('alias rows use a shared icon-only edit action', () => {
         indexTemplate,
         /class="table-action-btn table-icon-btn"[\s\S]*:aria-label="'Edit alias ' \+ row\.alias\.name"[\s\S]*@click="openAliasEdit\(row\.alias\)"[\s\S]*{{template "edit-icon"}}/
     );
+    assert.match(indexTemplate, /x-show="modelOverrideFormOpen" x-ref="modelOverrideEditor"/);
+    assert.doesNotMatch(indexTemplate, /Model overrides feature is unavailable\./);
+    assert.doesNotMatch(indexTemplate, /!modelOverridesAvailable && !authError/);
     assert.match(editIconTemplate, /{{define "edit-icon"}}/);
 });
 

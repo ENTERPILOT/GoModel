@@ -30,16 +30,17 @@ import (
 
 // Handler serves admin API endpoints.
 type Handler struct {
-	usageReader    usage.UsageReader
-	auditReader    auditlog.Reader
-	registry       *providers.ModelRegistry
-	authKeys       *authkeys.Service
-	aliases        *aliases.Service
-	modelOverrides *modeloverrides.Service
-	plans          *executionplans.Service
-	guardrails     guardrails.Catalog
-	guardrailDefs  *guardrails.Service
-	runtimeConfig  DashboardConfigResponse
+	usageReader         usage.UsageReader
+	auditReader         auditlog.Reader
+	registry            *providers.ModelRegistry
+	authKeys            *authkeys.Service
+	aliases             *aliases.Service
+	modelOverrides      *modeloverrides.Service
+	plans               *executionplans.Service
+	guardrails          guardrails.Catalog
+	guardrailDefs       *guardrails.Service
+	runtimeConfig       DashboardConfigResponse
+	configuredProviders []providers.SanitizedProviderConfig
 
 	mutationMu sync.Mutex
 }
@@ -66,6 +67,30 @@ type DashboardConfigResponse struct {
 	CacheEnabled         string `json:"CACHE_ENABLED,omitempty"`
 	RedisURL             string `json:"REDIS_URL,omitempty"`
 	SemanticCacheEnabled string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
+}
+
+type providerStatusSummaryResponse struct {
+	Total         int    `json:"total"`
+	Healthy       int    `json:"healthy"`
+	Degraded      int    `json:"degraded"`
+	Unhealthy     int    `json:"unhealthy"`
+	OverallStatus string `json:"overall_status"`
+}
+
+type providerStatusItemResponse struct {
+	Name         string                            `json:"name"`
+	Type         string                            `json:"type"`
+	Status       string                            `json:"status"`
+	StatusLabel  string                            `json:"status_label"`
+	StatusReason string                            `json:"status_reason"`
+	LastError    string                            `json:"last_error,omitempty"`
+	Config       providers.SanitizedProviderConfig `json:"config"`
+	Runtime      providers.ProviderRuntimeSnapshot `json:"runtime"`
+}
+
+type providerStatusResponse struct {
+	Summary   providerStatusSummaryResponse `json:"summary"`
+	Providers []providerStatusItemResponse  `json:"providers"`
 }
 
 // WithAuditReader enables audit log read endpoints.
@@ -125,6 +150,13 @@ func WithDashboardRuntimeConfig(values DashboardConfigResponse) Option {
 	}
 }
 
+// WithConfiguredProviders enables the admin-safe provider inventory endpoint.
+func WithConfiguredProviders(configs []providers.SanitizedProviderConfig) Option {
+	return func(h *Handler) {
+		h.configuredProviders = cloneConfiguredProviders(configs)
+	}
+}
+
 // NewHandler creates a new admin API handler.
 // usageReader may be nil if usage tracking is not available.
 func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, options ...Option) *Handler {
@@ -157,6 +189,20 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 
 func cloneDashboardRuntimeConfig(values DashboardConfigResponse) DashboardConfigResponse {
 	return values
+}
+
+func cloneConfiguredProviders(configs []providers.SanitizedProviderConfig) []providers.SanitizedProviderConfig {
+	if len(configs) == 0 {
+		return nil
+	}
+	cloned := make([]providers.SanitizedProviderConfig, len(configs))
+	for i := range configs {
+		cloned[i] = configs[i]
+		if len(configs[i].Models) > 0 {
+			cloned[i].Models = append([]string(nil), configs[i].Models...)
+		}
+	}
+	return cloned
 }
 
 var validIntervals = map[string]bool{
@@ -677,12 +723,11 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 // @Failure      401  {object}  core.GatewayError
 // @Router       /admin/api/v1/models [get]
 type modelAccessResponse struct {
-	Selector                string                   `json:"selector"`
-	DefaultEnabled          bool                     `json:"default_enabled"`
-	EffectiveEnabled        bool                     `json:"effective_enabled"`
-	ForceDisabled           bool                     `json:"force_disabled"`
-	AllowedOnlyForUserPaths []string                 `json:"allowed_only_for_user_paths,omitempty"`
-	Override                *modeloverrides.Override `json:"override,omitempty"`
+	Selector         string                   `json:"selector"`
+	DefaultEnabled   bool                     `json:"default_enabled"`
+	EffectiveEnabled bool                     `json:"effective_enabled"`
+	UserPaths        []string                 `json:"user_paths,omitempty"`
+	Override         *modeloverrides.Override `json:"override,omitempty"`
 }
 
 type modelInventoryResponse struct {
@@ -739,11 +784,10 @@ func (h *Handler) ListModels(c *echo.Context) error {
 		}
 		effective := h.modelOverrides.EffectiveState(selector)
 		access := modelAccessResponse{
-			Selector:                effective.Selector,
-			DefaultEnabled:          effective.DefaultEnabled,
-			EffectiveEnabled:        effective.Enabled,
-			ForceDisabled:           effective.ForceDisabled,
-			AllowedOnlyForUserPaths: append([]string(nil), effective.AllowedOnlyForUserPaths...),
+			Selector:         effective.Selector,
+			DefaultEnabled:   effective.DefaultEnabled,
+			EffectiveEnabled: effective.Enabled,
+			UserPaths:        append([]string(nil), effective.UserPaths...),
 		}
 		if override, ok := h.modelOverrides.Get(selector.QualifiedModel()); ok && override != nil {
 			overrideCopy := *override
@@ -785,6 +829,141 @@ func (h *Handler) DashboardConfig(c *echo.Context) error {
 	return c.JSON(http.StatusOK, cloneDashboardRuntimeConfig(h.runtimeConfig))
 }
 
+// ProviderStatus handles GET /admin/api/v1/providers/status
+func (h *Handler) ProviderStatus(c *echo.Context) error {
+	return c.JSON(http.StatusOK, h.buildProviderStatusResponse())
+}
+
+func (h *Handler) buildProviderStatusResponse() providerStatusResponse {
+	configured := cloneConfiguredProviders(h.configuredProviders)
+	configuredByName := make(map[string]providers.SanitizedProviderConfig, len(configured))
+	nameSet := make(map[string]struct{}, len(configured))
+	for _, cfg := range configured {
+		name := strings.TrimSpace(cfg.Name)
+		if name == "" {
+			continue
+		}
+		configuredByName[name] = cfg
+		nameSet[name] = struct{}{}
+	}
+
+	runtimeByName := make(map[string]providers.ProviderRuntimeSnapshot)
+	if h.registry != nil {
+		for _, snapshot := range h.registry.ProviderRuntimeSnapshots() {
+			name := strings.TrimSpace(snapshot.Name)
+			if name == "" {
+				continue
+			}
+			runtimeByName[name] = snapshot
+			nameSet[name] = struct{}{}
+		}
+	}
+
+	names := make([]string, 0, len(nameSet))
+	for name := range nameSet {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	resp := providerStatusResponse{
+		Summary: providerStatusSummaryResponse{
+			OverallStatus: "degraded",
+		},
+		Providers: make([]providerStatusItemResponse, 0, len(names)),
+	}
+
+	for _, name := range names {
+		cfg, hasConfig := configuredByName[name]
+		runtime, hasRuntime := runtimeByName[name]
+		if !hasConfig {
+			cfg = providers.SanitizedProviderConfig{Name: name, Type: strings.TrimSpace(runtime.Type)}
+		}
+		if !hasRuntime {
+			runtime = providers.ProviderRuntimeSnapshot{Name: name, Type: strings.TrimSpace(cfg.Type)}
+		}
+		if strings.TrimSpace(cfg.Type) == "" {
+			cfg.Type = strings.TrimSpace(runtime.Type)
+		}
+		if strings.TrimSpace(runtime.Type) == "" {
+			runtime.Type = strings.TrimSpace(cfg.Type)
+		}
+
+		status, label, reason, lastError := classifyProviderStatus(cfg, runtime)
+		resp.Providers = append(resp.Providers, providerStatusItemResponse{
+			Name:         name,
+			Type:         strings.TrimSpace(cfg.Type),
+			Status:       status,
+			StatusLabel:  label,
+			StatusReason: reason,
+			LastError:    lastError,
+			Config:       cfg,
+			Runtime:      runtime,
+		})
+		resp.Summary.Total++
+		switch status {
+		case "healthy":
+			resp.Summary.Healthy++
+		case "unhealthy":
+			resp.Summary.Unhealthy++
+		default:
+			resp.Summary.Degraded++
+		}
+	}
+
+	switch {
+	case resp.Summary.Total == 0:
+		resp.Summary.OverallStatus = "degraded"
+	case resp.Summary.Healthy == resp.Summary.Total:
+		resp.Summary.OverallStatus = "healthy"
+	case resp.Summary.Unhealthy == resp.Summary.Total:
+		resp.Summary.OverallStatus = "unhealthy"
+	default:
+		resp.Summary.OverallStatus = "degraded"
+	}
+
+	if resp.Providers == nil {
+		resp.Providers = []providerStatusItemResponse{}
+	}
+	return resp
+}
+
+func classifyProviderStatus(cfg providers.SanitizedProviderConfig, runtime providers.ProviderRuntimeSnapshot) (status, label, reason, lastError string) {
+	modelFetchError := strings.TrimSpace(runtime.LastModelFetchError)
+	availabilityError := strings.TrimSpace(runtime.LastAvailabilityError)
+	configuredName := strings.TrimSpace(cfg.Name)
+	usingCachedModels := runtime.Registered &&
+		runtime.DiscoveredModelCount > 0 &&
+		modelFetchError == "" &&
+		runtime.LastModelFetchSuccessAt == nil
+
+	lastError = modelFetchError
+	if lastError == "" {
+		lastError = availabilityError
+	}
+
+	switch {
+	case runtime.DiscoveredModelCount > 0 && modelFetchError == "":
+		if usingCachedModels {
+			return "degraded", "Starting", "serving cached model inventory while live refresh finishes", lastError
+		}
+		return "healthy", "Healthy", "configured and model discovery succeeded", lastError
+	case modelFetchError != "" && runtime.DiscoveredModelCount > 0:
+		return "degraded", "Degraded", "latest model refresh failed; previous inventory is still available", lastError
+	case modelFetchError != "":
+		return "unhealthy", "Unhealthy", "model discovery failed and no provider models are currently available", lastError
+	case availabilityError != "" && runtime.DiscoveredModelCount == 0:
+		return "unhealthy", "Unhealthy", "startup availability check failed and no provider models are available", lastError
+	case runtime.DiscoveredModelCount > 0:
+		return "healthy", "Healthy", "provider models are currently available", lastError
+	case !runtime.Registered && configuredName != "":
+		return "degraded", "Starting", "provider is configured and awaiting live model discovery", lastError
+	case configuredName != "":
+		return "degraded", "Configured", "provider is configured but has not exposed models yet", lastError
+	default:
+		return "degraded", "Unknown", "provider runtime inventory is unavailable", lastError
+	}
+}
+
 type upsertAliasRequest struct {
 	TargetModel    string `json:"target_model"`
 	TargetProvider string `json:"target_provider,omitempty"`
@@ -793,9 +972,7 @@ type upsertAliasRequest struct {
 }
 
 type upsertModelOverrideRequest struct {
-	Enabled                 *bool    `json:"enabled,omitempty"`
-	ForceDisabled           bool     `json:"force_disabled,omitempty"`
-	AllowedOnlyForUserPaths []string `json:"allowed_only_for_user_paths,omitempty"`
+	UserPaths []string `json:"user_paths,omitempty"`
 }
 
 type upsertGuardrailRequest struct {
@@ -864,7 +1041,7 @@ func modelOverrideWriteError(err error) error {
 	if modeloverrides.IsValidationError(err) {
 		return core.NewInvalidRequestError(err.Error(), err)
 	}
-	return err
+	return core.NewProviderError("model_overrides", http.StatusBadGateway, err.Error(), err)
 }
 
 func executionPlanWriteError(err error) error {
@@ -981,10 +1158,8 @@ func (h *Handler) UpsertModelOverride(c *echo.Context) error {
 	}
 
 	if err := h.modelOverrides.Upsert(c.Request().Context(), modeloverrides.Override{
-		Selector:                selector,
-		Enabled:                 req.Enabled,
-		ForceDisabled:           req.ForceDisabled,
-		AllowedOnlyForUserPaths: req.AllowedOnlyForUserPaths,
+		Selector:  selector,
+		UserPaths: req.UserPaths,
 	}); err != nil {
 		return handleError(c, modelOverrideWriteError(err))
 	}

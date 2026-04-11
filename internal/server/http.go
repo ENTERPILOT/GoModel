@@ -43,36 +43,37 @@ const (
 
 // Config holds server configuration options
 type Config struct {
-	MasterKey                    string                                 // Optional: Master key for authentication
-	Authenticator                BearerTokenAuthenticator               // Optional: managed API key authenticator
-	MetricsEnabled               bool                                   // Whether to expose Prometheus metrics endpoint
-	MetricsEndpoint              string                                 // HTTP path for metrics endpoint (default: /metrics)
-	BodySizeLimit                string                                 // Max request body size (e.g., "10M", "1024K")
-	PprofEnabled                 bool                                   // Whether to expose debug profiling routes at /debug/pprof/*
-	AuditLogger                  auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
-	UsageLogger                  usage.LoggerInterface                  // Optional: Usage logger for token tracking
-	PricingResolver              usage.PricingResolver                  // Optional: Resolves pricing for cost calculation
-	ModelResolver                RequestModelResolver                   // Optional: explicit model resolver used during request planning
-	ModelAuthorizer              RequestModelAuthorizer                 // Optional: request-scoped concrete model access controller
-	ExecutionPolicyResolver      RequestExecutionPolicyResolver         // Optional: persisted execution-plan resolver used during request planning
-	FallbackResolver             RequestFallbackResolver                // Optional: translated-route fallback resolver
-	TranslatedRequestPatcher     TranslatedRequestPatcher               // Optional: request patcher for translated routes after planning
-	BatchRequestPreparer         BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
-	ExposedModelLister           ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
-	PassthroughSemanticEnrichers []core.PassthroughSemanticEnricher     // Optional: provider-owned passthrough semantic enrichers before planning
-	BatchStore                   batchstore.Store                       // Optional: Batch lifecycle persistence store
-	LogOnlyModelInteractions     bool                                   // Only log AI model endpoints (default: true)
-	DisablePassthroughRoutes     bool                                   // Disable /p/{provider}/{endpoint} route registration
-	EnabledPassthroughProviders  []string                               // Provider types enabled on /p/{provider}/... passthrough routes
-	AllowPassthroughV1Alias      *bool                                  // Allow /p/{provider}/v1/... aliases; nil defaults to true
-	AdminEndpointsEnabled        bool                                   // Whether admin API endpoints are enabled
-	AdminUIEnabled               bool                                   // Whether admin dashboard UI is enabled
-	AdminHandler                 *admin.Handler                         // Admin API handler (nil if disabled)
-	DashboardHandler             *dashboard.Handler                     // Dashboard UI handler (nil if disabled)
-	SwaggerEnabled               bool                                   // Whether to expose the Swagger UI at /swagger/index.html
-	ResponseCacheMiddleware      *responsecache.ResponseCacheMiddleware // Optional: response cache middleware for cacheable endpoints
-	GuardrailsHash               string                                 // Optional: SHA-256 hash of active guardrail rules; stored in context post-patch for semantic cache
-	IPExtractor                  echo.IPExtractor                       // Optional: trusted client IP extraction strategy for proxied deployments
+	MasterKey                       string                                 // Optional: Master key for authentication
+	Authenticator                   BearerTokenAuthenticator               // Optional: managed API key authenticator
+	MetricsEnabled                  bool                                   // Whether to expose Prometheus metrics endpoint
+	MetricsEndpoint                 string                                 // HTTP path for metrics endpoint (default: /metrics)
+	BodySizeLimit                   string                                 // Max request body size (e.g., "10M", "1024K")
+	PprofEnabled                    bool                                   // Whether to expose debug profiling routes at /debug/pprof/*
+	AuditLogger                     auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
+	UsageLogger                     usage.LoggerInterface                  // Optional: Usage logger for token tracking
+	PricingResolver                 usage.PricingResolver                  // Optional: Resolves pricing for cost calculation
+	ModelResolver                   RequestModelResolver                   // Optional: explicit model resolver used during request planning
+	ModelAuthorizer                 RequestModelAuthorizer                 // Optional: request-scoped concrete model access controller
+	ExecutionPolicyResolver         RequestExecutionPolicyResolver         // Optional: persisted execution-plan resolver used during request planning
+	FallbackResolver                RequestFallbackResolver                // Optional: translated-route fallback resolver
+	TranslatedRequestPatcher        TranslatedRequestPatcher               // Optional: request patcher for translated routes after planning
+	BatchRequestPreparer            BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
+	ExposedModelLister              ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
+	KeepOnlyAliasesAtModelsEndpoint bool                                   // Whether GET /v1/models should hide concrete provider models
+	PassthroughSemanticEnrichers    []core.PassthroughSemanticEnricher     // Optional: provider-owned passthrough semantic enrichers before planning
+	BatchStore                      batchstore.Store                       // Optional: Batch lifecycle persistence store
+	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
+	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
+	EnabledPassthroughProviders     []string                               // Provider types enabled on /p/{provider}/... passthrough routes
+	AllowPassthroughV1Alias         *bool                                  // Allow /p/{provider}/v1/... aliases; nil defaults to true
+	AdminEndpointsEnabled           bool                                   // Whether admin API endpoints are enabled
+	AdminUIEnabled                  bool                                   // Whether admin dashboard UI is enabled
+	AdminHandler                    *admin.Handler                         // Admin API handler (nil if disabled)
+	DashboardHandler                *dashboard.Handler                     // Dashboard UI handler (nil if disabled)
+	SwaggerEnabled                  bool                                   // Whether to expose the Swagger UI at /swagger/index.html
+	ResponseCacheMiddleware         *responsecache.ResponseCacheMiddleware // Optional: response cache middleware for cacheable endpoints
+	GuardrailsHash                  string                                 // Optional: SHA-256 hash of active guardrail rules; stored in context post-patch for semantic cache
+	IPExtractor                     echo.IPExtractor                       // Optional: trusted client IP extraction strategy for proxied deployments
 }
 
 // New creates a new HTTP server
@@ -114,6 +115,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil {
 		handler.batchRequestPreparer = cfg.BatchRequestPreparer
 		handler.exposedModelLister = cfg.ExposedModelLister
+		handler.keepOnlyAliasesAtModelsEndpoint = cfg.KeepOnlyAliasesAtModelsEndpoint
 		handler.responseCache = cfg.ResponseCacheMiddleware
 		handler.guardrailsHash = cfg.GuardrailsHash
 	}
@@ -305,6 +307,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		adminAPI.GET("/usage/log", cfg.AdminHandler.UsageLog)
 		adminAPI.GET("/audit/log", cfg.AdminHandler.AuditLog)
 		adminAPI.GET("/audit/conversation", cfg.AdminHandler.AuditConversation)
+		adminAPI.GET("/providers/status", cfg.AdminHandler.ProviderStatus)
 		adminAPI.GET("/models", cfg.AdminHandler.ListModels)
 		adminAPI.GET("/models/categories", cfg.AdminHandler.ListCategories)
 		adminAPI.GET("/model-overrides", cfg.AdminHandler.ListModelOverrides)

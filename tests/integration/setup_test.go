@@ -252,6 +252,7 @@ func buildAppConfig(t *testing.T, cfg TestServerConfig, mockLLMURL string, port 
 		},
 		Models: config.ModelsConfig{
 			EnabledByDefault: true,
+			OverridesEnabled: true,
 		},
 		Admin: config.AdminConfig{
 			EndpointsEnabled: cfg.AdminEndpointsEnabled,

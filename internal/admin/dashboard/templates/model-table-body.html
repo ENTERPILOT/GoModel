@@ -1,0 +1,96 @@
+{{define "model-table-body"}}
+<template x-for="group in filteredDisplayModelGroups" :key="group.key">
+    <tbody>
+        <tr class="provider-group-row">
+            <td :colspan="activeCategory === 'embedding' || activeCategory === 'image' ? 3 : (activeCategory === 'all' || activeCategory === 'text_generation' ? 6 : 4)">
+                <div class="provider-group-header">
+                    <div class="provider-group-meta">
+                        <div class="provider-group-title">
+                            <span class="mono font-size-md" x-text="group.display_name"></span>
+                            <span class="provider-group-type" x-show="group.type_label" x-text="'(' + group.type_label + ')'"></span>
+                            <span class="provider-group-count" x-show="group.item_count_label" x-text="group.item_count_label"></span>
+                        </div>
+                        <div class="provider-group-summary" x-show="group.access_summary" x-text="group.access_summary"></div>
+                    </div>
+                    <div class="alias-actions-cell">
+                        <span class="model-access-state-badge" :class="modelAccessStateClass(group.access)" x-text="modelAccessStateText(group.access)"></span>
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable && group.access.selector"
+                            :class="modelOverrideEditButtonClass(hasAccessOverride(group.access))"
+                            :aria-label="modelOverrideEditButtonLabel('provider access for ' + group.display_name, hasAccessOverride(group.access))"
+                            :title="modelOverrideEditButtonLabel('provider access for ' + group.display_name, hasAccessOverride(group.access))"
+                            @click="openProviderOverrideEdit(group)">
+                            {{template "edit-icon"}}
+                        </button>
+                    </div>
+                </div>
+            </td>
+        </tr>
+        <template x-for="row in group.rows" :key="row.key">
+            <tr :id="rowAnchorID(row)" :class="displayRowClass(row)">
+                <td>
+                    <div class="model-name-cell">
+                        <div class="model-name-primary">
+                            <span class="mono font-size-md" x-text="row.display_name"></span>
+                            <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
+                        </div>
+                        <div class="model-name-secondary" x-show="row.is_alias">
+                            Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
+                        </div>
+                        <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
+                            Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                        </div>
+                    </div>
+                </td>
+                <td x-show="activeCategory === 'all' || activeCategory === 'text_generation'" x-text="(row.model.metadata?.modes ?? []).join(', ') || '-'"></td>
+                <td class="col-price" x-show="activeCategory === 'all' || activeCategory === 'text_generation' || activeCategory === 'embedding'" x-text="formatPrice(row.model.metadata?.pricing?.input_per_mtok)"></td>
+                <td class="col-price" x-show="activeCategory === 'all' || activeCategory === 'text_generation'" x-text="formatPrice(row.model.metadata?.pricing?.output_per_mtok)"></td>
+                <td class="col-price" x-show="activeCategory === 'text_generation'" x-text="formatPrice(row.model.metadata?.pricing?.cached_input_per_mtok)"></td>
+                <td class="col-price" x-show="activeCategory === 'image'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_image)"></td>
+                <td class="col-price" x-show="activeCategory === 'audio'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_second_input)"></td>
+                <td class="col-price" x-show="activeCategory === 'audio'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_character_input)"></td>
+                <td class="col-price" x-show="activeCategory === 'video'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_second_input)"></td>
+                <td class="col-price" x-show="activeCategory === 'video'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_second_output)"></td>
+                <td class="col-price" x-show="activeCategory === 'utility'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_page)"></td>
+                <td class="col-price" x-show="activeCategory === 'utility'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_request)"></td>
+                <td class="model-row-actions">
+                    <template x-if="row.is_alias">
+                        <div class="alias-actions-cell">
+                            <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
+                                <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                                <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
+                            </button>
+                            <button type="button" class="table-action-btn table-icon-btn"
+                                :aria-label="'Edit alias ' + row.alias.name"
+                                :title="'Edit alias ' + row.alias.name"
+                                @click="openAliasEdit(row.alias)">
+                                {{template "edit-icon"}}
+                            </button>
+                            <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                :disabled="aliasDeletingName === row.alias.name"
+                                :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
+                                @click="deleteAlias(row.alias)">
+                                {{template "x-icon"}}
+                            </button>
+                        </div>
+                    </template>
+                    <template x-if="!row.is_alias">
+                        <div class="alias-actions-cell">
+                            <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
+                            <button type="button" class="table-action-btn table-icon-btn"
+                                x-show="modelOverridesAvailable"
+                                :class="modelOverrideEditButtonClass(hasAccessOverride(row.access))"
+                                :aria-label="modelOverrideEditButtonLabel('model access for ' + row.display_name, hasAccessOverride(row.access))"
+                                :title="modelOverrideEditButtonLabel('model access for ' + row.display_name, hasAccessOverride(row.access))"
+                                @click="openModelOverrideEdit(row)">
+                                {{template "edit-icon"}}
+                            </button>
+                        </div>
+                    </template>
+                </td>
+            </tr>
+        </template>
+    </tbody>
+</template>
+{{end}}

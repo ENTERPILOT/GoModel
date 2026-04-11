@@ -133,8 +133,8 @@ func TestListModels_ReturnsActionableErrorWhenUpstreamFailsWithoutConfiguredMode
 	if gatewayErr.Provider != "oracle" {
 		t.Fatalf("gatewayErr.Provider = %q, want oracle", gatewayErr.Provider)
 	}
-	if !strings.Contains(err.Error(), "configure providers.<name>.models") {
-		t.Fatalf("err = %q, want mention of providers.<name>.models", err)
+	if !strings.Contains(err.Error(), "add providers.<name>.models in config.yaml") {
+		t.Fatalf("err = %q, want mention of providers.<name>.models in config.yaml", err)
 	}
 }
 

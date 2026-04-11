@@ -30,9 +30,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 			selector TEXT PRIMARY KEY,
 			provider_name TEXT NOT NULL DEFAULT '',
 			model TEXT NOT NULL DEFAULT '',
-			enabled BOOLEAN NULL,
-			force_disabled BOOLEAN NOT NULL DEFAULT FALSE,
-			allowed_only_for_user_paths JSONB NOT NULL DEFAULT '[]'::jsonb,
+			user_paths JSONB NOT NULL DEFAULT '[]'::jsonb,
 			created_at BIGINT NOT NULL,
 			updated_at BIGINT NOT NULL
 		)
@@ -54,7 +52,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 
 func (s *PostgreSQLStore) List(ctx context.Context) ([]Override, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT selector, provider_name, model, enabled, force_disabled, allowed_only_for_user_paths, created_at, updated_at
+		SELECT selector, provider_name, model, user_paths, created_at, updated_at
 		FROM model_overrides
 		ORDER BY selector ASC
 	`)
@@ -72,41 +70,26 @@ func (s *PostgreSQLStore) List(ctx context.Context) ([]Override, error) {
 }
 
 func (s *PostgreSQLStore) Upsert(ctx context.Context, override Override) error {
-	override, err := normalizeStoredOverride(override)
+	override, pathsJSON, err := prepareOverrideUpsert(override)
 	if err != nil {
 		return err
 	}
 
-	pathsJSON, err := json.Marshal(override.AllowedOnlyForUserPaths)
-	if err != nil {
-		return fmt.Errorf("encode allowed_only_for_user_paths: %w", err)
-	}
-
-	now := time.Now().UTC().Unix()
-	if override.CreatedAt.IsZero() {
-		override.CreatedAt = time.Unix(now, 0).UTC()
-	}
-	override.UpdatedAt = time.Unix(now, 0).UTC()
-
 	_, err = s.pool.Exec(ctx, `
 		INSERT INTO model_overrides (
-			selector, provider_name, model, enabled, force_disabled, allowed_only_for_user_paths, created_at, updated_at
+			selector, provider_name, model, user_paths, created_at, updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+		VALUES ($1, $2, $3, $4::jsonb, $5, $6)
 		ON CONFLICT(selector) DO UPDATE SET
 			provider_name = excluded.provider_name,
 			model = excluded.model,
-			enabled = excluded.enabled,
-			force_disabled = excluded.force_disabled,
-			allowed_only_for_user_paths = excluded.allowed_only_for_user_paths,
+			user_paths = excluded.user_paths,
 			updated_at = excluded.updated_at
 	`,
 		override.Selector,
 		override.ProviderName,
 		override.Model,
-		override.Enabled,
-		override.ForceDisabled,
-		string(pathsJSON),
+		pathsJSON,
 		override.CreatedAt.Unix(),
 		override.UpdatedAt.Unix(),
 	)
@@ -133,17 +116,14 @@ func (s *PostgreSQLStore) Close() error {
 
 func scanPostgreSQLOverride(scanner interface{ Scan(dest ...any) error }) (Override, error) {
 	var override Override
-	var enabled *bool
-	var allowedOnlyForUserPaths []byte
+	var userPaths []byte
 	var createdAt int64
 	var updatedAt int64
 	if err := scanner.Scan(
 		&override.Selector,
 		&override.ProviderName,
 		&override.Model,
-		&enabled,
-		&override.ForceDisabled,
-		&allowedOnlyForUserPaths,
+		&userPaths,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -152,9 +132,8 @@ func scanPostgreSQLOverride(scanner interface{ Scan(dest ...any) error }) (Overr
 		}
 		return Override{}, fmt.Errorf("scan model override: %w", err)
 	}
-	override.Enabled = enabled
-	if err := json.Unmarshal(allowedOnlyForUserPaths, &override.AllowedOnlyForUserPaths); err != nil {
-		return Override{}, fmt.Errorf("decode allowed_only_for_user_paths: %w", err)
+	if err := json.Unmarshal(userPaths, &override.UserPaths); err != nil {
+		return Override{}, fmt.Errorf("decode user_paths: %w", err)
 	}
 	override.CreatedAt = time.Unix(createdAt, 0).UTC()
 	override.UpdatedAt = time.Unix(updatedAt, 0).UTC()

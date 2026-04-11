@@ -54,6 +54,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"USAGE_BUFFER_SIZE", "USAGE_FLUSH_INTERVAL", "USAGE_RETENTION_DAYS",
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING",
 		"FEATURE_FALLBACK_MODE", "FALLBACK_MANUAL_RULES_PATH",
+		"MODEL_OVERRIDES_ENABLED", "MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT",
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
 		"EXECUTION_PLAN_REFRESH_INTERVAL",
 	} {
@@ -165,11 +166,20 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.ExecutionPlans.RefreshInterval != time.Minute {
 		t.Errorf("expected ExecutionPlans.RefreshInterval=%s, got %s", time.Minute, cfg.ExecutionPlans.RefreshInterval)
 	}
+	if !cfg.Models.EnabledByDefault {
+		t.Error("expected Models.EnabledByDefault=true")
+	}
+	if cfg.Models.OverridesEnabled {
+		t.Error("expected Models.OverridesEnabled=false")
+	}
+	if cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
+		t.Error("expected Models.KeepOnlyAliasesAtModelsEndpoint=false")
+	}
 	if cfg.Guardrails.EnableForBatchProcessing {
 		t.Error("expected Guardrails.EnableForBatchProcessing=false")
 	}
-	if cfg.Fallback.DefaultMode != FallbackModeAuto {
-		t.Errorf("expected Fallback.DefaultMode=auto, got %q", cfg.Fallback.DefaultMode)
+	if cfg.Fallback.DefaultMode != FallbackModeManual {
+		t.Errorf("expected Fallback.DefaultMode=manual, got %q", cfg.Fallback.DefaultMode)
 	}
 	if cfg.Cache.Response.Simple != nil {
 		t.Errorf("expected Cache.Response.Simple=nil in defaults, got %+v", cfg.Cache.Response.Simple)
@@ -215,6 +225,10 @@ func TestLoad_YAMLOverridesDefaults(t *testing.T) {
 server:
   port: "3000"
   pprof_enabled: true
+models:
+  enabled_by_default: false
+  overrides_enabled: true
+  keep_only_aliases_at_models_endpoint: true
 cache:
   model:
     redis:
@@ -241,6 +255,15 @@ logging:
 		}
 		if !cfg.Server.PprofEnabled {
 			t.Error("expected Server.PprofEnabled=true from YAML")
+		}
+		if cfg.Models.EnabledByDefault {
+			t.Error("expected Models.EnabledByDefault=false from YAML")
+		}
+		if !cfg.Models.OverridesEnabled {
+			t.Error("expected Models.OverridesEnabled=true from YAML")
+		}
+		if !cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
+			t.Error("expected Models.KeepOnlyAliasesAtModelsEndpoint=true from YAML")
 		}
 		if cfg.Cache.Model.Redis == nil {
 			t.Fatal("expected Cache.Model.Redis to be set")
@@ -367,7 +390,7 @@ fallback:
 	})
 }
 
-func TestLoad_ManualFallbackModeRequiresManualRulesPath(t *testing.T) {
+func TestLoad_ManualFallbackModeAllowsMissingManualRulesPath(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
@@ -379,17 +402,20 @@ fallback:
 			t.Fatalf("Failed to write config.yaml: %v", err)
 		}
 
-		_, err := Load()
-		if err == nil {
-			t.Fatal("expected Load() to fail when manual fallback mode has no manual rules path")
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
 		}
-		if !strings.Contains(err.Error(), "fallback.manual_rules_path must be set") {
-			t.Fatalf("Load() error = %v, want manual rules path validation", err)
+		if result.Config.Fallback.DefaultMode != FallbackModeManual {
+			t.Fatalf("Fallback.DefaultMode = %q, want %q", result.Config.Fallback.DefaultMode, FallbackModeManual)
+		}
+		if result.Config.Fallback.Manual != nil {
+			t.Fatalf("Fallback.Manual = %v, want nil", result.Config.Fallback.Manual)
 		}
 	})
 }
 
-func TestLoad_ManualFallbackOverrideRequiresManualRulesPath(t *testing.T) {
+func TestLoad_ManualFallbackOverrideAllowsMissingManualRulesPath(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
@@ -403,12 +429,15 @@ fallback:
 			t.Fatalf("Failed to write config.yaml: %v", err)
 		}
 
-		_, err := Load()
-		if err == nil {
-			t.Fatal("expected Load() to fail when manual fallback override has no manual rules path")
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
 		}
-		if !strings.Contains(err.Error(), "fallback.manual_rules_path must be set") {
-			t.Fatalf("Load() error = %v, want manual rules path validation", err)
+		if result.Config.Fallback.Overrides["gpt-4o"].Mode != FallbackModeManual {
+			t.Fatalf("Fallback.Overrides[gpt-4o].Mode = %q, want %q", result.Config.Fallback.Overrides["gpt-4o"].Mode, FallbackModeManual)
+		}
+		if result.Config.Fallback.Manual != nil {
+			t.Fatalf("Fallback.Manual = %v, want nil", result.Config.Fallback.Manual)
 		}
 	})
 }
@@ -570,7 +599,7 @@ func TestLoad_FeatureFallbackModeEnvOverridesFallbackDefaultMode(t *testing.T) {
 	})
 }
 
-func TestLoad_BlankFallbackDefaultModeResolvesToAuto(t *testing.T) {
+func TestLoad_BlankFallbackDefaultModeResolvesToManual(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
@@ -586,8 +615,8 @@ fallback:
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.Fallback.DefaultMode != FallbackModeAuto {
-			t.Fatalf("Fallback.DefaultMode = %q, want %q", result.Config.Fallback.DefaultMode, FallbackModeAuto)
+		if result.Config.Fallback.DefaultMode != FallbackModeManual {
+			t.Fatalf("Fallback.DefaultMode = %q, want %q", result.Config.Fallback.DefaultMode, FallbackModeManual)
 		}
 	})
 }
@@ -813,6 +842,9 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 
 	withTempDir(t, func(_ string) {
 		t.Setenv("PORT", "5555")
+		t.Setenv("MODEL_OVERRIDES_ENABLED", "true")
+		t.Setenv("MODELS_ENABLED_BY_DEFAULT", "false")
+		t.Setenv("KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "true")
 		t.Setenv("STORAGE_TYPE", "postgresql")
 		t.Setenv("POSTGRES_URL", "postgres://localhost/test")
 		t.Setenv("POSTGRES_MAX_CONNS", "20")
@@ -825,6 +857,15 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 
 		if cfg.Server.Port != "5555" {
 			t.Errorf("expected port 5555, got %s", cfg.Server.Port)
+		}
+		if !cfg.Models.OverridesEnabled {
+			t.Error("expected model overrides to be enabled from env")
+		}
+		if cfg.Models.EnabledByDefault {
+			t.Error("expected models enabled-by-default to be disabled from env")
+		}
+		if !cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
+			t.Error("expected aliases-only models endpoint from env")
 		}
 		if cfg.Storage.Type != "postgresql" {
 			t.Errorf("expected storage type postgresql, got %s", cfg.Storage.Type)

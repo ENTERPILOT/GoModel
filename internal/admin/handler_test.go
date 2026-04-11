@@ -111,6 +111,7 @@ func (m *mockAuditReader) GetConversation(_ context.Context, logID string, limit
 // handlerMockProvider implements core.Provider for ListModels registry testing.
 type handlerMockProvider struct {
 	models *core.ModelsResponse
+	err    error
 }
 
 func (m *handlerMockProvider) ChatCompletion(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
@@ -120,6 +121,9 @@ func (m *handlerMockProvider) StreamChatCompletion(_ context.Context, _ *core.Ch
 	return nil, nil
 }
 func (m *handlerMockProvider) ListModels(_ context.Context) (*core.ModelsResponse, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
 	return m.models, nil
 }
 func (m *handlerMockProvider) Responses(_ context.Context, _ *core.ResponsesRequest) (*core.ResponsesResponse, error) {
@@ -1313,6 +1317,176 @@ func TestListCategories_WithModels(t *testing.T) {
 				t.Errorf("All count = %d, want 2", cat.Count)
 			}
 		}
+	}
+}
+
+func TestProviderStatus_DistinguishesProvidersWithSameTypeByName(t *testing.T) {
+	registry := providers.NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(&handlerMockProvider{
+		models: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-4o", Object: "model"},
+			},
+		},
+	}, "openai_primary", "openai")
+	registry.RegisterProviderWithNameAndType(&handlerMockProvider{
+		err: errors.New("upstream unavailable"),
+	}, "openai_backup", "openai")
+
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	registry.RecordAvailabilityCheck("openai_primary", nil)
+	registry.RecordAvailabilityCheck("openai_backup", errors.New("dial tcp timeout"))
+
+	h := NewHandler(nil, registry, WithConfiguredProviders([]providers.SanitizedProviderConfig{
+		{
+			Name:    "openai_backup",
+			Type:    "openai",
+			BaseURL: "https://backup.example.com/v1",
+			Resilience: providers.SanitizedResilienceConfig{
+				Retry: providers.SanitizedRetryConfig{
+					MaxRetries:     2,
+					InitialBackoff: "1s",
+					MaxBackoff:     "10s",
+					BackoffFactor:  2,
+					JitterFactor:   0.1,
+				},
+				CircuitBreaker: providers.SanitizedCircuitBreakerConfig{
+					FailureThreshold: 5,
+					SuccessThreshold: 2,
+					Timeout:          "30s",
+				},
+			},
+		},
+		{
+			Name:    "openai_primary",
+			Type:    "openai",
+			BaseURL: "https://primary.example.com/v1",
+			Resilience: providers.SanitizedResilienceConfig{
+				Retry: providers.SanitizedRetryConfig{
+					MaxRetries:     3,
+					InitialBackoff: "1s",
+					MaxBackoff:     "30s",
+					BackoffFactor:  2,
+					JitterFactor:   0.1,
+				},
+				CircuitBreaker: providers.SanitizedCircuitBreakerConfig{
+					FailureThreshold: 5,
+					SuccessThreshold: 2,
+					Timeout:          "30s",
+				},
+			},
+		},
+	}))
+	c, rec := newHandlerContext("/admin/api/v1/providers/status")
+
+	if err := h.ProviderStatus(c); err != nil {
+		t.Fatalf("ProviderStatus() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var body providerStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if body.Summary.Total != 2 {
+		t.Fatalf("summary.total = %d, want 2", body.Summary.Total)
+	}
+	if body.Summary.Healthy != 1 {
+		t.Fatalf("summary.healthy = %d, want 1", body.Summary.Healthy)
+	}
+	if body.Summary.Unhealthy != 1 {
+		t.Fatalf("summary.unhealthy = %d, want 1", body.Summary.Unhealthy)
+	}
+	if body.Summary.OverallStatus != "degraded" {
+		t.Fatalf("summary.overall_status = %q, want degraded", body.Summary.OverallStatus)
+	}
+
+	byName := make(map[string]providerStatusItemResponse, len(body.Providers))
+	for _, provider := range body.Providers {
+		byName[provider.Name] = provider
+	}
+
+	primary, ok := byName["openai_primary"]
+	if !ok {
+		t.Fatalf("missing openai_primary in %#v", body.Providers)
+	}
+	if primary.Type != "openai" {
+		t.Fatalf("primary.Type = %q, want openai", primary.Type)
+	}
+	if primary.Status != "healthy" {
+		t.Fatalf("primary.Status = %q, want healthy", primary.Status)
+	}
+	if primary.Runtime.DiscoveredModelCount != 1 {
+		t.Fatalf("primary discovered models = %d, want 1", primary.Runtime.DiscoveredModelCount)
+	}
+	if primary.Config.BaseURL != "https://primary.example.com/v1" {
+		t.Fatalf("primary base_url = %q, want primary endpoint", primary.Config.BaseURL)
+	}
+
+	backup, ok := byName["openai_backup"]
+	if !ok {
+		t.Fatalf("missing openai_backup in %#v", body.Providers)
+	}
+	if backup.Type != "openai" {
+		t.Fatalf("backup.Type = %q, want openai", backup.Type)
+	}
+	if backup.Status != "unhealthy" {
+		t.Fatalf("backup.Status = %q, want unhealthy", backup.Status)
+	}
+	if backup.Runtime.DiscoveredModelCount != 0 {
+		t.Fatalf("backup discovered models = %d, want 0", backup.Runtime.DiscoveredModelCount)
+	}
+	if backup.Config.BaseURL != "https://backup.example.com/v1" {
+		t.Fatalf("backup base_url = %q, want backup endpoint", backup.Config.BaseURL)
+	}
+	if !strings.Contains(backup.LastError, "upstream unavailable") {
+		t.Fatalf("backup last_error = %q, want model fetch failure", backup.LastError)
+	}
+}
+
+func TestClassifyProviderStatus_RegisteredZeroModelProviderIsConfigured(t *testing.T) {
+	status, label, reason, _ := classifyProviderStatus(
+		providers.SanitizedProviderConfig{Name: "openai"},
+		providers.ProviderRuntimeSnapshot{
+			Name:       "openai",
+			Registered: true,
+		},
+	)
+
+	if status != "degraded" {
+		t.Fatalf("status = %q, want degraded", status)
+	}
+	if label != "Configured" {
+		t.Fatalf("label = %q, want Configured", label)
+	}
+	if reason != "provider is configured but has not exposed models yet" {
+		t.Fatalf("reason = %q, want configured zero-model reason", reason)
+	}
+}
+
+func TestClassifyProviderStatus_DerivesCachedModelInventory(t *testing.T) {
+	status, label, reason, _ := classifyProviderStatus(
+		providers.SanitizedProviderConfig{Name: "openai"},
+		providers.ProviderRuntimeSnapshot{
+			Name:                 "openai",
+			Registered:           true,
+			DiscoveredModelCount: 1,
+		},
+	)
+
+	if status != "degraded" {
+		t.Fatalf("status = %q, want degraded", status)
+	}
+	if label != "Starting" {
+		t.Fatalf("label = %q, want Starting", label)
+	}
+	if reason != "serving cached model inventory while live refresh finishes" {
+		t.Fatalf("reason = %q, want cached inventory reason", reason)
 	}
 }
 

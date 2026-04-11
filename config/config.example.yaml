@@ -13,7 +13,8 @@ server:
   enabled_passthrough_providers: ["openai", "anthropic"] # providers enabled on /p/{provider}/...
 
 models:
-  enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, concrete models stay unavailable until explicitly enabled by a model override
+  enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false and overrides are enabled, concrete models stay unavailable until an override allows one or more user paths
+  overrides_enabled: false # env: MODEL_OVERRIDES_ENABLED; set true to load/enforce persisted model overrides and enable dashboard editing
 
 cache:
   model:
@@ -156,11 +157,11 @@ guardrails:
     #     # prompt: "Custom rewrite instructions here."
 
 fallback:
-  default_mode: "auto" # "off", "manual", or "auto"
-  manual_rules_path: "config/fallback.example.json" # optional JSON map: {"model": ["fallback-1", "provider/model"]}; required when fallback.default_mode or any fallback.overrides.*.mode is "manual"
+  default_mode: "manual" # "off", "manual", or "auto"; default is "manual"
+  manual_rules_path: "config/fallback.example.json" # optional JSON map: {"model": ["fallback-1", "provider/model"]}; when omitted, manual mode has no fallback candidates
   overrides:
     "gpt-4o":
-      mode: "manual" # use only manual fallbacks for this model; requires manual_rules_path
+      mode: "manual" # use only manual fallbacks for this model
     "claude-sonnet-4":
       mode: "off" # disable fallback just for this model
 

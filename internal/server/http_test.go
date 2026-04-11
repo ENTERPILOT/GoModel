@@ -432,7 +432,7 @@ func TestAdminEndpoints_Enabled(t *testing.T) {
 		AdminHandler:          adminHandler,
 	})
 
-	for _, path := range []string{"/admin/api/v1/models", "/admin/api/v1/audit/log", "/admin/api/v1/audit/conversation?log_id=abc"} {
+	for _, path := range []string{"/admin/api/v1/models", "/admin/api/v1/providers/status", "/admin/api/v1/audit/log", "/admin/api/v1/audit/conversation?log_id=abc"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -456,6 +456,7 @@ func TestAdminExecutionPlanEndpoints_AreRegistered(t *testing.T) {
 		path   string
 	}{
 		{method: http.MethodGet, path: "/admin/api/v1/dashboard/config"},
+		{method: http.MethodGet, path: "/admin/api/v1/providers/status"},
 		{method: http.MethodGet, path: "/admin/api/v1/auth-keys"},
 		{method: http.MethodPost, path: "/admin/api/v1/auth-keys"},
 		{method: http.MethodPost, path: "/admin/api/v1/auth-keys/test-key/deactivate"},

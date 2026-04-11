@@ -12,14 +12,12 @@ import (
 )
 
 type mongoOverrideDocument struct {
-	ID                      string    `bson:"_id"`
-	ProviderName            string    `bson:"provider_name,omitempty"`
-	Model                   string    `bson:"model,omitempty"`
-	Enabled                 *bool     `bson:"enabled,omitempty"`
-	ForceDisabled           bool      `bson:"force_disabled,omitempty"`
-	AllowedOnlyForUserPaths []string  `bson:"allowed_only_for_user_paths,omitempty"`
-	CreatedAt               time.Time `bson:"created_at"`
-	UpdatedAt               time.Time `bson:"updated_at"`
+	ID           string    `bson:"_id"`
+	ProviderName string    `bson:"provider_name,omitempty"`
+	Model        string    `bson:"model,omitempty"`
+	UserPaths    []string  `bson:"user_paths,omitempty"`
+	CreatedAt    time.Time `bson:"created_at"`
+	UpdatedAt    time.Time `bson:"updated_at"`
 }
 
 type mongoOverrideIDFilter struct {
@@ -86,12 +84,10 @@ func (s *MongoDBStore) Upsert(ctx context.Context, override Override) error {
 
 	update := bson.M{
 		"$set": bson.M{
-			"provider_name":               override.ProviderName,
-			"model":                       override.Model,
-			"enabled":                     override.Enabled,
-			"force_disabled":              override.ForceDisabled,
-			"allowed_only_for_user_paths": override.AllowedOnlyForUserPaths,
-			"updated_at":                  override.UpdatedAt,
+			"provider_name": override.ProviderName,
+			"model":         override.Model,
+			"user_paths":    override.UserPaths,
+			"updated_at":    override.UpdatedAt,
 		},
 		"$setOnInsert": bson.M{
 			"created_at": override.CreatedAt,
@@ -121,13 +117,11 @@ func (s *MongoDBStore) Close() error {
 
 func overrideFromMongo(doc mongoOverrideDocument) Override {
 	return Override{
-		Selector:                doc.ID,
-		ProviderName:            doc.ProviderName,
-		Model:                   doc.Model,
-		Enabled:                 cloneEnabled(doc.Enabled),
-		ForceDisabled:           doc.ForceDisabled,
-		AllowedOnlyForUserPaths: append([]string(nil), doc.AllowedOnlyForUserPaths...),
-		CreatedAt:               doc.CreatedAt.UTC(),
-		UpdatedAt:               doc.UpdatedAt.UTC(),
+		Selector:     doc.ID,
+		ProviderName: doc.ProviderName,
+		Model:        doc.Model,
+		UserPaths:    append([]string(nil), doc.UserPaths...),
+		CreatedAt:    doc.CreatedAt.UTC(),
+		UpdatedAt:    doc.UpdatedAt.UTC(),
 	}
 }

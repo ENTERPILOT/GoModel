@@ -59,6 +59,10 @@ function dashboard() {
             },
             daily: []
         },
+        providerStatus: {
+            summary: { total: 0, healthy: 0, degraded: 0, unhealthy: 0, overall_status: 'degraded' },
+            providers: []
+        },
         models: [],
         categories: [],
         activeCategory: 'all',
@@ -154,6 +158,9 @@ function dashboard() {
         init() {
             if (typeof this.initTimeZoneState === 'function') {
                 this.initTimeZoneState();
+            }
+            if (typeof this.initProviderStatusPreferences === 'function') {
+                this.initProviderStatusPreferences();
             }
             this.apiKey = localStorage.getItem('gomodel_api_key') || '';
             this.theme = localStorage.getItem('gomodel_theme') || 'system';
@@ -298,8 +305,14 @@ function dashboard() {
             this.authError = false;
             this.needsAuth = false;
             const requests = [this.fetchUsage(), this.fetchModels(), this.fetchCategories()];
+            if (typeof this.fetchProviderStatus === 'function') {
+                requests.push(this.fetchProviderStatus());
+            }
             if (typeof this.fetchAliases === 'function') {
                 requests.push(this.fetchAliases());
+            }
+            if (typeof this.fetchModelOverrides === 'function') {
+                requests.push(this.fetchModelOverrides());
             }
             if (typeof this.fetchExecutionPlansPage === 'function') {
                 requests.push(this.fetchExecutionPlansPage());
@@ -528,6 +541,10 @@ function dashboard() {
         resolveModuleFactory(
             typeof dashboardDatePickerModule === 'function' ? dashboardDatePickerModule : null,
             'dashboardDatePickerModule'
+        ),
+        resolveModuleFactory(
+            typeof dashboardProvidersModule === 'function' ? dashboardProvidersModule : null,
+            'dashboardProvidersModule'
         ),
         resolveModuleFactory(
             typeof dashboardUsageModule === 'function' ? dashboardUsageModule : null,

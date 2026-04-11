@@ -25,9 +25,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 			selector TEXT PRIMARY KEY,
 			provider_name TEXT NOT NULL DEFAULT '',
 			model TEXT NOT NULL DEFAULT '',
-			enabled INTEGER NULL,
-			force_disabled INTEGER NOT NULL DEFAULT 0,
-			allowed_only_for_user_paths TEXT NOT NULL DEFAULT '[]',
+			user_paths TEXT NOT NULL DEFAULT '[]',
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
 		)
@@ -49,7 +47,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 
 func (s *SQLiteStore) List(ctx context.Context) ([]Override, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT selector, provider_name, model, enabled, force_disabled, allowed_only_for_user_paths, created_at, updated_at
+		SELECT selector, provider_name, model, user_paths, created_at, updated_at
 		FROM model_overrides
 		ORDER BY selector ASC
 	`)
@@ -67,41 +65,26 @@ func (s *SQLiteStore) List(ctx context.Context) ([]Override, error) {
 }
 
 func (s *SQLiteStore) Upsert(ctx context.Context, override Override) error {
-	override, err := normalizeStoredOverride(override)
+	override, pathsJSON, err := prepareOverrideUpsert(override)
 	if err != nil {
 		return err
 	}
 
-	pathsJSON, err := json.Marshal(override.AllowedOnlyForUserPaths)
-	if err != nil {
-		return fmt.Errorf("encode allowed_only_for_user_paths: %w", err)
-	}
-
-	now := time.Now().UTC().Unix()
-	if override.CreatedAt.IsZero() {
-		override.CreatedAt = time.Unix(now, 0).UTC()
-	}
-	override.UpdatedAt = time.Unix(now, 0).UTC()
-
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO model_overrides (
-			selector, provider_name, model, enabled, force_disabled, allowed_only_for_user_paths, created_at, updated_at
+			selector, provider_name, model, user_paths, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(selector) DO UPDATE SET
 			provider_name = excluded.provider_name,
 			model = excluded.model,
-			enabled = excluded.enabled,
-			force_disabled = excluded.force_disabled,
-			allowed_only_for_user_paths = excluded.allowed_only_for_user_paths,
+			user_paths = excluded.user_paths,
 			updated_at = excluded.updated_at
 	`,
 		override.Selector,
 		override.ProviderName,
 		override.Model,
-		sqliteNullableBool(override.Enabled),
-		boolToSQLite(override.ForceDisabled),
-		string(pathsJSON),
+		pathsJSON,
 		override.CreatedAt.Unix(),
 		override.UpdatedAt.Unix(),
 	)
@@ -132,48 +115,23 @@ func (s *SQLiteStore) Close() error {
 
 func scanSQLiteOverride(scanner interface{ Scan(dest ...any) error }) (Override, error) {
 	var override Override
-	var enabled sql.NullBool
-	var forceDisabled int
-	var allowedOnlyForUserPaths string
+	var userPaths string
 	var createdAt int64
 	var updatedAt int64
 	if err := scanner.Scan(
 		&override.Selector,
 		&override.ProviderName,
 		&override.Model,
-		&enabled,
-		&forceDisabled,
-		&allowedOnlyForUserPaths,
+		&userPaths,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
 		return Override{}, fmt.Errorf("scan model override: %w", err)
 	}
-	if enabled.Valid {
-		override.Enabled = &enabled.Bool
-	}
-	override.ForceDisabled = forceDisabled != 0
-	if err := json.Unmarshal([]byte(allowedOnlyForUserPaths), &override.AllowedOnlyForUserPaths); err != nil {
-		return Override{}, fmt.Errorf("decode allowed_only_for_user_paths: %w", err)
+	if err := json.Unmarshal([]byte(userPaths), &override.UserPaths); err != nil {
+		return Override{}, fmt.Errorf("decode user_paths: %w", err)
 	}
 	override.CreatedAt = time.Unix(createdAt, 0).UTC()
 	override.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	return override, nil
-}
-
-func sqliteNullableBool(value *bool) any {
-	if value == nil {
-		return nil
-	}
-	if *value {
-		return 1
-	}
-	return 0
-}
-
-func boolToSQLite(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
 }

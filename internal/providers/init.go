@@ -23,6 +23,10 @@ type InitResult struct {
 	Cache    modelcache.Cache
 	Factory  *ProviderFactory
 
+	// ConfiguredProviders is the effective, admin-safe provider inventory keyed
+	// by configured provider name.
+	ConfiguredProviders []SanitizedProviderConfig
+
 	// CredentialResolvedProviders is the env-merged, credential-filtered providers
 	// map (same keys as Router). Keys match top-level providers YAML names.
 	CredentialResolvedProviders map[string]config.RawProviderConfig
@@ -150,6 +154,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	}
 
 	return &InitResult{
+		ConfiguredProviders:         SanitizeProviderConfigs(providerMap),
 		Registry:                    registry,
 		Router:                      router,
 		Cache:                       modelCache,
@@ -222,10 +227,13 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 		if checker, ok := p.(core.AvailabilityChecker); ok {
 			probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			if err := checker.CheckAvailability(probeCtx); err != nil {
+				registry.RecordAvailabilityCheck(name, err)
 				slog.Warn("provider unavailable at startup; keeping registered for refresh",
 					"name", name,
 					"type", pCfg.Type,
 					"reason", err.Error())
+			} else {
+				registry.RecordAvailabilityCheck(name, nil)
 			}
 			cancel()
 		}
