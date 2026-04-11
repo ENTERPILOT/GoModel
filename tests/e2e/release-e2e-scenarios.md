@@ -102,7 +102,7 @@ export QA_AUTH_REQ2="qa-auth-cacheoff-$QA_SUFFIX-2"
 export QA_CACHE_REQ1="qa-cache-exact-$QA_SUFFIX-1"
 export QA_CACHE_REQ2="qa-cache-exact-$QA_SUFFIX-2"
 export QA_DEACTIVATED_REQ="qa-auth-deactivated-$QA_SUFFIX"
-export QA_CACHE_REPLY="QA_CACHE_EXACT_OK_$QA_SUFFIX"
+export QA_CACHE_REPLY="QA_CACHE_EXACT_OK"
 
 cleanup_release_auth_artifacts() {
   rm -f "$QA_AUTH_KEY_JSON" "$QA_AUTH_KEY_VALUE_FILE" "$QA_WORKFLOW_JSON" "$QA_WORKFLOW_ID_FILE"

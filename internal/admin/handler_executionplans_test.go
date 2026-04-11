@@ -413,6 +413,23 @@ func TestGetExecutionPlan(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 
+	var rawBody map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &rawBody); err != nil {
+		t.Fatalf("unmarshal raw response: %v", err)
+	}
+	var effectiveFeatures map[string]bool
+	if err := json.Unmarshal(rawBody["effective_features"], &effectiveFeatures); err != nil {
+		t.Fatalf("unmarshal effective_features: %v", err)
+	}
+	for _, key := range []string{"cache", "audit", "usage", "guardrails", "fallback"} {
+		if _, ok := effectiveFeatures[key]; !ok {
+			t.Fatalf("effective_features missing lower-case key %q: %s", key, rec.Body.String())
+		}
+	}
+	if _, ok := effectiveFeatures["Cache"]; ok {
+		t.Fatalf("effective_features leaked Go field key %q: %s", "Cache", rec.Body.String())
+	}
+
 	var body executionplans.View
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)

@@ -93,11 +93,11 @@ func NewExecutionPlanSelector(provider, model string, userPath ...string) Execut
 // ExecutionFeatures stores resolved per-request feature flags sourced from the
 // matched persisted execution plan.
 type ExecutionFeatures struct {
-	Cache      bool
-	Audit      bool
-	Usage      bool
-	Guardrails bool
-	Fallback   bool
+	Cache      bool `json:"cache"`
+	Audit      bool `json:"audit"`
+	Usage      bool `json:"usage"`
+	Guardrails bool `json:"guardrails"`
+	Fallback   bool `json:"fallback"`
 }
 
 // ApplyUpperBound returns features with process-level caps applied.

@@ -128,7 +128,9 @@ run_with_timeout() {
   local watchdog=$!
 
   local status=0
-  if ! wait "$pid"; then
+  if wait "$pid"; then
+    status=0
+  else
     status=$?
   fi
 
