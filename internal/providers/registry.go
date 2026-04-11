@@ -1306,19 +1306,21 @@ func (r *ModelRegistry) StartBackgroundRefresh(interval time.Duration, modelList
 				return
 			case <-ticker.C:
 				refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
-				if err := r.Refresh(refreshCtx); err != nil {
+				err := r.Refresh(refreshCtx)
+				refreshCancel()
+				if err != nil {
 					if !isBenignBackgroundRefreshError(ctx, err) {
 						slog.Warn("background model refresh failed", "error", err)
 					}
 				} else {
-					// Save to cache after successful refresh
-					if err := r.SaveToCache(refreshCtx); err != nil {
+					cacheCtx, cacheCancel := context.WithTimeout(ctx, 10*time.Second)
+					if err := r.SaveToCache(cacheCtx); err != nil {
 						if !isBenignBackgroundRefreshError(ctx, err) {
 							slog.Warn("failed to save models to cache after refresh", "error", err)
 						}
 					}
+					cacheCancel()
 				}
-				refreshCancel()
 
 				// Also refresh model list if configured
 				if modelListURL != "" {
