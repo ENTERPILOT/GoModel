@@ -928,28 +928,36 @@ func (h *Handler) buildProviderStatusResponse() providerStatusResponse {
 }
 
 func classifyProviderStatus(cfg providers.SanitizedProviderConfig, runtime providers.ProviderRuntimeSnapshot) (status, label, reason, lastError string) {
-	lastError = strings.TrimSpace(runtime.LastModelFetchError)
+	modelFetchError := strings.TrimSpace(runtime.LastModelFetchError)
+	availabilityError := strings.TrimSpace(runtime.LastAvailabilityError)
+	configuredName := strings.TrimSpace(cfg.Name)
+	usingCachedModels := runtime.Registered &&
+		runtime.DiscoveredModelCount > 0 &&
+		modelFetchError == "" &&
+		runtime.LastModelFetchSuccessAt == nil
+
+	lastError = modelFetchError
 	if lastError == "" {
-		lastError = strings.TrimSpace(runtime.LastAvailabilityError)
+		lastError = availabilityError
 	}
 
 	switch {
-	case runtime.DiscoveredModelCount > 0 && strings.TrimSpace(runtime.LastModelFetchError) == "":
-		if runtime.UsingCachedModels {
+	case runtime.DiscoveredModelCount > 0 && modelFetchError == "":
+		if usingCachedModels {
 			return "degraded", "Starting", "serving cached model inventory while live refresh finishes", lastError
 		}
 		return "healthy", "Healthy", "configured and model discovery succeeded", lastError
-	case strings.TrimSpace(runtime.LastModelFetchError) != "" && runtime.DiscoveredModelCount > 0:
+	case modelFetchError != "" && runtime.DiscoveredModelCount > 0:
 		return "degraded", "Degraded", "latest model refresh failed; previous inventory is still available", lastError
-	case strings.TrimSpace(runtime.LastModelFetchError) != "":
+	case modelFetchError != "":
 		return "unhealthy", "Unhealthy", "model discovery failed and no provider models are currently available", lastError
-	case strings.TrimSpace(runtime.LastAvailabilityError) != "" && runtime.DiscoveredModelCount == 0:
+	case availabilityError != "" && runtime.DiscoveredModelCount == 0:
 		return "unhealthy", "Unhealthy", "startup availability check failed and no provider models are available", lastError
 	case runtime.DiscoveredModelCount > 0:
 		return "healthy", "Healthy", "provider models are currently available", lastError
-	case !runtime.RegistryInitialized && strings.TrimSpace(cfg.Name) != "":
+	case !runtime.Registered && configuredName != "":
 		return "degraded", "Starting", "provider is configured and awaiting live model discovery", lastError
-	case strings.TrimSpace(cfg.Name) != "":
+	case configuredName != "":
 		return "degraded", "Configured", "provider is configured but has not exposed models yet", lastError
 	default:
 		return "degraded", "Unknown", "provider runtime inventory is unavailable", lastError
@@ -1033,7 +1041,7 @@ func modelOverrideWriteError(err error) error {
 	if modeloverrides.IsValidationError(err) {
 		return core.NewInvalidRequestError(err.Error(), err)
 	}
-	return err
+	return core.NewProviderError("model_overrides", http.StatusBadGateway, err.Error(), err)
 }
 
 func executionPlanWriteError(err error) error {
@@ -1153,10 +1161,7 @@ func (h *Handler) UpsertModelOverride(c *echo.Context) error {
 		Selector:  selector,
 		UserPaths: req.UserPaths,
 	}); err != nil {
-		if modeloverrides.IsValidationError(err) {
-			return handleError(c, modelOverrideWriteError(err))
-		}
-		return handleError(c, core.NewProviderError("model_overrides", http.StatusBadGateway, err.Error(), err))
+		return handleError(c, modelOverrideWriteError(err))
 	}
 
 	override, ok := h.modelOverrides.Get(selector)

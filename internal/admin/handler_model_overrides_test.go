@@ -448,3 +448,34 @@ func TestModelOverrideWriteErrorsBubbleProviderErrors(t *testing.T) {
 		t.Fatalf("error message = %v, want upsert model override: boom", got)
 	}
 }
+
+func TestDeleteModelOverrideWriteErrorsBubbleProviderErrors(t *testing.T) {
+	service := newModelOverrideService(t, &failingModelOverrideStore{
+		deleteErr: errors.New("boom"),
+	}, true)
+	h := NewHandler(nil, nil, WithModelOverrides(service))
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/gpt-4o"}})
+
+	if err := h.DeleteModelOverride(c); err != nil {
+		t.Fatalf("DeleteModelOverride() error = %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+
+	var body map[string]map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := body["error"]["type"]; got != string(core.ErrorTypeProvider) {
+		t.Fatalf("error type = %v, want %s", got, core.ErrorTypeProvider)
+	}
+	if got := body["error"]["message"]; got != "delete model override: boom" {
+		t.Fatalf("error message = %v, want delete model override: boom", got)
+	}
+}

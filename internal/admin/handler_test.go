@@ -1449,6 +1449,47 @@ func TestProviderStatus_DistinguishesProvidersWithSameTypeByName(t *testing.T) {
 	}
 }
 
+func TestClassifyProviderStatus_RegisteredZeroModelProviderIsConfigured(t *testing.T) {
+	status, label, reason, _ := classifyProviderStatus(
+		providers.SanitizedProviderConfig{Name: "openai"},
+		providers.ProviderRuntimeSnapshot{
+			Name:       "openai",
+			Registered: true,
+		},
+	)
+
+	if status != "degraded" {
+		t.Fatalf("status = %q, want degraded", status)
+	}
+	if label != "Configured" {
+		t.Fatalf("label = %q, want Configured", label)
+	}
+	if reason != "provider is configured but has not exposed models yet" {
+		t.Fatalf("reason = %q, want configured zero-model reason", reason)
+	}
+}
+
+func TestClassifyProviderStatus_DerivesCachedModelInventory(t *testing.T) {
+	status, label, reason, _ := classifyProviderStatus(
+		providers.SanitizedProviderConfig{Name: "openai"},
+		providers.ProviderRuntimeSnapshot{
+			Name:                 "openai",
+			Registered:           true,
+			DiscoveredModelCount: 1,
+		},
+	)
+
+	if status != "degraded" {
+		t.Fatalf("status = %q, want degraded", status)
+	}
+	if label != "Starting" {
+		t.Fatalf("label = %q, want Starting", label)
+	}
+	if reason != "serving cached model inventory while live refresh finishes" {
+		t.Fatalf("reason = %q, want cached inventory reason", reason)
+	}
+}
+
 func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		FeatureFallbackMode:  "auto",
