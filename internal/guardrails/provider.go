@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
-	"maps"
 	"reflect"
 	"strings"
 
+	"gomodel/internal/batchrewrite"
 	"gomodel/internal/core"
 )
 
@@ -367,13 +366,13 @@ func (g *GuardedProvider) CreateBatch(ctx context.Context, providerType string, 
 	if err != nil {
 		return nil, err
 	}
-	g.recordBatchPreparation(ctx, req, result.Request)
+	batchrewrite.RecordPreparation(ctx, req, result.Request)
 	resp, err := bp.CreateBatch(ctx, providerType, result.Request)
 	if err != nil {
-		g.cleanupBatchRewriteFile(ctx, providerType, result.RewrittenInputFileID)
+		batchrewrite.CleanupFileFromRouter(ctx, g.nativeFileRouter, providerType, result.RewrittenInputFileID, "")
 		return nil, err
 	}
-	g.cleanupSupersededBatchRewriteFile(ctx, providerType, result.RewrittenInputFileID)
+	batchrewrite.CleanupSupersededFileFromRouter(ctx, g.nativeFileRouter, providerType, result.RewrittenInputFileID, "")
 	return resp, nil
 }
 
@@ -392,14 +391,14 @@ func (g *GuardedProvider) CreateBatchWithHints(ctx context.Context, providerType
 	if err != nil {
 		return nil, nil, err
 	}
-	g.recordBatchPreparation(ctx, req, result.Request)
+	batchrewrite.RecordPreparation(ctx, req, result.Request)
 	resp, hints, err := hinted.CreateBatchWithHints(ctx, providerType, result.Request)
 	if err != nil {
-		g.cleanupBatchRewriteFile(ctx, providerType, result.RewrittenInputFileID)
+		batchrewrite.CleanupFileFromRouter(ctx, g.nativeFileRouter, providerType, result.RewrittenInputFileID, "")
 		return nil, nil, err
 	}
-	g.cleanupSupersededBatchRewriteFile(ctx, providerType, result.RewrittenInputFileID)
-	return resp, mergeBatchHints(result.RequestEndpointHints, hints), nil
+	batchrewrite.CleanupSupersededFileFromRouter(ctx, g.nativeFileRouter, providerType, result.RewrittenInputFileID, "")
+	return resp, batchrewrite.MergeEndpointHints(result.RequestEndpointHints, hints), nil
 }
 
 // GetBatch delegates native batch retrieval.
@@ -499,61 +498,6 @@ func (g *GuardedProvider) GetFileContent(ctx context.Context, providerType, id s
 		return nil, err
 	}
 	return fp.GetFileContent(ctx, providerType, id)
-}
-
-func (g *GuardedProvider) recordBatchPreparation(ctx context.Context, original, rewritten *core.BatchRequest) {
-	if ctx == nil || original == nil || rewritten == nil {
-		return
-	}
-	metadata := core.GetBatchPreparationMetadata(ctx)
-	if metadata == nil {
-		return
-	}
-	metadata.RecordInputFileRewrite(original.InputFileID, rewritten.InputFileID)
-}
-
-func (g *GuardedProvider) cleanupSupersededBatchRewriteFile(ctx context.Context, providerType, localRewrittenFileID string) {
-	localRewrittenFileID = strings.TrimSpace(localRewrittenFileID)
-	if localRewrittenFileID == "" {
-		return
-	}
-	metadata := core.GetBatchPreparationMetadata(ctx)
-	if metadata == nil {
-		return
-	}
-	if strings.TrimSpace(metadata.RewrittenInputFileID) == localRewrittenFileID {
-		return
-	}
-	g.cleanupBatchRewriteFile(ctx, providerType, localRewrittenFileID)
-}
-
-func (g *GuardedProvider) cleanupBatchRewriteFile(ctx context.Context, providerType, fileID string) {
-	fileID = strings.TrimSpace(fileID)
-	if fileID == "" {
-		return
-	}
-	files, err := g.nativeFileRouter()
-	if err != nil {
-		return
-	}
-	if _, err := files.DeleteFile(ctx, providerType, fileID); err != nil {
-		slog.Warn("failed to delete rewritten batch input file", "provider", providerType, "file_id", fileID, "error", err)
-	}
-}
-
-func mergeBatchHints(left, right map[string]string) map[string]string {
-	if len(left) == 0 {
-		if len(right) == 0 {
-			return nil
-		}
-		merged := make(map[string]string, len(right))
-		maps.Copy(merged, right)
-		return merged
-	}
-	merged := make(map[string]string, len(left))
-	maps.Copy(merged, left)
-	maps.Copy(merged, right)
-	return merged
 }
 
 // Passthrough delegates opaque provider-native requests without semantic guardrail processing.

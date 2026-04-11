@@ -19,10 +19,10 @@ A second-layer semantic cache is needed to recognize meaning-equivalent queries 
 
 ### Layer Position & Ordering
 
-Semantic caching runs as a **second layer behind exact-match caching**.  
+Semantic caching runs as a **second layer behind exact-match caching**.
 Exact-match (sub-ms) always runs first; semantic (~50–100 ms including embedding) only on miss.
 
-**Important**: both cache layers must execute **after** guardrail/ExecutionPlan patching, so they see the final prompt sent to the LLM.  
+**Important**: both cache layers must execute **after** guardrail/ExecutionPlan patching, so they see the final prompt sent to the LLM.
 Current global middleware placement runs too early and can bypass guardrails — this is fixed by moving cache checks into the translated inference handlers (post-`PatchChatRequest`).
 
 ```mermaid
@@ -64,66 +64,66 @@ TTL is implemented via `expires_at` (unix seconds, `0` = no expiry) plus read-ti
 
 ### Text Extraction
 
-- Embed the **last user message** (GPTCache-style default — pragmatic hit-rate/accuracy trade-off).  
-- If `exclude_system_prompt: true`, strip system messages before count & embedding (avoids noise from identical system prompts).  
+- Embed the **last user message** (GPTCache-style default — pragmatic hit-rate/accuracy trade-off).
+- If `exclude_system_prompt: true`, strip system messages before count & embedding (avoids noise from identical system prompts).
 - Full conversation embedding rejected (noisy vectors, poor scaling on long threads).
 
 ### Parameter Isolation (`params_hash`)
 
-SHA-256 of output-shaping parameters including `model`, `temperature`, `top_p`, `max_tokens`, `tools` (xxhash64 per tool, then SHA-256 of combined seed), `response_format`, `stream`, `endpointPath` (the raw URL path, for endpoint safety), and `guardrails_hash`.  
+SHA-256 of output-shaping parameters including `model`, `temperature`, `top_p`, `max_tokens`, `tools` (xxhash64 per tool, then SHA-256 of combined seed), `response_format`, `stream`, `endpointPath` (the raw URL path, for endpoint safety), and `guardrails_hash`.
 All KNN searches filter by this hash → prevents serving wrong-format / wrong-parameter / wrong-policy responses.
 
 `guardrails_hash` is a SHA-256 of all active guardrail rule names, types, and content (sorted for stability, with xxhash64 used per-component for speed). It is computed once at startup in `app.go` from `config.GuardrailsConfig`, stored in the Echo context under `core.guardrailsHashKey` (via `core.WithGuardrailsHash`) immediately after `PatchChatRequest`, and read by `semanticCacheMiddleware` when building `params_hash`. When guardrail policy changes, the hash changes and old cache entries become unreachable — no manual cache flush needed. Entries expire naturally via TTL.
 
 ### Conversation History Threshold
 
-Skip semantic caching when non-system messages > `max_conversation_messages` (default: 3).  
+Skip semantic caching when non-system messages > `max_conversation_messages` (default: 3).
 Long multi-turn sessions have near-zero hit rates and high false-positive risk. Exact-match still applies.
 
 ### Similarity Threshold
 
-**Default: 0.92** (0.90–0.95 consensus range).  
-Start here; tune down only after monitoring false positives (higher = safer, lower = more hits).  
+**Default: 0.92** (0.90–0.95 consensus range).
+Start here; tune down only after monitoring false positives (higher = safer, lower = more hits).
 Bifrost's 0.80 is too aggressive for correctness-sensitive use cases.
 
 ### Per-Request Overrides
 
-- `X-Cache-Semantic-Threshold`  
-- `X-Cache-TTL`  
-- `X-Cache-Type`: `exact` | `semantic` | `both` (default)  
+- `X-Cache-Semantic-Threshold`
+- `X-Cache-TTL`
+- `X-Cache-Type`: `exact` | `semantic` | `both` (default)
 - `X-Cache-Control: no-store`
 
 ### What is Explicitly Not Implemented (v1)
 
-- Streaming caching (skipped entirely — phase-2: chunk array storage + replay)  
-- Cross-endpoint normalization (`/chat/completions` vs `/responses` vs pass-through) — `endpointPath` in `params_hash` for safety → Future optimization: canonical response renderer to enable sharing  
-- `cache_by_model` / `cache_by_provider` opt-out flags — both layers always include `model` and provider identity in their cache keys (`params_hash` for semantic, `SHA-256(path + ExecutionPlan + body)` for exact). Disabling either safely requires shared flag semantics across both layers; deferred to a future `ResponseCacheConfig`-level enhancement  
-- Cache warming, manual purge, advanced eviction  
+- Streaming caching (skipped entirely — phase-2: chunk array storage + replay)
+- Cross-endpoint normalization (`/chat/completions` vs `/responses` vs pass-through) — `endpointPath` in `params_hash` for safety → Future optimization: canonical response renderer to enable sharing
+- `cache_by_model` / `cache_by_provider` opt-out flags — both layers always include `model` and provider identity in their cache keys (`params_hash` for semantic, `SHA-256(path + ExecutionPlan + body)` for exact). Disabling either safely requires shared flag semantics across both layers; deferred to a future `ResponseCacheConfig`-level enhancement
+- Cache warming, manual purge, advanced eviction
 - Prometheus metrics / observability (deferred — basic structured logging sufficient for v1)
 
 ## Consequences
 
 ### Positive
 
-- Expected 60–70% semantic hit rates in support/FAQ/classification workloads  
-- Strong correctness guarantees via parameter isolation & high threshold  
-- Reuses existing provider credentials for embeddings via the same resolved provider map as routing  
+- Expected 60–70% semantic hit rates in support/FAQ/classification workloads
+- Strong correctness guarantees via parameter isolation & high threshold
+- Reuses existing provider credentials for embeddings via the same resolved provider map as routing
 - Swappable vector backends (`qdrant`, `pgvector`, `pinecone`, `weaviate`) behind `VecStore`
 
 ### Negative / Mitigations
 
-- ~50–100 ms added latency on semantic miss (acceptable vs LLM latency)  
-- Requires a provider with a working OpenAI-compatible embeddings endpoint and credentials  
-- Semantic layer **requires external vector infrastructure** (no embedded sqlite-vec path)  
-- Pinecone metadata size caps can block caching very large JSON bodies — mitigated by clear errors / operational choice of backend  
-- False positives possible → mitigated by high default threshold + sampling of semantic hits  
-- No benefit for creative, real-time, or personalized traffic → use `no-store` header  
+- ~50–100 ms added latency on semantic miss (acceptable vs LLM latency)
+- Requires a provider with a working OpenAI-compatible embeddings endpoint and credentials
+- Semantic layer **requires external vector infrastructure** (no embedded sqlite-vec path)
+- Pinecone metadata size caps can block caching very large JSON bodies — mitigated by clear errors / operational choice of backend
+- False positives possible → mitigated by high default threshold + sampling of semantic hits
+- No benefit for creative, real-time, or personalized traffic → use `no-store` header
 - No observability yet → add structured logs for semantic hits/misses in v1
 
 ## Alternatives Considered
 
-- **Embedded default vector store (sqlite-vec)** — removed to reduce CGO/sqlite-vec complexity and keep one operational model: explicit choice of managed/self-hosted vector DB.  
-- Redis/RediSearch as a backend — not chosen for v1; Qdrant/pgvector/Pinecone/Weaviate cover common deployment patterns.  
-- Embed full conversation → rejected (noisy, expensive, low hit rate)  
-- Single cache store for exact + semantic → rejected (different needs & scaling)  
-- Optional in-process embedder (e.g. ONNX MiniLM) → removed; API-only embedding keeps one code path and avoids native runtime dependencies  
+- **Embedded default vector store (sqlite-vec)** — removed to reduce CGO/sqlite-vec complexity and keep one operational model: explicit choice of managed/self-hosted vector DB.
+- Redis/RediSearch as a backend — not chosen for v1; Qdrant/pgvector/Pinecone/Weaviate cover common deployment patterns.
+- Embed full conversation → rejected (noisy, expensive, low hit rate)
+- Single cache store for exact + semantic → rejected (different needs & scaling)
+- Optional in-process embedder (e.g. ONNX MiniLM) → removed; API-only embedding keeps one code path and avoids native runtime dependencies

@@ -3,11 +3,10 @@ package aliases
 import (
 	"context"
 	"io"
-	"log/slog"
-	"maps"
 	"sort"
 	"strings"
 
+	"gomodel/internal/batchrewrite"
 	"gomodel/internal/core"
 )
 
@@ -191,13 +190,13 @@ func (p *Provider) CreateBatch(ctx context.Context, providerType string, req *co
 	if err != nil {
 		return nil, err
 	}
-	p.recordBatchPreparation(ctx, req, result.Request)
+	batchrewrite.RecordPreparation(ctx, req, result.Request)
 	resp, err := native.CreateBatch(ctx, providerType, result.Request)
 	if err != nil {
-		p.cleanupBatchRewriteFile(ctx, providerType, result.RewrittenInputFileID)
+		batchrewrite.CleanupFileFromRouter(ctx, p.nativeFileRouter, providerType, result.RewrittenInputFileID, "")
 		return nil, err
 	}
-	p.cleanupSupersededBatchRewriteFile(ctx, providerType, result.RewrittenInputFileID)
+	batchrewrite.CleanupSupersededFileFromRouter(ctx, p.nativeFileRouter, providerType, result.RewrittenInputFileID, "")
 	return resp, nil
 }
 
@@ -245,14 +244,14 @@ func (p *Provider) CreateBatchWithHints(ctx context.Context, providerType string
 	if err != nil {
 		return nil, nil, err
 	}
-	p.recordBatchPreparation(ctx, req, result.Request)
+	batchrewrite.RecordPreparation(ctx, req, result.Request)
 	resp, hints, err := hinted.CreateBatchWithHints(ctx, providerType, result.Request)
 	if err != nil {
-		p.cleanupBatchRewriteFile(ctx, providerType, result.RewrittenInputFileID)
+		batchrewrite.CleanupFileFromRouter(ctx, p.nativeFileRouter, providerType, result.RewrittenInputFileID, "")
 		return nil, nil, err
 	}
-	p.cleanupSupersededBatchRewriteFile(ctx, providerType, result.RewrittenInputFileID)
-	return resp, mergeBatchHints(result.RequestEndpointHints, hints), nil
+	batchrewrite.CleanupSupersededFileFromRouter(ctx, p.nativeFileRouter, providerType, result.RewrittenInputFileID, "")
+	return resp, batchrewrite.MergeEndpointHints(result.RequestEndpointHints, hints), nil
 }
 
 func (p *Provider) GetBatchResultsWithHints(ctx context.Context, providerType, id string, endpointByCustomID map[string]string) (*core.BatchResultsResponse, error) {
@@ -326,61 +325,6 @@ func (p *Provider) PrepareBatchRequest(ctx context.Context, providerType string,
 		return &core.BatchRewriteResult{Request: req}, nil
 	}
 	return rewriteAliasBatchSource(ctx, providerType, req, p.service, p.inner, p.batchFileTransport())
-}
-
-func (p *Provider) recordBatchPreparation(ctx context.Context, original, rewritten *core.BatchRequest) {
-	if ctx == nil || original == nil || rewritten == nil {
-		return
-	}
-	metadata := core.GetBatchPreparationMetadata(ctx)
-	if metadata == nil {
-		return
-	}
-	metadata.RecordInputFileRewrite(original.InputFileID, rewritten.InputFileID)
-}
-
-func (p *Provider) cleanupSupersededBatchRewriteFile(ctx context.Context, providerType, localRewrittenFileID string) {
-	localRewrittenFileID = strings.TrimSpace(localRewrittenFileID)
-	if localRewrittenFileID == "" {
-		return
-	}
-	metadata := core.GetBatchPreparationMetadata(ctx)
-	if metadata == nil {
-		return
-	}
-	if strings.TrimSpace(metadata.RewrittenInputFileID) == localRewrittenFileID {
-		return
-	}
-	p.cleanupBatchRewriteFile(ctx, providerType, localRewrittenFileID)
-}
-
-func (p *Provider) cleanupBatchRewriteFile(ctx context.Context, providerType, fileID string) {
-	fileID = strings.TrimSpace(fileID)
-	if fileID == "" {
-		return
-	}
-	files, err := p.nativeFileRouter()
-	if err != nil {
-		return
-	}
-	if _, err := files.DeleteFile(ctx, providerType, fileID); err != nil {
-		slog.Warn("failed to delete rewritten batch input file", "provider", providerType, "file_id", fileID, "error", err)
-	}
-}
-
-func mergeBatchHints(left, right map[string]string) map[string]string {
-	if len(left) == 0 {
-		if len(right) == 0 {
-			return nil
-		}
-		merged := make(map[string]string, len(right))
-		maps.Copy(merged, right)
-		return merged
-	}
-	merged := make(map[string]string, len(left))
-	maps.Copy(merged, left)
-	maps.Copy(merged, right)
-	return merged
 }
 
 func providerValueForMode(selector core.ModelSelector, mode requestRewriteMode) string {
