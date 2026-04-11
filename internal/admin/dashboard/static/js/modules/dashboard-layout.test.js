@@ -255,11 +255,13 @@ test('audit toolbar uses a full-width search row above the select row with a rig
 test('audit entry metadata is rendered as a labeled pill row at the bottom of the expanded entry', () => {
     const indexTemplate = readFixture('../../../templates/index.html');
     const css = readFixture('../../css/dashboard.css');
-    const auditEntryMatch = indexTemplate.match(/<div class="audit-entry-details">[\s\S]*?<\/div>\s*<\/details>/);
+    const detailsStart = indexTemplate.indexOf('<div class="audit-entry-details">');
+    const detailsEnd = indexTemplate.indexOf('</template>', detailsStart);
 
-    assert.ok(auditEntryMatch, 'Expected audit entry details block');
+    assert.notEqual(detailsStart, -1, 'Expected audit entry details block');
+    assert.notEqual(detailsEnd, -1, 'Expected lazy audit entry details wrapper');
 
-    const auditEntry = auditEntryMatch[0];
+    const auditEntry = indexTemplate.slice(detailsStart, detailsEnd);
     const requestResponseIndex = auditEntry.indexOf('<div class="audit-request-response">');
     const metadataIndex = auditEntry.indexOf('<div class="audit-entry-metadata">');
 
@@ -287,7 +289,10 @@ test('audit entry metadata is rendered as a labeled pill row at the bottom of th
 });
 
 test('alias rows use a shared icon-only edit action', () => {
-    const indexTemplate = readFixture('../../../templates/index.html');
+    const indexTemplate = [
+        readFixture('../../../templates/index.html'),
+        readFixture('../../../templates/model-table-body.html')
+    ].join('\n');
     const editIconTemplate = readFixture('../../../templates/edit-icon.html');
 
     assert.match(
@@ -326,7 +331,7 @@ test('audit request and response sections reuse a shared audit pane template', (
 
     assert.match(
         auditPaneTemplate,
-        /{{define "audit-pane"}}[\s\S]*x-data="auditPaneState\({{\.\}}\)"[\s\S]*x-text="pane\.title"[\s\S]*type="button"[\s\S]*@click\.prevent="copyBody\(\)"[\s\S]*x-text="formatJSON\(pane\.headers\)"[\s\S]*renderBodyWithConversationHighlights\(pane\.entry, pane\.body\)[\s\S]*x-text="pane\.emptyMessage"[\s\S]*x-text="pane\.tooLargeMessage"[\s\S]*{{end}}/
+        /{{define "audit-pane"}}[\s\S]*x-data="auditPaneState\({{\.\}}\)"[\s\S]*x-text="pane\.title"[\s\S]*type="button"[\s\S]*@click\.prevent="copyBody\(\)"[\s\S]*x-text="formattedHeaders"[\s\S]*x-html="renderedBody"[\s\S]*x-text="pane\.emptyMessage"[\s\S]*x-text="pane\.tooLargeMessage"[\s\S]*{{end}}/
     );
     assert.match(indexTemplate, /{{template "audit-pane" "auditRequestPane\(entry\)"}}/);
     assert.match(indexTemplate, /{{template "audit-pane" "auditResponsePane\(entry\)"}}/);

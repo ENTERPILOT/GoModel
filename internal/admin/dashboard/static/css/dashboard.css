@@ -2016,14 +2016,14 @@ td.col-price {
     display: none;
 }
 
-.audit-entry-main {
+.audit-entry-left {
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
 }
 
-.audit-entry-meta {
+.audit-entry-right {
     display: inline-flex;
     align-items: center;
     gap: 10px;
@@ -2125,19 +2125,10 @@ td.col-price {
 }
 
 .audit-entry-details {
-    border-top: 1px solid transparent;
-    padding: 0 12px;
-    background: var(--bg-surface);
-    max-height: 0;
-    opacity: 0;
-    overflow: hidden;
-    transition: max-height 0.12s ease-out, opacity 0.08s linear, padding 0.12s ease-out, border-color 0.12s ease-out;
-}
-
-.audit-entry[open] .audit-entry-details {
-    border-top-color: var(--border);
+    border-top: 1px solid var(--border);
     padding: 12px;
-    opacity: 1;
+    background: var(--bg-surface);
+    overflow: hidden;
 }
 
 .audit-request-response {
@@ -3211,7 +3202,7 @@ body.conversation-drawer-open {
         flex-direction: column;
         align-items: flex-start;
     }
-    .audit-entry-meta {
+    .audit-entry-right {
         width: 100%;
         justify-content: space-between;
     }

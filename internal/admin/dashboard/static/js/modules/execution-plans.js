@@ -1138,6 +1138,15 @@
                         return 'Copy workflow ID ' + this.workflowID;
                     },
 
+                    setWorkflowID(workflowID) {
+                        const nextWorkflowID = String(workflowID || '').trim();
+                        if (this.workflowID === nextWorkflowID) return;
+
+                        this.workflowID = nextWorkflowID;
+                        this.copyState.copied = false;
+                        this.copyState.error = false;
+                    },
+
                     async copyWorkflowID() {
                         if (!this.workflowID) {
                             return;

@@ -91,6 +91,7 @@ function dashboard() {
         auditStatusCode: '',
         auditStream: '',
         auditFetchToken: 0,
+        auditExpandedEntries: {},
 
         // Conversation drawer state
         conversationOpen: false,

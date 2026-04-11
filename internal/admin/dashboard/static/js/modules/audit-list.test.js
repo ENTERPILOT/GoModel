@@ -181,6 +181,51 @@ test('clearAuditFilters resets the consolidated audit controls', () => {
     assert.equal(fetchCalled, true);
 });
 
+test('handleAuditEntryToggle lazily marks an opened audit row for details rendering', () => {
+    const module = createAuditListModule();
+    module.auditExpandedEntries = {};
+
+    module.handleAuditEntryToggle({ currentTarget: { open: true } }, { id: 'audit-1' });
+
+    assert.equal(module.isAuditEntryExpanded({ id: 'audit-1' }), true);
+    assert.equal(JSON.stringify(module.auditExpandedEntries), JSON.stringify({ 'audit-1': true }));
+});
+
+test('pruneAuditExpandedEntries drops expanded state for rows no longer on the page', () => {
+    const module = createAuditListModule();
+    module.auditExpandedEntries = {
+        'audit-1': true,
+        'audit-2': true
+    };
+
+    module.pruneAuditExpandedEntries([{ id: 'audit-2' }, { id: 'audit-3' }]);
+
+    assert.equal(JSON.stringify(module.auditExpandedEntries), JSON.stringify({ 'audit-2': true }));
+});
+
+test('auditPaneState formats pane content once for template rendering', () => {
+    const module = createAuditListModule();
+    const entry = { id: 'audit-1' };
+    let renderCalls = 0;
+    module.renderBodyWithConversationHighlights = (renderEntry, body) => {
+        renderCalls++;
+        assert.equal(renderEntry, entry);
+        return 'rendered:' + body.id;
+    };
+
+    const paneState = module.auditPaneState({
+        entry,
+        showHeaders: true,
+        headers: { authorization: 'Bearer redacted' },
+        showBody: true,
+        body: { id: 'body-1' }
+    });
+
+    assert.equal(paneState.formattedHeaders, '{\n  "authorization": "Bearer redacted"\n}');
+    assert.equal(paneState.renderedBody, 'rendered:body-1');
+    assert.equal(renderCalls, 1);
+});
+
 test('auditPaneState copies the formatted body and resets success feedback', async () => {
     let resetCallback = null;
     const writes = [];

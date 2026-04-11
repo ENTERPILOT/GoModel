@@ -37,6 +37,7 @@
                     if (requestToken !== this.auditFetchToken) return;
                     this.auditLog = payload;
                     if (!this.auditLog.entries) this.auditLog.entries = [];
+                    this.pruneAuditExpandedEntries(this.auditLog.entries);
                     if (typeof this.prefetchAuditExecutionPlans === 'function') {
                         try {
                             await this.prefetchAuditExecutionPlans(this.auditLog.entries);
@@ -48,6 +49,47 @@
                     console.error('Failed to fetch audit log:', e);
                     if (requestToken !== this.auditFetchToken) return;
                     this.auditLog = { entries: [], total: 0, limit: 25, offset: 0 };
+                }
+            },
+
+            auditEntryKey(entry) {
+                return String(entry && entry.id || '').trim();
+            },
+
+            isAuditEntryExpanded(entry) {
+                const key = this.auditEntryKey(entry);
+                if (!key) return false;
+                return !!(this.auditExpandedEntries && this.auditExpandedEntries[key]);
+            },
+
+            markAuditEntryExpanded(entry) {
+                const key = this.auditEntryKey(entry);
+                if (!key || this.isAuditEntryExpanded(entry)) return;
+
+                this.auditExpandedEntries = {
+                    ...(this.auditExpandedEntries || {}),
+                    [key]: true
+                };
+            },
+
+            pruneAuditExpandedEntries(entries) {
+                const expanded = this.auditExpandedEntries || {};
+                const keys = new Set((Array.isArray(entries) ? entries : [])
+                    .map((entry) => this.auditEntryKey(entry))
+                    .filter(Boolean));
+                const next = {};
+                let changed = false;
+
+                Object.keys(expanded).forEach((key) => {
+                    if (keys.has(key)) {
+                        next[key] = true;
+                        return;
+                    }
+                    changed = true;
+                });
+
+                if (changed) {
+                    this.auditExpandedEntries = next;
                 }
             },
 
@@ -80,33 +122,13 @@
                 return (ns / 1000000000).toFixed(2) + ' s';
             },
 
-            handleAuditEntryToggle(event) {
+            handleAuditEntryToggle(event, entry) {
                 const detailsEl = event && event.currentTarget;
                 if (!detailsEl) return;
 
-                const content = detailsEl.querySelector('.audit-entry-details');
-                if (!content) return;
-
                 if (detailsEl.open) {
-                    const targetHeight = content.scrollHeight;
-                    content.style.maxHeight = targetHeight + 'px';
-                    const onTransitionEnd = () => {
-                        if (detailsEl.open) {
-                            content.style.maxHeight = 'none';
-                        }
-                        content.removeEventListener('transitionend', onTransitionEnd);
-                    };
-                    content.addEventListener('transitionend', onTransitionEnd);
-                    return;
+                    this.markAuditEntryExpanded(entry);
                 }
-
-                if (!content.style.maxHeight || content.style.maxHeight === 'none') {
-                    content.style.maxHeight = content.scrollHeight + 'px';
-                    void content.offsetHeight;
-                }
-                requestAnimationFrame(() => {
-                    content.style.maxHeight = '0px';
-                });
             },
 
             statusCodeClass(statusCode) {
@@ -183,9 +205,14 @@
 
             auditPaneState(pane) {
                 const formatJSON = this.formatJSON.bind(this);
+                const renderBody = typeof this.renderBodyWithConversationHighlights === 'function'
+                    ? this.renderBodyWithConversationHighlights.bind(this)
+                    : (_entry, body) => formatJSON(body);
 
                 return {
                     pane,
+                    formattedHeaders: pane && pane.showHeaders ? formatJSON(pane.headers) : '',
+                    renderedBody: pane && pane.showBody ? renderBody(pane.entry, pane.body) : '',
                     copyState: clipboard
                         ? clipboard.createClipboardButtonState({
                             logPrefix: 'Failed to copy audit payload:'

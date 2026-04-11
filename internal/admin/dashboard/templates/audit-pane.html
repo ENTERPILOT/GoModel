@@ -20,12 +20,12 @@
     </div>
     <div class="audit-pane-block" x-show="pane.showHeaders">
         <h5>Headers</h5>
-        <pre class="audit-json" x-text="formatJSON(pane.headers)"></pre>
+        <pre class="audit-json" x-text="formattedHeaders"></pre>
     </div>
     <div class="audit-pane-block" x-show="pane.showBody">
         <h5>Body</h5>
         <pre class="audit-json audit-json-body"
-             x-html="renderBodyWithConversationHighlights(pane.entry, pane.body)"
+             x-html="renderedBody"
              @mousedown="startBodyInteraction($event)"
              @click="handleBodyConversationClick($event, pane.entry)"></pre>
     </div>

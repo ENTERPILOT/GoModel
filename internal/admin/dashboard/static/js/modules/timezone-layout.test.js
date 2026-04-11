@@ -61,7 +61,7 @@ test('dashboard templates expose a settings page and timezone context in activit
     assert.match(template, /class="mono usage-ts"/);
     assert.match(template, /x-text="formatTimestamp\(entry\.timestamp\)"/);
     assert.match(template, /:title="timestampTitle\(entry\.timestamp\)"/);
-    assert.match(template, /class="audit-entry-meta"/);
+    assert.match(template, /class="audit-entry-right"/);
     assert.match(template, /<button(?=[^>]*class="audit-conversation-trigger")(?=[^>]*type="button")[^>]*>/);
 
     const toggleRule = readCSSRule(css, '.inline-help-toggle');

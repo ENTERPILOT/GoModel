@@ -62,11 +62,11 @@ test('async label stays inline on the right side of the branch', () => {
     );
     assert.match(
         template,
-        /<div class="ep-conn ep-conn-async" x-show="{{\.}}\.showUsage && {{\.}}\.showAudit"><\/div>\s*<div class="ep-node ep-node-feature ep-node-async ep-node-async-audit" x-show="{{\.}}\.showAudit" :class="{{\.}}\.auditNodeClass">/
+        /<div class="ep-conn ep-conn-async" x-show="ep\.showUsage && ep\.showAudit"><\/div>\s*<div class="ep-node ep-node-feature ep-node-async ep-node-async-audit" x-show="ep\.showAudit" :class="ep\.auditNodeClass">/
     );
     assert.match(
         template,
-        /<div class="ep-node ep-node-feature ep-node-async ep-node-async-usage" x-show="{{\.}}\.showUsage" :class="{{\.}}\.usageNodeClass">/
+        /<div class="ep-node ep-node-feature ep-node-async ep-node-async-usage" x-show="ep\.showUsage" :class="ep\.usageNodeClass">/
     );
 
     const asyncLabelRule = readCSSRule(css, '.ep-async-label');
@@ -218,7 +218,7 @@ test('workflow editor renders a live preview card from the draft workflow state'
     );
     assert.match(
         chartTemplate,
-        /{{define "execution-plan-chart"}}[\s\S]*<span class="ep-node-label">Auth<\/span>[\s\S]*x-text="{{\.}}\.authNodeSublabel"[\s\S]*x-show="{{\.}}\.showGuardrails"[\s\S]*x-show="{{\.}}\.showCache"[\s\S]*x-text="{{\.}}\.aiLabel"/
+        /{{define "execution-plan-chart"}}[\s\S]*x-data="\{ ep: {{\.}} \|\| \{\} \}"[\s\S]*x-effect="ep = {{\.}} \|\| \{\}"[\s\S]*<span class="ep-node-label">Auth<\/span>[\s\S]*x-text="ep\.authNodeSublabel"[\s\S]*x-show="ep\.showGuardrails"[\s\S]*x-show="ep\.showCache"[\s\S]*x-text="ep\.aiLabel"/
     );
 });
 
@@ -228,27 +228,27 @@ test('audit log pipeline binds cache visibility and runtime highlight classes ac
 
     assert.match(
         template,
-        /{{template "execution-plan-chart" "executionPlanAuditChart\(entry\)"}}[\s\S]*<div class="ep-conn" x-show="{{\.}}\.showCache" :class="{{\.}}\.cacheConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-feature ep-node-cache" x-show="{{\.}}\.showCache" :class="{{\.}}\.cacheNodeClass">[\s\S]*x-text="{{\.}}\.cacheStatusLabel"/
+        /{{template "execution-plan-chart" "executionPlanAuditChart\(entry\)"}}[\s\S]*<div class="ep-conn" x-show="ep\.showCache" :class="ep\.cacheConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-feature ep-node-cache" x-show="ep\.showCache" :class="ep\.cacheNodeClass">[\s\S]*x-text="ep\.cacheStatusLabel"/
     );
     assert.match(
         template,
-        /:class="{{\.}}\.authNodeClass"[\s\S]*x-show="{{\.}}\.showGuardrails"[\s\S]*x-show="{{\.}}\.showUsage"[\s\S]*x-show="{{\.}}\.showAudit"/
+        /:class="ep\.authNodeClass"[\s\S]*x-show="ep\.showGuardrails"[\s\S]*x-show="ep\.showUsage"[\s\S]*x-show="ep\.showAudit"/
     );
     assert.match(
         template,
-        /<div class="ep-conn" :class="{{\.}}\.aiConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-ai" :class="{{\.}}\.aiNodeClass">/
+        /<div class="ep-conn" :class="ep\.aiConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-ai" :class="ep\.aiNodeClass">/
     );
     assert.match(
         template,
-        /<div class="exec-pipeline" :class="\{ 'exec-pipeline-has-meta': {{\.}}\.workflowID \}">[\s\S]*<button type="button"[\s\S]*class="exec-pipeline-meta exec-pipeline-meta-copy mono"[\s\S]*x-show="{{\.}}\.workflowID"[\s\S]*x-data="executionPlanWorkflowIDChip\({{\.\}}\.workflowID\)"[\s\S]*@click\.prevent="copyWorkflowID\(\)"[\s\S]*<span class="exec-pipeline-meta-label">id:<\/span>[\s\S]*<span class="exec-pipeline-meta-placeholder">\.\.\.<\/span>[\s\S]*x-text="workflowID"/
+        /<div class="exec-pipeline" x-data="\{ ep: {{\.}} \|\| \{\} \}" x-effect="ep = {{\.}} \|\| \{\}" :class="\{ 'exec-pipeline-has-meta': ep\.workflowID \}">[\s\S]*<button type="button"[\s\S]*class="exec-pipeline-meta exec-pipeline-meta-copy mono"[\s\S]*x-show="ep\.workflowID"[\s\S]*x-data="executionPlanWorkflowIDChip\(ep\.workflowID\)"[\s\S]*x-effect="setWorkflowID\(ep\.workflowID\)"[\s\S]*@click\.prevent="copyWorkflowID\(\)"[\s\S]*<span class="exec-pipeline-meta-label">id:<\/span>[\s\S]*<span class="exec-pipeline-meta-placeholder">\.\.\.<\/span>[\s\S]*x-text="workflowID"/
     );
     assert.match(
         template,
-        /<div class="ep-conn" :class="{{\.}}\.responseConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-endpoint" :class="{{\.}}\.responseNodeClass">/
+        /<div class="ep-conn" :class="ep\.responseConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-endpoint" :class="ep\.responseNodeClass">/
     );
     assert.doesNotMatch(
         template,
-        /<div class="exec-pipeline-meta" x-show="{{\.}}\.workflowID">/
+        /<div class="exec-pipeline-meta" x-show="ep\.workflowID">/
     );
 
     const successRule = readCSSRule(css, '.ep-node-success');
@@ -334,7 +334,7 @@ test('execution pipeline main row is flattened without ep-left or ep-right wrapp
     assert.doesNotMatch(template, /class="ep-step"/);
     assert.match(
         template,
-        /<div class="exec-pipeline-row">[\s\S]*<div class="ep-node ep-node-endpoint">[\s\S]*<div class="ep-conn"><\/div>[\s\S]*<div class="ep-node ep-node-feature ep-node-auth"[\s\S]*<div class="ep-conn" :class="{{\.}}\.aiConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-ai" :class="{{\.}}\.aiNodeClass">[\s\S]*<div class="ep-conn" :class="{{\.}}\.responseConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-endpoint" :class="{{\.}}\.responseNodeClass">/
+        /<div class="exec-pipeline-row">[\s\S]*<div class="ep-node ep-node-endpoint">[\s\S]*<div class="ep-conn"><\/div>[\s\S]*<div class="ep-node ep-node-feature ep-node-auth"[\s\S]*<div class="ep-conn" :class="ep\.aiConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-ai" :class="ep\.aiNodeClass">[\s\S]*<div class="ep-conn" :class="ep\.responseConnClass"><\/div>[\s\S]*<div class="ep-node ep-node-endpoint" :class="ep\.responseNodeClass">/
     );
     assert.doesNotMatch(css, /\.ep-left\s*,/);
     assert.doesNotMatch(css, /\.ep-right\s*\{/);
@@ -369,7 +369,7 @@ test('guardrails node only renders a sublabel when step detail exists', () => {
 
     assert.match(
         template,
-        /<span class="ep-node-label">Guardrails<\/span>\s*<span class="ep-node-sub" x-show="{{\.}}\.guardrailLabel" x-text="{{\.}}\.guardrailLabel"><\/span>/
+        /<span class="ep-node-label">Guardrails<\/span>\s*<span class="ep-node-sub" x-show="ep\.guardrailLabel" x-text="ep\.guardrailLabel"><\/span>/
     );
 });
 
