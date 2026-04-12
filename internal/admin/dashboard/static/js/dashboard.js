@@ -188,6 +188,8 @@ function dashboard() {
             window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
                 if (this.theme === 'system') {
                     this.renderChart();
+                    this.renderBarChart();
+                    this.renderUserPathChart();
                 }
             });
 

@@ -356,6 +356,7 @@ test('usage charts can switch between chart and table views', () => {
     assert.match(indexTemplate, /<div class="bar-chart-wrap" x-show="modelUsageView === 'chart'">[\s\S]*<canvas id="usageBarChart"><\/canvas>/);
     assert.match(indexTemplate, /<template x-if="modelUsageView === 'table'">[\s\S]*modelUsageTableRows\(\)/);
     assert.match(indexTemplate, /class="chart-view-toggle"[\s\S]*@click="toggleUsageChartView\('userPath', 'chart'\)"[\s\S]*@click="toggleUsageChartView\('userPath', 'table'\)"/);
+    assert.match(indexTemplate, /<h3 x-text="usageMode === 'costs' \? 'Cost by User Path' : 'Usage by User Path'"><\/h3>/);
     assert.match(indexTemplate, /<div class="bar-chart-wrap" x-show="userPathUsageView === 'chart'">[\s\S]*<canvas id="usageUserPathChart"><\/canvas>/);
     assert.match(indexTemplate, /<template x-if="userPathUsageView === 'table'">[\s\S]*userPathUsageTableRows\(\)/);
 });

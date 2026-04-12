@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadDashboardApp() {
+function loadDashboardApp(overrides = {}) {
     const dashboardSource = fs.readFileSync(path.join(__dirname, '../dashboard.js'), 'utf8');
     const window = {
         localStorage: {
@@ -18,7 +18,8 @@ function loadDashboardApp() {
         matchMedia() {
             return { addEventListener() {} };
         },
-        addEventListener() {}
+        addEventListener() {},
+        ...(overrides.window || {})
     };
     const context = {
         console,
@@ -46,6 +47,8 @@ function loadDashboardApp() {
                 }
             };
         },
+        localStorage: window.localStorage,
+        ...overrides.context,
         window
     };
 
@@ -78,4 +81,55 @@ test('qualifiedModelDisplay does not duplicate an existing exact provider prefix
         app.qualifiedResolvedModelDisplay({ provider_name: 'primary-openai', resolved_model: 'gpt-5-nano' }),
         'primary-openai/gpt-5-nano'
     );
+});
+
+test('system theme media changes rerender all dashboard charts', () => {
+    let mediaChangeHandler = null;
+    const app = loadDashboardApp({
+        window: {
+            location: { pathname: '/admin/dashboard/overview' },
+            matchMedia() {
+                return {
+                    addEventListener(event, handler) {
+                        if (event === 'change') {
+                            mediaChangeHandler = handler;
+                        }
+                    }
+                };
+            }
+        }
+    });
+    let overviewCalls = 0;
+    let modelCalls = 0;
+    let userPathCalls = 0;
+
+    app.fetchAll = () => {};
+    app.renderChart = () => {
+        overviewCalls++;
+    };
+    app.renderBarChart = () => {
+        modelCalls++;
+    };
+    app.renderUserPathChart = () => {
+        userPathCalls++;
+    };
+
+    app.init();
+    assert.equal(typeof mediaChangeHandler, 'function');
+
+    overviewCalls = 0;
+    modelCalls = 0;
+    userPathCalls = 0;
+    mediaChangeHandler();
+
+    assert.equal(overviewCalls, 1);
+    assert.equal(modelCalls, 1);
+    assert.equal(userPathCalls, 1);
+
+    app.theme = 'dark';
+    mediaChangeHandler();
+
+    assert.equal(overviewCalls, 1);
+    assert.equal(modelCalls, 1);
+    assert.equal(userPathCalls, 1);
 });

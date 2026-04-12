@@ -296,7 +296,7 @@
     <!-- Usage by User Path Chart -->
     <div class="model-chart-section" x-show="userPathUsage.length > 0">
         <div class="model-chart-header">
-            <h3>Usage by User Path</h3>
+            <h3 x-text="usageMode === 'costs' ? 'Cost by User Path' : 'Usage by User Path'"></h3>
             <div class="chart-view-toggle" role="group" aria-label="User path usage view">
                 <button type="button" class="chart-view-btn" :class="{active: userPathUsageView === 'chart'}" :aria-pressed="userPathUsageView === 'chart' ? 'true' : 'false'" aria-label="Show user path usage chart" title="Chart" @click="toggleUsageChartView('userPath', 'chart')">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V11M12 19V5M19 19v-8"/></svg>

@@ -683,11 +683,17 @@ func TestSQLiteReaderGetUsageByUserPath_GroupsByTrackedPath(t *testing.T) {
 	for _, row := range rootFiltered {
 		rootFilteredByPath[row.UserPath] = row
 	}
+	if len(rootFilteredByPath) != len(byPath) {
+		t.Fatalf("expected root filter to include %d grouped usage rows, got %d: %#v", len(byPath), len(rootFilteredByPath), rootFiltered)
+	}
 	if rootFilteredByPath["/"].TotalTokens != 50 {
 		t.Fatalf("expected root filter to include blank root total tokens 50, got %d", rootFilteredByPath["/"].TotalTokens)
 	}
 	if rootFilteredByPath["/team/alpha"].TotalTokens != 70 {
 		t.Fatalf("expected root filter to include alpha total tokens 70, got %d", rootFilteredByPath["/team/alpha"].TotalTokens)
+	}
+	if rootFilteredByPath["/team/beta"].TotalTokens != 110 {
+		t.Fatalf("expected root filter to include beta total tokens 110, got %d", rootFilteredByPath["/team/beta"].TotalTokens)
 	}
 }
 
