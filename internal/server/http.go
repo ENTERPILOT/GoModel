@@ -309,6 +309,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		adminAPI.GET("/audit/log", cfg.AdminHandler.AuditLog)
 		adminAPI.GET("/audit/conversation", cfg.AdminHandler.AuditConversation)
 		adminAPI.GET("/providers/status", cfg.AdminHandler.ProviderStatus)
+		adminAPI.POST("/runtime/refresh", cfg.AdminHandler.RefreshRuntime)
 		adminAPI.GET("/models", cfg.AdminHandler.ListModels)
 		adminAPI.GET("/models/categories", cfg.AdminHandler.ListCategories)
 		adminAPI.GET("/model-overrides", cfg.AdminHandler.ListModelOverrides)

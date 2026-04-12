@@ -1,12 +1,216 @@
 package app
 
 import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"gomodel/config"
 	"gomodel/internal/admin"
+	"gomodel/internal/core"
 	"gomodel/internal/guardrails"
+	"gomodel/internal/modeloverrides"
+	"gomodel/internal/providers"
 )
+
+type runtimeRefreshMockProvider struct {
+	models *core.ModelsResponse
+	err    error
+}
+
+func (m *runtimeRefreshMockProvider) ChatCompletion(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
+	return nil, nil
+}
+
+func (m *runtimeRefreshMockProvider) StreamChatCompletion(_ context.Context, _ *core.ChatRequest) (io.ReadCloser, error) {
+	return io.NopCloser(nil), nil
+}
+
+func (m *runtimeRefreshMockProvider) ListModels(_ context.Context) (*core.ModelsResponse, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.models, nil
+}
+
+func (m *runtimeRefreshMockProvider) Responses(_ context.Context, _ *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	return nil, nil
+}
+
+func (m *runtimeRefreshMockProvider) StreamResponses(_ context.Context, _ *core.ResponsesRequest) (io.ReadCloser, error) {
+	return io.NopCloser(nil), nil
+}
+
+func (m *runtimeRefreshMockProvider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	return nil, core.NewInvalidRequestError("not supported", nil)
+}
+
+func TestRefreshRuntime_RefreshesModelListProvidersAndRegistryCache(t *testing.T) {
+	registry := providers.NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(&runtimeRefreshMockProvider{
+		models: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-test", Object: "model", OwnedBy: "openai"},
+			},
+		},
+	}, "openai", "openai")
+
+	modelListServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"version": 1,
+			"updated_at": "2026-04-11T00:00:00Z",
+			"providers": {
+				"openai": {
+					"display_name": "OpenAI",
+					"api_type": "openai",
+					"supported_modes": ["chat"]
+				}
+			},
+			"models": {
+				"gpt-test": {
+					"display_name": "GPT Test",
+					"modes": ["chat"],
+					"context_window": 128000
+				}
+			},
+			"provider_models": {}
+		}`))
+	}))
+	defer modelListServer.Close()
+
+	app := &App{
+		config: &config.Config{
+			Cache: config.CacheConfig{
+				Model: config.ModelCacheConfig{
+					ModelList: config.ModelListConfig{URL: modelListServer.URL},
+				},
+			},
+		},
+		providers: &providers.InitResult{Registry: registry},
+	}
+
+	report, err := app.RefreshRuntime(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshRuntime() error = %v", err)
+	}
+	if report.Status != admin.RuntimeRefreshStatusOK {
+		t.Fatalf("RefreshRuntime().Status = %q, want ok; steps=%+v", report.Status, report.Steps)
+	}
+	if report.ModelCount != 1 || report.ProviderCount != 1 {
+		t.Fatalf("RefreshRuntime() counts = %d/%d, want 1/1", report.ModelCount, report.ProviderCount)
+	}
+
+	info := registry.GetModel("openai/gpt-test")
+	if info == nil || info.Model.Metadata == nil {
+		t.Fatal("expected refreshed provider model metadata")
+	}
+	if info.Model.Metadata.DisplayName != "GPT Test" {
+		t.Fatalf("DisplayName = %q, want GPT Test", info.Model.Metadata.DisplayName)
+	}
+	if info.Model.Metadata.ContextWindow == nil || *info.Model.Metadata.ContextWindow != 128000 {
+		t.Fatalf("ContextWindow = %v, want 128000", info.Model.Metadata.ContextWindow)
+	}
+}
+
+func TestRefreshRuntime_SkipsDisabledModelOverrides(t *testing.T) {
+	registry := providers.NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(&runtimeRefreshMockProvider{
+		models: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "gpt-test", Object: "model", OwnedBy: "openai"},
+			},
+		},
+	}, "openai", "openai")
+
+	app := &App{
+		config: &config.Config{},
+		providers: &providers.InitResult{
+			Registry: registry,
+		},
+		modelOverrides: &modeloverrides.Result{},
+	}
+
+	report, err := app.RefreshRuntime(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshRuntime() error = %v", err)
+	}
+
+	step := runtimeRefreshStepByName(report.Steps, "model_overrides")
+	if step == nil {
+		t.Fatalf("model_overrides step missing: %+v", report.Steps)
+	}
+	if step.Status != admin.RuntimeRefreshStatusSkipped {
+		t.Fatalf("model_overrides step status = %q, want skipped; step=%+v", step.Status, *step)
+	}
+}
+
+func TestRefreshRuntime_ReturnsGatewayErrorWhenContextCanceledBeforeAcquire(t *testing.T) {
+	app := &App{}
+	ch := app.runtimeRefreshSemaphore()
+	ch <- struct{}{}
+	defer func() { <-ch }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := app.RefreshRuntime(ctx)
+	if err == nil {
+		t.Fatal("RefreshRuntime() error = nil, want cancellation error")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("RefreshRuntime() error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusRequestTimeout {
+		t.Fatalf("status = %d, want 408", gatewayErr.HTTPStatusCode())
+	}
+	if gatewayErr.Provider != "runtime_refresh" {
+		t.Fatalf("provider = %q, want runtime_refresh", gatewayErr.Provider)
+	}
+}
+
+func TestRunRuntimeRefreshStepReturnsContextErrorWithoutAppendingStep(t *testing.T) {
+	app := &App{}
+	report := admin.RuntimeRefreshReport{}
+
+	err := app.runRuntimeRefreshStep(&report, "providers", func() runtimeRefreshStepResult {
+		return runtimeRefreshStepResult{err: context.Canceled}
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runRuntimeRefreshStep() error = %v, want context canceled", err)
+	}
+	if len(report.Steps) != 0 {
+		t.Fatalf("steps = %+v, want none appended for context cancellation", report.Steps)
+	}
+}
+
+func TestProviderRefreshIssueCountIncludesAvailabilityErrors(t *testing.T) {
+	got := providerRefreshIssueCount([]providers.ProviderRuntimeSnapshot{
+		{Name: "healthy"},
+		{Name: "model-fetch", LastModelFetchError: " failed to fetch models "},
+		{Name: "availability", LastAvailabilityError: " provider unavailable "},
+		{Name: "both", LastModelFetchError: "fetch failed", LastAvailabilityError: "unavailable"},
+	})
+	if got != 3 {
+		t.Fatalf("providerRefreshIssueCount() = %d, want 3", got)
+	}
+}
+
+func runtimeRefreshStepByName(steps []admin.RuntimeRefreshStep, name string) *admin.RuntimeRefreshStep {
+	for i := range steps {
+		if steps[i].Name == name {
+			return &steps[i]
+		}
+	}
+	return nil
+}
 
 func TestRuntimeExecutionFeatureCaps_EnableFallbackFromOverride(t *testing.T) {
 	cfg := &config.Config{

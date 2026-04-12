@@ -40,6 +40,7 @@ type Handler struct {
 	guardrails          guardrails.Catalog
 	guardrailDefs       *guardrails.Service
 	runtimeConfig       DashboardConfigResponse
+	runtimeRefresher    RuntimeRefresher
 	configuredProviders []providers.SanitizedProviderConfig
 
 	mutationMu sync.Mutex
@@ -91,6 +92,38 @@ type providerStatusItemResponse struct {
 type providerStatusResponse struct {
 	Summary   providerStatusSummaryResponse `json:"summary"`
 	Providers []providerStatusItemResponse  `json:"providers"`
+}
+
+const (
+	RuntimeRefreshStatusOK      = "ok"
+	RuntimeRefreshStatusPartial = "partial"
+	RuntimeRefreshStatusFailed  = "failed"
+	RuntimeRefreshStatusSkipped = "skipped"
+)
+
+// RuntimeRefreshStep describes the result of one manual runtime refresh step.
+type RuntimeRefreshStep struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Message    string `json:"message,omitempty"`
+	Error      string `json:"error,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
+}
+
+// RuntimeRefreshReport is returned by the manual runtime refresh endpoint.
+type RuntimeRefreshReport struct {
+	Status        string               `json:"status"`
+	StartedAt     time.Time            `json:"started_at"`
+	FinishedAt    time.Time            `json:"finished_at"`
+	DurationMS    int64                `json:"duration_ms"`
+	ModelCount    int                  `json:"model_count"`
+	ProviderCount int                  `json:"provider_count"`
+	Steps         []RuntimeRefreshStep `json:"steps"`
+}
+
+// RuntimeRefresher refreshes application runtime snapshots on demand.
+type RuntimeRefresher interface {
+	RefreshRuntime(ctx context.Context) (RuntimeRefreshReport, error)
 }
 
 // WithAuditReader enables audit log read endpoints.
@@ -147,6 +180,13 @@ func WithGuardrailService(service *guardrails.Service) Option {
 func WithDashboardRuntimeConfig(values DashboardConfigResponse) Option {
 	return func(h *Handler) {
 		h.runtimeConfig = normalizeDashboardRuntimeConfig(values)
+	}
+}
+
+// WithRuntimeRefresher enables manual runtime refresh from the admin API.
+func WithRuntimeRefresher(refresher RuntimeRefresher) Option {
+	return func(h *Handler) {
+		h.runtimeRefresher = refresher
 	}
 }
 
@@ -839,6 +879,28 @@ func (h *Handler) DashboardConfig(c *echo.Context) error {
 // ProviderStatus handles GET /admin/api/v1/providers/status
 func (h *Handler) ProviderStatus(c *echo.Context) error {
 	return c.JSON(http.StatusOK, h.buildProviderStatusResponse())
+}
+
+// RefreshRuntime handles POST /admin/api/v1/runtime/refresh
+func (h *Handler) RefreshRuntime(c *echo.Context) error {
+	if h.runtimeRefresher == nil {
+		return handleError(c, featureUnavailableError("runtime refresh is unavailable"))
+	}
+
+	report, err := h.runtimeRefresher.RefreshRuntime(c.Request().Context())
+	if err != nil {
+		if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
+			return handleError(c, gatewayErr)
+		}
+		return handleError(c, core.NewProviderError("runtime_refresh", http.StatusInternalServerError, "runtime refresh failed", err))
+	}
+	if report.Status == "" {
+		report.Status = RuntimeRefreshStatusOK
+	}
+	if report.Steps == nil {
+		report.Steps = []RuntimeRefreshStep{}
+	}
+	return c.JSON(http.StatusOK, report)
 }
 
 func (h *Handler) buildProviderStatusResponse() providerStatusResponse {

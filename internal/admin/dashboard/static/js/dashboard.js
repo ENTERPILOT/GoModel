@@ -31,6 +31,10 @@ function dashboard() {
         theme: 'system',
         sidebarCollapsed: false,
         settingsSubpage: 'general',
+        runtimeRefreshLoading: false,
+        runtimeRefreshNotice: '',
+        runtimeRefreshError: '',
+        runtimeRefreshReport: null,
 
         // Date picker
         datePickerOpen: false,
@@ -307,10 +311,7 @@ function dashboard() {
             return Boolean(error) && (error.name === 'AbortError' || error.code === 20);
         },
 
-        async fetchAll() {
-            this.loading = true;
-            this.authError = false;
-            this.needsAuth = false;
+        dashboardDataFetches() {
             const requests = [this.fetchUsage(), this.fetchModels(), this.fetchCategories()];
             if (typeof this.fetchProviderStatus === 'function') {
                 requests.push(this.fetchProviderStatus());
@@ -327,8 +328,105 @@ function dashboard() {
             if (this.hasCalendarModule && typeof this.fetchCalendarData === 'function') {
                 requests.push(this.fetchCalendarData());
             }
+            return requests;
+        },
+
+        async fetchAll() {
+            this.loading = true;
+            this.authError = false;
+            this.needsAuth = false;
+            const requests = this.dashboardDataFetches();
             await Promise.all(requests);
             this.loading = false;
+        },
+
+        async refreshRuntime() {
+            if (this.runtimeRefreshLoading) {
+                return;
+            }
+            this.runtimeRefreshLoading = true;
+            this.runtimeRefreshNotice = '';
+            this.runtimeRefreshError = '';
+            this.runtimeRefreshReport = null;
+
+            try {
+                const res = await fetch('/admin/api/v1/runtime/refresh', {
+                    method: 'POST',
+                    headers: this.headers()
+                });
+                if (!this.handleFetchResponse(res, 'runtime refresh')) {
+                    this.runtimeRefreshNotice = 'Runtime refresh failed.';
+                    this.runtimeRefreshError = this.runtimeRefreshNotice;
+                    return;
+                }
+
+                const payload = await res.json();
+                this.runtimeRefreshReport = payload && typeof payload === 'object' ? payload : null;
+                this.runtimeRefreshNotice = this.runtimeRefreshSummary();
+                await this.refreshDashboardDataAfterRuntimeRefresh();
+            } catch (e) {
+                console.error('Failed to refresh runtime:', e);
+                this.runtimeRefreshNotice = 'Runtime refresh failed.';
+                this.runtimeRefreshError = this.runtimeRefreshNotice;
+            } finally {
+                this.runtimeRefreshLoading = false;
+            }
+        },
+
+        async refreshDashboardDataAfterRuntimeRefresh() {
+            const requests = this.dashboardDataFetches();
+            if (this.page === 'audit-logs' && typeof this.fetchAuditLog === 'function') {
+                requests.push(this.fetchAuditLog(true));
+            }
+            if (this.page === 'auth-keys' && typeof this.fetchAuthKeys === 'function') {
+                requests.push(this.fetchAuthKeys());
+            }
+            if (this.page === 'guardrails' && typeof this.fetchGuardrailsPage === 'function') {
+                requests.push(this.fetchGuardrailsPage());
+            }
+            if (this.page === 'usage' && typeof this.fetchUsagePage === 'function') {
+                requests.push(this.fetchUsagePage());
+            }
+            await Promise.all(requests);
+        },
+
+        runtimeRefreshStatus() {
+            const report = this.runtimeRefreshReport;
+            return String((report && report.status) || 'ok').toLowerCase();
+        },
+
+        runtimeRefreshSummary() {
+            const report = this.runtimeRefreshReport;
+            if (!report || typeof report !== 'object') {
+                return 'Runtime refresh completed.';
+            }
+            const modelCount = Number(report.model_count || 0);
+            const providerCount = Number(report.provider_count || 0);
+            const status = this.runtimeRefreshStatus();
+            const prefix = status === 'ok'
+                ? 'Runtime refreshed.'
+                : status === 'partial'
+                    ? 'Runtime refresh completed with warnings.'
+                    : 'Runtime refresh failed.';
+            return prefix + ' ' + modelCount + ' model' + (modelCount === 1 ? '' : 's') +
+                ' across ' + providerCount + ' provider' + (providerCount === 1 ? '' : 's') + '.';
+        },
+
+        runtimeRefreshSucceeded() {
+            return Boolean(this.runtimeRefreshReport) && this.runtimeRefreshStatus() === 'ok';
+        },
+
+        runtimeRefreshWarnings() {
+            return Boolean(this.runtimeRefreshReport) && this.runtimeRefreshStatus() !== 'ok';
+        },
+
+        runtimeRefreshStepLabel(step) {
+            const name = String(step && step.name || '').replace(/_/g, ' ');
+            const status = String(step && step.status || '').trim();
+            const detail = String((step && (step.error || step.message)) || '').trim();
+            if (!name) return detail || status || '';
+            if (!detail) return name + ': ' + status;
+            return name + ': ' + status + ' - ' + detail;
         },
 
         handleFetchResponse(res, label) {

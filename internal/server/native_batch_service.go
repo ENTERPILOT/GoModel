@@ -13,6 +13,7 @@ import (
 
 	"gomodel/internal/auditlog"
 	batchstore "gomodel/internal/batch"
+	"gomodel/internal/batchrewrite"
 	"gomodel/internal/core"
 )
 
@@ -69,7 +70,7 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 			if prepared.Request != nil {
 				forward = prepared.Request
 			}
-			batchPreparation.RecordInputFileRewrite(prepared.OriginalInputFileID, prepared.RewrittenInputFileID)
+			batchrewrite.RecordResult(ctx, prepared)
 			preparedHints = prepared.RequestEndpointHints
 		}
 	}
@@ -124,7 +125,7 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 	resp.Metadata = sanitizePublicBatchMetadata(resp.Metadata)
 
 	if s.batchStore != nil {
-		mergedHints := mergeBatchRequestEndpointHints(preparedHints, hints)
+		mergedHints := batchrewrite.MergeEndpointHints(preparedHints, hints)
 		stored := &batchstore.StoredBatch{
 			Batch:                     &resp,
 			RequestEndpointByCustomID: mergedHints,

@@ -2952,6 +2952,60 @@ body.conversation-drawer-open {
     width: 100%;
 }
 
+.settings-refresh-section {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 24px;
+    padding-top: 22px;
+    border-top: 1px solid var(--border);
+}
+
+.settings-refresh-section h3 {
+    margin-bottom: 6px;
+    font-size: 18px;
+}
+
+.settings-refresh-section p {
+    max-width: 720px;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.55;
+}
+
+.settings-refresh-alert {
+    margin-top: 16px;
+    margin-bottom: 0;
+}
+
+.settings-refresh-loading {
+    justify-content: flex-start;
+    min-height: 52px;
+    margin-top: 14px;
+}
+
+.runtime-refresh-steps {
+    display: grid;
+    gap: 8px;
+    margin-top: 14px;
+    padding-left: 18px;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+.runtime-refresh-step.is-ok {
+    color: var(--success);
+}
+
+.runtime-refresh-step.is-partial {
+    color: var(--warning);
+}
+
+.runtime-refresh-step.is-failed {
+    color: var(--danger);
+}
+
 .page-subtitle {
     margin-top: 6px;
     color: var(--text-muted);
@@ -3316,6 +3370,9 @@ body.conversation-drawer-open {
     }
     .settings-form-grid {
         grid-template-columns: 1fr;
+    }
+    .settings-refresh-section {
+        flex-direction: column;
     }
 
     /* Date picker mobile */

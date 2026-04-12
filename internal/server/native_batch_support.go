@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"maps"
 	"math"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 
 	"gomodel/internal/auditlog"
 	batchstore "gomodel/internal/batch"
+	"gomodel/internal/batchrewrite"
 	"gomodel/internal/core"
 	"gomodel/internal/usage"
 )
@@ -140,22 +140,6 @@ func determineBatchExecutionSelectionWithAuthorizer(
 	}, nil
 }
 
-func mergeBatchRequestEndpointHints(left, right map[string]string) map[string]string {
-	if len(left) == 0 {
-		if len(right) == 0 {
-			return nil
-		}
-		merged := make(map[string]string, len(right))
-		maps.Copy(merged, right)
-		return merged
-	}
-
-	merged := make(map[string]string, len(left))
-	maps.Copy(merged, left)
-	maps.Copy(merged, right)
-	return merged
-}
-
 func (h *Handler) cleanupPreparedBatchInputFile(ctx context.Context, providerType, fileID string) {
 	fileID = strings.TrimSpace(fileID)
 	if fileID == "" {
@@ -165,9 +149,7 @@ func (h *Handler) cleanupPreparedBatchInputFile(ctx context.Context, providerTyp
 	if !ok {
 		return
 	}
-	if _, err := files.DeleteFile(ctx, providerType, fileID); err != nil {
-		slog.Warn("failed to delete rewritten batch input file", "provider", providerType, "file_id", fileID, "error", err)
-	}
+	batchrewrite.CleanupFile(ctx, files, providerType, fileID, "")
 }
 
 func (h *Handler) loadBatch(c *echo.Context, id string) (*batchstore.StoredBatch, error) {
@@ -599,14 +581,7 @@ func (h *Handler) cleanupStoredBatchRewrittenInputFile(ctx context.Context, stor
 	if err != nil {
 		return false
 	}
-	if _, err := nativeFiles.DeleteFile(ctx, stored.Batch.Provider, fileID); err != nil {
-		slog.Warn(
-			"failed to delete rewritten batch input file",
-			"batch_id", stored.Batch.ID,
-			"provider", stored.Batch.Provider,
-			"file_id", fileID,
-			"error", err,
-		)
+	if !batchrewrite.CleanupFile(ctx, nativeFiles, stored.Batch.Provider, fileID, "", "batch_id", stored.Batch.ID) {
 		return false
 	}
 	stored.RewrittenInputFileID = ""

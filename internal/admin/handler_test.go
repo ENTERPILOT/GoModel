@@ -49,6 +49,17 @@ type mockAuditReader struct {
 	lastConversationLim int
 }
 
+type mockRuntimeRefresher struct {
+	report RuntimeRefreshReport
+	err    error
+	calls  int
+}
+
+func (m *mockRuntimeRefresher) RefreshRuntime(_ context.Context) (RuntimeRefreshReport, error) {
+	m.calls++
+	return m.report, m.err
+}
+
 func (m *mockUsageReader) GetSummary(_ context.Context, _ usage.UsageQueryParams) (*usage.UsageSummary, error) {
 	if m.summaryErr != nil {
 		return nil, m.summaryErr
@@ -1611,6 +1622,132 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	}
 	if rec.Body.String() == "" || strings.Contains(rec.Body.String(), "UNRELATED_FLAG") {
 		t.Fatal("UNRELATED_FLAG should not be exposed")
+	}
+}
+
+func TestRefreshRuntime_ReturnsReport(t *testing.T) {
+	started := time.Date(2026, 4, 11, 12, 0, 0, 0, time.UTC)
+	refresher := &mockRuntimeRefresher{
+		report: RuntimeRefreshReport{
+			Status:        RuntimeRefreshStatusPartial,
+			StartedAt:     started,
+			FinishedAt:    started.Add(2 * time.Second),
+			DurationMS:    2000,
+			ModelCount:    7,
+			ProviderCount: 2,
+			Steps: []RuntimeRefreshStep{
+				{Name: "providers", Status: RuntimeRefreshStatusPartial, Error: "one provider failed"},
+			},
+		},
+	}
+	h := NewHandler(nil, nil, WithRuntimeRefresher(refresher))
+	c, rec := newHandlerContext("/admin/api/v1/runtime/refresh")
+	c.Request().Method = http.MethodPost
+
+	if err := h.RefreshRuntime(c); err != nil {
+		t.Fatalf("RefreshRuntime() error = %v", err)
+	}
+	if refresher.calls != 1 {
+		t.Fatalf("RefreshRuntime calls = %d, want 1", refresher.calls)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var body RuntimeRefreshReport
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Status != RuntimeRefreshStatusPartial {
+		t.Fatalf("status = %q, want partial", body.Status)
+	}
+	if body.ModelCount != 7 || body.ProviderCount != 2 {
+		t.Fatalf("counts = %d/%d, want 7/2", body.ModelCount, body.ProviderCount)
+	}
+	if len(body.Steps) != 1 || body.Steps[0].Error != "one provider failed" {
+		t.Fatalf("steps = %+v, want provider warning", body.Steps)
+	}
+}
+
+func TestRefreshRuntime_FeatureUnavailableWhenNotConfigured(t *testing.T) {
+	h := NewHandler(nil, nil)
+	c, rec := newHandlerContext("/admin/api/v1/runtime/refresh")
+	c.Request().Method = http.MethodPost
+
+	if err := h.RefreshRuntime(c); err != nil {
+		t.Fatalf("RefreshRuntime() error = %v", err)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	rawError, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error object missing or invalid: %#v", body["error"])
+	}
+	for _, key := range []string{"type", "message", "param", "code"} {
+		if _, ok := rawError[key]; !ok {
+			t.Fatalf("error.%s missing from response: %#v", key, rawError)
+		}
+	}
+	if rawError["type"] != string(core.ErrorTypeInvalidRequest) {
+		t.Fatalf("error.type = %#v, want %q", rawError["type"], core.ErrorTypeInvalidRequest)
+	}
+	if rawError["message"] != "runtime refresh is unavailable" {
+		t.Fatalf("error.message = %#v, want runtime refresh is unavailable", rawError["message"])
+	}
+	if rawError["param"] != nil {
+		t.Fatalf("error.param = %#v, want null", rawError["param"])
+	}
+	if rawError["code"] != "feature_unavailable" {
+		t.Fatalf("error.code = %#v, want feature_unavailable", rawError["code"])
+	}
+}
+
+func TestRefreshRuntime_PreservesGatewayError(t *testing.T) {
+	refresher := &mockRuntimeRefresher{
+		err: core.NewInvalidRequestErrorWithStatus(http.StatusRequestTimeout, "runtime refresh canceled before start", context.Canceled).
+			WithCode("request_canceled"),
+	}
+	h := NewHandler(nil, nil, WithRuntimeRefresher(refresher))
+	c, rec := newHandlerContext("/admin/api/v1/runtime/refresh")
+	c.Request().Method = http.MethodPost
+
+	if err := h.RefreshRuntime(c); err != nil {
+		t.Fatalf("RefreshRuntime() error = %v", err)
+	}
+	if rec.Code != http.StatusRequestTimeout {
+		t.Fatalf("status = %d, want 408", rec.Code)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	rawError, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error object missing or invalid: %#v", body["error"])
+	}
+	for _, key := range []string{"type", "message", "param", "code"} {
+		if _, ok := rawError[key]; !ok {
+			t.Fatalf("error.%s missing from response: %#v", key, rawError)
+		}
+	}
+	if rawError["type"] != string(core.ErrorTypeInvalidRequest) {
+		t.Fatalf("error.type = %#v, want %q", rawError["type"], core.ErrorTypeInvalidRequest)
+	}
+	if rawError["message"] != "runtime refresh canceled before start" {
+		t.Fatalf("error.message = %#v, want preserved message", rawError["message"])
+	}
+	if rawError["param"] != nil {
+		t.Fatalf("error.param = %#v, want null", rawError["param"])
+	}
+	if rawError["code"] != "request_canceled" {
+		t.Fatalf("error.code = %#v, want request_canceled", rawError["code"])
 	}
 }
 

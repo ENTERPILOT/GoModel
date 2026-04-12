@@ -48,11 +48,13 @@ type App struct {
 	executionPlans *executionplans.Result
 	server         *server.Server
 
-	shutdownMu sync.Mutex
-	shutdown   bool
-	serverMu   sync.Mutex
-	serverStop context.CancelFunc
-	serverDone chan error
+	shutdownMu  sync.Mutex
+	shutdown    bool
+	serverMu    sync.Mutex
+	serverStop  context.CancelFunc
+	serverDone  chan error
+	refreshCh   chan struct{}
+	refreshOnce sync.Once
 }
 
 // Config holds the configuration options for creating an App.
@@ -368,6 +370,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			app.modelOverrides.Service,
 			executionPlanResult.Service,
 			app.guardrails.Service,
+			app,
 			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard),
 			adminCfg.UIEnabled,
 		)
@@ -746,6 +749,7 @@ func initAdmin(
 	modelOverrideService *modeloverrides.Service,
 	executionPlanService *executionplans.Service,
 	guardrailService *guardrails.Service,
+	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
 	uiEnabled bool,
 ) (*admin.Handler, *dashboard.Handler, error) {
@@ -788,6 +792,7 @@ func initAdmin(
 		admin.WithModelOverrides(modelOverrideService),
 		admin.WithExecutionPlans(executionPlanService),
 		admin.WithGuardrailService(guardrailService),
+		admin.WithRuntimeRefresher(runtimeRefresher),
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
 	)
 

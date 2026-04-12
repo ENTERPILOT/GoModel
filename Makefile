@@ -1,4 +1,4 @@
-.PHONY: all build run clean tidy test test-e2e test-integration test-contract test-all lint lint-fix record-api swagger install-tools perf-check perf-bench infra image
+.PHONY: all build run clean tidy test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix record-api swagger install-tools perf-check perf-bench infra image
 
 all: build
 
@@ -41,7 +41,15 @@ image:
 
 # Run unit tests only
 test:
-	go test ./internal/... ./config/... -v
+	go test ./cmd/... ./internal/... ./config/... -v
+
+# Run unit tests with race detection and coverage
+test-race:
+	go test -v -race -coverprofile=coverage.out ./cmd/... ./internal/... ./config/...
+
+# Run dashboard JavaScript unit tests
+test-dashboard:
+	node --test internal/admin/dashboard/static/js/modules/*.test.js
 
 # Run e2e tests (uses an in-process mock LLM server; no Docker required)
 test-e2e:
@@ -55,8 +63,8 @@ test-integration:
 test-contract:
 	go test -v -tags=contract -timeout=5m ./tests/contract/...
 
-# Run all tests including e2e, integration, and contract tests
-test-all: test test-e2e test-integration test-contract
+# Run all tests including dashboard, e2e, integration, and contract tests
+test-all: test test-dashboard test-e2e test-integration test-contract
 
 perf-check:
 	go test -run '^TestHotPathPerfGuard$$' -count=1 -v ./tests/perf/...

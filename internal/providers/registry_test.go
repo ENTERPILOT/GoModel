@@ -384,6 +384,122 @@ func TestModelRegistry(t *testing.T) {
 		}
 	})
 
+	t.Run("RefreshModelListDownloadsAndEnrichesCurrentModels", func(t *testing.T) {
+		registry := NewModelRegistry()
+		mock := &registryMockProvider{
+			name: "openai-provider",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{
+						ID:      "gpt-test",
+						Object:  "model",
+						OwnedBy: "openai",
+					},
+				},
+			},
+		}
+		registry.RegisterProviderWithType(mock, "openai")
+		if err := registry.Initialize(context.Background()); err != nil {
+			t.Fatalf("Initialize() error = %v", err)
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"version": 1,
+				"updated_at": "2026-04-11T00:00:00Z",
+				"providers": {
+					"openai": {
+						"display_name": "OpenAI",
+						"api_type": "openai",
+						"supported_modes": ["chat"]
+					}
+				},
+				"models": {
+					"gpt-test": {
+						"display_name": "GPT Test",
+						"modes": ["chat"],
+						"capabilities": {"tool_calling": true}
+					}
+				},
+				"provider_models": {}
+			}`))
+		}))
+		defer server.Close()
+
+		count, err := registry.RefreshModelList(context.Background(), server.URL)
+		if err != nil {
+			t.Fatalf("RefreshModelList() error = %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("RefreshModelList() count = %d, want 1", count)
+		}
+
+		info := registry.GetModel("gpt-test")
+		if info == nil || info.Model.Metadata == nil {
+			t.Fatal("expected refreshed model metadata")
+		}
+		if info.Model.Metadata.DisplayName != "GPT Test" {
+			t.Fatalf("DisplayName = %q, want GPT Test", info.Model.Metadata.DisplayName)
+		}
+		if !info.Model.Metadata.Capabilities["tool_calling"] {
+			t.Fatal("expected tool_calling capability from refreshed model list")
+		}
+	})
+
+	t.Run("InitializeReturnsGatewayErrorWhenContextCanceledBeforeAcquire", func(t *testing.T) {
+		registry := NewModelRegistry()
+		ch := registry.refreshSemaphore()
+		ch <- struct{}{}
+		defer func() { <-ch }()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := registry.Initialize(ctx)
+		if err == nil {
+			t.Fatal("Initialize() error = nil, want cancellation error")
+		}
+
+		var gatewayErr *core.GatewayError
+		if !errors.As(err, &gatewayErr) {
+			t.Fatalf("Initialize() error = %T, want *core.GatewayError", err)
+		}
+		if gatewayErr.HTTPStatusCode() != http.StatusRequestTimeout {
+			t.Fatalf("status = %d, want 408", gatewayErr.HTTPStatusCode())
+		}
+		if gatewayErr.Provider != "model_registry" {
+			t.Fatalf("provider = %q, want model_registry", gatewayErr.Provider)
+		}
+	})
+
+	t.Run("RefreshModelListReturnsGatewayErrorWhenContextCanceledBeforeAcquire", func(t *testing.T) {
+		registry := NewModelRegistry()
+		ch := registry.refreshSemaphore()
+		ch <- struct{}{}
+		defer func() { <-ch }()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := registry.RefreshModelList(ctx, "https://example.test/models.min.json")
+		if err == nil {
+			t.Fatal("RefreshModelList() error = nil, want cancellation error")
+		}
+
+		var gatewayErr *core.GatewayError
+		if !errors.As(err, &gatewayErr) {
+			t.Fatalf("RefreshModelList() error = %T, want *core.GatewayError", err)
+		}
+		if gatewayErr.HTTPStatusCode() != http.StatusRequestTimeout {
+			t.Fatalf("status = %d, want 408", gatewayErr.HTTPStatusCode())
+		}
+		if gatewayErr.Provider != "model_registry" {
+			t.Fatalf("provider = %q, want model_registry", gatewayErr.Provider)
+		}
+	})
+
 	t.Run("DuplicateModels", func(t *testing.T) {
 		registry := NewModelRegistry()
 		mock1 := &registryMockProvider{

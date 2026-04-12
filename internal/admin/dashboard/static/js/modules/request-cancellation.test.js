@@ -106,6 +106,67 @@ function jsonResponse(payload) {
     };
 }
 
+test('refreshRuntime posts to admin endpoint and refreshes dashboard data', async() => {
+    const queue = createPendingFetchQueue();
+    const app = loadDashboardApp({ fetch: queue.fetch });
+    let dashboardRefreshes = 0;
+    app.dashboardDataFetches = () => {
+        dashboardRefreshes++;
+        return [Promise.resolve()];
+    };
+
+    const refresh = app.refreshRuntime();
+    assert.equal(app.runtimeRefreshLoading, true);
+    assert.equal(queue.requests.length, 1);
+    assert.equal(queue.requests[0].url, '/admin/api/v1/runtime/refresh');
+    assert.equal(queue.requests[0].options.method, 'POST');
+
+    queue.requests[0].resolve(jsonResponse({
+        status: 'ok',
+        model_count: 4,
+        provider_count: 2,
+        steps: [{ name: 'providers', status: 'ok', message: 'refreshed' }]
+    }));
+    await refresh;
+
+    assert.equal(app.runtimeRefreshLoading, false);
+    assert.equal(dashboardRefreshes, 1);
+    assert.equal(app.runtimeRefreshSucceeded(), true);
+    assert.equal(app.runtimeRefreshNotice, 'Runtime refreshed. 4 models across 2 providers.');
+    assert.equal(app.runtimeRefreshStepLabel(app.runtimeRefreshReport.steps[0]), 'providers: ok - refreshed');
+});
+
+test('refreshRuntime leaves dashboard data untouched when the admin request fails', async() => {
+    const queue = createPendingFetchQueue();
+    const app = loadDashboardApp({ fetch: queue.fetch });
+    let dashboardRefreshes = 0;
+    app.dashboardDataFetches = () => {
+        dashboardRefreshes++;
+        return [Promise.resolve()];
+    };
+
+    const refresh = app.refreshRuntime();
+    assert.equal(app.runtimeRefreshLoading, true);
+    assert.equal(queue.requests.length, 1);
+    assert.equal(queue.requests[0].url, '/admin/api/v1/runtime/refresh');
+    assert.equal(queue.requests[0].options.method, 'POST');
+
+    queue.requests[0].resolve({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        json: async() => ({})
+    });
+    await refresh;
+
+    assert.equal(app.runtimeRefreshLoading, false);
+    assert.equal(dashboardRefreshes, 0);
+    assert.equal(app.runtimeRefreshSucceeded(), false);
+    assert.equal(app.authError, true);
+    assert.equal(app.needsAuth, true);
+    assert.match(app.runtimeRefreshNotice, /Runtime refresh failed/);
+});
+
 function loadDashboardApp(overrides = {}) {
     const sources = [
         fs.readFileSync(path.join(__dirname, 'usage.js'), 'utf8'),

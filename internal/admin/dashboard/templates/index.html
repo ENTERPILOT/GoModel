@@ -421,6 +421,8 @@
         </div>
     </div>
 
+    {{template "auth-banner" .}}
+
     <div class="settings-subnav">
         <button type="button" class="settings-subnav-btn active" @click="navigateSettings('general')">General</button>
     </div>
@@ -443,6 +445,48 @@
         </div>
         <div class="alias-form-actions">
             <button type="button" class="pagination-btn" x-show="timezoneOverride" @click="clearTimezoneOverride()">Use Browser Timezone</button>
+        </div>
+
+        <div class="settings-refresh-section">
+            <div>
+                <h3>Runtime Refresh</h3>
+                <p>Pull the latest model metadata, provider inventory, API keys, aliases, model access rules, guardrails, and workflows.</p>
+            </div>
+            <button type="button"
+                    class="pagination-btn pagination-btn-primary"
+                    :disabled="runtimeRefreshLoading"
+                    @click="refreshRuntime()"
+                    x-text="runtimeRefreshLoading ? 'Refreshing...' : 'Refresh Runtime'"></button>
+        </div>
+
+        <div class="loading-state settings-refresh-loading"
+             x-show="runtimeRefreshLoading"
+             role="status"
+             aria-live="polite">
+            <span class="loading-spinner" aria-hidden="true"></span>
+            <span>Generating runtime report...</span>
+        </div>
+        <div>
+            <div class="alert alert-success settings-refresh-alert"
+                 role="status"
+                 aria-live="polite"
+                 aria-atomic="true"
+                 x-show="runtimeRefreshNotice && runtimeRefreshSucceeded()"
+                 x-text="runtimeRefreshNotice"></div>
+            <div class="alert alert-warning settings-refresh-alert"
+                 role="alert"
+                 aria-live="assertive"
+                 aria-atomic="true"
+                 x-show="runtimeRefreshError || (runtimeRefreshNotice && runtimeRefreshWarnings())"
+                 x-text="runtimeRefreshError || runtimeRefreshNotice"></div>
+            <ul class="runtime-refresh-steps"
+                role="status"
+                aria-live="polite"
+                x-show="runtimeRefreshReport && runtimeRefreshReport.steps && runtimeRefreshReport.steps.length > 0">
+                <template x-for="step in runtimeRefreshReport.steps" :key="step.name">
+                    <li :class="'runtime-refresh-step is-' + step.status" x-text="runtimeRefreshStepLabel(step)"></li>
+                </template>
+            </ul>
         </div>
     </div>
 </div>
