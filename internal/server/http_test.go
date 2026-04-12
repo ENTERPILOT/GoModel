@@ -470,8 +470,8 @@ func TestAdminExecutionPlanEndpoints_AreRegistered(t *testing.T) {
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 
-		if rec.Code == http.StatusNotFound {
-			t.Fatalf("%s %s returned 404, want registered route", tc.method, tc.path)
+		if rec.Code == http.StatusNotFound || rec.Code == http.StatusMethodNotAllowed {
+			t.Fatalf("%s %s returned %d, want registered route and method", tc.method, tc.path, rec.Code)
 		}
 	}
 }

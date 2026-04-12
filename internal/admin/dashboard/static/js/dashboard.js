@@ -350,17 +350,19 @@ function dashboard() {
                     headers: this.headers()
                 });
                 if (!this.handleFetchResponse(res, 'runtime refresh')) {
-                    this.runtimeRefreshError = 'Runtime refresh failed.';
+                    this.runtimeRefreshNotice = 'Runtime refresh failed.';
+                    this.runtimeRefreshError = this.runtimeRefreshNotice;
                     return;
                 }
 
                 const payload = await res.json();
                 this.runtimeRefreshReport = payload && typeof payload === 'object' ? payload : null;
-                this.runtimeRefreshNotice = this.runtimeRefreshSummary(this.runtimeRefreshReport);
+                this.runtimeRefreshNotice = this.runtimeRefreshSummary();
                 await this.refreshDashboardDataAfterRuntimeRefresh();
             } catch (e) {
                 console.error('Failed to refresh runtime:', e);
-                this.runtimeRefreshError = 'Runtime refresh failed.';
+                this.runtimeRefreshNotice = 'Runtime refresh failed.';
+                this.runtimeRefreshError = this.runtimeRefreshNotice;
             } finally {
                 this.runtimeRefreshLoading = false;
             }
@@ -383,13 +385,19 @@ function dashboard() {
             await Promise.all(requests);
         },
 
-        runtimeRefreshSummary(report) {
+        runtimeRefreshStatus() {
+            const report = this.runtimeRefreshReport;
+            return String((report && report.status) || 'ok').toLowerCase();
+        },
+
+        runtimeRefreshSummary() {
+            const report = this.runtimeRefreshReport;
             if (!report || typeof report !== 'object') {
                 return 'Runtime refresh completed.';
             }
             const modelCount = Number(report.model_count || 0);
             const providerCount = Number(report.provider_count || 0);
-            const status = String(report.status || 'ok').toLowerCase();
+            const status = this.runtimeRefreshStatus();
             const prefix = status === 'ok'
                 ? 'Runtime refreshed.'
                 : status === 'partial'
@@ -400,11 +408,11 @@ function dashboard() {
         },
 
         runtimeRefreshSucceeded() {
-            return this.runtimeRefreshReport && String(this.runtimeRefreshReport.status || '').toLowerCase() === 'ok';
+            return Boolean(this.runtimeRefreshReport) && this.runtimeRefreshStatus() === 'ok';
         },
 
         runtimeRefreshWarnings() {
-            return this.runtimeRefreshReport && String(this.runtimeRefreshReport.status || '').toLowerCase() !== 'ok';
+            return Boolean(this.runtimeRefreshReport) && this.runtimeRefreshStatus() !== 'ok';
         },
 
         runtimeRefreshStepLabel(step) {

@@ -45,6 +45,8 @@ test('dashboard templates expose a settings page and timezone context in activit
     assert.match(template, /<h3>Runtime Refresh<\/h3>/);
     assert.match(template, /@click="refreshRuntime\(\)"/);
     assert.match(template, /x-text="runtimeRefreshLoading \? 'Refreshing\.\.\.' : 'Refresh Runtime'"/);
+    assert.match(template, /class="loading-state settings-refresh-loading"[\s\S]*x-show="runtimeRefreshLoading"[\s\S]*class="loading-spinner"[\s\S]*Generating runtime report\.\.\./);
+    assert.match(template, /role="status" aria-live="polite" aria-atomic="true"[\s\S]*runtimeRefreshSucceeded\(\)[\s\S]*runtimeRefreshWarnings\(\)[\s\S]*runtimeRefreshStepLabel\(step\)/);
     assert.match(template, /runtimeRefreshReport\.steps/);
     assert.match(template, /{{template "helper-disclosure" "\{ heading: 'Timezone', open: false, copyId: 'timezone-help-copy'/);
     assert.match(template, /class="inline-help-toggle"/);
@@ -108,6 +110,16 @@ test('dashboard templates expose a settings page and timezone context in activit
     const refreshRule = readCSSRule(css, '.settings-refresh-section');
     assert.match(refreshRule, /border-top:\s*1px solid var\(--border\)/);
     assert.match(refreshRule, /justify-content:\s*space-between/);
+
+    const refreshLoadingRule = readCSSRule(css, '.settings-refresh-loading');
+    assert.match(refreshLoadingRule, /justify-content:\s*flex-start/);
+    assert.match(refreshLoadingRule, /min-height:\s*52px/);
+
+    const refreshPartialRule = readCSSRule(css, '.runtime-refresh-step.is-partial');
+    assert.match(refreshPartialRule, /color:\s*var\(--warning\)/);
+
+    const refreshFailedRule = readCSSRule(css, '.runtime-refresh-step.is-failed');
+    assert.match(refreshFailedRule, /color:\s*var\(--danger\)/);
 });
 
 test('guardrails authoring moved to a top-level page while settings keeps the general switch', () => {

@@ -448,6 +448,58 @@ func TestModelRegistry(t *testing.T) {
 		}
 	})
 
+	t.Run("InitializeReturnsGatewayErrorWhenContextCanceledBeforeAcquire", func(t *testing.T) {
+		registry := NewModelRegistry()
+		ch := registry.refreshSemaphore()
+		ch <- struct{}{}
+		defer func() { <-ch }()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := registry.Initialize(ctx)
+		if err == nil {
+			t.Fatal("Initialize() error = nil, want cancellation error")
+		}
+
+		var gatewayErr *core.GatewayError
+		if !errors.As(err, &gatewayErr) {
+			t.Fatalf("Initialize() error = %T, want *core.GatewayError", err)
+		}
+		if gatewayErr.HTTPStatusCode() != http.StatusRequestTimeout {
+			t.Fatalf("status = %d, want 408", gatewayErr.HTTPStatusCode())
+		}
+		if gatewayErr.Provider != "model_registry" {
+			t.Fatalf("provider = %q, want model_registry", gatewayErr.Provider)
+		}
+	})
+
+	t.Run("RefreshModelListReturnsGatewayErrorWhenContextCanceledBeforeAcquire", func(t *testing.T) {
+		registry := NewModelRegistry()
+		ch := registry.refreshSemaphore()
+		ch <- struct{}{}
+		defer func() { <-ch }()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := registry.RefreshModelList(ctx, "https://example.test/models.min.json")
+		if err == nil {
+			t.Fatal("RefreshModelList() error = nil, want cancellation error")
+		}
+
+		var gatewayErr *core.GatewayError
+		if !errors.As(err, &gatewayErr) {
+			t.Fatalf("RefreshModelList() error = %T, want *core.GatewayError", err)
+		}
+		if gatewayErr.HTTPStatusCode() != http.StatusRequestTimeout {
+			t.Fatalf("status = %d, want 408", gatewayErr.HTTPStatusCode())
+		}
+		if gatewayErr.Provider != "model_registry" {
+			t.Fatalf("provider = %q, want model_registry", gatewayErr.Provider)
+		}
+	})
+
 	t.Run("DuplicateModels", func(t *testing.T) {
 		registry := NewModelRegistry()
 		mock1 := &registryMockProvider{

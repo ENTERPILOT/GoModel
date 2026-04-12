@@ -2,11 +2,14 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	"gomodel/internal/admin"
+	"gomodel/internal/core"
 	"gomodel/internal/providers"
 )
 
@@ -28,8 +31,11 @@ func (a *App) RefreshRuntime(ctx context.Context) (admin.RuntimeRefreshReport, e
 		ctx = context.Background()
 	}
 
-	a.refreshMu.Lock()
-	defer a.refreshMu.Unlock()
+	release, err := a.acquireRuntimeRefresh(ctx)
+	if err != nil {
+		return admin.RuntimeRefreshReport{}, err
+	}
+	defer release()
 
 	startedAt := time.Now().UTC()
 	report := admin.RuntimeRefreshReport{
@@ -221,6 +227,38 @@ func pluralSuffix(count int) string {
 		return ""
 	}
 	return "s"
+}
+
+func (a *App) acquireRuntimeRefresh(ctx context.Context) (func(), error) {
+	if a == nil {
+		return nil, core.NewProviderError("runtime_refresh", http.StatusInternalServerError, "runtime refresh is unavailable", nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, runtimeRefreshAcquireError(err)
+	}
+	ch := a.runtimeRefreshSemaphore()
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, nil
+	case <-ctx.Done():
+		return nil, runtimeRefreshAcquireError(ctx.Err())
+	}
+}
+
+func (a *App) runtimeRefreshSemaphore() chan struct{} {
+	a.refreshOnce.Do(func() {
+		if a.refreshCh == nil {
+			a.refreshCh = make(chan struct{}, 1)
+		}
+	})
+	return a.refreshCh
+}
+
+func runtimeRefreshAcquireError(err error) *core.GatewayError {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return core.NewProviderError("runtime_refresh", http.StatusGatewayTimeout, "runtime refresh timed out before start", err)
+	}
+	return core.NewProviderError("runtime_refresh", http.StatusRequestTimeout, "runtime refresh canceled before start", err)
 }
 
 func (a *App) modelRegistry() *providers.ModelRegistry {

@@ -331,6 +331,8 @@
         </div>
     </div>
 
+    {{template "auth-banner" .}}
+
     <div class="settings-subnav">
         <button type="button" class="settings-subnav-btn active" @click="navigateSettings('general')">General</button>
     </div>
@@ -367,18 +369,27 @@
                     x-text="runtimeRefreshLoading ? 'Refreshing...' : 'Refresh Runtime'"></button>
         </div>
 
-        <div class="alert alert-success settings-refresh-alert"
-             x-show="runtimeRefreshNotice && runtimeRefreshSucceeded()"
-             x-text="runtimeRefreshNotice"></div>
-        <div class="alert alert-warning settings-refresh-alert"
-             x-show="runtimeRefreshError || (runtimeRefreshNotice && runtimeRefreshWarnings())"
-             x-text="runtimeRefreshError || runtimeRefreshNotice"></div>
-        <ul class="runtime-refresh-steps"
-            x-show="runtimeRefreshReport && runtimeRefreshReport.steps && runtimeRefreshReport.steps.length > 0">
-            <template x-for="step in runtimeRefreshReport.steps" :key="step.name">
-                <li :class="'runtime-refresh-step is-' + step.status" x-text="runtimeRefreshStepLabel(step)"></li>
-            </template>
-        </ul>
+        <div class="loading-state settings-refresh-loading"
+             x-show="runtimeRefreshLoading"
+             role="status"
+             aria-live="polite">
+            <span class="loading-spinner" aria-hidden="true"></span>
+            <span>Generating runtime report...</span>
+        </div>
+        <div role="status" aria-live="polite" aria-atomic="true">
+            <div class="alert alert-success settings-refresh-alert"
+                 x-show="runtimeRefreshNotice && runtimeRefreshSucceeded()"
+                 x-text="runtimeRefreshNotice"></div>
+            <div class="alert alert-warning settings-refresh-alert"
+                 x-show="runtimeRefreshError || (runtimeRefreshNotice && runtimeRefreshWarnings())"
+                 x-text="runtimeRefreshError || runtimeRefreshNotice"></div>
+            <ul class="runtime-refresh-steps"
+                x-show="runtimeRefreshReport && runtimeRefreshReport.steps && runtimeRefreshReport.steps.length > 0">
+                <template x-for="step in runtimeRefreshReport.steps" :key="step.name">
+                    <li :class="'runtime-refresh-step is-' + step.status" x-text="runtimeRefreshStepLabel(step)"></li>
+                </template>
+            </ul>
+        </div>
     </div>
 </div>
 </template>

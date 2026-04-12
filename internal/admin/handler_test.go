@@ -1603,6 +1603,66 @@ func TestRefreshRuntime_FeatureUnavailableWhenNotConfigured(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	rawError, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error object missing or invalid: %#v", body["error"])
+	}
+	for _, key := range []string{"type", "message", "param", "code"} {
+		if _, ok := rawError[key]; !ok {
+			t.Fatalf("error.%s missing from response: %#v", key, rawError)
+		}
+	}
+	if rawError["type"] != string(core.ErrorTypeInvalidRequest) {
+		t.Fatalf("error.type = %#v, want %q", rawError["type"], core.ErrorTypeInvalidRequest)
+	}
+	if rawError["message"] != "runtime refresh is unavailable" {
+		t.Fatalf("error.message = %#v, want runtime refresh is unavailable", rawError["message"])
+	}
+	if rawError["param"] != nil {
+		t.Fatalf("error.param = %#v, want null", rawError["param"])
+	}
+	if rawError["code"] != "feature_unavailable" {
+		t.Fatalf("error.code = %#v, want feature_unavailable", rawError["code"])
+	}
+}
+
+func TestRefreshRuntime_PreservesGatewayError(t *testing.T) {
+	refresher := &mockRuntimeRefresher{
+		err: core.NewInvalidRequestErrorWithStatus(http.StatusRequestTimeout, "runtime refresh canceled before start", context.Canceled).
+			WithCode("request_canceled"),
+	}
+	h := NewHandler(nil, nil, WithRuntimeRefresher(refresher))
+	c, rec := newHandlerContext("/admin/api/v1/runtime/refresh")
+
+	if err := h.RefreshRuntime(c); err != nil {
+		t.Fatalf("RefreshRuntime() error = %v", err)
+	}
+	if rec.Code != http.StatusRequestTimeout {
+		t.Fatalf("status = %d, want 408", rec.Code)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	rawError, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error object missing or invalid: %#v", body["error"])
+	}
+	if rawError["type"] != string(core.ErrorTypeInvalidRequest) {
+		t.Fatalf("error.type = %#v, want %q", rawError["type"], core.ErrorTypeInvalidRequest)
+	}
+	if rawError["message"] != "runtime refresh canceled before start" {
+		t.Fatalf("error.message = %#v, want preserved message", rawError["message"])
+	}
+	if rawError["code"] != "request_canceled" {
+		t.Fatalf("error.code = %#v, want request_canceled", rawError["code"])
+	}
 }
 
 func TestCacheOverview_FeatureUnavailableWhenCacheDisabled(t *testing.T) {

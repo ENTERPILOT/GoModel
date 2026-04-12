@@ -2920,6 +2920,12 @@ body.conversation-drawer-open {
     margin-bottom: 0;
 }
 
+.settings-refresh-loading {
+    justify-content: flex-start;
+    min-height: 52px;
+    margin-top: 14px;
+}
+
 .runtime-refresh-steps {
     display: grid;
     gap: 8px;
@@ -2933,9 +2939,12 @@ body.conversation-drawer-open {
     color: var(--success);
 }
 
-.runtime-refresh-step.is-partial,
-.runtime-refresh-step.is-failed {
+.runtime-refresh-step.is-partial {
     color: var(--warning);
+}
+
+.runtime-refresh-step.is-failed {
+    color: var(--danger);
 }
 
 .page-subtitle {

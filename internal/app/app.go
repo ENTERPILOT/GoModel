@@ -48,12 +48,13 @@ type App struct {
 	executionPlans *executionplans.Result
 	server         *server.Server
 
-	shutdownMu sync.Mutex
-	shutdown   bool
-	serverMu   sync.Mutex
-	serverStop context.CancelFunc
-	serverDone chan error
-	refreshMu  sync.Mutex
+	shutdownMu  sync.Mutex
+	shutdown    bool
+	serverMu    sync.Mutex
+	serverStop  context.CancelFunc
+	serverDone  chan error
+	refreshCh   chan struct{}
+	refreshOnce sync.Once
 }
 
 // Config holds the configuration options for creating an App.

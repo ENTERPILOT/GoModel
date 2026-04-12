@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/http"
 	"slices"
 	"sort"
 	"strings"
@@ -41,7 +42,8 @@ type ModelRegistry struct {
 	cache            modelcache.Cache     // cache backend (local or redis)
 	initialized      bool                 // true when at least one successful network fetch completed
 	initMu           sync.Mutex           // protects initialized flag
-	refreshMu        sync.Mutex           // serializes provider/model-list refresh cycles
+	refreshCh        chan struct{}        // serializes provider/model-list refresh cycles
+	refreshOnce      sync.Once            // initializes refreshCh for zero-value safety
 	modelList        *modeldata.ModelList // parsed model list (nil = not loaded)
 	modelListRaw     json.RawMessage      // raw bytes for cache persistence
 
@@ -74,6 +76,7 @@ func NewModelRegistry() *ModelRegistry {
 		providerTypes:    make(map[core.Provider]string),
 		providerNames:    make(map[core.Provider]string),
 		providerRuntime:  make(map[string]providerRuntimeState),
+		refreshCh:        make(chan struct{}, 1),
 	}
 }
 
@@ -131,8 +134,11 @@ func (r *ModelRegistry) RegisterProviderWithNameAndType(provider core.Provider, 
 // Initialize fetches models from all registered providers and populates the registry.
 // This should be called on application startup.
 func (r *ModelRegistry) Initialize(ctx context.Context) error {
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
+	release, err := r.acquireRefresh(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	return r.initialize(ctx)
 }
 
@@ -323,6 +329,38 @@ func (r *ModelRegistry) applyProviderRuntimeUpdatesLocked(updates map[string]pro
 // This can be called periodically to keep the registry up to date.
 func (r *ModelRegistry) Refresh(ctx context.Context) error {
 	return r.Initialize(ctx)
+}
+
+func (r *ModelRegistry) acquireRefresh(ctx context.Context) (func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, registryRefreshAcquireError(err)
+	}
+	ch := r.refreshSemaphore()
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, nil
+	case <-ctx.Done():
+		return nil, registryRefreshAcquireError(ctx.Err())
+	}
+}
+
+func (r *ModelRegistry) refreshSemaphore() chan struct{} {
+	r.refreshOnce.Do(func() {
+		if r.refreshCh == nil {
+			r.refreshCh = make(chan struct{}, 1)
+		}
+	})
+	return r.refreshCh
+}
+
+func registryRefreshAcquireError(err error) *core.GatewayError {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return core.NewProviderError("model_registry", http.StatusGatewayTimeout, "model registry refresh timed out before start", err)
+	}
+	return core.NewProviderError("model_registry", http.StatusRequestTimeout, "model registry refresh canceled before start", err)
 }
 
 // LoadFromCache loads the model list from the cache backend.
@@ -1366,8 +1404,11 @@ func (r *ModelRegistry) RefreshModelList(ctx context.Context, url string) (int, 
 		return 0, nil
 	}
 
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
+	release, err := r.acquireRefresh(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
 
 	models, _, err := r.refreshModelListLocked(ctx, url)
 	return models, err
@@ -1391,9 +1432,21 @@ func (r *ModelRegistry) refreshModelList(ctx context.Context, url string) {
 	fetchCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
-	r.refreshMu.Lock()
-	models, metadataStats, err := r.refreshModelListLocked(fetchCtx, url)
-	r.refreshMu.Unlock()
+	release, err := r.acquireRefresh(fetchCtx)
+	if err != nil {
+		if !isBenignBackgroundRefreshError(ctx, err) {
+			slog.Warn("failed to acquire model list refresh", "url", url, "error", err)
+		}
+		return
+	}
+	var (
+		models        int
+		metadataStats metadataEnrichmentStats
+	)
+	func() {
+		defer release()
+		models, metadataStats, err = r.refreshModelListLocked(fetchCtx, url)
+	}()
 	if err != nil {
 		if !isBenignBackgroundRefreshError(ctx, err) {
 			slog.Warn("failed to refresh model list", "url", url, "error", err)

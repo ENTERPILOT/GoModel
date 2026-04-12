@@ -142,7 +142,8 @@ test('dashboard pages reuse a shared auth banner template', () => {
     );
 
     const authBannerCalls = indexTemplate.match(/{{template "auth-banner" \.}}/g) || [];
-    assert.equal(authBannerCalls.length, 7);
+    assert.equal(authBannerCalls.length, 8);
+    assert.match(indexTemplate, /<template x-if="page==='settings'">\s*<div>[\s\S]*{{template "auth-banner" \.}}/);
     assert.match(indexTemplate, /<template x-if="page==='guardrails'">\s*<div>[\s\S]*{{template "auth-banner" \.}}/);
     assert.doesNotMatch(
         indexTemplate,
@@ -316,12 +317,12 @@ test('alias rows use a shared icon-only edit action', () => {
     const indexTemplate = readFixture('../../../templates/index.html');
     const modelTableTemplate = readFixture('../../../templates/model-table-body.html');
     const editIconTemplate = readFixture('../../../templates/edit-icon.html');
-    const templates = indexTemplate + '\n' + modelTableTemplate;
 
     assert.match(
-        templates,
+        modelTableTemplate,
         /class="table-action-btn table-icon-btn"[\s\S]*:aria-label="'Edit alias ' \+ row\.alias\.name"[\s\S]*@click="openAliasEdit\(row\.alias\)"[\s\S]*{{template "edit-icon"}}/
     );
+    assert.match(indexTemplate, /{{template "model-table-body" \.}}/);
     assert.match(indexTemplate, /x-show="modelOverrideFormOpen" x-ref="modelOverrideEditor"/);
     assert.doesNotMatch(indexTemplate, /Model overrides feature is unavailable\./);
     assert.doesNotMatch(indexTemplate, /!modelOverridesAvailable && !authError/);

@@ -882,6 +882,9 @@ func (h *Handler) RefreshRuntime(c *echo.Context) error {
 
 	report, err := h.runtimeRefresher.RefreshRuntime(c.Request().Context())
 	if err != nil {
+		if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
+			return handleError(c, gatewayErr)
+		}
 		return handleError(c, core.NewProviderError("runtime_refresh", http.StatusInternalServerError, "runtime refresh failed", err))
 	}
 	if report.Status == "" {

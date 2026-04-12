@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -146,6 +147,32 @@ func TestRefreshRuntime_SkipsDisabledModelOverrides(t *testing.T) {
 	}
 	if step.Status != admin.RuntimeRefreshStatusSkipped {
 		t.Fatalf("model_overrides step status = %q, want skipped; step=%+v", step.Status, *step)
+	}
+}
+
+func TestRefreshRuntime_ReturnsGatewayErrorWhenContextCanceledBeforeAcquire(t *testing.T) {
+	app := &App{}
+	ch := app.runtimeRefreshSemaphore()
+	ch <- struct{}{}
+	defer func() { <-ch }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := app.RefreshRuntime(ctx)
+	if err == nil {
+		t.Fatal("RefreshRuntime() error = nil, want cancellation error")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("RefreshRuntime() error = %T, want *core.GatewayError", err)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusRequestTimeout {
+		t.Fatalf("status = %d, want 408", gatewayErr.HTTPStatusCode())
+	}
+	if gatewayErr.Provider != "runtime_refresh" {
+		t.Fatalf("provider = %q, want runtime_refresh", gatewayErr.Provider)
 	}
 }
 
