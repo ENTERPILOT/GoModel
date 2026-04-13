@@ -87,6 +87,7 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 		RequestedModel:    baseEntry.RequestedModel,
 		ResolvedModel:     baseEntry.ResolvedModel,
 		Provider:          baseEntry.Provider,
+		ProviderName:      baseEntry.ProviderName,
 		AliasUsed:         baseEntry.AliasUsed,
 		WorkflowVersionID: baseEntry.WorkflowVersionID,
 		CacheType:         baseEntry.CacheType,

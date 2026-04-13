@@ -1306,8 +1306,14 @@
                     <div class="workflow-guardrail-list-editor" x-show="workflowForm.guardrails.length > 0">
                         <template x-for="(step, index) in workflowForm.guardrails" :key="'workflow-form-guardrail-' + index">
                             <div class="workflow-guardrail-row">
-                                <input type="text" class="filter-input workflow-input" list="workflow-guardrail-options" placeholder="Guardrail ref" x-model="step.ref" :aria-label="'Guardrail reference ' + (index + 1)">
-                                <input type="number" class="filter-input workflow-step-input" min="0" step="10" placeholder="Step" x-model.number="step.step" :aria-label="'Guardrail step ' + (index + 1)">
+                                <label class="alias-form-field workflow-guardrail-field" :for="'workflow-guardrail-ref-' + index">
+                                    <span>Guardrail reference</span>
+                                    <input type="text" class="filter-input workflow-input" :id="'workflow-guardrail-ref-' + index" list="workflow-guardrail-options" placeholder="Guardrail ref" x-model="step.ref" :aria-label="'Guardrail reference ' + (index + 1)">
+                                </label>
+                                <label class="alias-form-field workflow-guardrail-step-field" :for="'workflow-guardrail-step-' + index">
+                                    <span>Step</span>
+                                    <input type="number" class="filter-input workflow-step-input" :id="'workflow-guardrail-step-' + index" min="0" step="10" placeholder="Step" x-model.number="step.step" :aria-label="'Guardrail step ' + (index + 1)">
+                                </label>
                                 <button type="button" class="table-action-btn table-action-btn-danger" @click="removeWorkflowGuardrailStep(index)">Remove</button>
                             </div>
                         </template>

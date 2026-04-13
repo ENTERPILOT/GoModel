@@ -55,7 +55,7 @@ func (r *Result) Close() error {
 	return r.closeErr
 }
 
-// New creates an workflow subsystem with its own storage connection.
+// New creates a workflow subsystem with its own storage connection.
 func New(ctx context.Context, cfg *config.Config, compiler Compiler, refreshInterval time.Duration) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
@@ -73,7 +73,7 @@ func New(ctx context.Context, cfg *config.Config, compiler Compiler, refreshInte
 	return result, nil
 }
 
-// NewWithSharedStorage creates an workflow subsystem using an existing storage connection.
+// NewWithSharedStorage creates a workflow subsystem using an existing storage connection.
 func NewWithSharedStorage(ctx context.Context, shared storage.Storage, compiler Compiler, refreshInterval time.Duration) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")

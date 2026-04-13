@@ -887,6 +887,17 @@ func TestServiceListViews_IncludesEffectiveFeatures(t *testing.T) {
 	if views[0].EffectiveFeatures.Guardrails {
 		t.Fatal("EffectiveFeatures.Guardrails = true, want false")
 	}
+	rawView, err := json.Marshal(views[0])
+	if err != nil {
+		t.Fatalf("marshal view: %v", err)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(rawView, &response); err != nil {
+		t.Fatalf("unmarshal marshaled view: %v", err)
+	}
+	if _, ok := response["scope_key"]; ok {
+		t.Fatalf("view JSON exposed storage-only scope_key: %s", rawView)
+	}
 }
 
 func TestServiceListViews_AnnotatesCompileFailuresPerRow(t *testing.T) {

@@ -1806,6 +1806,15 @@ td.col-price {
     justify-content: stretch;
 }
 
+.workflow-guardrail-field {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.workflow-guardrail-step-field {
+    flex: 0 0 120px;
+}
+
 .workflow-editor {
     margin-bottom: 0;
     width: 100%;
@@ -3298,6 +3307,11 @@ body.conversation-drawer-open {
     }
     .workflow-step-input {
         max-width: none;
+        width: 100%;
+    }
+    .workflow-guardrail-field,
+    .workflow-guardrail-step-field {
+        flex-basis: auto;
         width: 100%;
     }
     .table-toolbar {

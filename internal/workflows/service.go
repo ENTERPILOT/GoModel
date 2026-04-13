@@ -50,7 +50,7 @@ type Service struct {
 	refreshMu sync.Mutex
 }
 
-// NewService creates an workflow service backed by storage.
+// NewService creates a workflow service backed by storage.
 func NewService(store Store, compiler Compiler) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
@@ -516,13 +516,12 @@ func (s *Service) viewForVersion(version Version) (View, error) {
 		return View{}, fmt.Errorf("compile workflow %q: empty compiled workflow", version.ID)
 	}
 
-	return View{
-		Version:           version,
-		ScopeType:         scopeType(scope),
-		ScopeDisplay:      scopeDisplay(scope),
-		EffectiveFeatures: compiled.Policy.Features,
-		GuardrailsHash:    compiled.Policy.GuardrailsHash,
-	}, nil
+	view := NewViewFromVersion(version)
+	view.ScopeType = scopeType(scope)
+	view.ScopeDisplay = scopeDisplay(scope)
+	view.EffectiveFeatures = compiled.Policy.Features
+	view.GuardrailsHash = compiled.Policy.GuardrailsHash
+	return view, nil
 }
 
 func viewWithError(version Version, err error) View {
@@ -533,12 +532,11 @@ func viewWithError(version Version, err error) View {
 	}
 	version.Scope = scope
 
-	return View{
-		Version:      version,
-		ScopeType:    rawScopeType(scope),
-		ScopeDisplay: rawScopeDisplay(scope),
-		CompileError: err.Error(),
-	}
+	view := NewViewFromVersion(version)
+	view.ScopeType = rawScopeType(scope)
+	view.ScopeDisplay = rawScopeDisplay(scope)
+	view.CompileError = err.Error()
+	return view
 }
 
 func rawScopeType(scope Scope) string {

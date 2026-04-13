@@ -114,11 +114,11 @@ test('workflow authoring inputs expose stable accessible names', () => {
     );
     assert.match(
         template,
-        /x-model="step\.ref"[^>]*:aria-label="'Guardrail reference ' \+ \(index \+ 1\)"/
+        /<label class="alias-form-field workflow-guardrail-field" :for="'workflow-guardrail-ref-' \+ index">[\s\S]*<span>Guardrail reference<\/span>[\s\S]*:id="'workflow-guardrail-ref-' \+ index"[\s\S]*x-model="step\.ref"[^>]*:aria-label="'Guardrail reference ' \+ \(index \+ 1\)"/
     );
     assert.match(
         template,
-        /x-model\.number="step\.step"[^>]*:aria-label="'Guardrail step ' \+ \(index \+ 1\)"/
+        /<label class="alias-form-field workflow-guardrail-step-field" :for="'workflow-guardrail-step-' \+ index">[\s\S]*<span>Step<\/span>[\s\S]*:id="'workflow-guardrail-step-' \+ index"[\s\S]*x-model\.number="step\.step"[^>]*:aria-label="'Guardrail step ' \+ \(index \+ 1\)"/
     );
 });
 

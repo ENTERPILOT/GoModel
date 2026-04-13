@@ -46,7 +46,7 @@ Examples include:
 
 ### ProviderAttempt
 
-`ProviderAttempt` is the explicit outbound execution unit produced from the plan.
+`ProviderAttempt` is the explicit outbound execution unit produced from the workflow.
 
 A single request may produce one or more attempts:
 
@@ -82,5 +82,5 @@ For async or media-oriented providers, an attempt may also produce:
 This ADR builds on ADR-0002 and ADR-0003:
 
 - ADR-0002 defines how requests enter the gateway
-- ADR-0003 defines how policies are resolved into an workflow
-- this ADR defines how the plan is constrained and executed against providers
+- ADR-0003 defines how policies are resolved into a workflow
+- this ADR defines how the workflow is constrained and executed against providers

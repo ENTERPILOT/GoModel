@@ -946,6 +946,7 @@ func TestCreateStreamEntry(t *testing.T) {
 		RequestedModel:    "claude-opus-4-6",
 		ResolvedModel:     "openai/gpt-5-nano",
 		Provider:          "openai",
+		ProviderName:      "primary-openai",
 		AliasUsed:         true,
 		WorkflowVersionID: "workflow-version-123",
 		CacheType:         CacheTypeSemantic,
@@ -988,6 +989,9 @@ func TestCreateStreamEntry(t *testing.T) {
 	}
 	if streamEntry.ResolvedModel != baseEntry.ResolvedModel {
 		t.Errorf("ResolvedModel mismatch")
+	}
+	if streamEntry.ProviderName != baseEntry.ProviderName {
+		t.Errorf("ProviderName mismatch")
 	}
 	if streamEntry.AliasUsed != baseEntry.AliasUsed {
 		t.Errorf("AliasUsed mismatch")

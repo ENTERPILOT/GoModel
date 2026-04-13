@@ -6,7 +6,7 @@
 
 Add first-class support for a canonical request user path sourced from
 `X-GoModel-User-Path`, persist it in audit and usage records, expose filtering by
-that path, and extend workflows so requests can match path-scoped plans
+that path, and extend workflows so requests can match path-scoped workflows
 with hierarchical fallback.
 
 ## Source Of Truth
@@ -65,7 +65,7 @@ For a request with `/team/a/user`, the fallback path chain is:
 - `/team`
 - `/`
 
-If no header is present, path-scoped plans are ignored.
+If no header is present, path-scoped workflows are ignored.
 
 ## Persistence
 

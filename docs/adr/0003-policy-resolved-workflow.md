@@ -10,8 +10,8 @@ That is not enough for the next stage of the gateway.
 GOModel needs:
 
 - durable control over request preprocessing behavior
-- one plan selected per request, with deterministic matching
-- immutable plan history so a request can be traced back to the exact plan used
+- one workflow selected per request, with deterministic matching
+- immutable workflow version history so a request can be traced back to the exact workflow used
 - in-memory lookup for the hot path
 - a storage-backed source of truth that works in future clustered deployments
 
@@ -56,8 +56,8 @@ The first slice supports exactly these scopes:
 Examples:
 
 - `(provider=NULL, model=NULL)` means the single global workflow
-- `(provider=openai, model=NULL)` means the provider-scoped plan
-- `(provider=openai, model=gpt-5)` means the provider-plus-model plan
+- `(provider=openai, model=NULL)` means the provider-scoped workflow
+- `(provider=openai, model=gpt-5)` means the provider-plus-model workflow
 
 This ADR does not yet define path-scoped, key-scoped, team-scoped, or
 organization-scoped workflows.
@@ -74,7 +74,7 @@ Matching uses most-specific-wins precedence:
 
 There is no runtime layering or composition in this slice.
 
-If a more specific plan exists, it fully replaces the less specific plan for
+If a more specific workflow exists, it fully replaces the less specific workflow for
 that request.
 
 ### 4. Persistence Model
@@ -99,7 +99,7 @@ Suggested fields:
 Rules:
 
 - rows are immutable after creation
-- changing a plan means inserting a new row
+- changing a workflow means inserting a new row
 - for a given scope, only one row may be active at a time
 - requests reference the immutable row id of the matched version
 - `scope_provider=NULL, scope_model!=NULL` is invalid in this slice
@@ -116,7 +116,7 @@ from an immutable in-memory snapshot.
 
 The in-memory snapshot should expose:
 
-- one global plan pointer
+- one global workflow pointer
 - one map keyed by provider
 - one nested map keyed by provider and model
 
@@ -130,7 +130,7 @@ Request-time lookup should be:
 6. attach the matched immutable workflow version id to request context
 
 Snapshot refresh must be atomic so hot-path reads never observe a partially
-reloaded plan set.
+reloaded workflow set.
 
 This allows each GOModel instance to keep a fast local read model while sharing
 one persistent source of truth across a cluster.
@@ -149,7 +149,7 @@ The first required persistence surface is `audit_logs`.
 This id identifies the immutable workflow version selected for the
 request.
 
-Process-level feature switches may still disable parts of that plan for a given
+Process-level feature switches may still disable parts of that workflow for a given
 deployment. In other words, the matched workflow remains traceable, but effective
 runtime behavior can also depend on deployment configuration.
 
@@ -157,7 +157,7 @@ The first slice does not require storing the same field in `usage`.
 
 Usage records may continue to link back to audit records through `request_id`.
 
-### 7. V1 Plan Payload
+### 7. V1 Workflow Payload
 
 The first slice keeps workflows intentionally simple.
 
@@ -170,7 +170,7 @@ Instead, a matched workflow configures:
 - simple feature flags for gateway-owned behaviors
 - guardrail execution order inside the predefined guardrails phase
 
-Human-facing metadata such as the plan name belongs in the immutable database
+Human-facing metadata such as the workflow name belongs in the immutable database
 row for the workflow version, not in the JSON payload.
 
 Recommended v1 payload shape:
@@ -210,9 +210,9 @@ V1 semantics:
 - later steps start only after the previous step fully completes
 - if `features.guardrails` is `false`, the guardrails array is ignored
 - `ref` must point to an existing named guardrail managed by the gateway
-- process-level feature configuration is a hard upper bound over plan features
-- the effective runtime feature value is `process_enabled AND plan_enabled`
-- if a process-level feature switch is disabled, the corresponding plan field is
+- process-level feature configuration is a hard upper bound over workflow features
+- the effective runtime feature value is `process_enabled AND workflow_enabled`
+- if a process-level feature switch is disabled, the corresponding workflow field is
   ignored by that process
 
 This preserves 12-factor operational control. Operators can disable gateway
@@ -220,13 +220,13 @@ features for one deployment through environment-backed process configuration
 without rewriting persisted workflows.
 
 To preserve immutability, omitted feature flags may be accepted at authoring
-time, but they must be resolved to explicit booleans before an immutable plan
+time, but they must be resolved to explicit booleans before an immutable workflow
 version is stored.
 
 In other words:
 
 - missing feature flags may mean "use defaults" in write-time input
-- persisted plan versions must store effective resolved values, not implicit
+- persisted workflow versions must store effective resolved values, not implicit
   defaults
 
 This prevents the same immutable workflow version from changing behavior
@@ -249,22 +249,22 @@ general-purpose workflow DSL before there is a concrete need for one.
 
 - **Cluster-ready source of truth**: All instances can load workflows from
   the same database
-- **Deterministic matching**: One request maps to one plan version using a
+- **Deterministic matching**: One request maps to one workflow version using a
   simple precedence rule
 - **Fast hot path**: Request matching uses in-memory snapshots instead of
   per-request database reads
-- **Immutable traceability**: Audit records can point to the exact plan version
+- **Immutable traceability**: Audit records can point to the exact workflow version
   used
-- **Clear control-plane boundary**: Persisted plan versions become the durable
+- **Clear control-plane boundary**: Persisted workflow versions become the durable
   policy layer, while `core.Workflow` remains request-scoped runtime state
 - **Simple v1 payload**: The first implementation stays focused on flags plus
   ordered guardrails instead of a premature workflow engine
 
 ### Negative
 
-- **More runtime machinery**: The gateway now needs plan loading, validation,
+- **More runtime machinery**: The gateway now needs workflow loading, validation,
   indexing, and refresh behavior
-- **Activation constraints**: The database must enforce one active plan per
+- **Activation constraints**: The database must enforce one active workflow per
   scope
 - **Limited expressiveness in v1**: Only the guardrails phase is explicitly
   configurable beyond feature toggles
@@ -277,7 +277,7 @@ This ADR intentionally stays focused on runtime and storage architecture.
 
 It does not define:
 
-- plan authoring APIs
+- workflow authoring APIs
 - admin UI behavior
 - rollout workflows
 - a general-purpose workflow graph

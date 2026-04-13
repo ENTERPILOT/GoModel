@@ -9,7 +9,7 @@ import (
 )
 
 // PassthroughSemanticEnrichment applies provider-owned passthrough metadata
-// enrichment before workflow workflow resolution runs.
+// enrichment before workflow resolution runs.
 func PassthroughSemanticEnrichment(provider core.RoutableProvider, enrichers []core.PassthroughSemanticEnricher, allowPassthroughV1Alias bool) echo.MiddlewareFunc {
 	byProvider := make(map[string]core.PassthroughSemanticEnricher, len(enrichers))
 	for _, enricher := range enrichers {
