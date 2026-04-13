@@ -56,7 +56,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"FEATURE_FALLBACK_MODE", "FALLBACK_MANUAL_RULES_PATH",
 		"MODEL_OVERRIDES_ENABLED", "MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT",
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
-		"EXECUTION_PLAN_REFRESH_INTERVAL",
+		"WORKFLOW_REFRESH_INTERVAL",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -163,8 +163,8 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.HTTP.ResponseHeaderTimeout != 600 {
 		t.Errorf("expected HTTP.ResponseHeaderTimeout=600, got %d", cfg.HTTP.ResponseHeaderTimeout)
 	}
-	if cfg.ExecutionPlans.RefreshInterval != time.Minute {
-		t.Errorf("expected ExecutionPlans.RefreshInterval=%s, got %s", time.Minute, cfg.ExecutionPlans.RefreshInterval)
+	if cfg.Workflows.RefreshInterval != time.Minute {
+		t.Errorf("expected Workflows.RefreshInterval=%s, got %s", time.Minute, cfg.Workflows.RefreshInterval)
 	}
 	if !cfg.Models.EnabledByDefault {
 		t.Error("expected Models.EnabledByDefault=true")
@@ -994,7 +994,7 @@ func TestLoad_HTTPConfig(t *testing.T) {
 	})
 }
 
-func TestLoad_ExecutionPlanRefreshInterval(t *testing.T) {
+func TestLoad_WorkflowRefreshInterval(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(_ string) {
@@ -1002,14 +1002,14 @@ func TestLoad_ExecutionPlanRefreshInterval(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.ExecutionPlans.RefreshInterval != time.Minute {
-			t.Fatalf("ExecutionPlans.RefreshInterval = %s, want %s", result.Config.ExecutionPlans.RefreshInterval, time.Minute)
+		if result.Config.Workflows.RefreshInterval != time.Minute {
+			t.Fatalf("Workflows.RefreshInterval = %s, want %s", result.Config.Workflows.RefreshInterval, time.Minute)
 		}
 	})
 
 	withTempDir(t, func(dir string) {
 		yaml := `
-execution_plans:
+workflows:
   refresh_interval: 90s
 `
 		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
@@ -1020,20 +1020,20 @@ execution_plans:
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.ExecutionPlans.RefreshInterval != 90*time.Second {
-			t.Fatalf("ExecutionPlans.RefreshInterval = %s, want %s", result.Config.ExecutionPlans.RefreshInterval, 90*time.Second)
+		if result.Config.Workflows.RefreshInterval != 90*time.Second {
+			t.Fatalf("Workflows.RefreshInterval = %s, want %s", result.Config.Workflows.RefreshInterval, 90*time.Second)
 		}
 	})
 
 	withTempDir(t, func(_ string) {
-		t.Setenv("EXECUTION_PLAN_REFRESH_INTERVAL", "45s")
+		t.Setenv("WORKFLOW_REFRESH_INTERVAL", "45s")
 
 		result, err := Load()
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.ExecutionPlans.RefreshInterval != 45*time.Second {
-			t.Fatalf("ExecutionPlans.RefreshInterval = %s, want %s", result.Config.ExecutionPlans.RefreshInterval, 45*time.Second)
+		if result.Config.Workflows.RefreshInterval != 45*time.Second {
+			t.Fatalf("Workflows.RefreshInterval = %s, want %s", result.Config.Workflows.RefreshInterval, 45*time.Second)
 		}
 	})
 }

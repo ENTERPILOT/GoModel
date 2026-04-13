@@ -12,8 +12,8 @@ const (
 	requestSnapshotKey contextKey = "request-snapshot"
 	// whiteBoxPromptKey stores the best-effort semantic extraction for the request.
 	whiteBoxPromptKey contextKey = "white-box-prompt"
-	// executionPlanKey stores the request-scoped execution plan chosen for handling.
-	executionPlanKey contextKey = "execution-plan"
+	// workflowKey stores the request-scoped workflow chosen for handling.
+	workflowKey contextKey = "workflow"
 	// authKeyIDKey stores the internal managed auth key id for the request.
 	authKeyIDKey contextKey = "auth-key-id"
 	// effectiveUserPathKey stores a request-scoped user path override applied
@@ -97,16 +97,16 @@ func GetWhiteBoxPrompt(ctx context.Context) *WhiteBoxPrompt {
 	return nil
 }
 
-// WithExecutionPlan returns a new context with the execution plan attached.
-func WithExecutionPlan(ctx context.Context, plan *ExecutionPlan) context.Context {
-	return context.WithValue(ctx, executionPlanKey, plan)
+// WithWorkflow returns a new context with the workflow attached.
+func WithWorkflow(ctx context.Context, workflow *Workflow) context.Context {
+	return context.WithValue(ctx, workflowKey, workflow)
 }
 
-// GetExecutionPlan retrieves the execution plan from the context.
-func GetExecutionPlan(ctx context.Context) *ExecutionPlan {
-	if v := ctx.Value(executionPlanKey); v != nil {
-		if plan, ok := v.(*ExecutionPlan); ok {
-			return plan
+// GetWorkflow retrieves the workflow from the context.
+func GetWorkflow(ctx context.Context) *Workflow {
+	if v := ctx.Value(workflowKey); v != nil {
+		if workflow, ok := v.(*Workflow); ok {
+			return workflow
 		}
 	}
 	return nil

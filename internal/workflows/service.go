@@ -1,4 +1,4 @@
-package executionplans
+package workflows
 
 import (
 	"context"
@@ -20,29 +20,29 @@ const (
 	ManagedDefaultGlobalDescription = "Bootstrapped from runtime configuration"
 )
 
-// CompiledPlan is the immutable runtime projection cached in the hot-path snapshot.
-type CompiledPlan struct {
+// CompiledWorkflow is the immutable runtime projection cached in the hot-path snapshot.
+type CompiledWorkflow struct {
 	Version  Version
-	Policy   *core.ResolvedExecutionPolicy
+	Policy   *core.ResolvedWorkflowPolicy
 	Pipeline *guardrails.Pipeline
 }
 
-// Compiler turns one persisted execution-plan version into its runtime projection.
+// Compiler turns one persisted workflow version into its runtime projection.
 type Compiler interface {
-	Compile(version Version) (*CompiledPlan, error)
+	Compile(version Version) (*CompiledWorkflow, error)
 }
 
 type snapshot struct {
-	global             *CompiledPlan
-	paths              map[string]*CompiledPlan
-	providers          map[string]*CompiledPlan
-	providerPaths      map[string]map[string]*CompiledPlan
-	providerModels     map[string]map[string]*CompiledPlan
-	providerModelPaths map[string]map[string]map[string]*CompiledPlan
-	byVersionID        map[string]*CompiledPlan
+	global             *CompiledWorkflow
+	paths              map[string]*CompiledWorkflow
+	providers          map[string]*CompiledWorkflow
+	providerPaths      map[string]map[string]*CompiledWorkflow
+	providerModels     map[string]map[string]*CompiledWorkflow
+	providerModelPaths map[string]map[string]map[string]*CompiledWorkflow
+	byVersionID        map[string]*CompiledWorkflow
 }
 
-// Service keeps the active execution-plan set cached in memory.
+// Service keeps the active workflow set cached in memory.
 type Service struct {
 	store     Store
 	compiler  Compiler
@@ -50,7 +50,7 @@ type Service struct {
 	refreshMu sync.Mutex
 }
 
-// NewService creates an execution-plan service backed by storage.
+// NewService creates a workflow service backed by storage.
 func NewService(store Store, compiler Compiler) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
@@ -64,17 +64,17 @@ func NewService(store Store, compiler Compiler) (*Service, error) {
 		compiler: compiler,
 	}
 	service.current.Store(snapshot{
-		paths:              map[string]*CompiledPlan{},
-		providers:          map[string]*CompiledPlan{},
-		providerPaths:      map[string]map[string]*CompiledPlan{},
-		providerModels:     map[string]map[string]*CompiledPlan{},
-		providerModelPaths: map[string]map[string]map[string]*CompiledPlan{},
-		byVersionID:        map[string]*CompiledPlan{},
+		paths:              map[string]*CompiledWorkflow{},
+		providers:          map[string]*CompiledWorkflow{},
+		providerPaths:      map[string]map[string]*CompiledWorkflow{},
+		providerModels:     map[string]map[string]*CompiledWorkflow{},
+		providerModelPaths: map[string]map[string]map[string]*CompiledWorkflow{},
+		byVersionID:        map[string]*CompiledWorkflow{},
 	})
 	return service, nil
 }
 
-// Refresh reloads active plans from storage and atomically swaps the in-memory snapshot.
+// Refresh reloads active workflows from storage and atomically swaps the in-memory snapshot.
 func (s *Service) Refresh(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
@@ -84,32 +84,32 @@ func (s *Service) Refresh(ctx context.Context) error {
 func (s *Service) refreshLocked(ctx context.Context) error {
 	versions, err := s.store.ListActive(ctx)
 	if err != nil {
-		return fmt.Errorf("list active execution plans: %w", err)
+		return fmt.Errorf("list active workflows: %w", err)
 	}
 
 	next := snapshot{
-		paths:              make(map[string]*CompiledPlan),
-		providers:          make(map[string]*CompiledPlan),
-		providerPaths:      make(map[string]map[string]*CompiledPlan),
-		providerModels:     make(map[string]map[string]*CompiledPlan),
-		providerModelPaths: make(map[string]map[string]map[string]*CompiledPlan),
-		byVersionID:        make(map[string]*CompiledPlan),
+		paths:              make(map[string]*CompiledWorkflow),
+		providers:          make(map[string]*CompiledWorkflow),
+		providerPaths:      make(map[string]map[string]*CompiledWorkflow),
+		providerModels:     make(map[string]map[string]*CompiledWorkflow),
+		providerModelPaths: make(map[string]map[string]map[string]*CompiledWorkflow),
+		byVersionID:        make(map[string]*CompiledWorkflow),
 	}
 
 	for _, version := range versions {
 		scope, scopeKey, err := normalizeScope(version.Scope)
 		if err != nil {
-			return fmt.Errorf("load execution plan %q: %w", version.ID, err)
+			return fmt.Errorf("load workflow %q: %w", version.ID, err)
 		}
 		version.Scope = scope
 		version.ScopeKey = scopeKey
 
 		compiled, err := s.compiler.Compile(version)
 		if err != nil {
-			return fmt.Errorf("compile execution plan %q: %w", version.ID, err)
+			return fmt.Errorf("compile workflow %q: %w", version.ID, err)
 		}
 		if compiled == nil || compiled.Policy == nil {
-			return fmt.Errorf("compile execution plan %q: empty compiled plan", version.ID)
+			return fmt.Errorf("compile workflow %q: empty compiled workflow", version.ID)
 		}
 
 		next.byVersionID[compiled.Version.ID] = compiled
@@ -117,90 +117,90 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 		switch {
 		case scope.Provider == "" && scope.UserPath == "":
 			if next.global != nil {
-				return fmt.Errorf("duplicate active global execution plans: %q and %q", next.global.Version.ID, version.ID)
+				return fmt.Errorf("duplicate active global workflows: %q and %q", next.global.Version.ID, version.ID)
 			}
 			next.global = compiled
 		case scope.Provider == "" && scope.UserPath != "":
 			if existing := next.paths[scope.UserPath]; existing != nil {
-				return fmt.Errorf("duplicate active path execution plans for %q: %q and %q", scope.UserPath, existing.Version.ID, version.ID)
+				return fmt.Errorf("duplicate active path workflows for %q: %q and %q", scope.UserPath, existing.Version.ID, version.ID)
 			}
 			next.paths[scope.UserPath] = compiled
 		case scope.Model == "" && scope.UserPath == "":
 			if existing := next.providers[scope.Provider]; existing != nil {
-				return fmt.Errorf("duplicate active provider execution plans for %q: %q and %q", scope.Provider, existing.Version.ID, version.ID)
+				return fmt.Errorf("duplicate active provider workflows for %q: %q and %q", scope.Provider, existing.Version.ID, version.ID)
 			}
 			next.providers[scope.Provider] = compiled
 		case scope.Model == "" && scope.UserPath != "":
 			paths := next.providerPaths[scope.Provider]
 			if paths == nil {
-				paths = make(map[string]*CompiledPlan)
+				paths = make(map[string]*CompiledWorkflow)
 				next.providerPaths[scope.Provider] = paths
 			}
 			if existing := paths[scope.UserPath]; existing != nil {
-				return fmt.Errorf("duplicate active provider-path execution plans for %q/%q: %q and %q", scope.Provider, scope.UserPath, existing.Version.ID, version.ID)
+				return fmt.Errorf("duplicate active provider-path workflows for %q/%q: %q and %q", scope.Provider, scope.UserPath, existing.Version.ID, version.ID)
 			}
 			paths[scope.UserPath] = compiled
 		case scope.UserPath == "":
 			models := next.providerModels[scope.Provider]
 			if models == nil {
-				models = make(map[string]*CompiledPlan)
+				models = make(map[string]*CompiledWorkflow)
 				next.providerModels[scope.Provider] = models
 			}
 			if existing := models[scope.Model]; existing != nil {
-				return fmt.Errorf("duplicate active provider-model execution plans for %q/%q: %q and %q", scope.Provider, scope.Model, existing.Version.ID, version.ID)
+				return fmt.Errorf("duplicate active provider-model workflows for %q/%q: %q and %q", scope.Provider, scope.Model, existing.Version.ID, version.ID)
 			}
 			models[scope.Model] = compiled
 		default:
 			providers := next.providerModelPaths[scope.Provider]
 			if providers == nil {
-				providers = make(map[string]map[string]*CompiledPlan)
+				providers = make(map[string]map[string]*CompiledWorkflow)
 				next.providerModelPaths[scope.Provider] = providers
 			}
 			paths := providers[scope.Model]
 			if paths == nil {
-				paths = make(map[string]*CompiledPlan)
+				paths = make(map[string]*CompiledWorkflow)
 				providers[scope.Model] = paths
 			}
 			if existing := paths[scope.UserPath]; existing != nil {
-				return fmt.Errorf("duplicate active provider-model-path execution plans for %q/%q/%q: %q and %q", scope.Provider, scope.Model, scope.UserPath, existing.Version.ID, version.ID)
+				return fmt.Errorf("duplicate active provider-model-path workflows for %q/%q/%q: %q and %q", scope.Provider, scope.Model, scope.UserPath, existing.Version.ID, version.ID)
 			}
 			paths[scope.UserPath] = compiled
 		}
 	}
 
 	if next.global == nil {
-		return fmt.Errorf("missing active global execution plan")
+		return fmt.Errorf("missing active global workflow")
 	}
 
 	s.current.Store(next)
 	return nil
 }
 
-// EnsureDefaultGlobal seeds or reconciles the managed active global execution plan.
+// EnsureDefaultGlobal seeds or reconciles the managed active global workflow.
 func (s *Service) EnsureDefaultGlobal(ctx context.Context, input CreateInput) error {
 	input.Managed = true
-	normalized, _, planHash, err := normalizeCreateInput(input)
+	normalized, _, workflowHash, err := normalizeCreateInput(input)
 	if err != nil {
 		return err
 	}
 	if normalized.Scope.Provider != "" || normalized.Scope.Model != "" || normalized.Scope.UserPath != "" {
-		return newValidationError("default execution plan must use global scope", nil)
+		return newValidationError("default workflow must use global scope", nil)
 	}
 
 	if !normalized.Activate {
 		normalized.Activate = true
 	}
 	normalized.Managed = true
-	previewCompiled, err := s.validateCreateCandidate(normalized, "global", planHash)
+	previewCompiled, err := s.validateCreateCandidate(normalized, "global", workflowHash)
 	if err != nil {
 		return err
 	}
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	version, err := s.store.EnsureManagedDefaultGlobal(ctx, normalized, planHash)
+	version, err := s.store.EnsureManagedDefaultGlobal(ctx, normalized, workflowHash)
 	if err != nil {
-		return fmt.Errorf("ensure default global execution plan: %w", err)
+		return fmt.Errorf("ensure default global workflow: %w", err)
 	}
 	if version == nil {
 		if s.snapshot().global == nil {
@@ -211,22 +211,22 @@ func (s *Service) EnsureDefaultGlobal(ctx context.Context, input CreateInput) er
 		return nil
 	}
 
-	s.storeActivatedCompiledLocked(compiledPlanForVersion(previewCompiled, *version))
+	s.storeActivatedCompiledLocked(compiledWorkflowForVersion(previewCompiled, *version))
 	return nil
 }
 
-// Create inserts a new immutable execution-plan version and refreshes the
+// Create inserts a new immutable workflow version and refreshes the
 // in-memory snapshot so future requests can match it immediately.
 func (s *Service) Create(ctx context.Context, input CreateInput) (*Version, error) {
 	if s == nil {
-		return nil, fmt.Errorf("execution plan service is required")
+		return nil, fmt.Errorf("workflow service is required")
 	}
 
-	normalized, scopeKey, planHash, err := normalizeCreateInput(input)
+	normalized, scopeKey, workflowHash, err := normalizeCreateInput(input)
 	if err != nil {
 		return nil, err
 	}
-	previewCompiled, err := s.validateCreateCandidate(normalized, scopeKey, planHash)
+	previewCompiled, err := s.validateCreateCandidate(normalized, scopeKey, workflowHash)
 	if err != nil {
 		return nil, err
 	}
@@ -236,19 +236,19 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*Version, erro
 
 	version, err := s.store.Create(ctx, normalized)
 	if err != nil {
-		return nil, fmt.Errorf("create execution plan: %w", err)
+		return nil, fmt.Errorf("create workflow: %w", err)
 	}
 	if version != nil && version.Active {
-		s.storeActivatedCompiledLocked(compiledPlanForVersion(previewCompiled, *version))
+		s.storeActivatedCompiledLocked(compiledWorkflowForVersion(previewCompiled, *version))
 	}
 	return version, nil
 }
 
-// Deactivate turns off one active execution-plan version and refreshes the
+// Deactivate turns off one active workflow version and refreshes the
 // in-memory snapshot so future requests stop matching it immediately.
 func (s *Service) Deactivate(ctx context.Context, id string) error {
 	if s == nil {
-		return fmt.Errorf("execution plan service is required")
+		return fmt.Errorf("workflow service is required")
 	}
 
 	version, err := s.store.Get(ctx, strings.TrimSpace(id))
@@ -256,7 +256,7 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 		if errors.Is(err, ErrNotFound) {
 			return err
 		}
-		return fmt.Errorf("load execution plan %q: %w", id, err)
+		return fmt.Errorf("load workflow %q: %w", id, err)
 	}
 	if version == nil {
 		return ErrNotFound
@@ -264,7 +264,7 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 
 	scope, scopeKey, err := normalizeScope(version.Scope)
 	if err != nil {
-		return fmt.Errorf("load execution plan %q: %w", id, err)
+		return fmt.Errorf("load workflow %q: %w", id, err)
 	}
 	version.Scope = scope
 	version.ScopeKey = scopeKey
@@ -283,16 +283,16 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 		if errors.Is(err, ErrNotFound) {
 			return err
 		}
-		return fmt.Errorf("deactivate execution plan %q: %w", version.ID, err)
+		return fmt.Errorf("deactivate workflow %q: %w", version.ID, err)
 	}
 	s.storeDeactivatedVersionLocked(*version)
 	return nil
 }
 
-// GetView returns one execution plan version view, including inactive historical versions.
+// GetView returns one workflow version view, including inactive historical versions.
 func (s *Service) GetView(ctx context.Context, id string) (View, error) {
 	if s == nil {
-		return View{}, fmt.Errorf("execution plan service is required")
+		return View{}, fmt.Errorf("workflow service is required")
 	}
 
 	version, err := s.store.Get(ctx, strings.TrimSpace(id))
@@ -300,7 +300,7 @@ func (s *Service) GetView(ctx context.Context, id string) (View, error) {
 		if errors.Is(err, ErrNotFound) {
 			return View{}, err
 		}
-		return View{}, fmt.Errorf("load execution plan %q: %w", id, err)
+		return View{}, fmt.Errorf("load workflow %q: %w", id, err)
 	}
 	if version == nil {
 		return View{}, ErrNotFound
@@ -309,7 +309,7 @@ func (s *Service) GetView(ctx context.Context, id string) (View, error) {
 	return s.viewForVersion(*version)
 }
 
-// ListViews returns the active execution plans together with their effective
+// ListViews returns the active workflows together with their effective
 // runtime features after process-level caps are applied.
 func (s *Service) ListViews(ctx context.Context) ([]View, error) {
 	if s == nil {
@@ -318,14 +318,14 @@ func (s *Service) ListViews(ctx context.Context) ([]View, error) {
 
 	versions, err := s.store.ListActive(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list active execution plans: %w", err)
+		return nil, fmt.Errorf("list active workflows: %w", err)
 	}
 
 	views := make([]View, 0, len(versions))
 	for _, version := range versions {
 		view, err := s.viewForVersion(version)
 		if err != nil {
-			slog.Warn("execution plan view build failed", "version_id", strings.TrimSpace(version.ID), "error", err)
+			slog.Warn("workflow view build failed", "version_id", strings.TrimSpace(version.ID), "error", err)
 			views = append(views, viewWithError(version, err))
 			continue
 		}
@@ -349,8 +349,8 @@ func (s *Service) ListViews(ctx context.Context) ([]View, error) {
 	return views, nil
 }
 
-// Match returns the most-specific compiled execution policy for one request.
-func (s *Service) Match(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+// Match returns the most-specific compiled workflow policy for one request.
+func (s *Service) Match(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 	compiled, err := s.matchCompiled(selector)
 	if err != nil || compiled == nil {
 		return nil, err
@@ -364,19 +364,19 @@ func (s *Service) PipelineForContext(ctx context.Context) *guardrails.Pipeline {
 	if s == nil || ctx == nil {
 		return nil
 	}
-	plan := core.GetExecutionPlan(ctx)
-	if plan == nil {
+	workflow := core.GetWorkflow(ctx)
+	if workflow == nil {
 		return nil
 	}
-	return s.PipelineForExecutionPlan(plan)
+	return s.PipelineForWorkflow(workflow)
 }
 
-// PipelineForExecutionPlan resolves the active guardrails pipeline for one request plan.
-func (s *Service) PipelineForExecutionPlan(plan *core.ExecutionPlan) *guardrails.Pipeline {
-	if s == nil || plan == nil || plan.Policy == nil || !plan.GuardrailsEnabled() {
+// PipelineForWorkflow resolves the active guardrails pipeline for one request workflow.
+func (s *Service) PipelineForWorkflow(workflow *core.Workflow) *guardrails.Pipeline {
+	if s == nil || workflow == nil || workflow.Policy == nil || !workflow.GuardrailsEnabled() {
 		return nil
 	}
-	versionID := strings.TrimSpace(plan.Policy.VersionID)
+	versionID := strings.TrimSpace(workflow.Policy.VersionID)
 	if versionID == "" {
 		return nil
 	}
@@ -388,7 +388,7 @@ func (s *Service) PipelineForExecutionPlan(plan *core.ExecutionPlan) *guardrails
 	return compiled.Pipeline
 }
 
-// StartBackgroundRefresh periodically reloads active execution plans until stopped.
+// StartBackgroundRefresh periodically reloads active workflows until stopped.
 func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 	if interval <= 0 {
 		interval = time.Minute
@@ -411,7 +411,7 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 					refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
 					defer refreshCancel()
 					if err := s.Refresh(refreshCtx); err != nil {
-						slog.Warn("execution plan refresh failed", "error", err)
+						slog.Warn("workflow refresh failed", "error", err)
 					}
 				}()
 			}
@@ -426,11 +426,11 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 	}
 }
 
-func (s *Service) matchCompiled(selector core.ExecutionPlanSelector) (*CompiledPlan, error) {
+func (s *Service) matchCompiled(selector core.WorkflowSelector) (*CompiledWorkflow, error) {
 	if s == nil {
 		return nil, nil
 	}
-	selector = core.NewExecutionPlanSelector(selector.Provider, selector.Model, selector.UserPath)
+	selector = core.NewWorkflowSelector(selector.Provider, selector.Model, selector.UserPath)
 	current := s.snapshot()
 	ancestors := core.UserPathAncestors(selector.UserPath)
 
@@ -470,30 +470,30 @@ func (s *Service) matchCompiled(selector core.ExecutionPlanSelector) (*CompiledP
 		}
 	}
 	if current.global == nil {
-		return nil, fmt.Errorf("missing active global execution plan")
+		return nil, fmt.Errorf("missing active global workflow")
 	}
 	return current.global, nil
 }
 
-func (s *Service) validateCreateCandidate(input CreateInput, scopeKey, planHash string) (*CompiledPlan, error) {
+func (s *Service) validateCreateCandidate(input CreateInput, scopeKey, workflowHash string) (*CompiledWorkflow, error) {
 	version := Version{
-		ID:          "preview",
-		Scope:       input.Scope,
-		ScopeKey:    scopeKey,
-		Version:     1,
-		Active:      input.Activate,
-		Name:        input.Name,
-		Description: input.Description,
-		Payload:     input.Payload,
-		PlanHash:    planHash,
-		CreatedAt:   time.Unix(0, 0).UTC(),
+		ID:           "preview",
+		Scope:        input.Scope,
+		ScopeKey:     scopeKey,
+		Version:      1,
+		Active:       input.Activate,
+		Name:         input.Name,
+		Description:  input.Description,
+		Payload:      input.Payload,
+		WorkflowHash: workflowHash,
+		CreatedAt:    time.Unix(0, 0).UTC(),
 	}
 	compiled, err := s.compiler.Compile(version)
 	if err != nil {
 		return nil, newValidationError(err.Error(), err)
 	}
 	if compiled == nil || compiled.Policy == nil {
-		return nil, newValidationError("compiled plan is empty or missing policy", nil)
+		return nil, newValidationError("compiled workflow is empty or missing policy", nil)
 	}
 	return compiled, nil
 }
@@ -501,7 +501,7 @@ func (s *Service) validateCreateCandidate(input CreateInput, scopeKey, planHash 
 func (s *Service) viewForVersion(version Version) (View, error) {
 	scope, scopeKey, err := normalizeScope(version.Scope)
 	if err != nil {
-		return View{}, fmt.Errorf("load execution plan %q: %w", version.ID, err)
+		return View{}, fmt.Errorf("load workflow %q: %w", version.ID, err)
 	}
 	version.Scope = scope
 	if strings.TrimSpace(version.ScopeKey) == "" {
@@ -510,19 +510,18 @@ func (s *Service) viewForVersion(version Version) (View, error) {
 
 	compiled, err := s.compiler.Compile(version)
 	if err != nil {
-		return View{}, fmt.Errorf("compile execution plan %q: %w", version.ID, err)
+		return View{}, fmt.Errorf("compile workflow %q: %w", version.ID, err)
 	}
 	if compiled == nil || compiled.Policy == nil {
-		return View{}, fmt.Errorf("compile execution plan %q: empty compiled plan", version.ID)
+		return View{}, fmt.Errorf("compile workflow %q: empty compiled workflow", version.ID)
 	}
 
-	return View{
-		Version:           version,
-		ScopeType:         scopeType(scope),
-		ScopeDisplay:      scopeDisplay(scope),
-		EffectiveFeatures: compiled.Policy.Features,
-		GuardrailsHash:    compiled.Policy.GuardrailsHash,
-	}, nil
+	view := NewViewFromVersion(version)
+	view.ScopeType = scopeType(scope)
+	view.ScopeDisplay = scopeDisplay(scope)
+	view.EffectiveFeatures = compiled.Policy.Features
+	view.GuardrailsHash = compiled.Policy.GuardrailsHash
+	return view, nil
 }
 
 func viewWithError(version Version, err error) View {
@@ -533,12 +532,11 @@ func viewWithError(version Version, err error) View {
 	}
 	version.Scope = scope
 
-	return View{
-		Version:      version,
-		ScopeType:    rawScopeType(scope),
-		ScopeDisplay: rawScopeDisplay(scope),
-		CompileError: err.Error(),
-	}
+	view := NewViewFromVersion(version)
+	view.ScopeType = rawScopeType(scope)
+	view.ScopeDisplay = rawScopeDisplay(scope)
+	view.CompileError = err.Error()
+	return view
 }
 
 func rawScopeType(scope Scope) string {
@@ -636,36 +634,36 @@ func viewScopeSpecificity(scopeType string) int {
 func (s *Service) snapshot() snapshot {
 	if s == nil {
 		return snapshot{
-			paths:              map[string]*CompiledPlan{},
-			providers:          map[string]*CompiledPlan{},
-			providerPaths:      map[string]map[string]*CompiledPlan{},
-			providerModels:     map[string]map[string]*CompiledPlan{},
-			providerModelPaths: map[string]map[string]map[string]*CompiledPlan{},
-			byVersionID:        map[string]*CompiledPlan{},
+			paths:              map[string]*CompiledWorkflow{},
+			providers:          map[string]*CompiledWorkflow{},
+			providerPaths:      map[string]map[string]*CompiledWorkflow{},
+			providerModels:     map[string]map[string]*CompiledWorkflow{},
+			providerModelPaths: map[string]map[string]map[string]*CompiledWorkflow{},
+			byVersionID:        map[string]*CompiledWorkflow{},
 		}
 	}
 	if current, ok := s.current.Load().(snapshot); ok {
 		return current
 	}
 	return snapshot{
-		paths:              map[string]*CompiledPlan{},
-		providers:          map[string]*CompiledPlan{},
-		providerPaths:      map[string]map[string]*CompiledPlan{},
-		providerModels:     map[string]map[string]*CompiledPlan{},
-		providerModelPaths: map[string]map[string]map[string]*CompiledPlan{},
-		byVersionID:        map[string]*CompiledPlan{},
+		paths:              map[string]*CompiledWorkflow{},
+		providers:          map[string]*CompiledWorkflow{},
+		providerPaths:      map[string]map[string]*CompiledWorkflow{},
+		providerModels:     map[string]map[string]*CompiledWorkflow{},
+		providerModelPaths: map[string]map[string]map[string]*CompiledWorkflow{},
+		byVersionID:        map[string]*CompiledWorkflow{},
 	}
 }
 
 func cloneSnapshot(current snapshot) snapshot {
 	next := snapshot{
 		global:             current.global,
-		paths:              make(map[string]*CompiledPlan, len(current.paths)),
-		providers:          make(map[string]*CompiledPlan, len(current.providers)),
-		providerPaths:      make(map[string]map[string]*CompiledPlan, len(current.providerPaths)),
-		providerModels:     make(map[string]map[string]*CompiledPlan, len(current.providerModels)),
-		providerModelPaths: make(map[string]map[string]map[string]*CompiledPlan, len(current.providerModelPaths)),
-		byVersionID:        make(map[string]*CompiledPlan, len(current.byVersionID)),
+		paths:              make(map[string]*CompiledWorkflow, len(current.paths)),
+		providers:          make(map[string]*CompiledWorkflow, len(current.providers)),
+		providerPaths:      make(map[string]map[string]*CompiledWorkflow, len(current.providerPaths)),
+		providerModels:     make(map[string]map[string]*CompiledWorkflow, len(current.providerModels)),
+		providerModelPaths: make(map[string]map[string]map[string]*CompiledWorkflow, len(current.providerModelPaths)),
+		byVersionID:        make(map[string]*CompiledWorkflow, len(current.byVersionID)),
 	}
 	for userPath, compiled := range current.paths {
 		next.paths[userPath] = compiled
@@ -674,23 +672,23 @@ func cloneSnapshot(current snapshot) snapshot {
 		next.providers[provider] = compiled
 	}
 	for provider, paths := range current.providerPaths {
-		copied := make(map[string]*CompiledPlan, len(paths))
+		copied := make(map[string]*CompiledWorkflow, len(paths))
 		for userPath, compiled := range paths {
 			copied[userPath] = compiled
 		}
 		next.providerPaths[provider] = copied
 	}
 	for provider, models := range current.providerModels {
-		copied := make(map[string]*CompiledPlan, len(models))
+		copied := make(map[string]*CompiledWorkflow, len(models))
 		for model, compiled := range models {
 			copied[model] = compiled
 		}
 		next.providerModels[provider] = copied
 	}
 	for provider, models := range current.providerModelPaths {
-		modelCopy := make(map[string]map[string]*CompiledPlan, len(models))
+		modelCopy := make(map[string]map[string]*CompiledWorkflow, len(models))
 		for model, paths := range models {
-			pathCopy := make(map[string]*CompiledPlan, len(paths))
+			pathCopy := make(map[string]*CompiledWorkflow, len(paths))
 			for userPath, compiled := range paths {
 				pathCopy[userPath] = compiled
 			}
@@ -704,11 +702,11 @@ func cloneSnapshot(current snapshot) snapshot {
 	return next
 }
 
-func compiledPlanForVersion(compiled *CompiledPlan, version Version) *CompiledPlan {
+func compiledWorkflowForVersion(compiled *CompiledWorkflow, version Version) *CompiledWorkflow {
 	if compiled == nil {
 		return nil
 	}
-	next := &CompiledPlan{
+	next := &CompiledWorkflow{
 		Version:  version,
 		Pipeline: compiled.Pipeline,
 	}
@@ -720,13 +718,13 @@ func compiledPlanForVersion(compiled *CompiledPlan, version Version) *CompiledPl
 		policy.ScopeModel = version.Scope.Model
 		policy.ScopeUserPath = version.Scope.UserPath
 		policy.Name = version.Name
-		policy.PlanHash = version.PlanHash
+		policy.WorkflowHash = version.WorkflowHash
 		next.Policy = &policy
 	}
 	return next
 }
 
-func (s *Service) storeActivatedCompiledLocked(compiled *CompiledPlan) {
+func (s *Service) storeActivatedCompiledLocked(compiled *CompiledWorkflow) {
 	if s == nil || compiled == nil {
 		return
 	}
@@ -752,7 +750,7 @@ func (s *Service) storeActivatedCompiledLocked(compiled *CompiledPlan) {
 	case scope.Model == "" && scope.UserPath != "":
 		paths := next.providerPaths[scope.Provider]
 		if paths == nil {
-			paths = make(map[string]*CompiledPlan)
+			paths = make(map[string]*CompiledWorkflow)
 			next.providerPaths[scope.Provider] = paths
 		}
 		if existing := paths[scope.UserPath]; existing != nil {
@@ -762,7 +760,7 @@ func (s *Service) storeActivatedCompiledLocked(compiled *CompiledPlan) {
 	case scope.UserPath == "":
 		models := next.providerModels[scope.Provider]
 		if models == nil {
-			models = make(map[string]*CompiledPlan)
+			models = make(map[string]*CompiledWorkflow)
 			next.providerModels[scope.Provider] = models
 		}
 		if existing := models[scope.Model]; existing != nil {
@@ -772,12 +770,12 @@ func (s *Service) storeActivatedCompiledLocked(compiled *CompiledPlan) {
 	default:
 		providers := next.providerModelPaths[scope.Provider]
 		if providers == nil {
-			providers = make(map[string]map[string]*CompiledPlan)
+			providers = make(map[string]map[string]*CompiledWorkflow)
 			next.providerModelPaths[scope.Provider] = providers
 		}
 		paths := providers[scope.Model]
 		if paths == nil {
-			paths = make(map[string]*CompiledPlan)
+			paths = make(map[string]*CompiledWorkflow)
 			providers[scope.Model] = paths
 		}
 		if existing := paths[scope.UserPath]; existing != nil {

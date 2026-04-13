@@ -12,11 +12,11 @@ import (
 )
 
 type pgVecStore struct {
-	pool       *pgxpool.Pool
-	table      string
-	dim        int
-	cleanup    *vecCleanup
-	quotedTbl  string
+	pool      *pgxpool.Pool
+	table     string
+	dim       int
+	cleanup   *vecCleanup
+	quotedTbl string
 }
 
 func newPGVectorStore(cfg config.PGVectorConfig) (*pgVecStore, error) {

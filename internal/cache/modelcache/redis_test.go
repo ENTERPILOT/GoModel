@@ -136,9 +136,12 @@ type spyStore struct {
 	setCalls   int
 }
 
-func (s *spyStore) Get(_ context.Context, _ string) ([]byte, error)                  { return nil, nil }
-func (s *spyStore) Set(_ context.Context, _ string, _ []byte, _ time.Duration) error { s.setCalls++; return nil }
-func (s *spyStore) Close() error                                                      { s.closeCalls++; return nil }
+func (s *spyStore) Get(_ context.Context, _ string) ([]byte, error) { return nil, nil }
+func (s *spyStore) Set(_ context.Context, _ string, _ []byte, _ time.Duration) error {
+	s.setCalls++
+	return nil
+}
+func (s *spyStore) Close() error { s.closeCalls++; return nil }
 
 func TestRedisModelCache_SetNilReturnsError(t *testing.T) {
 	spy := &spyStore{}

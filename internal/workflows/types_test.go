@@ -1,4 +1,4 @@
-package executionplans
+package workflows
 
 import "testing"
 
@@ -45,7 +45,7 @@ func TestNormalizeScope_AllowsPathOnlyScope(t *testing.T) {
 func TestNormalizeCreateInput_AllowsEmptyName(t *testing.T) {
 	t.Parallel()
 
-	input, scopeKey, planHash, err := normalizeCreateInput(CreateInput{
+	input, scopeKey, workflowHash, err := normalizeCreateInput(CreateInput{
 		Scope:    Scope{},
 		Activate: true,
 		Name:     "",
@@ -63,8 +63,8 @@ func TestNormalizeCreateInput_AllowsEmptyName(t *testing.T) {
 	if scopeKey != "global" {
 		t.Fatalf("scopeKey = %q, want global", scopeKey)
 	}
-	if planHash == "" {
-		t.Fatal("planHash is empty")
+	if workflowHash == "" {
+		t.Fatal("workflowHash is empty")
 	}
 }
 
@@ -123,7 +123,7 @@ func TestFeatureFlagsRuntimeFeatures_FallbackDefaultsToTrue(t *testing.T) {
 	}
 }
 
-func TestNormalizePayload_CanonicalizesFallbackForStablePlanHash(t *testing.T) {
+func TestNormalizePayload_CanonicalizesFallbackForStableWorkflowHash(t *testing.T) {
 	explicitTrue := true
 
 	implicitPayload, implicitHash, err := normalizePayload(Payload{
@@ -160,6 +160,6 @@ func TestNormalizePayload_CanonicalizesFallbackForStablePlanHash(t *testing.T) {
 		t.Fatalf("explicit payload fallback = %v, want explicit true", explicitPayload.Features.Fallback)
 	}
 	if implicitHash != explicitHash {
-		t.Fatalf("plan hash mismatch: implicit=%q explicit=%q", implicitHash, explicitHash)
+		t.Fatalf("workflow hash mismatch: implicit=%q explicit=%q", implicitHash, explicitHash)
 	}
 }

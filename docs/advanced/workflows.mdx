@@ -5,7 +5,7 @@ description: "How workflow matching works, including user_path-first precedence 
 
 ## Overview
 
-Workflows are immutable execution-policy versions stored in the gateway and matched per request.
+Workflows are immutable workflow-policy versions stored in the gateway and matched per request.
 
 They currently control gateway-owned behavior such as:
 
@@ -94,7 +94,7 @@ Even though both have provider type `openai`, they are different workflow scopes
 Create a workflow scoped to one configured provider name, one model, and one user-path subtree:
 
 ```bash
-curl -X POST http://localhost:8080/admin/api/v1/execution-plans \
+curl -X POST http://localhost:8080/admin/api/v1/workflows \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -103,7 +103,7 @@ curl -X POST http://localhost:8080/admin/api/v1/execution-plans \
     "scope_user_path": "/team/alpha",
     "name": "team-alpha-openai-primary",
     "description": "Disable cache for this tenant on the primary OpenAI provider",
-    "plan_payload": {
+    "workflow_payload": {
       "schema_version": 1,
       "features": {
         "cache": false,

@@ -33,7 +33,7 @@ type RouteHints struct {
 // RawEndpoint reflects the route-relative provider endpoint from the inbound
 // path. NormalizedEndpoint, SemanticOperation, and AuditPath are optional and
 // may be filled by later gateway enrichment before execution. Once cached on
-// WhiteBoxPrompt or ExecutionPlan, it should be treated as immutable by later
+// WhiteBoxPrompt or Workflow, it should be treated as immutable by later
 // request stages.
 type PassthroughRouteInfo struct {
 	Provider           string

@@ -9,7 +9,7 @@ func TestValidateCacheConfig_BothLocalAndRedis(t *testing.T) {
 	cfg := &CacheConfig{
 		Model: ModelCacheConfig{
 			Local: &LocalCacheConfig{CacheDir: ".cache"},
-		Redis: &RedisModelConfig{URL: "redis://localhost:6379"},
+			Redis: &RedisModelConfig{URL: "redis://localhost:6379"},
 		},
 	}
 	err := ValidateCacheConfig(cfg)
@@ -70,7 +70,7 @@ func TestValidateCacheConfig_RedisOnly(t *testing.T) {
 	cfg := &CacheConfig{
 		Model: ModelCacheConfig{
 			Local: nil,
-		Redis: &RedisModelConfig{URL: "redis://localhost:6379"},
+			Redis: &RedisModelConfig{URL: "redis://localhost:6379"},
 		},
 	}
 	err := ValidateCacheConfig(cfg)
@@ -173,9 +173,9 @@ func TestValidateCacheConfig_SemanticSimilarityThresholdInvalid(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name  string
-		th    float64
-		want  string
+		name string
+		th   float64
+		want string
 	}{
 		{"zero", 0, "similarity_threshold"},
 		{"negative", -0.1, "similarity_threshold"},

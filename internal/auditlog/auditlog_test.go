@@ -465,14 +465,14 @@ func TestMiddleware_SkipsStreamingResponseWriterCapture(t *testing.T) {
 	}
 }
 
-func TestMiddleware_PrefersExecutionPlanOverLegacyResolution(t *testing.T) {
+func TestMiddleware_PrefersWorkflowOverLegacyResolution(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"anthropic/claude-opus-4-6"}`))
-	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
 		ProviderType: "openai",
 		Resolution: &core.RequestModelResolution{
 			Requested:        core.NewRequestedModelSelector("anthropic/claude-opus-4-6", ""),
@@ -512,7 +512,7 @@ func TestMiddleware_PrefersExecutionPlanOverLegacyResolution(t *testing.T) {
 	}
 }
 
-func TestMiddleware_UsesExecutionPlanRequestID(t *testing.T) {
+func TestMiddleware_UsesWorkflowRequestID(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true},
@@ -520,8 +520,8 @@ func TestMiddleware_UsesExecutionPlanRequestID(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-nano"}`))
 	req.Header.Set("X-Request-ID", "header-req-id")
-	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
-		RequestID:    "plan-req-id",
+	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
+		RequestID:    "workflow-req-id",
 		ProviderType: "openai",
 		Resolution: &core.RequestModelResolution{
 			Requested:        core.NewRequestedModelSelector("gpt-5-nano", ""),
@@ -545,12 +545,12 @@ func TestMiddleware_UsesExecutionPlanRequestID(t *testing.T) {
 	}
 
 	entry := logger.entries[0]
-	if entry.RequestID != "plan-req-id" {
-		t.Fatalf("RequestID = %q, want plan-req-id", entry.RequestID)
+	if entry.RequestID != "workflow-req-id" {
+		t.Fatalf("RequestID = %q, want workflow-req-id", entry.RequestID)
 	}
 }
 
-func TestMiddleware_DoesNotApplyModelMetadataWithoutExecutionPlan(t *testing.T) {
+func TestMiddleware_DoesNotApplyModelMetadataWithoutWorkflow(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true},
@@ -587,14 +587,14 @@ func TestMiddleware_DoesNotApplyModelMetadataWithoutExecutionPlan(t *testing.T) 
 	}
 }
 
-func TestMiddleware_PassthroughExecutionPlanUsesPassthroughModel(t *testing.T) {
+func TestMiddleware_PassthroughWorkflowUsesPassthroughModel(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", strings.NewReader(`{"model":"gpt-4.1-nano"}`))
-	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
 		Passthrough: &core.PassthroughRouteInfo{
@@ -630,18 +630,18 @@ func TestMiddleware_PassthroughExecutionPlanUsesPassthroughModel(t *testing.T) {
 	}
 }
 
-func TestMiddleware_StoresExecutionPlanVersionID(t *testing.T) {
+func TestMiddleware_StoresWorkflowVersionID(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-nano"}`))
-	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
 		ProviderType: "openai",
-		Policy: &core.ResolvedExecutionPolicy{
-			VersionID: "plan-version-123",
-			Features: core.ExecutionFeatures{
+		Policy: &core.ResolvedWorkflowPolicy{
+			VersionID: "workflow-version-123",
+			Features: core.WorkflowFeatures{
 				Cache:      true,
 				Audit:      true,
 				Usage:      true,
@@ -668,8 +668,8 @@ func TestMiddleware_StoresExecutionPlanVersionID(t *testing.T) {
 	if len(logger.entries) != 1 {
 		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
 	}
-	if got := logger.entries[0].ExecutionPlanVersionID; got != "plan-version-123" {
-		t.Fatalf("ExecutionPlanVersionID = %q, want plan-version-123", got)
+	if got := logger.entries[0].WorkflowVersionID; got != "workflow-version-123" {
+		t.Fatalf("WorkflowVersionID = %q, want workflow-version-123", got)
 	}
 }
 
@@ -752,17 +752,17 @@ func TestMiddleware_DefaultsMissingUserPathToRoot(t *testing.T) {
 	}
 }
 
-func TestMiddleware_SkipsWriteWhenExecutionPlanDisablesAudit(t *testing.T) {
+func TestMiddleware_SkipsWriteWhenWorkflowDisablesAudit(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true, LogBodies: true, LogHeaders: true},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-nano"}`))
-	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
-		Policy: &core.ResolvedExecutionPolicy{
-			VersionID: "plan-version-123",
-			Features: core.ExecutionFeatures{
+	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
+		Policy: &core.ResolvedWorkflowPolicy{
+			VersionID: "workflow-version-123",
+			Features: core.WorkflowFeatures{
 				Cache:      true,
 				Audit:      false,
 				Usage:      true,
@@ -940,27 +940,28 @@ func TestCreateStreamEntry(t *testing.T) {
 
 	// Test with valid entry
 	baseEntry := &LogEntry{
-		ID:                     "test-id",
-		Timestamp:              time.Now(),
-		DurationNs:             1000,
-		RequestedModel:         "claude-opus-4-6",
-		ResolvedModel:          "openai/gpt-5-nano",
-		Provider:               "openai",
-		AliasUsed:              true,
-		ExecutionPlanVersionID: "plan-version-123",
-		CacheType:              CacheTypeSemantic,
-		StatusCode:             200,
-		RequestID:              "req-123",
-		AuthKeyID:              "auth-key-123",
-		AuthMethod:             AuthMethodAPIKey,
-		ClientIP:               "127.0.0.1",
-		Method:                 "POST",
-		Path:                   "/v1/chat/completions",
-		UserPath:               "/team/alpha",
-		Stream:                 false,
+		ID:                "test-id",
+		Timestamp:         time.Now(),
+		DurationNs:        1000,
+		RequestedModel:    "claude-opus-4-6",
+		ResolvedModel:     "openai/gpt-5-nano",
+		Provider:          "openai",
+		ProviderName:      "primary-openai",
+		AliasUsed:         true,
+		WorkflowVersionID: "workflow-version-123",
+		CacheType:         CacheTypeSemantic,
+		StatusCode:        200,
+		RequestID:         "req-123",
+		AuthKeyID:         "auth-key-123",
+		AuthMethod:        AuthMethodAPIKey,
+		ClientIP:          "127.0.0.1",
+		Method:            "POST",
+		Path:              "/v1/chat/completions",
+		UserPath:          "/team/alpha",
+		Stream:            false,
 		Data: &LogData{
 			UserAgent: "test",
-			ExecutionFeatures: &ExecutionFeaturesSnapshot{
+			WorkflowFeatures: &WorkflowFeaturesSnapshot{
 				Cache:      false,
 				Audit:      true,
 				Usage:      true,
@@ -989,14 +990,17 @@ func TestCreateStreamEntry(t *testing.T) {
 	if streamEntry.ResolvedModel != baseEntry.ResolvedModel {
 		t.Errorf("ResolvedModel mismatch")
 	}
+	if streamEntry.ProviderName != baseEntry.ProviderName {
+		t.Errorf("ProviderName mismatch")
+	}
 	if streamEntry.AliasUsed != baseEntry.AliasUsed {
 		t.Errorf("AliasUsed mismatch")
 	}
 	if streamEntry.CacheType != baseEntry.CacheType {
 		t.Errorf("CacheType mismatch")
 	}
-	if streamEntry.ExecutionPlanVersionID != baseEntry.ExecutionPlanVersionID {
-		t.Errorf("ExecutionPlanVersionID mismatch")
+	if streamEntry.WorkflowVersionID != baseEntry.WorkflowVersionID {
+		t.Errorf("WorkflowVersionID mismatch")
 	}
 	if !streamEntry.Stream {
 		t.Error("Stream should be true")
@@ -1038,42 +1042,42 @@ func TestCreateStreamEntry(t *testing.T) {
 	if streamEntry.Data.RequestHeaders["New"] == "value" {
 		t.Error("Headers should be a copy, not same reference")
 	}
-	if streamEntry.Data.ExecutionFeatures == nil {
-		t.Fatal("ExecutionFeatures is nil")
+	if streamEntry.Data.WorkflowFeatures == nil {
+		t.Fatal("WorkflowFeatures is nil")
 	}
-	if streamEntry.Data.ExecutionFeatures == baseEntry.Data.ExecutionFeatures {
-		t.Fatal("ExecutionFeatures should be copied, not shared")
+	if streamEntry.Data.WorkflowFeatures == baseEntry.Data.WorkflowFeatures {
+		t.Fatal("WorkflowFeatures should be copied, not shared")
 	}
-	if streamEntry.Data.ExecutionFeatures.Cache != baseEntry.Data.ExecutionFeatures.Cache {
-		t.Error("ExecutionFeatures.Cache mismatch")
+	if streamEntry.Data.WorkflowFeatures.Cache != baseEntry.Data.WorkflowFeatures.Cache {
+		t.Error("WorkflowFeatures.Cache mismatch")
 	}
-	if streamEntry.Data.ExecutionFeatures.Audit != baseEntry.Data.ExecutionFeatures.Audit {
-		t.Error("ExecutionFeatures.Audit mismatch")
+	if streamEntry.Data.WorkflowFeatures.Audit != baseEntry.Data.WorkflowFeatures.Audit {
+		t.Error("WorkflowFeatures.Audit mismatch")
 	}
-	if streamEntry.Data.ExecutionFeatures.Usage != baseEntry.Data.ExecutionFeatures.Usage {
-		t.Error("ExecutionFeatures.Usage mismatch")
+	if streamEntry.Data.WorkflowFeatures.Usage != baseEntry.Data.WorkflowFeatures.Usage {
+		t.Error("WorkflowFeatures.Usage mismatch")
 	}
-	if streamEntry.Data.ExecutionFeatures.Guardrails != baseEntry.Data.ExecutionFeatures.Guardrails {
-		t.Error("ExecutionFeatures.Guardrails mismatch")
+	if streamEntry.Data.WorkflowFeatures.Guardrails != baseEntry.Data.WorkflowFeatures.Guardrails {
+		t.Error("WorkflowFeatures.Guardrails mismatch")
 	}
-	if streamEntry.Data.ExecutionFeatures.Fallback != baseEntry.Data.ExecutionFeatures.Fallback {
-		t.Error("ExecutionFeatures.Fallback mismatch")
+	if streamEntry.Data.WorkflowFeatures.Fallback != baseEntry.Data.WorkflowFeatures.Fallback {
+		t.Error("WorkflowFeatures.Fallback mismatch")
 	}
 }
 
-func TestEnrichEntryWithExecutionPlanStoresExecutionFeatures(t *testing.T) {
+func TestEnrichEntryWithWorkflowStoresWorkflowFeatures(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	entry := &LogEntry{ID: "plan-audit-entry"}
+	entry := &LogEntry{ID: "workflow-audit-entry"}
 	c.Set(string(LogEntryKey), entry)
 
-	EnrichEntryWithExecutionPlan(c, &core.ExecutionPlan{
-		Policy: &core.ResolvedExecutionPolicy{
+	EnrichEntryWithWorkflow(c, &core.Workflow{
+		Policy: &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-v3",
-			Features: core.ExecutionFeatures{
+			Features: core.WorkflowFeatures{
 				Cache:      false,
 				Audit:      true,
 				Usage:      false,
@@ -1083,26 +1087,26 @@ func TestEnrichEntryWithExecutionPlanStoresExecutionFeatures(t *testing.T) {
 		},
 	})
 
-	if entry.ExecutionPlanVersionID != "workflow-v3" {
-		t.Fatalf("ExecutionPlanVersionID = %q, want workflow-v3", entry.ExecutionPlanVersionID)
+	if entry.WorkflowVersionID != "workflow-v3" {
+		t.Fatalf("WorkflowVersionID = %q, want workflow-v3", entry.WorkflowVersionID)
 	}
-	if entry.Data == nil || entry.Data.ExecutionFeatures == nil {
-		t.Fatal("expected execution feature snapshot to be stored in audit data")
+	if entry.Data == nil || entry.Data.WorkflowFeatures == nil {
+		t.Fatal("expected workflow feature snapshot to be stored in audit data")
 	}
-	if entry.Data.ExecutionFeatures.Cache {
-		t.Fatal("ExecutionFeatures.Cache = true, want false")
+	if entry.Data.WorkflowFeatures.Cache {
+		t.Fatal("WorkflowFeatures.Cache = true, want false")
 	}
-	if !entry.Data.ExecutionFeatures.Audit {
-		t.Fatal("ExecutionFeatures.Audit = false, want true")
+	if !entry.Data.WorkflowFeatures.Audit {
+		t.Fatal("WorkflowFeatures.Audit = false, want true")
 	}
-	if entry.Data.ExecutionFeatures.Usage {
-		t.Fatal("ExecutionFeatures.Usage = true, want false")
+	if entry.Data.WorkflowFeatures.Usage {
+		t.Fatal("WorkflowFeatures.Usage = true, want false")
 	}
-	if !entry.Data.ExecutionFeatures.Guardrails {
-		t.Fatal("ExecutionFeatures.Guardrails = false, want true")
+	if !entry.Data.WorkflowFeatures.Guardrails {
+		t.Fatal("WorkflowFeatures.Guardrails = false, want true")
 	}
-	if entry.Data.ExecutionFeatures.Fallback {
-		t.Fatal("ExecutionFeatures.Fallback = true, want false")
+	if entry.Data.WorkflowFeatures.Fallback {
+		t.Fatal("WorkflowFeatures.Fallback = true, want false")
 	}
 }
 

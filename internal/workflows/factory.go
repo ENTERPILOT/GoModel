@@ -1,4 +1,4 @@
-package executionplans
+package workflows
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"gomodel/internal/storage"
 )
 
-// Result holds the initialized execution-plan service and any owned resources.
+// Result holds the initialized workflow service and any owned resources.
 type Result struct {
 	Service *Service
 	Store   Store
@@ -26,7 +26,7 @@ type Result struct {
 	closeErr    error
 }
 
-// Close releases resources held by the execution-plan subsystem.
+// Close releases resources held by the workflow subsystem.
 func (r *Result) Close() error {
 	if r == nil {
 		return nil
@@ -55,7 +55,7 @@ func (r *Result) Close() error {
 	return r.closeErr
 }
 
-// New creates an execution-plan subsystem with its own storage connection.
+// New creates a workflow subsystem with its own storage connection.
 func New(ctx context.Context, cfg *config.Config, compiler Compiler, refreshInterval time.Duration) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
@@ -73,7 +73,7 @@ func New(ctx context.Context, cfg *config.Config, compiler Compiler, refreshInte
 	return result, nil
 }
 
-// NewWithSharedStorage creates an execution-plan subsystem using an existing storage connection.
+// NewWithSharedStorage creates a workflow subsystem using an existing storage connection.
 func NewWithSharedStorage(ctx context.Context, shared storage.Storage, compiler Compiler, refreshInterval time.Duration) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")

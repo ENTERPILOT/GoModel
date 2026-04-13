@@ -1,0 +1,90 @@
+{{define "workflow-chart"}}
+<div class="workflow-pipeline" x-data="{ workflow: {{.}} || {} }" x-effect="workflow = {{.}} || {}" :class="{ 'workflow-pipeline-has-meta': workflow.workflowID }">
+    <button type="button"
+        class="workflow-pipeline-meta workflow-pipeline-meta-copy mono"
+        x-show="workflow.workflowID"
+        x-data="workflowIDChip(workflow.workflowID)"
+        x-effect="setWorkflowID(workflow.workflowID)"
+        :class="{ 'workflow-pipeline-meta-copied': copyState.copied, 'workflow-pipeline-meta-error': copyState.error }"
+        :title="copyTitle()"
+        :aria-label="copyAriaLabel()"
+        @click.prevent="copyWorkflowID()">
+        <span class="workflow-pipeline-meta-label">id:</span>
+        <span class="workflow-pipeline-meta-placeholder">...</span>
+        <span class="workflow-pipeline-meta-value" x-text="workflowID"></span>
+        <span class="workflow-pipeline-meta-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </span>
+    </button>
+    <div class="workflow-pipeline-row">
+        <div class="workflow-node workflow-node-endpoint">
+            <div class="workflow-node-icon workflow-node-icon-endpoint">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>
+            </div>
+            <span class="workflow-node-label">Client</span>
+        </div>
+
+        <div class="workflow-conn"></div>
+        <div class="workflow-node workflow-node-feature workflow-node-auth" :class="workflow.authNodeClass">
+            <div class="workflow-node-icon">
+                <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            </div>
+            <span class="workflow-node-label">Auth</span>
+            <span class="workflow-node-sub" x-show="workflow.authNodeSublabel" x-text="workflow.authNodeSublabel"></span>
+        </div>
+
+        <div class="workflow-conn" x-show="workflow.showGuardrails"></div>
+        <div class="workflow-node workflow-node-feature workflow-node-guardrails" x-show="workflow.showGuardrails">
+            <div class="workflow-node-icon">
+                <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <span class="workflow-node-label">Guardrails</span>
+            <span class="workflow-node-sub" x-show="workflow.guardrailLabel" x-text="workflow.guardrailLabel"></span>
+        </div>
+
+        <div class="workflow-conn" x-show="workflow.showCache" :class="workflow.cacheConnClass"></div>
+        <div class="workflow-node workflow-node-feature workflow-node-cache" x-show="workflow.showCache" :class="workflow.cacheNodeClass">
+            <div class="workflow-node-icon">
+                <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            </div>
+            <span class="workflow-node-label">Cache</span>
+            <span class="workflow-node-badge" x-show="workflow.cacheStatusLabel" x-text="workflow.cacheStatusLabel"></span>
+        </div>
+
+        <div class="workflow-conn" :class="workflow.aiConnClass"></div>
+
+        <div class="workflow-node workflow-node-ai" :class="workflow.aiNodeClass">
+            <span class="workflow-node-label" x-text="workflow.aiLabel"></span>
+            <span class="workflow-node-sub" x-show="workflow.aiSublabel" x-text="workflow.aiSublabel"></span>
+        </div>
+
+        <div class="workflow-conn" :class="workflow.responseConnClass"></div>
+        <div class="workflow-node workflow-node-endpoint" :class="workflow.responseNodeClass">
+            <div class="workflow-node-icon workflow-node-icon-endpoint">
+                <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </div>
+            <span class="workflow-node-label">Response</span>
+        </div>
+    </div>
+
+    <div class="workflow-async-section" x-show="workflow.showAsync">
+        <div class="workflow-async-row">
+            <div class="workflow-node workflow-node-feature workflow-node-async workflow-node-async-usage" x-show="workflow.showUsage" :class="workflow.usageNodeClass">
+                <div class="workflow-node-icon">
+                    <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                </div>
+                <span class="workflow-node-label">Usage</span>
+            </div>
+            <div class="workflow-conn workflow-conn-async" x-show="workflow.showUsage && workflow.showAudit"></div>
+            <div class="workflow-node workflow-node-feature workflow-node-async workflow-node-async-audit" x-show="workflow.showAudit" :class="workflow.auditNodeClass">
+                <div class="workflow-node-icon">
+                    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                </div>
+                <span class="workflow-node-label">Audit Log</span>
+            </div>
+        </div>
+        <div class="workflow-async-turn"></div>
+        <span class="workflow-async-label">Async</span>
+    </div>
+</div>
+{{end}}

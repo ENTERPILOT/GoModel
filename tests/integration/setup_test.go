@@ -167,7 +167,7 @@ func resetPostgreSQLStorage(t *testing.T) {
 	tables := []string{
 		"audit_logs",
 		"usage",
-		"execution_plan_versions",
+		"workflow_versions",
 		"aliases",
 		"batches",
 	}
@@ -189,7 +189,7 @@ func resetMongoDBStorage(t *testing.T) {
 	collections := []string{
 		"audit_logs",
 		"usage",
-		"execution_plan_versions",
+		"workflow_versions",
 		"aliases",
 		"batches",
 	}

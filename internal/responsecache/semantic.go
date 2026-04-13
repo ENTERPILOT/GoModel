@@ -64,7 +64,7 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 	}
 
 	ctx := c.Request().Context()
-	plan := core.GetExecutionPlan(ctx)
+	plan := core.GetWorkflow(ctx)
 
 	embedText, msgCount := extractEmbedText(body, m.cfg.ExcludeSystemPrompt)
 	if embedText == "" {
@@ -385,7 +385,7 @@ func extractTextFromContent(content any) string {
 // This ensures semantically similar prompts with different parameters or guardrail
 // policies never share a cache entry. endpointPath is the raw URL path
 // (e.g. "/v1/chat/completions") and isolates entries across distinct endpoints.
-func computeParamsHash(body []byte, endpointPath string, plan *core.ExecutionPlan, guardrailsHash, embedderIdentity string) string {
+func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, guardrailsHash, embedderIdentity string) string {
 	var req struct {
 		Model           string              `json:"model"`
 		Temperature     *float64            `json:"temperature"`

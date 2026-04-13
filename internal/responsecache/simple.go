@@ -81,8 +81,8 @@ func (m *simpleCacheMiddleware) Middleware() echo.MiddlewareFunc {
 			if !cacheable {
 				return next(c)
 			}
-			plan := core.GetExecutionPlan(c.Request().Context())
-			if shouldSkipCacheForExecutionPlan(plan) {
+			plan := core.GetWorkflow(c.Request().Context())
+			if shouldSkipCacheForWorkflow(plan) {
 				return next(c)
 			}
 			hit, err := m.TryHit(c, body)
@@ -101,7 +101,7 @@ func (m *simpleCacheMiddleware) TryHit(c *echo.Context, body []byte) (bool, erro
 		return false, nil
 	}
 	path := c.Request().URL.Path
-	plan := core.GetExecutionPlan(c.Request().Context())
+	plan := core.GetWorkflow(c.Request().Context())
 	key := hashRequest(path, body, plan)
 	cached, err := m.store.Get(c.Request().Context(), key)
 	if err != nil {
@@ -131,7 +131,7 @@ func (m *simpleCacheMiddleware) StoreAfter(c *echo.Context, body []byte, next fu
 		return next()
 	}
 	path := c.Request().URL.Path
-	plan := core.GetExecutionPlan(c.Request().Context())
+	plan := core.GetWorkflow(c.Request().Context())
 	key := hashRequest(path, body, plan)
 
 	capture := &responseCapture{
@@ -205,7 +205,7 @@ func (m *simpleCacheMiddleware) enqueueWrite(job cacheWriteJob) {
 	}
 }
 
-func shouldSkipCacheForExecutionPlan(plan *core.ExecutionPlan) bool {
+func shouldSkipCacheForWorkflow(plan *core.Workflow) bool {
 	if plan == nil {
 		return true
 	}
@@ -272,7 +272,7 @@ func isStreamingRequestGJSON(path string, body []byte) bool {
 	return result.Bool()
 }
 
-func hashRequest(path string, body []byte, plan *core.ExecutionPlan) string {
+func hashRequest(path string, body []byte, plan *core.Workflow) string {
 	h := sha256.New()
 	h.Write([]byte(path))
 	h.Write([]byte{0})

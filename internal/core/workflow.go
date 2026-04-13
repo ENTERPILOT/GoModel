@@ -13,7 +13,7 @@ const (
 )
 
 // CapabilitySet advertises the gateway behaviors that are valid for a request.
-// This is intentionally small and pragmatic for the initial planning slice.
+// This is intentionally small and pragmatic for the initial workflow slice.
 type CapabilitySet struct {
 	SemanticExtraction bool
 	AliasResolution    bool
@@ -67,18 +67,18 @@ func CapabilitiesForEndpoint(desc EndpointDescriptor) CapabilitySet {
 	}
 }
 
-// ExecutionPlanSelector contains the request facts used to match one persisted
-// execution-plan version.
-type ExecutionPlanSelector struct {
+// WorkflowSelector contains the request facts used to match one persisted
+// workflow version.
+type WorkflowSelector struct {
 	// Provider is the configured provider instance name used for workflow matching.
 	Provider string
 	Model    string
 	UserPath string
 }
 
-// NewExecutionPlanSelector trims selector inputs for deterministic matching.
-func NewExecutionPlanSelector(provider, model string, userPath ...string) ExecutionPlanSelector {
-	selector := ExecutionPlanSelector{
+// NewWorkflowSelector trims selector inputs for deterministic matching.
+func NewWorkflowSelector(provider, model string, userPath ...string) WorkflowSelector {
+	selector := WorkflowSelector{
 		Provider: strings.TrimSpace(provider),
 		Model:    strings.TrimSpace(model),
 	}
@@ -90,9 +90,9 @@ func NewExecutionPlanSelector(provider, model string, userPath ...string) Execut
 	return selector
 }
 
-// ExecutionFeatures stores resolved per-request feature flags sourced from the
-// matched persisted execution plan.
-type ExecutionFeatures struct {
+// WorkflowFeatures stores resolved per-request feature flags sourced from the
+// matched persisted workflow.
+type WorkflowFeatures struct {
 	Cache      bool `json:"cache"`
 	Audit      bool `json:"audit"`
 	Usage      bool `json:"usage"`
@@ -101,8 +101,8 @@ type ExecutionFeatures struct {
 }
 
 // ApplyUpperBound returns features with process-level caps applied.
-func (f ExecutionFeatures) ApplyUpperBound(caps ExecutionFeatures) ExecutionFeatures {
-	return ExecutionFeatures{
+func (f WorkflowFeatures) ApplyUpperBound(caps WorkflowFeatures) WorkflowFeatures {
+	return WorkflowFeatures{
 		Cache:      f.Cache && caps.Cache,
 		Audit:      f.Audit && caps.Audit,
 		Usage:      f.Usage && caps.Usage,
@@ -111,10 +111,10 @@ func (f ExecutionFeatures) ApplyUpperBound(caps ExecutionFeatures) ExecutionFeat
 	}
 }
 
-// DefaultExecutionFeatures returns the permissive runtime default used when no
-// persisted execution plan has been attached to the request.
-func DefaultExecutionFeatures() ExecutionFeatures {
-	return ExecutionFeatures{
+// DefaultWorkflowFeatures returns the permissive runtime default used when no
+// persisted workflow has been attached to the request.
+func DefaultWorkflowFeatures() WorkflowFeatures {
+	return WorkflowFeatures{
 		Cache:      true,
 		Audit:      true,
 		Usage:      true,
@@ -123,9 +123,9 @@ func DefaultExecutionFeatures() ExecutionFeatures {
 	}
 }
 
-// ResolvedExecutionPolicy is the request-scoped runtime projection of one
-// matched persisted execution-plan version.
-type ResolvedExecutionPolicy struct {
+// ResolvedWorkflowPolicy is the request-scoped runtime projection of one
+// matched persisted workflow version.
+type ResolvedWorkflowPolicy struct {
 	VersionID string
 	Version   int
 	// ScopeProvider is the configured provider instance name stored on the matched workflow.
@@ -133,15 +133,15 @@ type ResolvedExecutionPolicy struct {
 	ScopeModel     string
 	ScopeUserPath  string
 	Name           string
-	PlanHash       string
-	Features       ExecutionFeatures
+	WorkflowHash   string
+	Features       WorkflowFeatures
 	GuardrailsHash string
 }
 
-// ExecutionPlan is the request-scoped control-plane result consumed by later
+// Workflow is the request-scoped control-plane result consumed by later
 // execution stages. It carries the resolved execution mode, endpoint
 // capabilities, and any model routing decision already made for the request.
-type ExecutionPlan struct {
+type Workflow struct {
 	RequestID    string
 	Endpoint     EndpointDescriptor
 	Mode         ExecutionMode
@@ -149,11 +149,11 @@ type ExecutionPlan struct {
 	ProviderType string
 	Passthrough  *PassthroughRouteInfo
 	Resolution   *RequestModelResolution
-	Policy       *ResolvedExecutionPolicy
+	Policy       *ResolvedWorkflowPolicy
 }
 
 // RequestedQualifiedModel returns the requested model selector when present.
-func (p *ExecutionPlan) RequestedQualifiedModel() string {
+func (p *Workflow) RequestedQualifiedModel() string {
 	if p == nil || p.Resolution == nil {
 		return ""
 	}
@@ -161,15 +161,15 @@ func (p *ExecutionPlan) RequestedQualifiedModel() string {
 }
 
 // ResolvedQualifiedModel returns the resolved model selector when present.
-func (p *ExecutionPlan) ResolvedQualifiedModel() string {
+func (p *Workflow) ResolvedQualifiedModel() string {
 	if p == nil || p.Resolution == nil {
 		return ""
 	}
 	return p.Resolution.ResolvedQualifiedModel()
 }
 
-// ExecutionPlanVersionID returns the matched immutable execution-plan version id.
-func (p *ExecutionPlan) ExecutionPlanVersionID() string {
+// WorkflowVersionID returns the matched immutable workflow version id.
+func (p *Workflow) WorkflowVersionID() string {
 	if p == nil || p.Policy == nil {
 		return ""
 	}
@@ -177,41 +177,41 @@ func (p *ExecutionPlan) ExecutionPlanVersionID() string {
 }
 
 // CacheEnabled reports whether response caching is enabled for the request.
-func (p *ExecutionPlan) CacheEnabled() bool {
-	return p.featureEnabled(func(features ExecutionFeatures) bool { return features.Cache })
+func (p *Workflow) CacheEnabled() bool {
+	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.Cache })
 }
 
 // AuditEnabled reports whether audit logging is enabled for the request.
-func (p *ExecutionPlan) AuditEnabled() bool {
-	return p.featureEnabled(func(features ExecutionFeatures) bool { return features.Audit })
+func (p *Workflow) AuditEnabled() bool {
+	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.Audit })
 }
 
 // UsageEnabled reports whether usage tracking is enabled for the request.
-func (p *ExecutionPlan) UsageEnabled() bool {
-	return p.featureEnabled(func(features ExecutionFeatures) bool { return features.Usage })
+func (p *Workflow) UsageEnabled() bool {
+	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.Usage })
 }
 
 // GuardrailsEnabled reports whether guardrail processing is enabled for the request.
-func (p *ExecutionPlan) GuardrailsEnabled() bool {
-	return p.featureEnabled(func(features ExecutionFeatures) bool { return features.Guardrails })
+func (p *Workflow) GuardrailsEnabled() bool {
+	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.Guardrails })
 }
 
 // FallbackEnabled reports whether translated-route fallback is enabled for the request.
-func (p *ExecutionPlan) FallbackEnabled() bool {
-	return p.featureEnabled(func(features ExecutionFeatures) bool { return features.Fallback })
+func (p *Workflow) FallbackEnabled() bool {
+	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.Fallback })
 }
 
-// GuardrailsHash returns the matched plan's guardrails hash.
-func (p *ExecutionPlan) GuardrailsHash() string {
+// GuardrailsHash returns the matched workflow's guardrails hash.
+func (p *Workflow) GuardrailsHash() string {
 	if p == nil || p.Policy == nil || !p.GuardrailsEnabled() {
 		return ""
 	}
 	return strings.TrimSpace(p.Policy.GuardrailsHash)
 }
 
-func (p *ExecutionPlan) featureEnabled(pick func(ExecutionFeatures) bool) bool {
+func (p *Workflow) featureEnabled(pick func(WorkflowFeatures) bool) bool {
 	if p == nil || p.Policy == nil || strings.TrimSpace(p.Policy.VersionID) == "" {
-		return pick(DefaultExecutionFeatures())
+		return pick(DefaultWorkflowFeatures())
 	}
 	return pick(p.Policy.Features)
 }

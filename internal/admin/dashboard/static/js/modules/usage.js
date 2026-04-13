@@ -17,8 +17,8 @@
             },
 
             cacheAnalyticsEnabled() {
-                return typeof this.executionPlanRuntimeBooleanFlag === 'function'
-                    ? this.executionPlanRuntimeBooleanFlag('CACHE_ENABLED', false)
+                return typeof this.workflowRuntimeBooleanFlag === 'function'
+                    ? this.workflowRuntimeBooleanFlag('CACHE_ENABLED', false)
                     : false;
             },
 

@@ -21,11 +21,11 @@ import (
 	"gomodel/internal/auditlog"
 	"gomodel/internal/authkeys"
 	"gomodel/internal/core"
-	"gomodel/internal/executionplans"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/modeloverrides"
 	"gomodel/internal/providers"
 	"gomodel/internal/usage"
+	"gomodel/internal/workflows"
 )
 
 // Handler serves admin API endpoints.
@@ -36,7 +36,7 @@ type Handler struct {
 	authKeys            *authkeys.Service
 	aliases             *aliases.Service
 	modelOverrides      *modeloverrides.Service
-	plans               *executionplans.Service
+	workflows           *workflows.Service
 	guardrails          guardrails.Catalog
 	guardrailDefs       *guardrails.Service
 	runtimeConfig       DashboardConfigResponse
@@ -154,14 +154,14 @@ func WithModelOverrides(service *modeloverrides.Service) Option {
 	}
 }
 
-// WithExecutionPlans enables execution-plan administration endpoints.
-func WithExecutionPlans(service *executionplans.Service) Option {
+// WithWorkflows enables workflow administration endpoints.
+func WithWorkflows(service *workflows.Service) Option {
 	return func(h *Handler) {
-		h.plans = service
+		h.workflows = service
 	}
 }
 
-// WithGuardrailsRegistry enables listing valid guardrail references for plan authoring.
+// WithGuardrailsRegistry enables listing valid guardrail references for workflow authoring.
 func WithGuardrailsRegistry(registry guardrails.Catalog) Option {
 	return func(h *Handler) {
 		h.guardrails = registry
@@ -1051,14 +1051,14 @@ type upsertGuardrailRequest struct {
 	Config      json.RawMessage `json:"config"`
 }
 
-type createExecutionPlanRequest struct {
-	ScopeProviderName   string                 `json:"scope_provider_name,omitempty"`
-	LegacyScopeProvider string                 `json:"scope_provider,omitempty"`
-	ScopeModel          string                 `json:"scope_model,omitempty"`
-	ScopeUserPath       string                 `json:"scope_user_path,omitempty"`
-	Name                string                 `json:"name"`
-	Description         string                 `json:"description,omitempty"`
-	Payload             executionplans.Payload `json:"plan_payload"`
+type createWorkflowRequest struct {
+	ScopeProviderName   string            `json:"scope_provider_name,omitempty"`
+	LegacyScopeProvider string            `json:"scope_provider,omitempty"`
+	ScopeModel          string            `json:"scope_model,omitempty"`
+	ScopeUserPath       string            `json:"scope_user_path,omitempty"`
+	Name                string            `json:"name"`
+	Description         string            `json:"description,omitempty"`
+	Payload             workflows.Payload `json:"workflow_payload"`
 }
 
 type createAuthKeyRequest struct {
@@ -1089,8 +1089,8 @@ func (h *Handler) guardrailsUnavailableError() error {
 	return featureUnavailableError("guardrails feature is unavailable")
 }
 
-func (h *Handler) executionPlansUnavailableError() error {
-	return featureUnavailableError("execution plans feature is unavailable")
+func (h *Handler) workflowsUnavailableError() error {
+	return featureUnavailableError("workflows feature is unavailable")
 }
 
 func aliasWriteError(err error) error {
@@ -1113,11 +1113,11 @@ func modelOverrideWriteError(err error) error {
 	return core.NewProviderError("model_overrides", http.StatusBadGateway, err.Error(), err)
 }
 
-func executionPlanWriteError(err error) error {
+func workflowWriteError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if executionplans.IsValidationError(err) {
+	if workflows.IsValidationError(err) {
 		return core.NewInvalidRequestError(err.Error(), err)
 	}
 	return err
@@ -1450,7 +1450,7 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 	}); err != nil {
 		return handleError(c, guardrailWriteError(err))
 	}
-	if err := h.refreshExecutionPlansAfterGuardrailChange(c.Request().Context()); err != nil {
+	if err := h.refreshWorkflowsAfterGuardrailChange(c.Request().Context()); err != nil {
 		return handleError(c, err)
 	}
 
@@ -1489,43 +1489,43 @@ func (h *Handler) DeleteGuardrail(c *echo.Context) error {
 		}
 		return handleError(c, guardrailWriteError(err))
 	}
-	if err := h.refreshExecutionPlansAfterGuardrailChange(c.Request().Context()); err != nil {
+	if err := h.refreshWorkflowsAfterGuardrailChange(c.Request().Context()); err != nil {
 		return handleError(c, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
 }
 
-// ListExecutionPlans handles GET /admin/api/v1/execution-plans
-func (h *Handler) ListExecutionPlans(c *echo.Context) error {
-	if h.plans == nil {
-		return handleError(c, h.executionPlansUnavailableError())
+// ListWorkflows handles GET /admin/api/v1/workflows
+func (h *Handler) ListWorkflows(c *echo.Context) error {
+	if h.workflows == nil {
+		return handleError(c, h.workflowsUnavailableError())
 	}
 
-	views, err := h.plans.ListViews(c.Request().Context())
+	views, err := h.workflows.ListViews(c.Request().Context())
 	if err != nil {
 		return handleError(c, err)
 	}
 	if views == nil {
-		views = []executionplans.View{}
+		views = []workflows.View{}
 	}
 	return c.JSON(http.StatusOK, views)
 }
 
-// GetExecutionPlan handles GET /admin/api/v1/execution-plans/:id
-func (h *Handler) GetExecutionPlan(c *echo.Context) error {
-	if h.plans == nil {
-		return handleError(c, h.executionPlansUnavailableError())
+// GetWorkflow handles GET /admin/api/v1/workflows/:id
+func (h *Handler) GetWorkflow(c *echo.Context) error {
+	if h.workflows == nil {
+		return handleError(c, h.workflowsUnavailableError())
 	}
 
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return handleError(c, core.NewInvalidRequestError("execution plan id is required", nil))
+		return handleError(c, core.NewInvalidRequestError("workflow id is required", nil))
 	}
 
-	view, err := h.plans.GetView(c.Request().Context(), id)
+	view, err := h.workflows.GetView(c.Request().Context(), id)
 	if err != nil {
-		if errors.Is(err, executionplans.ErrNotFound) {
+		if errors.Is(err, workflows.ErrNotFound) {
 			return handleError(c, core.NewNotFoundError("workflow not found: "+id))
 		}
 		return handleError(c, err)
@@ -1534,8 +1534,8 @@ func (h *Handler) GetExecutionPlan(c *echo.Context) error {
 	return c.JSON(http.StatusOK, view)
 }
 
-// ListExecutionPlanGuardrails handles GET /admin/api/v1/execution-plans/guardrails
-func (h *Handler) ListExecutionPlanGuardrails(c *echo.Context) error {
+// ListWorkflowGuardrails handles GET /admin/api/v1/workflows/guardrails
+func (h *Handler) ListWorkflowGuardrails(c *echo.Context) error {
 	if h.guardrails == nil {
 		return c.JSON(http.StatusOK, []string{})
 	}
@@ -1543,13 +1543,13 @@ func (h *Handler) ListExecutionPlanGuardrails(c *echo.Context) error {
 	return c.JSON(http.StatusOK, h.guardrails.Names())
 }
 
-// CreateExecutionPlan handles POST /admin/api/v1/execution-plans
-func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
-	if h.plans == nil {
-		return handleError(c, h.executionPlansUnavailableError())
+// CreateWorkflow handles POST /admin/api/v1/workflows
+func (h *Handler) CreateWorkflow(c *echo.Context) error {
+	if h.workflows == nil {
+		return handleError(c, h.workflowsUnavailableError())
 	}
 
-	var req createExecutionPlanRequest
+	var req createWorkflowRequest
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
@@ -1564,20 +1564,20 @@ func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
-	scopeProviderName, err = h.validateExecutionPlanScope(scopeProviderName, scopeModel)
+	scopeProviderName, err = h.validateWorkflowScope(scopeProviderName, scopeModel)
 	if err != nil {
 		return handleError(c, err)
 	}
 
-	if err := h.validateExecutionPlanGuardrails(req.Payload); err != nil {
+	if err := h.validateWorkflowGuardrails(req.Payload); err != nil {
 		return handleError(c, err)
 	}
 
 	h.mutationMu.Lock()
 	defer h.mutationMu.Unlock()
 
-	version, err := h.plans.Create(c.Request().Context(), executionplans.CreateInput{
-		Scope: executionplans.Scope{
+	version, err := h.workflows.Create(c.Request().Context(), workflows.CreateInput{
+		Scope: workflows.Scope{
 			Provider: scopeProviderName,
 			Model:    scopeModel,
 			UserPath: scopeUserPath,
@@ -1588,7 +1588,7 @@ func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
 		Payload:     req.Payload,
 	})
 	if err != nil {
-		return handleError(c, executionPlanWriteError(err))
+		return handleError(c, workflowWriteError(err))
 	}
 	if version == nil {
 		return c.NoContent(http.StatusNoContent)
@@ -1596,41 +1596,41 @@ func (h *Handler) CreateExecutionPlan(c *echo.Context) error {
 	return c.JSON(http.StatusCreated, version)
 }
 
-// DeactivateExecutionPlan handles POST /admin/api/v1/execution-plans/:id/deactivate
-func (h *Handler) DeactivateExecutionPlan(c *echo.Context) error {
-	if h.plans == nil {
-		return handleError(c, h.executionPlansUnavailableError())
+// DeactivateWorkflow handles POST /admin/api/v1/workflows/:id/deactivate
+func (h *Handler) DeactivateWorkflow(c *echo.Context) error {
+	if h.workflows == nil {
+		return handleError(c, h.workflowsUnavailableError())
 	}
 
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return handleError(c, core.NewInvalidRequestError("execution plan id is required", nil))
+		return handleError(c, core.NewInvalidRequestError("workflow id is required", nil))
 	}
 
 	h.mutationMu.Lock()
 	defer h.mutationMu.Unlock()
 
-	if err := h.plans.Deactivate(c.Request().Context(), id); err != nil {
-		if errors.Is(err, executionplans.ErrNotFound) {
+	if err := h.workflows.Deactivate(c.Request().Context(), id); err != nil {
+		if errors.Is(err, workflows.ErrNotFound) {
 			return handleError(c, core.NewNotFoundError("workflow not found: "+id))
 		}
-		return handleError(c, executionPlanWriteError(err))
+		return handleError(c, workflowWriteError(err))
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *Handler) refreshExecutionPlansAfterGuardrailChange(ctx context.Context) error {
-	if h.plans == nil {
+func (h *Handler) refreshWorkflowsAfterGuardrailChange(ctx context.Context) error {
+	if h.workflows == nil {
 		return nil
 	}
-	if err := h.plans.Refresh(ctx); err != nil {
+	if err := h.workflows.Refresh(ctx); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (h *Handler) activeWorkflowGuardrailReferences(ctx context.Context, name string) ([]string, error) {
-	if h.plans == nil {
+	if h.workflows == nil {
 		return nil, nil
 	}
 
@@ -1639,7 +1639,7 @@ func (h *Handler) activeWorkflowGuardrailReferences(ctx context.Context, name st
 		return nil, nil
 	}
 
-	views, err := h.plans.ListViews(ctx)
+	views, err := h.workflows.ListViews(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1661,12 +1661,12 @@ func (h *Handler) activeWorkflowGuardrailReferences(ctx context.Context, name st
 	return references, nil
 }
 
-func (h *Handler) validateExecutionPlanGuardrails(payload executionplans.Payload) error {
+func (h *Handler) validateWorkflowGuardrails(payload workflows.Payload) error {
 	if !payload.Features.Guardrails || len(payload.Guardrails) == 0 {
 		return nil
 	}
 	if h.guardrails == nil {
-		return featureUnavailableError("guardrail registry is unavailable for plan authoring")
+		return featureUnavailableError("guardrail registry is unavailable for workflow authoring")
 	}
 
 	known := make(map[string]struct{}, h.guardrails.Len())
@@ -1685,7 +1685,7 @@ func (h *Handler) validateExecutionPlanGuardrails(payload executionplans.Payload
 	return nil
 }
 
-func (h *Handler) validateExecutionPlanScope(scopeProviderName, scopeModel string) (string, error) {
+func (h *Handler) validateWorkflowScope(scopeProviderName, scopeModel string) (string, error) {
 	scopeProviderName = strings.TrimSpace(scopeProviderName)
 	scopeModel = strings.TrimSpace(scopeModel)
 

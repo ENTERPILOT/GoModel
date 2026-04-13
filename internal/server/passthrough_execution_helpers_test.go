@@ -10,10 +10,10 @@ import (
 	"gomodel/internal/core"
 )
 
-func TestPassthroughExecutionTarget_PrefersExecutionPlan(t *testing.T) {
+func TestPassthroughExecutionTarget_PrefersWorkflow(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/responses?trace=1", nil)
-	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
 		Passthrough: &core.PassthroughRouteInfo{

@@ -10,7 +10,7 @@ import (
 	"gomodel/internal/core"
 )
 
-func TestEnrichEntryWithExecutionPlan_PrefersProviderNameForResolvedModel(t *testing.T) {
+func TestEnrichEntryWithWorkflow_PrefersProviderNameForResolvedModel(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -19,7 +19,7 @@ func TestEnrichEntryWithExecutionPlan_PrefersProviderNameForResolvedModel(t *tes
 	entry := &LogEntry{ID: "provider-name-prefill"}
 	c.Set(string(LogEntryKey), entry)
 
-	EnrichEntryWithExecutionPlan(c, &core.ExecutionPlan{
+	EnrichEntryWithWorkflow(c, &core.Workflow{
 		ProviderType: "openai",
 		Resolution: &core.RequestModelResolution{
 			ResolvedSelector: core.ModelSelector{

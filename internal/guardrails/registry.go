@@ -19,7 +19,7 @@ type registryEntry struct {
 	descriptor responsecache.GuardrailRuleDescriptor
 }
 
-// Registry stores named guardrails so execution plans can reference them by id.
+// Registry stores named guardrails so workflows can reference them by id.
 type Registry struct {
 	entries map[string]registryEntry
 }

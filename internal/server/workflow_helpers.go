@@ -9,36 +9,36 @@ import (
 	"gomodel/internal/core"
 )
 
-func ensureTranslatedRequestPlan(
+func ensureTranslatedRequestWorkflow(
 	c *echo.Context,
 	provider core.RoutableProvider,
 	resolver RequestModelResolver,
-	policyResolver RequestExecutionPolicyResolver,
+	policyResolver RequestWorkflowPolicyResolver,
 	model,
 	providerHint *string,
-) (*core.ExecutionPlan, error) {
-	return ensureTranslatedRequestPlanWithAuthorizer(c, provider, resolver, nil, policyResolver, model, providerHint)
+) (*core.Workflow, error) {
+	return ensureTranslatedRequestWorkflowWithAuthorizer(c, provider, resolver, nil, policyResolver, model, providerHint)
 }
 
-func ensureTranslatedRequestPlanWithAuthorizer(
+func ensureTranslatedRequestWorkflowWithAuthorizer(
 	c *echo.Context,
 	provider core.RoutableProvider,
 	resolver RequestModelResolver,
 	authorizer RequestModelAuthorizer,
-	policyResolver RequestExecutionPolicyResolver,
+	policyResolver RequestWorkflowPolicyResolver,
 	model,
 	providerHint *string,
-) (*core.ExecutionPlan, error) {
+) (*core.Workflow, error) {
 	if model == nil || providerHint == nil {
 		return nil, core.NewInvalidRequestError("model selector targets are required", nil)
 	}
 
-	plan, err := ensureTranslatedExecutionPlan(c, provider, resolver, policyResolver)
+	workflow, err := ensureTranslatedWorkflow(c, provider, resolver, policyResolver)
 	if err != nil {
 		return nil, err
 	}
 
-	resolution := translatedPlanResolution(plan)
+	resolution := translatedWorkflowResolution(workflow)
 	if resolution != nil && authorizer != nil {
 		if err := authorizer.ValidateModelAccess(c.Request().Context(), resolution.ResolvedSelector); err != nil {
 			return nil, err
@@ -49,57 +49,57 @@ func ensureTranslatedRequestPlanWithAuthorizer(
 		if err != nil {
 			return nil, err
 		}
-		plan, err = translatedExecutionPlanForRequest(c, resolution, policyResolver)
+		workflow, err = translatedWorkflowForRequest(c, resolution, policyResolver)
 		if err != nil {
 			return nil, err
 		}
-		storeExecutionPlan(c, plan)
+		storeWorkflow(c, workflow)
 	}
 
 	applyResolvedSelector(model, providerHint, resolution)
-	return plan, nil
+	return workflow, nil
 }
 
-func ensureTranslatedExecutionPlan(
+func ensureTranslatedWorkflow(
 	c *echo.Context,
 	provider core.RoutableProvider,
 	resolver RequestModelResolver,
-	policyResolver RequestExecutionPolicyResolver,
-) (*core.ExecutionPlan, error) {
-	if plan := currentTranslatedExecutionPlan(c); plan != nil {
-		return plan, nil
+	policyResolver RequestWorkflowPolicyResolver,
+) (*core.Workflow, error) {
+	if workflow := currentTranslatedWorkflow(c); workflow != nil {
+		return workflow, nil
 	}
 
-	plan, err := deriveExecutionPlanWithPolicy(c, provider, resolver, policyResolver)
-	if err != nil || plan == nil {
-		return plan, err
+	workflow, err := deriveWorkflowWithPolicy(c, provider, resolver, policyResolver)
+	if err != nil || workflow == nil {
+		return workflow, err
 	}
 
-	storeExecutionPlan(c, plan)
-	return core.GetExecutionPlan(c.Request().Context()), nil
+	storeWorkflow(c, workflow)
+	return core.GetWorkflow(c.Request().Context()), nil
 }
 
-func currentTranslatedExecutionPlan(c *echo.Context) *core.ExecutionPlan {
+func currentTranslatedWorkflow(c *echo.Context) *core.Workflow {
 	if c == nil {
 		return nil
 	}
-	plan := core.GetExecutionPlan(c.Request().Context())
-	if plan == nil {
+	workflow := core.GetWorkflow(c.Request().Context())
+	if workflow == nil {
 		return nil
 	}
 
 	desc := core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path)
-	if plan.Mode != core.ExecutionModeTranslated || plan.Endpoint.Operation != desc.Operation {
+	if workflow.Mode != core.ExecutionModeTranslated || workflow.Endpoint.Operation != desc.Operation {
 		return nil
 	}
-	return plan
+	return workflow
 }
 
-func translatedPlanResolution(plan *core.ExecutionPlan) *core.RequestModelResolution {
-	if plan == nil {
+func translatedWorkflowResolution(workflow *core.Workflow) *core.RequestModelResolution {
+	if workflow == nil {
 		return nil
 	}
-	return plan.Resolution
+	return workflow.Resolution
 }
 
 func applyResolvedSelector(model, providerHint *string, resolution *core.RequestModelResolution) {
@@ -110,11 +110,11 @@ func applyResolvedSelector(model, providerHint *string, resolution *core.Request
 	*providerHint = resolution.ResolvedSelector.Provider
 }
 
-func translatedExecutionPlanForRequest(
+func translatedWorkflowForRequest(
 	c *echo.Context,
 	resolution *core.RequestModelResolution,
-	policyResolver RequestExecutionPolicyResolver,
-) (*core.ExecutionPlan, error) {
+	policyResolver RequestWorkflowPolicyResolver,
+) (*core.Workflow, error) {
 	if c == nil {
 		return nil, nil
 	}
@@ -126,7 +126,7 @@ func translatedExecutionPlanForRequest(
 		c.SetRequest(c.Request().WithContext(ctx))
 	}
 
-	return translatedExecutionPlan(
+	return translatedWorkflow(
 		c.Request().Context(),
 		requestID,
 		core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path),
@@ -135,34 +135,34 @@ func translatedExecutionPlanForRequest(
 	)
 }
 
-func translatedExecutionPlan(
+func translatedWorkflow(
 	ctx context.Context,
 	requestID string,
 	endpoint core.EndpointDescriptor,
 	resolution *core.RequestModelResolution,
-	policyResolver RequestExecutionPolicyResolver,
-) (*core.ExecutionPlan, error) {
-	plan := &core.ExecutionPlan{
+	policyResolver RequestWorkflowPolicyResolver,
+) (*core.Workflow, error) {
+	workflow := &core.Workflow{
 		RequestID:    strings.TrimSpace(requestID),
 		Endpoint:     endpoint,
 		Mode:         core.ExecutionModeTranslated,
 		Capabilities: core.CapabilitiesForEndpoint(endpoint),
 	}
 	if resolution != nil {
-		plan.ProviderType = strings.TrimSpace(resolution.ProviderType)
-		plan.Resolution = resolution
+		workflow.ProviderType = strings.TrimSpace(resolution.ProviderType)
+		workflow.Resolution = resolution
 	}
 
-	selector := core.ExecutionPlanSelector{}
+	selector := core.WorkflowSelector{}
 	if resolution != nil {
-		selector = core.NewExecutionPlanSelector(
+		selector = core.NewWorkflowSelector(
 			resolvedWorkflowProviderName(resolution),
 			resolution.ResolvedSelector.Model,
 			core.UserPathFromContext(ctx),
 		)
 	}
-	if err := applyExecutionPolicy(ctx, plan, policyResolver, selector); err != nil {
+	if err := applyWorkflowPolicy(ctx, workflow, policyResolver, selector); err != nil {
 		return nil, err
 	}
-	return plan, nil
+	return workflow, nil
 }

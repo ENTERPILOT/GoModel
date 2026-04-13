@@ -195,7 +195,7 @@ GOModel has a two-layer response cache that reduces LLM API costs and latency fo
 
 ### Layer 1 — Exact-match cache
 
-Hashes the full request body (path + `ExecutionPlan` + body) and returns a stored response on byte-identical requests. Sub-millisecond lookup. Activate by pointing it at Redis:
+Hashes the full request body (path + `Workflow` + body) and returns a stored response on byte-identical requests. Sub-millisecond lookup. Activate by pointing it at Redis:
 
 ```yaml
 # config/config.yaml
@@ -221,7 +221,7 @@ Responses served from this layer carry `X-Cache: HIT (semantic)`.
 
 Supported vector backends: `qdrant`, `pgvector`, `pinecone`, `weaviate` (set `cache.response.semantic.vector_store.type` and the matching nested block).
 
-Both cache layers run **after** guardrail/execution-plan patching so they always see the final prompt. Use `Cache-Control: no-cache` or `Cache-Control: no-store` to bypass caching per-request.
+Both cache layers run **after** guardrail/workflow patching so they always see the final prompt. Use `Cache-Control: no-cache` or `Cache-Control: no-store` to bypass caching per-request.
 
 ---
 

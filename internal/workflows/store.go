@@ -1,14 +1,14 @@
-package executionplans
+package workflows
 
 import (
 	"context"
 	"errors"
 )
 
-// ErrNotFound indicates a requested execution-plan version was not found.
-var ErrNotFound = errors.New("execution plan version not found")
+// ErrNotFound indicates a requested workflow version was not found.
+var ErrNotFound = errors.New("workflow version not found")
 
-// ValidationError indicates invalid execution-plan input or state.
+// ValidationError indicates invalid workflow input or state.
 type ValidationError struct {
 	Message string
 	Err     error
@@ -38,12 +38,12 @@ func IsValidationError(err error) bool {
 	return ok
 }
 
-// Store defines persistence operations for immutable execution-plan versions.
+// Store defines persistence operations for immutable workflow versions.
 type Store interface {
 	ListActive(ctx context.Context) ([]Version, error)
 	Get(ctx context.Context, id string) (*Version, error)
 	Create(ctx context.Context, input CreateInput) (*Version, error)
-	EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, planHash string) (*Version, error)
+	EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error)
 	Deactivate(ctx context.Context, id string) error
 	Close() error
 }

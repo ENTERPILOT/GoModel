@@ -36,7 +36,7 @@ type RoutablePassthrough interface {
 
 // PassthroughSemanticEnricher derives provider-specific passthrough metadata
 // from ingress transport and best-effort prompt state before execution
-// planning runs.
+// workflow resolution runs.
 type PassthroughSemanticEnricher interface {
 	ProviderType() string
 	Enrich(snapshot *RequestSnapshot, prompt *WhiteBoxPrompt, info *PassthroughRouteInfo) *PassthroughRouteInfo

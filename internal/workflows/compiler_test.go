@@ -1,4 +1,4 @@
-package executionplans
+package workflows
 
 import (
 	"errors"
@@ -24,7 +24,7 @@ func TestCompilerCompile_Guardrails(t *testing.T) {
 	}
 
 	compiled, err := NewCompiler(registry).Compile(Version{
-		ID:      "plan-1",
+		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 3,
 		Name:    "global",
@@ -58,14 +58,14 @@ func TestCompilerCompile_Guardrails(t *testing.T) {
 
 func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
 	fallbackEnabled := true
-	compiled, err := NewCompilerWithFeatureCaps(nil, core.ExecutionFeatures{
+	compiled, err := NewCompilerWithFeatureCaps(nil, core.WorkflowFeatures{
 		Cache:      false,
 		Audit:      true,
 		Usage:      false,
 		Guardrails: false,
 		Fallback:   false,
 	}).Compile(Version{
-		ID:      "plan-1",
+		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 1,
 		Name:    "global",
@@ -107,8 +107,8 @@ func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
 }
 
 func TestCompilerCompile_DefaultsFallbackEnabledWhenUnset(t *testing.T) {
-	compiled, err := NewCompilerWithFeatureCaps(nil, core.DefaultExecutionFeatures()).Compile(Version{
-		ID:      "plan-1",
+	compiled, err := NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()).Compile(Version{
+		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 1,
 		Name:    "global",
@@ -135,7 +135,7 @@ func TestCompilerCompile_DefaultsFallbackEnabledWhenUnset(t *testing.T) {
 
 func TestCompilerCompile_ReturnsGatewayErrorWhenGuardrailsCatalogIsEmpty(t *testing.T) {
 	_, err := NewCompiler(guardrails.NewRegistry()).Compile(Version{
-		ID:      "plan-1",
+		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 1,
 		Name:    "global",
@@ -171,7 +171,7 @@ func TestCompilerCompile_WrapsBuildPipelineErrorsAsGatewayErrors(t *testing.T) {
 		t.Fatalf("Register() error = %v", err)
 	}
 	_, err = NewCompiler(registry).Compile(Version{
-		ID:      "plan-1",
+		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 1,
 		Name:    "global",

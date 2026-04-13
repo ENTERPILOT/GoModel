@@ -9,7 +9,7 @@ It focuses on:
 - what is instantiated at boot
 - how requests move through the gateway
 - what data objects are passed between layers
-- where `RequestSnapshot`, `WhiteBoxPrompt`, and `ExecutionPlan` are created and consumed
+- where `RequestSnapshot`, `WhiteBoxPrompt`, and `Workflow` are created and consumed
 
 ## 1. Boot And Dependency Wiring
 
@@ -156,14 +156,14 @@ Echo + Handler"]
 | Object | Created by | Contains | Consumed by |
 | --- | --- | --- | --- |
 | `RequestSnapshot` | `RequestSnapshotCapture()` | Immutable ingress transport data: method, path, route params, query params, headers, content type, captured body bytes, `BodyNotCaptured`, request id, trace metadata | `DeriveWhiteBoxPrompt`, audit logging, passthrough semantic enrichers, any later logic that needs raw ingress fidelity |
-| `WhiteBoxPrompt` | `core.DeriveWhiteBoxPrompt(snapshot)` | Best-effort semantics: route type, operation type, route hints, stream intent, JSON parsed flag, cached typed request objects, cached route metadata | request planning, canonical request decoding, passthrough/file/batch helpers |
-| `ExecutionPlan` | `ExecutionPlanningWithResolver(...)` or `ensureTranslatedRequestPlan(...)` | Control-plane decision: endpoint descriptor, execution mode, capabilities, provider type, resolved model selector, passthrough info | response cache, translated handlers, passthrough handlers, audit-log enrichment |
+| `WhiteBoxPrompt` | `core.DeriveWhiteBoxPrompt(snapshot)` | Best-effort semantics: route type, operation type, route hints, stream intent, JSON parsed flag, cached typed request objects, cached route metadata | workflow resolution, canonical request decoding, passthrough/file/batch helpers |
+| `Workflow` | `WorkflowResolutionWithResolver(...)` or `ensureTranslatedRequestWorkflow(...)` | Control-plane decision: endpoint descriptor, execution mode, capabilities, provider type, resolved model selector, passthrough info | response cache, translated handlers, passthrough handlers, audit-log enrichment |
 
 Important constraints:
 
 - `RequestSnapshot` is transport-first and must not be mutated.
 - `WhiteBoxPrompt` is best-effort and may be partial or absent.
-- `ExecutionPlan` is request-scoped control-plane state, not raw transport state.
+- `Workflow` is request-scoped control-plane state, not raw transport state.
 - Streaming response frames are not part of `RequestSnapshot`.
 
 ## 3. Model-Facing Request Lifecycle
@@ -205,7 +205,7 @@ skips public paths"]
         M5["PassthroughSemanticEnrichment
 provider-owned enrichers for /p/*"]
 
-        M6["ExecutionPlanningWithResolver"]
+        M6["WorkflowResolutionWithResolver"]
 
         M7["ResponseCacheMiddleware
 only POST:
@@ -253,7 +253,7 @@ cache:
     M5 -->|"enrich cached PassthroughRouteInfo
 using RequestSnapshot + WhiteBoxPrompt"| WBP
 
-    M6 -->|"build"| Plan["core.ExecutionPlan
+    M6 -->|"build"| Plan["core.Workflow
 RequestID
 EndpointDescriptor
 Mode:
@@ -300,7 +300,7 @@ flowchart TB
 RequestSnapshot body + WhiteBoxPrompt
 -> ChatRequest or ResponsesRequest or EmbeddingRequest"]
 
-        T2["ensureTranslatedRequestPlan
+        T2["ensureTranslatedRequestWorkflow
 selector hints from WhiteBoxPrompt
 -> RequestModelResolution
 requested selector -> resolved selector"]
@@ -426,8 +426,8 @@ Translated request path:
 2. `RequestSnapshot` becomes `WhiteBoxPrompt`.
 3. `WhiteBoxPrompt` plus request body decoding becomes a typed request such as `*core.ChatRequest`.
 4. `WhiteBoxPrompt` selector hints plus alias resolution become `RequestModelResolution`.
-5. `RequestModelResolution` becomes part of `ExecutionPlan`.
-6. `ExecutionPlan` drives:
+5. `RequestModelResolution` becomes part of `Workflow`.
+6. `Workflow` drives:
    - response-cache keying
    - provider selection
    - audit-log enrichment
@@ -442,7 +442,7 @@ Passthrough request path:
 1. HTTP ingress data becomes `RequestSnapshot`.
 2. `RequestSnapshot` becomes `WhiteBoxPrompt`.
 3. Provider-owned passthrough enrichment can add `PassthroughRouteInfo` such as normalized endpoint, semantic operation, or model hints.
-4. `ExecutionPlan` is created in `passthrough` mode with `ProviderType` and `PassthroughRouteInfo`.
+4. `Workflow` is created in `passthrough` mode with `ProviderType` and `PassthroughRouteInfo`.
 5. The handler converts the live request into `*core.PassthroughRequest`:
    - `Method`
    - normalized `Endpoint`

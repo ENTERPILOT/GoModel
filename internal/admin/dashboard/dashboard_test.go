@@ -180,14 +180,14 @@ func TestStatic_ServesAliasesModuleJS(t *testing.T) {
 	}
 }
 
-func TestStatic_ServesExecutionPlansModuleJS(t *testing.T) {
+func TestStatic_ServesWorkflowsModuleJS(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New() returned error: %v", err)
 	}
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/static/js/modules/execution-plans.js", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/static/js/modules/workflows.js", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -199,7 +199,7 @@ func TestStatic_ServesExecutionPlansModuleJS(t *testing.T) {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
 	if rec.Body.Len() == 0 {
-		t.Error("expected non-empty body for execution plans module JS file")
+		t.Error("expected non-empty body for workflows module JS file")
 	}
 }
 

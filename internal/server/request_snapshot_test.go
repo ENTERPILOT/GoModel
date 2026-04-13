@@ -215,7 +215,7 @@ func TestModelValidation_UsesSemanticEnvelopeWithoutReadingBody(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	handler := ExecutionPlanning(provider)(func(c *echo.Context) error {
+	handler := WorkflowResolution(provider)(func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	})
 

@@ -195,7 +195,7 @@ func TestChatCompletion_DoesNotFallbackOnNonAvailabilityError(t *testing.T) {
 	}
 }
 
-func TestChatCompletion_DoesNotFallbackWhenExecutionPolicyDisablesFallback(t *testing.T) {
+func TestChatCompletion_DoesNotFallbackWhenWorkflowPolicyDisablesFallback(t *testing.T) {
 	provider := &fallbackProvider{
 		chatResponses: map[string]*core.ChatResponse{
 			"azure/gpt-4o": {
@@ -219,10 +219,10 @@ func TestChatCompletion_DoesNotFallbackWhenExecutionPolicyDisablesFallback(t *te
 		},
 	}
 
-	handler := newHandler(provider, nil, nil, nil, nil, requestExecutionPolicyResolverFunc(func(core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
-		return &core.ResolvedExecutionPolicy{
-			VersionID: "plan-fallback-off",
-			Features: core.ExecutionFeatures{
+	handler := newHandler(provider, nil, nil, nil, nil, requestWorkflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+		return &core.ResolvedWorkflowPolicy{
+			VersionID: "workflow-fallback-off",
+			Features: core.WorkflowFeatures{
 				Cache:      true,
 				Audit:      true,
 				Usage:      true,
@@ -295,7 +295,7 @@ func TestChatCompletion_StreamFallsBackToAlternateModel(t *testing.T) {
 	}
 }
 
-func TestChatCompletion_StreamDoesNotFallbackWhenExecutionPolicyDisablesFallback(t *testing.T) {
+func TestChatCompletion_StreamDoesNotFallbackWhenWorkflowPolicyDisablesFallback(t *testing.T) {
 	provider := &fallbackProvider{
 		chatStreams: map[string]string{
 			"azure/gpt-4o": "data: {\"choices\":[{\"delta\":{\"content\":\"fallback ok\"}}]}\n\ndata: [DONE]\n\n",
@@ -309,10 +309,10 @@ func TestChatCompletion_StreamDoesNotFallbackWhenExecutionPolicyDisablesFallback
 		},
 	}
 
-	handler := newHandler(provider, nil, nil, nil, nil, requestExecutionPolicyResolverFunc(func(core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
-		return &core.ResolvedExecutionPolicy{
-			VersionID: "plan-fallback-off",
-			Features: core.ExecutionFeatures{
+	handler := newHandler(provider, nil, nil, nil, nil, requestWorkflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+		return &core.ResolvedWorkflowPolicy{
+			VersionID: "workflow-fallback-off",
+			Features: core.WorkflowFeatures{
 				Cache:      true,
 				Audit:      true,
 				Usage:      true,
@@ -490,7 +490,7 @@ func TestResponses_StreamDoesNotFallbackOnNonAvailabilityError(t *testing.T) {
 	}
 }
 
-func TestResponses_StreamDoesNotFallbackWhenExecutionPolicyDisablesFallback(t *testing.T) {
+func TestResponses_StreamDoesNotFallbackWhenWorkflowPolicyDisablesFallback(t *testing.T) {
 	provider := &fallbackProvider{
 		responsesStreams: map[string]string{
 			"azure/gpt-4o": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"fallback response\"}\n\ndata: [DONE]\n\n",
@@ -504,10 +504,10 @@ func TestResponses_StreamDoesNotFallbackWhenExecutionPolicyDisablesFallback(t *t
 		},
 	}
 
-	handler := newHandler(provider, nil, nil, nil, nil, requestExecutionPolicyResolverFunc(func(core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
-		return &core.ResolvedExecutionPolicy{
-			VersionID: "plan-fallback-off",
-			Features: core.ExecutionFeatures{
+	handler := newHandler(provider, nil, nil, nil, nil, requestWorkflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+		return &core.ResolvedWorkflowPolicy{
+			VersionID: "workflow-fallback-off",
+			Features: core.WorkflowFeatures{
 				Cache:      true,
 				Audit:      true,
 				Usage:      true,

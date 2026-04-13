@@ -12,8 +12,8 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/core"
-	"gomodel/internal/executionplans"
 	"gomodel/internal/guardrails"
+	"gomodel/internal/workflows"
 )
 
 type guardrailTestStore struct {
@@ -315,7 +315,7 @@ func TestUpsertGuardrailRejectsSlashInName(t *testing.T) {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 
-	envelope := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	envelope := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
 	if envelope.Error.Type != string(core.ErrorTypeInvalidRequest) {
 		t.Fatalf("error type = %q, want %q", envelope.Error.Type, core.ErrorTypeInvalidRequest)
 	}
@@ -339,33 +339,33 @@ func TestDeleteGuardrailRejectsActiveWorkflowReference(t *testing.T) {
 			"content": "be precise",
 		}),
 	})
-	planStore := &executionPlanTestStore{
-		versions: []executionplans.Version{
+	planStore := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
-					Guardrails:    []executionplans.GuardrailStep{{Ref: "policy-system", Step: 10}},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
+					Guardrails:    []workflows.GuardrailStep{{Ref: "policy-system", Step: 10}},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
-	planService, err := executionplans.NewService(planStore, executionplans.NewCompiler(guardrailService))
+	planService, err := workflows.NewService(planStore, workflows.NewCompiler(guardrailService))
 	if err != nil {
-		t.Fatalf("executionplans.NewService() error = %v", err)
+		t.Fatalf("workflows.NewService() error = %v", err)
 	}
 	if err := planService.Refresh(context.Background()); err != nil {
 		t.Fatalf("planService.Refresh() error = %v", err)
 	}
 
-	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithExecutionPlans(planService))
+	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithWorkflows(planService))
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/guardrails/policy-system", nil)
 	rec := httptest.NewRecorder()
@@ -380,7 +380,7 @@ func TestDeleteGuardrailRejectsActiveWorkflowReference(t *testing.T) {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 
-	envelope := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	envelope := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
 	if envelope.Error.Message != "guardrail is used by active workflows: global" {
 		t.Fatalf("error message = %q, want active workflow reference", envelope.Error.Message)
 	}
@@ -395,33 +395,33 @@ func TestDeleteGuardrailIgnoresDisabledWorkflowGuardrailRefs(t *testing.T) {
 			"content": "be precise",
 		}),
 	})
-	planStore := &executionPlanTestStore{
-		versions: []executionplans.Version{
+	planStore := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-					Guardrails:    []executionplans.GuardrailStep{{Ref: "policy-system", Step: 10}},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Guardrails:    []workflows.GuardrailStep{{Ref: "policy-system", Step: 10}},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
-	planService, err := executionplans.NewService(planStore, executionplans.NewCompiler(guardrailService))
+	planService, err := workflows.NewService(planStore, workflows.NewCompiler(guardrailService))
 	if err != nil {
-		t.Fatalf("executionplans.NewService() error = %v", err)
+		t.Fatalf("workflows.NewService() error = %v", err)
 	}
 	if err := planService.Refresh(context.Background()); err != nil {
 		t.Fatalf("planService.Refresh() error = %v", err)
 	}
 
-	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithExecutionPlans(planService))
+	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithWorkflows(planService))
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/guardrails/policy-system", nil)
 	rec := httptest.NewRecorder()

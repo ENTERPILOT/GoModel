@@ -81,16 +81,17 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 	// Create a copy of the entry for the stream.
 	// The stream observer will complete and write it when the stream closes.
 	entryCopy := &LogEntry{
-		ID:                     baseEntry.ID,
-		Timestamp:              baseEntry.Timestamp,
-		DurationNs:             baseEntry.DurationNs,
-		RequestedModel:         baseEntry.RequestedModel,
-		ResolvedModel:          baseEntry.ResolvedModel,
-		Provider:               baseEntry.Provider,
-		AliasUsed:              baseEntry.AliasUsed,
-		ExecutionPlanVersionID: baseEntry.ExecutionPlanVersionID,
-		CacheType:              baseEntry.CacheType,
-		StatusCode:             baseEntry.StatusCode,
+		ID:                baseEntry.ID,
+		Timestamp:         baseEntry.Timestamp,
+		DurationNs:        baseEntry.DurationNs,
+		RequestedModel:    baseEntry.RequestedModel,
+		ResolvedModel:     baseEntry.ResolvedModel,
+		Provider:          baseEntry.Provider,
+		ProviderName:      baseEntry.ProviderName,
+		AliasUsed:         baseEntry.AliasUsed,
+		WorkflowVersionID: baseEntry.WorkflowVersionID,
+		CacheType:         baseEntry.CacheType,
+		StatusCode:        baseEntry.StatusCode,
 		// Copy extracted fields
 		RequestID:  baseEntry.RequestID,
 		AuthKeyID:  baseEntry.AuthKeyID,
@@ -112,9 +113,9 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 			ResponseHeaders: copyMap(baseEntry.Data.ResponseHeaders),
 			RequestBody:     baseEntry.Data.RequestBody,
 		}
-		if baseEntry.Data.ExecutionFeatures != nil {
-			snapshot := *baseEntry.Data.ExecutionFeatures
-			entryCopy.Data.ExecutionFeatures = &snapshot
+		if baseEntry.Data.WorkflowFeatures != nil {
+			snapshot := *baseEntry.Data.WorkflowFeatures
+			entryCopy.Data.WorkflowFeatures = &snapshot
 		}
 	}
 

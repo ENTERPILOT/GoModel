@@ -146,12 +146,12 @@ func storeRequestModelResolution(c *echo.Context, resolution *core.RequestModelR
 	}
 
 	ctx := c.Request().Context()
-	if plan := core.GetExecutionPlan(ctx); plan != nil {
-		cloned := *plan
+	if workflow := core.GetWorkflow(ctx); workflow != nil {
+		cloned := *workflow
 		cloned.ProviderType = resolution.ProviderType
 		cloned.Resolution = resolution
-		auditlog.EnrichEntryWithExecutionPlan(c, &cloned)
-		ctx = core.WithExecutionPlan(ctx, &cloned)
+		auditlog.EnrichEntryWithWorkflow(c, &cloned)
+		ctx = core.WithWorkflow(ctx, &cloned)
 	}
 	if env := core.GetWhiteBoxPrompt(ctx); env != nil {
 		env.RouteHints.Model = resolution.ResolvedSelector.Model
@@ -180,8 +180,8 @@ func currentRequestModelResolution(c *echo.Context) *core.RequestModelResolution
 	if c == nil {
 		return nil
 	}
-	if plan := core.GetExecutionPlan(c.Request().Context()); plan != nil {
-		return plan.Resolution
+	if workflow := core.GetWorkflow(c.Request().Context()); workflow != nil {
+		return workflow.Resolution
 	}
 	return nil
 }
@@ -212,13 +212,13 @@ func enrichAuditEntryWithRequestedModel(c *echo.Context, requested core.Requeste
 	if requested.Model == "" {
 		return
 	}
-	plan := &core.ExecutionPlan{}
-	if existing := core.GetExecutionPlan(c.Request().Context()); existing != nil {
+	workflow := &core.Workflow{}
+	if existing := core.GetWorkflow(c.Request().Context()); existing != nil {
 		cloned := *existing
-		plan = &cloned
+		workflow = &cloned
 	}
-	plan.Resolution = &core.RequestModelResolution{
+	workflow.Resolution = &core.RequestModelResolution{
 		Requested: requested,
 	}
-	auditlog.EnrichEntryWithExecutionPlan(c, plan)
+	auditlog.EnrichEntryWithWorkflow(c, workflow)
 }

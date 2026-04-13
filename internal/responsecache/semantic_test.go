@@ -32,7 +32,7 @@ func (m *mockEmbedder) Close() error { return nil }
 
 func (m *mockEmbedder) Identity() string { return "test\x00mock-model" }
 
-func intPtr(v int) *int   { return &v }
+func intPtr(v int) *int    { return &v }
 func boolPtr(v bool) *bool { return &v }
 
 func newTestSemanticMiddleware(threshold float64, maxConvMessages int, excludeSystem bool) (*semanticCacheMiddleware, *MapVecStore, *mockEmbedder) {
@@ -213,7 +213,7 @@ func TestSemanticCacheMiddleware_ParamsHashIsolation_Temperature(t *testing.T) {
 func TestComputeParamsHash_StreamIncludeUsageChangesHash(t *testing.T) {
 	base := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"same prompt"}]}`)
 	withUsage := []byte(`{"model":"gpt-4","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"same prompt"}]}`)
-	plan := &core.ExecutionPlan{
+	plan := &core.Workflow{
 		Mode:         core.ExecutionModeTranslated,
 		ProviderType: "openai",
 		Resolution: &core.RequestModelResolution{
@@ -232,7 +232,7 @@ func TestComputeParamsHash_StreamIncludeUsageChangesHash(t *testing.T) {
 func TestComputeParamsHash_StreamModeChangesHash(t *testing.T) {
 	base := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"same prompt"}]}`)
 	streaming := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"same prompt"}]}`)
-	plan := &core.ExecutionPlan{
+	plan := &core.Workflow{
 		Mode:         core.ExecutionModeTranslated,
 		ProviderType: "openai",
 		Resolution: &core.RequestModelResolution{

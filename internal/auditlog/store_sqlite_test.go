@@ -279,7 +279,7 @@ func TestSQLiteStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 	}
 }
 
-func TestSQLiteReader_AllowsNullExecutionPlanVersionID(t *testing.T) {
+func TestSQLiteReader_AllowsNullWorkflowVersionID(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
@@ -292,11 +292,11 @@ func TestSQLiteReader_AllowsNullExecutionPlanVersionID(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := db.Exec(`
 		INSERT INTO audit_logs (
-			id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, execution_plan_version_id,
+			id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, workflow_version_id,
 			status_code, request_id, client_ip, method, path, stream, error_type, data
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		"null-plan-version",
+		"null-workflow-version",
 		now,
 		0,
 		"gpt-4",
@@ -321,7 +321,7 @@ func TestSQLiteReader_AllowsNullExecutionPlanVersionID(t *testing.T) {
 		t.Fatalf("failed to create reader: %v", err)
 	}
 
-	entry, err := reader.GetLogByID(context.Background(), "null-plan-version")
+	entry, err := reader.GetLogByID(context.Background(), "null-workflow-version")
 	if err != nil {
 		t.Fatalf("GetLogByID failed: %v", err)
 	}
@@ -329,8 +329,8 @@ func TestSQLiteReader_AllowsNullExecutionPlanVersionID(t *testing.T) {
 		t.Fatal("expected log entry, got nil")
 		return
 	}
-	if entry.ExecutionPlanVersionID != "" {
-		t.Fatalf("ExecutionPlanVersionID = %q, want empty", entry.ExecutionPlanVersionID)
+	if entry.WorkflowVersionID != "" {
+		t.Fatalf("WorkflowVersionID = %q, want empty", entry.WorkflowVersionID)
 	}
 
 	logs, err := reader.GetLogs(context.Background(), LogQueryParams{Limit: 10})
@@ -340,8 +340,8 @@ func TestSQLiteReader_AllowsNullExecutionPlanVersionID(t *testing.T) {
 	if len(logs.Entries) != 1 {
 		t.Fatalf("len(entries) = %d, want 1", len(logs.Entries))
 	}
-	if logs.Entries[0].ExecutionPlanVersionID != "" {
-		t.Fatalf("list ExecutionPlanVersionID = %q, want empty", logs.Entries[0].ExecutionPlanVersionID)
+	if logs.Entries[0].WorkflowVersionID != "" {
+		t.Fatalf("list WorkflowVersionID = %q, want empty", logs.Entries[0].WorkflowVersionID)
 	}
 }
 
@@ -358,7 +358,7 @@ func TestSQLiteReader_GetLogsFiltersByUserPathSubtree(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = db.Exec(`
 		INSERT INTO audit_logs (
-			id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, execution_plan_version_id,
+			id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, workflow_version_id,
 			status_code, request_id, client_ip, method, path, user_path, stream, error_type, data
 		) VALUES
 			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
@@ -436,7 +436,7 @@ func TestSQLiteReader_GetLogsRootUserPathIncludesLegacyNullRows(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = db.Exec(`
 		INSERT INTO audit_logs (
-			id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, execution_plan_version_id,
+			id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, workflow_version_id,
 			status_code, request_id, client_ip, method, path, user_path, stream, error_type, data
 		) VALUES
 			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),

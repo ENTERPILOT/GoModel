@@ -98,8 +98,8 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 	}
 
 	refreshInterval := time.Minute
-	if cfg.ExecutionPlans.RefreshInterval > 0 {
-		refreshInterval = cfg.ExecutionPlans.RefreshInterval
+	if cfg.Workflows.RefreshInterval > 0 {
+		refreshInterval = cfg.Workflows.RefreshInterval
 	}
 
 	return &Result{

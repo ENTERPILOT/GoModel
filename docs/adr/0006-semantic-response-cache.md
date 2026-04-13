@@ -22,15 +22,15 @@ A second-layer semantic cache is needed to recognize meaning-equivalent queries 
 Semantic caching runs as a **second layer behind exact-match caching**.
 Exact-match (sub-ms) always runs first; semantic (~50–100 ms including embedding) only on miss.
 
-**Important**: both cache layers must execute **after** guardrail/ExecutionPlan patching, so they see the final prompt sent to the LLM.
+**Important**: both cache layers must execute **after** guardrail/Workflow patching, so they see the final prompt sent to the LLM.
 Current global middleware placement runs too early and can bypass guardrails — this is fixed by moving cache checks into the translated inference handlers (post-`PatchChatRequest`).
 
 ```mermaid
 flowchart TD
   Request([Request])
   Request --> auth[auth]
-  auth --> planning[execution planning]
-  planning --> guardrails[guardrails]
+  auth --> workflow_resolution[workflow resolution]
+  workflow_resolution --> guardrails[guardrails]
   guardrails --> exact[simpleCacheMiddleware]
   exact -->|HIT| ret[return to client]
   exact -->|MISS| semantic[semanticCacheMiddleware]
@@ -97,7 +97,7 @@ Bifrost's 0.80 is too aggressive for correctness-sensitive use cases.
 
 - Streaming caching (skipped entirely — phase-2: chunk array storage + replay)
 - Cross-endpoint normalization (`/chat/completions` vs `/responses` vs pass-through) — `endpointPath` in `params_hash` for safety → Future optimization: canonical response renderer to enable sharing
-- `cache_by_model` / `cache_by_provider` opt-out flags — both layers always include `model` and provider identity in their cache keys (`params_hash` for semantic, `SHA-256(path + ExecutionPlan + body)` for exact). Disabling either safely requires shared flag semantics across both layers; deferred to a future `ResponseCacheConfig`-level enhancement
+- `cache_by_model` / `cache_by_provider` opt-out flags — both layers always include `model` and provider identity in their cache keys (`params_hash` for semantic, `SHA-256(path + Workflow + body)` for exact). Disabling either safely requires shared flag semantics across both layers; deferred to a future `ResponseCacheConfig`-level enhancement
 - Cache warming, manual purge, advanced eviction
 - Prometheus metrics / observability (deferred — basic structured logging sufficient for v1)
 

@@ -14,27 +14,27 @@ type modelCountProvider interface {
 	ModelCount() int
 }
 
-// ExecutionPlanning resolves the request-scoped execution plan for model-facing
-// routes. The plan centralizes endpoint capabilities, execution mode, resolved
+// WorkflowResolution resolves the request-scoped workflow for model-facing
+// routes. The workflow centralizes endpoint capabilities, execution mode, resolved
 // provider type, and any early model routing decision that downstream handlers
 // or middleware need to consume.
-func ExecutionPlanning(provider core.RoutableProvider) echo.MiddlewareFunc {
-	return ExecutionPlanningWithResolverAndPolicy(provider, nil, nil)
+func WorkflowResolution(provider core.RoutableProvider) echo.MiddlewareFunc {
+	return WorkflowResolutionWithResolverAndPolicy(provider, nil, nil)
 }
 
-// ExecutionPlanningWithResolver resolves request-scoped execution plans using
-// an explicit selector resolver when provided. This lets request planning own
+// WorkflowResolutionWithResolver resolves request-scoped workflows using
+// an explicit selector resolver when provided. This lets workflow resolution own
 // alias policy instead of depending on provider decorators.
-func ExecutionPlanningWithResolver(provider core.RoutableProvider, resolver RequestModelResolver) echo.MiddlewareFunc {
-	return ExecutionPlanningWithResolverAndPolicy(provider, resolver, nil)
+func WorkflowResolutionWithResolver(provider core.RoutableProvider, resolver RequestModelResolver) echo.MiddlewareFunc {
+	return WorkflowResolutionWithResolverAndPolicy(provider, resolver, nil)
 }
 
-// ExecutionPlanningWithResolverAndPolicy resolves request-scoped execution plans
-// and matches one persisted execution policy when configured.
-func ExecutionPlanningWithResolverAndPolicy(
+// WorkflowResolutionWithResolverAndPolicy resolves request-scoped workflows
+// and matches one persisted workflow policy when configured.
+func WorkflowResolutionWithResolverAndPolicy(
 	provider core.RoutableProvider,
 	resolver RequestModelResolver,
-	policyResolver RequestExecutionPolicyResolver,
+	policyResolver RequestWorkflowPolicyResolver,
 ) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
@@ -42,24 +42,24 @@ func ExecutionPlanningWithResolverAndPolicy(
 			if !core.IsModelInteractionPath(path) {
 				return next(c)
 			}
-			plan, err := deriveExecutionPlanWithPolicy(c, provider, resolver, policyResolver)
+			workflow, err := deriveWorkflowWithPolicy(c, provider, resolver, policyResolver)
 			if err != nil {
 				return handleError(c, err)
 			}
-			if plan != nil {
-				storeExecutionPlan(c, plan)
+			if workflow != nil {
+				storeWorkflow(c, workflow)
 			}
 			return next(c)
 		}
 	}
 }
 
-func deriveExecutionPlanWithPolicy(
+func deriveWorkflowWithPolicy(
 	c *echo.Context,
 	provider core.RoutableProvider,
 	resolver RequestModelResolver,
-	policyResolver RequestExecutionPolicyResolver,
-) (*core.ExecutionPlan, error) {
+	policyResolver RequestWorkflowPolicyResolver,
+) (*core.Workflow, error) {
 	if c == nil {
 		return nil, nil
 	}
@@ -71,7 +71,7 @@ func deriveExecutionPlanWithPolicy(
 
 	desc := core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path)
 	userPath := core.UserPathFromContext(c.Request().Context())
-	plan := &core.ExecutionPlan{
+	workflow := &core.Workflow{
 		RequestID:    requestID,
 		Endpoint:     desc,
 		Capabilities: core.CapabilitiesForEndpoint(desc),
@@ -90,58 +90,58 @@ func deriveExecutionPlanWithPolicy(
 		cloned := *passthrough
 		cloned.Provider = providerType
 		passthrough = &cloned
-		plan.Mode = core.ExecutionModePassthrough
-		plan.ProviderType = providerType
-		plan.Passthrough = passthrough
-		if err := applyExecutionPolicy(
+		workflow.Mode = core.ExecutionModePassthrough
+		workflow.ProviderType = providerType
+		workflow.Passthrough = passthrough
+		if err := applyWorkflowPolicy(
 			c.Request().Context(),
-			plan,
+			workflow,
 			policyResolver,
-			core.NewExecutionPlanSelector(providerName, passthrough.Model, userPath),
+			core.NewWorkflowSelector(providerName, passthrough.Model, userPath),
 		); err != nil {
 			return nil, err
 		}
-		return plan, nil
+		return workflow, nil
 
 	case core.OperationBatches:
-		plan.Mode = core.ExecutionModeNativeBatch
-		if err := applyExecutionPolicy(c.Request().Context(), plan, policyResolver, core.ExecutionPlanSelector{}); err != nil {
+		workflow.Mode = core.ExecutionModeNativeBatch
+		if err := applyWorkflowPolicy(c.Request().Context(), workflow, policyResolver, core.WorkflowSelector{}); err != nil {
 			return nil, err
 		}
-		return plan, nil
+		return workflow, nil
 
 	case core.OperationFiles:
-		plan.Mode = core.ExecutionModeNativeFile
-		if err := applyExecutionPolicy(c.Request().Context(), plan, policyResolver, core.ExecutionPlanSelector{}); err != nil {
+		workflow.Mode = core.ExecutionModeNativeFile
+		if err := applyWorkflowPolicy(c.Request().Context(), workflow, policyResolver, core.WorkflowSelector{}); err != nil {
 			return nil, err
 		}
-		return plan, nil
+		return workflow, nil
 
 	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings:
-		plan.Mode = core.ExecutionModeTranslated
+		workflow.Mode = core.ExecutionModeTranslated
 		resolution, parsed, err := ensureRequestModelResolution(c, provider, resolver)
 		if err != nil {
 			return nil, err
 		}
 		if !parsed || resolution == nil {
-			if err := applyExecutionPolicy(c.Request().Context(), plan, policyResolver, core.ExecutionPlanSelector{}); err != nil {
+			if err := applyWorkflowPolicy(c.Request().Context(), workflow, policyResolver, core.WorkflowSelector{}); err != nil {
 				return nil, err
 			}
-			return plan, nil
+			return workflow, nil
 		}
-		return translatedExecutionPlan(c.Request().Context(), requestID, desc, resolution, policyResolver)
+		return translatedWorkflow(c.Request().Context(), requestID, desc, resolution, policyResolver)
 
 	default:
 		return nil, nil
 	}
 }
 
-func storeExecutionPlan(c *echo.Context, plan *core.ExecutionPlan) {
-	if c == nil || plan == nil {
+func storeWorkflow(c *echo.Context, workflow *core.Workflow) {
+	if c == nil || workflow == nil {
 		return
 	}
-	auditlog.EnrichEntryWithExecutionPlan(c, plan)
-	ctx := core.WithExecutionPlan(c.Request().Context(), plan)
+	auditlog.EnrichEntryWithWorkflow(c, workflow)
+	ctx := core.WithWorkflow(c.Request().Context(), workflow)
 	c.SetRequest(c.Request().WithContext(ctx))
 }
 
@@ -187,7 +187,7 @@ func selectorHintsFromJSONGJSON(body []byte) (model, provider string, parsed boo
 	// gjson returns the first matching top-level field. That differs from
 	// encoding/json on duplicate keys, but the hot-path speedup is worth it here:
 	// duplicate selector keys are not expected from real clients, and we accept
-	// the first-match behavior to keep request planning fast.
+	// the first-match behavior to keep workflow resolution fast.
 	modelResult := root.Get("model")
 	if !selectorHintValueAllowed(modelResult) {
 		return "", "", false
@@ -239,14 +239,14 @@ func passthroughRouteInfo(c *echo.Context) *core.PassthroughRouteInfo {
 	if c == nil {
 		return nil
 	}
-	if plan := core.GetExecutionPlan(c.Request().Context()); plan != nil && plan.Passthrough != nil {
-		if plan.Passthrough.Provider == "" && strings.TrimSpace(plan.ProviderType) != "" {
-			plan.Passthrough.Provider = strings.TrimSpace(plan.ProviderType)
+	if workflow := core.GetWorkflow(c.Request().Context()); workflow != nil && workflow.Passthrough != nil {
+		if workflow.Passthrough.Provider == "" && strings.TrimSpace(workflow.ProviderType) != "" {
+			workflow.Passthrough.Provider = strings.TrimSpace(workflow.ProviderType)
 		}
-		if plan.Passthrough.AuditPath == "" {
-			plan.Passthrough.AuditPath = c.Request().URL.Path
+		if workflow.Passthrough.AuditPath == "" {
+			workflow.Passthrough.AuditPath = c.Request().URL.Path
 		}
-		return plan.Passthrough
+		return workflow.Passthrough
 	}
 	if env := core.GetWhiteBoxPrompt(c.Request().Context()); env != nil {
 		if info := env.CachedPassthroughRouteInfo(); info != nil {
@@ -278,10 +278,10 @@ func passthroughRouteInfo(c *echo.Context) *core.PassthroughRouteInfo {
 	}
 }
 
-// GetProviderType returns the provider type captured in the execution plan for this request.
+// GetProviderType returns the provider type captured in the workflow for this request.
 func GetProviderType(c *echo.Context) string {
-	if plan := core.GetExecutionPlan(c.Request().Context()); plan != nil {
-		if providerType := strings.TrimSpace(plan.ProviderType); providerType != "" {
+	if workflow := core.GetWorkflow(c.Request().Context()); workflow != nil {
+		if providerType := strings.TrimSpace(workflow.ProviderType); providerType != "" {
 			return providerType
 		}
 	}

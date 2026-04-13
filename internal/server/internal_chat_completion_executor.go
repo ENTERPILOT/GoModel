@@ -20,49 +20,49 @@ import (
 // InternalChatCompletionExecutorConfig configures the transport-free translated
 // chat execution path used by gateway-owned workflows such as guardrails.
 type InternalChatCompletionExecutorConfig struct {
-	ModelResolver           RequestModelResolver
-	ModelAuthorizer         RequestModelAuthorizer
-	ExecutionPolicyResolver RequestExecutionPolicyResolver
-	FallbackResolver        RequestFallbackResolver
-	AuditLogger             auditlog.LoggerInterface
-	UsageLogger             usage.LoggerInterface
-	PricingResolver         usage.PricingResolver
-	ResponseCache           *responsecache.ResponseCacheMiddleware
+	ModelResolver          RequestModelResolver
+	ModelAuthorizer        RequestModelAuthorizer
+	WorkflowPolicyResolver RequestWorkflowPolicyResolver
+	FallbackResolver       RequestFallbackResolver
+	AuditLogger            auditlog.LoggerInterface
+	UsageLogger            usage.LoggerInterface
+	PricingResolver        usage.PricingResolver
+	ResponseCache          *responsecache.ResponseCacheMiddleware
 }
 
 // InternalChatCompletionExecutor executes internal translated chat requests
 // without synthesizing an HTTP request or Echo context.
 type InternalChatCompletionExecutor struct {
-	provider                core.RoutableProvider
-	modelResolver           RequestModelResolver
-	executionPolicyResolver RequestExecutionPolicyResolver
-	logger                  auditlog.LoggerInterface
-	service                 *translatedInferenceService
-	modelAuthorizer         RequestModelAuthorizer
+	provider               core.RoutableProvider
+	modelResolver          RequestModelResolver
+	workflowPolicyResolver RequestWorkflowPolicyResolver
+	logger                 auditlog.LoggerInterface
+	service                *translatedInferenceService
+	modelAuthorizer        RequestModelAuthorizer
 }
 
 // NewInternalChatCompletionExecutor creates a transport-free translated chat
-// executor that reuses planning, fallback, usage, and audit logic.
+// executor that reuses workflow resolution, fallback, usage, and audit logic.
 func NewInternalChatCompletionExecutor(provider core.RoutableProvider, cfg InternalChatCompletionExecutorConfig) *InternalChatCompletionExecutor {
 	service := &translatedInferenceService{
-		provider:                provider,
-		modelResolver:           cfg.ModelResolver,
-		modelAuthorizer:         cfg.ModelAuthorizer,
-		executionPolicyResolver: cfg.ExecutionPolicyResolver,
-		fallbackResolver:        cfg.FallbackResolver,
-		logger:                  cfg.AuditLogger,
-		usageLogger:             cfg.UsageLogger,
-		pricingResolver:         cfg.PricingResolver,
-		responseCache:           cfg.ResponseCache,
+		provider:               provider,
+		modelResolver:          cfg.ModelResolver,
+		modelAuthorizer:        cfg.ModelAuthorizer,
+		workflowPolicyResolver: cfg.WorkflowPolicyResolver,
+		fallbackResolver:       cfg.FallbackResolver,
+		logger:                 cfg.AuditLogger,
+		usageLogger:            cfg.UsageLogger,
+		pricingResolver:        cfg.PricingResolver,
+		responseCache:          cfg.ResponseCache,
 	}
 
 	return &InternalChatCompletionExecutor{
-		provider:                provider,
-		modelResolver:           cfg.ModelResolver,
-		modelAuthorizer:         cfg.ModelAuthorizer,
-		executionPolicyResolver: cfg.ExecutionPolicyResolver,
-		logger:                  cfg.AuditLogger,
-		service:                 service,
+		provider:               provider,
+		modelResolver:          cfg.ModelResolver,
+		modelAuthorizer:        cfg.ModelAuthorizer,
+		workflowPolicyResolver: cfg.WorkflowPolicyResolver,
+		logger:                 cfg.AuditLogger,
+		service:                service,
 	}
 }
 
@@ -83,38 +83,38 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 	requested := core.NewRequestedModelSelector(req.Model, req.Provider)
 	start := time.Now()
 	entry := e.newAuditEntry(ctx, requestID, requested)
-	var plan *core.ExecutionPlan
+	var workflow *core.Workflow
 	var cacheType string
 	var providerType string
 	var providerName string
 	defer func() {
-		e.finishAuditEntry(ctx, entry, start, plan, req, resp, err, cacheType, providerType, providerName)
+		e.finishAuditEntry(ctx, entry, start, workflow, req, resp, err, cacheType, providerType, providerName)
 	}()
 
 	resolution, err := resolveRequestModelWithAuthorizer(ctx, e.provider, e.modelResolver, e.modelAuthorizer, requested)
 	if err != nil {
 		return nil, err
 	}
-	plan, err = translatedExecutionPlan(
+	workflow, err = translatedWorkflow(
 		ctx,
 		requestID,
 		core.DescribeEndpoint(http.MethodPost, "/v1/chat/completions"),
 		resolution,
-		e.executionPolicyResolver,
+		e.workflowPolicyResolver,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx = e.service.withCacheRequestContext(ctx, plan)
+	ctx = e.service.withCacheRequestContext(ctx, workflow)
 	execReq := cloneChatRequestForSelector(req, resolution.ResolvedSelector)
-	resp, providerType, providerName, _, cacheType, err = e.executeChatCompletion(ctx, plan, execReq)
+	resp, providerType, providerName, _, cacheType, err = e.executeChatCompletion(ctx, workflow, execReq)
 	if err != nil {
 		return nil, err
 	}
 
 	if cacheType == "" {
-		e.service.logUsage(ctx, plan, resp.Model, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
+		e.service.logUsage(ctx, workflow, resp.Model, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
 			return usage.ExtractFromChatResponse(resp, requestID, providerType, "/v1/chat/completions", pricing)
 		})
 	}
@@ -123,17 +123,17 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 
 func (e *InternalChatCompletionExecutor) executeChatCompletion(
 	ctx context.Context,
-	plan *core.ExecutionPlan,
+	workflow *core.Workflow,
 	req *core.ChatRequest,
 ) (*core.ChatResponse, string, string, bool, string, error) {
-	if e.service.responseCache == nil || (plan != nil && !plan.CacheEnabled()) {
-		resp, providerType, providerName, usedFallback, err := e.service.executeChatCompletion(ctx, plan, req)
+	if e.service.responseCache == nil || (workflow != nil && !workflow.CacheEnabled()) {
+		resp, providerType, providerName, usedFallback, err := e.service.executeChatCompletion(ctx, workflow, req)
 		return resp, providerType, providerName, usedFallback, "", err
 	}
 
 	body, err := marshalRequestBody(req)
 	if err != nil {
-		resp, providerType, providerName, usedFallback, execErr := e.service.executeChatCompletion(ctx, plan, req)
+		resp, providerType, providerName, usedFallback, execErr := e.service.executeChatCompletion(ctx, workflow, req)
 		if execErr != nil {
 			return nil, "", "", false, "", execErr
 		}
@@ -148,7 +148,7 @@ func (e *InternalChatCompletionExecutor) executeChatCompletion(
 	)
 	result, err := e.service.responseCache.HandleInternalRequest(ctx, http.MethodPost, "/v1/chat/completions", body, func(c *echo.Context) error {
 		var execErr error
-		resp, providerType, providerName, usedFallback, execErr = e.service.executeChatCompletion(c.Request().Context(), plan, req)
+		resp, providerType, providerName, usedFallback, execErr = e.service.executeChatCompletion(c.Request().Context(), workflow, req)
 		if execErr != nil {
 			return execErr
 		}
@@ -165,7 +165,7 @@ func (e *InternalChatCompletionExecutor) executeChatCompletion(
 		if err := json.Unmarshal(result.Body, &cached); err != nil {
 			return nil, "", "", false, "", err
 		}
-		return &cached, plan.ProviderType, providerNameFromPlan(plan), false, result.CacheType, nil
+		return &cached, workflow.ProviderType, providerNameFromWorkflow(workflow), false, result.CacheType, nil
 	}
 	return resp, providerType, providerName, usedFallback, "", nil
 }
@@ -203,7 +203,7 @@ func (e *InternalChatCompletionExecutor) finishAuditEntry(
 	ctx context.Context,
 	entry *auditlog.LogEntry,
 	start time.Time,
-	plan *core.ExecutionPlan,
+	workflow *core.Workflow,
 	req *core.ChatRequest,
 	resp *core.ChatResponse,
 	err error,
@@ -216,10 +216,10 @@ func (e *InternalChatCompletionExecutor) finishAuditEntry(
 	}
 
 	entry.DurationNs = time.Since(start).Nanoseconds()
-	auditlog.EnrichLogEntryWithExecutionPlan(entry, plan)
-	auditlog.EnrichLogEntryWithResolvedRoute(entry, qualifyExecutedModel(plan, chatResponseModel(resp), providerName), providerType, providerName)
+	auditlog.EnrichLogEntryWithWorkflow(entry, workflow)
+	auditlog.EnrichLogEntryWithResolvedRoute(entry, qualifyExecutedModel(workflow, chatResponseModel(resp), providerName), providerType, providerName)
 	auditlog.EnrichLogEntryWithRequestContext(entry, ctx)
-	if plan != nil && !plan.AuditEnabled() {
+	if workflow != nil && !workflow.AuditEnabled() {
 		return
 	}
 

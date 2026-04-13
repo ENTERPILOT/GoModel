@@ -86,7 +86,7 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 		return nil, fmt.Errorf("failed to count audit log entries: %w", err)
 	}
 
-	dataQuery := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, execution_plan_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	dataQuery := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
 		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs` + where + ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`
 	dataArgs := append(append([]any(nil), args...), limit, offset)
@@ -105,13 +105,13 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 		var aliasUsedInt int
 		var streamInt int
 		var dataJSON *string
-		var executionPlanVersionID sql.NullString
+		var workflowVersionID sql.NullString
 		var cacheType sql.NullString
 		var authKeyID sql.NullString
 		var authMethod sql.NullString
 		var userPath sql.NullString
 
-		if err := rows.Scan(&e.ID, &ts, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &aliasUsedInt, &executionPlanVersionID, &cacheType, &e.StatusCode,
+		if err := rows.Scan(&e.ID, &ts, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &aliasUsedInt, &workflowVersionID, &cacheType, &e.StatusCode,
 			&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &streamInt, &e.ErrorType, &dataJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 		}
@@ -119,8 +119,8 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 		e.AliasUsed = aliasUsedInt == 1
 		e.Stream = streamInt == 1
 		e.Timestamp = parseSQLTimestamp(ts, e.ID)
-		if executionPlanVersionID.Valid {
-			e.ExecutionPlanVersionID = executionPlanVersionID.String
+		if workflowVersionID.Valid {
+			e.WorkflowVersionID = workflowVersionID.String
 		}
 		if authKeyID.Valid {
 			e.AuthKeyID = authKeyID.String
@@ -166,7 +166,7 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 
 // GetLogByID returns a single audit log entry by ID.
 func (r *SQLiteReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error) {
-	query := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, execution_plan_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	query := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
 		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs WHERE id = ? LIMIT 1`
 
@@ -298,7 +298,7 @@ func parseSQLTimestamp(ts string, entryID string) time.Time {
 }
 
 func (r *SQLiteReader) findByResponseID(ctx context.Context, responseID string) (*LogEntry, error) {
-	query := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, execution_plan_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	query := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
 		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs
 		WHERE json_extract(data, '$.response_body.id') = ?
@@ -317,7 +317,7 @@ func (r *SQLiteReader) findByResponseID(ctx context.Context, responseID string) 
 }
 
 func (r *SQLiteReader) findByPreviousResponseID(ctx context.Context, previousResponseID string) (*LogEntry, error) {
-	query := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, execution_plan_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	query := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
 		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs
 		WHERE json_extract(data, '$.request_body.previous_response_id') = ?
@@ -342,13 +342,13 @@ func scanSQLiteLogEntry(rows *sql.Rows) (*LogEntry, error) {
 	var aliasUsedInt int
 	var streamInt int
 	var dataJSON *string
-	var executionPlanVersionID sql.NullString
+	var workflowVersionID sql.NullString
 	var cacheType sql.NullString
 	var authKeyID sql.NullString
 	var authMethod sql.NullString
 	var userPath sql.NullString
 
-	if err := rows.Scan(&e.ID, &ts, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &aliasUsedInt, &executionPlanVersionID, &cacheType, &e.StatusCode,
+	if err := rows.Scan(&e.ID, &ts, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &aliasUsedInt, &workflowVersionID, &cacheType, &e.StatusCode,
 		&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &streamInt, &e.ErrorType, &dataJSON); err != nil {
 		return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 	}
@@ -356,8 +356,8 @@ func scanSQLiteLogEntry(rows *sql.Rows) (*LogEntry, error) {
 	e.AliasUsed = aliasUsedInt == 1
 	e.Stream = streamInt == 1
 	e.Timestamp = parseSQLTimestamp(ts, e.ID)
-	if executionPlanVersionID.Valid {
-		e.ExecutionPlanVersionID = executionPlanVersionID.String
+	if workflowVersionID.Valid {
+		e.WorkflowVersionID = workflowVersionID.String
 	}
 	if authKeyID.Valid {
 		e.AuthKeyID = authKeyID.String

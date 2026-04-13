@@ -26,7 +26,7 @@ const (
 
 // Options controls optional behavior of Provider.
 type Options struct {
-	// DisableTranslatedRequestProcessing lets explicit request planning own
+	// DisableTranslatedRequestProcessing lets explicit workflow resolution own
 	// translated-route selector resolution while this wrapper still exposes
 	// alias inventory and batch preparation.
 	DisableTranslatedRequestProcessing bool

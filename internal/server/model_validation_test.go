@@ -31,11 +31,11 @@ type modelCountingValidationProvider struct {
 	modelCount int
 }
 
-type staticExecutionPolicyResolver struct {
-	match func(core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error)
+type staticWorkflowPolicyResolver struct {
+	match func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
 }
 
-func (r *staticExecutionPolicyResolver) Match(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+func (r *staticWorkflowPolicyResolver) Match(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 	if r == nil || r.match == nil {
 		return nil, nil
 	}
@@ -191,7 +191,7 @@ func TestModelValidation(t *testing.T) {
 			e := echo.New()
 			handlerCalled := false
 
-			middleware := ExecutionPlanning(provider)
+			middleware := WorkflowResolution(provider)
 			handler := middleware(func(c *echo.Context) error {
 				handlerCalled = true
 				return c.String(http.StatusOK, "ok")
@@ -230,7 +230,7 @@ func TestModelValidation_SetsProviderType(t *testing.T) {
 	e := echo.New()
 	var capturedProviderType string
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
 		capturedProviderType = GetProviderType(c)
 		return c.String(http.StatusOK, "ok")
@@ -248,77 +248,77 @@ func TestModelValidation_SetsProviderType(t *testing.T) {
 	assert.Equal(t, "mock", capturedProviderType)
 }
 
-func TestModelValidation_StoresExecutionPlan(t *testing.T) {
+func TestModelValidation_StoresWorkflow(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
 
 	e := echo.New()
-	var capturedPlan *core.ExecutionPlan
+	var capturedWorkflow *core.Workflow
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
-		capturedPlan = core.GetExecutionPlan(c.Request().Context())
+		capturedWorkflow = core.GetWorkflow(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
 		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "plan-req-123")
+	req.Header.Set("X-Request-ID", "workflow-req-123")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
 	err := handler(c)
 	require.NoError(t, err)
 
-	if assert.NotNil(t, capturedPlan) {
-		assert.Equal(t, "plan-req-123", capturedPlan.RequestID)
-		assert.Equal(t, core.ExecutionModeTranslated, capturedPlan.Mode)
-		assert.Equal(t, "mock", capturedPlan.ProviderType)
-		assert.True(t, capturedPlan.Capabilities.SemanticExtraction)
-		assert.True(t, capturedPlan.Capabilities.AliasResolution)
-		assert.True(t, capturedPlan.Capabilities.ResponseCaching)
-		if assert.NotNil(t, capturedPlan.Resolution) {
-			assert.Equal(t, "gpt-4o-mini", capturedPlan.Resolution.Requested.Model)
-			assert.Equal(t, "gpt-4o-mini", capturedPlan.Resolution.ResolvedSelector.Model)
+	if assert.NotNil(t, capturedWorkflow) {
+		assert.Equal(t, "workflow-req-123", capturedWorkflow.RequestID)
+		assert.Equal(t, core.ExecutionModeTranslated, capturedWorkflow.Mode)
+		assert.Equal(t, "mock", capturedWorkflow.ProviderType)
+		assert.True(t, capturedWorkflow.Capabilities.SemanticExtraction)
+		assert.True(t, capturedWorkflow.Capabilities.AliasResolution)
+		assert.True(t, capturedWorkflow.Capabilities.ResponseCaching)
+		if assert.NotNil(t, capturedWorkflow.Resolution) {
+			assert.Equal(t, "gpt-4o-mini", capturedWorkflow.Resolution.Requested.Model)
+			assert.Equal(t, "gpt-4o-mini", capturedWorkflow.Resolution.ResolvedSelector.Model)
 		}
 	}
 }
 
-func TestModelValidation_StoresMatchedExecutionPolicy(t *testing.T) {
+func TestModelValidation_StoresMatchedWorkflowPolicy(t *testing.T) {
 	provider := &mockProvider{
 		supportedModels: []string{"gpt-4o-mini"},
 		providerNames:   map[string]string{"gpt-4o-mini": "mock"},
 	}
 
 	e := echo.New()
-	var capturedPlan *core.ExecutionPlan
+	var capturedWorkflow *core.Workflow
 
-	policyResolver := &staticExecutionPolicyResolver{
-		match: func(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+	policyResolver := &staticWorkflowPolicyResolver{
+		match: func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			if selector.Provider == "mock" && selector.Model == "gpt-4o-mini" {
-				return &core.ResolvedExecutionPolicy{
-					VersionID:      "plan-openai-gpt-4o-mini-v3",
+				return &core.ResolvedWorkflowPolicy{
+					VersionID:      "workflow-openai-gpt-4o-mini-v3",
 					Version:        3,
 					ScopeProvider:  "mock",
 					ScopeModel:     "gpt-4o-mini",
 					Name:           "provider-model",
-					PlanHash:       "hash-123",
-					Features:       core.DefaultExecutionFeatures(),
+					WorkflowHash:   "hash-123",
+					Features:       core.DefaultWorkflowFeatures(),
 					GuardrailsHash: "guardrails-123",
 				}, nil
 			}
-			return &core.ResolvedExecutionPolicy{
-				VersionID: "plan-global-v1",
+			return &core.ResolvedWorkflowPolicy{
+				VersionID: "workflow-global-v1",
 				Version:   1,
 				Name:      "global",
-				Features:  core.DefaultExecutionFeatures(),
+				Features:  core.DefaultWorkflowFeatures(),
 			}, nil
 		},
 	}
 
-	middleware := ExecutionPlanningWithResolverAndPolicy(provider, nil, policyResolver)
+	middleware := WorkflowResolutionWithResolverAndPolicy(provider, nil, policyResolver)
 	handler := middleware(func(c *echo.Context) error {
-		capturedPlan = core.GetExecutionPlan(c.Request().Context())
+		capturedWorkflow = core.GetWorkflow(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	})
 
@@ -331,35 +331,35 @@ func TestModelValidation_StoresMatchedExecutionPolicy(t *testing.T) {
 	err := handler(c)
 	require.NoError(t, err)
 
-	if assert.NotNil(t, capturedPlan) && assert.NotNil(t, capturedPlan.Policy) {
-		assert.Equal(t, "plan-openai-gpt-4o-mini-v3", capturedPlan.Policy.VersionID)
-		assert.Equal(t, "guardrails-123", capturedPlan.Policy.GuardrailsHash)
+	if assert.NotNil(t, capturedWorkflow) && assert.NotNil(t, capturedWorkflow.Policy) {
+		assert.Equal(t, "workflow-openai-gpt-4o-mini-v3", capturedWorkflow.Policy.VersionID)
+		assert.Equal(t, "guardrails-123", capturedWorkflow.Policy.GuardrailsHash)
 	}
 }
 
-func TestModelValidation_PassesUserPathToExecutionPolicyResolver(t *testing.T) {
+func TestModelValidation_PassesUserPathToWorkflowPolicyResolver(t *testing.T) {
 	provider := &mockProvider{
 		supportedModels: []string{"gpt-4o-mini"},
 		providerNames:   map[string]string{"gpt-4o-mini": "mock"},
 	}
 
 	e := echo.New()
-	var capturedSelector core.ExecutionPlanSelector
+	var capturedSelector core.WorkflowSelector
 
-	policyResolver := &staticExecutionPolicyResolver{
-		match: func(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+	policyResolver := &staticWorkflowPolicyResolver{
+		match: func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			capturedSelector = selector
-			return &core.ResolvedExecutionPolicy{
-				VersionID: "plan-global-v1",
+			return &core.ResolvedWorkflowPolicy{
+				VersionID: "workflow-global-v1",
 				Version:   1,
 				Name:      "global",
-				Features:  core.DefaultExecutionFeatures(),
+				Features:  core.DefaultWorkflowFeatures(),
 			}, nil
 		},
 	}
 
 	middleware := RequestSnapshotCapture()
-	handler := middleware(ExecutionPlanningWithResolverAndPolicy(provider, nil, policyResolver)(func(c *echo.Context) error {
+	handler := middleware(WorkflowResolutionWithResolverAndPolicy(provider, nil, policyResolver)(func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	}))
 
@@ -377,15 +377,15 @@ func TestModelValidation_PassesUserPathToExecutionPolicyResolver(t *testing.T) {
 	assert.Equal(t, "/team/a/user", capturedSelector.UserPath)
 }
 
-func TestExecutionPlanning_StoresPassthroughRouteInfo(t *testing.T) {
+func TestWorkflowResolution_StoresPassthroughRouteInfo(t *testing.T) {
 	provider := &mockProvider{}
 
 	e := echo.New()
-	var capturedPlan *core.ExecutionPlan
+	var capturedWorkflow *core.Workflow
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
-		capturedPlan = core.GetExecutionPlan(c.Request().Context())
+		capturedWorkflow = core.GetWorkflow(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	})
 
@@ -412,20 +412,20 @@ func TestExecutionPlanning_StoresPassthroughRouteInfo(t *testing.T) {
 	err := handler(c)
 	require.NoError(t, err)
 
-	if assert.NotNil(t, capturedPlan) {
-		assert.Equal(t, "pass-req-123", capturedPlan.RequestID)
-		assert.Equal(t, core.ExecutionModePassthrough, capturedPlan.Mode)
-		assert.Equal(t, "openai", capturedPlan.ProviderType)
-		if assert.NotNil(t, capturedPlan.Passthrough) {
-			assert.Equal(t, "openai", capturedPlan.Passthrough.Provider)
-			assert.Equal(t, "responses", capturedPlan.Passthrough.RawEndpoint)
-			assert.Equal(t, "gpt-5-mini", capturedPlan.Passthrough.Model)
-			assert.Equal(t, "/p/openai/responses", capturedPlan.Passthrough.AuditPath)
+	if assert.NotNil(t, capturedWorkflow) {
+		assert.Equal(t, "pass-req-123", capturedWorkflow.RequestID)
+		assert.Equal(t, core.ExecutionModePassthrough, capturedWorkflow.Mode)
+		assert.Equal(t, "openai", capturedWorkflow.ProviderType)
+		if assert.NotNil(t, capturedWorkflow.Passthrough) {
+			assert.Equal(t, "openai", capturedWorkflow.Passthrough.Provider)
+			assert.Equal(t, "responses", capturedWorkflow.Passthrough.RawEndpoint)
+			assert.Equal(t, "gpt-5-mini", capturedWorkflow.Passthrough.Model)
+			assert.Equal(t, "/p/openai/responses", capturedWorkflow.Passthrough.AuditPath)
 		}
 	}
 }
 
-func TestExecutionPlanning_PassthroughProviderNameRouteUsesCanonicalProviderNameForPolicy(t *testing.T) {
+func TestWorkflowResolution_PassthroughProviderNameRouteUsesCanonicalProviderNameForPolicy(t *testing.T) {
 	provider := &mockProvider{
 		providerTypes: map[string]string{
 			"openai_test/gpt-5-mini": "openai",
@@ -436,24 +436,24 @@ func TestExecutionPlanning_PassthroughProviderNameRouteUsesCanonicalProviderName
 	}
 
 	e := echo.New()
-	var capturedSelector core.ExecutionPlanSelector
-	var capturedPlan *core.ExecutionPlan
+	var capturedSelector core.WorkflowSelector
+	var capturedWorkflow *core.Workflow
 
-	policyResolver := &staticExecutionPolicyResolver{
-		match: func(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+	policyResolver := &staticWorkflowPolicyResolver{
+		match: func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			capturedSelector = selector
-			return &core.ResolvedExecutionPolicy{
-				VersionID: "plan-passthrough-v1",
+			return &core.ResolvedWorkflowPolicy{
+				VersionID: "workflow-passthrough-v1",
 				Version:   1,
 				Name:      "passthrough",
-				Features:  core.DefaultExecutionFeatures(),
+				Features:  core.DefaultWorkflowFeatures(),
 			}, nil
 		},
 	}
 
 	middleware := RequestSnapshotCapture()
-	handler := middleware(ExecutionPlanningWithResolverAndPolicy(provider, nil, policyResolver)(func(c *echo.Context) error {
-		capturedPlan = core.GetExecutionPlan(c.Request().Context())
+	handler := middleware(WorkflowResolutionWithResolverAndPolicy(provider, nil, policyResolver)(func(c *echo.Context) error {
+		capturedWorkflow = core.GetWorkflow(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	}))
 
@@ -466,23 +466,23 @@ func TestExecutionPlanning_PassthroughProviderNameRouteUsesCanonicalProviderName
 	require.NoError(t, err)
 	assert.Equal(t, "openai_test", capturedSelector.Provider)
 	assert.Equal(t, "gpt-5-mini", capturedSelector.Model)
-	if assert.NotNil(t, capturedPlan) {
-		assert.Equal(t, "openai", capturedPlan.ProviderType)
-		if assert.NotNil(t, capturedPlan.Passthrough) {
-			assert.Equal(t, "openai", capturedPlan.Passthrough.Provider)
+	if assert.NotNil(t, capturedWorkflow) {
+		assert.Equal(t, "openai", capturedWorkflow.ProviderType)
+		if assert.NotNil(t, capturedWorkflow.Passthrough) {
+			assert.Equal(t, "openai", capturedWorkflow.Passthrough.Provider)
 		}
 	}
 }
 
-func TestExecutionPlanning_PopulatesPassthroughProviderFromPathFallback(t *testing.T) {
+func TestWorkflowResolution_PopulatesPassthroughProviderFromPathFallback(t *testing.T) {
 	provider := &mockProvider{}
 
 	e := echo.New()
-	var capturedPlan *core.ExecutionPlan
+	var capturedWorkflow *core.Workflow
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
-		capturedPlan = core.GetExecutionPlan(c.Request().Context())
+		capturedWorkflow = core.GetWorkflow(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	})
 
@@ -518,13 +518,13 @@ func TestExecutionPlanning_PopulatesPassthroughProviderFromPathFallback(t *testi
 	err := handler(c)
 	require.NoError(t, err)
 
-	if assert.NotNil(t, capturedPlan) {
-		assert.Equal(t, core.ExecutionModePassthrough, capturedPlan.Mode)
-		assert.Equal(t, "openai", capturedPlan.ProviderType)
-		if assert.NotNil(t, capturedPlan.Passthrough) {
-			assert.Equal(t, "openai", capturedPlan.Passthrough.Provider)
-			assert.Equal(t, "responses", capturedPlan.Passthrough.RawEndpoint)
-			assert.Equal(t, "gpt-5-mini", capturedPlan.Passthrough.Model)
+	if assert.NotNil(t, capturedWorkflow) {
+		assert.Equal(t, core.ExecutionModePassthrough, capturedWorkflow.Mode)
+		assert.Equal(t, "openai", capturedWorkflow.ProviderType)
+		if assert.NotNil(t, capturedWorkflow.Passthrough) {
+			assert.Equal(t, "openai", capturedWorkflow.Passthrough.Provider)
+			assert.Equal(t, "responses", capturedWorkflow.Passthrough.RawEndpoint)
+			assert.Equal(t, "gpt-5-mini", capturedWorkflow.Passthrough.Model)
 		}
 	}
 }
@@ -535,7 +535,7 @@ func TestModelValidation_SetsRequestIDInContext(t *testing.T) {
 	e := echo.New()
 	var capturedRequestID string
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
 		capturedRequestID = core.GetRequestID(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
@@ -560,7 +560,7 @@ func TestModelValidation_DoesNotTreatPrefixOvermatchAsBatchPath(t *testing.T) {
 	e := echo.New()
 	var capturedRequestID string
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
 		capturedRequestID = core.GetRequestID(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
@@ -585,7 +585,7 @@ func TestModelValidation_BodyRewound(t *testing.T) {
 	e := echo.New()
 	var boundReq core.ChatRequest
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
 		if err := c.Bind(&boundReq); err != nil {
 			return err
@@ -612,7 +612,7 @@ func TestModelValidation_DoesNotReadLiveBodyWhenSelectorHintsAlreadyExist(t *tes
 	e := echo.New()
 	handlerCalled := false
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
 		handlerCalled = true
 		return c.String(http.StatusOK, "ok")
@@ -649,7 +649,7 @@ func TestModelValidation_UsesIngressBodyForMissingSelectorHints(t *testing.T) {
 	e := echo.New()
 	handlerCalled := false
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
 		handlerCalled = true
 		return c.String(http.StatusOK, "ok")
@@ -693,7 +693,7 @@ func TestModelValidation_RegistryNotInitializedReturnsGatewayError(t *testing.T)
 	e := echo.New()
 	handlerCalled := false
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
 		handlerCalled = true
 		return c.String(http.StatusOK, "ok")
@@ -741,7 +741,7 @@ func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t
 	e := echo.New()
 	handlerCalled := false
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
 		handlerCalled = true
 		return c.String(http.StatusOK, "ok")
@@ -778,7 +778,7 @@ func TestModelValidation_ResolvesProviderTypeFromOversizedLiveBody(t *testing.T)
 	var capturedEnv *core.WhiteBoxPrompt
 	var capturedProviderType string
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
 		capturedEnv = core.GetWhiteBoxPrompt(c.Request().Context())
 		capturedProviderType = GetProviderType(c)
@@ -818,7 +818,7 @@ func TestModelValidation_DoesNotCacheCanonicalChatRequestWhenRouteHintsAlreadyEx
 	e := echo.New()
 	var capturedEnv *core.WhiteBoxPrompt
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
 		capturedEnv = core.GetWhiteBoxPrompt(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
@@ -866,7 +866,7 @@ func TestModelValidation_DoesNotCacheCanonicalResponsesRequestWhenRouteHintsAlre
 	e := echo.New()
 	var capturedEnv *core.WhiteBoxPrompt
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
 		capturedEnv = core.GetWhiteBoxPrompt(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
@@ -914,10 +914,10 @@ func TestGetProviderType_EmptyWhenNotSet(t *testing.T) {
 	assert.Equal(t, "", GetProviderType(c))
 }
 
-func TestGetProviderType_UsesExecutionPlan(t *testing.T) {
+func TestGetProviderType_UsesWorkflow(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
 		ProviderType: "openai",
 	}))
 	rec := httptest.NewRecorder()
@@ -1006,13 +1006,13 @@ func TestModelValidation_ResolvesQualifiedMaskingAliasBeforeProviderParsing(t *t
 	e := echo.New()
 	var (
 		capturedProviderType string
-		capturedPlan         *core.ExecutionPlan
+		capturedWorkflow     *core.Workflow
 	)
 
-	middleware := ExecutionPlanning(provider)
+	middleware := WorkflowResolution(provider)
 	handler := middleware(func(c *echo.Context) error {
 		capturedProviderType = GetProviderType(c)
-		capturedPlan = core.GetExecutionPlan(c.Request().Context())
+		capturedWorkflow = core.GetWorkflow(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	})
 
@@ -1027,14 +1027,14 @@ func TestModelValidation_ResolvesQualifiedMaskingAliasBeforeProviderParsing(t *t
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "openai", capturedProviderType)
-	if assert.NotNil(t, capturedPlan) && assert.NotNil(t, capturedPlan.Resolution) {
-		assert.True(t, capturedPlan.Resolution.AliasApplied)
-		assert.Equal(t, "anthropic/claude-opus-4-6", capturedPlan.RequestedQualifiedModel())
-		assert.Equal(t, "openai/gpt-5-nano", capturedPlan.ResolvedQualifiedModel())
+	if assert.NotNil(t, capturedWorkflow) && assert.NotNil(t, capturedWorkflow.Resolution) {
+		assert.True(t, capturedWorkflow.Resolution.AliasApplied)
+		assert.Equal(t, "anthropic/claude-opus-4-6", capturedWorkflow.RequestedQualifiedModel())
+		assert.Equal(t, "openai/gpt-5-nano", capturedWorkflow.ResolvedQualifiedModel())
 	}
 }
 
-func TestExecutionPlanningWithResolver_UsesExplicitAliasResolverWithoutProviderDecorator(t *testing.T) {
+func TestWorkflowResolutionWithResolver_UsesExplicitAliasResolverWithoutProviderDecorator(t *testing.T) {
 	catalog := aliasesTestCatalog{
 		supported: map[string]bool{
 			"anthropic/claude-opus-4-6": true,
@@ -1068,11 +1068,11 @@ func TestExecutionPlanningWithResolver_UsesExplicitAliasResolverWithoutProviderD
 	}
 
 	e := echo.New()
-	var capturedPlan *core.ExecutionPlan
+	var capturedWorkflow *core.Workflow
 
-	middleware := ExecutionPlanningWithResolver(provider, service)
+	middleware := WorkflowResolutionWithResolver(provider, service)
 	handler := middleware(func(c *echo.Context) error {
-		capturedPlan = core.GetExecutionPlan(c.Request().Context())
+		capturedWorkflow = core.GetWorkflow(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	})
 
@@ -1086,10 +1086,10 @@ func TestExecutionPlanningWithResolver_UsesExplicitAliasResolverWithoutProviderD
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	if assert.NotNil(t, capturedPlan) && assert.NotNil(t, capturedPlan.Resolution) {
-		assert.Equal(t, "openai", capturedPlan.ProviderType)
-		assert.True(t, capturedPlan.Resolution.AliasApplied)
-		assert.Equal(t, "anthropic/claude-opus-4-6", capturedPlan.RequestedQualifiedModel())
-		assert.Equal(t, "openai/gpt-5-nano", capturedPlan.ResolvedQualifiedModel())
+	if assert.NotNil(t, capturedWorkflow) && assert.NotNil(t, capturedWorkflow.Resolution) {
+		assert.Equal(t, "openai", capturedWorkflow.ProviderType)
+		assert.True(t, capturedWorkflow.Resolution.AliasApplied)
+		assert.Equal(t, "anthropic/claude-opus-4-6", capturedWorkflow.RequestedQualifiedModel())
+		assert.Equal(t, "openai/gpt-5-nano", capturedWorkflow.ResolvedQualifiedModel())
 	}
 }

@@ -20,8 +20,8 @@ func passthroughExecutionTarget(c *echo.Context, provider core.RoutableProvider,
 
 	providerType := strings.TrimSpace(resolvePassthroughProvider(provider, info.Provider).ProviderType)
 	if providerType == "" {
-		if plan := core.GetExecutionPlan(c.Request().Context()); plan != nil {
-			providerType = strings.TrimSpace(plan.ProviderType)
+		if workflow := core.GetWorkflow(c.Request().Context()); workflow != nil {
+			providerType = strings.TrimSpace(workflow.ProviderType)
 		}
 	}
 	if providerType == "" {

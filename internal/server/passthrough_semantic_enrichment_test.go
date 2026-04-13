@@ -30,7 +30,7 @@ func (p passthroughSemanticEnricherStub) Enrich(_ *core.RequestSnapshot, _ *core
 	return &cloned
 }
 
-func TestPassthroughSemanticEnrichment_EnrichesPromptBeforePlanning(t *testing.T) {
+func TestPassthroughSemanticEnrichment_EnrichesPromptBeforeWorkflowResolution(t *testing.T) {
 	provider := &mockProvider{}
 	e := echo.New()
 
@@ -39,11 +39,11 @@ func TestPassthroughSemanticEnrichment_EnrichesPromptBeforePlanning(t *testing.T
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	var capturedPlan *core.ExecutionPlan
+	var capturedWorkflow *core.Workflow
 	handler := PassthroughSemanticEnrichment(provider, []core.PassthroughSemanticEnricher{
 		passthroughSemanticEnricherStub{providerType: "openai"},
-	}, true)(ExecutionPlanning(provider)(func(c *echo.Context) error {
-		capturedPlan = core.GetExecutionPlan(c.Request().Context())
+	}, true)(WorkflowResolution(provider)(func(c *echo.Context) error {
+		capturedWorkflow = core.GetWorkflow(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	}))
 
@@ -52,16 +52,16 @@ func TestPassthroughSemanticEnrichment_EnrichesPromptBeforePlanning(t *testing.T
 	err := RequestSnapshotCapture()(handler)(c)
 	require.NoError(t, err)
 
-	if capturedPlan == nil || capturedPlan.Passthrough == nil {
-		t.Fatal("expected passthrough execution plan")
+	if capturedWorkflow == nil || capturedWorkflow.Passthrough == nil {
+		t.Fatal("expected passthrough workflow")
 	}
-	if capturedPlan.Passthrough.NormalizedEndpoint != "responses" {
-		t.Fatalf("NormalizedEndpoint = %q, want responses", capturedPlan.Passthrough.NormalizedEndpoint)
+	if capturedWorkflow.Passthrough.NormalizedEndpoint != "responses" {
+		t.Fatalf("NormalizedEndpoint = %q, want responses", capturedWorkflow.Passthrough.NormalizedEndpoint)
 	}
-	if capturedPlan.Passthrough.SemanticOperation != "openai.responses" {
-		t.Fatalf("SemanticOperation = %q, want openai.responses", capturedPlan.Passthrough.SemanticOperation)
+	if capturedWorkflow.Passthrough.SemanticOperation != "openai.responses" {
+		t.Fatalf("SemanticOperation = %q, want openai.responses", capturedWorkflow.Passthrough.SemanticOperation)
 	}
-	if capturedPlan.Passthrough.AuditPath != "/v1/responses" {
-		t.Fatalf("AuditPath = %q, want /v1/responses", capturedPlan.Passthrough.AuditPath)
+	if capturedWorkflow.Passthrough.AuditPath != "/v1/responses" {
+		t.Fatalf("AuditPath = %q, want /v1/responses", capturedWorkflow.Passthrough.AuditPath)
 	}
 }

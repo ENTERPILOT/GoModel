@@ -2157,7 +2157,7 @@ const docTemplate = `{
                 }
             }
         },
-        "auditlog.ExecutionFeaturesSnapshot": {
+        "auditlog.WorkflowFeaturesSnapshot": {
             "type": "object",
             "properties": {
                 "audit": {
@@ -2187,11 +2187,11 @@ const docTemplate = `{
                     "description": "Error details (message can be long, so kept in JSON)",
                     "type": "string"
                 },
-                "execution_features": {
-                    "description": "ExecutionFeatures captures the request-time effective workflow features\nafter runtime caps were applied. This keeps audit views historically accurate\neven if the active process config changes later.",
+                "workflow_features": {
+                    "description": "WorkflowFeatures captures the request-time effective workflow features\nafter runtime caps were applied. This keeps audit views historically accurate\neven if the active process config changes later.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/auditlog.ExecutionFeaturesSnapshot"
+                            "$ref": "#/definitions/auditlog.WorkflowFeaturesSnapshot"
                         }
                     ]
                 },
@@ -2265,7 +2265,7 @@ const docTemplate = `{
                 "error_type": {
                     "type": "string"
                 },
-                "execution_plan_version_id": {
+                "workflow_version_id": {
                     "type": "string"
                 },
                 "id": {

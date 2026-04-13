@@ -13,9 +13,9 @@ import (
 	"gomodel/internal/core"
 )
 
-type requestExecutionPolicyResolverFunc func(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error)
+type requestWorkflowPolicyResolverFunc func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
 
-func (f requestExecutionPolicyResolverFunc) Match(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+func (f requestWorkflowPolicyResolverFunc) Match(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 	return f(selector)
 }
 
@@ -29,20 +29,20 @@ func (r *countingBatchResolver) ResolveModel(requested core.RequestedModelSelect
 	return r.resolved, false, nil
 }
 
-func TestApplyExecutionPolicy_NormalizesResolverErrors(t *testing.T) {
+func TestApplyWorkflowPolicy_NormalizesResolverErrors(t *testing.T) {
 	t.Parallel()
 
-	plan := &core.ExecutionPlan{}
-	err := applyExecutionPolicy(context.Background(), plan, requestExecutionPolicyResolverFunc(func(core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+	workflow := &core.Workflow{}
+	err := applyWorkflowPolicy(context.Background(), workflow, requestWorkflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 		return nil, errors.New("storage unavailable")
-	}), core.NewExecutionPlanSelector("openai", "gpt-4o-mini"))
+	}), core.NewWorkflowSelector("openai", "gpt-4o-mini"))
 	if err == nil {
-		t.Fatal("applyExecutionPolicy() error = nil, want gateway error")
+		t.Fatal("applyWorkflowPolicy() error = nil, want gateway error")
 	}
 
 	var gatewayErr *core.GatewayError
 	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("applyExecutionPolicy() error = %T, want *core.GatewayError", err)
+		t.Fatalf("applyWorkflowPolicy() error = %T, want *core.GatewayError", err)
 	}
 	if gatewayErr.Type != core.ErrorTypeProvider {
 		t.Fatalf("gateway error type = %q, want %q", gatewayErr.Type, core.ErrorTypeProvider)
@@ -91,11 +91,11 @@ func TestDetermineBatchExecutionSelection_UsesSingleResolutionPass(t *testing.T)
 	}
 }
 
-func TestNativeBatchService_StoreExecutionPlanForBatch_NormalizesPolicyErrors(t *testing.T) {
+func TestNativeBatchService_StoreWorkflowForBatch_NormalizesPolicyErrors(t *testing.T) {
 	t.Parallel()
 
 	svc := &nativeBatchService{
-		executionPolicyResolver: requestExecutionPolicyResolverFunc(func(core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+		workflowPolicyResolver: requestWorkflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			return nil, errors.New("resolver backend unavailable")
 		}),
 	}
@@ -105,17 +105,17 @@ func TestNativeBatchService_StoreExecutionPlanForBatch_NormalizesPolicyErrors(t 
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	_, err := svc.storeExecutionPlanForBatch(c, batchExecutionSelection{
+	_, err := svc.storeWorkflowForBatch(c, batchExecutionSelection{
 		providerType: "openai",
-		selector:     core.NewExecutionPlanSelector("openai", "gpt-4o-mini"),
+		selector:     core.NewWorkflowSelector("openai", "gpt-4o-mini"),
 	})
 	if err == nil {
-		t.Fatal("storeExecutionPlanForBatch() error = nil, want gateway error")
+		t.Fatal("storeWorkflowForBatch() error = nil, want gateway error")
 	}
 
 	var gatewayErr *core.GatewayError
 	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("storeExecutionPlanForBatch() error = %T, want *core.GatewayError", err)
+		t.Fatalf("storeWorkflowForBatch() error = %T, want *core.GatewayError", err)
 	}
 	if gatewayErr.Type != core.ErrorTypeProvider {
 		t.Fatalf("gateway error type = %q, want %q", gatewayErr.Type, core.ErrorTypeProvider)

@@ -1,4 +1,4 @@
-package executionplans
+package workflows
 
 import "testing"
 

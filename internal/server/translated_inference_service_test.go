@@ -20,7 +20,7 @@ func (l *usageCaptureLogger) Write(entry *usage.UsageEntry) {
 func (l *usageCaptureLogger) Config() usage.Config { return l.config }
 func (l *usageCaptureLogger) Close() error         { return nil }
 
-func TestTranslatedInferenceService_LogUsageSkipsWhenExecutionPlanDisablesUsage(t *testing.T) {
+func TestTranslatedInferenceService_LogUsageSkipsWhenWorkflowDisablesUsage(t *testing.T) {
 	logger := &usageCaptureLogger{
 		config: usage.Config{Enabled: true},
 	}
@@ -28,10 +28,10 @@ func TestTranslatedInferenceService_LogUsageSkipsWhenExecutionPlanDisablesUsage(
 		usageLogger: logger,
 	}
 
-	service.logUsage(context.Background(), &core.ExecutionPlan{
-		Policy: &core.ResolvedExecutionPolicy{
-			VersionID: "plan-usage-off",
-			Features: core.ExecutionFeatures{
+	service.logUsage(context.Background(), &core.Workflow{
+		Policy: &core.ResolvedWorkflowPolicy{
+			VersionID: "workflow-usage-off",
+			Features: core.WorkflowFeatures{
 				Cache:      true,
 				Audit:      true,
 				Usage:      false,
@@ -123,11 +123,11 @@ func TestTranslatedInferenceService_WithCacheRequestContextClearsInheritedGuardr
 		guardrailsHash: "service-default",
 	}
 	ctx := core.WithGuardrailsHash(context.Background(), "caller-hash")
-	plan := &core.ExecutionPlan{
-		Policy: &core.ResolvedExecutionPolicy{
-			VersionID:      "plan-1",
+	workflow := &core.Workflow{
+		Policy: &core.ResolvedWorkflowPolicy{
+			VersionID:      "workflow-1",
 			GuardrailsHash: "",
-			Features: core.ExecutionFeatures{
+			Features: core.WorkflowFeatures{
 				Cache:      true,
 				Audit:      true,
 				Usage:      true,
@@ -137,7 +137,7 @@ func TestTranslatedInferenceService_WithCacheRequestContextClearsInheritedGuardr
 		},
 	}
 
-	got := service.withCacheRequestContext(ctx, plan)
+	got := service.withCacheRequestContext(ctx, workflow)
 	if hash := core.GetGuardrailsHash(got); hash != "" {
 		t.Fatalf("guardrails hash = %q, want cleared hash", hash)
 	}

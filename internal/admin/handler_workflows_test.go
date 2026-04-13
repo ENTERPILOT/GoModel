@@ -13,17 +13,17 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/core"
-	"gomodel/internal/executionplans"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/providers"
 	"gomodel/internal/responsecache"
+	"gomodel/internal/workflows"
 )
 
-type executionPlanTestStore struct {
-	versions []executionplans.Version
+type workflowTestStore struct {
+	versions []workflows.Version
 }
 
-type executionPlanErrorEnvelope struct {
+type workflowErrorEnvelope struct {
 	Error struct {
 		Type    string  `json:"type"`
 		Message string  `json:"message"`
@@ -32,8 +32,8 @@ type executionPlanErrorEnvelope struct {
 	} `json:"error"`
 }
 
-func (s *executionPlanTestStore) ListActive(context.Context) ([]executionplans.Version, error) {
-	result := make([]executionplans.Version, 0, len(s.versions))
+func (s *workflowTestStore) ListActive(context.Context) ([]workflows.Version, error) {
+	result := make([]workflows.Version, 0, len(s.versions))
 	for _, version := range s.versions {
 		if version.Active {
 			result = append(result, version)
@@ -42,17 +42,17 @@ func (s *executionPlanTestStore) ListActive(context.Context) ([]executionplans.V
 	return result, nil
 }
 
-func (s *executionPlanTestStore) Get(_ context.Context, id string) (*executionplans.Version, error) {
+func (s *workflowTestStore) Get(_ context.Context, id string) (*workflows.Version, error) {
 	for _, version := range s.versions {
 		if version.ID == id {
 			copy := version
 			return &copy, nil
 		}
 	}
-	return nil, executionplans.ErrNotFound
+	return nil, workflows.ErrNotFound
 }
 
-func (s *executionPlanTestStore) Create(_ context.Context, input executionplans.CreateInput) (*executionplans.Version, error) {
+func (s *workflowTestStore) Create(_ context.Context, input workflows.CreateInput) (*workflows.Version, error) {
 	var scopeKey string
 	switch {
 	case input.Scope.Provider == "":
@@ -74,21 +74,21 @@ func (s *executionPlanTestStore) Create(_ context.Context, input executionplans.
 			scopeKey = "provider_model_path:" + input.Scope.Provider + ":" + input.Scope.Model + ":" + input.Scope.UserPath
 		}
 	}
-	planHash, err := executionPlanTestPlanHash(input.Payload)
+	workflowHash, err := workflowTestWorkflowHash(input.Payload)
 	if err != nil {
 		return nil, err
 	}
 
-	version := executionplans.Version{
-		ID:          "plan-created",
-		Scope:       input.Scope,
-		ScopeKey:    scopeKey,
-		Version:     len(s.versions) + 1,
-		Active:      input.Activate,
-		Name:        input.Name,
-		Description: input.Description,
-		Payload:     input.Payload,
-		PlanHash:    planHash,
+	version := workflows.Version{
+		ID:           "workflow-created",
+		Scope:        input.Scope,
+		ScopeKey:     scopeKey,
+		Version:      len(s.versions) + 1,
+		Active:       input.Activate,
+		Name:         input.Name,
+		Description:  input.Description,
+		Payload:      input.Payload,
+		WorkflowHash: workflowHash,
 	}
 
 	if input.Activate {
@@ -103,7 +103,7 @@ func (s *executionPlanTestStore) Create(_ context.Context, input executionplans.
 	return &version, nil
 }
 
-func (s *executionPlanTestStore) EnsureManagedDefaultGlobal(ctx context.Context, input executionplans.CreateInput, planHash string) (*executionplans.Version, error) {
+func (s *workflowTestStore) EnsureManagedDefaultGlobal(ctx context.Context, input workflows.CreateInput, workflowHash string) (*workflows.Version, error) {
 	for _, version := range s.versions {
 		if !version.Active || version.ScopeKey != "global" {
 			continue
@@ -111,7 +111,7 @@ func (s *executionPlanTestStore) EnsureManagedDefaultGlobal(ctx context.Context,
 		if !version.Managed {
 			return nil, nil
 		}
-		if version.Name == input.Name && version.Description == input.Description && version.PlanHash == planHash {
+		if version.Name == input.Name && version.Description == input.Description && version.WorkflowHash == workflowHash {
 			return nil, nil
 		}
 		break
@@ -119,19 +119,19 @@ func (s *executionPlanTestStore) EnsureManagedDefaultGlobal(ctx context.Context,
 	return s.Create(ctx, input)
 }
 
-func (s *executionPlanTestStore) Deactivate(_ context.Context, id string) error {
+func (s *workflowTestStore) Deactivate(_ context.Context, id string) error {
 	for i := range s.versions {
 		if s.versions[i].ID == id && s.versions[i].Active {
 			s.versions[i].Active = false
 			return nil
 		}
 	}
-	return executionplans.ErrNotFound
+	return workflows.ErrNotFound
 }
 
-func (s *executionPlanTestStore) Close() error { return nil }
+func (s *workflowTestStore) Close() error { return nil }
 
-func executionPlanTestPlanHash(payload executionplans.Payload) (string, error) {
+func workflowTestWorkflowHash(payload workflows.Payload) (string, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
@@ -140,7 +140,7 @@ func executionPlanTestPlanHash(payload executionplans.Payload) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func newExecutionPlanRegistry(t *testing.T) *guardrails.Registry {
+func newWorkflowRegistry(t *testing.T) *guardrails.Registry {
 	t.Helper()
 
 	registry := guardrails.NewRegistry()
@@ -158,7 +158,7 @@ func newExecutionPlanRegistry(t *testing.T) *guardrails.Registry {
 	return registry
 }
 
-func newExecutionPlanModelRegistry(t *testing.T) *providers.ModelRegistry {
+func newWorkflowModelRegistry(t *testing.T) *providers.ModelRegistry {
 	t.Helper()
 
 	registry := providers.NewModelRegistry()
@@ -176,24 +176,24 @@ func newExecutionPlanModelRegistry(t *testing.T) *providers.ModelRegistry {
 	return registry
 }
 
-func decodeExecutionPlanErrorEnvelope(t *testing.T, body []byte) executionPlanErrorEnvelope {
+func decodeWorkflowErrorEnvelope(t *testing.T, body []byte) workflowErrorEnvelope {
 	t.Helper()
 
-	var envelope executionPlanErrorEnvelope
+	var envelope workflowErrorEnvelope
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	return envelope
 }
 
-func newExecutionPlanHandler(t *testing.T, store executionplans.Store, registry *guardrails.Registry) *Handler {
-	return newExecutionPlanHandlerWithModelRegistry(t, store, newExecutionPlanModelRegistry(t), registry)
+func newWorkflowHandler(t *testing.T, store workflows.Store, registry *guardrails.Registry) *Handler {
+	return newWorkflowHandlerWithModelRegistry(t, store, newWorkflowModelRegistry(t), registry)
 }
 
-func newExecutionPlanHandlerWithModelRegistry(t *testing.T, store executionplans.Store, modelRegistry *providers.ModelRegistry, guardrailRegistry *guardrails.Registry) *Handler {
+func newWorkflowHandlerWithModelRegistry(t *testing.T, store workflows.Store, modelRegistry *providers.ModelRegistry, guardrailRegistry *guardrails.Registry) *Handler {
 	t.Helper()
 
-	service, err := executionplans.NewService(store, executionplans.NewCompiler(guardrailRegistry))
+	service, err := workflows.NewService(store, workflows.NewCompiler(guardrailRegistry))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -201,40 +201,40 @@ func newExecutionPlanHandlerWithModelRegistry(t *testing.T, store executionplans
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	return NewHandler(nil, modelRegistry, WithExecutionPlans(service), WithGuardrailsRegistry(guardrailRegistry))
+	return NewHandler(nil, modelRegistry, WithWorkflows(service), WithGuardrailsRegistry(guardrailRegistry))
 }
 
-func TestListExecutionPlans(t *testing.T) {
+func TestListWorkflows(t *testing.T) {
 	fallbackDisabled := false
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false, Fallback: &fallbackDisabled},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false, Fallback: &fallbackDisabled},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
 
-	h := newExecutionPlanHandler(t, store, nil)
-	c, rec := newHandlerContext("/admin/api/v1/execution-plans")
+	h := newWorkflowHandler(t, store, nil)
+	c, rec := newHandlerContext("/admin/api/v1/workflows")
 
-	if err := h.ListExecutionPlans(c); err != nil {
-		t.Fatalf("ListExecutionPlans() error = %v", err)
+	if err := h.ListWorkflows(c); err != nil {
+		t.Fatalf("ListWorkflows() error = %v", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 
-	var body []executionplans.View
+	var body []workflows.View
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -258,23 +258,23 @@ func TestListExecutionPlans(t *testing.T) {
 	}
 }
 
-func TestExecutionPlansEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
+func TestWorkflowsEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	h := NewHandler(nil, nil)
 	e := echo.New()
 
-	listCtx, listRec := newHandlerContext("/admin/api/v1/execution-plans")
-	if err := h.ListExecutionPlans(listCtx); err != nil {
-		t.Fatalf("ListExecutionPlans() error = %v", err)
+	listCtx, listRec := newHandlerContext("/admin/api/v1/workflows")
+	if err := h.ListWorkflows(listCtx); err != nil {
+		t.Fatalf("ListWorkflows() error = %v", err)
 	}
 	if listRec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("list status = %d, want 503", listRec.Code)
 	}
-	listEnvelope := decodeExecutionPlanErrorEnvelope(t, listRec.Body.Bytes())
+	listEnvelope := decodeWorkflowErrorEnvelope(t, listRec.Body.Bytes())
 	if listEnvelope.Error.Type != "invalid_request_error" {
 		t.Fatalf("list error type = %q, want invalid_request_error", listEnvelope.Error.Type)
 	}
-	if listEnvelope.Error.Message != "execution plans feature is unavailable" {
-		t.Fatalf("list error message = %q, want execution plans feature is unavailable", listEnvelope.Error.Message)
+	if listEnvelope.Error.Message != "workflows feature is unavailable" {
+		t.Fatalf("list error message = %q, want workflows feature is unavailable", listEnvelope.Error.Message)
 	}
 	if listEnvelope.Error.Param != nil {
 		t.Fatalf("list error param = %v, want nil", *listEnvelope.Error.Param)
@@ -283,22 +283,22 @@ func TestExecutionPlansEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 		t.Fatalf("list error code = %v, want feature_unavailable", listEnvelope.Error.Code)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	if err := h.CreateExecutionPlan(c); err != nil {
-		t.Fatalf("CreateExecutionPlan() error = %v", err)
+	if err := h.CreateWorkflow(c); err != nil {
+		t.Fatalf("CreateWorkflow() error = %v", err)
 	}
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("create status = %d, want 503", rec.Code)
 	}
-	createEnvelope := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	createEnvelope := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
 	if createEnvelope.Error.Type != "invalid_request_error" {
 		t.Fatalf("create error type = %q, want invalid_request_error", createEnvelope.Error.Type)
 	}
-	if createEnvelope.Error.Message != "execution plans feature is unavailable" {
-		t.Fatalf("create error message = %q, want execution plans feature is unavailable", createEnvelope.Error.Message)
+	if createEnvelope.Error.Message != "workflows feature is unavailable" {
+		t.Fatalf("create error message = %q, want workflows feature is unavailable", createEnvelope.Error.Message)
 	}
 	if createEnvelope.Error.Param != nil {
 		t.Fatalf("create error param = %v, want nil", *createEnvelope.Error.Param)
@@ -307,23 +307,23 @@ func TestExecutionPlansEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 		t.Fatalf("create error code = %v, want feature_unavailable", createEnvelope.Error.Code)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans/test-plan/deactivate", nil)
+	req = httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows/test-workflow/deactivate", nil)
 	rec = httptest.NewRecorder()
 	c = e.NewContext(req, rec)
-	c.SetPath("/admin/api/v1/execution-plans/:id/deactivate")
-	c.SetPathValues(echo.PathValues{{Name: "id", Value: "test-plan"}})
-	if err := h.DeactivateExecutionPlan(c); err != nil {
-		t.Fatalf("DeactivateExecutionPlan() error = %v", err)
+	c.SetPath("/admin/api/v1/workflows/:id/deactivate")
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: "test-workflow"}})
+	if err := h.DeactivateWorkflow(c); err != nil {
+		t.Fatalf("DeactivateWorkflow() error = %v", err)
 	}
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("deactivate status = %d, want 503", rec.Code)
 	}
-	deactivateEnvelope := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	deactivateEnvelope := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
 	if deactivateEnvelope.Error.Type != "invalid_request_error" {
 		t.Fatalf("deactivate error type = %q, want invalid_request_error", deactivateEnvelope.Error.Type)
 	}
-	if deactivateEnvelope.Error.Message != "execution plans feature is unavailable" {
-		t.Fatalf("deactivate error message = %q, want execution plans feature is unavailable", deactivateEnvelope.Error.Message)
+	if deactivateEnvelope.Error.Message != "workflows feature is unavailable" {
+		t.Fatalf("deactivate error message = %q, want workflows feature is unavailable", deactivateEnvelope.Error.Message)
 	}
 	if deactivateEnvelope.Error.Param != nil {
 		t.Fatalf("deactivate error param = %v, want nil", *deactivateEnvelope.Error.Param)
@@ -332,82 +332,82 @@ func TestExecutionPlansEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 		t.Fatalf("deactivate error code = %v, want feature_unavailable", deactivateEnvelope.Error.Code)
 	}
 
-	getCtx, getRec := newHandlerContext("/admin/api/v1/execution-plans/test-plan")
-	getCtx.SetPath("/admin/api/v1/execution-plans/:id")
-	getCtx.SetPathValues(echo.PathValues{{Name: "id", Value: "test-plan"}})
-	if err := h.GetExecutionPlan(getCtx); err != nil {
-		t.Fatalf("GetExecutionPlan() error = %v", err)
+	getCtx, getRec := newHandlerContext("/admin/api/v1/workflows/test-workflow")
+	getCtx.SetPath("/admin/api/v1/workflows/:id")
+	getCtx.SetPathValues(echo.PathValues{{Name: "id", Value: "test-workflow"}})
+	if err := h.GetWorkflow(getCtx); err != nil {
+		t.Fatalf("GetWorkflow() error = %v", err)
 	}
 	if getRec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("get status = %d, want 503", getRec.Code)
 	}
-	getEnvelope := decodeExecutionPlanErrorEnvelope(t, getRec.Body.Bytes())
+	getEnvelope := decodeWorkflowErrorEnvelope(t, getRec.Body.Bytes())
 	if getEnvelope.Error.Type != "invalid_request_error" {
 		t.Fatalf("get error type = %q, want invalid_request_error", getEnvelope.Error.Type)
 	}
-	if getEnvelope.Error.Message != "execution plans feature is unavailable" {
-		t.Fatalf("get error message = %q, want execution plans feature is unavailable", getEnvelope.Error.Message)
+	if getEnvelope.Error.Message != "workflows feature is unavailable" {
+		t.Fatalf("get error message = %q, want workflows feature is unavailable", getEnvelope.Error.Message)
 	}
 	if getEnvelope.Error.Code == nil || *getEnvelope.Error.Code != "feature_unavailable" {
 		t.Fatalf("get error code = %v, want feature_unavailable", getEnvelope.Error.Code)
 	}
 }
 
-func TestGetExecutionPlan(t *testing.T) {
+func TestGetWorkflow(t *testing.T) {
 	fallbackEnabled := true
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features: executionplans.FeatureFlags{
+					Features: workflows.FeatureFlags{
 						Cache: true,
 						Audit: true,
 						Usage: true,
 					},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 			{
-				ID:          "provider-plan-v1",
-				Scope:       executionplans.Scope{Provider: "openai", Model: "gpt-5"},
+				ID:          "provider-workflow-v1",
+				Scope:       workflows.Scope{Provider: "openai", Model: "gpt-5"},
 				ScopeKey:    "provider_model:openai:gpt-5",
 				Version:     1,
 				Active:      false,
 				Name:        "historical provider workflow",
 				Description: "inactive but still queryable",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features: executionplans.FeatureFlags{
+					Features: workflows.FeatureFlags{
 						Cache:      true,
 						Audit:      true,
 						Usage:      true,
 						Guardrails: true,
 						Fallback:   &fallbackEnabled,
 					},
-					Guardrails: []executionplans.GuardrailStep{
+					Guardrails: []workflows.GuardrailStep{
 						{Ref: "policy-system", Step: 10},
 					},
 				},
-				PlanHash: "hash-provider-v1",
+				WorkflowHash: "hash-provider-v1",
 			},
 		},
 	}
 
-	registry := newExecutionPlanRegistry(t)
-	h := newExecutionPlanHandler(t, store, registry)
-	c, rec := newHandlerContext("/admin/api/v1/execution-plans/provider-plan-v1")
-	c.SetPath("/admin/api/v1/execution-plans/:id")
-	c.SetPathValues(echo.PathValues{{Name: "id", Value: "provider-plan-v1"}})
+	registry := newWorkflowRegistry(t)
+	h := newWorkflowHandler(t, store, registry)
+	c, rec := newHandlerContext("/admin/api/v1/workflows/provider-workflow-v1")
+	c.SetPath("/admin/api/v1/workflows/:id")
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: "provider-workflow-v1"}})
 
-	if err := h.GetExecutionPlan(c); err != nil {
-		t.Fatalf("GetExecutionPlan() error = %v", err)
+	if err := h.GetWorkflow(c); err != nil {
+		t.Fatalf("GetWorkflow() error = %v", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -430,12 +430,12 @@ func TestGetExecutionPlan(t *testing.T) {
 		t.Fatalf("effective_features leaked Go field key %q: %s", "Cache", rec.Body.String())
 	}
 
-	var body executionplans.View
+	var body workflows.View
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if body.ID != "provider-plan-v1" {
-		t.Fatalf("id = %q, want provider-plan-v1", body.ID)
+	if body.ID != "provider-workflow-v1" {
+		t.Fatalf("id = %q, want provider-workflow-v1", body.ID)
 	}
 	if body.Active {
 		t.Fatal("Active = true, want false")
@@ -451,33 +451,33 @@ func TestGetExecutionPlan(t *testing.T) {
 	}
 }
 
-func TestCreateExecutionPlan_NormalizesScopeUserPath(t *testing.T) {
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+func TestCreateWorkflow_NormalizesScopeUserPath(t *testing.T) {
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
-	h := newExecutionPlanHandler(t, store, nil)
+	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
 		"scope_provider_name":"openai",
 		"scope_model":"gpt-5",
 		"scope_user_path":" team//alpha/user/ ",
 		"name":"Scoped workflow",
-		"plan_payload":{
+		"workflow_payload":{
 			"schema_version":1,
 			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false}
 		}
@@ -486,14 +486,14 @@ func TestCreateExecutionPlan_NormalizesScopeUserPath(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	if err := h.CreateExecutionPlan(c); err != nil {
-		t.Fatalf("CreateExecutionPlan() error = %v", err)
+	if err := h.CreateWorkflow(c); err != nil {
+		t.Fatalf("CreateWorkflow() error = %v", err)
 	}
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", rec.Code)
 	}
 
-	var version executionplans.Version
+	var version workflows.Version
 	if err := json.Unmarshal(rec.Body.Bytes(), &version); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -502,13 +502,13 @@ func TestCreateExecutionPlan_NormalizesScopeUserPath(t *testing.T) {
 	}
 }
 
-func TestListExecutionPlanGuardrails(t *testing.T) {
-	registry := newExecutionPlanRegistry(t)
+func TestListWorkflowGuardrails(t *testing.T) {
+	registry := newWorkflowRegistry(t)
 	h := NewHandler(nil, nil, WithGuardrailsRegistry(registry))
-	c, rec := newHandlerContext("/admin/api/v1/execution-plans/guardrails")
+	c, rec := newHandlerContext("/admin/api/v1/workflows/guardrails")
 
-	if err := h.ListExecutionPlanGuardrails(c); err != nil {
-		t.Fatalf("ListExecutionPlanGuardrails() error = %v", err)
+	if err := h.ListWorkflowGuardrails(c); err != nil {
+		t.Fatalf("ListWorkflowGuardrails() error = %v", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -523,34 +523,34 @@ func TestListExecutionPlanGuardrails(t *testing.T) {
 	}
 }
 
-func TestCreateExecutionPlan(t *testing.T) {
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+func TestCreateWorkflow(t *testing.T) {
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
 
-	h := newExecutionPlanHandler(t, store, nil)
+	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
 		"scope_provider":"openai",
 		"scope_model":"gpt-5",
 		"name":"openai gpt-5",
-		"description":"provider-model plan",
-		"plan_payload":{
+		"description":"provider-model workflow",
+		"workflow_payload":{
 			"schema_version":1,
 			"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"fallback":false},
 			"guardrails":[]
@@ -560,14 +560,14 @@ func TestCreateExecutionPlan(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	if err := h.CreateExecutionPlan(c); err != nil {
-		t.Fatalf("CreateExecutionPlan() error = %v", err)
+	if err := h.CreateWorkflow(c); err != nil {
+		t.Fatalf("CreateWorkflow() error = %v", err)
 	}
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", rec.Code)
 	}
 
-	var body executionplans.Version
+	var body workflows.Version
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -581,7 +581,7 @@ func TestCreateExecutionPlan(t *testing.T) {
 		t.Fatalf("payload fallback = %v, want explicit false", body.Payload.Features.Fallback)
 	}
 
-	views, err := h.plans.ListViews(context.Background())
+	views, err := h.workflows.ListViews(context.Background())
 	if err != nil {
 		t.Fatalf("ListViews() error = %v", err)
 	}
@@ -590,7 +590,7 @@ func TestCreateExecutionPlan(t *testing.T) {
 	}
 }
 
-func TestCreateExecutionPlan_StoresCanonicalScopeModel(t *testing.T) {
+func TestCreateWorkflow_StoresCanonicalScopeModel(t *testing.T) {
 	tests := []struct {
 		name         string
 		body         string
@@ -603,7 +603,7 @@ func TestCreateExecutionPlan_StoresCanonicalScopeModel(t *testing.T) {
 				"scope_provider_name":"openai",
 				"scope_model":"  gpt-5  ",
 				"name":"trimmed model",
-				"plan_payload":{
+				"workflow_payload":{
 					"schema_version":1,
 					"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
 					"guardrails":[]
@@ -618,7 +618,7 @@ func TestCreateExecutionPlan_StoresCanonicalScopeModel(t *testing.T) {
 				"scope_provider_name":"openai",
 				"scope_model":"   ",
 				"name":"provider only",
-				"plan_payload":{
+				"workflow_payload":{
 					"schema_version":1,
 					"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
 					"guardrails":[]
@@ -631,40 +631,40 @@ func TestCreateExecutionPlan_StoresCanonicalScopeModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &executionPlanTestStore{
-				versions: []executionplans.Version{
+			store := &workflowTestStore{
+				versions: []workflows.Version{
 					{
-						ID:       "global-plan",
-						Scope:    executionplans.Scope{},
+						ID:       "global-workflow",
+						Scope:    workflows.Scope{},
 						ScopeKey: "global",
 						Version:  1,
 						Active:   true,
 						Name:     "global",
-						Payload: executionplans.Payload{
+						Payload: workflows.Payload{
 							SchemaVersion: 1,
-							Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+							Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 						},
-						PlanHash: "hash-global",
+						WorkflowHash: "hash-global",
 					},
 				},
 			}
 
-			h := newExecutionPlanHandler(t, store, nil)
+			h := newWorkflowHandler(t, store, nil)
 			e := echo.New()
 
-			req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(tt.body))
+			req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
 
-			if err := h.CreateExecutionPlan(c); err != nil {
-				t.Fatalf("CreateExecutionPlan() error = %v", err)
+			if err := h.CreateWorkflow(c); err != nil {
+				t.Fatalf("CreateWorkflow() error = %v", err)
 			}
 			if rec.Code != http.StatusCreated {
 				t.Fatalf("status = %d, want 201", rec.Code)
 			}
 
-			var body executionplans.Version
+			var body workflows.Version
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatalf("unmarshal response: %v", err)
 			}
@@ -678,21 +678,21 @@ func TestCreateExecutionPlan_StoresCanonicalScopeModel(t *testing.T) {
 	}
 }
 
-func TestCreateExecutionPlan_LegacyProviderTypeResolvesToConfiguredProviderName(t *testing.T) {
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+func TestCreateWorkflow_LegacyProviderTypeResolvesToConfiguredProviderName(t *testing.T) {
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
@@ -710,14 +710,14 @@ func TestCreateExecutionPlan_LegacyProviderTypeResolvesToConfiguredProviderName(
 		t.Fatalf("Initialize() error = %v", err)
 	}
 
-	h := newExecutionPlanHandlerWithModelRegistry(t, store, modelRegistry, nil)
+	h := newWorkflowHandlerWithModelRegistry(t, store, modelRegistry, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
 		"scope_provider":"openai",
 		"scope_model":"gpt-5",
 		"name":"legacy provider type scope",
-		"plan_payload":{
+		"workflow_payload":{
 			"schema_version":1,
 			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
 			"guardrails":[]
@@ -727,14 +727,14 @@ func TestCreateExecutionPlan_LegacyProviderTypeResolvesToConfiguredProviderName(
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	if err := h.CreateExecutionPlan(c); err != nil {
-		t.Fatalf("CreateExecutionPlan() error = %v", err)
+	if err := h.CreateWorkflow(c); err != nil {
+		t.Fatalf("CreateWorkflow() error = %v", err)
 	}
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", rec.Code)
 	}
 
-	var body executionplans.Version
+	var body workflows.Version
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -743,33 +743,33 @@ func TestCreateExecutionPlan_LegacyProviderTypeResolvesToConfiguredProviderName(
 	}
 }
 
-func TestCreateExecutionPlan_AllowsEmptyName(t *testing.T) {
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+func TestCreateWorkflow_AllowsEmptyName(t *testing.T) {
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
 
-	h := newExecutionPlanHandler(t, store, nil)
+	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
 		"scope_provider":"openai",
 		"scope_model":"gpt-5",
-		"description":"provider-model plan",
-		"plan_payload":{
+		"description":"provider-model workflow",
+		"workflow_payload":{
 			"schema_version":1,
 			"features":{"cache":false,"audit":true,"usage":true,"guardrails":false},
 			"guardrails":[]
@@ -779,14 +779,14 @@ func TestCreateExecutionPlan_AllowsEmptyName(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	if err := h.CreateExecutionPlan(c); err != nil {
-		t.Fatalf("CreateExecutionPlan() error = %v", err)
+	if err := h.CreateWorkflow(c); err != nil {
+		t.Fatalf("CreateWorkflow() error = %v", err)
 	}
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", rec.Code)
 	}
 
-	var body executionplans.Version
+	var body workflows.Version
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -795,31 +795,31 @@ func TestCreateExecutionPlan_AllowsEmptyName(t *testing.T) {
 	}
 }
 
-func TestCreateExecutionPlanRejectsUnknownGuardrail(t *testing.T) {
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+func TestCreateWorkflowRejectsUnknownGuardrail(t *testing.T) {
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
-	registry := newExecutionPlanRegistry(t)
-	h := newExecutionPlanHandler(t, store, registry)
+	registry := newWorkflowRegistry(t)
+	h := newWorkflowHandler(t, store, registry)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{
-		"name":"guardrail plan",
-		"plan_payload":{
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
+		"name":"guardrail workflow",
+		"workflow_payload":{
 			"schema_version":1,
 			"features":{"cache":true,"audit":true,"usage":true,"guardrails":true},
 			"guardrails":[{"ref":"missing-guardrail","step":10}]
@@ -829,14 +829,14 @@ func TestCreateExecutionPlanRejectsUnknownGuardrail(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	if err := h.CreateExecutionPlan(c); err != nil {
-		t.Fatalf("CreateExecutionPlan() error = %v", err)
+	if err := h.CreateWorkflow(c); err != nil {
+		t.Fatalf("CreateWorkflow() error = %v", err)
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 
-	body := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	body := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
 	if body.Error.Type != "invalid_request_error" {
 		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
 	}
@@ -851,32 +851,32 @@ func TestCreateExecutionPlanRejectsUnknownGuardrail(t *testing.T) {
 	}
 }
 
-func TestCreateExecutionPlanReturnsValidationErrors(t *testing.T) {
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+func TestCreateWorkflowReturnsValidationErrors(t *testing.T) {
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
 
-	h := newExecutionPlanHandler(t, store, nil)
+	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
 		"scope_model":"gpt-5",
 		"name":"invalid scope",
-		"plan_payload":{
+		"workflow_payload":{
 			"schema_version":1,
 			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
 			"guardrails":[]
@@ -886,14 +886,14 @@ func TestCreateExecutionPlanReturnsValidationErrors(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	if err := h.CreateExecutionPlan(c); err != nil {
-		t.Fatalf("CreateExecutionPlan() error = %v", err)
+	if err := h.CreateWorkflow(c); err != nil {
+		t.Fatalf("CreateWorkflow() error = %v", err)
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 
-	body := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	body := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
 	if body.Error.Type != "invalid_request_error" {
 		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
 	}
@@ -905,21 +905,21 @@ func TestCreateExecutionPlanReturnsValidationErrors(t *testing.T) {
 	}
 }
 
-func TestCreateExecutionPlanRejectsUnknownProviderOrModelScope(t *testing.T) {
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+func TestCreateWorkflowRejectsUnknownProviderOrModelScope(t *testing.T) {
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
@@ -934,7 +934,7 @@ func TestCreateExecutionPlanRejectsUnknownProviderOrModelScope(t *testing.T) {
 			body: `{
 				"scope_provider":"anthropic",
 				"name":"invalid provider",
-				"plan_payload":{
+				"workflow_payload":{
 					"schema_version":1,
 					"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
 					"guardrails":[]
@@ -948,7 +948,7 @@ func TestCreateExecutionPlanRejectsUnknownProviderOrModelScope(t *testing.T) {
 				"scope_provider":"openai",
 				"scope_model":"gpt-4o-mini",
 				"name":"invalid model",
-				"plan_payload":{
+				"workflow_payload":{
 					"schema_version":1,
 					"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
 					"guardrails":[]
@@ -960,22 +960,22 @@ func TestCreateExecutionPlanRejectsUnknownProviderOrModelScope(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := newExecutionPlanHandler(t, store, nil)
+			h := newWorkflowHandler(t, store, nil)
 			e := echo.New()
 
-			req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(tt.body))
+			req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
 
-			if err := h.CreateExecutionPlan(c); err != nil {
-				t.Fatalf("CreateExecutionPlan() error = %v", err)
+			if err := h.CreateWorkflow(c); err != nil {
+				t.Fatalf("CreateWorkflow() error = %v", err)
 			}
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400", rec.Code)
 			}
 
-			body := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+			body := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
 			if body.Error.Type != "invalid_request_error" {
 				t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
 			}
@@ -992,31 +992,31 @@ func TestCreateExecutionPlanRejectsUnknownProviderOrModelScope(t *testing.T) {
 	}
 }
 
-func TestCreateExecutionPlan_UsesScopeUserPathInValidationErrors(t *testing.T) {
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+func TestCreateWorkflow_UsesScopeUserPathInValidationErrors(t *testing.T) {
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
-	h := newExecutionPlanHandler(t, store, nil)
+	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
 		"scope_user_path":"/team/../alpha",
 		"name":"invalid path",
-		"plan_payload":{
+		"workflow_payload":{
 			"schema_version":1,
 			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
 			"guardrails":[]
@@ -1026,14 +1026,14 @@ func TestCreateExecutionPlan_UsesScopeUserPathInValidationErrors(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	if err := h.CreateExecutionPlan(c); err != nil {
-		t.Fatalf("CreateExecutionPlan() error = %v", err)
+	if err := h.CreateWorkflow(c); err != nil {
+		t.Fatalf("CreateWorkflow() error = %v", err)
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 
-	body := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	body := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
 	if body.Error.Type != "invalid_request_error" {
 		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
 	}
@@ -1042,26 +1042,26 @@ func TestCreateExecutionPlan_UsesScopeUserPathInValidationErrors(t *testing.T) {
 	}
 }
 
-func TestExecutionPlanViewReflectsFeatureCaps(t *testing.T) {
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+func TestWorkflowViewReflectsFeatureCaps(t *testing.T) {
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
 
-	service, err := executionplans.NewService(store, executionplans.NewCompilerWithFeatureCaps(nil, core.ExecutionFeatures{
+	service, err := workflows.NewService(store, workflows.NewCompilerWithFeatureCaps(nil, core.WorkflowFeatures{
 		Cache:      false,
 		Audit:      true,
 		Usage:      true,
@@ -1074,17 +1074,17 @@ func TestExecutionPlanViewReflectsFeatureCaps(t *testing.T) {
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	h := NewHandler(nil, nil, WithExecutionPlans(service))
-	c, rec := newHandlerContext("/admin/api/v1/execution-plans")
+	h := NewHandler(nil, nil, WithWorkflows(service))
+	c, rec := newHandlerContext("/admin/api/v1/workflows")
 
-	if err := h.ListExecutionPlans(c); err != nil {
-		t.Fatalf("ListExecutionPlans() error = %v", err)
+	if err := h.ListWorkflows(c); err != nil {
+		t.Fatalf("ListWorkflows() error = %v", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 
-	var body []executionplans.View
+	var body []workflows.View
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -1099,102 +1099,102 @@ func TestExecutionPlanViewReflectsFeatureCaps(t *testing.T) {
 	}
 }
 
-func TestDeactivateExecutionPlan(t *testing.T) {
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+func TestDeactivateWorkflow(t *testing.T) {
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 			{
-				ID:       "provider-plan",
-				Scope:    executionplans.Scope{Provider: "openai"},
+				ID:       "provider-workflow",
+				Scope:    workflows.Scope{Provider: "openai"},
 				ScopeKey: "provider:openai",
 				Version:  1,
 				Active:   true,
 				Name:     "openai",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+					Features:      workflows.FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "hash-provider",
+				WorkflowHash: "hash-provider",
 			},
 		},
 	}
 
-	h := newExecutionPlanHandler(t, store, nil)
+	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans/provider-plan/deactivate", nil)
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows/provider-workflow/deactivate", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPath("/admin/api/v1/execution-plans/:id/deactivate")
-	c.SetPathValues(echo.PathValues{{Name: "id", Value: "provider-plan"}})
+	c.SetPath("/admin/api/v1/workflows/:id/deactivate")
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: "provider-workflow"}})
 
-	if err := h.DeactivateExecutionPlan(c); err != nil {
-		t.Fatalf("DeactivateExecutionPlan() error = %v", err)
+	if err := h.DeactivateWorkflow(c); err != nil {
+		t.Fatalf("DeactivateWorkflow() error = %v", err)
 	}
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", rec.Code)
 	}
 
-	views, err := h.plans.ListViews(context.Background())
+	views, err := h.workflows.ListViews(context.Background())
 	if err != nil {
 		t.Fatalf("ListViews() error = %v", err)
 	}
 	if len(views) != 1 {
 		t.Fatalf("len(views) = %d, want 1", len(views))
 	}
-	if views[0].ID != "global-plan" {
-		t.Fatalf("remaining view = %q, want global-plan", views[0].ID)
+	if views[0].ID != "global-workflow" {
+		t.Fatalf("remaining view = %q, want global-workflow", views[0].ID)
 	}
 }
 
-func TestDeactivateExecutionPlanRejectsGlobalWorkflow(t *testing.T) {
-	store := &executionPlanTestStore{
-		versions: []executionplans.Version{
+func TestDeactivateWorkflowRejectsGlobalWorkflow(t *testing.T) {
+	store := &workflowTestStore{
+		versions: []workflows.Version{
 			{
-				ID:       "global-plan",
-				Scope:    executionplans.Scope{},
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
 				ScopeKey: "global",
 				Version:  1,
 				Active:   true,
 				Name:     "global",
-				Payload: executionplans.Payload{
+				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      executionplans.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "hash-global",
+				WorkflowHash: "hash-global",
 			},
 		},
 	}
 
-	h := newExecutionPlanHandler(t, store, nil)
+	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/execution-plans/global-plan/deactivate", nil)
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows/global-workflow/deactivate", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPath("/admin/api/v1/execution-plans/:id/deactivate")
-	c.SetPathValues(echo.PathValues{{Name: "id", Value: "global-plan"}})
+	c.SetPath("/admin/api/v1/workflows/:id/deactivate")
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: "global-workflow"}})
 
-	if err := h.DeactivateExecutionPlan(c); err != nil {
-		t.Fatalf("DeactivateExecutionPlan() error = %v", err)
+	if err := h.DeactivateWorkflow(c); err != nil {
+		t.Fatalf("DeactivateWorkflow() error = %v", err)
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 
-	body := decodeExecutionPlanErrorEnvelope(t, rec.Body.Bytes())
+	body := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
 	if body.Error.Type != "invalid_request_error" {
 		t.Fatalf("error type = %q, want invalid_request_error", body.Error.Type)
 	}

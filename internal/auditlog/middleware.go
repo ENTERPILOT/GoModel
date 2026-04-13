@@ -45,9 +45,9 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			}
 
 			// This only short-circuits when an upstream component has already
-			// populated the context with an Audit=false execution plan before next(c).
-			// In the common path planning happens later, so the real gating occurs
-			// after next(c) once the final plan has been resolved.
+			// populated the context with an Audit=false workflow before next(c).
+			// In the common path workflow resolution happens later, so the real
+			// gating occurs after next(c) once the final workflow has been resolved.
 			if !auditEnabledForContext(c.Request().Context()) {
 				return next(c)
 			}
@@ -100,7 +100,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			// Execute the handler
 			err := next(c)
 
-			applyExecutionPlan(entry, c.Request().Context())
+			applyWorkflow(entry, c.Request().Context())
 			applyAuthentication(entry, c.Request().Context())
 
 			if !auditEnabledForContext(c.Request().Context()) {
@@ -115,7 +115,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			_, entry.StatusCode = echo.ResolveResponseStatus(c.Response(), err)
 
 			// Request capture is deferred until after next so a later-resolved
-			// Audit=false plan can skip it entirely.
+			// Audit=false workflow can skip it entirely.
 			PopulateRequestData(entry, req, cfg)
 
 			// Log response headers if enabled
@@ -159,13 +159,13 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 	}
 }
 
-func applyExecutionPlan(entry *LogEntry, ctx context.Context) {
+func applyWorkflow(entry *LogEntry, ctx context.Context) {
 	if entry == nil || ctx == nil {
 		return
 	}
 
-	if plan := core.GetExecutionPlan(ctx); plan != nil {
-		enrichEntryWithExecutionPlan(entry, plan)
+	if workflow := core.GetWorkflow(ctx); workflow != nil {
+		enrichEntryWithWorkflow(entry, workflow)
 	}
 }
 
@@ -181,62 +181,62 @@ func applyAuthentication(entry *LogEntry, ctx context.Context) {
 	}
 }
 
-func enrichEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
-	if entry == nil || plan == nil {
+func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
+	if entry == nil || workflow == nil {
 		return
 	}
 
-	if requestID := strings.TrimSpace(plan.RequestID); requestID != "" {
+	if requestID := strings.TrimSpace(workflow.RequestID); requestID != "" {
 		entry.RequestID = requestID
 	}
-	if requestedModel := plan.RequestedQualifiedModel(); requestedModel != "" {
+	if requestedModel := workflow.RequestedQualifiedModel(); requestedModel != "" {
 		entry.RequestedModel = requestedModel
 	}
-	if resolvedModel := resolvedModelForAuditLog(plan); resolvedModel != "" {
+	if resolvedModel := resolvedModelForAuditLog(workflow); resolvedModel != "" {
 		entry.ResolvedModel = resolvedModel
 	}
-	if plan.Mode == core.ExecutionModePassthrough && plan.Passthrough != nil {
-		if model := strings.TrimSpace(plan.Passthrough.Model); model != "" {
+	if workflow.Mode == core.ExecutionModePassthrough && workflow.Passthrough != nil {
+		if model := strings.TrimSpace(workflow.Passthrough.Model); model != "" {
 			entry.RequestedModel = model
 		}
 	}
-	if providerType := strings.TrimSpace(plan.ProviderType); providerType != "" {
+	if providerType := strings.TrimSpace(workflow.ProviderType); providerType != "" {
 		entry.Provider = providerType
-	} else if plan.Resolution != nil && strings.TrimSpace(plan.Resolution.ProviderType) != "" {
-		entry.Provider = strings.TrimSpace(plan.Resolution.ProviderType)
+	} else if workflow.Resolution != nil && strings.TrimSpace(workflow.Resolution.ProviderType) != "" {
+		entry.Provider = strings.TrimSpace(workflow.Resolution.ProviderType)
 	}
-	if plan.Resolution != nil {
-		if providerName := strings.TrimSpace(plan.Resolution.ProviderName); providerName != "" {
+	if workflow.Resolution != nil {
+		if providerName := strings.TrimSpace(workflow.Resolution.ProviderName); providerName != "" {
 			entry.ProviderName = providerName
 		}
-		entry.AliasUsed = plan.Resolution.AliasApplied
+		entry.AliasUsed = workflow.Resolution.AliasApplied
 	}
-	if versionID := strings.TrimSpace(plan.ExecutionPlanVersionID()); versionID != "" {
-		entry.ExecutionPlanVersionID = versionID
+	if versionID := strings.TrimSpace(workflow.WorkflowVersionID()); versionID != "" {
+		entry.WorkflowVersionID = versionID
 	}
-	if plan.Policy != nil {
-		ensureLogData(entry).ExecutionFeatures = &ExecutionFeaturesSnapshot{
-			Cache:      plan.Policy.Features.Cache,
-			Audit:      plan.Policy.Features.Audit,
-			Usage:      plan.Policy.Features.Usage,
-			Guardrails: plan.Policy.Features.Guardrails,
-			Fallback:   plan.Policy.Features.Fallback,
+	if workflow.Policy != nil {
+		ensureLogData(entry).WorkflowFeatures = &WorkflowFeaturesSnapshot{
+			Cache:      workflow.Policy.Features.Cache,
+			Audit:      workflow.Policy.Features.Audit,
+			Usage:      workflow.Policy.Features.Usage,
+			Guardrails: workflow.Policy.Features.Guardrails,
+			Fallback:   workflow.Policy.Features.Fallback,
 		}
 	}
 }
 
-func resolvedModelForAuditLog(plan *core.ExecutionPlan) string {
-	if plan == nil || plan.Resolution == nil {
+func resolvedModelForAuditLog(workflow *core.Workflow) string {
+	if workflow == nil || workflow.Resolution == nil {
 		return ""
 	}
-	model := strings.TrimSpace(plan.Resolution.ResolvedSelector.Model)
+	model := strings.TrimSpace(workflow.Resolution.ResolvedSelector.Model)
 	if model == "" {
 		return ""
 	}
-	if providerName := strings.TrimSpace(plan.Resolution.ProviderName); providerName != "" {
+	if providerName := strings.TrimSpace(workflow.Resolution.ProviderName); providerName != "" {
 		return providerName + "/" + model
 	}
-	if provider := strings.TrimSpace(plan.Resolution.ResolvedSelector.Provider); provider != "" {
+	if provider := strings.TrimSpace(workflow.Resolution.ResolvedSelector.Provider); provider != "" {
 		return provider + "/" + model
 	}
 	return model
@@ -388,10 +388,10 @@ func EnrichEntry(c *echo.Context, model, provider string) {
 	entry.Provider = provider
 }
 
-// EnrichEntryWithExecutionPlan attaches execution-plan metadata to the live
-// audit entry. This is preferred over resolution-only enrichment once planning
-// has completed for the request.
-func EnrichEntryWithExecutionPlan(c *echo.Context, plan *core.ExecutionPlan) {
+// EnrichEntryWithWorkflow attaches workflow metadata to the live
+// audit entry. This is preferred over resolution-only enrichment once workflow
+// resolution has completed for the request.
+func EnrichEntryWithWorkflow(c *echo.Context, workflow *core.Workflow) {
 	entryVal := c.Get(string(LogEntryKey))
 	if entryVal == nil {
 		return
@@ -402,14 +402,14 @@ func EnrichEntryWithExecutionPlan(c *echo.Context, plan *core.ExecutionPlan) {
 		return
 	}
 
-	enrichEntryWithExecutionPlan(entry, plan)
+	enrichEntryWithWorkflow(entry, workflow)
 }
 
-// EnrichLogEntryWithExecutionPlan attaches execution-plan metadata directly to
+// EnrichLogEntryWithWorkflow attaches workflow metadata directly to
 // an existing log entry. Internal translated executors can use this without
 // depending on Echo middleware state.
-func EnrichLogEntryWithExecutionPlan(entry *LogEntry, plan *core.ExecutionPlan) {
-	enrichEntryWithExecutionPlan(entry, plan)
+func EnrichLogEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
+	enrichEntryWithWorkflow(entry, workflow)
 }
 
 // EnrichEntryWithResolvedRoute attaches the final executed route to the live
@@ -535,8 +535,8 @@ func EnrichLogEntryWithRequestContext(entry *LogEntry, ctx context.Context) {
 }
 
 func auditEnabledForContext(ctx context.Context) bool {
-	plan := core.GetExecutionPlan(ctx)
-	return plan == nil || plan.AuditEnabled()
+	workflow := core.GetWorkflow(ctx)
+	return workflow == nil || workflow.AuditEnabled()
 }
 
 // EnrichEntryWithError adds error information to the log entry.

@@ -56,15 +56,15 @@ func TestInternalChatCompletionExecutor_UsesTranslatedPlanAndAuditMetadata(t *te
 		},
 	}
 
-	var capturedSelector core.ExecutionPlanSelector
+	var capturedSelector core.WorkflowSelector
 	executor := NewInternalChatCompletionExecutor(provider, InternalChatCompletionExecutorConfig{
-		ExecutionPolicyResolver: requestExecutionPolicyResolverFunc(func(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+		WorkflowPolicyResolver: requestWorkflowPolicyResolverFunc(func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			capturedSelector = selector
-			return &core.ResolvedExecutionPolicy{
+			return &core.ResolvedWorkflowPolicy{
 				VersionID:      "workflow-guardrail",
 				ScopeUserPath:  selector.UserPath,
 				GuardrailsHash: "hash-should-be-cleared",
-				Features: core.ExecutionFeatures{
+				Features: core.WorkflowFeatures{
 					Cache:      true,
 					Audit:      true,
 					Usage:      true,
@@ -115,18 +115,18 @@ func TestInternalChatCompletionExecutor_UsesTranslatedPlanAndAuditMetadata(t *te
 	if entry.UserPath != "/team/alpha/guardrails/privacy" {
 		t.Fatalf("audit user path = %q, want /team/alpha/guardrails/privacy", entry.UserPath)
 	}
-	if entry.ExecutionPlanVersionID != "workflow-guardrail" {
-		t.Fatalf("audit execution plan version = %q, want workflow-guardrail", entry.ExecutionPlanVersionID)
+	if entry.WorkflowVersionID != "workflow-guardrail" {
+		t.Fatalf("audit workflow version = %q, want workflow-guardrail", entry.WorkflowVersionID)
 	}
-	if entry.Data == nil || entry.Data.ExecutionFeatures == nil {
-		t.Fatalf("audit execution features = %#v, want populated snapshot", entry.Data)
+	if entry.Data == nil || entry.Data.WorkflowFeatures == nil {
+		t.Fatalf("audit workflow features = %#v, want populated snapshot", entry.Data)
 	}
-	if entry.Data.ExecutionFeatures.Guardrails {
+	if entry.Data.WorkflowFeatures.Guardrails {
 		t.Fatalf("audit guardrails feature = true, want false for internal guardrail calls")
 	}
 }
 
-func TestInternalChatCompletionExecutor_DoesNotReuseParentExecutionPlanResolution(t *testing.T) {
+func TestInternalChatCompletionExecutor_DoesNotReuseParentWorkflowResolution(t *testing.T) {
 	logger := &capturingAuditLogger{
 		config: auditlog.Config{Enabled: true},
 	}
@@ -161,7 +161,7 @@ func TestInternalChatCompletionExecutor_DoesNotReuseParentExecutionPlanResolutio
 		AuditLogger: logger,
 	})
 
-	parentCtx := core.WithExecutionPlan(context.Background(), &core.ExecutionPlan{
+	parentCtx := core.WithWorkflow(context.Background(), &core.Workflow{
 		RequestID: "outer-request",
 		Resolution: &core.RequestModelResolution{
 			Requested:        core.NewRequestedModelSelector("gpt-5-nano", "openai"),

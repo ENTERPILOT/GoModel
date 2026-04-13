@@ -1,4 +1,4 @@
-package executionplans
+package workflows
 
 import (
 	"crypto/sha256"
@@ -13,7 +13,7 @@ import (
 
 const currentSchemaVersion = 1
 
-// Scope identifies the request selector a persisted execution plan applies to.
+// Scope identifies the request selector a persisted workflow applies to.
 // Provider stores the configured provider instance name, not the provider type.
 type Scope struct {
 	Provider string `json:"-" bson:"scope_provider,omitempty"`
@@ -54,7 +54,7 @@ func (s *Scope) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Payload is the immutable persisted execution-plan JSON document.
+// Payload is the immutable persisted workflow JSON document.
 type Payload struct {
 	SchemaVersion int             `json:"schema_version" bson:"schema_version"`
 	Features      FeatureFlags    `json:"features" bson:"features"`
@@ -79,13 +79,13 @@ func (f FeatureFlags) canonicalize() FeatureFlags {
 	return f
 }
 
-func (f FeatureFlags) runtimeFeatures() core.ExecutionFeatures {
+func (f FeatureFlags) runtimeFeatures() core.WorkflowFeatures {
 	f = f.canonicalize()
 	fallback := true
 	if f.Fallback != nil {
 		fallback = *f.Fallback
 	}
-	return core.ExecutionFeatures{
+	return core.WorkflowFeatures{
 		Cache:      f.Cache,
 		Audit:      f.Audit,
 		Usage:      f.Usage,
@@ -100,22 +100,22 @@ type GuardrailStep struct {
 	Step int    `json:"step" bson:"step"`
 }
 
-// Version is one immutable persisted execution-plan version row.
+// Version is one immutable persisted workflow version row.
 type Version struct {
-	ID          string    `json:"id" bson:"_id"`
-	Scope       Scope     `json:"scope" bson:"-"`
-	ScopeKey    string    `json:"scope_key" bson:"scope_key"`
-	Version     int       `json:"version" bson:"version"`
-	Active      bool      `json:"active" bson:"active"`
-	Managed     bool      `json:"managed_default,omitempty" bson:"managed_default,omitempty"`
-	Name        string    `json:"name" bson:"name"`
-	Description string    `json:"description,omitempty" bson:"description,omitempty"`
-	Payload     Payload   `json:"plan_payload" bson:"plan_payload"`
-	PlanHash    string    `json:"plan_hash" bson:"plan_hash"`
-	CreatedAt   time.Time `json:"created_at" bson:"created_at"`
+	ID           string    `json:"id" bson:"_id"`
+	Scope        Scope     `json:"scope" bson:"-"`
+	ScopeKey     string    `json:"scope_key" bson:"scope_key"`
+	Version      int       `json:"version" bson:"version"`
+	Active       bool      `json:"active" bson:"active"`
+	Managed      bool      `json:"managed_default,omitempty" bson:"managed_default,omitempty"`
+	Name         string    `json:"name" bson:"name"`
+	Description  string    `json:"description,omitempty" bson:"description,omitempty"`
+	Payload      Payload   `json:"workflow_payload" bson:"workflow_payload"`
+	WorkflowHash string    `json:"workflow_hash" bson:"workflow_hash"`
+	CreatedAt    time.Time `json:"created_at" bson:"created_at"`
 }
 
-// CreateInput is the authoring input for one new immutable execution-plan version.
+// CreateInput is the authoring input for one new immutable workflow version.
 type CreateInput struct {
 	Scope       Scope
 	Activate    bool
@@ -204,7 +204,7 @@ func normalizePayload(payload Payload) (Payload, string, error) {
 
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return Payload{}, "", newValidationError("marshal plan payload", err)
+		return Payload{}, "", newValidationError("marshal workflow payload", err)
 	}
 	sum := sha256.Sum256(raw)
 	return payload, hex.EncodeToString(sum[:]), nil
@@ -216,7 +216,7 @@ func normalizeCreateInput(input CreateInput) (CreateInput, string, string, error
 		return CreateInput{}, "", "", err
 	}
 
-	payload, planHash, err := normalizePayload(input.Payload)
+	payload, workflowHash, err := normalizePayload(input.Payload)
 	if err != nil {
 		return CreateInput{}, "", "", err
 	}
@@ -233,5 +233,5 @@ func normalizeCreateInput(input CreateInput) (CreateInput, string, string, error
 		input.Description == ManagedDefaultGlobalDescription {
 		return CreateInput{}, "", "", newValidationError("managed default workflow name/description is reserved", nil)
 	}
-	return input, scopeKey, planHash, nil
+	return input, scopeKey, workflowHash, nil
 }

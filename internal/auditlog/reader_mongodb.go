@@ -19,53 +19,53 @@ type MongoDBReader struct {
 }
 
 type mongoLogRow struct {
-	ID                     string    `bson:"_id"`
-	Timestamp              time.Time `bson:"timestamp"`
-	DurationNs             int64     `bson:"duration_ns"`
-	RequestedModel         string    `bson:"requested_model"`
-	LegacyModel            string    `bson:"model"`
-	ResolvedModel          string    `bson:"resolved_model"`
-	Provider               string    `bson:"provider"`
-	ProviderName           string    `bson:"provider_name"`
-	AliasUsed              bool      `bson:"alias_used"`
-	ExecutionPlanVersionID string    `bson:"execution_plan_version_id"`
-	CacheType              string    `bson:"cache_type"`
-	StatusCode             int       `bson:"status_code"`
-	RequestID              string    `bson:"request_id"`
-	AuthKeyID              string    `bson:"auth_key_id"`
-	AuthMethod             string    `bson:"auth_method"`
-	ClientIP               string    `bson:"client_ip"`
-	Method                 string    `bson:"method"`
-	Path                   string    `bson:"path"`
-	UserPath               string    `bson:"user_path"`
-	Stream                 bool      `bson:"stream"`
-	ErrorType              string    `bson:"error_type"`
-	Data                   *LogData  `bson:"data"`
+	ID                string    `bson:"_id"`
+	Timestamp         time.Time `bson:"timestamp"`
+	DurationNs        int64     `bson:"duration_ns"`
+	RequestedModel    string    `bson:"requested_model"`
+	LegacyModel       string    `bson:"model"`
+	ResolvedModel     string    `bson:"resolved_model"`
+	Provider          string    `bson:"provider"`
+	ProviderName      string    `bson:"provider_name"`
+	AliasUsed         bool      `bson:"alias_used"`
+	WorkflowVersionID string    `bson:"workflow_version_id"`
+	CacheType         string    `bson:"cache_type"`
+	StatusCode        int       `bson:"status_code"`
+	RequestID         string    `bson:"request_id"`
+	AuthKeyID         string    `bson:"auth_key_id"`
+	AuthMethod        string    `bson:"auth_method"`
+	ClientIP          string    `bson:"client_ip"`
+	Method            string    `bson:"method"`
+	Path              string    `bson:"path"`
+	UserPath          string    `bson:"user_path"`
+	Stream            bool      `bson:"stream"`
+	ErrorType         string    `bson:"error_type"`
+	Data              *LogData  `bson:"data"`
 }
 
 func (r mongoLogRow) toLogEntry() *LogEntry {
 	return &LogEntry{
-		ID:                     r.ID,
-		Timestamp:              r.Timestamp,
-		DurationNs:             r.DurationNs,
-		RequestedModel:         firstNonEmpty(r.RequestedModel, r.LegacyModel),
-		ResolvedModel:          r.ResolvedModel,
-		Provider:               r.Provider,
-		ProviderName:           displayAuditProviderName(r.ProviderName, r.Provider),
-		AliasUsed:              r.AliasUsed,
-		ExecutionPlanVersionID: r.ExecutionPlanVersionID,
-		CacheType:              normalizeCacheType(r.CacheType),
-		StatusCode:             r.StatusCode,
-		RequestID:              r.RequestID,
-		AuthKeyID:              r.AuthKeyID,
-		AuthMethod:             r.AuthMethod,
-		ClientIP:               r.ClientIP,
-		Method:                 r.Method,
-		Path:                   r.Path,
-		UserPath:               r.UserPath,
-		Stream:                 r.Stream,
-		ErrorType:              r.ErrorType,
-		Data:                   sanitizeLogData(r.Data),
+		ID:                r.ID,
+		Timestamp:         r.Timestamp,
+		DurationNs:        r.DurationNs,
+		RequestedModel:    firstNonEmpty(r.RequestedModel, r.LegacyModel),
+		ResolvedModel:     r.ResolvedModel,
+		Provider:          r.Provider,
+		ProviderName:      displayAuditProviderName(r.ProviderName, r.Provider),
+		AliasUsed:         r.AliasUsed,
+		WorkflowVersionID: r.WorkflowVersionID,
+		CacheType:         normalizeCacheType(r.CacheType),
+		StatusCode:        r.StatusCode,
+		RequestID:         r.RequestID,
+		AuthKeyID:         r.AuthKeyID,
+		AuthMethod:        r.AuthMethod,
+		ClientIP:          r.ClientIP,
+		Method:            r.Method,
+		Path:              r.Path,
+		UserPath:          r.UserPath,
+		Stream:            r.Stream,
+		ErrorType:         r.ErrorType,
+		Data:              sanitizeLogData(r.Data),
 	}
 }
 

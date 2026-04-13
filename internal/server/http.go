@@ -52,15 +52,15 @@ type Config struct {
 	AuditLogger                     auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
 	UsageLogger                     usage.LoggerInterface                  // Optional: Usage logger for token tracking
 	PricingResolver                 usage.PricingResolver                  // Optional: Resolves pricing for cost calculation
-	ModelResolver                   RequestModelResolver                   // Optional: explicit model resolver used during request planning
+	ModelResolver                   RequestModelResolver                   // Optional: explicit model resolver used during workflow resolution
 	ModelAuthorizer                 RequestModelAuthorizer                 // Optional: request-scoped concrete model access controller
-	ExecutionPolicyResolver         RequestExecutionPolicyResolver         // Optional: persisted execution-plan resolver used during request planning
+	WorkflowPolicyResolver          RequestWorkflowPolicyResolver          // Optional: persisted workflow resolver used during workflow resolution
 	FallbackResolver                RequestFallbackResolver                // Optional: translated-route fallback resolver
-	TranslatedRequestPatcher        TranslatedRequestPatcher               // Optional: request patcher for translated routes after planning
+	TranslatedRequestPatcher        TranslatedRequestPatcher               // Optional: request patcher for translated routes after workflow resolution
 	BatchRequestPreparer            BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
 	ExposedModelLister              ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
 	KeepOnlyAliasesAtModelsEndpoint bool                                   // Whether GET /v1/models should hide concrete provider models
-	PassthroughSemanticEnrichers    []core.PassthroughSemanticEnricher     // Optional: provider-owned passthrough semantic enrichers before planning
+	PassthroughSemanticEnrichers    []core.PassthroughSemanticEnricher     // Optional: provider-owned passthrough semantic enrichers before workflow resolution
 	BatchStore                      batchstore.Store                       // Optional: Batch lifecycle persistence store
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
@@ -100,18 +100,18 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	var modelResolver RequestModelResolver
 	var modelAuthorizer RequestModelAuthorizer
-	var executionPolicyResolver RequestExecutionPolicyResolver
+	var workflowPolicyResolver RequestWorkflowPolicyResolver
 	var fallbackResolver RequestFallbackResolver
 	var translatedRequestPatcher TranslatedRequestPatcher
 	if cfg != nil {
 		modelResolver = cfg.ModelResolver
 		modelAuthorizer = cfg.ModelAuthorizer
-		executionPolicyResolver = cfg.ExecutionPolicyResolver
+		workflowPolicyResolver = cfg.WorkflowPolicyResolver
 		fallbackResolver = cfg.FallbackResolver
 		translatedRequestPatcher = cfg.TranslatedRequestPatcher
 	}
 
-	handler := newHandlerWithAuthorizer(provider, auditLogger, usageLogger, pricingResolver, modelResolver, modelAuthorizer, executionPolicyResolver, fallbackResolver, translatedRequestPatcher)
+	handler := newHandlerWithAuthorizer(provider, auditLogger, usageLogger, pricingResolver, modelResolver, modelAuthorizer, workflowPolicyResolver, fallbackResolver, translatedRequestPatcher)
 	if cfg != nil {
 		handler.batchRequestPreparer = cfg.BatchRequestPreparer
 		handler.exposedModelLister = cfg.ExposedModelLister
@@ -232,9 +232,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.Use(PassthroughSemanticEnrichment(provider, cfg.PassthroughSemanticEnrichers, passthroughV1PrefixNormalizationEnabled(cfg)))
 	}
 
-	// Audit logging runs before request planning so early planning/validation
+	// Audit logging runs before workflow resolution so early workflow resolution/validation
 	// failures are still logged. The middleware defers request capture and
-	// dynamically gates response capture on the final resolved execution plan, so
+	// dynamically gates response capture on the final resolved workflow, so
 	// Audit=false still suppresses per-request capture work.
 	if cfg != nil && cfg.AuditLogger != nil && cfg.AuditLogger.Config().Enabled {
 		e.Use(auditlog.Middleware(cfg.AuditLogger))
@@ -245,10 +245,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.Use(AuthMiddlewareWithAuthenticator(cfg.MasterKey, cfg.Authenticator, authSkipPaths))
 	}
 
-	// Request planning resolves the request-scoped execution plan after auth so
+	// Workflow resolution resolves the request-scoped workflow after auth so
 	// managed auth key user-path overrides are visible to policy resolution while
-	// still keeping planning failures loggable through the audit middleware.
-	e.Use(ExecutionPlanningWithResolverAndPolicy(provider, modelResolver, executionPolicyResolver))
+	// still keeping workflow resolution failures loggable through the audit middleware.
+	e.Use(WorkflowResolutionWithResolverAndPolicy(provider, modelResolver, workflowPolicyResolver))
 
 	// Public routes
 	e.GET("/health", handler.Health)
@@ -325,11 +325,11 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		adminAPI.GET("/guardrails", cfg.AdminHandler.ListGuardrails)
 		adminAPI.PUT("/guardrails/:name", cfg.AdminHandler.UpsertGuardrail)
 		adminAPI.DELETE("/guardrails/:name", cfg.AdminHandler.DeleteGuardrail)
-		adminAPI.GET("/execution-plans", cfg.AdminHandler.ListExecutionPlans)
-		adminAPI.GET("/execution-plans/guardrails", cfg.AdminHandler.ListExecutionPlanGuardrails)
-		adminAPI.GET("/execution-plans/:id", cfg.AdminHandler.GetExecutionPlan)
-		adminAPI.POST("/execution-plans", cfg.AdminHandler.CreateExecutionPlan)
-		adminAPI.POST("/execution-plans/:id/deactivate", cfg.AdminHandler.DeactivateExecutionPlan)
+		adminAPI.GET("/workflows", cfg.AdminHandler.ListWorkflows)
+		adminAPI.GET("/workflows/guardrails", cfg.AdminHandler.ListWorkflowGuardrails)
+		adminAPI.GET("/workflows/:id", cfg.AdminHandler.GetWorkflow)
+		adminAPI.POST("/workflows", cfg.AdminHandler.CreateWorkflow)
+		adminAPI.POST("/workflows/:id/deactivate", cfg.AdminHandler.DeactivateWorkflow)
 	}
 
 	// Admin dashboard UI routes (behind ADMIN_UI_ENABLED flag)

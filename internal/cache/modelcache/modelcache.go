@@ -13,7 +13,7 @@ import (
 // Models are grouped by provider to avoid repeating shared fields (provider_type, owned_by)
 // on every model entry.
 type ModelCache struct {
-	UpdatedAt time.Time                `json:"updated_at"`
+	UpdatedAt time.Time                 `json:"updated_at"`
 	Providers map[string]CachedProvider `json:"providers"`
 	// ModelListData holds the raw JSON model registry bytes for cache persistence,
 	// allowing the registry to restore its full model list without re-fetching.

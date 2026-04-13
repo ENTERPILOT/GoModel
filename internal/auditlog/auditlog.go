@@ -47,14 +47,14 @@ type LogEntry struct {
 	DurationNs int64 `json:"duration_ns" bson:"duration_ns"`
 
 	// Core fields (indexed for queries)
-	RequestedModel         string `json:"requested_model" bson:"requested_model,omitempty"`
-	ResolvedModel          string `json:"resolved_model,omitempty" bson:"resolved_model,omitempty"`
-	Provider               string `json:"provider" bson:"provider"` // canonical provider type used for routing and filters
-	ProviderName           string `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
-	AliasUsed              bool   `json:"alias_used,omitempty" bson:"alias_used,omitempty"`
-	ExecutionPlanVersionID string `json:"execution_plan_version_id,omitempty" bson:"execution_plan_version_id,omitempty"`
-	CacheType              string `json:"cache_type,omitempty" bson:"cache_type,omitempty"`
-	StatusCode             int    `json:"status_code" bson:"status_code"`
+	RequestedModel    string `json:"requested_model" bson:"requested_model,omitempty"`
+	ResolvedModel     string `json:"resolved_model,omitempty" bson:"resolved_model,omitempty"`
+	Provider          string `json:"provider" bson:"provider"` // canonical provider type used for routing and filters
+	ProviderName      string `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
+	AliasUsed         bool   `json:"alias_used,omitempty" bson:"alias_used,omitempty"`
+	WorkflowVersionID string `json:"workflow_version_id,omitempty" bson:"workflow_version_id,omitempty"`
+	CacheType         string `json:"cache_type,omitempty" bson:"cache_type,omitempty"`
+	StatusCode        int    `json:"status_code" bson:"status_code"`
 
 	// Extracted fields for efficient filtering (indexed in relational DBs)
 	RequestID  string `json:"request_id,omitempty" bson:"request_id,omitempty"`
@@ -79,10 +79,10 @@ type LogData struct {
 	UserAgent  string `json:"user_agent,omitempty" bson:"user_agent,omitempty"`
 	APIKeyHash string `json:"api_key_hash,omitempty" bson:"api_key_hash,omitempty"`
 
-	// ExecutionFeatures captures the request-time effective workflow features
+	// WorkflowFeatures captures the request-time effective workflow features
 	// after runtime caps were applied. This keeps audit views historically accurate
 	// even if the active process config changes later.
-	ExecutionFeatures *ExecutionFeaturesSnapshot `json:"execution_features,omitempty" bson:"execution_features,omitempty"`
+	WorkflowFeatures *WorkflowFeaturesSnapshot `json:"workflow_features,omitempty" bson:"workflow_features,omitempty"`
 
 	// Request parameters
 	Temperature *float64 `json:"temperature,omitempty" bson:"temperature,omitempty"`
@@ -107,10 +107,10 @@ type LogData struct {
 	ResponseBodyTooBigToHandle bool `json:"response_body_too_big_to_handle,omitempty" bson:"response_body_too_big_to_handle,omitempty"`
 }
 
-// ExecutionFeaturesSnapshot stores the effective workflow feature state that
+// WorkflowFeaturesSnapshot stores the effective workflow feature state that
 // applied to one request. Fields intentionally do not use omitempty so "false"
 // remains explicit once the snapshot exists.
-type ExecutionFeaturesSnapshot struct {
+type WorkflowFeaturesSnapshot struct {
 	Cache      bool `json:"cache" bson:"cache"`
 	Audit      bool `json:"audit" bson:"audit"`
 	Usage      bool `json:"usage" bson:"usage"`

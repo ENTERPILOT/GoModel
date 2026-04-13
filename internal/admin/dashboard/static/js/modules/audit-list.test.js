@@ -93,7 +93,7 @@ test('fetchAuditLog preserves a successful payload when workflow prefetch fails'
             return Promise.resolve({
                 ok: true,
                 json: async () => ({
-                    entries: [{ id: 'audit-1', execution_plan_version_id: 'workflow-1' }],
+                    entries: [{ id: 'audit-1', workflow_version_id: 'workflow-1' }],
                     total: 1,
                     limit: 25,
                     offset: 0
@@ -106,7 +106,7 @@ test('fetchAuditLog preserves a successful payload when workflow prefetch fails'
     module.days = 7;
     module.headers = () => ({ authorization: 'Bearer token' });
     module.handleFetchResponse = () => true;
-    module.prefetchAuditExecutionPlans = async () => {
+    module.prefetchAuditWorkflows = async () => {
         throw new Error('prefetch failed');
     };
 
@@ -115,7 +115,7 @@ test('fetchAuditLog preserves a successful payload when workflow prefetch fails'
     assert.equal(
         JSON.stringify(module.auditLog),
         JSON.stringify({
-            entries: [{ id: 'audit-1', execution_plan_version_id: 'workflow-1' }],
+            entries: [{ id: 'audit-1', workflow_version_id: 'workflow-1' }],
             total: 1,
             limit: 25,
             offset: 0

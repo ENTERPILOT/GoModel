@@ -27,7 +27,7 @@ Why:
 - The same shape is repeated in:
   - `internal/admin/dashboard/static/js/dashboard.js`
   - `internal/admin/dashboard/static/js/modules/usage.js`
-  - `internal/admin/dashboard/static/js/modules/execution-plans.js`
+  - `internal/admin/dashboard/static/js/modules/workflows.js`
 
 Suggested action:
 - Keep a single `emptyCacheOverview()` factory and reuse it everywhere.
@@ -173,22 +173,22 @@ Suggested action:
 - Keep `loadFallbackConfig()` focused on policy validation and wiring.
 - Preserve the current strict error messages and test coverage while isolating the parser.
 
-## 10. Pick one owner for execution-plan fallback defaults
+## 10. Pick one owner for workflow fallback defaults
 
 Effort: medium
 Risk: medium
 
 Why:
-- The managed backend default is set in `internal/app/app.go:defaultExecutionPlanInput()`.
-- The dashboard draft default is separately hardcoded in `internal/admin/dashboard/static/js/modules/execution-plans.js:defaultExecutionPlanForm()`.
+- The managed backend default is set in `internal/app/app.go:defaultWorkflowInput()`.
+- The dashboard draft default is separately hardcoded in `internal/admin/dashboard/static/js/modules/workflows.js:defaultWorkflowForm()`.
 - We already changed both once to keep them aligned, which confirms the drift risk is real.
 
 Suggested action:
-- Prefer a single server-owned default surface for execution-plan authoring defaults.
+- Prefer a single server-owned default surface for workflow authoring defaults.
 - Options:
   - expose default feature flags from the admin config endpoint
   - derive the initial dashboard form from the active managed default workflow
-- This reduces UI/backend drift for fallback and other execution-plan features.
+- This reduces UI/backend drift for fallback and other workflow features.
 
 ## Recommended order
 
@@ -201,4 +201,4 @@ Suggested action:
 7. Collapse the duplicated translated fallback attempt loops.
 8. Precompute fallback source identity once per resolution.
 9. Extract manual fallback-rule file parsing from `loadFallbackConfig`.
-10. Pick one owner for execution-plan fallback defaults.
+10. Pick one owner for workflow fallback defaults.

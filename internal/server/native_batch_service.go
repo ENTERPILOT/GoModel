@@ -24,7 +24,7 @@ type nativeBatchService struct {
 	provider                             core.RoutableProvider
 	modelResolver                        RequestModelResolver
 	modelAuthorizer                      RequestModelAuthorizer
-	executionPolicyResolver              RequestExecutionPolicyResolver
+	workflowPolicyResolver               RequestWorkflowPolicyResolver
 	batchRequestPreparer                 BatchRequestPreparer
 	batchStore                           batchstore.Store
 	loadBatch                            func(*echo.Context, string) (*batchstore.StoredBatch, error)
@@ -53,7 +53,7 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	providerType := selection.providerType
-	plan, err := s.storeExecutionPlanForBatch(c, selection)
+	workflow, err := s.storeWorkflowForBatch(c, selection)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -133,8 +133,8 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 			RewrittenInputFileID:      batchPreparation.RewrittenInputFileID,
 			RequestID:                 requestID,
 			UserPath:                  core.UserPathFromContext(ctx),
-			ExecutionPlanVersionID:    executionPlanVersionID(plan),
-			UsageEnabled:              boolPtr(plan == nil || plan.UsageEnabled()),
+			WorkflowVersionID:         workflowVersionID(workflow),
+			UsageEnabled:              boolPtr(workflow == nil || workflow.UsageEnabled()),
 		}
 		if err := s.batchStore.Create(ctx, stored); err != nil {
 			s.rollbackPreparedBatch(ctx, providerType, batchPreparation, providerBatchID)
@@ -156,23 +156,23 @@ func (s *nativeBatchService) rollbackPreparedBatch(ctx context.Context, provider
 	s.cancelUpstreamBatch(ctx, providerType, providerBatchID)
 }
 
-func (s *nativeBatchService) storeExecutionPlanForBatch(c *echo.Context, selection batchExecutionSelection) (*core.ExecutionPlan, error) {
-	plan := cloneCurrentExecutionPlan(c)
-	if plan == nil {
+func (s *nativeBatchService) storeWorkflowForBatch(c *echo.Context, selection batchExecutionSelection) (*core.Workflow, error) {
+	workflow := cloneCurrentWorkflow(c)
+	if workflow == nil {
 		return nil, nil
 	}
-	plan.Mode = core.ExecutionModeNativeBatch
-	plan.ProviderType = strings.TrimSpace(selection.providerType)
+	workflow.Mode = core.ExecutionModeNativeBatch
+	workflow.ProviderType = strings.TrimSpace(selection.providerType)
 
-	if s.executionPolicyResolver != nil {
-		selector := core.NewExecutionPlanSelector(selection.selector.Provider, selection.selector.Model, core.UserPathFromContext(c.Request().Context()))
-		if err := applyExecutionPolicy(c.Request().Context(), plan, s.executionPolicyResolver, selector); err != nil {
+	if s.workflowPolicyResolver != nil {
+		selector := core.NewWorkflowSelector(selection.selector.Provider, selection.selector.Model, core.UserPathFromContext(c.Request().Context()))
+		if err := applyWorkflowPolicy(c.Request().Context(), workflow, s.workflowPolicyResolver, selector); err != nil {
 			return nil, err
 		}
 	}
 
-	storeExecutionPlan(c, plan)
-	return plan, nil
+	storeWorkflow(c, workflow)
+	return workflow, nil
 }
 
 func (s *nativeBatchService) clearUpstreamBatchResultHints(providerType, batchID string) {

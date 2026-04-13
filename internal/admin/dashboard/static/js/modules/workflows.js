@@ -1,7 +1,7 @@
 (function(global) {
     const DRAFT_WORKFLOW_PREVIEW_ID = 'draft-workflow-preview';
 
-    function dashboardExecutionPlansModule() {
+    function dashboardWorkflowsModule() {
         const clipboardModuleFactory = typeof global.dashboardClipboardModule === 'function'
             ? global.dashboardClipboardModule
             : null;
@@ -23,27 +23,27 @@
         }
 
         return {
-            executionPlans: [],
-            executionPlanVersionsByID: {},
-            executionPlanVersionRequests: {},
-            executionPlansAvailable: true,
-            executionPlansLoading: false,
-            executionPlanRuntimeConfig: {},
-            executionPlanError: '',
-            executionPlanNotice: '',
-            executionPlanFilter: '',
-            executionPlanFormOpen: false,
-            executionPlanSubmitting: false,
-            executionPlanDeactivatingID: '',
-            executionPlanFormError: '',
-            executionPlanFormHydrated: false,
-            executionPlanHydratedScope: {
+            workflows: [],
+            workflowVersionsByID: {},
+            workflowVersionRequests: {},
+            workflowsAvailable: true,
+            workflowsLoading: false,
+            workflowRuntimeConfig: {},
+            workflowError: '',
+            workflowNotice: '',
+            workflowFilter: '',
+            workflowFormOpen: false,
+            workflowSubmitting: false,
+            workflowDeactivatingID: '',
+            workflowFormError: '',
+            workflowFormHydrated: false,
+            workflowHydratedScope: {
                 scope_provider: '',
                 scope_model: '',
                 scope_user_path: ''
             },
             guardrailRefs: [],
-            executionPlanForm: {
+            workflowForm: {
                 scope_provider: '',
                 scope_model: '',
                 scope_user_path: '',
@@ -59,7 +59,7 @@
                 guardrails: []
             },
 
-            defaultExecutionPlanForm() {
+            defaultWorkflowForm() {
                 return {
                     scope_provider: '',
                     scope_model: '',
@@ -77,7 +77,7 @@
                 };
             },
 
-	            executionPlanRuntimeConfigKeys() {
+	            workflowRuntimeConfigKeys() {
 	                return [
 	                    'FEATURE_FALLBACK_MODE',
 	                    'LOGGING_ENABLED',
@@ -89,55 +89,55 @@
 	                ];
 	            },
 
-	            executionPlanRuntimeFlag(name) {
-	                const value = this.executionPlanRuntimeConfig && this.executionPlanRuntimeConfig[name];
+	            workflowRuntimeFlag(name) {
+	                const value = this.workflowRuntimeConfig && this.workflowRuntimeConfig[name];
 	                return String(value || '').trim().toLowerCase();
 	            },
 
-	            executionPlanRuntimeBooleanFlag(name, defaultValue) {
-	                const value = this.executionPlanRuntimeFlag(name);
+	            workflowRuntimeBooleanFlag(name, defaultValue) {
+	                const value = this.workflowRuntimeFlag(name);
 	                if (value === '') {
 	                    return !!defaultValue;
 	                }
 	                return value === 'on' || value === 'true' || value === '1';
 	            },
 
-	            executionPlanCacheVisible() {
-	                const explicit = this.executionPlanRuntimeFlag('CACHE_ENABLED');
+	            workflowCacheVisible() {
+	                const explicit = this.workflowRuntimeFlag('CACHE_ENABLED');
 	                if (explicit !== '') {
-	                    return this.executionPlanRuntimeBooleanFlag('CACHE_ENABLED', false);
+	                    return this.workflowRuntimeBooleanFlag('CACHE_ENABLED', false);
 	                }
-	                const redis = this.executionPlanRuntimeFlag('REDIS_URL');
-	                const semantic = this.executionPlanRuntimeFlag('SEMANTIC_CACHE_ENABLED');
+	                const redis = this.workflowRuntimeFlag('REDIS_URL');
+	                const semantic = this.workflowRuntimeFlag('SEMANTIC_CACHE_ENABLED');
 	                if (redis === '' && semantic === '') {
 	                    return true;
 	                }
-	                return this.executionPlanRuntimeBooleanFlag('REDIS_URL', false)
-	                    || this.executionPlanRuntimeBooleanFlag('SEMANTIC_CACHE_ENABLED', false);
+	                return this.workflowRuntimeBooleanFlag('REDIS_URL', false)
+	                    || this.workflowRuntimeBooleanFlag('SEMANTIC_CACHE_ENABLED', false);
 	            },
 
-	            executionPlanAuditVisible() {
-	                return this.executionPlanRuntimeBooleanFlag('LOGGING_ENABLED', true);
+	            workflowAuditVisible() {
+	                return this.workflowRuntimeBooleanFlag('LOGGING_ENABLED', true);
 	            },
 
-	            executionPlanUsageVisible() {
-	                return this.executionPlanRuntimeBooleanFlag('USAGE_ENABLED', true);
+	            workflowUsageVisible() {
+	                return this.workflowRuntimeBooleanFlag('USAGE_ENABLED', true);
 	            },
 
-	            executionPlanGuardrailsVisible() {
-	                return this.executionPlanRuntimeBooleanFlag('GUARDRAILS_ENABLED', true);
+	            workflowGuardrailsVisible() {
+	                return this.workflowRuntimeBooleanFlag('GUARDRAILS_ENABLED', true);
 	            },
 
-	            executionPlanFeatureCaps() {
+	            workflowFeatureCaps() {
 	                return {
-	                    cache: this.executionPlanCacheVisible(),
-	                    audit: this.executionPlanAuditVisible(),
-	                    usage: this.executionPlanUsageVisible(),
-	                    guardrails: this.executionPlanGuardrailsVisible()
+	                    cache: this.workflowCacheVisible(),
+	                    audit: this.workflowAuditVisible(),
+	                    usage: this.workflowUsageVisible(),
+	                    guardrails: this.workflowGuardrailsVisible()
 	                };
 	            },
 
-	            executionPlanReadFeatureFlag(raw, key, defaultValue) {
+	            workflowReadFeatureFlag(raw, key, defaultValue) {
 	                if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
 	                    return defaultValue;
 	                }
@@ -150,7 +150,7 @@
 	                return defaultValue;
 	            },
 
-	            executionPlanHasDefinedFeatureFlag(raw, key) {
+	            workflowHasDefinedFeatureFlag(raw, key) {
 	                if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
 	                    return false;
 	                }
@@ -162,19 +162,19 @@
 	                });
 	            },
 
-	            executionPlanNormalizedFeatures(raw) {
+	            workflowNormalizedFeatures(raw) {
 	                return {
-	                    cache: !!this.executionPlanReadFeatureFlag(raw, 'cache', false),
-	                    audit: !!this.executionPlanReadFeatureFlag(raw, 'audit', false),
-	                    usage: !!this.executionPlanReadFeatureFlag(raw, 'usage', false),
-	                    guardrails: !!this.executionPlanReadFeatureFlag(raw, 'guardrails', false),
-	                    fallback: this.executionPlanReadFeatureFlag(raw, 'fallback', true) !== false
+	                    cache: !!this.workflowReadFeatureFlag(raw, 'cache', false),
+	                    audit: !!this.workflowReadFeatureFlag(raw, 'audit', false),
+	                    usage: !!this.workflowReadFeatureFlag(raw, 'usage', false),
+	                    guardrails: !!this.workflowReadFeatureFlag(raw, 'guardrails', false),
+	                    fallback: this.workflowReadFeatureFlag(raw, 'fallback', true) !== false
 	                };
 	            },
 
-	            executionPlanApplyGlobalFeatureCaps(raw) {
-	                const features = this.executionPlanNormalizedFeatures(raw);
-	                const caps = this.executionPlanFeatureCaps();
+	            workflowApplyGlobalFeatureCaps(raw) {
+	                const features = this.workflowNormalizedFeatures(raw);
+	                const caps = this.workflowFeatureCaps();
 	                return {
 	                    cache: features.cache && caps.cache,
 	                    audit: features.audit && caps.audit,
@@ -184,23 +184,23 @@
 	                };
 	            },
 
-	            executionPlanFailoverVisible() {
-	                const mode = this.executionPlanRuntimeFlag('FEATURE_FALLBACK_MODE');
+	            workflowFailoverVisible() {
+	                const mode = this.workflowRuntimeFlag('FEATURE_FALLBACK_MODE');
 	                return mode !== '' && mode !== 'off';
 	            },
 
-            executionPlanFallbackLabel(source) {
-                return this.executionPlanSourceFeatures(source).fallback ? 'On' : 'Off';
+            workflowFallbackLabel(source) {
+                return this.workflowSourceFeatures(source).fallback ? 'On' : 'Off';
             },
 
-            defaultExecutionPlanGuardrailStep(step) {
+            defaultWorkflowGuardrailStep(step) {
                 return {
                     ref: '',
                     step: Number.isFinite(step) ? step : 10
                 };
             },
 
-            parseExecutionPlanGuardrailStep(rawStep) {
+            parseWorkflowGuardrailStep(rawStep) {
                 const trimmedStep = rawStep === null || rawStep === undefined ? '' : String(rawStep).trim();
                 if (trimmedStep === '') {
                     return Number.NaN;
@@ -209,50 +209,50 @@
                 return Number.isFinite(parsedStep) ? parsedStep : Number.NaN;
             },
 
-            get filteredExecutionPlans() {
-                if (!this.executionPlanFilter) {
-                    return this.executionPlans;
+            get filteredWorkflows() {
+                if (!this.workflowFilter) {
+                    return this.workflows;
                 }
-                const filter = this.executionPlanFilter.toLowerCase();
-                return this.executionPlans.filter((plan) => {
+                const filter = this.workflowFilter.toLowerCase();
+                return this.workflows.filter((workflow) => {
                     const fields = [
-                        plan.name,
-                        plan.description,
-                        plan.scope_display,
-                        plan.scope_type,
-                        this.executionPlanScopeProviderValue(plan && plan.scope),
-                        plan.scope && plan.scope.scope_model,
-                        plan.scope && plan.scope.scope_user_path,
-                        plan.plan_hash,
-                        ...(Array.isArray(plan.plan_payload && plan.plan_payload.guardrails)
-                            ? plan.plan_payload.guardrails.map((step) => step.ref)
+                        workflow.name,
+                        workflow.description,
+                        workflow.scope_display,
+                        workflow.scope_type,
+                        this.workflowScopeProviderValue(workflow && workflow.scope),
+                        workflow.scope && workflow.scope.scope_model,
+                        workflow.scope && workflow.scope.scope_user_path,
+                        workflow.workflow_hash,
+                        ...(Array.isArray(workflow.workflow_payload && workflow.workflow_payload.guardrails)
+                            ? workflow.workflow_payload.guardrails.map((step) => step.ref)
                             : [])
                     ];
                     return fields.some((value) => String(value || '').toLowerCase().includes(filter));
                 });
             },
 
-            executionPlanScopeProviderValue(scope) {
+            workflowScopeProviderValue(scope) {
                 return String(
                     scope && (scope.scope_provider_name || scope.scope_provider) || ''
                 ).trim();
             },
 
-            executionPlanModelProviderValue(model) {
+            workflowModelProviderValue(model) {
                 return String(
                     model && (model.provider_name || model.provider_type) || ''
                 ).trim();
             },
 
-            executionPlanProviderOptions() {
+            workflowProviderOptions() {
                 const options = new Set();
-                const preservedProvider = String(this.executionPlanHydratedScope && this.executionPlanHydratedScope.scope_provider || '').trim();
+                const preservedProvider = String(this.workflowHydratedScope && this.workflowHydratedScope.scope_provider || '').trim();
                 if (preservedProvider) {
                     options.add(preservedProvider);
                 }
                 const models = Array.isArray(this.models) ? this.models : [];
                 models.forEach((model) => {
-                    const providerName = this.executionPlanModelProviderValue(model);
+                    const providerName = this.workflowModelProviderValue(model);
                     if (providerName) {
                         options.add(providerName);
                     }
@@ -260,17 +260,17 @@
                 return [...options].sort();
             },
 
-            executionPlanModelOptions(providerName) {
+            workflowModelOptions(providerName) {
                 const wantedProvider = String(providerName || '').trim();
                 const options = new Set();
-                const preservedProvider = String(this.executionPlanHydratedScope && this.executionPlanHydratedScope.scope_provider || '').trim();
-                const preservedModel = String(this.executionPlanHydratedScope && this.executionPlanHydratedScope.scope_model || '').trim();
+                const preservedProvider = String(this.workflowHydratedScope && this.workflowHydratedScope.scope_provider || '').trim();
+                const preservedModel = String(this.workflowHydratedScope && this.workflowHydratedScope.scope_model || '').trim();
                 if (wantedProvider && wantedProvider === preservedProvider && preservedModel) {
                     options.add(preservedModel);
                 }
                 const models = Array.isArray(this.models) ? this.models : [];
                 models.forEach((model) => {
-                    if (wantedProvider && this.executionPlanModelProviderValue(model) !== wantedProvider) {
+                    if (wantedProvider && this.workflowModelProviderValue(model) !== wantedProvider) {
                         return;
                     }
                     const modelID = String(model && model.model && model.model.id || '').trim();
@@ -281,8 +281,8 @@
                 return [...options].sort();
             },
 
-            planScopeTypeLabel(plan) {
-                const scopeType = String(plan && plan.scope_type || '').trim();
+            workflowScopeTypeLabel(workflow) {
+                const scopeType = String(workflow && workflow.scope_type || '').trim();
                 if (scopeType === 'provider_model') return 'Provider Name + Model';
                 if (scopeType === 'provider_model_path') return 'Provider Name + Model + Path';
                 if (scopeType === 'provider_path') return 'Provider Name + Path';
@@ -291,26 +291,26 @@
                 return 'Global';
             },
 
-            planScopeLabel(plan) {
-                return String(plan && plan.scope_display || 'global').trim() || 'global';
+            workflowScopeLabel(workflow) {
+                return String(workflow && workflow.scope_display || 'global').trim() || 'global';
             },
 
-            workflowDisplayName(plan) {
-                const explicitName = String(plan && plan.name || '').trim();
+            workflowDisplayName(workflow) {
+                const explicitName = String(workflow && workflow.name || '').trim();
                 if (explicitName) {
                     return explicitName;
                 }
-                const scopeLabel = this.planScopeLabel(plan);
+                const scopeLabel = this.workflowScopeLabel(workflow);
                 if (scopeLabel === 'global') {
                     return 'All models';
                 }
                 return scopeLabel;
             },
 
-            executionPlanCurrentScope() {
-                const form = this.executionPlanForm || this.defaultExecutionPlanForm();
+            workflowCurrentScope() {
+                const form = this.workflowForm || this.defaultWorkflowForm();
                 const provider = String(form.scope_provider || '').trim();
-                const userPath = this.normalizeExecutionPlanScopeUserPath(form.scope_user_path);
+                const userPath = this.normalizeWorkflowScopeUserPath(form.scope_user_path);
                 return {
                     scope_provider: provider,
                     scope_model: provider ? String(form.scope_model || '').trim() : '',
@@ -318,10 +318,10 @@
                 };
             },
 
-            executionPlanScopeType(scope) {
+            workflowScopeType(scope) {
                 const provider = String(scope && scope.scope_provider || '').trim();
                 const model = provider ? String(scope && scope.scope_model || '').trim() : '';
-                const userPath = this.normalizeExecutionPlanScopeUserPath(scope && scope.scope_user_path);
+                const userPath = this.normalizeWorkflowScopeUserPath(scope && scope.scope_user_path);
                 if (!provider && !userPath) return 'global';
                 if (!provider && userPath) return 'path';
                 if (!model && !userPath) return 'provider';
@@ -330,11 +330,11 @@
                 return 'provider_model';
             },
 
-            executionPlanScopeDisplay(scope) {
+            workflowScopeDisplay(scope) {
                 const provider = String(scope && scope.scope_provider || '').trim();
                 const model = provider ? String(scope && scope.scope_model || '').trim() : '';
-                const userPath = this.normalizeExecutionPlanScopeUserPath(scope && scope.scope_user_path);
-                const scopeType = this.executionPlanScopeType({
+                const userPath = this.normalizeWorkflowScopeUserPath(scope && scope.scope_user_path);
+                const scopeType = this.workflowScopeType({
                     scope_provider: provider,
                     scope_model: model,
                     scope_user_path: userPath
@@ -347,50 +347,50 @@
                 return provider + '/' + model;
             },
 
-            executionPlanScopeMatches(plan, scope) {
+            workflowScopeMatches(workflow, scope) {
                 const normalized = scope || { scope_provider: '', scope_model: '', scope_user_path: '' };
-                const provider = this.executionPlanScopeProviderValue(plan && plan.scope);
-                const model = provider ? String(plan && plan.scope && plan.scope.scope_model || '').trim() : '';
-                const userPath = this.normalizeExecutionPlanScopeUserPath(plan && plan.scope && plan.scope.scope_user_path);
+                const provider = this.workflowScopeProviderValue(workflow && workflow.scope);
+                const model = provider ? String(workflow && workflow.scope && workflow.scope.scope_model || '').trim() : '';
+                const userPath = this.normalizeWorkflowScopeUserPath(workflow && workflow.scope && workflow.scope.scope_user_path);
                 return provider === String(normalized.scope_provider || '').trim()
                     && model === String(normalized.scope_model || '').trim()
-                    && userPath === this.normalizeExecutionPlanScopeUserPath(normalized.scope_user_path);
+                    && userPath === this.normalizeWorkflowScopeUserPath(normalized.scope_user_path);
             },
 
-            executionPlanActiveScopeMatch() {
-                const scope = this.executionPlanCurrentScope();
+            workflowActiveScopeMatch() {
+                const scope = this.workflowCurrentScope();
                 const hasScopedSelection = scope.scope_provider !== ''
                     || scope.scope_model !== ''
                     || scope.scope_user_path !== '';
-                if (!hasScopedSelection && !this.executionPlanFormHydrated) {
+                if (!hasScopedSelection && !this.workflowFormHydrated) {
                     return null;
                 }
-                const plans = Array.isArray(this.executionPlans) ? this.executionPlans : [];
-                return plans.find((plan) => this.executionPlanScopeMatches(plan, scope)) || null;
+                const workflows = Array.isArray(this.workflows) ? this.workflows : [];
+                return workflows.find((workflow) => this.workflowScopeMatches(workflow, scope)) || null;
             },
 
-            executionPlanSubmitMode() {
-                return this.executionPlanActiveScopeMatch() ? 'save' : 'create';
+            workflowSubmitMode() {
+                return this.workflowActiveScopeMatch() ? 'save' : 'create';
             },
 
-            executionPlanSubmitLabel() {
-                return this.executionPlanSubmitMode() === 'save' ? 'Save' : 'Create';
+            workflowSubmitLabel() {
+                return this.workflowSubmitMode() === 'save' ? 'Save' : 'Create';
             },
 
-            executionPlanSubmittingLabel() {
-                return this.executionPlanSubmitMode() === 'save' ? 'Saving...' : 'Creating...';
+            workflowSubmittingLabel() {
+                return this.workflowSubmitMode() === 'save' ? 'Saving...' : 'Creating...';
             },
 
-            executionPlanPreview() {
-                const form = this.executionPlanForm || this.defaultExecutionPlanForm();
-                const scope = this.executionPlanCurrentScope();
-                const rawFeatures = this.executionPlanNormalizedFeatures(form.features || {});
-                const features = this.executionPlanApplyGlobalFeatureCaps(rawFeatures);
+            workflowPreview() {
+                const form = this.workflowForm || this.defaultWorkflowForm();
+                const scope = this.workflowCurrentScope();
+                const rawFeatures = this.workflowNormalizedFeatures(form.features || {});
+                const features = this.workflowApplyGlobalFeatureCaps(rawFeatures);
                 features.fallback = rawFeatures.fallback;
                 const guardrailsEnabled = !!features.guardrails;
-                const guardrails = guardrailsEnabled ? this.executionPlanSourceGuardrails(form) : [];
-                const scopeType = this.executionPlanScopeType(scope);
-                const scopeDisplay = this.executionPlanScopeDisplay(scope);
+                const guardrails = guardrailsEnabled ? this.workflowSourceGuardrails(form) : [];
+                const scopeType = this.workflowScopeType(scope);
+                const scopeDisplay = this.workflowScopeDisplay(scope);
 
                 return {
                     id: DRAFT_WORKFLOW_PREVIEW_ID,
@@ -403,7 +403,7 @@
                     },
                     name: String(form.name || '').trim(),
                     description: String(form.description || '').trim(),
-                    plan_payload: {
+                    workflow_payload: {
                         schema_version: 1,
                         features: {
                             cache: !!features.cache,
@@ -417,58 +417,58 @@
                 };
             },
 
-	            executionPlanSourceFeatures(source) {
-	                const raw = source && source.plan_payload && source.plan_payload.features
-	                    ? source.plan_payload.features
+	            workflowSourceFeatures(source) {
+	                const raw = source && source.workflow_payload && source.workflow_payload.features
+	                    ? source.workflow_payload.features
 	                    : source && source.features
 	                        ? source.features
 	                        : {};
 	                const effective = source && source.effective_features && typeof source.effective_features === 'object' && !Array.isArray(source.effective_features)
 	                    ? source.effective_features
 	                    : null;
-	                const features = this.executionPlanApplyGlobalFeatureCaps(effective || raw);
+	                const features = this.workflowApplyGlobalFeatureCaps(effective || raw);
 	                return {
 	                    ...features,
-	                    fallback: this.executionPlanNormalizedFeatures(raw).fallback
+	                    fallback: this.workflowNormalizedFeatures(raw).fallback
 	                };
 	            },
 
-            executionPlanEntryFeatures(entry) {
-                const raw = entry && entry.data && entry.data.execution_features;
+            workflowEntryFeatures(entry) {
+                const raw = entry && entry.data && entry.data.workflow_features;
                 if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
                     return null;
                 }
-                return this.executionPlanNormalizedFeatures(raw);
+                return this.workflowNormalizedFeatures(raw);
             },
 
-            executionPlanSourceGuardrails(source) {
-                const raw = Array.isArray(source && source.plan_payload && source.plan_payload.guardrails)
-                    ? source.plan_payload.guardrails
+            workflowSourceGuardrails(source) {
+                const raw = Array.isArray(source && source.workflow_payload && source.workflow_payload.guardrails)
+                    ? source.workflow_payload.guardrails
                     : Array.isArray(source && source.guardrails)
                         ? source.guardrails
                         : [];
                 return raw
                     .map((step) => ({
                         ref: String(step && step.ref || '').trim(),
-                        step: this.parseExecutionPlanGuardrailStep(step && step.step)
+                        step: this.parseWorkflowGuardrailStep(step && step.step)
                     }))
                     .filter((step) => Number.isInteger(step.step) && step.step >= 0);
             },
 
-            canDeactivateExecutionPlan(plan) {
-                return String(plan && plan.scope_type || '').trim() !== 'global';
+            canDeactivateWorkflow(workflow) {
+                return String(workflow && workflow.scope_type || '').trim() !== 'global';
             },
 
-            executionPlanEditorScrollTarget() {
+            workflowEditorScrollTarget() {
                 if (!global.document || typeof global.document.querySelector !== 'function') {
                     return null;
                 }
-                return global.document.querySelector('.execution-plan-editor');
+                return global.document.querySelector('.workflow-editor');
             },
 
-            scrollExecutionPlanFormIntoView() {
+            scrollWorkflowFormIntoView() {
                 const scroll = () => {
-                    const editor = this.executionPlanEditorScrollTarget();
+                    const editor = this.workflowEditorScrollTarget();
                     if (editor && typeof editor.scrollIntoView === 'function') {
                         editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }
@@ -480,12 +480,12 @@
                 scroll();
             },
 
-	            planGuardrails(plan) {
-	                if (!this.executionPlanSourceFeatures(plan).guardrails) {
+	            workflowGuardrails(workflow) {
+	                if (!this.workflowSourceFeatures(workflow).guardrails) {
 	                    return [];
 	                }
-	                return Array.isArray(plan && plan.plan_payload && plan.plan_payload.guardrails)
-	                    ? plan.plan_payload.guardrails
+	                return Array.isArray(workflow && workflow.workflow_payload && workflow.workflow_payload.guardrails)
+	                    ? workflow.workflow_payload.guardrails
 	                    : [];
 	            },
 
@@ -496,38 +496,38 @@
                 return hash.slice(0, 12) + '\u2026';
             },
 
-            openExecutionPlanCreate(plan) {
-                this.executionPlanFormOpen = true;
-                this.executionPlanSubmitting = false;
-                this.executionPlanFormError = '';
-                this.executionPlanNotice = '';
+            openWorkflowCreate(workflow) {
+                this.workflowFormOpen = true;
+                this.workflowSubmitting = false;
+                this.workflowFormError = '';
+                this.workflowNotice = '';
 
-                if (!plan) {
-                    this.executionPlanFormHydrated = false;
-                    this.executionPlanHydratedScope = {
+                if (!workflow) {
+                    this.workflowFormHydrated = false;
+                    this.workflowHydratedScope = {
                         scope_provider: '',
                         scope_model: '',
                         scope_user_path: ''
                     };
-                    this.executionPlanForm = this.defaultExecutionPlanForm();
-                    this.scrollExecutionPlanFormIntoView();
+                    this.workflowForm = this.defaultWorkflowForm();
+                    this.scrollWorkflowFormIntoView();
                     return;
                 }
 
-                this.executionPlanFormHydrated = true;
-                this.executionPlanHydratedScope = {
-                    scope_provider: this.executionPlanScopeProviderValue(plan.scope),
-                    scope_model: String(plan.scope && plan.scope.scope_model || '').trim(),
-                    scope_user_path: String(plan.scope && plan.scope.scope_user_path || '').trim()
+                this.workflowFormHydrated = true;
+                this.workflowHydratedScope = {
+                    scope_provider: this.workflowScopeProviderValue(workflow.scope),
+                    scope_model: String(workflow.scope && workflow.scope.scope_model || '').trim(),
+                    scope_user_path: String(workflow.scope && workflow.scope.scope_user_path || '').trim()
                 };
-                const features = this.executionPlanSourceFeatures(plan);
-                const guardrails = this.executionPlanSourceGuardrails(plan);
-                this.executionPlanForm = {
-                    scope_provider: this.executionPlanScopeProviderValue(plan.scope),
-                    scope_model: String(plan.scope && plan.scope.scope_model || ''),
-                    scope_user_path: String(plan.scope && plan.scope.scope_user_path || ''),
-                    name: String(plan.name || ''),
-                    description: String(plan.description || ''),
+                const features = this.workflowSourceFeatures(workflow);
+                const guardrails = this.workflowSourceGuardrails(workflow);
+                this.workflowForm = {
+                    scope_provider: this.workflowScopeProviderValue(workflow.scope),
+                    scope_model: String(workflow.scope && workflow.scope.scope_model || ''),
+                    scope_user_path: String(workflow.scope && workflow.scope.scope_user_path || ''),
+                    name: String(workflow.name || ''),
+                    description: String(workflow.description || ''),
                     features: {
                         cache: !!features.cache,
                         audit: !!features.audit,
@@ -540,50 +540,50 @@
                         step: Number.isFinite(step && step.step) ? step.step : 10
                     }))
                 };
-                this.scrollExecutionPlanFormIntoView();
+                this.scrollWorkflowFormIntoView();
             },
 
-            closeExecutionPlanForm() {
-                this.executionPlanFormOpen = false;
-                this.executionPlanSubmitting = false;
-                this.executionPlanFormError = '';
-                this.executionPlanFormHydrated = false;
-                this.executionPlanHydratedScope = {
+            closeWorkflowForm() {
+                this.workflowFormOpen = false;
+                this.workflowSubmitting = false;
+                this.workflowFormError = '';
+                this.workflowFormHydrated = false;
+                this.workflowHydratedScope = {
                     scope_provider: '',
                     scope_model: '',
                     scope_user_path: ''
                 };
-                this.executionPlanForm = this.defaultExecutionPlanForm();
+                this.workflowForm = this.defaultWorkflowForm();
             },
 
-            setExecutionPlanProvider(provider) {
-                this.executionPlanForm.scope_provider = String(provider || '').trim();
-                if (!this.executionPlanForm.scope_provider) {
-                    this.executionPlanForm.scope_provider = '';
-                    this.executionPlanForm.scope_model = '';
+            setWorkflowProvider(provider) {
+                this.workflowForm.scope_provider = String(provider || '').trim();
+                if (!this.workflowForm.scope_provider) {
+                    this.workflowForm.scope_provider = '';
+                    this.workflowForm.scope_model = '';
                     return;
                 }
-                const modelOptions = this.executionPlanModelOptions(this.executionPlanForm.scope_provider);
-                if (!modelOptions.includes(String(this.executionPlanForm.scope_model || '').trim())) {
-                    this.executionPlanForm.scope_model = '';
+                const modelOptions = this.workflowModelOptions(this.workflowForm.scope_provider);
+                if (!modelOptions.includes(String(this.workflowForm.scope_model || '').trim())) {
+                    this.workflowForm.scope_model = '';
                 }
             },
 
-            addExecutionPlanGuardrailStep() {
-                const steps = Array.isArray(this.executionPlanForm.guardrails) ? this.executionPlanForm.guardrails : [];
+            addWorkflowGuardrailStep() {
+                const steps = Array.isArray(this.workflowForm.guardrails) ? this.workflowForm.guardrails : [];
                 const nextStep = steps.reduce((maxStep, step) => {
                     const parsed = Number(step && step.step);
                     return Number.isFinite(parsed) ? Math.max(maxStep, parsed) : maxStep;
                 }, 0) + 10;
-                this.executionPlanForm.guardrails.push(this.defaultExecutionPlanGuardrailStep(nextStep));
+                this.workflowForm.guardrails.push(this.defaultWorkflowGuardrailStep(nextStep));
             },
 
-            removeExecutionPlanGuardrailStep(index) {
-                if (!Array.isArray(this.executionPlanForm.guardrails)) return;
-                this.executionPlanForm.guardrails.splice(index, 1);
+            removeWorkflowGuardrailStep(index) {
+                if (!Array.isArray(this.workflowForm.guardrails)) return;
+                this.workflowForm.guardrails.splice(index, 1);
             },
 
-            executionPlanScopeUserPathValidationError(value) {
+            workflowScopeUserPathValidationError(value) {
                 const trimmed = String(value || '').trim();
                 if (!trimmed) {
                     return '';
@@ -605,8 +605,8 @@
                 return '';
             },
 
-            normalizeExecutionPlanScopeUserPath(value) {
-                if (this.executionPlanScopeUserPathValidationError(value)) {
+            normalizeWorkflowScopeUserPath(value) {
+                if (this.workflowScopeUserPathValidationError(value)) {
                     return '';
                 }
                 const trimmed = String(value || '').trim();
@@ -629,32 +629,32 @@
                 return '/' + canonical.join('/');
             },
 
-            buildExecutionPlanRequest() {
-                const form = this.executionPlanForm || this.defaultExecutionPlanForm();
+            buildWorkflowRequest() {
+                const form = this.workflowForm || this.defaultWorkflowForm();
                 const provider = String(form.scope_provider || '').trim();
                 const model = provider ? String(form.scope_model || '').trim() : '';
-                const userPath = this.normalizeExecutionPlanScopeUserPath(form.scope_user_path);
-                const rawFeatures = this.executionPlanNormalizedFeatures(form.features || {});
-                const features = this.executionPlanApplyGlobalFeatureCaps(rawFeatures);
-                const activeScopeMatch = this.executionPlanActiveScopeMatch();
-                const activeScopeFeatures = activeScopeMatch && activeScopeMatch.plan_payload && activeScopeMatch.plan_payload.features;
-                const activeScopeHasFallback = this.executionPlanHasDefinedFeatureFlag(activeScopeFeatures, 'fallback');
+                const userPath = this.normalizeWorkflowScopeUserPath(form.scope_user_path);
+                const rawFeatures = this.workflowNormalizedFeatures(form.features || {});
+                const features = this.workflowApplyGlobalFeatureCaps(rawFeatures);
+                const activeScopeMatch = this.workflowActiveScopeMatch();
+                const activeScopeFeatures = activeScopeMatch && activeScopeMatch.workflow_payload && activeScopeMatch.workflow_payload.features;
+                const activeScopeHasFallback = this.workflowHasDefinedFeatureFlag(activeScopeFeatures, 'fallback');
                 const preservedActiveFallback = activeScopeHasFallback
-                    ? this.executionPlanReadFeatureFlag(activeScopeFeatures, 'fallback', true) !== false
+                    ? this.workflowReadFeatureFlag(activeScopeFeatures, 'fallback', true) !== false
                     : null;
-                const hydratedScope = this.executionPlanHydratedScope || {
+                const hydratedScope = this.workflowHydratedScope || {
                     scope_provider: '',
                     scope_model: '',
                     scope_user_path: ''
                 };
                 const sameHydratedScope = String(hydratedScope.scope_provider || '').trim() === provider
                     && String(hydratedScope.scope_model || '').trim() === model
-                    && this.normalizeExecutionPlanScopeUserPath(hydratedScope.scope_user_path) === this.normalizeExecutionPlanScopeUserPath(userPath);
-                const includeFallback = this.executionPlanFailoverVisible()
-                    || (!!this.executionPlanFormHydrated
+                    && this.normalizeWorkflowScopeUserPath(hydratedScope.scope_user_path) === this.normalizeWorkflowScopeUserPath(userPath);
+                const includeFallback = this.workflowFailoverVisible()
+                    || (!!this.workflowFormHydrated
                         && sameHydratedScope
                         && Object.prototype.hasOwnProperty.call(rawFeatures, 'fallback'))
-                    || (!this.executionPlanFormHydrated
+                    || (!this.workflowFormHydrated
                         && !!activeScopeMatch
                         && activeScopeHasFallback);
 
@@ -662,7 +662,7 @@
                     ? (Array.isArray(form.guardrails) ? form.guardrails : []).map((step) => {
                         return {
                             ref: String(step && step.ref || '').trim(),
-                            step: this.parseExecutionPlanGuardrailStep(step && step.step)
+                            step: this.parseWorkflowGuardrailStep(step && step.step)
                         };
                     })
                     : [];
@@ -673,7 +673,7 @@
                     ...(userPath ? { scope_user_path: userPath } : {}),
                     name: String(form.name || '').trim(),
                     description: String(form.description || '').trim(),
-                    plan_payload: {
+                    workflow_payload: {
                         schema_version: 1,
                         features: {
                             cache: !!features.cache,
@@ -685,8 +685,8 @@
                     }
                 };
                 if (includeFallback) {
-                    payload.plan_payload.features.fallback = !this.executionPlanFailoverVisible()
-                        && !this.executionPlanFormHydrated
+                    payload.workflow_payload.features.fallback = !this.workflowFailoverVisible()
+                        && !this.workflowFormHydrated
                         && !!activeScopeMatch
                         && activeScopeHasFallback
                         ? preservedActiveFallback
@@ -696,7 +696,7 @@
                 return payload;
             },
 
-            async fetchExecutionPlanRuntimeConfig() {
+            async fetchWorkflowRuntimeConfig() {
                 const controller = typeof AbortController === 'function' ? new AbortController() : null;
                 const timeoutID = controller && typeof setTimeout === 'function'
                     ? setTimeout(() => controller.abort(), 10000)
@@ -708,20 +708,20 @@
                     }
                     const res = await fetch('/admin/api/v1/dashboard/config', request);
                     if (!this.handleFetchResponse(res, 'dashboard config', request)) {
-                        this.executionPlanRuntimeConfig = {};
+                        this.workflowRuntimeConfig = {};
                         return;
                     }
                     const payload = await res.json();
                     const next = {};
-                    const allowedKeys = this.executionPlanRuntimeConfigKeys();
+                    const allowedKeys = this.workflowRuntimeConfigKeys();
                     for (const key of allowedKeys) {
                         if (payload && typeof payload === 'object' && !Array.isArray(payload) && payload[key] !== undefined && payload[key] !== null) {
                             next[key] = String(payload[key]).trim();
                         }
 	                    }
-	                    this.executionPlanRuntimeConfig = next;
+	                    this.workflowRuntimeConfig = next;
 	                    if (typeof this.fetchCacheOverview === 'function') {
-	                        if (this.executionPlanCacheVisible()) {
+	                        if (this.workflowCacheVisible()) {
 	                            this.fetchCacheOverview();
 	                        } else {
 	                            this.cacheOverview = {
@@ -743,7 +743,7 @@
 	                    }
 	                } catch (e) {
 	                    console.error('Failed to fetch dashboard config:', e);
-	                    this.executionPlanRuntimeConfig = {};
+	                    this.workflowRuntimeConfig = {};
                 } finally {
                     if (timeoutID !== null && typeof clearTimeout === 'function') {
                         clearTimeout(timeoutID);
@@ -751,14 +751,14 @@
                 }
             },
 
-            validateExecutionPlanRequest(payload) {
-                const preservedProvider = String(this.executionPlanHydratedScope && this.executionPlanHydratedScope.scope_provider || '').trim();
-                const preservedModel = String(this.executionPlanHydratedScope && this.executionPlanHydratedScope.scope_model || '').trim();
+            validateWorkflowRequest(payload) {
+                const preservedProvider = String(this.workflowHydratedScope && this.workflowHydratedScope.scope_provider || '').trim();
+                const preservedModel = String(this.workflowHydratedScope && this.workflowHydratedScope.scope_model || '').trim();
                 const providerName = String(payload && (payload.scope_provider_name || payload.scope_provider) || '').trim();
                 const scopeModel = String(payload && payload.scope_model || '').trim();
 
                 if (providerName) {
-                    const providers = this.executionPlanProviderOptions();
+                    const providers = this.workflowProviderOptions();
                     if (!providers.includes(providerName) && providerName !== preservedProvider) {
                         return 'Choose a registered provider name.';
                     }
@@ -767,19 +767,19 @@
                     return 'Model selection requires a provider name.';
                 }
                 if (scopeModel) {
-                    const models = this.executionPlanModelOptions(providerName);
+                    const models = this.workflowModelOptions(providerName);
                     const isPreservedModel = providerName === preservedProvider && scopeModel === preservedModel;
                     if (!models.includes(scopeModel) && !isPreservedModel) {
                         return 'Choose a registered model for the selected provider name.';
                     }
                 }
-                const userPathError = this.executionPlanScopeUserPathValidationError(payload.scope_user_path);
+                const userPathError = this.workflowScopeUserPathValidationError(payload.scope_user_path);
                 if (userPathError) {
                     return userPathError;
                 }
-                const features = payload.plan_payload && payload.plan_payload.features ? payload.plan_payload.features : {};
-                const guardrails = Array.isArray(payload.plan_payload && payload.plan_payload.guardrails)
-                    ? payload.plan_payload.guardrails
+                const features = payload.workflow_payload && payload.workflow_payload.features ? payload.workflow_payload.features : {};
+                const guardrails = Array.isArray(payload.workflow_payload && payload.workflow_payload.guardrails)
+                    ? payload.workflow_payload.guardrails
                     : [];
                 if (!features.guardrails) {
                     return '';
@@ -794,7 +794,7 @@
                         return 'Each guardrail step must use a non-negative integer step number.';
                     }
                     if (seen.has(step.ref)) {
-                        return 'Each guardrail ref may appear only once in a plan.';
+                        return 'Each guardrail ref may appear only once in a workflow.';
                     }
                     seen.add(step.ref);
                 }
@@ -802,7 +802,7 @@
                 return '';
             },
 
-            async executionPlanResponseMessage(res, fallback) {
+            async workflowResponseMessage(res, fallback) {
                 try {
                     const payload = await res.json();
                     if (payload && payload.error && payload.error.message) {
@@ -814,9 +814,9 @@
                 return fallback;
             },
 
-            async fetchExecutionPlans() {
-                this.executionPlansLoading = true;
-                this.executionPlanError = '';
+            async fetchWorkflows() {
+                this.workflowsLoading = true;
+                this.workflowError = '';
                 const controller = typeof AbortController === 'function' ? new AbortController() : null;
                 const timeoutID = controller && typeof setTimeout === 'function'
                     ? setTimeout(() => controller.abort(), 10000)
@@ -826,38 +826,38 @@
                     if (controller) {
                         request.signal = controller.signal;
                     }
-                    const res = await fetch('/admin/api/v1/execution-plans', request);
+                    const res = await fetch('/admin/api/v1/workflows', request);
                     if (res.status === 503) {
-                        this.executionPlansAvailable = false;
-                        this.executionPlans = [];
+                        this.workflowsAvailable = false;
+                        this.workflows = [];
                         return;
                     }
-                    this.executionPlansAvailable = true;
+                    this.workflowsAvailable = true;
                     if (!this.handleFetchResponse(res, 'workflows', request)) {
-                        this.executionPlans = [];
+                        this.workflows = [];
                         return;
                     }
                     const payload = await res.json();
-                    this.executionPlans = Array.isArray(payload) ? payload : [];
-                    this.cacheExecutionPlanVersions(this.executionPlans);
+                    this.workflows = Array.isArray(payload) ? payload : [];
+                    this.cacheWorkflowVersions(this.workflows);
                 } catch (e) {
                     console.error('Failed to fetch workflows:', e);
-                    this.executionPlans = [];
-                    this.executionPlanError = e && e.name === 'AbortError'
+                    this.workflows = [];
+                    this.workflowError = e && e.name === 'AbortError'
                         ? 'Loading workflows timed out.'
                         : 'Unable to load workflows.';
                 } finally {
                     if (timeoutID !== null && typeof clearTimeout === 'function') {
                         clearTimeout(timeoutID);
                     }
-                    this.executionPlansLoading = false;
+                    this.workflowsLoading = false;
                 }
             },
 
-            async fetchExecutionPlanGuardrails() {
+            async fetchWorkflowGuardrails() {
                 const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
                 try {
-                    const res = await fetch('/admin/api/v1/execution-plans/guardrails', request);
+                    const res = await fetch('/admin/api/v1/workflows/guardrails', request);
                     if (!this.handleFetchResponse(res, 'workflow guardrails', request)) {
                         this.guardrailRefs = [];
                         return;
@@ -870,83 +870,83 @@
                 }
             },
 
-            async fetchExecutionPlansPage() {
+            async fetchWorkflowsPage() {
                 await Promise.all([
-                    this.fetchExecutionPlanRuntimeConfig(),
-                    this.fetchExecutionPlans(),
-                    this.fetchExecutionPlanGuardrails()
+                    this.fetchWorkflowRuntimeConfig(),
+                    this.fetchWorkflows(),
+                    this.fetchWorkflowGuardrails()
                 ]);
             },
 
-            cacheExecutionPlanVersion(plan) {
-                const planID = String(plan && plan.id || '').trim();
-                if (!planID) {
+            cacheWorkflowVersion(workflow) {
+                const workflowID = String(workflow && workflow.id || '').trim();
+                if (!workflowID) {
                     return null;
                 }
-                this.executionPlanVersionsByID = {
-                    ...(this.executionPlanVersionsByID || {}),
-                    [planID]: plan
+                this.workflowVersionsByID = {
+                    ...(this.workflowVersionsByID || {}),
+                    [workflowID]: workflow
                 };
-                return plan;
+                return workflow;
             },
 
-            cacheExecutionPlanVersions(plans) {
-                if (!Array.isArray(plans) || plans.length === 0) {
+            cacheWorkflowVersions(workflows) {
+                if (!Array.isArray(workflows) || workflows.length === 0) {
                     return;
                 }
                 const next = {
-                    ...(this.executionPlanVersionsByID || {})
+                    ...(this.workflowVersionsByID || {})
                 };
-                plans.forEach((plan) => {
-                    const planID = String(plan && plan.id || '').trim();
-                    if (planID) {
-                        next[planID] = plan;
+                workflows.forEach((workflow) => {
+                    const workflowID = String(workflow && workflow.id || '').trim();
+                    if (workflowID) {
+                        next[workflowID] = workflow;
                     }
                 });
-                this.executionPlanVersionsByID = next;
+                this.workflowVersionsByID = next;
             },
 
-            cacheMissingExecutionPlanVersion(planID) {
-                const normalizedID = String(planID || '').trim();
+            cacheMissingWorkflowVersion(workflowID) {
+                const normalizedID = String(workflowID || '').trim();
                 if (!normalizedID) {
                     return;
                 }
-                this.executionPlanVersionsByID = {
-                    ...(this.executionPlanVersionsByID || {}),
+                this.workflowVersionsByID = {
+                    ...(this.workflowVersionsByID || {}),
                     [normalizedID]: null
                 };
             },
 
-            executionPlanVersionCacheHas(planID) {
-                return Object.prototype.hasOwnProperty.call(this.executionPlanVersionsByID || {}, String(planID || '').trim());
+            workflowVersionCacheHas(workflowID) {
+                return Object.prototype.hasOwnProperty.call(this.workflowVersionsByID || {}, String(workflowID || '').trim());
             },
 
-            executionPlanVersionByID(planID) {
-                const normalizedID = String(planID || '').trim();
+            workflowVersionByID(workflowID) {
+                const normalizedID = String(workflowID || '').trim();
                 if (!normalizedID) {
                     return null;
                 }
-                if (this.executionPlanVersionCacheHas(normalizedID)) {
-                    return this.executionPlanVersionsByID[normalizedID];
+                if (this.workflowVersionCacheHas(normalizedID)) {
+                    return this.workflowVersionsByID[normalizedID];
                 }
-                const plans = Array.isArray(this.executionPlans) ? this.executionPlans : [];
-                const activeMatch = plans.find((plan) => String(plan && plan.id || '').trim() === normalizedID) || null;
+                const workflows = Array.isArray(this.workflows) ? this.workflows : [];
+                const activeMatch = workflows.find((workflow) => String(workflow && workflow.id || '').trim() === normalizedID) || null;
                 if (activeMatch) {
-                    this.cacheExecutionPlanVersion(activeMatch);
+                    this.cacheWorkflowVersion(activeMatch);
                 }
                 return activeMatch;
             },
 
-            async fetchExecutionPlanVersion(planID) {
-                const normalizedID = String(planID || '').trim();
+            async fetchWorkflowVersion(workflowID) {
+                const normalizedID = String(workflowID || '').trim();
                 if (!normalizedID) {
                     return null;
                 }
-                if (this.executionPlanVersionCacheHas(normalizedID)) {
-                    return this.executionPlanVersionsByID[normalizedID];
+                if (this.workflowVersionCacheHas(normalizedID)) {
+                    return this.workflowVersionsByID[normalizedID];
                 }
-                if (this.executionPlanVersionRequests && this.executionPlanVersionRequests[normalizedID]) {
-                    return this.executionPlanVersionRequests[normalizedID];
+                if (this.workflowVersionRequests && this.workflowVersionRequests[normalizedID]) {
+                    return this.workflowVersionRequests[normalizedID];
                 }
 
 	                const request = (async () => {
@@ -959,9 +959,9 @@
 	                        if (controller) {
 	                            options.signal = controller.signal;
 	                        }
-	                        const res = await fetch('/admin/api/v1/execution-plans/' + encodeURIComponent(normalizedID), options);
+	                        const res = await fetch('/admin/api/v1/workflows/' + encodeURIComponent(normalizedID), options);
 	                        if (res.status === 404) {
-	                            this.cacheMissingExecutionPlanVersion(normalizedID);
+	                            this.cacheMissingWorkflowVersion(normalizedID);
 	                            return null;
                         }
                         if (res.status === 401) {
@@ -979,10 +979,10 @@
 
                         const payload = await res.json();
                         if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-                            this.cacheMissingExecutionPlanVersion(normalizedID);
+                            this.cacheMissingWorkflowVersion(normalizedID);
                             return null;
 	                        }
-	                        return this.cacheExecutionPlanVersion(payload);
+	                        return this.cacheWorkflowVersion(payload);
 	                    } catch (e) {
 	                        if (e && e.name === 'AbortError') {
 	                            return null;
@@ -993,54 +993,54 @@
 	                        if (timeoutID !== null && typeof clearTimeout === 'function') {
 	                            clearTimeout(timeoutID);
 	                        }
-	                        if (this.executionPlanVersionRequests) {
-	                            delete this.executionPlanVersionRequests[normalizedID];
+	                        if (this.workflowVersionRequests) {
+	                            delete this.workflowVersionRequests[normalizedID];
 	                        }
                     }
                 })();
 
-                this.executionPlanVersionRequests = {
-                    ...(this.executionPlanVersionRequests || {}),
+                this.workflowVersionRequests = {
+                    ...(this.workflowVersionRequests || {}),
                     [normalizedID]: request
                 };
                 return request;
             },
 
-            async prefetchAuditExecutionPlans(entries) {
-                const uniquePlanIDs = [...new Set(
+            async prefetchAuditWorkflows(entries) {
+                const uniqueWorkflowIDs = [...new Set(
                     (Array.isArray(entries) ? entries : [])
-                        .map((entry) => String(entry && entry.execution_plan_version_id || '').trim())
+                        .map((entry) => String(entry && entry.workflow_version_id || '').trim())
                         .filter(Boolean)
                 )];
-                if (uniquePlanIDs.length === 0) {
+                if (uniqueWorkflowIDs.length === 0) {
                     return;
                 }
-                await Promise.all(uniquePlanIDs.map((planID) => this.fetchExecutionPlanVersion(planID)));
+                await Promise.all(uniqueWorkflowIDs.map((workflowID) => this.fetchWorkflowVersion(workflowID)));
             },
 
-            auditEntryExecutionPlan(entry) {
-                const planID = String(entry && entry.execution_plan_version_id || '').trim();
-                if (!planID) {
+            auditEntryWorkflow(entry) {
+                const workflowID = String(entry && entry.workflow_version_id || '').trim();
+                if (!workflowID) {
                     return null;
                 }
-                return this.executionPlanVersionByID(planID);
+                return this.workflowVersionByID(workflowID);
             },
 
-            async submitExecutionPlanForm() {
-                if (this.executionPlanSubmitting) {
+            async submitWorkflowForm() {
+                if (this.workflowSubmitting) {
                     return;
                 }
-                this.executionPlanFormError = '';
-                this.executionPlanNotice = '';
+                this.workflowFormError = '';
+                this.workflowNotice = '';
 
-                const payload = this.buildExecutionPlanRequest();
-                const validationError = this.validateExecutionPlanRequest(payload);
+                const payload = this.buildWorkflowRequest();
+                const validationError = this.validateWorkflowRequest(payload);
                 if (validationError) {
-                    this.executionPlanFormError = validationError;
+                    this.workflowFormError = validationError;
                     return;
                 }
 
-                this.executionPlanSubmitting = true;
+                this.workflowSubmitting = true;
                 try {
                     const request = typeof this.requestOptions === 'function'
                         ? this.requestOptions({
@@ -1052,81 +1052,81 @@
                             headers: this.headers(),
                             body: JSON.stringify(payload)
                         };
-                    const res = await fetch('/admin/api/v1/execution-plans', request);
+                    const res = await fetch('/admin/api/v1/workflows', request);
 
                     if (res.status === 401) {
                         this.handleFetchResponse(res, 'create workflow', request);
                         return;
                     }
                     if (!res.ok) {
-                        this.executionPlanFormError = await this.executionPlanResponseMessage(res, 'Unable to create workflow.');
+                        this.workflowFormError = await this.workflowResponseMessage(res, 'Unable to create workflow.');
                         return;
                     }
 
-                    this.executionPlanNotice = 'Workflow created and activated.';
-                    this.closeExecutionPlanForm();
-                    await this.fetchExecutionPlansPage();
+                    this.workflowNotice = 'Workflow created and activated.';
+                    this.closeWorkflowForm();
+                    await this.fetchWorkflowsPage();
                 } catch (e) {
                     console.error('Failed to create workflow:', e);
-                    this.executionPlanFormError = 'Unable to create workflow.';
+                    this.workflowFormError = 'Unable to create workflow.';
                 } finally {
-                    this.executionPlanSubmitting = false;
+                    this.workflowSubmitting = false;
                 }
             },
 
-            // ─── Execution Pipeline helpers ───
+            // ─── Workflow Pipeline helpers ───
 
-            epHasGuardrails(source) {
-                return !!this.executionPlanSourceFeatures(source).guardrails;
+            workflowHasGuardrails(source) {
+                return !!this.workflowSourceFeatures(source).guardrails;
             },
 
-            epHasCache(source) {
-                return !!this.executionPlanSourceFeatures(source).cache;
+            workflowHasCache(source) {
+                return !!this.workflowSourceFeatures(source).cache;
             },
 
-            epHasAudit(source) {
-                return !!this.executionPlanSourceFeatures(source).audit;
+            workflowHasAudit(source) {
+                return !!this.workflowSourceFeatures(source).audit;
             },
 
-            epHasUsage(source) {
-                return !!this.executionPlanSourceFeatures(source).usage;
+            workflowHasUsage(source) {
+                return !!this.workflowSourceFeatures(source).usage;
             },
 
-            epHasAsync(source) {
-                const f = this.executionPlanSourceFeatures(source);
+            workflowHasAsync(source) {
+                const f = this.workflowSourceFeatures(source);
                 return !!(f.audit || f.usage);
             },
 
-            epGuardrailLabel(source) {
-                const count = this.executionPlanSourceGuardrails(source).length;
+            workflowGuardrailLabel(source) {
+                const count = this.workflowSourceGuardrails(source).length;
                 if (count === 0) return '';
                 return count === 1 ? '1 step' : count + ' steps';
             },
 
-            epAiLabel(source, runtime) {
+            workflowAiLabel(source, runtime) {
                 if (runtime && runtime.provider) return runtime.provider;
-                const provider = this.executionPlanScopeProviderValue(source && source.scope);
+                const provider = this.workflowScopeProviderValue(source && source.scope);
                 return provider || 'AI';
             },
 
-	            epAiSublabel(source, runtime) {
+	            workflowAiSublabel(source, runtime) {
 	                if (runtime && runtime.model) return runtime.model;
 	                return source && source.scope && source.scope.scope_model || null;
 	            },
 
-            executionPlanChartWorkflowID(source, entry) {
+            workflowChartWorkflowID(source, entry) {
                 const sourceID = String(source && source.id || '').trim();
                 if (sourceID && sourceID !== DRAFT_WORKFLOW_PREVIEW_ID) {
                     return sourceID;
                 }
-                const entryID = String(entry && entry.execution_plan_version_id || '').trim();
+                const entryID = String(entry && entry.workflow_version_id || '').trim();
                 if (entryID && entryID !== DRAFT_WORKFLOW_PREVIEW_ID) {
                     return entryID;
                 }
                 return null;
             },
 
-            executionPlanWorkflowIDChip(workflowID) {
+            workflowIDChip(workflowID) {
                 const normalizedWorkflowID = String(workflowID || '').trim();
                 return {
                     workflowID: normalizedWorkflowID,
@@ -1163,35 +1163,35 @@
                 };
             },
 
-	            executionPlanChartModel(source, runtime, options) {
+	            workflowChartModel(source, runtime, options) {
 	                const config = options || {};
 	                const features = config.features && typeof config.features === 'object' && !Array.isArray(config.features)
-                    ? this.executionPlanNormalizedFeatures(config.features)
-                    : this.executionPlanSourceFeatures(source);
+                    ? this.workflowNormalizedFeatures(config.features)
+                    : this.workflowSourceFeatures(source);
 	                const forceAudit = !!config.forceAudit;
                     const highlightAsyncPresent = !!config.highlightAsyncPresent;
 	                const showGuardrails = !!features.guardrails;
 	                const showUsage = !!features.usage;
 	                const showAudit = forceAudit || !!features.audit;
 	                const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
-                    const workflowID = this.executionPlanChartWorkflowID(source, config.entry);
+                    const workflowID = this.workflowChartWorkflowID(source, config.entry);
 	                return {
 	                    showGuardrails,
-	                    guardrailLabel: showGuardrails ? this.epGuardrailLabel(source) : '',
-	                    showCache: !!config.forceCache || !!features.cache || this.epRuntimeHasCache(runtime),
-                    cacheNodeClass: this.epCacheNodeClass(runtime),
-                    cacheConnClass: this.epCacheConnClass(runtime),
-                    cacheStatusLabel: this.epCacheStatusLabel(runtime),
-                    aiLabel: this.epAiLabel(source, runtime),
-                    aiSublabel: this.epAiSublabel(source, runtime),
-	                    aiConnClass: this.epAiConnClass(runtime),
-	                    aiNodeClass: this.epAiNodeClass(runtime),
-	                    responseConnClass: this.epResponseConnClass(runtime),
-	                    responseNodeClass: this.epResponseNodeClass(runtime),
-				    authNodeClass: this.epAuthNodeClass(runtime),
-				    authNodeSublabel: this.epAuthNodeSublabel(runtime),
-                        usageNodeClass: this.epAsyncNodeClass(showUsage, highlightAsyncPresent),
-                        auditNodeClass: this.epAsyncNodeClass(showAudit, highlightAsyncPresent),
+	                    guardrailLabel: showGuardrails ? this.workflowGuardrailLabel(source) : '',
+	                    showCache: !!config.forceCache || !!features.cache || this.workflowRuntimeHasCache(runtime),
+                    cacheNodeClass: this.workflowCacheNodeClass(runtime),
+                    cacheConnClass: this.workflowCacheConnClass(runtime),
+                    cacheStatusLabel: this.workflowCacheStatusLabel(runtime),
+                    aiLabel: this.workflowAiLabel(source, runtime),
+                    aiSublabel: this.workflowAiSublabel(source, runtime),
+	                    aiConnClass: this.workflowAiConnClass(runtime),
+	                    aiNodeClass: this.workflowAiNodeClass(runtime),
+	                    responseConnClass: this.workflowResponseConnClass(runtime),
+	                    responseNodeClass: this.workflowResponseNodeClass(runtime),
+				    authNodeClass: this.workflowAuthNodeClass(runtime),
+				    authNodeSublabel: this.workflowAuthNodeSublabel(runtime),
+                        usageNodeClass: this.workflowAsyncNodeClass(showUsage, highlightAsyncPresent),
+                        auditNodeClass: this.workflowAsyncNodeClass(showAudit, highlightAsyncPresent),
 	                    showAsync,
 	                    showUsage,
 	                    showAudit,
@@ -1199,15 +1199,15 @@
 	                };
 	            },
 
-            executionPlanWorkflowChart(source) {
-                return this.executionPlanChartModel(source, null, { forceCache: false });
+            workflowChart(source) {
+                return this.workflowChartModel(source, null, { forceCache: false });
             },
 
-            executionPlanAuditChart(entry) {
-                const source = this.auditEntryExecutionPlan(entry);
-                const runtime = this.epRuntimeFromEntry(entry);
-                const features = this.executionPlanEntryFeatures(entry) || this.executionPlanSourceFeatures(source);
-                return this.executionPlanChartModel(source, runtime, {
+            workflowAuditChart(entry) {
+                const source = this.auditEntryWorkflow(entry);
+                const runtime = this.workflowRuntimeFromEntry(entry);
+                const features = this.workflowEntryFeatures(entry) || this.workflowSourceFeatures(source);
+                return this.workflowChartModel(source, runtime, {
                     entry,
                     features,
                     forceAudit: true,
@@ -1225,68 +1225,68 @@
             //   responseSuccess: bool,
             //   aiSuccess: bool
             // }
-            epRuntimeHasCache(runtime) {
+            workflowRuntimeHasCache(runtime) {
                 return !!(runtime && runtime.cacheHit);
             },
 
-            epShowCacheStep(source, runtime) {
-                return this.epHasCache(source) || this.epRuntimeHasCache(runtime);
+            workflowShowCacheStep(source, runtime) {
+                return this.workflowHasCache(source) || this.workflowRuntimeHasCache(runtime);
             },
 
-            epCacheNodeClass(runtime) {
-                return runtime && runtime.cacheHit ? 'ep-node-success' : '';
+            workflowCacheNodeClass(runtime) {
+                return runtime && runtime.cacheHit ? 'workflow-node-success' : '';
             },
 
-            epCacheConnClass(runtime) {
-                return runtime && runtime.cacheHit ? 'ep-conn-hit' : '';
+            workflowCacheConnClass(runtime) {
+                return runtime && runtime.cacheHit ? 'workflow-conn-hit' : '';
             },
 
-            epCacheStatusLabel(runtime) {
+            workflowCacheStatusLabel(runtime) {
                 if (!runtime || !runtime.cacheHit) return null;
                 if (runtime.cacheType === 'semantic') return 'Hit (Semantic)';
                 return 'Hit (Exact)';
             },
 
-            epAiConnClass(runtime) {
+            workflowAiConnClass(runtime) {
                 if (!runtime) return '';
-                if (runtime.cacheHit) return 'ep-conn-dim';
+                if (runtime.cacheHit) return 'workflow-conn-dim';
                 return '';
             },
 
-            epAiNodeClass(runtime) {
+            workflowAiNodeClass(runtime) {
                 if (!runtime) return '';
-                if (runtime.cacheHit) return 'ep-node-skipped';
-                return runtime.aiSuccess ? 'ep-node-success' : '';
+                if (runtime.cacheHit) return 'workflow-node-skipped';
+                return runtime.aiSuccess ? 'workflow-node-success' : '';
             },
 
-            epResponseConnClass(runtime) {
+            workflowResponseConnClass(runtime) {
                 if (!runtime) return '';
-                if (runtime.cacheHit) return 'ep-conn-dim';
+                if (runtime.cacheHit) return 'workflow-conn-dim';
                 return '';
             },
 
-            epResponseNodeClass(runtime) {
+            workflowResponseNodeClass(runtime) {
                 if (!runtime) return '';
-                return runtime.responseSuccess ? 'ep-node-success' : '';
+                return runtime.responseSuccess ? 'workflow-node-success' : '';
             },
 
-            epAuthNodeClass(runtime) {
+            workflowAuthNodeClass(runtime) {
                 if (!runtime) return '';
-                if (runtime.authError) return 'ep-node-error';
-                if (runtime.authMethod === 'api_key' || runtime.authMethod === 'master_key') return 'ep-node-success';
+                if (runtime.authError) return 'workflow-node-error';
+                if (runtime.authMethod === 'api_key' || runtime.authMethod === 'master_key') return 'workflow-node-success';
                 return '';
             },
 
-            epAuthNodeSublabel(runtime) {
+            workflowAuthNodeSublabel(runtime) {
                 if (!runtime || !runtime.authMethod) return null;
                 return runtime.authMethod;
             },
 
-            epAsyncNodeClass(visible, highlightPresent) {
-                return visible && highlightPresent ? 'ep-node-success' : '';
+            workflowAsyncNodeClass(visible, highlightPresent) {
+                return visible && highlightPresent ? 'workflow-node-success' : '';
             },
 
-            epRuntimeFromEntry(entry) {
+            workflowRuntimeFromEntry(entry) {
                 if (!entry) return null;
                 const normalizedCacheType = (() => {
                     const value = String(entry.cache_type || '').trim().toLowerCase();
@@ -1321,21 +1321,21 @@
                 };
             },
 
-            async deactivateExecutionPlan(plan) {
-                const planID = String(plan && plan.id || '').trim();
-                if (!planID || this.executionPlanDeactivatingID || !this.canDeactivateExecutionPlan(plan)) {
+            async deactivateWorkflow(workflow) {
+                const workflowID = String(workflow && workflow.id || '').trim();
+                if (!workflowID || this.workflowDeactivatingID || !this.canDeactivateWorkflow(workflow)) {
                     return;
                 }
-                const workflowName = this.workflowDisplayName(plan);
+                const workflowName = this.workflowDisplayName(workflow);
                 if (typeof global.confirm === 'function' && !global.confirm(
                     'Deactivate workflow "' + workflowName + '"? Requests will fall back to the next active workflow for this scope.'
                 )) {
                     return;
                 }
 
-                this.executionPlanError = '';
-                this.executionPlanNotice = '';
-                this.executionPlanDeactivatingID = planID;
+                this.workflowError = '';
+                this.workflowNotice = '';
+                this.workflowDeactivatingID = workflowID;
                 try {
                     const request = typeof this.requestOptions === 'function'
                         ? this.requestOptions({
@@ -1345,28 +1345,28 @@
                             method: 'POST',
                             headers: this.headers()
                         };
-                    const res = await fetch('/admin/api/v1/execution-plans/' + encodeURIComponent(planID) + '/deactivate', request);
+                    const res = await fetch('/admin/api/v1/workflows/' + encodeURIComponent(workflowID) + '/deactivate', request);
 
                     if (res.status === 401) {
                         this.handleFetchResponse(res, 'deactivate workflow', request);
                         return;
                     }
                     if (!res.ok) {
-                        this.executionPlanError = await this.executionPlanResponseMessage(res, 'Unable to deactivate workflow.');
+                        this.workflowError = await this.workflowResponseMessage(res, 'Unable to deactivate workflow.');
                         return;
                     }
 
-                    this.executionPlanNotice = 'Workflow deactivated.';
-                    await this.fetchExecutionPlansPage();
+                    this.workflowNotice = 'Workflow deactivated.';
+                    await this.fetchWorkflowsPage();
                 } catch (e) {
                     console.error('Failed to deactivate workflow:', e);
-                    this.executionPlanError = 'Unable to deactivate workflow.';
+                    this.workflowError = 'Unable to deactivate workflow.';
                 } finally {
-                    this.executionPlanDeactivatingID = '';
+                    this.workflowDeactivatingID = '';
                 }
             }
         };
     }
 
-    global.dashboardExecutionPlansModule = dashboardExecutionPlansModule;
+    global.dashboardWorkflowsModule = dashboardWorkflowsModule;
 })(window);

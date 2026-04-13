@@ -1,4 +1,4 @@
-package executionplans
+package workflows
 
 import (
 	"context"
@@ -14,22 +14,22 @@ import (
 )
 
 type mongoVersionDocument struct {
-	ID            string    `bson:"_id"`
-	ScopeProvider string    `bson:"scope_provider,omitempty"`
-	ScopeModel    string    `bson:"scope_model,omitempty"`
-	ScopeUserPath string    `bson:"scope_user_path,omitempty"`
-	ScopeKey      string    `bson:"scope_key"`
-	Version       int       `bson:"version"`
-	Active        bool      `bson:"active"`
-	Managed       bool      `bson:"managed_default,omitempty"`
-	Name          string    `bson:"name"`
-	Description   string    `bson:"description,omitempty"`
-	PlanPayload   Payload   `bson:"plan_payload"`
-	PlanHash      string    `bson:"plan_hash"`
-	CreatedAt     time.Time `bson:"created_at"`
+	ID              string    `bson:"_id"`
+	ScopeProvider   string    `bson:"scope_provider,omitempty"`
+	ScopeModel      string    `bson:"scope_model,omitempty"`
+	ScopeUserPath   string    `bson:"scope_user_path,omitempty"`
+	ScopeKey        string    `bson:"scope_key"`
+	Version         int       `bson:"version"`
+	Active          bool      `bson:"active"`
+	Managed         bool      `bson:"managed_default,omitempty"`
+	Name            string    `bson:"name"`
+	Description     string    `bson:"description,omitempty"`
+	WorkflowPayload Payload   `bson:"workflow_payload"`
+	WorkflowHash    string    `bson:"workflow_hash"`
+	CreatedAt       time.Time `bson:"created_at"`
 }
 
-// MongoDBStore stores immutable execution-plan versions in MongoDB.
+// MongoDBStore stores immutable workflow versions in MongoDB.
 type MongoDBStore struct {
 	collection *mongo.Collection
 }
@@ -40,7 +40,7 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 		return nil, fmt.Errorf("database is required")
 	}
 
-	collection := database.Collection("execution_plan_versions")
+	collection := database.Collection("workflow_versions")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -58,7 +58,7 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 		},
 	}
 	if _, err := collection.Indexes().CreateMany(ctx, indexes); err != nil {
-		return nil, fmt.Errorf("create execution plan indexes: %w", err)
+		return nil, fmt.Errorf("create workflow indexes: %w", err)
 	}
 	if _, err := collection.UpdateMany(ctx,
 		bson.D{
@@ -69,7 +69,7 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 		},
 		bson.D{{Key: "$set", Value: bson.D{{Key: "managed_default", Value: true}}}},
 	); err != nil {
-		return nil, fmt.Errorf("backfill managed execution plan defaults: %w", err)
+		return nil, fmt.Errorf("backfill managed workflow defaults: %w", err)
 	}
 
 	return &MongoDBStore{collection: collection}, nil
@@ -81,7 +81,7 @@ func (s *MongoDBStore) ListActive(ctx context.Context) ([]Version, error) {
 		options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}, {Key: "_id", Value: -1}}),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("list active execution plans: %w", err)
+		return nil, fmt.Errorf("list active workflows: %w", err)
 	}
 	defer cursor.Close(ctx)
 
@@ -89,12 +89,12 @@ func (s *MongoDBStore) ListActive(ctx context.Context) ([]Version, error) {
 	for cursor.Next(ctx) {
 		var doc mongoVersionDocument
 		if err := cursor.Decode(&doc); err != nil {
-			return nil, fmt.Errorf("decode execution plan: %w", err)
+			return nil, fmt.Errorf("decode workflow: %w", err)
 		}
 		versions = append(versions, versionFromMongo(doc))
 	}
 	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("iterate execution plans: %w", err)
+		return nil, fmt.Errorf("iterate workflows: %w", err)
 	}
 	return versions, nil
 }
@@ -105,21 +105,21 @@ func (s *MongoDBStore) Get(ctx context.Context, id string) (*Version, error) {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("get execution plan: %w", err)
+		return nil, fmt.Errorf("get workflow: %w", err)
 	}
 	version := versionFromMongo(doc)
 	return &version, nil
 }
 
 func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version, error) {
-	input, scopeKey, planHash, err := normalizeCreateInput(input)
+	input, scopeKey, workflowHash, err := normalizeCreateInput(input)
 	if err != nil {
 		return nil, err
 	}
 
 	session, err := s.collection.Database().Client().StartSession()
 	if err != nil {
-		return nil, fmt.Errorf("start execution plan session: %w", err)
+		return nil, fmt.Errorf("start workflow session: %w", err)
 	}
 	defer session.EndSession(ctx)
 
@@ -130,7 +130,7 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 		findOpts := options.FindOne().SetSort(bson.D{{Key: "version", Value: -1}})
 		err := s.collection.FindOne(sessionCtx, bson.D{{Key: "scope_key", Value: scopeKey}}, findOpts).Decode(&latest)
 		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, fmt.Errorf("load latest execution plan version: %w", err)
+			return nil, fmt.Errorf("load latest workflow version: %w", err)
 		}
 
 		if input.Activate {
@@ -138,30 +138,30 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 				bson.D{{Key: "scope_key", Value: scopeKey}, {Key: "active", Value: true}},
 				bson.D{{Key: "$set", Value: bson.D{{Key: "active", Value: false}}}},
 			); err != nil {
-				return nil, fmt.Errorf("deactivate current execution plan version: %w", err)
+				return nil, fmt.Errorf("deactivate current workflow version: %w", err)
 			}
 		}
 
 		now := time.Now().UTC()
 		version := &Version{
-			ID:          uuid.NewString(),
-			Scope:       input.Scope,
-			ScopeKey:    scopeKey,
-			Version:     latest.Version + 1,
-			Active:      input.Activate,
-			Managed:     input.Managed,
-			Name:        input.Name,
-			Description: input.Description,
-			Payload:     input.Payload,
-			PlanHash:    planHash,
-			CreatedAt:   now,
+			ID:           uuid.NewString(),
+			Scope:        input.Scope,
+			ScopeKey:     scopeKey,
+			Version:      latest.Version + 1,
+			Active:       input.Activate,
+			Managed:      input.Managed,
+			Name:         input.Name,
+			Description:  input.Description,
+			Payload:      input.Payload,
+			WorkflowHash: workflowHash,
+			CreatedAt:    now,
 		}
 
 		if err := s.insertVersion(sessionCtx, version); err != nil {
 			if mongo.IsDuplicateKeyError(err) {
-				return nil, fmt.Errorf("insert execution plan version: duplicate key: %w", err)
+				return nil, fmt.Errorf("insert workflow version: duplicate key: %w", err)
 			}
-			return nil, fmt.Errorf("insert execution plan version: %w", err)
+			return nil, fmt.Errorf("insert workflow version: %w", err)
 		}
 
 		return version, nil
@@ -172,15 +172,15 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 
 	version, ok := result.(*Version)
 	if !ok {
-		return nil, fmt.Errorf("unexpected execution plan transaction result: %T", result)
+		return nil, fmt.Errorf("unexpected workflow transaction result: %T", result)
 	}
 	return version, nil
 }
 
-func (s *MongoDBStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, planHash string) (*Version, error) {
+func (s *MongoDBStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error) {
 	var lastErr error
 	for range 5 {
-		version, err := s.ensureManagedDefaultGlobal(ctx, input, planHash)
+		version, err := s.ensureManagedDefaultGlobal(ctx, input, workflowHash)
 		if err == nil {
 			return version, nil
 		}
@@ -189,7 +189,7 @@ func (s *MongoDBStore) EnsureManagedDefaultGlobal(ctx context.Context, input Cre
 		}
 		lastErr = err
 	}
-	return nil, fmt.Errorf("ensure managed default execution plan after concurrent retries: %w", lastErr)
+	return nil, fmt.Errorf("ensure managed default workflow after concurrent retries: %w", lastErr)
 }
 
 func (s *MongoDBStore) Deactivate(ctx context.Context, id string) error {
@@ -198,7 +198,7 @@ func (s *MongoDBStore) Deactivate(ctx context.Context, id string) error {
 		bson.D{{Key: "$set", Value: bson.D{{Key: "active", Value: false}}}},
 	)
 	if err != nil {
-		return fmt.Errorf("deactivate execution plan version: %w", err)
+		return fmt.Errorf("deactivate workflow version: %w", err)
 	}
 	if result.MatchedCount == 0 {
 		return ErrNotFound
@@ -210,10 +210,10 @@ func (s *MongoDBStore) Close() error {
 	return nil
 }
 
-func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, input CreateInput, planHash string) (*Version, error) {
+func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error) {
 	session, err := s.collection.Database().Client().StartSession()
 	if err != nil {
-		return nil, fmt.Errorf("start execution plan session: %w", err)
+		return nil, fmt.Errorf("start workflow session: %w", err)
 	}
 	defer session.EndSession(ctx)
 
@@ -228,7 +228,7 @@ func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, input Cre
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				hasActive = false
 			} else {
-				return nil, fmt.Errorf("load active global execution plan: %w", err)
+				return nil, fmt.Errorf("load active global workflow: %w", err)
 			}
 		}
 
@@ -238,7 +238,7 @@ func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, input Cre
 			}
 			if strings.TrimSpace(activeDoc.Name) == input.Name &&
 				strings.TrimSpace(activeDoc.Description) == input.Description &&
-				strings.TrimSpace(activeDoc.PlanHash) == planHash {
+				strings.TrimSpace(activeDoc.WorkflowHash) == workflowHash {
 				return nil, nil
 			}
 		}
@@ -249,7 +249,7 @@ func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, input Cre
 		findOpts := options.FindOne().SetSort(bson.D{{Key: "version", Value: -1}})
 		err = s.collection.FindOne(sessionCtx, bson.D{{Key: "scope_key", Value: "global"}}, findOpts).Decode(&latest)
 		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, fmt.Errorf("load latest execution plan version: %w", err)
+			return nil, fmt.Errorf("load latest workflow version: %w", err)
 		}
 
 		if hasActive {
@@ -257,30 +257,30 @@ func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, input Cre
 				bson.D{{Key: "_id", Value: activeDoc.ID}, {Key: "active", Value: true}},
 				bson.D{{Key: "$set", Value: bson.D{{Key: "active", Value: false}}}},
 			); err != nil {
-				return nil, fmt.Errorf("deactivate current execution plan version: %w", err)
+				return nil, fmt.Errorf("deactivate current workflow version: %w", err)
 			}
 		}
 
 		now := time.Now().UTC()
 		version := &Version{
-			ID:          uuid.NewString(),
-			Scope:       input.Scope,
-			ScopeKey:    "global",
-			Version:     latest.Version + 1,
-			Active:      true,
-			Managed:     true,
-			Name:        input.Name,
-			Description: input.Description,
-			Payload:     input.Payload,
-			PlanHash:    planHash,
-			CreatedAt:   now,
+			ID:           uuid.NewString(),
+			Scope:        input.Scope,
+			ScopeKey:     "global",
+			Version:      latest.Version + 1,
+			Active:       true,
+			Managed:      true,
+			Name:         input.Name,
+			Description:  input.Description,
+			Payload:      input.Payload,
+			WorkflowHash: workflowHash,
+			CreatedAt:    now,
 		}
 
 		if err := s.insertVersion(sessionCtx, version); err != nil {
 			if mongo.IsDuplicateKeyError(err) {
-				return nil, fmt.Errorf("insert execution plan version: duplicate key: %w", err)
+				return nil, fmt.Errorf("insert workflow version: duplicate key: %w", err)
 			}
-			return nil, fmt.Errorf("insert execution plan version: %w", err)
+			return nil, fmt.Errorf("insert workflow version: %w", err)
 		}
 
 		return version, nil
@@ -293,7 +293,7 @@ func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, input Cre
 	}
 	version, ok := result.(*Version)
 	if !ok {
-		return nil, fmt.Errorf("unexpected execution plan transaction result: %T", result)
+		return nil, fmt.Errorf("unexpected workflow transaction result: %T", result)
 	}
 	return version, nil
 }
@@ -303,19 +303,19 @@ func (s *MongoDBStore) insertVersion(ctx context.Context, version *Version) erro
 		return fmt.Errorf("version is required")
 	}
 	_, err := s.collection.InsertOne(ctx, mongoVersionDocument{
-		ID:            version.ID,
-		ScopeProvider: version.Scope.Provider,
-		ScopeModel:    version.Scope.Model,
-		ScopeUserPath: version.Scope.UserPath,
-		ScopeKey:      version.ScopeKey,
-		Version:       version.Version,
-		Active:        version.Active,
-		Managed:       version.Managed,
-		Name:          version.Name,
-		Description:   version.Description,
-		PlanPayload:   version.Payload,
-		PlanHash:      version.PlanHash,
-		CreatedAt:     version.CreatedAt,
+		ID:              version.ID,
+		ScopeProvider:   version.Scope.Provider,
+		ScopeModel:      version.Scope.Model,
+		ScopeUserPath:   version.Scope.UserPath,
+		ScopeKey:        version.ScopeKey,
+		Version:         version.Version,
+		Active:          version.Active,
+		Managed:         version.Managed,
+		Name:            version.Name,
+		Description:     version.Description,
+		WorkflowPayload: version.Payload,
+		WorkflowHash:    version.WorkflowHash,
+		CreatedAt:       version.CreatedAt,
 	})
 	return err
 }
@@ -328,14 +328,14 @@ func versionFromMongo(doc mongoVersionDocument) Version {
 			Model:    doc.ScopeModel,
 			UserPath: doc.ScopeUserPath,
 		},
-		ScopeKey:    doc.ScopeKey,
-		Version:     doc.Version,
-		Active:      doc.Active,
-		Managed:     doc.Managed,
-		Name:        doc.Name,
-		Description: doc.Description,
-		Payload:     doc.PlanPayload,
-		PlanHash:    doc.PlanHash,
-		CreatedAt:   doc.CreatedAt.UTC(),
+		ScopeKey:     doc.ScopeKey,
+		Version:      doc.Version,
+		Active:       doc.Active,
+		Managed:      doc.Managed,
+		Name:         doc.Name,
+		Description:  doc.Description,
+		Payload:      doc.WorkflowPayload,
+		WorkflowHash: doc.WorkflowHash,
+		CreatedAt:    doc.CreatedAt.UTC(),
 	}
 }

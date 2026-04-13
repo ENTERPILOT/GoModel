@@ -1,4 +1,4 @@
-package executionplans
+package workflows
 
 import (
 	"errors"
@@ -10,33 +10,33 @@ import (
 
 type compiler struct {
 	registry    guardrails.Catalog
-	featureCaps core.ExecutionFeatures
+	featureCaps core.WorkflowFeatures
 }
 
-// NewCompiler creates the default execution-plan compiler for the v1 payload.
+// NewCompiler creates the default workflow compiler for the v1 payload.
 func NewCompiler(registry guardrails.Catalog) Compiler {
-	return NewCompilerWithFeatureCaps(registry, core.DefaultExecutionFeatures())
+	return NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures())
 }
 
-// NewCompilerWithFeatureCaps creates the default execution-plan compiler for the
+// NewCompilerWithFeatureCaps creates the default workflow compiler for the
 // v1 payload with process-level feature caps applied at compile time.
-func NewCompilerWithFeatureCaps(registry guardrails.Catalog, featureCaps core.ExecutionFeatures) Compiler {
+func NewCompilerWithFeatureCaps(registry guardrails.Catalog, featureCaps core.WorkflowFeatures) Compiler {
 	return &compiler{
 		registry:    registry,
 		featureCaps: featureCaps,
 	}
 }
 
-func (c *compiler) Compile(version Version) (*CompiledPlan, error) {
+func (c *compiler) Compile(version Version) (*CompiledWorkflow, error) {
 	features := version.Payload.Features.runtimeFeatures().ApplyUpperBound(c.featureCaps)
-	policy := &core.ResolvedExecutionPolicy{
+	policy := &core.ResolvedWorkflowPolicy{
 		VersionID:      version.ID,
 		Version:        version.Version,
 		ScopeProvider:  version.Scope.Provider,
 		ScopeModel:     version.Scope.Model,
 		ScopeUserPath:  version.Scope.UserPath,
 		Name:           version.Name,
-		PlanHash:       version.PlanHash,
+		WorkflowHash:   version.WorkflowHash,
 		Features:       features,
 		GuardrailsHash: "",
 	}
@@ -58,7 +58,7 @@ func (c *compiler) Compile(version Version) (*CompiledPlan, error) {
 		}
 	}
 
-	return &CompiledPlan{
+	return &CompiledWorkflow{
 		Version:  version,
 		Policy:   policy,
 		Pipeline: pipeline,

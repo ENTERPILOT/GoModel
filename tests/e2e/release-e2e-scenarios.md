@@ -864,10 +864,10 @@ jq -e --arg name "$QA_AUTH_KEY_NAME" --arg user_path "$QA_USER_PATH" '
 Creates a scoped workflow for `openai/gpt-4.1-nano` that disables cache for the managed-key user path.
 
 ```bash
-curl -fsS -X POST "$AUTH_BASE_URL/admin/api/v1/execution-plans" \
+curl -fsS -X POST "$AUTH_BASE_URL/admin/api/v1/workflows" \
   -H "$ADMIN_AUTH_HEADER" \
   -H 'Content-Type: application/json' \
-  -d "{\"scope_provider\":\"openai\",\"scope_model\":\"gpt-4.1-nano\",\"scope_user_path\":\"$QA_USER_PATH\",\"name\":\"$QA_WORKFLOW_NAME\",\"description\":\"Disable cache for managed-key release e2e scope\",\"plan_payload\":{\"schema_version\":1,\"features\":{\"cache\":false,\"audit\":true,\"usage\":true,\"guardrails\":false,\"fallback\":false},\"guardrails\":[]}}" \
+  -d "{\"scope_provider\":\"openai\",\"scope_model\":\"gpt-4.1-nano\",\"scope_user_path\":\"$QA_USER_PATH\",\"name\":\"$QA_WORKFLOW_NAME\",\"description\":\"Disable cache for managed-key release e2e scope\",\"workflow_payload\":{\"schema_version\":1,\"features\":{\"cache\":false,\"audit\":true,\"usage\":true,\"guardrails\":false,\"fallback\":false},\"guardrails\":[]}}" \
   > "$QA_WORKFLOW_JSON"
 if ! jq -er '.id | select(type == "string" and length > 0)' "$QA_WORKFLOW_JSON" > "$QA_WORKFLOW_ID_FILE"; then
   echo "error: workflow creation failed or did not return a usable workflow id" >&2
@@ -877,8 +877,8 @@ fi
 require_release_artifact "$QA_WORKFLOW_JSON"
 require_release_artifact "$QA_WORKFLOW_ID_FILE"
 jq -e --arg user_path "$QA_USER_PATH" '
-    {id,name,scope,plan_payload}
-    | select(.id != null and .scope.scope_user_path == $user_path and .plan_payload.features.cache == false)
+    {id,name,scope,workflow_payload}
+    | select(.id != null and .scope.scope_user_path == $user_path and .workflow_payload.features.cache == false)
   ' "$QA_WORKFLOW_JSON"
 ```
 
@@ -890,10 +890,10 @@ Reads the created workflow back and confirms the normalized scope and effective 
 require_release_artifact "$QA_WORKFLOW_ID_FILE"
 WORKFLOW_ID=$(<"$QA_WORKFLOW_ID_FILE")
 WORKFLOW_DETAIL_FILE="$QA_RUN_DIR/s67.workflow-detail.json"
-curl -fsS "$AUTH_BASE_URL/admin/api/v1/execution-plans/$WORKFLOW_ID" \
+curl -fsS "$AUTH_BASE_URL/admin/api/v1/workflows/$WORKFLOW_ID" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$WORKFLOW_DETAIL_FILE"
-jq '{id,name,scope,plan_payload,effective_features}' "$WORKFLOW_DETAIL_FILE"
+jq '{id,name,scope,workflow_payload,effective_features}' "$WORKFLOW_DETAIL_FILE"
 jq -e --arg workflow_id "$WORKFLOW_ID" --arg user_path "$QA_USER_PATH" '
     .id == $workflow_id
     and .scope.scope_user_path == $user_path
@@ -966,7 +966,7 @@ AUDIT_JSON_FILE="$QA_RUN_DIR/s70.audit.json"
 curl -fsS "$AUTH_BASE_URL/admin/api/v1/audit/log?search=$QA_AUTH_REQ2&limit=5" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$AUDIT_JSON_FILE"
-jq --arg request_id "$QA_AUTH_REQ2" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,status_code,auth_method,auth_key_id,user_path,execution_plan_version_id,cache_type,answer:.data.response_body.choices[0].message.content}))}' "$AUDIT_JSON_FILE"
+jq --arg request_id "$QA_AUTH_REQ2" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,status_code,auth_method,auth_key_id,user_path,workflow_version_id,cache_type,answer:.data.response_body.choices[0].message.content}))}' "$AUDIT_JSON_FILE"
 jq -e \
     --arg request_id "$QA_AUTH_REQ2" \
     --arg auth_key_id "$AUTH_KEY_ID" \
@@ -978,7 +978,7 @@ jq -e \
       and .auth_method == "api_key"
       and .auth_key_id == $auth_key_id
       and .user_path == $user_path
-      and .execution_plan_version_id == $workflow_id
+      and .workflow_version_id == $workflow_id
       and .cache_type == null
       and .data.response_body.choices[0].message.content == "QA_AUTH_CACHE_OFF_OK"
     )
@@ -1080,10 +1080,10 @@ Verifies user-path validation for workflow creation.
 ```bash
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s76.headers.XXXXXX")
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s76.body.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X POST "$AUTH_BASE_URL/admin/api/v1/execution-plans" \
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X POST "$AUTH_BASE_URL/admin/api/v1/workflows" \
   -H "$ADMIN_AUTH_HEADER" \
   -H 'Content-Type: application/json' \
-  -d '{"scope_provider":"openai","scope_model":"gpt-4.1-nano","scope_user_path":"/team/../alpha","name":"qa-invalid-workflow-path","plan_payload":{"schema_version":1,"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},"guardrails":[]}}'
+  -d '{"scope_provider":"openai","scope_model":"gpt-4.1-nano","scope_user_path":"/team/../alpha","name":"qa-invalid-workflow-path","workflow_payload":{"schema_version":1,"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},"guardrails":[]}}'
 sed -n '1,24p' "$HEADERS_FILE"
 sed -n '1,24p' "$BODY_FILE"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
@@ -1140,7 +1140,7 @@ Deactivates the workflow created for the scoped managed-key release run.
 require_release_artifact "$QA_WORKFLOW_ID_FILE"
 WORKFLOW_ID=$(<"$QA_WORKFLOW_ID_FILE")
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s79.headers.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o /dev/null -X POST "$AUTH_BASE_URL/admin/api/v1/execution-plans/$WORKFLOW_ID/deactivate" \
+curl -sS -D "$HEADERS_FILE" -o /dev/null -X POST "$AUTH_BASE_URL/admin/api/v1/workflows/$WORKFLOW_ID/deactivate" \
   -H "$ADMIN_AUTH_HEADER"
 sed -n '1,20p' "$HEADERS_FILE"
 grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"

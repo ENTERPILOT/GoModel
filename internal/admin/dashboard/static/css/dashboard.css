@@ -1826,34 +1826,34 @@ td.col-price {
     background: color-mix(in srgb, var(--danger) 10%, var(--bg-surface-hover));
 }
 
-/* Execution Plans */
-.execution-plan-page-note {
+/* Workflows */
+.workflow-page-note {
     margin-top: 6px;
     color: var(--text-muted);
     font-size: 14px;
 }
 
-.execution-plans-layout {
+.workflows-layout {
     display: flex;
     flex-direction: column;
     gap: 16px;
 }
 
-.execution-plans-layout.is-editor-open {
+.workflows-layout.is-editor-open {
     align-items: stretch;
 }
 
-.execution-plans-list {
+.workflows-list {
     min-width: 0;
 }
 
-.execution-plan-card-grid {
+.workflow-card-grid {
     display: grid;
     grid-template-columns: 1fr;
     gap: 16px;
 }
 
-.execution-plan-card {
+.workflow-card {
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -1863,69 +1863,69 @@ td.col-price {
     padding: 20px;
 }
 
-.execution-plan-card-head,
-.execution-plan-section-head {
+.workflow-card-head,
+.workflow-section-head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
 }
 
-.execution-plan-card-footer {
+.workflow-card-footer {
     display: flex;
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
 }
 
-.execution-plan-card-head h3,
-.execution-plan-section-head h4 {
+.workflow-card-head h3,
+.workflow-section-head h4 {
     font-size: 18px;
     font-weight: 700;
 }
 
-.execution-plan-section-head h4 {
+.workflow-section-head h4 {
     font-size: 14px;
 }
 
-.execution-plan-card-badges,
-.execution-plan-card-meta {
+.workflow-card-badges,
+.workflow-card-meta {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     justify-content: flex-end;
 }
 
-.execution-plan-card-meta-footer {
+.workflow-card-meta-footer {
     justify-content: flex-start;
 }
 
-.execution-plan-card-footer .alias-actions-cell {
+.workflow-card-footer .alias-actions-cell {
     align-self: flex-end;
 }
 
-.execution-plan-card-description {
+.workflow-card-description {
     color: var(--text-muted);
     font-size: 14px;
 }
 
-.execution-plan-guardrails,
-.execution-plan-preview,
-.execution-plan-guardrail-editor {
+.workflow-guardrails,
+.workflow-preview,
+.workflow-guardrail-editor {
     display: flex;
     flex-direction: column;
     gap: 12px;
 }
 
-.execution-plan-guardrail-list,
-.execution-plan-guardrail-list-editor {
+.workflow-guardrail-list,
+.workflow-guardrail-list-editor {
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
 
-.execution-plan-guardrail-item,
-.execution-plan-guardrail-row {
+.workflow-guardrail-item,
+.workflow-guardrail-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1936,31 +1936,40 @@ td.col-price {
     background: var(--bg);
 }
 
-.execution-plan-guardrail-row {
+.workflow-guardrail-row {
     justify-content: stretch;
 }
 
-.execution-plan-editor {
+.workflow-guardrail-field {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.workflow-guardrail-step-field {
+    flex: 0 0 120px;
+}
+
+.workflow-editor {
     margin-bottom: 0;
     width: 100%;
 }
 
-.execution-plan-input {
+.workflow-input {
     max-width: none;
     width: 100%;
 }
 
-.execution-plan-step-input {
+.workflow-step-input {
     max-width: 120px;
 }
 
-.execution-plan-feature-toggles {
+.workflow-feature-toggles {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
 }
 
-.execution-plan-feature-toggle {
+.workflow-feature-toggle {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -1972,7 +1981,7 @@ td.col-price {
     font-weight: 500;
 }
 
-.execution-plan-feature-toggle input {
+.workflow-feature-toggle input {
     width: 16px;
     height: 16px;
 }
@@ -2804,14 +2813,14 @@ body.conversation-drawer-open {
     height: 16px;
 }
 
-.execution-plan-submit-btn {
+.workflow-submit-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
 }
 
-.execution-plan-submit-icon {
+.workflow-submit-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2820,7 +2829,7 @@ body.conversation-drawer-open {
     flex: 0 0 auto;
 }
 
-.execution-plan-submit-icon svg {
+.workflow-submit-icon svg {
     width: 16px;
     height: 16px;
     fill: none;
@@ -3420,22 +3429,27 @@ body.conversation-drawer-open {
     .alias-form-grid {
         grid-template-columns: 1fr;
     }
-    .execution-plan-card-grid,
-    .execution-plan-feature-toggles {
+    .workflow-card-grid,
+    .workflow-feature-toggles {
         grid-template-columns: 1fr;
     }
-    .execution-plan-card-head,
-    .execution-plan-card-footer,
-    .execution-plan-section-head,
-    .execution-plan-card-badges,
-    .execution-plan-card-meta,
-    .execution-plan-guardrail-item,
-    .execution-plan-guardrail-row {
+    .workflow-card-head,
+    .workflow-card-footer,
+    .workflow-section-head,
+    .workflow-card-badges,
+    .workflow-card-meta,
+    .workflow-guardrail-item,
+    .workflow-guardrail-row {
         flex-direction: column;
         align-items: flex-start;
     }
-    .execution-plan-step-input {
+    .workflow-step-input {
         max-width: none;
+        width: 100%;
+    }
+    .workflow-guardrail-field,
+    .workflow-guardrail-step-field {
+        flex-basis: auto;
         width: 100%;
     }
     .table-toolbar {
@@ -3552,10 +3566,10 @@ body.conversation-drawer-open {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Execution Pipeline Visualization
+   Workflow Pipeline Visualization
    ═══════════════════════════════════════════════════════════════ */
 
-.exec-pipeline {
+.workflow-pipeline {
     position: relative;
     display: flex;
     flex-direction: column;
@@ -3567,11 +3581,11 @@ body.conversation-drawer-open {
     background: var(--bg);
 }
 
-.exec-pipeline-has-meta {
+.workflow-pipeline-has-meta {
     padding-top: 42px;
 }
 
-.exec-pipeline-meta {
+.workflow-pipeline-meta {
     position: absolute;
     top: 12px;
     right: 14px;
@@ -3591,7 +3605,7 @@ body.conversation-drawer-open {
     white-space: nowrap;
 }
 
-.exec-pipeline-meta-copy {
+.workflow-pipeline-meta-copy {
     appearance: none;
     cursor: pointer;
     text-align: left;
@@ -3599,24 +3613,24 @@ body.conversation-drawer-open {
     transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
 
-.exec-pipeline-meta-copy:hover,
-.exec-pipeline-meta-copy:focus-visible {
+.workflow-pipeline-meta-copy:hover,
+.workflow-pipeline-meta-copy:focus-visible {
     border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
     background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
     color: color-mix(in srgb, var(--accent) 74%, var(--text));
 }
 
-.exec-pipeline-meta-copy:focus-visible {
+.workflow-pipeline-meta-copy:focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
-.exec-pipeline-meta-label {
+.workflow-pipeline-meta-label {
     flex: 0 0 auto;
     font-weight: 700;
 }
 
-.exec-pipeline-meta-placeholder {
+.workflow-pipeline-meta-placeholder {
     flex: 0 0 auto;
     max-width: 3ch;
     margin-left: 4px;
@@ -3625,7 +3639,7 @@ body.conversation-drawer-open {
     transition: max-width 0.18s ease, margin-left 0.18s ease, opacity 0.15s ease;
 }
 
-.exec-pipeline-meta-value {
+.workflow-pipeline-meta-value {
     flex: 0 1 auto;
     max-width: 0;
     margin-left: 0;
@@ -3635,25 +3649,25 @@ body.conversation-drawer-open {
     transition: max-width 0.22s ease, margin-left 0.18s ease, opacity 0.15s ease;
 }
 
-.exec-pipeline-meta-copy:hover .exec-pipeline-meta-placeholder,
-.exec-pipeline-meta-copy:focus-visible .exec-pipeline-meta-placeholder,
-.exec-pipeline-meta-copied .exec-pipeline-meta-placeholder,
-.exec-pipeline-meta-error .exec-pipeline-meta-placeholder {
+.workflow-pipeline-meta-copy:hover .workflow-pipeline-meta-placeholder,
+.workflow-pipeline-meta-copy:focus-visible .workflow-pipeline-meta-placeholder,
+.workflow-pipeline-meta-copied .workflow-pipeline-meta-placeholder,
+.workflow-pipeline-meta-error .workflow-pipeline-meta-placeholder {
     max-width: 0;
     margin-left: 0;
     opacity: 0;
 }
 
-.exec-pipeline-meta-copy:hover .exec-pipeline-meta-value,
-.exec-pipeline-meta-copy:focus-visible .exec-pipeline-meta-value,
-.exec-pipeline-meta-copied .exec-pipeline-meta-value,
-.exec-pipeline-meta-error .exec-pipeline-meta-value {
+.workflow-pipeline-meta-copy:hover .workflow-pipeline-meta-value,
+.workflow-pipeline-meta-copy:focus-visible .workflow-pipeline-meta-value,
+.workflow-pipeline-meta-copied .workflow-pipeline-meta-value,
+.workflow-pipeline-meta-error .workflow-pipeline-meta-value {
     max-width: 42ch;
     margin-left: 4px;
     opacity: 1;
 }
 
-.exec-pipeline-meta-icon {
+.workflow-pipeline-meta-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3668,7 +3682,7 @@ body.conversation-drawer-open {
     transition: width 0.18s ease, margin-left 0.18s ease, opacity 0.15s ease, transform 0.18s ease;
 }
 
-.exec-pipeline-meta-icon svg {
+.workflow-pipeline-meta-icon svg {
     width: 14px;
     height: 14px;
     stroke: currentcolor;
@@ -3678,24 +3692,24 @@ body.conversation-drawer-open {
     stroke-linejoin: round;
 }
 
-.exec-pipeline-meta-copied,
-.exec-pipeline-meta-copied:hover,
-.exec-pipeline-meta-copied:focus-visible {
+.workflow-pipeline-meta-copied,
+.workflow-pipeline-meta-copied:hover,
+.workflow-pipeline-meta-copied:focus-visible {
     background: color-mix(in srgb, var(--success) 12%, var(--bg));
     border-color: color-mix(in srgb, var(--success) 40%, var(--border));
     color: var(--success);
 }
 
-.exec-pipeline-meta-copied .exec-pipeline-meta-icon {
+.workflow-pipeline-meta-copied .workflow-pipeline-meta-icon {
     width: 14px;
     margin-left: 6px;
     opacity: 1;
     transform: translateY(1px);
 }
 
-.exec-pipeline-meta-error,
-.exec-pipeline-meta-error:hover,
-.exec-pipeline-meta-error:focus-visible {
+.workflow-pipeline-meta-error,
+.workflow-pipeline-meta-error:hover,
+.workflow-pipeline-meta-error:focus-visible {
     background: color-mix(in srgb, var(--danger) 10%, var(--bg));
     border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
     color: var(--danger);
@@ -3703,7 +3717,7 @@ body.conversation-drawer-open {
 
 /* ─── Main pipeline row ─── */
 
-.exec-pipeline-row {
+.workflow-pipeline-row {
     display: flex;
     align-items: center;
     width: 100%;
@@ -3712,7 +3726,7 @@ body.conversation-drawer-open {
 
 /* ─── Connectors ─── */
 
-.ep-conn {
+.workflow-conn {
     flex: 1 1 0;
     min-width: 13px;
     position: relative;
@@ -3721,7 +3735,7 @@ body.conversation-drawer-open {
     background: color-mix(in srgb, var(--accent) 44%, var(--border));
 }
 
-.ep-conn::after {
+.workflow-conn::after {
     content: "";
     position: absolute;
     right: -1px;
@@ -3734,27 +3748,27 @@ body.conversation-drawer-open {
 }
 
 /* Green connector — cache hit path */
-.ep-conn-hit {
+.workflow-conn-hit {
     background: color-mix(in srgb, var(--success) 58%, var(--border));
 }
 
-.ep-conn-hit::after {
+.workflow-conn-hit::after {
     background: color-mix(in srgb, var(--success) 58%, var(--border));
 }
 
 /* Dimmed connector — path not taken */
-.ep-conn-dim {
+.workflow-conn-dim {
     background: color-mix(in srgb, var(--border) 75%, transparent);
     opacity: 0.4;
 }
 
-.ep-conn-dim::after {
+.workflow-conn-dim::after {
     background: color-mix(in srgb, var(--border) 75%, transparent);
 }
 
 /* ─── Base node ─── */
 
-.ep-node {
+.workflow-node {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -3769,7 +3783,7 @@ body.conversation-drawer-open {
     flex-shrink: 0;
 }
 
-.ep-node-icon {
+.workflow-node-icon {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3780,7 +3794,7 @@ body.conversation-drawer-open {
     color: var(--text-muted);
 }
 
-.ep-node-icon svg {
+.workflow-node-icon svg {
     width: 15px;
     height: 15px;
     stroke: currentcolor;
@@ -3790,7 +3804,7 @@ body.conversation-drawer-open {
     stroke-linejoin: round;
 }
 
-.ep-node-label {
+.workflow-node-label {
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.03em;
@@ -3799,7 +3813,7 @@ body.conversation-drawer-open {
     line-height: 1.2;
 }
 
-.ep-node-sub {
+.workflow-node-sub {
     font-size: 10px;
     font-weight: 500;
     color: var(--text-muted);
@@ -3811,7 +3825,7 @@ body.conversation-drawer-open {
     font-family: var(--font-mono, ui-monospace, monospace);
 }
 
-.ep-node-badge {
+.workflow-node-badge {
     display: inline-flex;
     align-items: center;
     padding: 2px 7px;
@@ -3829,7 +3843,7 @@ body.conversation-drawer-open {
 
 /* ─── Endpoint nodes (Client / Response) ─── */
 
-.ep-node-endpoint {
+.workflow-node-endpoint {
     flex-direction: row;
     padding: 10px 14px;
     border-radius: var(--radius);
@@ -3839,7 +3853,7 @@ body.conversation-drawer-open {
     background: var(--bg-surface);
 }
 
-.ep-node-icon-endpoint {
+.workflow-node-icon-endpoint {
     width: auto;
     height: auto;
     justify-content: flex-start;
@@ -3849,12 +3863,12 @@ body.conversation-drawer-open {
     color: var(--text-muted);
 }
 
-.ep-node-icon-endpoint svg {
+.workflow-node-icon-endpoint svg {
     width: 14px;
     height: 14px;
 }
 
-.ep-node-endpoint .ep-node-label {
+.workflow-node-endpoint .workflow-node-label {
     font-size: 11px;
     font-weight: 600;
     color: var(--text-muted);
@@ -3862,75 +3876,75 @@ body.conversation-drawer-open {
 
 /* ─── Shared node variants ─── */
 
-.ep-node-feature {
+.workflow-node-feature {
     border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
     background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
 }
 
-.ep-node-feature .ep-node-icon {
+.workflow-node-feature .workflow-node-icon {
     background: color-mix(in srgb, var(--accent) 16%, var(--bg));
     color: var(--accent);
 }
 
-.ep-node-feature .ep-node-label {
+.workflow-node-feature .workflow-node-label {
     color: var(--accent);
 }
 
-.ep-node-feature .ep-node-sub {
+.workflow-node-feature .workflow-node-sub {
     color: color-mix(in srgb, var(--accent) 70%, var(--text-muted));
 }
 
-.ep-node-success {
+.workflow-node-success {
     border-color: color-mix(in srgb, var(--success) 52%, var(--border));
     background: color-mix(in srgb, var(--success) 9%, var(--bg-surface));
 }
 
-.ep-node-success .ep-node-icon {
+.workflow-node-success .workflow-node-icon {
     background: color-mix(in srgb, var(--success) 18%, var(--bg));
     color: var(--success);
 }
 
-.ep-node-success .ep-node-icon-endpoint {
+.workflow-node-success .workflow-node-icon-endpoint {
     color: var(--success);
 }
 
-.ep-node-success .ep-node-label {
+.workflow-node-success .workflow-node-label {
     color: color-mix(in srgb, var(--success) 85%, var(--text));
 }
 
-.ep-node-success .ep-node-sub {
+.workflow-node-success .workflow-node-sub {
     color: color-mix(in srgb, var(--success) 74%, var(--text-muted));
 }
 
-.ep-node-success .ep-node-badge {
+.workflow-node-success .workflow-node-badge {
     background: color-mix(in srgb, var(--success) 14%, var(--bg));
     border-color: color-mix(in srgb, var(--success) 38%, var(--border));
     color: var(--success);
 }
 
-.ep-node-error {
+.workflow-node-error {
     border-color: color-mix(in srgb, var(--danger) 52%, var(--border));
     background: color-mix(in srgb, var(--danger) 9%, var(--bg-surface));
 }
 
-.ep-node-error .ep-node-icon {
+.workflow-node-error .workflow-node-icon {
     background: color-mix(in srgb, var(--danger) 14%, var(--bg));
     color: var(--danger);
 }
 
-.ep-node-error .ep-node-icon-endpoint {
+.workflow-node-error .workflow-node-icon-endpoint {
     color: var(--danger);
 }
 
-.ep-node-error .ep-node-label {
+.workflow-node-error .workflow-node-label {
     color: color-mix(in srgb, var(--danger) 85%, var(--text));
 }
 
-.ep-node-error .ep-node-sub {
+.workflow-node-error .workflow-node-sub {
     color: color-mix(in srgb, var(--danger) 72%, var(--text-muted));
 }
 
-.ep-node-skipped {
+.workflow-node-skipped {
     position: relative;
     opacity: 0.28;
 }
@@ -3938,7 +3952,7 @@ body.conversation-drawer-open {
 /* ─── Cache node ─── */
 
 /* Cache — runtime: miss badge only */
-.ep-node-cache-miss .ep-node-badge {
+.workflow-node-cache-miss .workflow-node-badge {
     color: var(--text-muted);
     border-color: var(--border);
 }
@@ -3947,7 +3961,7 @@ body.conversation-drawer-open {
 
 /* ─── AI node ─── */
 
-.ep-node-ai {
+.workflow-node-ai {
     min-width: 96px;
     padding: 12px 16px;
     border-radius: var(--radius);
@@ -3969,7 +3983,7 @@ body.conversation-drawer-open {
  */
 
 /* Container — full-width branch lane below the main row */
-.ep-async-section {
+.workflow-async-section {
     width: 100%;
     display: flex;
     align-items: center;
@@ -3980,7 +3994,7 @@ body.conversation-drawer-open {
 }
 
 /* L-turn connector: centered horizontal leg plus vertical rise back to Response */
-.ep-async-turn {
+.workflow-async-turn {
     flex: 0 0 60px;
     position: relative; /* for arrowhead + vertical rise */
     height: 2px;
@@ -3994,7 +4008,7 @@ body.conversation-drawer-open {
 }
 
 /* Left-pointing arrowhead at the end of the horizontal L-turn line */
-.ep-async-turn::before {
+.workflow-async-turn::before {
     content: "";
     position: absolute;
     left: -7px;
@@ -4007,7 +4021,7 @@ body.conversation-drawer-open {
 }
 
 /* Vertical dashed rise that connects the inline turn back up to Response */
-.ep-async-turn::after {
+.workflow-async-turn::after {
     content: "";
     position: absolute;
     right: 0;
@@ -4017,7 +4031,7 @@ body.conversation-drawer-open {
 }
 
 /* RTL async row — Audit Log right, Usage left */
-.ep-async-row {
+.workflow-async-row {
     display: flex;
     align-items: center;
     min-width: 0;
@@ -4025,7 +4039,7 @@ body.conversation-drawer-open {
 }
 
 /* Dashed left-pointing connector between async nodes */
-.ep-conn-async {
+.workflow-conn-async {
     flex: 0 0 24px;
     background: repeating-linear-gradient(
         to left,
@@ -4037,8 +4051,8 @@ body.conversation-drawer-open {
     width: 24px;
 }
 
-/* Left-pointing arrowhead (overrides ep-conn::after right-pointing default) */
-.ep-conn-async::after {
+/* Left-pointing arrowhead (overrides workflow-conn::after right-pointing default) */
+.workflow-conn-async::after {
     background: color-mix(in srgb, var(--text-muted) 45%, var(--border));
     left: -1px;
     right: auto;
@@ -4046,7 +4060,7 @@ body.conversation-drawer-open {
 }
 
 /* Async nodes — horizontal inline pills */
-.ep-node-async {
+.workflow-node-async {
     flex-direction: row;
     padding: 7px 12px;
     border-radius: var(--radius);
@@ -4055,24 +4069,24 @@ body.conversation-drawer-open {
     gap: 7px;
 }
 
-.ep-node-async .ep-node-icon {
+.workflow-node-async .workflow-node-icon {
     width: 12px;
     height: 12px;
     border-radius: var(--radius);
 }
 
-.ep-node-async .ep-node-icon svg {
+.workflow-node-async .workflow-node-icon svg {
     width: 12px;
     height: 12px;
 }
 
-.ep-node-async .ep-node-label {
+.workflow-node-async .workflow-node-label {
     font-size: 10px;
     font-weight: 700;
 }
 
 /* "ASYNC" label inline on the right of the branch */
-.ep-async-label {
+.workflow-async-label {
     display: inline-flex;
     align-items: center;
     margin-left: 8px;

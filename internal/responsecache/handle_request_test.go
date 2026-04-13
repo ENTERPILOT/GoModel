@@ -388,14 +388,14 @@ func TestHandleRequest_ExactHitWritesSyntheticUsageEntry(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
-		plan := &core.ExecutionPlan{
+		plan := &core.Workflow{
 			Mode:         core.ExecutionModeTranslated,
 			ProviderType: "openai",
 			Resolution: &core.RequestModelResolution{
 				ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-4"},
 			},
 		}
-		c.SetRequest(req.WithContext(core.WithExecutionPlan(req.Context(), plan)))
+		c.SetRequest(req.WithContext(core.WithWorkflow(req.Context(), plan)))
 		if err := m.HandleRequest(c, body, func() error {
 			return c.JSON(http.StatusOK, &core.ChatResponse{
 				ID:    "chatcmpl-cache-hit",
@@ -527,14 +527,14 @@ func TestHandleRequest_StreamingMissPopulatesExactStreamingCacheOnly(t *testing.
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
-		plan := &core.ExecutionPlan{
+		plan := &core.Workflow{
 			Mode:         core.ExecutionModeTranslated,
 			ProviderType: "openai",
 			Resolution: &core.RequestModelResolution{
 				ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-4"},
 			},
 		}
-		c.SetRequest(req.WithContext(core.WithExecutionPlan(req.Context(), plan)))
+		c.SetRequest(req.WithContext(core.WithWorkflow(req.Context(), plan)))
 		if err := m.HandleRequest(c, body, func() error {
 			handlerCalls++
 			if isStreamingRequest(c.Request().URL.Path, body) {
@@ -634,14 +634,14 @@ func TestHandleRequest_StreamingExactHitWritesSyntheticUsageEntry(t *testing.T) 
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
-		plan := &core.ExecutionPlan{
+		plan := &core.Workflow{
 			Mode:         core.ExecutionModeTranslated,
 			ProviderType: "openai",
 			Resolution: &core.RequestModelResolution{
 				ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-4"},
 			},
 		}
-		c.SetRequest(req.WithContext(core.WithExecutionPlan(req.Context(), plan)))
+		c.SetRequest(req.WithContext(core.WithWorkflow(req.Context(), plan)))
 		if err := m.HandleRequest(c, body, func() error {
 			c.Response().Header().Set("Content-Type", "text/event-stream")
 			c.Response().WriteHeader(http.StatusOK)
@@ -700,14 +700,14 @@ func TestHandleRequest_InvalidStreamingBodySkipsExactCacheWrite(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
-		plan := &core.ExecutionPlan{
+		plan := &core.Workflow{
 			Mode:         core.ExecutionModeTranslated,
 			ProviderType: "openai",
 			Resolution: &core.RequestModelResolution{
 				ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-4"},
 			},
 		}
-		c.SetRequest(req.WithContext(core.WithExecutionPlan(req.Context(), plan)))
+		c.SetRequest(req.WithContext(core.WithWorkflow(req.Context(), plan)))
 		if err := m.HandleRequest(c, body, func() error {
 			handlerCalls++
 			c.Response().Header().Set("Content-Type", "text/event-stream")

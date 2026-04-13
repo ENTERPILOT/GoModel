@@ -1371,24 +1371,24 @@ func TestChatCompletion_ResolvesQualifiedMaskingAliasBeforeHandlerRouting(t *tes
 		t.Fatalf("captured provider = %q, want openai", inner.capturedChatReq.Provider)
 	}
 
-	plan := core.GetExecutionPlan(c.Request().Context())
-	if plan == nil {
-		t.Fatal("expected execution plan in context")
+	workflow := core.GetWorkflow(c.Request().Context())
+	if workflow == nil {
+		t.Fatal("expected workflow in context")
 	}
-	if plan.Mode != core.ExecutionModeTranslated {
-		t.Fatalf("plan mode = %q, want %q", plan.Mode, core.ExecutionModeTranslated)
+	if workflow.Mode != core.ExecutionModeTranslated {
+		t.Fatalf("workflow mode = %q, want %q", workflow.Mode, core.ExecutionModeTranslated)
 	}
-	if plan.ProviderType != "openai" {
-		t.Fatalf("plan provider type = %q, want openai", plan.ProviderType)
+	if workflow.ProviderType != "openai" {
+		t.Fatalf("workflow provider type = %q, want openai", workflow.ProviderType)
 	}
-	if plan.Resolution == nil {
-		t.Fatal("expected plan resolution")
+	if workflow.Resolution == nil {
+		t.Fatal("expected workflow resolution")
 	}
-	if !plan.Resolution.AliasApplied {
+	if !workflow.Resolution.AliasApplied {
 		t.Fatal("expected alias resolution to be marked as applied")
 	}
-	if plan.ResolvedQualifiedModel() != "openai/gpt-5-nano" {
-		t.Fatalf("plan resolved model = %q, want openai/gpt-5-nano", plan.ResolvedQualifiedModel())
+	if workflow.ResolvedQualifiedModel() != "openai/gpt-5-nano" {
+		t.Fatalf("workflow resolved model = %q, want openai/gpt-5-nano", workflow.ResolvedQualifiedModel())
 	}
 }
 
@@ -1487,15 +1487,15 @@ func TestChatCompletion_UsesExplicitAliasResolverWithoutProviderDecorator(t *tes
 		t.Fatalf("captured provider = %q, want openai", inner.capturedChatReq.Provider)
 	}
 
-	plan := core.GetExecutionPlan(c.Request().Context())
-	if plan == nil || plan.Resolution == nil {
-		t.Fatal("expected execution plan resolution in context")
+	workflow := core.GetWorkflow(c.Request().Context())
+	if workflow == nil || workflow.Resolution == nil {
+		t.Fatal("expected workflow resolution in context")
 	}
-	if !plan.Resolution.AliasApplied {
+	if !workflow.Resolution.AliasApplied {
 		t.Fatal("expected alias resolution to be marked as applied")
 	}
-	if plan.ResolvedQualifiedModel() != "openai/gpt-5-nano" {
-		t.Fatalf("plan resolved model = %q, want openai/gpt-5-nano", plan.ResolvedQualifiedModel())
+	if workflow.ResolvedQualifiedModel() != "openai/gpt-5-nano" {
+		t.Fatalf("workflow resolved model = %q, want openai/gpt-5-nano", workflow.ResolvedQualifiedModel())
 	}
 }
 
@@ -5770,7 +5770,7 @@ func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
 		Passthrough: &core.PassthroughRouteInfo{
@@ -5821,7 +5821,7 @@ func TestProviderPassthrough_UsesConfiguredProviderNameForAccessValidation(t *te
 	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, authorizer, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/p/openai_test/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
 		Passthrough: &core.PassthroughRouteInfo{
@@ -5869,7 +5869,7 @@ func TestProviderPassthrough_FallsBackFromProviderTypeToCanonicalProviderNameFor
 	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, authorizer, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
 		Passthrough: &core.PassthroughRouteInfo{
@@ -6082,7 +6082,7 @@ func TestProviderPassthrough_OpenAIStreamUsageKeepsClientVisibleRoute(t *testing
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "req-pass-stream-visible-path")
-	req = req.WithContext(core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
+	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
 		Passthrough: &core.PassthroughRouteInfo{

@@ -1,4 +1,4 @@
-package executionplans
+package workflows
 
 import (
 	"context"
@@ -12,19 +12,19 @@ import (
 	"github.com/google/uuid"
 )
 
-// SQLiteStore stores immutable execution-plan versions in SQLite.
+// SQLiteStore stores immutable workflow versions in SQLite.
 type SQLiteStore struct {
 	db *sql.DB
 }
 
-// NewSQLiteStore creates the execution-plan table and indexes if needed.
+// NewSQLiteStore creates the workflow table and indexes if needed.
 func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
 
 	statements := []string{
-		`CREATE TABLE IF NOT EXISTS execution_plan_versions (
+		`CREATE TABLE IF NOT EXISTS workflow_versions (
 			id TEXT PRIMARY KEY,
 			scope_provider TEXT,
 			scope_model TEXT,
@@ -35,38 +35,38 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 			managed_default INTEGER NOT NULL DEFAULT 0,
 			name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
-			plan_payload JSON NOT NULL,
-			plan_hash TEXT NOT NULL,
+			workflow_payload JSON NOT NULL,
+			workflow_hash TEXT NOT NULL,
 			created_at INTEGER NOT NULL,
 			CHECK (scope_provider IS NOT NULL OR scope_model IS NULL)
 		)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_execution_plan_versions_scope_version
-			ON execution_plan_versions(scope_key, version)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_execution_plan_versions_active_scope
-			ON execution_plan_versions(scope_key) WHERE active = 1`,
-		`CREATE INDEX IF NOT EXISTS idx_execution_plan_versions_active_created_at
-			ON execution_plan_versions(active, created_at DESC)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_versions_scope_version
+			ON workflow_versions(scope_key, version)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_versions_active_scope
+			ON workflow_versions(scope_key) WHERE active = 1`,
+		`CREATE INDEX IF NOT EXISTS idx_workflow_versions_active_created_at
+			ON workflow_versions(active, created_at DESC)`,
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {
-			return nil, fmt.Errorf("initialize execution plan versions table: %w", err)
+			return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 		}
 	}
-	if _, err := db.Exec(`ALTER TABLE execution_plan_versions ADD COLUMN scope_user_path TEXT`); err != nil && !isSQLiteDuplicateColumnError(err) {
-		return nil, fmt.Errorf("initialize execution plan versions table: %w", err)
+	if _, err := db.Exec(`ALTER TABLE workflow_versions ADD COLUMN scope_user_path TEXT`); err != nil && !isSQLiteDuplicateColumnError(err) {
+		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 	}
-	if _, err := db.Exec(`ALTER TABLE execution_plan_versions ADD COLUMN managed_default INTEGER NOT NULL DEFAULT 0`); err != nil && !isSQLiteDuplicateColumnError(err) {
-		return nil, fmt.Errorf("initialize execution plan versions table: %w", err)
+	if _, err := db.Exec(`ALTER TABLE workflow_versions ADD COLUMN managed_default INTEGER NOT NULL DEFAULT 0`); err != nil && !isSQLiteDuplicateColumnError(err) {
+		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 	}
 	if _, err := db.Exec(`
-		UPDATE execution_plan_versions
+		UPDATE workflow_versions
 		SET managed_default = 1
 		WHERE managed_default = 0
 		  AND scope_key = 'global'
 		  AND name = ?
 		  AND description = ?
 	`, ManagedDefaultGlobalName, ManagedDefaultGlobalDescription); err != nil {
-		return nil, fmt.Errorf("initialize execution plan versions table: %w", err)
+		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 	}
 
 	return &SQLiteStore{db: db}, nil
@@ -82,13 +82,13 @@ func isSQLiteDuplicateColumnError(err error) bool {
 
 func (s *SQLiteStore) ListActive(ctx context.Context) ([]Version, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, plan_payload, plan_hash, created_at
-		FROM execution_plan_versions
+		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+		FROM workflow_versions
 		WHERE active = 1
 		ORDER BY created_at DESC, id DESC
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("list active execution plans: %w", err)
+		return nil, fmt.Errorf("list active workflows: %w", err)
 	}
 	defer rows.Close()
 	return collectVersions(rows, func(scanner versionRowScanner) (Version, error) {
@@ -98,8 +98,8 @@ func (s *SQLiteStore) ListActive(ctx context.Context) ([]Version, error) {
 
 func (s *SQLiteStore) Get(ctx context.Context, id string) (*Version, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, plan_payload, plan_hash, created_at
-		FROM execution_plan_versions
+		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+		FROM workflow_versions
 		WHERE id = ?
 	`, id)
 	version, err := scanSQLiteVersion(row)
@@ -113,20 +113,20 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*Version, error) {
 }
 
 func (s *SQLiteStore) Create(ctx context.Context, input CreateInput) (*Version, error) {
-	input, scopeKey, planHash, err := normalizeCreateInput(input)
+	input, scopeKey, workflowHash, err := normalizeCreateInput(input)
 	if err != nil {
 		return nil, err
 	}
 
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("acquire execution plan connection: %w", err)
+		return nil, fmt.Errorf("acquire workflow connection: %w", err)
 	}
 	defer func() {
 		_ = conn.Close()
 	}()
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, fmt.Errorf("begin execution plan transaction: %w", err)
+		return nil, fmt.Errorf("begin workflow transaction: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -138,44 +138,44 @@ func (s *SQLiteStore) Create(ctx context.Context, input CreateInput) (*Version, 
 
 	var nextVersion int
 	if err := conn.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(version), 0) + 1 FROM execution_plan_versions WHERE scope_key = ?`,
+		`SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_versions WHERE scope_key = ?`,
 		scopeKey,
 	).Scan(&nextVersion); err != nil {
-		return nil, fmt.Errorf("select next execution plan version: %w", err)
+		return nil, fmt.Errorf("select next workflow version: %w", err)
 	}
 
 	if input.Activate {
 		if _, err := conn.ExecContext(ctx,
-			`UPDATE execution_plan_versions SET active = 0 WHERE scope_key = ? AND active = 1`,
+			`UPDATE workflow_versions SET active = 0 WHERE scope_key = ? AND active = 1`,
 			scopeKey,
 		); err != nil {
-			return nil, fmt.Errorf("deactivate current execution plan version: %w", err)
+			return nil, fmt.Errorf("deactivate current workflow version: %w", err)
 		}
 	}
 
 	payloadJSON, err := json.Marshal(input.Payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal execution plan payload: %w", err)
+		return nil, fmt.Errorf("marshal workflow payload: %w", err)
 	}
 
 	now := time.Now().UTC()
 	version := &Version{
-		ID:          uuid.NewString(),
-		Scope:       input.Scope,
-		ScopeKey:    scopeKey,
-		Version:     nextVersion,
-		Active:      input.Activate,
-		Managed:     input.Managed,
-		Name:        input.Name,
-		Description: input.Description,
-		Payload:     input.Payload,
-		PlanHash:    planHash,
-		CreatedAt:   now,
+		ID:           uuid.NewString(),
+		Scope:        input.Scope,
+		ScopeKey:     scopeKey,
+		Version:      nextVersion,
+		Active:       input.Activate,
+		Managed:      input.Managed,
+		Name:         input.Name,
+		Description:  input.Description,
+		Payload:      input.Payload,
+		WorkflowHash: workflowHash,
+		CreatedAt:    now,
 	}
 
 	if _, err := conn.ExecContext(ctx, `
-		INSERT INTO execution_plan_versions (
-			id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, plan_payload, plan_hash, created_at
+		INSERT INTO workflow_versions (
+			id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		version.ID,
@@ -189,29 +189,29 @@ func (s *SQLiteStore) Create(ctx context.Context, input CreateInput) (*Version, 
 		version.Name,
 		version.Description,
 		string(payloadJSON),
-		version.PlanHash,
+		version.WorkflowHash,
 		version.CreatedAt.Unix(),
 	); err != nil {
-		return nil, fmt.Errorf("insert execution plan version: %w", err)
+		return nil, fmt.Errorf("insert workflow version: %w", err)
 	}
 
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
-		return nil, fmt.Errorf("commit execution plan version: %w", err)
+		return nil, fmt.Errorf("commit workflow version: %w", err)
 	}
 	committed = true
 	return version, nil
 }
 
-func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, planHash string) (*Version, error) {
+func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("acquire execution plan connection: %w", err)
+		return nil, fmt.Errorf("acquire workflow connection: %w", err)
 	}
 	defer func() {
 		_ = conn.Close()
 	}()
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, fmt.Errorf("begin execution plan transaction: %w", err)
+		return nil, fmt.Errorf("begin workflow transaction: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -222,8 +222,8 @@ func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input Crea
 	}()
 
 	row := conn.QueryRowContext(ctx, `
-		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, plan_payload, plan_hash, created_at
-		FROM execution_plan_versions
+		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+		FROM workflow_versions
 		WHERE scope_key = 'global' AND active = 1
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
@@ -234,22 +234,22 @@ func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input Crea
 		if errors.Is(err, sql.ErrNoRows) {
 			hasActive = false
 		} else {
-			return nil, fmt.Errorf("load active global execution plan: %w", err)
+			return nil, fmt.Errorf("load active global workflow: %w", err)
 		}
 	}
 	if hasActive {
 		if !activeVersion.Managed {
 			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
-				return nil, fmt.Errorf("commit execution plan transaction: %w", err)
+				return nil, fmt.Errorf("commit workflow transaction: %w", err)
 			}
 			committed = true
 			return nil, nil
 		}
 		if strings.TrimSpace(activeVersion.Name) == input.Name &&
 			strings.TrimSpace(activeVersion.Description) == input.Description &&
-			strings.TrimSpace(activeVersion.PlanHash) == planHash {
+			strings.TrimSpace(activeVersion.WorkflowHash) == workflowHash {
 			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
-				return nil, fmt.Errorf("commit execution plan transaction: %w", err)
+				return nil, fmt.Errorf("commit workflow transaction: %w", err)
 			}
 			committed = true
 			return nil, nil
@@ -258,43 +258,43 @@ func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input Crea
 
 	var nextVersion int
 	if err := conn.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(version), 0) + 1 FROM execution_plan_versions WHERE scope_key = 'global'`,
+		`SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_versions WHERE scope_key = 'global'`,
 	).Scan(&nextVersion); err != nil {
-		return nil, fmt.Errorf("select next execution plan version: %w", err)
+		return nil, fmt.Errorf("select next workflow version: %w", err)
 	}
 
 	if hasActive {
 		if _, err := conn.ExecContext(ctx,
-			`UPDATE execution_plan_versions SET active = 0 WHERE id = ? AND active = 1`,
+			`UPDATE workflow_versions SET active = 0 WHERE id = ? AND active = 1`,
 			activeVersion.ID,
 		); err != nil {
-			return nil, fmt.Errorf("deactivate current execution plan version: %w", err)
+			return nil, fmt.Errorf("deactivate current workflow version: %w", err)
 		}
 	}
 
 	payloadJSON, err := json.Marshal(input.Payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal execution plan payload: %w", err)
+		return nil, fmt.Errorf("marshal workflow payload: %w", err)
 	}
 
 	now := time.Now().UTC()
 	version := &Version{
-		ID:          uuid.NewString(),
-		Scope:       input.Scope,
-		ScopeKey:    "global",
-		Version:     nextVersion,
-		Active:      true,
-		Managed:     true,
-		Name:        input.Name,
-		Description: input.Description,
-		Payload:     input.Payload,
-		PlanHash:    planHash,
-		CreatedAt:   now,
+		ID:           uuid.NewString(),
+		Scope:        input.Scope,
+		ScopeKey:     "global",
+		Version:      nextVersion,
+		Active:       true,
+		Managed:      true,
+		Name:         input.Name,
+		Description:  input.Description,
+		Payload:      input.Payload,
+		WorkflowHash: workflowHash,
+		CreatedAt:    now,
 	}
 
 	if _, err := conn.ExecContext(ctx, `
-		INSERT INTO execution_plan_versions (
-			id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, plan_payload, plan_hash, created_at
+		INSERT INTO workflow_versions (
+			id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		version.ID,
@@ -308,14 +308,14 @@ func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input Crea
 		version.Name,
 		version.Description,
 		string(payloadJSON),
-		version.PlanHash,
+		version.WorkflowHash,
 		version.CreatedAt.Unix(),
 	); err != nil {
-		return nil, fmt.Errorf("insert execution plan version: %w", err)
+		return nil, fmt.Errorf("insert workflow version: %w", err)
 	}
 
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
-		return nil, fmt.Errorf("commit execution plan version: %w", err)
+		return nil, fmt.Errorf("commit workflow version: %w", err)
 	}
 	committed = true
 	return version, nil
@@ -323,16 +323,16 @@ func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input Crea
 
 func (s *SQLiteStore) Deactivate(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE execution_plan_versions
+		UPDATE workflow_versions
 		SET active = 0
 		WHERE id = ? AND active = 1
 	`, id)
 	if err != nil {
-		return fmt.Errorf("deactivate execution plan version: %w", err)
+		return fmt.Errorf("deactivate workflow version: %w", err)
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("deactivate execution plan version rows affected: %w", err)
+		return fmt.Errorf("deactivate workflow version rows affected: %w", err)
 	}
 	if rowsAffected == 0 {
 		return ErrNotFound
@@ -370,7 +370,7 @@ func scanSQLiteVersion(scanner interface {
 		&version.Name,
 		&version.Description,
 		&payloadJSON,
-		&version.PlanHash,
+		&version.WorkflowHash,
 		&createdAtUnix,
 	); err != nil {
 		return Version{}, err
@@ -385,7 +385,7 @@ func scanSQLiteVersion(scanner interface {
 	version.Managed = managed != 0
 	version.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
 	if err := json.Unmarshal([]byte(payloadJSON), &version.Payload); err != nil {
-		return Version{}, fmt.Errorf("decode execution plan payload %q: %w", version.ID, err)
+		return Version{}, fmt.Errorf("decode workflow payload %q: %w", version.ID, err)
 	}
 	return version, nil
 }

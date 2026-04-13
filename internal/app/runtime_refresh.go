@@ -135,7 +135,7 @@ func (a *App) RefreshRuntime(ctx context.Context) (admin.RuntimeRefreshReport, e
 	if err := a.runRefreshableServiceStep(&report, "guardrails", a.guardrailService(), ctx); err != nil {
 		return report, err
 	}
-	if err := a.runRefreshableServiceStep(&report, "execution_plans", a.executionPlanService(), ctx); err != nil {
+	if err := a.runRefreshableServiceStep(&report, "workflows", a.workflowService(), ctx); err != nil {
 		return report, err
 	}
 
@@ -324,9 +324,9 @@ func (a *App) guardrailService() refreshableService {
 	return a.guardrails.Service
 }
 
-func (a *App) executionPlanService() refreshableService {
-	if a == nil || a.executionPlans == nil || a.executionPlans.Service == nil {
+func (a *App) workflowService() refreshableService {
+	if a == nil || a.workflows == nil || a.workflows.Service == nil {
 		return nil
 	}
-	return a.executionPlans.Service
+	return a.workflows.Service
 }

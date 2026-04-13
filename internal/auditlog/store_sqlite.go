@@ -48,7 +48,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 			provider TEXT,
 			provider_name TEXT,
 			alias_used INTEGER DEFAULT 0,
-			execution_plan_version_id TEXT,
+			workflow_version_id TEXT,
 			cache_type TEXT,
 			status_code INTEGER DEFAULT 0,
 			request_id TEXT,
@@ -76,7 +76,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 		"ALTER TABLE audit_logs ADD COLUMN resolved_model TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN provider_name TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN alias_used INTEGER DEFAULT 0",
-		"ALTER TABLE audit_logs ADD COLUMN execution_plan_version_id TEXT",
+		"ALTER TABLE audit_logs ADD COLUMN workflow_version_id TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN cache_type TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN auth_key_id TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN auth_method TEXT",
@@ -98,7 +98,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 		"CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status_code)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_provider ON audit_logs(provider)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_provider_name ON audit_logs(provider_name)",
-		"CREATE INDEX IF NOT EXISTS idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_workflow_version_id ON audit_logs(workflow_version_id)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON audit_logs(auth_key_id)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON audit_logs(client_ip)",
@@ -182,7 +182,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 				e.Provider,
 				e.ProviderName,
 				aliasUsedInt,
-				e.ExecutionPlanVersionID,
+				e.WorkflowVersionID,
 				cacheTypeValue,
 				e.StatusCode,
 				e.RequestID,
@@ -198,7 +198,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 			)
 		}
 
-		query := `INSERT OR IGNORE INTO audit_logs (id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, execution_plan_version_id, cache_type, status_code,
+		query := `INSERT OR IGNORE INTO audit_logs (id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code,
 			request_id, auth_key_id, auth_method, client_ip, method, path, user_path, stream, error_type, data) VALUES ` +
 			strings.Join(placeholders, ",")
 

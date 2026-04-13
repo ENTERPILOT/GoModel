@@ -21,7 +21,7 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 		}
 
 		ctx := c.Request().Context()
-		plan := core.GetExecutionPlan(ctx)
+		plan := core.GetWorkflow(ctx)
 		if plan != nil && !plan.UsageEnabled() {
 			return
 		}

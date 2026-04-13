@@ -93,7 +93,7 @@ http:
   timeout: 600 # seconds (10 minutes)
   response_header_timeout: 600
 
-execution_plans:
+workflows:
   refresh_interval: 1m
 
 # Global resilience settings (applied to all providers by default)

@@ -225,12 +225,12 @@ func TestNewSystemPromptGuardrail_UnicodeNames(t *testing.T) {
 	tests := []struct {
 		name string
 	}{
-		{"safety prompt"},           // spaces
-		{"compliance check v2"},     // spaces and digits
-		{"проверка безопасности"},   // Cyrillic with space
-		{"安全検査"},                // CJK (Chinese + Japanese)
-		{"sécurité-modèle"},        // accented Latin
-		{"🛡️ guardrail"},           // emoji
+		{"safety prompt"},         // spaces
+		{"compliance check v2"},   // spaces and digits
+		{"проверка безопасности"}, // Cyrillic with space
+		{"安全検査"},                  // CJK (Chinese + Japanese)
+		{"sécurité-modèle"},       // accented Latin
+		{"🛡️ guardrail"},          // emoji
 	}
 	for _, tc := range tests {
 		g, err := NewSystemPromptGuardrail(tc.name, SystemPromptInject, "content")

@@ -20,7 +20,7 @@ type Handler struct {
 	modelResolver                   RequestModelResolver
 	modelAuthorizer                 RequestModelAuthorizer
 	fallbackResolver                RequestFallbackResolver
-	executionPolicyResolver         RequestExecutionPolicyResolver
+	workflowPolicyResolver          RequestWorkflowPolicyResolver
 	translatedRequestPatcher        TranslatedRequestPatcher
 	batchRequestPreparer            BatchRequestPreparer
 	exposedModelLister              ExposedModelLister
@@ -49,7 +49,7 @@ func newHandler(
 	usageLogger usage.LoggerInterface,
 	pricingResolver usage.PricingResolver,
 	modelResolver RequestModelResolver,
-	executionPolicyResolver RequestExecutionPolicyResolver,
+	workflowPolicyResolver RequestWorkflowPolicyResolver,
 	fallbackResolver RequestFallbackResolver,
 	translatedRequestPatcher TranslatedRequestPatcher,
 ) *Handler {
@@ -60,7 +60,7 @@ func newHandler(
 		pricingResolver,
 		modelResolver,
 		nil,
-		executionPolicyResolver,
+		workflowPolicyResolver,
 		fallbackResolver,
 		translatedRequestPatcher,
 	)
@@ -73,7 +73,7 @@ func newHandlerWithAuthorizer(
 	pricingResolver usage.PricingResolver,
 	modelResolver RequestModelResolver,
 	modelAuthorizer RequestModelAuthorizer,
-	executionPolicyResolver RequestExecutionPolicyResolver,
+	workflowPolicyResolver RequestWorkflowPolicyResolver,
 	fallbackResolver RequestFallbackResolver,
 	translatedRequestPatcher TranslatedRequestPatcher,
 ) *Handler {
@@ -82,7 +82,7 @@ func newHandlerWithAuthorizer(
 		modelResolver:                modelResolver,
 		modelAuthorizer:              modelAuthorizer,
 		fallbackResolver:             fallbackResolver,
-		executionPolicyResolver:      executionPolicyResolver,
+		workflowPolicyResolver:       workflowPolicyResolver,
 		translatedRequestPatcher:     translatedRequestPatcher,
 		logger:                       logger,
 		usageLogger:                  usageLogger,
@@ -108,7 +108,7 @@ func (h *Handler) translatedInference() *translatedInferenceService {
 			provider:                 h.provider,
 			modelResolver:            h.modelResolver,
 			modelAuthorizer:          h.modelAuthorizer,
-			executionPolicyResolver:  h.executionPolicyResolver,
+			workflowPolicyResolver:   h.workflowPolicyResolver,
 			fallbackResolver:         h.fallbackResolver,
 			translatedRequestPatcher: h.translatedRequestPatcher,
 			logger:                   h.logger,
@@ -128,7 +128,7 @@ func (h *Handler) nativeBatch() *nativeBatchService {
 		provider:                             h.provider,
 		modelResolver:                        h.modelResolver,
 		modelAuthorizer:                      h.modelAuthorizer,
-		executionPolicyResolver:              h.executionPolicyResolver,
+		workflowPolicyResolver:               h.workflowPolicyResolver,
 		batchRequestPreparer:                 h.batchRequestPreparer,
 		batchStore:                           h.batchStore,
 		loadBatch:                            h.loadBatch,

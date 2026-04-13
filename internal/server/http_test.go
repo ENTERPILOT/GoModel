@@ -364,7 +364,7 @@ func TestServerWithMasterKeyAndMetrics(t *testing.T) {
 	})
 }
 
-func TestServer_ManagedAuthKeyUserPathOverridesHeaderBeforeExecutionPlanning(t *testing.T) {
+func TestServer_ManagedAuthKeyUserPathOverridesHeaderBeforeWorkflowResolution(t *testing.T) {
 	mock := &mockProvider{
 		supportedModels: []string{"gpt-5-mini"},
 		providerTypes:   map[string]string{"gpt-5-mini": "openai"},
@@ -386,14 +386,14 @@ func TestServer_ManagedAuthKeyUserPathOverridesHeaderBeforeExecutionPlanning(t *
 		},
 	}
 
-	var capturedSelector core.ExecutionPlanSelector
+	var capturedSelector core.WorkflowSelector
 	srv := New(mock, &Config{
 		Authenticator: mockAuthenticator{
 			enabled:   true,
 			tokenToID: map[string]string{"managed-token": "key-123"},
 			tokenPath: map[string]string{"managed-token": "/team/from-key"},
 		},
-		ExecutionPolicyResolver: requestExecutionPolicyResolverFunc(func(selector core.ExecutionPlanSelector) (*core.ResolvedExecutionPolicy, error) {
+		WorkflowPolicyResolver: requestWorkflowPolicyResolverFunc(func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			capturedSelector = selector
 			return nil, nil
 		}),
@@ -443,7 +443,7 @@ func TestAdminEndpoints_Enabled(t *testing.T) {
 	}
 }
 
-func TestAdminExecutionPlanEndpoints_AreRegistered(t *testing.T) {
+func TestAdminWorkflowEndpoints_AreRegistered(t *testing.T) {
 	mock := &mockProvider{}
 	adminHandler := admin.NewHandler(nil, nil)
 	srv := New(mock, &Config{
@@ -461,10 +461,10 @@ func TestAdminExecutionPlanEndpoints_AreRegistered(t *testing.T) {
 		{method: http.MethodGet, path: "/admin/api/v1/auth-keys"},
 		{method: http.MethodPost, path: "/admin/api/v1/auth-keys"},
 		{method: http.MethodPost, path: "/admin/api/v1/auth-keys/test-key/deactivate"},
-		{method: http.MethodGet, path: "/admin/api/v1/execution-plans"},
-		{method: http.MethodGet, path: "/admin/api/v1/execution-plans/guardrails"},
-		{method: http.MethodPost, path: "/admin/api/v1/execution-plans"},
-		{method: http.MethodPost, path: "/admin/api/v1/execution-plans/test-plan/deactivate"},
+		{method: http.MethodGet, path: "/admin/api/v1/workflows"},
+		{method: http.MethodGet, path: "/admin/api/v1/workflows/guardrails"},
+		{method: http.MethodPost, path: "/admin/api/v1/workflows"},
+		{method: http.MethodPost, path: "/admin/api/v1/workflows/test-workflow/deactivate"},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		rec := httptest.NewRecorder()

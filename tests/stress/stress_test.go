@@ -222,8 +222,8 @@ func TestCircuitBreakerHalfOpenRace(t *testing.T) {
 		MaxRetries:     0,
 		InitialBackoff: 1 * time.Millisecond,
 		CircuitBreaker: &llmclient.CircuitBreakerConfig{
-			FailureThreshold: 1,              // Open after 1 failure
-			SuccessThreshold: 1,              // Close after 1 success
+			FailureThreshold: 1,               // Open after 1 failure
+			SuccessThreshold: 1,               // Close after 1 success
 			Timeout:          1 * time.Second, // Long enough to keep half-open during test
 		},
 	}

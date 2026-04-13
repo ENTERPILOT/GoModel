@@ -212,7 +212,7 @@ func runtimeRefreshStepByName(steps []admin.RuntimeRefreshStep, name string) *ad
 	return nil
 }
 
-func TestRuntimeExecutionFeatureCaps_EnableFallbackFromOverride(t *testing.T) {
+func TestRuntimeWorkflowFeatureCaps_EnableFallbackFromOverride(t *testing.T) {
 	cfg := &config.Config{
 		Fallback: config.FallbackConfig{
 			DefaultMode: config.FallbackModeOff,
@@ -222,29 +222,29 @@ func TestRuntimeExecutionFeatureCaps_EnableFallbackFromOverride(t *testing.T) {
 		},
 	}
 
-	caps := runtimeExecutionFeatureCaps(cfg)
+	caps := runtimeWorkflowFeatureCaps(cfg)
 	if !caps.Fallback {
-		t.Fatal("runtimeExecutionFeatureCaps().Fallback = false, want true")
+		t.Fatal("runtimeWorkflowFeatureCaps().Fallback = false, want true")
 	}
 }
 
-func TestDefaultExecutionPlanInput_SetsFallbackFeature(t *testing.T) {
+func TestDefaultWorkflowInput_SetsFallbackFeature(t *testing.T) {
 	cfg := &config.Config{
 		Fallback: config.FallbackConfig{
 			DefaultMode: config.FallbackModeAuto,
 		},
 	}
 
-	input := defaultExecutionPlanInput(cfg, nil, nil)
+	input := defaultWorkflowInput(cfg, nil, nil)
 	if input.Payload.Features.Fallback == nil {
-		t.Fatal("defaultExecutionPlanInput().Payload.Features.Fallback = nil, want non-nil")
+		t.Fatal("defaultWorkflowInput().Payload.Features.Fallback = nil, want non-nil")
 	}
 	if !*input.Payload.Features.Fallback {
-		t.Fatal("defaultExecutionPlanInput().Payload.Features.Fallback = false, want true")
+		t.Fatal("defaultWorkflowInput().Payload.Features.Fallback = false, want true")
 	}
 }
 
-func TestDefaultExecutionPlanInput_IncludesConfiguredGuardrailsMissingFromLoadedCatalog(t *testing.T) {
+func TestDefaultWorkflowInput_IncludesConfiguredGuardrailsMissingFromLoadedCatalog(t *testing.T) {
 	cfg := &config.Config{
 		Guardrails: config.GuardrailsConfig{
 			Enabled: true,
@@ -258,22 +258,22 @@ func TestDefaultExecutionPlanInput_IncludesConfiguredGuardrailsMissingFromLoaded
 		},
 	}
 
-	input := defaultExecutionPlanInput(cfg, nil, []guardrails.Definition{
+	input := defaultWorkflowInput(cfg, nil, []guardrails.Definition{
 		{Name: "policy-system", Type: "system_prompt"},
 	})
 
 	if !input.Payload.Features.Guardrails {
-		t.Fatal("defaultExecutionPlanInput().Payload.Features.Guardrails = false, want true")
+		t.Fatal("defaultWorkflowInput().Payload.Features.Guardrails = false, want true")
 	}
 	if len(input.Payload.Guardrails) != 1 {
-		t.Fatalf("len(defaultExecutionPlanInput().Payload.Guardrails) = %d, want 1", len(input.Payload.Guardrails))
+		t.Fatalf("len(defaultWorkflowInput().Payload.Guardrails) = %d, want 1", len(input.Payload.Guardrails))
 	}
 	if got := input.Payload.Guardrails[0].Ref; got != "policy-system" {
-		t.Fatalf("defaultExecutionPlanInput().Payload.Guardrails[0].Ref = %q, want policy-system", got)
+		t.Fatalf("defaultWorkflowInput().Payload.Guardrails[0].Ref = %q, want policy-system", got)
 	}
 }
 
-func TestDefaultExecutionPlanInput_TrimsConfiguredGuardrailRefs(t *testing.T) {
+func TestDefaultWorkflowInput_TrimsConfiguredGuardrailRefs(t *testing.T) {
 	cfg := &config.Config{
 		Guardrails: config.GuardrailsConfig{
 			Enabled: true,
@@ -287,12 +287,12 @@ func TestDefaultExecutionPlanInput_TrimsConfiguredGuardrailRefs(t *testing.T) {
 		},
 	}
 
-	input := defaultExecutionPlanInput(cfg, []string{"policy-system"}, nil)
+	input := defaultWorkflowInput(cfg, []string{"policy-system"}, nil)
 	if len(input.Payload.Guardrails) != 1 {
-		t.Fatalf("len(defaultExecutionPlanInput().Payload.Guardrails) = %d, want 1", len(input.Payload.Guardrails))
+		t.Fatalf("len(defaultWorkflowInput().Payload.Guardrails) = %d, want 1", len(input.Payload.Guardrails))
 	}
 	if got := input.Payload.Guardrails[0].Ref; got != "policy-system" {
-		t.Fatalf("defaultExecutionPlanInput().Payload.Guardrails[0].Ref = %q, want policy-system", got)
+		t.Fatalf("defaultWorkflowInput().Payload.Guardrails[0].Ref = %q, want policy-system", got)
 	}
 }
 

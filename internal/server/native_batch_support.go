@@ -28,7 +28,7 @@ var batchResultsPending404Providers = map[string]struct{}{
 
 type batchExecutionSelection struct {
 	providerType string
-	selector     core.ExecutionPlanSelector
+	selector     core.WorkflowSelector
 }
 
 func determineBatchExecutionSelection(
@@ -60,7 +60,7 @@ func determineBatchExecutionSelectionWithAuthorizer(
 		}
 		return batchExecutionSelection{
 			providerType: providerType,
-			selector:     core.NewExecutionPlanSelector(workflowProviderNameForType(provider, providerType), ""),
+			selector:     core.NewWorkflowSelector(workflowProviderNameForType(provider, providerType), ""),
 		}, nil
 	}
 
@@ -136,7 +136,7 @@ func determineBatchExecutionSelectionWithAuthorizer(
 	}
 	return batchExecutionSelection{
 		providerType: providerType,
-		selector:     core.NewExecutionPlanSelector(providerName, commonModel),
+		selector:     core.NewWorkflowSelector(providerName, commonModel),
 	}, nil
 }
 

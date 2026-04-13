@@ -1,4 +1,4 @@
-package executionplans
+package workflows
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ func collectVersions(rows versionRowIterator, scan func(versionRowScanner) (Vers
 		versions = append(versions, version)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate execution plans: %w", err)
+		return nil, fmt.Errorf("iterate workflows: %w", err)
 	}
 	return versions, nil
 }

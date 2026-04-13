@@ -593,9 +593,9 @@
                         <template x-if="field.input === 'checkboxes'">
                             <fieldset class="alias-form-field alias-form-field-wide alias-form-field-fieldset" :aria-describedby="field.help ? 'guardrail-field-help-' + field.key : null">
                                 <legend class="alias-form-field-legend" x-text="field.label"></legend>
-                                <div class="execution-plan-feature-toggles">
+                                <div class="workflow-feature-toggles">
                                     <template x-for="option in field.options" :key="field.key + '-' + option.value">
-                                        <label class="execution-plan-feature-toggle">
+                                        <label class="workflow-feature-toggle">
                                             <input type="checkbox" :checked="guardrailArrayFieldSelected(field, option.value)" @change="toggleGuardrailArrayFieldValue(field, option.value, $event.target.checked)">
                                             <span x-text="option.label"></span>
                                         </label>
@@ -1148,59 +1148,59 @@
     <div class="page-header">
         <div>
             <h2>Workflows</h2>
-            <p class="execution-plan-page-note">Active workflows are matched path-first: deepest user path wins first, then provider name and model specificity, then broader matches, then global.</p>
+            <p class="workflow-page-note">Active workflows are matched path-first: deepest user path wins first, then provider name and model specificity, then broader matches, then global.</p>
         </div>
         <div class="page-header-controls">
-            <button type="button" class="pagination-btn pagination-btn-primary" x-show="executionPlansAvailable" @click="openExecutionPlanCreate()">New Workflow</button>
+            <button type="button" class="pagination-btn pagination-btn-primary" x-show="workflowsAvailable" @click="openWorkflowCreate()">New Workflow</button>
         </div>
     </div>
 
     {{template "auth-banner" .}}
-    <div class="alert alert-warning" x-show="!executionPlansAvailable && !authError">
+    <div class="alert alert-warning" x-show="!workflowsAvailable && !authError">
         Workflows feature is unavailable.
     </div>
-    <div class="alert alert-warning" x-show="executionPlanError && !authError" x-text="executionPlanError"></div>
-    <div class="alert alert-success" x-show="executionPlanNotice" x-text="executionPlanNotice"></div>
+    <div class="alert alert-warning" x-show="workflowError && !authError" x-text="workflowError"></div>
+    <div class="alert alert-success" x-show="workflowNotice" x-text="workflowNotice"></div>
 
-    <div class="table-toolbar" x-show="executionPlansAvailable">
+    <div class="table-toolbar" x-show="workflowsAvailable">
         <div class="table-toolbar-main">
-            <input type="text" placeholder="Filter by scope, name, hash, or guardrail..." x-model="executionPlanFilter" class="filter-input" aria-label="Filter workflows by scope, name, hash, or guardrail">
+            <input type="text" placeholder="Filter by scope, name, hash, or guardrail..." x-model="workflowFilter" class="filter-input" aria-label="Filter workflows by scope, name, hash, or guardrail">
         </div>
         <div class="table-toolbar-actions">
-            <span class="model-count" x-text="filteredExecutionPlans.length + ' active scopes'"></span>
+            <span class="model-count" x-text="filteredWorkflows.length + ' active scopes'"></span>
         </div>
     </div>
 
-    <div class="execution-plans-layout" :class="{ 'is-editor-open': executionPlanFormOpen }">
-        <section class="model-alias-editor execution-plan-editor" x-show="executionPlanFormOpen">
-            <form class="alias-form" @submit.prevent="submitExecutionPlanForm()">
+    <div class="workflows-layout" :class="{ 'is-editor-open': workflowFormOpen }">
+        <section class="model-alias-editor workflow-editor" x-show="workflowFormOpen">
+            <form class="alias-form" @submit.prevent="submitWorkflowForm()">
                 <div class="aliases-editor-header">
                     <div>
                         {{template "helper-disclosure" "{ heading: 'Workflow', open: false, copyId: 'workflow-help-copy', showLabel: 'Show workflow help', hideLabel: 'Hide workflow help', text: 'Create immutable version. Submitting activates it for the selected scope.' }"}}
                     </div>
-                    <button type="button" class="table-action-btn alias-close-btn table-icon-btn" aria-label="Close workflow editor" @click="closeExecutionPlanForm()">
+                    <button type="button" class="table-action-btn alias-close-btn table-icon-btn" aria-label="Close workflow editor" @click="closeWorkflowForm()">
                         {{template "x-icon"}}
                     </button>
                 </div>
 
-                <div class="alert alert-warning" x-show="executionPlanFormError" x-text="executionPlanFormError"></div>
+                <div class="alert alert-warning" x-show="workflowFormError" x-text="workflowFormError"></div>
 
                 <div class="alias-form-grid">
                     <label class="alias-form-field">
                         <span>Provider Name</span>
-                        <select class="usage-log-select execution-plan-input" x-model="executionPlanForm.scope_provider" @change="setExecutionPlanProvider(executionPlanForm.scope_provider)">
+                        <select class="usage-log-select workflow-input" x-model="workflowForm.scope_provider" @change="setWorkflowProvider(workflowForm.scope_provider)">
                             <option value="">All providers and models</option>
-                            <template x-for="providerName in executionPlanProviderOptions()" :key="providerName">
+                            <template x-for="providerName in workflowProviderOptions()" :key="providerName">
                                 <option :value="providerName" x-text="providerName"></option>
                             </template>
                         </select>
                     </label>
 
-                    <label class="alias-form-field" x-show="executionPlanForm.scope_provider">
+                    <label class="alias-form-field" x-show="workflowForm.scope_provider">
                         <span>Model</span>
-                        <select class="usage-log-select execution-plan-input" x-model="executionPlanForm.scope_model">
+                        <select class="usage-log-select workflow-input" x-model="workflowForm.scope_model">
                             <option value="">All models for provider</option>
-                            <template x-for="modelID in executionPlanModelOptions(executionPlanForm.scope_provider)" :key="executionPlanForm.scope_provider + '-' + modelID">
+                            <template x-for="modelID in workflowModelOptions(workflowForm.scope_provider)" :key="workflowForm.scope_provider + '-' + modelID">
                                 <option :value="modelID" x-text="modelID"></option>
                             </template>
                         </select>
@@ -1208,12 +1208,12 @@
 
                     <label class="alias-form-field">
                         <span>Name</span>
-                        <input type="text" class="filter-input execution-plan-input" placeholder="Optional. Defaults to scope label." x-model="executionPlanForm.name">
+                        <input type="text" class="filter-input workflow-input" placeholder="Optional. Defaults to scope label." x-model="workflowForm.name">
                     </label>
 
                     <label class="alias-form-field">
                         <span>User Path</span>
-                        <input type="text" class="filter-input execution-plan-input" placeholder="team/alpha or /team/alpha" x-model="executionPlanForm.scope_user_path">
+                        <input type="text" class="filter-input workflow-input" placeholder="team/alpha or /team/alpha" x-model="workflowForm.scope_user_path">
                     </label>
                 </div>
 
@@ -1223,190 +1223,196 @@
 
                 <label class="alias-form-field">
                     <span>Description</span>
-                    <textarea class="alias-form-textarea" placeholder="Optional operator note for why this version exists." x-model="executionPlanForm.description"></textarea>
+                    <textarea class="alias-form-textarea" placeholder="Optional operator note for why this version exists." x-model="workflowForm.description"></textarea>
                 </label>
 
-                <div class="execution-plan-feature-toggles">
-                    <label class="execution-plan-feature-toggle" x-show="executionPlanCacheVisible()">
-                        <input type="checkbox" x-model="executionPlanForm.features.cache">
+                <div class="workflow-feature-toggles">
+                    <label class="workflow-feature-toggle" x-show="workflowCacheVisible()">
+                        <input type="checkbox" x-model="workflowForm.features.cache">
                         <span>Cache</span>
                     </label>
-                    <label class="execution-plan-feature-toggle" x-show="executionPlanAuditVisible()">
-                        <input type="checkbox" x-model="executionPlanForm.features.audit">
+                    <label class="workflow-feature-toggle" x-show="workflowAuditVisible()">
+                        <input type="checkbox" x-model="workflowForm.features.audit">
                         <span>Audit Logs</span>
                     </label>
-                    <label class="execution-plan-feature-toggle" x-show="executionPlanUsageVisible()">
-                        <input type="checkbox" x-model="executionPlanForm.features.usage">
+                    <label class="workflow-feature-toggle" x-show="workflowUsageVisible()">
+                        <input type="checkbox" x-model="workflowForm.features.usage">
                         <span>Usage</span>
                     </label>
-                    <label class="execution-plan-feature-toggle" x-show="executionPlanGuardrailsVisible()">
-                        <input type="checkbox" x-model="executionPlanForm.features.guardrails">
+                    <label class="workflow-feature-toggle" x-show="workflowGuardrailsVisible()">
+                        <input type="checkbox" x-model="workflowForm.features.guardrails">
                         <span>Guardrails</span>
                     </label>
-                    <label class="execution-plan-feature-toggle" x-show="executionPlanFailoverVisible()">
-                        <input type="checkbox" x-model="executionPlanForm.features.fallback">
+                    <label class="workflow-feature-toggle" x-show="workflowFailoverVisible()">
+                        <input type="checkbox" x-model="workflowForm.features.fallback">
                         <span>Failover</span>
                     </label>
                 </div>
 
-                <div class="execution-plan-preview">
-                    <div class="execution-plan-section-head">
+                <div class="workflow-preview">
+                    <div class="workflow-section-head">
                         <h4>Preview</h4>
                         <span class="provider-badge">Live</span>
                     </div>
 
-                    <article class="execution-plan-card execution-plan-preview-card">
-                        <div class="execution-plan-card-head">
+                    <article class="workflow-card workflow-preview-card">
+                        <div class="workflow-card-head">
                             <div>
-                                <p class="alias-form-kicker" x-text="planScopeTypeLabel(executionPlanPreview())"></p>
-                                <h3 x-text="workflowDisplayName(executionPlanPreview())"></h3>
+                                <p class="alias-form-kicker" x-text="workflowScopeTypeLabel(workflowPreview())"></p>
+                                <h3 x-text="workflowDisplayName(workflowPreview())"></h3>
                             </div>
-                            <div class="execution-plan-card-badges">
-                                <span class="provider-badge" x-text="planScopeLabel(executionPlanPreview())"></span>
+                            <div class="workflow-card-badges">
+                                <span class="provider-badge" x-text="workflowScopeLabel(workflowPreview())"></span>
                             </div>
                         </div>
 
-                        <p class="execution-plan-card-description" x-show="executionPlanPreview().description" x-text="executionPlanPreview().description"></p>
-                        <p class="alias-form-hint" x-show="executionPlanFailoverVisible()" x-text="'Failover: ' + executionPlanFallbackLabel(executionPlanPreview())"></p>
+                        <p class="workflow-card-description" x-show="workflowPreview().description" x-text="workflowPreview().description"></p>
+                        <p class="alias-form-hint" x-show="workflowFailoverVisible()" x-text="'Failover: ' + workflowFallbackLabel(workflowPreview())"></p>
 
-                        {{template "execution-plan-chart" "executionPlanWorkflowChart(executionPlanPreview())"}}
+                        {{template "workflow-chart" "workflowChart(workflowPreview())"}}
 
-                        <div class="execution-plan-guardrails" x-show="executionPlanGuardrailsVisible()">
-                            <div class="execution-plan-section-head">
+                        <div class="workflow-guardrails" x-show="workflowGuardrailsVisible()">
+                            <div class="workflow-section-head">
                                 <h4>Guardrails</h4>
-                                <span class="provider-badge" x-text="planGuardrails(executionPlanPreview()).length ? planGuardrails(executionPlanPreview()).length + ' steps' : 'None'"></span>
+                                <span class="provider-badge" x-text="workflowGuardrails(workflowPreview()).length ? workflowGuardrails(workflowPreview()).length + ' steps' : 'None'"></span>
                             </div>
-                            <div class="execution-plan-guardrail-list" x-show="planGuardrails(executionPlanPreview()).length > 0">
-                                <template x-for="(step, stepIndex) in planGuardrails(executionPlanPreview())" :key="'draft-workflow-preview-guardrail-' + stepIndex">
-                                    <div class="execution-plan-guardrail-item">
+                            <div class="workflow-guardrail-list" x-show="workflowGuardrails(workflowPreview()).length > 0">
+                                <template x-for="(step, stepIndex) in workflowGuardrails(workflowPreview())" :key="'draft-workflow-preview-guardrail-' + stepIndex">
+                                    <div class="workflow-guardrail-item">
                                         <span class="mono font-size-md" x-text="step.ref"></span>
                                         <span class="provider-badge" x-text="'step ' + step.step"></span>
                                     </div>
                                 </template>
                             </div>
-                            <p class="alias-form-hint" x-show="planGuardrails(executionPlanPreview()).length === 0">No guardrails configured for this plan.</p>
+                            <p class="alias-form-hint" x-show="workflowGuardrails(workflowPreview()).length === 0">No guardrails configured for this workflow.</p>
                         </div>
                     </article>
                 </div>
 
-	                <div class="execution-plan-guardrail-editor" x-show="executionPlanForm.features.guardrails && executionPlanGuardrailsVisible()">
-                    <div class="execution-plan-section-head">
+	                <div class="workflow-guardrail-editor" x-show="workflowForm.features.guardrails && workflowGuardrailsVisible()">
+                    <div class="workflow-section-head">
                         <div>
                             <h4>Guardrail Steps</h4>
                             <p class="alias-form-hint">Guardrails in the same numeric step run together. Later steps wait for earlier ones to finish.</p>
                         </div>
-                        <button type="button" class="table-action-btn" @click="addExecutionPlanGuardrailStep()">Add Step</button>
+                        <button type="button" class="table-action-btn" @click="addWorkflowGuardrailStep()">Add Step</button>
                     </div>
 
                     <div class="alert alert-warning alert-inline-actions" x-show="guardrailRefs.length === 0">
-                        <span>No named guardrails are currently registered on this deployment. You can still draft a plan, but guardrail-backed creation may be rejected.</span>
+                        <span>No named guardrails are currently registered on this deployment. You can still draft a workflow, but guardrail-backed creation may be rejected.</span>
                         <button type="button" class="table-action-btn" @click="navigate('guardrails')">Open Guardrails</button>
                     </div>
 
-                    <div class="execution-plan-guardrail-list-editor" x-show="executionPlanForm.guardrails.length > 0">
-                        <template x-for="(step, index) in executionPlanForm.guardrails" :key="'execution-plan-form-guardrail-' + index">
-                            <div class="execution-plan-guardrail-row">
-                                <input type="text" class="filter-input execution-plan-input" list="execution-plan-guardrail-options" placeholder="Guardrail ref" x-model="step.ref" :aria-label="'Guardrail reference ' + (index + 1)">
-                                <input type="number" class="filter-input execution-plan-step-input" min="0" step="10" placeholder="Step" x-model.number="step.step" :aria-label="'Guardrail step ' + (index + 1)">
-                                <button type="button" class="table-action-btn table-action-btn-danger" @click="removeExecutionPlanGuardrailStep(index)">Remove</button>
+                    <div class="workflow-guardrail-list-editor" x-show="workflowForm.guardrails.length > 0">
+                        <template x-for="(step, index) in workflowForm.guardrails" :key="'workflow-form-guardrail-' + index">
+                            <div class="workflow-guardrail-row">
+                                <label class="alias-form-field workflow-guardrail-field" :for="'workflow-guardrail-ref-' + index">
+                                    <span>Guardrail reference</span>
+                                    <input type="text" class="filter-input workflow-input" :id="'workflow-guardrail-ref-' + index" list="workflow-guardrail-options" placeholder="Guardrail ref" x-model="step.ref" :aria-label="'Guardrail reference ' + (index + 1)">
+                                </label>
+                                <label class="alias-form-field workflow-guardrail-step-field" :for="'workflow-guardrail-step-' + index">
+                                    <span>Step</span>
+                                    <input type="number" class="filter-input workflow-step-input" :id="'workflow-guardrail-step-' + index" min="0" step="10" placeholder="Step" x-model.number="step.step" :aria-label="'Guardrail step ' + (index + 1)">
+                                </label>
+                                <button type="button" class="table-action-btn table-action-btn-danger" @click="removeWorkflowGuardrailStep(index)">Remove</button>
                             </div>
                         </template>
                     </div>
 
-                    <p class="alias-form-hint" x-show="executionPlanForm.guardrails.length === 0">No guardrail steps configured yet.</p>
+                    <p class="alias-form-hint" x-show="workflowForm.guardrails.length === 0">No guardrail steps configured yet.</p>
                 </div>
 
                 <div class="alias-form-actions">
-                    <button type="button" class="pagination-btn" @click="closeExecutionPlanForm()">Cancel</button>
-                    <button type="submit" class="pagination-btn pagination-btn-primary execution-plan-submit-btn" :disabled="executionPlanSubmitting">
-                        <span class="execution-plan-submit-icon" aria-hidden="true">
-                            <svg x-show="executionPlanSubmitMode() === 'create'" viewBox="0 0 24 24">
+                    <button type="button" class="pagination-btn" @click="closeWorkflowForm()">Cancel</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary workflow-submit-btn" :disabled="workflowSubmitting">
+                        <span class="workflow-submit-icon" aria-hidden="true">
+                            <svg x-show="workflowSubmitMode() === 'create'" viewBox="0 0 24 24">
                                 <path d="M12 5v14"></path>
                                 <path d="M5 12h14"></path>
                             </svg>
-                            <svg x-show="executionPlanSubmitMode() === 'save'" viewBox="0 0 24 24">
+                            <svg x-show="workflowSubmitMode() === 'save'" viewBox="0 0 24 24">
                                 <path d="M5 4h11l3 3v13H5z"></path>
                                 <path d="M8 4v6h8"></path>
                                 <path d="M8 20v-6h8v6"></path>
                             </svg>
                         </span>
-                        <span x-text="executionPlanSubmitting ? executionPlanSubmittingLabel() : executionPlanSubmitLabel()"></span>
+                        <span x-text="workflowSubmitting ? workflowSubmittingLabel() : workflowSubmitLabel()"></span>
                     </button>
                 </div>
             </form>
         </section>
 
-        <section class="execution-plans-list">
-            <p class="empty-state" x-show="executionPlansLoading && !authError">Loading workflows...</p>
+        <section class="workflows-list">
+            <p class="empty-state" x-show="workflowsLoading && !authError">Loading workflows...</p>
 
-            <div class="execution-plan-card-grid" x-show="filteredExecutionPlans.length > 0">
-                <template x-for="plan in filteredExecutionPlans" :key="plan.id">
-                    <article class="execution-plan-card">
-                        <div class="execution-plan-card-head">
+            <div class="workflow-card-grid" x-show="filteredWorkflows.length > 0">
+                <template x-for="workflow in filteredWorkflows" :key="workflow.id">
+                    <article class="workflow-card">
+                        <div class="workflow-card-head">
                             <div>
-                                <p class="alias-form-kicker" x-text="planScopeTypeLabel(plan)"></p>
-                                <h3 x-text="workflowDisplayName(plan)"></h3>
+                                <p class="alias-form-kicker" x-text="workflowScopeTypeLabel(workflow)"></p>
+                                <h3 x-text="workflowDisplayName(workflow)"></h3>
                             </div>
-                            <div class="execution-plan-card-badges">
-                                <span class="provider-badge" x-text="planScopeLabel(plan)"></span>
+                            <div class="workflow-card-badges">
+                                <span class="provider-badge" x-text="workflowScopeLabel(workflow)"></span>
                             </div>
                         </div>
 
-                        <p class="execution-plan-card-description" x-show="plan.description" x-text="plan.description"></p>
-                        <p class="alias-form-hint" x-show="executionPlanFailoverVisible()" x-text="'Failover: ' + executionPlanFallbackLabel(plan)"></p>
+                        <p class="workflow-card-description" x-show="workflow.description" x-text="workflow.description"></p>
+                        <p class="alias-form-hint" x-show="workflowFailoverVisible()" x-text="'Failover: ' + workflowFallbackLabel(workflow)"></p>
 
-                        {{template "execution-plan-chart" "executionPlanWorkflowChart(plan)"}}
+                        {{template "workflow-chart" "workflowChart(workflow)"}}
 
-	                        <div class="execution-plan-guardrails" x-show="executionPlanGuardrailsVisible()">
-                            <div class="execution-plan-section-head">
+	                        <div class="workflow-guardrails" x-show="workflowGuardrailsVisible()">
+                            <div class="workflow-section-head">
                                 <h4>Guardrails</h4>
-                                <span class="provider-badge" x-text="planGuardrails(plan).length ? planGuardrails(plan).length + ' steps' : 'None'"></span>
+                                <span class="provider-badge" x-text="workflowGuardrails(workflow).length ? workflowGuardrails(workflow).length + ' steps' : 'None'"></span>
                             </div>
-                            <div class="execution-plan-guardrail-list" x-show="planGuardrails(plan).length > 0">
-                                <template x-for="(step, stepIndex) in planGuardrails(plan)" :key="plan.id + '-guardrail-' + stepIndex">
-                                    <div class="execution-plan-guardrail-item">
+                            <div class="workflow-guardrail-list" x-show="workflowGuardrails(workflow).length > 0">
+                                <template x-for="(step, stepIndex) in workflowGuardrails(workflow)" :key="workflow.id + '-guardrail-' + stepIndex">
+                                    <div class="workflow-guardrail-item">
                                         <span class="mono font-size-md" x-text="step.ref"></span>
                                         <span class="provider-badge" x-text="'step ' + step.step"></span>
                                     </div>
                                 </template>
                             </div>
-                            <p class="alias-form-hint" x-show="planGuardrails(plan).length === 0">No guardrails configured for this plan.</p>
+                            <p class="alias-form-hint" x-show="workflowGuardrails(workflow).length === 0">No guardrails configured for this workflow.</p>
                         </div>
 
-                        <div class="execution-plan-card-footer">
+                        <div class="workflow-card-footer">
                             <div class="alias-actions-cell">
                                 <button type="button"
                                         class="table-action-btn table-action-btn-danger"
-                                        :disabled="executionPlanDeactivatingID === plan.id || !canDeactivateExecutionPlan(plan)"
-                                        :aria-label="'Deactivate workflow ' + workflowDisplayName(plan)"
-                                        :title="canDeactivateExecutionPlan(plan) ? 'Deactivate active workflow' : 'The global workflow cannot be deactivated.'"
-                                        @click="deactivateExecutionPlan(plan)"
-                                        x-text="executionPlanDeactivatingID === plan.id ? 'Deactivating...' : 'Deactivate'"></button>
+                                        :disabled="workflowDeactivatingID === workflow.id || !canDeactivateWorkflow(workflow)"
+                                        :aria-label="'Deactivate workflow ' + workflowDisplayName(workflow)"
+                                        :title="canDeactivateWorkflow(workflow) ? 'Deactivate active workflow' : 'The global workflow cannot be deactivated.'"
+                                        @click="deactivateWorkflow(workflow)"
+                                        x-text="workflowDeactivatingID === workflow.id ? 'Deactivating...' : 'Deactivate'"></button>
                                 <button type="button"
                                         class="table-action-btn table-icon-btn"
-                                        :aria-label="'Edit workflow ' + workflowDisplayName(plan)"
-                                        :title="'Edit workflow ' + workflowDisplayName(plan)"
-                                        @click="openExecutionPlanCreate(plan)">
+                                        :aria-label="'Edit workflow ' + workflowDisplayName(workflow)"
+                                        :title="'Edit workflow ' + workflowDisplayName(workflow)"
+                                        @click="openWorkflowCreate(workflow)">
                                     {{template "edit-icon"}}
                                 </button>
                             </div>
-                            <div class="execution-plan-card-meta execution-plan-card-meta-footer">
-                                <span class="provider-badge mono" x-text="'version: v' + plan.version"></span>
-                                <span class="provider-badge mono" x-text="'created: ' + formatTimestamp(plan.created_at)"></span>
-                                <span class="provider-badge mono" x-text="'hash: ' + shortHash(plan.plan_hash)"></span>
+                            <div class="workflow-card-meta workflow-card-meta-footer">
+                                <span class="provider-badge mono" x-text="'version: v' + workflow.version"></span>
+                                <span class="provider-badge mono" x-text="'created: ' + formatTimestamp(workflow.created_at)"></span>
+                                <span class="provider-badge mono" x-text="'hash: ' + shortHash(workflow.workflow_hash)"></span>
                             </div>
                         </div>
                     </article>
                 </template>
             </div>
 
-            <p class="empty-state" x-show="executionPlans.length === 0 && !executionPlansLoading && !authError && executionPlansAvailable">No active workflows found.</p>
-            <p class="empty-state" x-show="executionPlans.length > 0 && filteredExecutionPlans.length === 0 && !executionPlansLoading">No workflows match your filter.</p>
+            <p class="empty-state" x-show="workflows.length === 0 && !workflowsLoading && !authError && workflowsAvailable">No active workflows found.</p>
+            <p class="empty-state" x-show="workflows.length > 0 && filteredWorkflows.length === 0 && !workflowsLoading">No workflows match your filter.</p>
         </section>
 
     </div>
 
-    <datalist id="execution-plan-guardrail-options">
+    <datalist id="workflow-guardrail-options">
         <template x-for="guardrailRef in guardrailRefs" :key="guardrailRef">
             <option :value="guardrailRef"></option>
         </template>
@@ -1494,8 +1500,8 @@
                     </summary>
                     <template x-if="isAuditEntryExpanded(entry)">
                         <div class="audit-entry-details">
-                            <!-- Execution Pipeline (workflow + runtime view) -->
-                            {{template "execution-plan-chart" "executionPlanAuditChart(entry)"}}
+                            <!-- Workflow Pipeline (workflow + runtime view) -->
+                            {{template "workflow-chart" "workflowAuditChart(entry)"}}
 
                             <div class="audit-request-response">
                                 {{template "audit-pane" "auditRequestPane(entry)"}}

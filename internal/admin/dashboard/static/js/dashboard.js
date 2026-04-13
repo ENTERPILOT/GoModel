@@ -120,7 +120,7 @@ function dashboard() {
             const rest = path.replace('/admin/dashboard', '').replace(/^\//, '');
             const parts = rest.split('/');
             let page = parts[0];
-            if (page === 'execution-plans') {
+            if (page === 'workflows') {
                 page = 'workflows';
             }
             if (page === 'audit') {
@@ -152,8 +152,8 @@ function dashboard() {
             if (page === 'usage' && sub !== 'costs') this.usageMode = 'tokens';
             if (page === 'audit-logs') this.fetchAuditLog(true);
             if (page === 'auth-keys' && typeof this.fetchAuthKeys === 'function') this.fetchAuthKeys();
-            if (page === 'workflows' && typeof this.fetchExecutionPlansPage === 'function') {
-                this.fetchExecutionPlansPage();
+            if (page === 'workflows' && typeof this.fetchWorkflowsPage === 'function') {
+                this.fetchWorkflowsPage();
             }
             if (page === 'guardrails' && typeof this.fetchGuardrailsPage === 'function') {
                 this.fetchGuardrailsPage();
@@ -219,8 +219,8 @@ function dashboard() {
         },
 
         guardrailsPageVisible() {
-            return typeof this.executionPlanRuntimeBooleanFlag === 'function'
-                ? this.executionPlanRuntimeBooleanFlag('GUARDRAILS_ENABLED', true)
+            return typeof this.workflowRuntimeBooleanFlag === 'function'
+                ? this.workflowRuntimeBooleanFlag('GUARDRAILS_ENABLED', true)
                 : true;
         },
 
@@ -372,8 +372,8 @@ function dashboard() {
             if (typeof this.fetchModelOverrides === 'function') {
                 requests.push(this.fetchModelOverrides());
             }
-            if (typeof this.fetchExecutionPlansPage === 'function') {
-                requests.push(this.fetchExecutionPlansPage());
+            if (typeof this.fetchWorkflowsPage === 'function') {
+                requests.push(this.fetchWorkflowsPage());
             }
             if (this.hasCalendarModule && typeof this.fetchCalendarData === 'function') {
                 requests.push(this.fetchCalendarData());
@@ -730,8 +730,8 @@ function dashboard() {
             'dashboardGuardrailsModule'
         ),
         resolveModuleFactory(
-            typeof dashboardExecutionPlansModule === 'function' ? dashboardExecutionPlansModule : null,
-            'dashboardExecutionPlansModule'
+            typeof dashboardWorkflowsModule === 'function' ? dashboardWorkflowsModule : null,
+            'dashboardWorkflowsModule'
         ),
         resolveModuleFactory(
             typeof dashboardConversationDrawerModule === 'function' ? dashboardConversationDrawerModule : null,

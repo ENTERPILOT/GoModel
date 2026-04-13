@@ -207,8 +207,8 @@ func passthroughAuditPath(c *echo.Context, providerType, endpoint string, info *
 		}
 	}
 	if c != nil {
-		if plan := core.GetExecutionPlan(c.Request().Context()); plan != nil && plan.Passthrough != nil {
-			if auditPath := strings.TrimSpace(plan.Passthrough.AuditPath); auditPath != "" {
+		if workflow := core.GetWorkflow(c.Request().Context()); workflow != nil && workflow.Passthrough != nil {
+			if auditPath := strings.TrimSpace(workflow.Passthrough.AuditPath); auditPath != "" {
 				return auditPath
 			}
 		}
@@ -247,8 +247,8 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 	if isSSEContentType(resp.Headers) {
 		auditlog.MarkEntryAsStreaming(c, true)
 		auditlog.EnrichEntryWithStream(c, true)
-		plan := core.GetExecutionPlan(c.Request().Context())
-		auditEnabled := s.logger != nil && s.logger.Config().Enabled && (plan == nil || plan.AuditEnabled())
+		workflow := core.GetWorkflow(c.Request().Context())
+		auditEnabled := s.logger != nil && s.logger.Config().Enabled && (workflow == nil || workflow.AuditEnabled())
 
 		entry := auditlog.GetStreamEntryFromContext(c)
 		if auditEnabled && entry != nil {
@@ -272,7 +272,7 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 		if info != nil {
 			model = strings.TrimSpace(info.Model)
 		}
-		model = resolvedModelFromPlan(plan, model)
+		model = resolvedModelFromWorkflow(workflow, model)
 
 		observers := make([]streaming.Observer, 0, 2)
 		if auditEnabled && streamEntry != nil {
@@ -280,7 +280,7 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 				observers = append(observers, observer)
 			}
 		}
-		if s.usageLogger != nil && s.usageLogger.Config().Enabled && (plan == nil || plan.UsageEnabled()) {
+		if s.usageLogger != nil && s.usageLogger.Config().Enabled && (workflow == nil || workflow.UsageEnabled()) {
 			if observer := usage.NewStreamUsageObserver(s.usageLogger, model, providerType, requestID, usagePath, s.pricingResolver, core.UserPathFromContext(c.Request().Context())); observer != nil {
 				observer.SetProviderName(providerName)
 				observers = append(observers, observer)

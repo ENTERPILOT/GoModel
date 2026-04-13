@@ -39,9 +39,9 @@
                     this.auditLog = payload;
                     if (!this.auditLog.entries) this.auditLog.entries = [];
                     this.pruneAuditExpandedEntries(this.auditLog.entries);
-                    if (typeof this.prefetchAuditExecutionPlans === 'function') {
+                    if (typeof this.prefetchAuditWorkflows === 'function') {
                         try {
-                            await this.prefetchAuditExecutionPlans(this.auditLog.entries);
+                            await this.prefetchAuditWorkflows(this.auditLog.entries);
                         } catch (e) {
                             console.error('Failed to prefetch audit workflows:', e);
                         }

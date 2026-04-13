@@ -1,4 +1,4 @@
-package executionplans
+package workflows
 
 import (
 	"context"
@@ -36,7 +36,7 @@ func (s *staticStore) Get(_ context.Context, id string) (*Version, error) {
 	return nil, ErrNotFound
 }
 func (s *staticStore) Create(_ context.Context, input CreateInput) (*Version, error) {
-	input, scopeKey, planHash, err := normalizeCreateInput(input)
+	input, scopeKey, workflowHash, err := normalizeCreateInput(input)
 	if err != nil {
 		return nil, err
 	}
@@ -48,22 +48,22 @@ func (s *staticStore) Create(_ context.Context, input CreateInput) (*Version, er
 		}
 	}
 	version := Version{
-		ID:          "created-global",
-		Scope:       input.Scope,
-		ScopeKey:    scopeKey,
-		Version:     1,
-		Active:      input.Activate,
-		Managed:     input.Managed,
-		Name:        input.Name,
-		Description: input.Description,
-		Payload:     input.Payload,
-		PlanHash:    planHash,
+		ID:           "created-global",
+		Scope:        input.Scope,
+		ScopeKey:     scopeKey,
+		Version:      1,
+		Active:       input.Activate,
+		Managed:      input.Managed,
+		Name:         input.Name,
+		Description:  input.Description,
+		Payload:      input.Payload,
+		WorkflowHash: workflowHash,
 	}
 	s.versions = append(s.versions, version)
 	return &version, nil
 }
 
-func (s *staticStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, planHash string) (*Version, error) {
+func (s *staticStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error) {
 	for _, version := range s.versions {
 		if !version.Active || version.ScopeKey != "global" {
 			continue
@@ -71,7 +71,7 @@ func (s *staticStore) EnsureManagedDefaultGlobal(ctx context.Context, input Crea
 		if !version.Managed {
 			return nil, nil
 		}
-		if version.Name == input.Name && version.Description == input.Description && version.PlanHash == planHash {
+		if version.Name == input.Name && version.Description == input.Description && version.WorkflowHash == workflowHash {
 			return nil, nil
 		}
 		break
@@ -130,7 +130,7 @@ func (s *concurrentStore) Create(_ context.Context, input CreateInput) (*Version
 }
 
 func (s *concurrentStore) createLocked(input CreateInput) (*Version, error) {
-	input, scopeKey, planHash, err := normalizeCreateInput(input)
+	input, scopeKey, workflowHash, err := normalizeCreateInput(input)
 	if err != nil {
 		return nil, err
 	}
@@ -142,16 +142,16 @@ func (s *concurrentStore) createLocked(input CreateInput) (*Version, error) {
 		}
 	}
 	version := Version{
-		ID:          "created-provider",
-		Scope:       input.Scope,
-		ScopeKey:    scopeKey,
-		Version:     len(s.versions) + 1,
-		Active:      input.Activate,
-		Managed:     input.Managed,
-		Name:        input.Name,
-		Description: input.Description,
-		Payload:     input.Payload,
-		PlanHash:    planHash,
+		ID:           "created-provider",
+		Scope:        input.Scope,
+		ScopeKey:     scopeKey,
+		Version:      len(s.versions) + 1,
+		Active:       input.Activate,
+		Managed:      input.Managed,
+		Name:         input.Name,
+		Description:  input.Description,
+		Payload:      input.Payload,
+		WorkflowHash: workflowHash,
 	}
 	s.versions = append(s.versions, version)
 	if s.createCalled != nil {
@@ -163,7 +163,7 @@ func (s *concurrentStore) createLocked(input CreateInput) (*Version, error) {
 	return &version, nil
 }
 
-func (s *concurrentStore) EnsureManagedDefaultGlobal(_ context.Context, input CreateInput, planHash string) (*Version, error) {
+func (s *concurrentStore) EnsureManagedDefaultGlobal(_ context.Context, input CreateInput, workflowHash string) (*Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -174,7 +174,7 @@ func (s *concurrentStore) EnsureManagedDefaultGlobal(_ context.Context, input Cr
 		if !version.Managed {
 			return nil, nil
 		}
-		if version.Name == input.Name && version.Description == input.Description && version.PlanHash == planHash {
+		if version.Name == input.Name && version.Description == input.Description && version.WorkflowHash == workflowHash {
 			return nil, nil
 		}
 		break
@@ -205,7 +205,7 @@ type blockingCompiler struct {
 	release   chan struct{}
 }
 
-func (c *blockingCompiler) Compile(version Version) (*CompiledPlan, error) {
+func (c *blockingCompiler) Compile(version Version) (*CompiledWorkflow, error) {
 	call := atomic.AddInt32(&c.callCount, 1)
 	if call == c.blockCall {
 		close(c.blocked)
@@ -218,7 +218,7 @@ type previewEmptyCompiler struct {
 	delegate Compiler
 }
 
-func (c *previewEmptyCompiler) Compile(version Version) (*CompiledPlan, error) {
+func (c *previewEmptyCompiler) Compile(version Version) (*CompiledWorkflow, error) {
 	if version.ID == "preview" {
 		return nil, nil
 	}
@@ -231,7 +231,7 @@ type versionFailingCompiler struct {
 	err      error
 }
 
-func (c *versionFailingCompiler) Compile(version Version) (*CompiledPlan, error) {
+func (c *versionFailingCompiler) Compile(version Version) (*CompiledWorkflow, error) {
 	if version.ID == c.version {
 		return nil, c.err
 	}
@@ -369,7 +369,7 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	assertMatch := func(name string, selector core.ExecutionPlanSelector, wantVersionID string) {
+	assertMatch := func(name string, selector core.WorkflowSelector, wantVersionID string) {
 		t.Helper()
 		policy, err := service.Match(selector)
 		if err != nil {
@@ -383,12 +383,12 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 		}
 	}
 
-	assertMatch("provider+model+path", core.NewExecutionPlanSelector("openai", "gpt-5", "/team/a/user"), "provider-model-path")
-	assertMatch("path beats provider+model", core.NewExecutionPlanSelector("openai", "gpt-5", "/team/user"), "path-team")
-	assertMatch("provider+model", core.NewExecutionPlanSelector("openai", "gpt-5"), "provider-model")
-	assertMatch("path", core.NewExecutionPlanSelector("anthropic", "claude-sonnet-4", "/team/a/user"), "path-team")
-	assertMatch("provider", core.NewExecutionPlanSelector("openai", "gpt-4o"), "provider")
-	assertMatch("global", core.NewExecutionPlanSelector("anthropic", "claude-sonnet-4"), "global")
+	assertMatch("provider+model+path", core.NewWorkflowSelector("openai", "gpt-5", "/team/a/user"), "provider-model-path")
+	assertMatch("path beats provider+model", core.NewWorkflowSelector("openai", "gpt-5", "/team/user"), "path-team")
+	assertMatch("provider+model", core.NewWorkflowSelector("openai", "gpt-5"), "provider-model")
+	assertMatch("path", core.NewWorkflowSelector("anthropic", "claude-sonnet-4", "/team/a/user"), "path-team")
+	assertMatch("provider", core.NewWorkflowSelector("openai", "gpt-4o"), "provider")
+	assertMatch("global", core.NewWorkflowSelector("anthropic", "claude-sonnet-4"), "global")
 }
 
 func TestServiceEnsureDefaultGlobal_CreatesWhenMissing(t *testing.T) {
@@ -418,7 +418,7 @@ func TestServiceEnsureDefaultGlobal_CreatesWhenMissing(t *testing.T) {
 	if !store.versions[0].Managed {
 		t.Fatal("Managed = false, want true for managed default global")
 	}
-	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -446,7 +446,7 @@ func TestServiceEnsureDefaultGlobal_ReconcilesManagedDefault(t *testing.T) {
 					SchemaVersion: 1,
 					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "stale-hash",
+				WorkflowHash: "stale-hash",
 			},
 		},
 	}
@@ -502,7 +502,7 @@ func TestServiceEnsureDefaultGlobal_PreservesCustomGlobal(t *testing.T) {
 					SchemaVersion: 1,
 					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "custom-hash",
+				WorkflowHash: "custom-hash",
 			},
 		},
 	}
@@ -549,7 +549,7 @@ func TestServiceEnsureDefaultGlobal_LoadsPreservedCustomGlobalIntoSnapshot(t *te
 					SchemaVersion: 1,
 					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
 				},
-				PlanHash: "custom-hash",
+				WorkflowHash: "custom-hash",
 			},
 		},
 	}
@@ -571,7 +571,7 @@ func TestServiceEnsureDefaultGlobal_LoadsPreservedCustomGlobalIntoSnapshot(t *te
 		t.Fatalf("EnsureDefaultGlobal() error = %v", err)
 	}
 
-	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -671,7 +671,7 @@ func TestServiceRefresh_RebuildsCompiledGuardrailPipelinesAfterExecutorSwap(t *t
 			},
 		},
 	}
-	service, err := NewService(store, NewCompilerWithFeatureCaps(guardrailService, core.DefaultExecutionFeatures()))
+	service, err := NewService(store, NewCompilerWithFeatureCaps(guardrailService, core.DefaultWorkflowFeatures()))
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -679,14 +679,14 @@ func TestServiceRefresh_RebuildsCompiledGuardrailPipelinesAfterExecutorSwap(t *t
 		t.Fatalf("service.Refresh() error = %v", err)
 	}
 
-	selector := core.NewExecutionPlanSelector("", "", "/")
+	selector := core.NewWorkflowSelector("", "", "/")
 	policy, err := service.Match(selector)
 	if err != nil {
 		t.Fatalf("service.Match() error = %v", err)
 	}
-	plan := &core.ExecutionPlan{Policy: policy}
+	workflow := &core.Workflow{Policy: policy}
 
-	assertPipelineRewrite(t, service.PipelineForExecutionPlan(plan), "[|---|](PERSON_1)")
+	assertPipelineRewrite(t, service.PipelineForWorkflow(workflow), "[|---|](PERSON_1)")
 
 	if err := guardrailService.SetExecutor(context.Background(), guardrailExecutorFunc(func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
 		return &core.ChatResponse{
@@ -698,12 +698,12 @@ func TestServiceRefresh_RebuildsCompiledGuardrailPipelinesAfterExecutorSwap(t *t
 		t.Fatalf("guardrailService.SetExecutor() error = %v", err)
 	}
 
-	assertPipelineRewrite(t, service.PipelineForExecutionPlan(plan), "[|---|](PERSON_1)")
+	assertPipelineRewrite(t, service.PipelineForWorkflow(workflow), "[|---|](PERSON_1)")
 
 	if err := service.Refresh(context.Background()); err != nil {
 		t.Fatalf("service.Refresh() after SetExecutor error = %v", err)
 	}
-	assertPipelineRewrite(t, service.PipelineForExecutionPlan(plan), "[|---|](PERSON_2)")
+	assertPipelineRewrite(t, service.PipelineForWorkflow(workflow), "[|---|](PERSON_2)")
 }
 
 type guardrailTestStore struct {
@@ -829,7 +829,7 @@ func TestServiceCreate_RefreshesSnapshot(t *testing.T) {
 		t.Fatal("Create() returned nil version")
 	}
 
-	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -858,7 +858,7 @@ func TestServiceListViews_IncludesEffectiveFeatures(t *testing.T) {
 			},
 		},
 	}
-	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.ExecutionFeatures{
+	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.WorkflowFeatures{
 		Cache:      false,
 		Audit:      true,
 		Usage:      true,
@@ -886,6 +886,17 @@ func TestServiceListViews_IncludesEffectiveFeatures(t *testing.T) {
 	}
 	if views[0].EffectiveFeatures.Guardrails {
 		t.Fatal("EffectiveFeatures.Guardrails = true, want false")
+	}
+	rawView, err := json.Marshal(views[0])
+	if err != nil {
+		t.Fatalf("marshal view: %v", err)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(rawView, &response); err != nil {
+		t.Fatalf("unmarshal marshaled view: %v", err)
+	}
+	if _, ok := response["scope_key"]; ok {
+		t.Fatalf("view JSON exposed storage-only scope_key: %s", rawView)
 	}
 }
 
@@ -945,7 +956,7 @@ func TestServiceListViews_AnnotatesCompileFailuresPerRow(t *testing.T) {
 	if views[1].ID != "provider-v1" {
 		t.Fatalf("views[1].ID = %q, want provider-v1", views[1].ID)
 	}
-	if views[1].CompileError != "compile execution plan \"provider-v1\": compile failed for provider-v1" {
+	if views[1].CompileError != "compile workflow \"provider-v1\": compile failed for provider-v1" {
 		t.Fatalf("views[1].CompileError = %q, want wrapped compile failure", views[1].CompileError)
 	}
 	if views[1].ScopeType != "provider" {
@@ -1003,7 +1014,7 @@ func TestServiceDeactivate_RefreshesSnapshot(t *testing.T) {
 		t.Fatalf("Deactivate() error = %v", err)
 	}
 
-	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -1170,7 +1181,7 @@ func TestServiceCreateWaitsForInFlightRefreshBeforePersisting(t *testing.T) {
 		t.Fatal("Create() returned nil version")
 	}
 
-	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -1223,8 +1234,8 @@ func TestServiceCreateRejectsEmptyCompiledPreviewBeforePersisting(t *testing.T) 
 	if !IsValidationError(err) {
 		t.Fatalf("Create() error = %v, want validation error", err)
 	}
-	if err.Error() != "compiled plan is empty or missing policy" {
-		t.Fatalf("Create() error = %q, want compiled plan is empty or missing policy", err.Error())
+	if err.Error() != "compiled workflow is empty or missing policy" {
+		t.Fatalf("Create() error = %q, want compiled workflow is empty or missing policy", err.Error())
 	}
 	if created != nil {
 		t.Fatalf("Create() version = %#v, want nil", created)
@@ -1282,7 +1293,7 @@ func TestServiceCreateRefreshIgnoresRequestContextCancellationAfterPersist(t *te
 		t.Fatal("Create() returned nil version")
 	}
 
-	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -1337,7 +1348,7 @@ func TestServiceCreateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testin
 		t.Fatal("Create() returned nil version")
 	}
 
-	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -1395,7 +1406,7 @@ func TestServiceDeactivateRefreshIgnoresRequestContextCancellationAfterPersist(t
 		t.Fatalf("Deactivate() error = %v", err)
 	}
 
-	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -1450,7 +1461,7 @@ func TestServiceDeactivateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *te
 		t.Fatalf("Deactivate() error = %v", err)
 	}
 
-	policy, err := service.Match(core.NewExecutionPlanSelector("openai", "gpt-5"))
+	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}

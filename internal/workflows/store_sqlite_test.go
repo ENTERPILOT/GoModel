@@ -1,4 +1,4 @@
-package executionplans
+package workflows
 
 import (
 	"database/sql"
@@ -17,7 +17,7 @@ func TestNewSQLiteStore_SkipsExistingScopeUserPathMigration(t *testing.T) {
 	defer db.Close()
 
 	_, err = db.Exec(`
-		CREATE TABLE execution_plan_versions (
+		CREATE TABLE workflow_versions (
 			id TEXT PRIMARY KEY,
 			scope_provider TEXT,
 			scope_model TEXT,
@@ -27,13 +27,13 @@ func TestNewSQLiteStore_SkipsExistingScopeUserPathMigration(t *testing.T) {
 			active INTEGER NOT NULL DEFAULT 1,
 			name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
-			plan_payload JSON NOT NULL,
-			plan_hash TEXT NOT NULL,
+			workflow_payload JSON NOT NULL,
+			workflow_hash TEXT NOT NULL,
 			created_at INTEGER NOT NULL
 		)
 	`)
 	if err != nil {
-		t.Fatalf("create execution_plan_versions table: %v", err)
+		t.Fatalf("create workflow_versions table: %v", err)
 	}
 
 	store, err := NewSQLiteStore(db)
@@ -55,7 +55,7 @@ func TestNewSQLiteStore_AddsMissingScopeUserPathColumn(t *testing.T) {
 	defer db.Close()
 
 	_, err = db.Exec(`
-		CREATE TABLE execution_plan_versions (
+		CREATE TABLE workflow_versions (
 			id TEXT PRIMARY KEY,
 			scope_provider TEXT,
 			scope_model TEXT,
@@ -64,13 +64,13 @@ func TestNewSQLiteStore_AddsMissingScopeUserPathColumn(t *testing.T) {
 			active INTEGER NOT NULL DEFAULT 1,
 			name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
-			plan_payload JSON NOT NULL,
-			plan_hash TEXT NOT NULL,
+			workflow_payload JSON NOT NULL,
+			workflow_hash TEXT NOT NULL,
 			created_at INTEGER NOT NULL
 		)
 	`)
 	if err != nil {
-		t.Fatalf("create execution_plan_versions table: %v", err)
+		t.Fatalf("create workflow_versions table: %v", err)
 	}
 
 	store, err := NewSQLiteStore(db)
@@ -81,7 +81,7 @@ func TestNewSQLiteStore_AddsMissingScopeUserPathColumn(t *testing.T) {
 		t.Fatal("NewSQLiteStore() = nil, want store")
 	}
 
-	rows, err := db.Query(`PRAGMA table_info('execution_plan_versions')`)
+	rows, err := db.Query(`PRAGMA table_info('workflow_versions')`)
 	if err != nil {
 		t.Fatalf("PRAGMA table_info() error = %v", err)
 	}

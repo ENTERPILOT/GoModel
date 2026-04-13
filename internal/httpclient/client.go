@@ -64,15 +64,16 @@ func getEnvDuration(key string, defaultVal time.Duration) time.Duration {
 // here works correctly because the gomodel entrypoint loads .env before config and
 // providers are initialized.
 func DefaultConfig() ClientConfig {
+	defaultLongTimeout := 600 * time.Second
 	return ClientConfig{
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   100,
 		IdleConnTimeout:       90 * time.Second,
-		Timeout:               getEnvDuration("HTTP_TIMEOUT", 600 * time.Second),
+		Timeout:               getEnvDuration("HTTP_TIMEOUT", defaultLongTimeout),
 		DialTimeout:           30 * time.Second,
 		KeepAlive:             30 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: getEnvDuration("HTTP_RESPONSE_HEADER_TIMEOUT", 600 * time.Second),
+		ResponseHeaderTimeout: getEnvDuration("HTTP_RESPONSE_HEADER_TIMEOUT", defaultLongTimeout),
 	}
 }
 

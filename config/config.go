@@ -30,19 +30,19 @@ var bodySizeLimitRegex = regexp.MustCompile(`(?i)^(\d+)([KMG])?B?$`)
 
 // Config holds the application configuration.
 type Config struct {
-	Server         ServerConfig         `yaml:"server"`
-	Models         ModelsConfig         `yaml:"models"`
-	Cache          CacheConfig          `yaml:"cache"`
-	Storage        StorageConfig        `yaml:"storage"`
-	Logging        LogConfig            `yaml:"logging"`
-	Usage          UsageConfig          `yaml:"usage"`
-	Metrics        MetricsConfig        `yaml:"metrics"`
-	HTTP           HTTPConfig           `yaml:"http"`
-	Admin          AdminConfig          `yaml:"admin"`
-	Guardrails     GuardrailsConfig     `yaml:"guardrails"`
-	Fallback       FallbackConfig       `yaml:"fallback"`
-	ExecutionPlans ExecutionPlansConfig `yaml:"execution_plans"`
-	Resilience     ResilienceConfig     `yaml:"resilience"`
+	Server     ServerConfig     `yaml:"server"`
+	Models     ModelsConfig     `yaml:"models"`
+	Cache      CacheConfig      `yaml:"cache"`
+	Storage    StorageConfig    `yaml:"storage"`
+	Logging    LogConfig        `yaml:"logging"`
+	Usage      UsageConfig      `yaml:"usage"`
+	Metrics    MetricsConfig    `yaml:"metrics"`
+	HTTP       HTTPConfig       `yaml:"http"`
+	Admin      AdminConfig      `yaml:"admin"`
+	Guardrails GuardrailsConfig `yaml:"guardrails"`
+	Fallback   FallbackConfig   `yaml:"fallback"`
+	Workflows  WorkflowsConfig  `yaml:"workflows"`
+	Resilience ResilienceConfig `yaml:"resilience"`
 }
 
 // LoadResult is returned by Load and bundles the application config with the raw
@@ -269,11 +269,11 @@ type HTTPConfig struct {
 	ResponseHeaderTimeout int `yaml:"response_header_timeout" env:"HTTP_RESPONSE_HEADER_TIMEOUT"`
 }
 
-// ExecutionPlansConfig holds runtime refresh behavior for persisted execution plans.
-type ExecutionPlansConfig struct {
-	// RefreshInterval controls how often the in-memory execution-plan snapshot
+// WorkflowsConfig holds runtime refresh behavior for persisted workflows.
+type WorkflowsConfig struct {
+	// RefreshInterval controls how often the in-memory workflow snapshot
 	// is refreshed from storage. Default: 1m.
-	RefreshInterval time.Duration `yaml:"refresh_interval" env:"EXECUTION_PLAN_REFRESH_INTERVAL"`
+	RefreshInterval time.Duration `yaml:"refresh_interval" env:"WORKFLOW_REFRESH_INTERVAL"`
 }
 
 // LogConfig holds audit logging configuration
@@ -935,7 +935,7 @@ func buildDefaultConfig() *Config {
 		Fallback: FallbackConfig{
 			DefaultMode: FallbackModeManual,
 		},
-		ExecutionPlans: ExecutionPlansConfig{
+		Workflows: WorkflowsConfig{
 			RefreshInterval: time.Minute,
 		},
 		Resilience: ResilienceConfig{

@@ -129,7 +129,7 @@ The streamed response is not part of `RequestSnapshot`. If the gateway needs str
 - **Graceful degradation**: Requests still flow even when only partial semantic understanding is available
 - **Safer passthrough**: Opaque provider-native routes do not need to be forced through translated abstractions
 - **Forward compatibility**: Unknown JSON fields can be preserved instead of being silently dropped
-- **Foundation for future policy work**: Later planning and capability decisions can build on a stable ingress and semantics model
+- **Foundation for future policy work**: Later workflow resolution and capability decisions can build on a stable ingress and semantics model
 
 ### Negative
 

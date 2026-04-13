@@ -70,11 +70,11 @@ func (s *concurrentTrackingStore) Close() error {
 	return nil
 }
 
-func installResolvedExecutionPlan(e *echo.Echo, providerType, model string) {
+func installResolvedWorkflow(e *echo.Echo, providerType, model string) {
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			desc := core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path)
-			ctx := core.WithExecutionPlan(c.Request().Context(), &core.ExecutionPlan{
+			ctx := core.WithWorkflow(c.Request().Context(), &core.Workflow{
 				Endpoint:     desc,
 				Mode:         core.ExecutionModeTranslated,
 				Capabilities: core.CapabilitiesForEndpoint(desc),
@@ -96,7 +96,7 @@ func TestSimpleCacheMiddleware_CacheHit(t *testing.T) {
 	defer store.Close()
 	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
 	e := echo.New()
-	installResolvedExecutionPlan(e, "openai", "gpt-4")
+	installResolvedWorkflow(e, "openai", "gpt-4")
 	e.Use(mw.Middleware())
 	e.POST("/v1/chat/completions", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"result": "cached"})
@@ -138,7 +138,7 @@ func TestSimpleCacheMiddleware_DifferentBodyDifferentKey(t *testing.T) {
 	defer store.Close()
 	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
 	e := echo.New()
-	installResolvedExecutionPlan(e, "openai", "gpt-4")
+	installResolvedWorkflow(e, "openai", "gpt-4")
 	e.Use(mw.Middleware())
 	e.POST("/v1/chat/completions", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"msg": c.Request().URL.Path})
@@ -167,13 +167,13 @@ func TestSimpleCacheMiddleware_DifferentBodyDifferentKey(t *testing.T) {
 func TestHashRequest_ResolvedModelChangesKey(t *testing.T) {
 	body := []byte(`{"model":"anthropic/claude-opus-4-6","messages":[{"role":"user","content":"hi"}]}`)
 
-	first := hashRequest("/v1/chat/completions", body, &core.ExecutionPlan{
+	first := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModeTranslated,
 		Resolution: &core.RequestModelResolution{
 			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
 		},
 	})
-	second := hashRequest("/v1/chat/completions", body, &core.ExecutionPlan{
+	second := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModeTranslated,
 		Resolution: &core.RequestModelResolution{
 			ResolvedSelector: core.ModelSelector{Provider: "anthropic", Model: "claude-opus-4-6"},
@@ -188,10 +188,10 @@ func TestHashRequest_ResolvedModelChangesKey(t *testing.T) {
 func TestHashRequest_ModeChangesKey(t *testing.T) {
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
 
-	first := hashRequest("/v1/chat/completions", body, &core.ExecutionPlan{
+	first := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModeTranslated,
 	})
-	second := hashRequest("/v1/chat/completions", body, &core.ExecutionPlan{
+	second := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModePassthrough,
 	})
 
@@ -203,7 +203,7 @@ func TestHashRequest_ModeChangesKey(t *testing.T) {
 func TestHashRequest_StreamIncludeUsageChangesKey(t *testing.T) {
 	base := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
 	withUsage := []byte(`{"model":"gpt-4","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"hi"}]}`)
-	plan := &core.ExecutionPlan{
+	plan := &core.Workflow{
 		Mode:         core.ExecutionModeTranslated,
 		ProviderType: "openai",
 		Resolution: &core.RequestModelResolution{
@@ -222,7 +222,7 @@ func TestHashRequest_StreamIncludeUsageChangesKey(t *testing.T) {
 func TestHashRequest_StreamModeChangesKey(t *testing.T) {
 	base := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
 	streaming := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
-	plan := &core.ExecutionPlan{
+	plan := &core.Workflow{
 		Mode:         core.ExecutionModeTranslated,
 		ProviderType: "openai",
 		Resolution: &core.RequestModelResolution{
@@ -243,7 +243,7 @@ func TestSimpleCacheMiddleware_SeparatesStreamingAndNonStreamingEntries(t *testi
 	defer store.Close()
 	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
 	e := echo.New()
-	installResolvedExecutionPlan(e, "openai", "gpt-4")
+	installResolvedWorkflow(e, "openai", "gpt-4")
 	e.Use(mw.Middleware())
 	callCount := 0
 	rawStream := []byte(
@@ -344,7 +344,7 @@ func TestSimpleCacheMiddleware_SkipsPartialTranslatedPlan(t *testing.T) {
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			desc := core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path)
-			ctx := core.WithExecutionPlan(c.Request().Context(), &core.ExecutionPlan{
+			ctx := core.WithWorkflow(c.Request().Context(), &core.Workflow{
 				Endpoint:     desc,
 				Mode:         core.ExecutionModeTranslated,
 				Capabilities: core.CapabilitiesForEndpoint(desc),
@@ -376,7 +376,7 @@ func TestSimpleCacheMiddleware_SkipsPartialTranslatedPlan(t *testing.T) {
 	}
 }
 
-func TestSimpleCacheMiddleware_SkipsWhenExecutionPlanDisablesCache(t *testing.T) {
+func TestSimpleCacheMiddleware_SkipsWhenWorkflowDisablesCache(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()
 	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
@@ -384,7 +384,7 @@ func TestSimpleCacheMiddleware_SkipsWhenExecutionPlanDisablesCache(t *testing.T)
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			desc := core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path)
-			ctx := core.WithExecutionPlan(c.Request().Context(), &core.ExecutionPlan{
+			ctx := core.WithWorkflow(c.Request().Context(), &core.Workflow{
 				Endpoint:     desc,
 				Mode:         core.ExecutionModeTranslated,
 				Capabilities: core.CapabilitiesForEndpoint(desc),
@@ -392,9 +392,9 @@ func TestSimpleCacheMiddleware_SkipsWhenExecutionPlanDisablesCache(t *testing.T)
 					ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-4"},
 					ProviderType:     "openai",
 				},
-				Policy: &core.ResolvedExecutionPolicy{
+				Policy: &core.ResolvedWorkflowPolicy{
 					VersionID: "plan-cache-off",
-					Features: core.ExecutionFeatures{
+					Features: core.WorkflowFeatures{
 						Cache:      false,
 						Audit:      true,
 						Usage:      true,
@@ -434,7 +434,7 @@ func TestSimpleCacheMiddleware_UsesCapturedSnapshotBodyWithoutReadingLiveBody(t 
 	defer store.Close()
 	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
 	e := echo.New()
-	installResolvedExecutionPlan(e, "openai", "gpt-4")
+	installResolvedWorkflow(e, "openai", "gpt-4")
 	e.Use(mw.Middleware())
 	callCount := 0
 	e.POST("/v1/chat/completions", func(c *echo.Context) error {
@@ -528,7 +528,7 @@ func TestSimpleCacheMiddleware_BypassesCacheWhenBodyWasNotCaptured(t *testing.T)
 	}
 }
 
-func TestSimpleCacheMiddleware_BypassesCacheWithoutExecutionPlan(t *testing.T) {
+func TestSimpleCacheMiddleware_BypassesCacheWithoutWorkflow(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()
 	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
@@ -773,7 +773,7 @@ func TestSimpleCacheMiddleware_CloseWaitsForPendingWrites(t *testing.T) {
 	store := cache.NewMapStore()
 	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
 	e := echo.New()
-	installResolvedExecutionPlan(e, "openai", "gpt-4")
+	installResolvedWorkflow(e, "openai", "gpt-4")
 	e.Use(mw.Middleware())
 	e.POST("/v1/chat/completions", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"result": "ok"})
@@ -800,7 +800,7 @@ func TestSimpleCacheMiddleware_LimitsConcurrentCacheWrites(t *testing.T) {
 	store := newConcurrentTrackingStore()
 	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
 	e := echo.New()
-	installResolvedExecutionPlan(e, "openai", "gpt-4")
+	installResolvedWorkflow(e, "openai", "gpt-4")
 	e.Use(mw.Middleware())
 	e.POST("/v1/chat/completions", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"result": "ok"})

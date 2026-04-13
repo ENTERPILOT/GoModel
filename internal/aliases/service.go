@@ -139,8 +139,8 @@ func (s *Service) resolveRequested(requested core.RequestedModelSelector) (Resol
 
 // ResolveModel resolves a requested selector and returns the concrete selector
 // chosen for execution. This allows alias policy to be consumed as an explicit
-// planning dependency without requiring the provider chain itself to own alias
-// behavior.
+// workflow resolution dependency without requiring the provider chain itself to
+// own alias behavior.
 func (s *Service) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	resolution, changed, err := s.resolveRequested(requested)
 	if err != nil {

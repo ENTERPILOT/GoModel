@@ -44,12 +44,12 @@ You can also configure it with environment variables:
 The exact cache hashes:
 
 - the request path
-- the resolved execution plan context used for execution
+- the resolved workflow context used for execution
   specifically execution mode, provider type, and resolved model
 - the final request body
 
 This means guardrails and workflows affect cache keys when they change the
-resolved execution plan or the final body sent through execution.
+resolved workflow or the final body sent through execution.
 
 You can bypass caching per request with:
 
@@ -68,7 +68,7 @@ Cache-Control: no-store
 `user_path` is not added to the exact-cache key by itself.
 
 That is intentional. If two requests end up with the same path, resolved
-execution plan, and final request body, they can share the same exact-cache
+workflow, and final request body, they can share the same exact-cache
 entry even when they originate from different `user_path` values.
 
 <Note>

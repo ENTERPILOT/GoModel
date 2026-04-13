@@ -13,7 +13,7 @@ import (
 	"gomodel/internal/core"
 )
 
-func TestEnsureTranslatedRequestPlan_CompletesPartialPlanFromDecodedSelector(t *testing.T) {
+func TestEnsureTranslatedRequestWorkflow_CompletesPartialWorkflowFromDecodedSelector(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
 
 	e := echo.New()
@@ -21,8 +21,8 @@ func TestEnsureTranslatedRequestPlan_CompletesPartialPlanFromDecodedSelector(t *
 	rec := httptest.NewRecorder()
 
 	desc := core.DescribeEndpoint(req.Method, req.URL.Path)
-	ctx := core.WithExecutionPlan(req.Context(), &core.ExecutionPlan{
-		RequestID:    "req-partial-plan",
+	ctx := core.WithWorkflow(req.Context(), &core.Workflow{
+		RequestID:    "req-partial-workflow",
 		Endpoint:     desc,
 		Mode:         core.ExecutionModeTranslated,
 		Capabilities: core.CapabilitiesForEndpoint(desc),
@@ -35,26 +35,26 @@ func TestEnsureTranslatedRequestPlan_CompletesPartialPlanFromDecodedSelector(t *
 	model := "gpt-4o-mini"
 	providerHint := ""
 
-	plan, err := ensureTranslatedRequestPlan(c, provider, nil, nil, &model, &providerHint)
+	workflow, err := ensureTranslatedRequestWorkflow(c, provider, nil, nil, &model, &providerHint)
 	require.NoError(t, err)
-	require.NotNil(t, plan)
+	require.NotNil(t, workflow)
 
 	assert.Equal(t, "gpt-4o-mini", model)
 	assert.Equal(t, "", providerHint)
-	assert.Equal(t, core.ExecutionModeTranslated, plan.Mode)
-	assert.Equal(t, "mock", plan.ProviderType)
-	if assert.NotNil(t, plan.Resolution) {
-		assert.Equal(t, "gpt-4o-mini", plan.Resolution.Requested.Model)
-		assert.Equal(t, "gpt-4o-mini", plan.Resolution.ResolvedSelector.Model)
+	assert.Equal(t, core.ExecutionModeTranslated, workflow.Mode)
+	assert.Equal(t, "mock", workflow.ProviderType)
+	if assert.NotNil(t, workflow.Resolution) {
+		assert.Equal(t, "gpt-4o-mini", workflow.Resolution.Requested.Model)
+		assert.Equal(t, "gpt-4o-mini", workflow.Resolution.ResolvedSelector.Model)
 	}
 
-	storedPlan := core.GetExecutionPlan(c.Request().Context())
-	if assert.NotNil(t, storedPlan) {
-		assert.Equal(t, "mock", storedPlan.ProviderType)
-		assert.Equal(t, "gpt-4o-mini", storedPlan.ResolvedQualifiedModel())
-		if assert.NotNil(t, storedPlan.Resolution) {
-			assert.Equal(t, "mock", storedPlan.Resolution.ProviderType)
-			assert.Equal(t, "gpt-4o-mini", storedPlan.Resolution.ResolvedSelector.Model)
+	storedWorkflow := core.GetWorkflow(c.Request().Context())
+	if assert.NotNil(t, storedWorkflow) {
+		assert.Equal(t, "mock", storedWorkflow.ProviderType)
+		assert.Equal(t, "gpt-4o-mini", storedWorkflow.ResolvedQualifiedModel())
+		if assert.NotNil(t, storedWorkflow.Resolution) {
+			assert.Equal(t, "mock", storedWorkflow.Resolution.ProviderType)
+			assert.Equal(t, "gpt-4o-mini", storedWorkflow.Resolution.ResolvedSelector.Model)
 		}
 	}
 	assert.Equal(t, "gpt-4o-mini", entry.RequestedModel)
