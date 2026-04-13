@@ -149,8 +149,8 @@
             async fetchAliases() {
                 this.aliasLoading = true;
                 this.aliasError = '';
-                const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
                 try {
+                    const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
                     const res = await fetch('/admin/api/v1/aliases', request);
                     if (res.status === 503) {
                         this.aliasesAvailable = false;
@@ -158,8 +158,12 @@
                         this.syncDisplayModels();
                         return;
                     }
+                    const handled = this.handleFetchResponse(res, 'aliases', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
                     this.aliasesAvailable = true;
-                    if (!this.handleFetchResponse(res, 'aliases', request)) {
+                    if (!handled) {
                         this.aliases = [];
                         this.syncDisplayModels();
                         return;
@@ -179,8 +183,8 @@
 
             async fetchModelOverrides() {
                 this.modelOverrideError = '';
-                const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
                 try {
+                    const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
                     const res = await fetch('/admin/api/v1/model-overrides', request);
                     if (res.status === 503) {
                         this.modelOverridesAvailable = false;
@@ -188,8 +192,12 @@
                         this.syncDisplayModels();
                         return;
                     }
+                    const handled = this.handleFetchResponse(res, 'model overrides', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
                     this.modelOverridesAvailable = true;
-                    if (!this.handleFetchResponse(res, 'model overrides', request)) {
+                    if (!handled) {
                         this.modelOverrideViews = [];
                         this.syncDisplayModels();
                         return;

@@ -19,18 +19,21 @@
                     }
                     return this._calendarFetchController === controller && !controller.signal.aborted;
                 };
-                const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                if (controller) {
-                    options.signal = controller.signal;
-                }
-
                 this.calendarLoading = true;
                 try {
+                    const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    if (controller) {
+                        options.signal = controller.signal;
+                    }
                     const res = await fetch('/admin/api/v1/usage/daily?days=365&interval=daily', options);
                     if (!isCurrentRequest()) {
                         return;
                     }
-                    if (!this.handleFetchResponse(res, 'calendar', options)) {
+                    const handled = this.handleFetchResponse(res, 'calendar', options);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
                         if (!isCurrentRequest()) {
                             return;
                         }

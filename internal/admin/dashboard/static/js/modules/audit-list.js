@@ -29,7 +29,11 @@
 
                     const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
                     const res = await fetch('/admin/api/v1/audit/log?' + qs, request);
-                    if (!this.handleFetchResponse(res, 'audit log', request)) {
+                    const handled = this.handleFetchResponse(res, 'audit log', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
                         if (requestToken !== this.auditFetchToken) return;
                         this.auditLog = { entries: [], total: 0, limit: 25, offset: 0 };
                         return;

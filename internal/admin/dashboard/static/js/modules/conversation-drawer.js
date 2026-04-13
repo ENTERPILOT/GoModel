@@ -112,7 +112,11 @@
 
                     if (requestToken !== this.conversationRequestToken) return;
 
-                    if (!this.handleFetchResponse(res, 'audit conversation', request)) {
+                    const handled = this.handleFetchResponse(res, 'audit conversation', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
                         this.conversationError = 'Unable to load interactions.';
                         this.conversationEntries = [];
                         this.conversationMessages = [];

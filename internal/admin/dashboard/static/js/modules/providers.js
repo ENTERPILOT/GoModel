@@ -62,17 +62,21 @@
             },
 
             async fetchProviderStatus() {
-                const controller = typeof this._startAbortableRequest === 'function'
-                    ? this._startAbortableRequest('_providerStatusFetchController')
-                    : null;
-                const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                if (controller) {
-                    options.signal = controller.signal;
-                }
-
+                let controller = null;
                 try {
+                    controller = typeof this._startAbortableRequest === 'function'
+                        ? this._startAbortableRequest('_providerStatusFetchController')
+                        : null;
+                    const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    if (controller) {
+                        options.signal = controller.signal;
+                    }
                     const res = await fetch('/admin/api/v1/providers/status', options);
-                    if (!this.handleFetchResponse(res, 'provider status', options)) {
+                    const handled = this.handleFetchResponse(res, 'provider status', options);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
                         this.providerStatus = this.emptyProviderStatus();
                         return;
                     }

@@ -707,7 +707,11 @@
                         request.signal = controller.signal;
                     }
                     const res = await fetch('/admin/api/v1/dashboard/config', request);
-                    if (!this.handleFetchResponse(res, 'dashboard config', request)) {
+                    const handled = this.handleFetchResponse(res, 'dashboard config', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
                         this.workflowRuntimeConfig = {};
                         return;
                     }
@@ -832,8 +836,12 @@
                         this.workflows = [];
                         return;
                     }
+                    const handled = this.handleFetchResponse(res, 'workflows', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
                     this.workflowsAvailable = true;
-                    if (!this.handleFetchResponse(res, 'workflows', request)) {
+                    if (!handled) {
                         this.workflows = [];
                         return;
                     }
@@ -855,10 +863,14 @@
             },
 
             async fetchWorkflowGuardrails() {
-                const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
                 try {
+                    const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
                     const res = await fetch('/admin/api/v1/workflows/guardrails', request);
-                    if (!this.handleFetchResponse(res, 'workflow guardrails', request)) {
+                    const handled = this.handleFetchResponse(res, 'workflow guardrails', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
                         this.guardrailRefs = [];
                         return;
                     }

@@ -131,6 +131,9 @@
                            placeholder="Master key or bearer token"
                            autocomplete="current-password"
                            x-model="apiKey">
+                    <p class="auth-dialog-error" x-show="authError" role="alert">
+                        Enter a valid API key to continue.
+                    </p>
                     <p class="auth-dialog-hint">Stored in this browser. Requests use the Authorization bearer header.</p>
                     <div class="auth-dialog-actions">
                         <button type="button" class="pagination-btn" @click="closeAuthDialog()">Not now</button>

@@ -308,6 +308,12 @@ body {
     font-size: 13px;
 }
 
+.auth-dialog-error {
+    color: var(--danger);
+    font-size: 13px;
+    font-weight: 600;
+}
+
 .auth-dialog-form {
     display: grid;
     gap: 10px;

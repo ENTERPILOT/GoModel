@@ -37,15 +37,15 @@
                     return;
                 }
 
-                const controller = typeof this._startAbortableRequest === 'function'
-                    ? this._startAbortableRequest('_cacheOverviewFetchController')
-                    : null;
-                const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                if (controller) {
-                    options.signal = controller.signal;
-                }
-
+                let controller = null;
                 try {
+                    controller = typeof this._startAbortableRequest === 'function'
+                        ? this._startAbortableRequest('_cacheOverviewFetchController')
+                        : null;
+                    const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    if (controller) {
+                        options.signal = controller.signal;
+                    }
                     let queryStr;
                     if (this.customStartDate && this.customEndDate) {
                         queryStr = 'start_date=' + this._formatDate(this.customStartDate) +
@@ -56,7 +56,11 @@
                     queryStr += '&interval=' + this.interval;
 
                     const res = await fetch('/admin/api/v1/cache/overview?' + queryStr, options);
-                    if (!this.handleFetchResponse(res, 'cache overview', options)) {
+                    const handled = this.handleFetchResponse(res, 'cache overview', options);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
                         this.cacheOverview = this.emptyCacheOverview();
                         return;
                     }
@@ -86,15 +90,15 @@
             },
 
             async fetchUsage() {
-                const controller = typeof this._startAbortableRequest === 'function'
-                    ? this._startAbortableRequest('_usageFetchController')
-                    : null;
-                const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                if (controller) {
-                    options.signal = controller.signal;
-                }
-
+                let controller = null;
                 try {
+                    controller = typeof this._startAbortableRequest === 'function'
+                        ? this._startAbortableRequest('_usageFetchController')
+                        : null;
+                    const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    if (controller) {
+                        options.signal = controller.signal;
+                    }
                     let queryStr;
                     if (this.customStartDate && this.customEndDate) {
                         queryStr = 'start_date=' + this._formatDate(this.customStartDate) +
@@ -109,8 +113,13 @@
                         fetch('/admin/api/v1/usage/daily?' + queryStr, options)
                     ]);
 
-                    if (!this.handleFetchResponse(summaryRes, 'usage summary', options) ||
-                        !this.handleFetchResponse(dailyRes, 'usage daily', options)) {
+                    const summaryHandled = this.handleFetchResponse(summaryRes, 'usage summary', options);
+                    const dailyHandled = this.handleFetchResponse(dailyRes, 'usage daily', options);
+                    if ((typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(summaryHandled)) ||
+                        (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(dailyHandled))) {
+                        return;
+                    }
+                    if (!summaryHandled || !dailyHandled) {
                         return;
                     }
 
@@ -154,17 +163,21 @@
             },
 
             async fetchModelUsage() {
-                const controller = typeof this._startAbortableRequest === 'function'
-                    ? this._startAbortableRequest('_modelUsageFetchController')
-                    : null;
-                const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                if (controller) {
-                    options.signal = controller.signal;
-                }
-
+                let controller = null;
                 try {
+                    controller = typeof this._startAbortableRequest === 'function'
+                        ? this._startAbortableRequest('_modelUsageFetchController')
+                        : null;
+                    const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    if (controller) {
+                        options.signal = controller.signal;
+                    }
                     const res = await fetch('/admin/api/v1/usage/models?' + this._usageQueryStr(), options);
-                    if (!this.handleFetchResponse(res, 'usage models', options)) {
+                    const handled = this.handleFetchResponse(res, 'usage models', options);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
                         this.modelUsage = [];
                         return;
                     }
@@ -187,17 +200,21 @@
             },
 
             async fetchUserPathUsage() {
-                const controller = typeof this._startAbortableRequest === 'function'
-                    ? this._startAbortableRequest('_userPathUsageFetchController')
-                    : null;
-                const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                if (controller) {
-                    options.signal = controller.signal;
-                }
-
+                let controller = null;
                 try {
+                    controller = typeof this._startAbortableRequest === 'function'
+                        ? this._startAbortableRequest('_userPathUsageFetchController')
+                        : null;
+                    const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    if (controller) {
+                        options.signal = controller.signal;
+                    }
                     const res = await fetch('/admin/api/v1/usage/user-paths?' + this._usageQueryStr(), options);
-                    if (!this.handleFetchResponse(res, 'usage user paths', options)) {
+                    const handled = this.handleFetchResponse(res, 'usage user paths', options);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
                         this.userPathUsage = [];
                         return;
                     }
@@ -220,15 +237,15 @@
             },
 
             async fetchUsageLog(resetOffset) {
-                const controller = typeof this._startAbortableRequest === 'function'
-                    ? this._startAbortableRequest('_usageLogFetchController')
-                    : null;
-                const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                if (controller) {
-                    options.signal = controller.signal;
-                }
-
+                let controller = null;
                 try {
+                    controller = typeof this._startAbortableRequest === 'function'
+                        ? this._startAbortableRequest('_usageLogFetchController')
+                        : null;
+                    const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    if (controller) {
+                        options.signal = controller.signal;
+                    }
                     if (resetOffset) this.usageLog.offset = 0;
                     let qs = this._usageQueryStr();
                     qs += '&limit=' + this.usageLog.limit + '&offset=' + this.usageLog.offset;
@@ -238,7 +255,11 @@
                     if (this.usageLogUserPath) qs += '&user_path=' + encodeURIComponent(this.usageLogUserPath);
 
                     const res = await fetch('/admin/api/v1/usage/log?' + qs, options);
-                    if (!this.handleFetchResponse(res, 'usage log', options)) {
+                    const handled = this.handleFetchResponse(res, 'usage log', options);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
                         this.usageLog = { entries: [], total: 0, limit: 50, offset: 0 };
                         return;
                     }

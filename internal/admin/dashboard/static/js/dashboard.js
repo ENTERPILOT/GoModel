@@ -1,6 +1,8 @@
 // GOModel Dashboard — Alpine.js + Chart.js logic
 
 function dashboard() {
+    const STALE_AUTH_RESPONSE = 'STALE_AUTH';
+
     function resolveModuleFactory(factory, windowName) {
         if (typeof factory === 'function') {
             return factory;
@@ -308,6 +310,15 @@ function dashboard() {
         },
 
         submitApiKey() {
+            const apiKey = this.normalizeApiKey(this.apiKey);
+            if (!apiKey) {
+                this.apiKey = '';
+                this.authError = true;
+                this.needsAuth = true;
+                this.openAuthDialog();
+                return;
+            }
+            this.apiKey = apiKey;
             this.saveApiKey();
             this.authRequestGeneration++;
             this.authError = false;
@@ -361,6 +372,14 @@ function dashboard() {
             return Boolean(error) && (error.name === 'AbortError' || error.code === 20);
         },
 
+        staleAuthResponseResult() {
+            return STALE_AUTH_RESPONSE;
+        },
+
+        isStaleAuthFetchResult(result) {
+            return result === STALE_AUTH_RESPONSE;
+        },
+
         dashboardDataFetches() {
             const requests = [this.fetchUsage(), this.fetchModels(), this.fetchCategories()];
             if (typeof this.fetchProviderStatus === 'function') {
@@ -404,7 +423,11 @@ function dashboard() {
                     method: 'POST',
                 });
                 const res = await fetch('/admin/api/v1/runtime/refresh', request);
-                if (!this.handleFetchResponse(res, 'runtime refresh', request)) {
+                const handled = this.handleFetchResponse(res, 'runtime refresh', request);
+                if (this.isStaleAuthFetchResult(handled)) {
+                    return;
+                }
+                if (!handled) {
                     this.runtimeRefreshNotice = 'Runtime refresh failed.';
                     this.runtimeRefreshError = this.runtimeRefreshNotice;
                     return;
@@ -482,7 +505,7 @@ function dashboard() {
         handleFetchResponse(res, label, request) {
             if (res.status === 401) {
                 if (this.isStaleAuthResponse(request)) {
-                    return false;
+                    return STALE_AUTH_RESPONSE;
                 }
                 this.authError = true;
                 this.needsAuth = true;
@@ -522,7 +545,11 @@ function dashboard() {
                 if (!isCurrentRequest()) {
                     return;
                 }
-                if (!this.handleFetchResponse(res, 'models', options)) {
+                const handled = this.handleFetchResponse(res, 'models', options);
+                if (this.isStaleAuthFetchResult(handled)) {
+                    return;
+                }
+                if (!handled) {
                     if (!isCurrentRequest()) {
                         return;
                     }
@@ -559,7 +586,11 @@ function dashboard() {
             const request = this.requestOptions();
             try {
                 const res = await fetch('/admin/api/v1/models/categories', request);
-                if (!this.handleFetchResponse(res, 'categories', request)) {
+                const handled = this.handleFetchResponse(res, 'categories', request);
+                if (this.isStaleAuthFetchResult(handled)) {
+                    return;
+                }
+                if (!handled) {
                     this.categories = [];
                     return;
                 }

@@ -175,7 +175,31 @@ test('stale unauthorized dashboard responses do not reopen the auth dialog', () 
         statusText: 'Unauthorized'
     }, 'categories', staleRequest);
 
-    assert.equal(handled, false);
+    assert.equal(handled, app.staleAuthResponseResult());
+    assert.equal(app.authError, false);
+    assert.equal(app.needsAuth, false);
+    assert.equal(app.authDialogOpen, false);
+});
+
+test('stale unauthorized category responses preserve existing categories', async () => {
+    const existingCategories = [{ category: 'chat', count: 2 }];
+    const app = loadDashboardApp({
+        context: {
+            fetch: async () => ({
+                ok: false,
+                status: 401,
+                statusText: 'Unauthorized'
+            })
+        }
+    });
+    const staleRequest = app.requestOptions();
+    app.requestOptions = () => staleRequest;
+    app.categories = existingCategories;
+    app.authRequestGeneration++;
+
+    await app.fetchCategories();
+
+    assert.equal(app.categories, existingCategories);
     assert.equal(app.authError, false);
     assert.equal(app.needsAuth, false);
     assert.equal(app.authDialogOpen, false);
@@ -200,6 +224,29 @@ test('submitApiKey trims bearer input and stores the key before refreshing dashb
     assert.equal(storage.getItem('gomodel_api_key'), 'secret-token');
     assert.equal(app.authDialogOpen, false);
     assert.equal(fetches, 1);
+});
+
+test('submitApiKey rejects blank input without unlocking dashboard', () => {
+    const storage = createLocalStorage({ gomodel_api_key: 'existing-token' });
+    const app = loadDashboardApp({
+        window: { localStorage: storage }
+    });
+    let fetches = 0;
+    app.fetchAll = () => {
+        fetches++;
+    };
+
+    app.authDialogOpen = true;
+    app.apiKey = '   ';
+    app.submitApiKey();
+
+    assert.equal(app.apiKey, '');
+    assert.equal(app.authRequestGeneration, 0);
+    assert.equal(storage.getItem('gomodel_api_key'), 'existing-token');
+    assert.equal(app.authError, true);
+    assert.equal(app.needsAuth, true);
+    assert.equal(app.authDialogOpen, true);
+    assert.equal(fetches, 0);
 });
 
 test('headers accept a pasted bearer value without duplicating the prefix', () => {
