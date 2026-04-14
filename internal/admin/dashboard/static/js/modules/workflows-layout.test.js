@@ -136,15 +136,15 @@ test('workflow actions use New Workflow copy for open and submit buttons', () =>
 
     assert.match(
         template,
-        /@click="openWorkflowCreate\(\)">New Workflow<\/button>/
+        /class="pagination-btn pagination-btn-primary pagination-btn-with-icon workflow-create-btn"[\s\S]*@click="openWorkflowCreate\(\)"[\s\S]*data-lucide="plus" class="form-action-icon"[\s\S]*<span>New Workflow<\/span>/
     );
     assert.match(
         template,
-        /class="pagination-btn pagination-btn-primary workflow-submit-btn"[\s\S]*workflowSubmitting \? workflowSubmittingLabel\(\) : workflowSubmitLabel\(\)/
+        /class="pagination-btn pagination-btn-primary pagination-btn-with-icon workflow-submit-btn"[\s\S]*workflowSubmitting \? workflowSubmittingLabel\(\) : workflowSubmitLabel\(\)/
     );
     assert.match(
         template,
-        /workflow-submit-icon[\s\S]*<svg x-show="workflowSubmitMode\(\) === 'create'" viewBox="0 0 24 24">[\s\S]*<svg x-show="workflowSubmitMode\(\) === 'save'" viewBox="0 0 24 24">/
+        /data-lucide="plus" class="form-action-icon" x-show="workflowSubmitMode\(\) === 'create'"[\s\S]*data-lucide="save" class="form-action-icon" x-show="workflowSubmitMode\(\) === 'save'"/
     );
 });
 

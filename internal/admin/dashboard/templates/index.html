@@ -448,23 +448,18 @@
         </div>
 
         <div class="settings-refresh-section">
-            <div>
-                <h3>Runtime Refresh</h3>
-                <p>Pull the latest model metadata, provider inventory, API keys, aliases, model access rules, guardrails, and workflows.</p>
+            {{template "helper-disclosure" "{ heading: 'Runtime Refresh', open: false, copyId: 'runtime-refresh-help-copy', showLabel: 'Show runtime refresh help', hideLabel: 'Hide runtime refresh help', text: 'Pull the latest model metadata, provider inventory, API keys, aliases, model access rules, guardrails, and workflows.' }"}}
+            <div class="settings-refresh-actions">
+                <button type="button"
+                        class="pagination-btn pagination-btn-primary pagination-btn-with-icon settings-refresh-btn"
+                        :class="{ 'is-refreshing': runtimeRefreshLoading }"
+                        :disabled="runtimeRefreshLoading"
+                        :aria-busy="runtimeRefreshLoading ? 'true' : 'false'"
+                        @click="refreshRuntime()">
+                    <i data-lucide="refresh-cw" class="settings-refresh-icon" aria-hidden="true"></i>
+                    <span>Refresh</span>
+                </button>
             </div>
-            <button type="button"
-                    class="pagination-btn pagination-btn-primary"
-                    :disabled="runtimeRefreshLoading"
-                    @click="refreshRuntime()"
-                    x-text="runtimeRefreshLoading ? 'Refreshing...' : 'Refresh Runtime'"></button>
-        </div>
-
-        <div class="loading-state settings-refresh-loading"
-             x-show="runtimeRefreshLoading"
-             role="status"
-             aria-live="polite">
-            <span class="loading-spinner" aria-hidden="true"></span>
-            <span>Generating runtime report...</span>
         </div>
         <div>
             <div class="alert alert-success settings-refresh-alert"
@@ -610,7 +605,10 @@
 
             <div class="alias-form-actions">
                 <button type="button" class="pagination-btn" @click="closeGuardrailForm()">Cancel</button>
-                <button type="button" class="pagination-btn pagination-btn-primary" :disabled="guardrailFormSubmitting" @click="submitGuardrailForm()">Save Guardrail</button>
+                <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon guardrail-submit-btn" :disabled="guardrailFormSubmitting" @click="submitGuardrailForm()">
+                    <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                    <span>Save Guardrail</span>
+                </button>
             </div>
         </div>
     </div>
@@ -622,7 +620,10 @@
                     <h3>Instances</h3>
                     <p class="alias-form-hint">Each instance has a reusable name, a type, an optional user path for future UI visibility scoping, and a JSON-backed config payload for that type.</p>
                 </div>
-                <button type="button" class="pagination-btn pagination-btn-primary" :disabled="guardrailTypesLoading || guardrailFormSubmitting || !guardrailsAvailable" @click="openGuardrailCreate()">Create Guardrail</button>
+                <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon guardrail-create-btn" :disabled="guardrailTypesLoading || guardrailFormSubmitting || !guardrailsAvailable" @click="openGuardrailCreate()">
+                    <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                    <span>Create Guardrail</span>
+                </button>
             </div>
 
             <div class="table-toolbar" x-show="guardrailsAvailable">
@@ -874,7 +875,10 @@
             <input type="text" placeholder="Filter by provider, provider/model, alias, or owner..." x-model="modelFilter" class="filter-input models-filter-input">
         </div>
         <div class="table-toolbar-actions">
-            <button type="button" class="pagination-btn pagination-btn-primary" x-show="aliasesAvailable" @click="openAliasCreate()">Create Alias</button>
+            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn" x-show="aliasesAvailable" @click="openAliasCreate()">
+                <i data-lucide="plus" class="alias-create-icon" aria-hidden="true"></i>
+                <span>Create Alias</span>
+            </button>
         </div>
     </div>
 
@@ -934,7 +938,11 @@
             <div class="alert alert-warning" x-show="aliasFormError" x-text="aliasFormError"></div>
 
             <div class="alias-form-actions">
-                <button type="submit" class="pagination-btn pagination-btn-primary" :disabled="aliasSubmitting" x-text="aliasSubmitting ? 'Saving...' : (aliasFormMode === 'edit' ? 'Save Alias' : 'Create Alias')"></button>
+                <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-submit-btn" :disabled="aliasSubmitting">
+                    <i data-lucide="plus" class="form-action-icon" x-show="aliasFormMode !== 'edit'" aria-hidden="true"></i>
+                    <i data-lucide="save" class="form-action-icon" x-show="aliasFormMode === 'edit'" aria-hidden="true"></i>
+                    <span x-text="aliasSubmitting ? 'Saving...' : (aliasFormMode === 'edit' ? 'Save Alias' : 'Create Alias')"></span>
+                </button>
             </div>
         </form>
     </div>
@@ -975,7 +983,10 @@
             <div class="alias-form-actions">
                 <button type="button" class="pagination-btn" @click="closeModelOverrideForm()">Cancel</button>
                 <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="modelOverrideFormHasExistingOverride" :disabled="modelOverrideSubmitting" @click="deleteModelOverride()">Remove Override</button>
-                <button type="submit" class="pagination-btn pagination-btn-primary" :disabled="modelOverrideSubmitting" x-text="modelOverrideSubmitting ? 'Saving...' : 'Save Access'"></button>
+                <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon model-access-submit-btn" :disabled="modelOverrideSubmitting">
+                    <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                    <span x-text="modelOverrideSubmitting ? 'Saving...' : 'Save Access'"></span>
+                </button>
             </div>
         </form>
     </div>
@@ -1151,7 +1162,10 @@
             <p class="workflow-page-note">Active workflows are matched path-first: deepest user path wins first, then provider name and model specificity, then broader matches, then global.</p>
         </div>
         <div class="page-header-controls">
-            <button type="button" class="pagination-btn pagination-btn-primary" x-show="workflowsAvailable" @click="openWorkflowCreate()">New Workflow</button>
+            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon workflow-create-btn" x-show="workflowsAvailable" @click="openWorkflowCreate()">
+                <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                <span>New Workflow</span>
+            </button>
         </div>
     </div>
 
@@ -1324,18 +1338,9 @@
 
                 <div class="alias-form-actions">
                     <button type="button" class="pagination-btn" @click="closeWorkflowForm()">Cancel</button>
-                    <button type="submit" class="pagination-btn pagination-btn-primary workflow-submit-btn" :disabled="workflowSubmitting">
-                        <span class="workflow-submit-icon" aria-hidden="true">
-                            <svg x-show="workflowSubmitMode() === 'create'" viewBox="0 0 24 24">
-                                <path d="M12 5v14"></path>
-                                <path d="M5 12h14"></path>
-                            </svg>
-                            <svg x-show="workflowSubmitMode() === 'save'" viewBox="0 0 24 24">
-                                <path d="M5 4h11l3 3v13H5z"></path>
-                                <path d="M8 4v6h8"></path>
-                                <path d="M8 20v-6h8v6"></path>
-                            </svg>
-                        </span>
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon workflow-submit-btn" :disabled="workflowSubmitting">
+                        <i data-lucide="plus" class="form-action-icon" x-show="workflowSubmitMode() === 'create'" aria-hidden="true"></i>
+                        <i data-lucide="save" class="form-action-icon" x-show="workflowSubmitMode() === 'save'" aria-hidden="true"></i>
                         <span x-text="workflowSubmitting ? workflowSubmittingLabel() : workflowSubmitLabel()"></span>
                     </button>
                 </div>

@@ -28,6 +28,10 @@ function dashboard() {
       : null,
     "dashboardContributionCalendarModule",
   );
+  const iconsModuleFactory = resolveModuleFactory(
+    typeof dashboardIconsModule === "function" ? dashboardIconsModule : null,
+    "dashboardIconsModule",
+  );
 
   const base = {
     // State
@@ -205,6 +209,9 @@ function dashboard() {
       }
       if (page === "overview") this.renderChart();
       if (page === "usage") this.fetchUsagePage();
+      if (typeof this.renderIconsAfterUpdate === "function") {
+        this.renderIconsAfterUpdate();
+      }
     },
 
     init() {
@@ -274,6 +281,9 @@ function dashboard() {
       localStorage.setItem("gomodel_theme", t);
       this.applyTheme();
       this.rerenderCharts();
+      if (typeof this.renderIconsAfterUpdate === "function") {
+        this.renderIconsAfterUpdate();
+      }
     },
 
     toggleTheme() {
@@ -869,6 +879,7 @@ function dashboard() {
   };
 
   const moduleFactories = [
+    iconsModuleFactory,
     timezoneModuleFactory,
     resolveModuleFactory(
       typeof dashboardDatePickerModule === "function"

@@ -7,6 +7,13 @@ function readFixture(relativePath) {
     return fs.readFileSync(path.join(__dirname, relativePath), 'utf8');
 }
 
+function readDashboardShellTemplate() {
+    const layout = readFixture('../../../templates/layout.html');
+    const sidebar = readFixture('../../../templates/sidebar.html');
+
+    return layout.replace('{{template "sidebar" .}}', sidebar);
+}
+
 function readCSSRule(source, selector) {
     const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const match = source.match(new RegExp(`${escapedSelector}\\s*\\{([\\s\\S]*?)\\s*\\}`, 'm'));
@@ -24,9 +31,10 @@ test('readCSSRule matches rules with CRLF endings and indented closing braces', 
 });
 
 test('sidebar and main content share the flex layout without manual content offsets', () => {
-    const template = readFixture('../../../templates/layout.html');
+    const template = readDashboardShellTemplate();
     const css = readFixture('../../css/dashboard.css');
 
+    assert.match(readFixture('../../../templates/layout.html'), /{{template "sidebar" \.}}/);
     assert.match(template, /<aside class="sidebar"[\s\S]*<div class="sidebar-toggle"[\s\S]*<main class="content"/);
     assert.doesNotMatch(template, /content-collapsed/);
     assert.match(
@@ -85,11 +93,44 @@ test('dashboard layout pins Chart.js to 4.5.0 and avoids unused htmx', () => {
         template,
         /<script defer src="https:\/\/cdn\.jsdelivr\.net\/npm\/alpinejs@3\.15\.8\/dist\/cdn\.min\.js" integrity="sha384-LXWjKwDZz29o7TduNe\+r\/UxaolHh5FsSvy2W7bDHSZ8jJeGgDeuNnsDNHoxpSgDi" crossorigin="anonymous"><\/script>/
     );
+    assert.match(
+        template,
+        /<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/lucide@0\.577\.0\/dist\/umd\/lucide\.min\.js" integrity="sha384-orgVf2eX2\+m1zKAOIi09hD0W6GtVhoOUmqDK\+sysYB2JTZ4vS86j4jm\+X7a4Nnei" crossorigin="anonymous"><\/script>/
+    );
     assert.doesNotMatch(template, /htmx/i);
     assert.match(
         template,
-        /<script src="\/admin\/static\/js\/modules\/conversation-helpers\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/clipboard\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/providers\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/audit-list\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/auth-keys\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/guardrails\.js"><\/script>/
+        /<script src="\/admin\/static\/js\/modules\/conversation-helpers\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/icons\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/clipboard\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/providers\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/audit-list\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/auth-keys\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/guardrails\.js"><\/script>/
     );
+});
+
+test('dashboard chrome uses Lucide icons for stable navigation and auth controls', () => {
+    const template = readDashboardShellTemplate();
+    const css = readFixture('../../css/dashboard.css');
+    const iconsModule = readFixture('icons.js');
+
+    assert.match(template, /data-lucide="layout-dashboard" class="nav-icon"[\s\S]*<span>Overview<\/span>/);
+    assert.match(template, /data-lucide="box" class="nav-icon"[\s\S]*<span>Models<\/span>/);
+    assert.match(template, /data-lucide="history" class="nav-icon"[\s\S]*<span>Audit Logs<\/span>/);
+    assert.match(template, /data-lucide="chart-column" class="nav-icon"[\s\S]*<span>Usage<\/span>/);
+    assert.match(template, /data-lucide="key-round" class="nav-icon"[\s\S]*<span>API Keys<\/span>/);
+    assert.match(template, /data-lucide="workflow" class="nav-icon"[\s\S]*<span>Workflows<\/span>/);
+    assert.match(template, /data-lucide="shield-check" class="nav-icon"[\s\S]*<span>Guardrails \(experimental\)<\/span>/);
+    assert.match(template, /data-lucide="settings" class="nav-icon"[\s\S]*<span>Settings<\/span>/);
+    assert.match(template, /data-lucide="sun" class="theme-icon"/);
+    assert.match(template, /data-lucide="monitor" class="theme-icon"/);
+    assert.match(template, /data-lucide="moon" class="theme-icon"/);
+    assert.match(template, /data-lucide="lock-keyhole" class="api-key-open-icon"/);
+    assert.match(template, /data-lucide="lock-keyhole" class="auth-dialog-input-icon"/);
+    assert.match(template, /data-lucide="check" class="auth-dialog-submit-icon"/);
+
+    const navIconRule = readCSSRule(css, '.nav-icon');
+    assert.match(navIconRule, /width:\s*18px/);
+    assert.match(navIconRule, /height:\s*18px/);
+    assert.match(navIconRule, /flex:\s*0 0 18px/);
+
+    assert.match(iconsModule, /lucide\.createIcons/);
+    assert.match(iconsModule, /focusable/);
 });
 
 test('overview page shows provider status summary and per-provider cards keyed by configured provider name', () => {
@@ -152,7 +193,7 @@ test('dashboard pages reuse a shared auth banner template', () => {
 });
 
 test('dashboard auth uses a root-level dialog instead of a hidden sidebar input', () => {
-    const template = readFixture('../../../templates/layout.html');
+    const template = readDashboardShellTemplate();
     const css = readFixture('../../css/dashboard.css');
 
     assert.doesNotMatch(template, /<input id="apiKey"/);
@@ -399,6 +440,9 @@ test('model category tables lazy mount only the active table body', () => {
     assert.match(modelsBlock, /activeCategory === 'utility'[\s\S]*{{template "model-table-body" \.}}/);
     assert.match(modelsBlock, /class="loading-state" x-show="modelsLoading && !authError" role="status" aria-live="polite"/);
     assert.match(modelsBlock, /x-text="displayModels\.length > 0 \? 'Refreshing models\.\.\.' : 'Loading models\.\.\.'"/);
+    assert.match(modelsBlock, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn"[\s\S]*@click="openAliasCreate\(\)"[\s\S]*data-lucide="plus" class="alias-create-icon"[\s\S]*<span>Create Alias<\/span>/);
+    assert.match(modelsBlock, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-submit-btn"[\s\S]*:disabled="aliasSubmitting"[\s\S]*data-lucide="plus" class="form-action-icon" x-show="aliasFormMode !== 'edit'"[\s\S]*data-lucide="save" class="form-action-icon" x-show="aliasFormMode === 'edit'"[\s\S]*x-text="aliasSubmitting \? 'Saving\.\.\.' : \(aliasFormMode === 'edit' \? 'Save Alias' : 'Create Alias'\)"/);
+    assert.match(modelsBlock, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon model-access-submit-btn"[\s\S]*:disabled="modelOverrideSubmitting"[\s\S]*data-lucide="save" class="form-action-icon"[\s\S]*x-text="modelOverrideSubmitting \? 'Saving\.\.\.' : 'Save Access'"/);
 
     const loadingRule = readCSSRule(css, '.loading-state');
     assert.match(loadingRule, /display:\s*flex/);

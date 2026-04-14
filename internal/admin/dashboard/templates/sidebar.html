@@ -1,0 +1,86 @@
+{{define "sidebar"}}
+<aside class="sidebar" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+    <div class="sidebar-header">
+        <div class="sidebar-logo">
+            <svg viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M15 3L25.39 9L25.39 21L15 27L4.61 21L4.61 9Z" stroke="currentColor" stroke-width="2" fill="none"/>
+                <circle cx="15" cy="15" r="4" fill="currentColor" opacity="0.3"/>
+                <path d="M15 9.5L15 6M15 20.5L15 24M19.76 12.25L22.79 10.5M10.24 17.75L7.21 19.5M19.76 17.75L22.79 19.5M10.24 12.25L7.21 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+        </div>
+        <h1>GoModel</h1>
+        <span class="badge">Admin</span>
+    </div>
+    <nav class="sidebar-nav">
+        <a href="/admin/dashboard/overview" class="nav-item" :class="{ active: page === 'overview' }" title="Overview" @click.prevent="navigate('overview')">
+            <i data-lucide="layout-dashboard" class="nav-icon" aria-hidden="true"></i>
+            <span>Overview</span>
+        </a>
+        <a href="/admin/dashboard/models" class="nav-item" :class="{ active: page === 'models' }" title="Models" @click.prevent="navigate('models')">
+            <i data-lucide="box" class="nav-icon" aria-hidden="true"></i>
+            <span>Models</span>
+        </a>
+        <a href="/admin/dashboard/audit-logs" class="nav-item" :class="{ active: page === 'audit-logs' }" title="Audit Logs" @click.prevent="navigate('audit-logs')">
+            <i data-lucide="history" class="nav-icon" aria-hidden="true"></i>
+            <span>Audit Logs</span>
+        </a>
+        <a href="/admin/dashboard/usage" class="nav-item" :class="{ active: page === 'usage' }" title="Usage" @click.prevent="navigate('usage')">
+            <i data-lucide="chart-column" class="nav-icon" aria-hidden="true"></i>
+            <span>Usage</span>
+        </a>
+        <a href="/admin/dashboard/auth-keys" class="nav-item" :class="{ active: page === 'auth-keys' }" title="API Keys" @click.prevent="navigate('auth-keys')">
+            <i data-lucide="key-round" class="nav-icon" aria-hidden="true"></i>
+            <span>API Keys</span>
+        </a>
+        <a href="/admin/dashboard/workflows" class="nav-item" :class="{ active: page === 'workflows' }" title="Workflows" @click.prevent="navigate('workflows')">
+            <i data-lucide="workflow" class="nav-icon" aria-hidden="true"></i>
+            <span>Workflows</span>
+        </a>
+        <a href="/admin/dashboard/guardrails" class="nav-item" :class="{ active: page === 'guardrails' }" title="Guardrails (experimental)" x-show="guardrailsPageVisible()" @click.prevent="navigate('guardrails')">
+            <i data-lucide="shield-check" class="nav-icon" aria-hidden="true"></i>
+            <span>Guardrails (experimental)</span>
+        </a>
+        <a href="/admin/dashboard/settings" class="nav-item" :class="{ active: page === 'settings' }" title="Settings" @click.prevent="navigate('settings')">
+            <i data-lucide="settings" class="nav-icon" aria-hidden="true"></i>
+            <span>Settings</span>
+        </a>
+    </nav>
+    <div class="sidebar-footer">
+        <div class="theme-toggle">
+            <button class="theme-btn" :class="{ active: theme === 'light' }" @click="setTheme('light')" title="Light" tabindex="-1">
+                <i data-lucide="sun" class="theme-icon" aria-hidden="true"></i>
+            </button>
+            <button class="theme-btn" :class="{ active: theme === 'system' }" @click="setTheme('system')" title="System" tabindex="-1">
+                <i data-lucide="monitor" class="theme-icon" aria-hidden="true"></i>
+            </button>
+            <button class="theme-btn" :class="{ active: theme === 'dark' }" @click="setTheme('dark')" title="Dark" tabindex="-1">
+                <i data-lucide="moon" class="theme-icon" aria-hidden="true"></i>
+            </button>
+        </div>
+        <button class="theme-toggle-mobile" @click="toggleTheme()" :title="theme === 'light' ? 'Light' : theme === 'dark' ? 'Dark' : 'System'" tabindex="-1">
+            <template x-if="theme === 'light'">
+                <i data-lucide="sun" class="theme-icon" aria-hidden="true"></i>
+            </template>
+            <template x-if="theme === 'system'">
+                <i data-lucide="monitor" class="theme-icon" aria-hidden="true"></i>
+            </template>
+            <template x-if="theme === 'dark'">
+                <i data-lucide="moon" class="theme-icon" aria-hidden="true"></i>
+            </template>
+        </button>
+        <div class="api-key-section" x-show="needsAuth || hasApiKey()">
+            <button type="button"
+                    class="api-key-open-btn"
+                    @click="openAuthDialog()"
+                    :aria-label="needsAuth ? 'Enter API key' : 'Change API key'">
+                <i data-lucide="lock-keyhole" class="api-key-open-icon" aria-hidden="true"></i>
+                <span x-text="needsAuth ? 'Enter API key' : 'Change API key'">Enter API key</span>
+            </button>
+        </div>
+    </div>
+</aside>
+<div class="sidebar-toggle"
+     @mousedown="toggleSidebar()"
+     :class="{ collapsed: sidebarCollapsed }"
+     :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"></div>
+{{end}}

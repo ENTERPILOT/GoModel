@@ -42,10 +42,13 @@ test('dashboard templates expose a settings page and timezone context in activit
     assert.match(template, /:selected="!timezoneOverride"/);
     assert.match(template, /<option :value="timeZone\.value"/);
     assert.match(template, /:selected="timeZone\.value === timezoneOverride"/);
-    assert.match(template, /<h3>Runtime Refresh<\/h3>/);
+    assert.match(template, /{{template "helper-disclosure" "\{ heading: 'Runtime Refresh', open: false, copyId: 'runtime-refresh-help-copy'/);
     assert.match(template, /@click="refreshRuntime\(\)"/);
-    assert.match(template, /x-text="runtimeRefreshLoading \? 'Refreshing\.\.\.' : 'Refresh Runtime'"/);
-    assert.match(template, /class="loading-state settings-refresh-loading"[\s\S]*x-show="runtimeRefreshLoading"[\s\S]*class="loading-spinner"[\s\S]*Generating runtime report\.\.\./);
+    assert.match(
+        template,
+        /class="pagination-btn pagination-btn-primary pagination-btn-with-icon settings-refresh-btn"[\s\S]*:class="\{ 'is-refreshing': runtimeRefreshLoading \}"[\s\S]*:aria-busy="runtimeRefreshLoading \? 'true' : 'false'"[\s\S]*data-lucide="refresh-cw"[\s\S]*<span>Refresh<\/span>/
+    );
+    assert.doesNotMatch(template, /class="loading-state settings-refresh-loading"/);
     assert.match(template, /class="alert alert-success settings-refresh-alert"[\s\S]*role="status"[\s\S]*aria-live="polite"[\s\S]*runtimeRefreshSucceeded\(\)/);
     assert.match(template, /class="alert alert-warning settings-refresh-alert"[\s\S]*role="alert"[\s\S]*aria-live="assertive"[\s\S]*runtimeRefreshError \|\| runtimeRefreshNotice/);
     assert.match(template, /class="runtime-refresh-steps"[\s\S]*role="status"[\s\S]*aria-live="polite"[\s\S]*runtimeRefreshStepLabel\(step\)/);
@@ -111,11 +114,18 @@ test('dashboard templates expose a settings page and timezone context in activit
 
     const refreshRule = readCSSRule(css, '.settings-refresh-section');
     assert.match(refreshRule, /border-top:\s*1px solid var\(--border\)/);
-    assert.match(refreshRule, /justify-content:\s*space-between/);
+    assert.match(refreshRule, /display:\s*grid/);
+    assert.match(refreshRule, /justify-items:\s*start/);
 
-    const refreshLoadingRule = readCSSRule(css, '.settings-refresh-loading');
-    assert.match(refreshLoadingRule, /justify-content:\s*flex-start/);
-    assert.match(refreshLoadingRule, /min-height:\s*52px/);
+    assert.doesNotMatch(css, /\.settings-refresh-loading\s*\{/);
+
+    const refreshIconRule = readCSSRule(css, '.settings-refresh-icon,\n.alias-create-icon,\n.form-action-icon');
+    assert.match(refreshIconRule, /width:\s*16px/);
+    assert.match(refreshIconRule, /height:\s*16px/);
+
+    const refreshAnimatingIconRule = readCSSRule(css, '.settings-refresh-btn.is-refreshing .settings-refresh-icon');
+    assert.match(refreshAnimatingIconRule, /animation:\s*loading-spin 0\.8s linear infinite/);
+    assert.match(refreshAnimatingIconRule, /transform-origin:\s*center/);
 
     const refreshPartialRule = readCSSRule(css, '.runtime-refresh-step.is-partial');
     assert.match(refreshPartialRule, /color:\s*var\(--warning\)/);
@@ -131,6 +141,8 @@ test('guardrails authoring moved to a top-level page while settings keeps the ge
     assert.match(template, /<div class="settings-subnav">[\s\S]*class="settings-subnav-btn active"[\s\S]*>General<\/button>/);
     assert.match(template, /<template x-if="page==='guardrails'">\s*<div>[\s\S]*<h2>Guardrails<\/h2>/);
     assert.match(template, /Guardrail Library/);
+    assert.match(template, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon guardrail-create-btn"[\s\S]*@click="openGuardrailCreate\(\)"[\s\S]*data-lucide="plus" class="form-action-icon"[\s\S]*<span>Create Guardrail<\/span>/);
+    assert.match(template, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon guardrail-submit-btn"[\s\S]*@click="submitGuardrailForm\(\)"[\s\S]*data-lucide="save" class="form-action-icon"[\s\S]*<span>Save Guardrail<\/span>/);
     assert.match(template, /x-ref="guardrailTypeSelect"/);
     assert.match(template, /x-model="guardrailForm\.type"/);
     assert.match(template, /x-effect="guardrailTypes\.length; guardrailForm\.type; \$nextTick\(\(\) => syncGuardrailTypeSelectValue\(\)\)"/);
