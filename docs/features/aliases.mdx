@@ -1,0 +1,71 @@
+---
+title: "Aliases"
+description: "Use GoModel aliases to expose stable model names and test model swaps without changing app code."
+icon: "tags"
+---
+
+<img
+  src="/features/aliases.png"
+  alt="GoModel dashboard models page with the Create Alias button and an active alias row"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+## What aliases do
+
+An alias is a stable model name that points to a concrete provider model. Your
+app sends the alias in the `model` field, and GoModel resolves it before sending
+the request upstream.
+
+Create and manage aliases in the admin dashboard at `Models -> Create Alias`.
+
+## Use stable names
+
+You can expose names like `regular` and `smarter` instead of provider-specific
+model IDs.
+
+- `regular` -> `anthropic/claude-sonnet-4-6`
+- `smarter` -> `anthropic/claude-opus-4-6`
+
+Your app can then send:
+
+```json
+{
+  "model": "regular",
+  "messages": []
+}
+```
+
+## Expose only aliases
+
+To hide provider models from `GET /v1/models`, set:
+
+```env
+KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT=true
+```
+
+When this is enabled, GoModel returns enabled aliases from `/v1/models` instead
+of the full provider model list. The setting is also listed in `.env.template`.
+
+## Shadow a model
+
+An alias can "shadow" a model by using the same name as an existing model and
+pointing it somewhere else. This lets you override a requested model without
+changing application code.
+
+For example:
+
+- alias name: `anthropic/claude-opus-4-6`
+- target model: `anthropic/claude-sonnet-4-6`
+
+Your app can keep sending `anthropic/claude-opus-4-6`, while GoModel routes the
+request to `anthropic/claude-sonnet-4-6`.
+
+## A/B testing
+
+Aliases are useful for short model experiments. Move an alias from one target to
+another, then compare app behavior, latency, and usage.
+
+For example, point `smarter` at Opus for one test and Sonnet for another. You can
+also shadow `opus-4-6` with `sonnet-4-6` to check whether the same app flow still
+works.

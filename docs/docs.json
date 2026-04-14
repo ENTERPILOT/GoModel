@@ -36,6 +36,8 @@
                         "group": "Features",
                         "icon": "sparkles",
                         "pages": [
+                            "features/aliases",
+                            "features/user-path",
                             "features/cache"
                         ]
                     },

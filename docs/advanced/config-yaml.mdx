@@ -1,6 +1,7 @@
 ---
 title: "config.yaml"
 description: "When to use config.yaml, when not to, and how it interacts with environment variables and Docker."
+icon: "file-cog"
 ---
 
 The goal in GoModel is to make `config.yaml` optional as much as possible.
@@ -24,25 +25,6 @@ Effective precedence is:
 
 `.env` is not a separate priority layer. It is just a convenient way to load
 environment variables before startup.
-
-## When `config.yaml` Is Better
-
-YAML is the current way to define multiple providers of the same type with
-flexible names:
-
-```yaml
-providers:
-  ollama-a:
-    type: ollama
-    base_url: "http://host.docker.internal:11434/v1"
-
-  ollama-b:
-    type: ollama
-    base_url: "http://host.docker.internal:11435/v1"
-```
-
-That gives you provider-qualified model IDs such as `ollama-a/llama3.2` and
-`ollama-b/llama3.2`.
 
 ## Current Schema
 

@@ -1,6 +1,7 @@
 ---
 title: "Configuration"
 description: "How to configure GoModel using environment variables, .env files, and YAML."
+icon: "sliders-horizontal"
 ---
 
 ## Good defaults
@@ -316,8 +317,3 @@ providers:
     type: ollama
     base_url: "http://localhost:11434/v1"
 ```
-
-<Note>
-  Providers with missing or unresolved API keys are automatically filtered out
-  at startup. Ollama is the only exception — it only requires a base URL.
-</Note>
