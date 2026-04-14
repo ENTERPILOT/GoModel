@@ -76,6 +76,7 @@ func TestServiceCreateAuthenticateAndDeactivate(t *testing.T) {
 	}
 	if issued == nil {
 		t.Fatal("Create() = nil, want issued key")
+		return
 	}
 	if len(issued.Value) <= len(TokenPrefix) || issued.Value[:len(TokenPrefix)] != TokenPrefix {
 		t.Fatalf("issued value = %q, want %q prefix", issued.Value, TokenPrefix)
@@ -176,6 +177,7 @@ func TestServiceWriteOperationsIgnoreRefreshReconciliationFailures(t *testing.T)
 		}
 		if issued == nil {
 			t.Fatal("Create() = nil, want issued key")
+			return
 		}
 		if got, err := service.Authenticate(context.Background(), issued.Value); err != nil || got.ID != issued.ID {
 			t.Fatalf("Authenticate() = (%q, %v), want (%q, nil)", got.ID, err, issued.ID)

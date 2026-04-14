@@ -144,6 +144,7 @@ func TestRefreshRuntime_SkipsDisabledModelOverrides(t *testing.T) {
 	step := runtimeRefreshStepByName(report.Steps, "model_overrides")
 	if step == nil {
 		t.Fatalf("model_overrides step missing: %+v", report.Steps)
+		return
 	}
 	if step.Status != admin.RuntimeRefreshStatusSkipped {
 		t.Fatalf("model_overrides step status = %q, want skipped; step=%+v", step.Status, *step)
