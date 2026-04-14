@@ -14,7 +14,7 @@ import (
 const (
 	defaultBaseURL = "https://openrouter.ai/api/v1"
 	defaultSiteURL = "https://gomodel.enterpilot.io"
-	defaultAppName = "GOModel"
+	defaultAppName = "GoModel"
 )
 
 var Registration = providers.Registration{

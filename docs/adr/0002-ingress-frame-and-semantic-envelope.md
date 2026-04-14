@@ -2,7 +2,7 @@
 
 ## Context
 
-GOModel already exposes OpenAI-compatible endpoints under `/v1/*` and is expected to add a provider pass-through API under `/p/{provider}/{endpoint}`.
+GoModel already exposes OpenAI-compatible endpoints under `/v1/*` and is expected to add a provider pass-through API under `/p/{provider}/{endpoint}`.
 
 The gateway also needs to support richer request shapes over time:
 
@@ -19,7 +19,7 @@ The current typed-request approach is too narrow for that future:
 - it treats semantic understanding as mandatory
 - it does not naturally model pass-through requests
 
-GOModel needs a model that preserves the original request faithfully while still allowing the gateway to extract and work with the parts it understands.
+GoModel needs a model that preserves the original request faithfully while still allowing the gateway to extract and work with the parts it understands.
 
 ## Flow Diagram
 
@@ -35,7 +35,7 @@ Discovery routes such as `GET /v1/models` are out of scope.
 
 `WhiteBoxPrompt` is optional and best-effort. It may be rich, sparse, or absent, depending on how much the gateway understands about the route, content type, and request body.
 
-This gives GOModel one consistent ingress model across both `/v1/*` and `/p/*`.
+This gives GoModel one consistent ingress model across both `/v1/*` and `/p/*`.
 
 ## RequestSnapshot
 

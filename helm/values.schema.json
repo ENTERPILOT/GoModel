@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "title": "GOModel Helm Chart Values",
+  "title": "GoModel Helm Chart Values",
   "type": "object",
   "allOf": [
     {

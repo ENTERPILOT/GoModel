@@ -2157,26 +2157,6 @@ const docTemplate = `{
                 }
             }
         },
-        "auditlog.WorkflowFeaturesSnapshot": {
-            "type": "object",
-            "properties": {
-                "audit": {
-                    "type": "boolean"
-                },
-                "cache": {
-                    "type": "boolean"
-                },
-                "fallback": {
-                    "type": "boolean"
-                },
-                "guardrails": {
-                    "type": "boolean"
-                },
-                "usage": {
-                    "type": "boolean"
-                }
-            }
-        },
         "auditlog.LogData": {
             "type": "object",
             "properties": {
@@ -2186,14 +2166,6 @@ const docTemplate = `{
                 "error_message": {
                     "description": "Error details (message can be long, so kept in JSON)",
                     "type": "string"
-                },
-                "workflow_features": {
-                    "description": "WorkflowFeatures captures the request-time effective workflow features\nafter runtime caps were applied. This keeps audit views historically accurate\neven if the active process config changes later.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/auditlog.WorkflowFeaturesSnapshot"
-                        }
-                    ]
                 },
                 "max_tokens": {
                     "type": "integer"
@@ -2229,6 +2201,14 @@ const docTemplate = `{
                 "user_agent": {
                     "description": "Identity",
                     "type": "string"
+                },
+                "workflow_features": {
+                    "description": "WorkflowFeatures captures the request-time effective workflow features\nafter runtime caps were applied. This keeps audit views historically accurate\neven if the active process config changes later.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/auditlog.WorkflowFeaturesSnapshot"
+                        }
+                    ]
                 }
             }
         },
@@ -2263,9 +2243,6 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "error_type": {
-                    "type": "string"
-                },
-                "workflow_version_id": {
                     "type": "string"
                 },
                 "id": {
@@ -2308,6 +2285,9 @@ const docTemplate = `{
                 },
                 "user_path": {
                     "type": "string"
+                },
+                "workflow_version_id": {
+                    "type": "string"
                 }
             }
         },
@@ -2328,6 +2308,26 @@ const docTemplate = `{
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "auditlog.WorkflowFeaturesSnapshot": {
+            "type": "object",
+            "properties": {
+                "audit": {
+                    "type": "boolean"
+                },
+                "cache": {
+                    "type": "boolean"
+                },
+                "fallback": {
+                    "type": "boolean"
+                },
+                "guardrails": {
+                    "type": "boolean"
+                },
+                "usage": {
+                    "type": "boolean"
                 }
             }
         },
@@ -2647,49 +2647,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "logprobs": {
-                    "type": "object",
-                    "properties": {
-                        "content": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "bytes": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "integer"
-                                        }
-                                    },
-                                    "logprob": {
-                                        "type": "number"
-                                    },
-                                    "token": {
-                                        "type": "string"
-                                    },
-                                    "top_logprobs": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "object",
-                                            "properties": {
-                                                "bytes": {
-                                                    "type": "array",
-                                                    "items": {
-                                                        "type": "integer"
-                                                    }
-                                                },
-                                                "logprob": {
-                                                    "type": "number"
-                                                },
-                                                "token": {
-                                                    "type": "string"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    "type": "object"
                 },
                 "message": {
                     "$ref": "#/definitions/core.ResponseMessage"
@@ -3776,7 +3734,7 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{"http"},
-	Title:            "GOModel API",
+	Title:            "GoModel API",
 	Description:      "High-performance AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, xAI, Oracle, Ollama). Drop-in OpenAI-compatible API.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,

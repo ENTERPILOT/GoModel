@@ -1,4 +1,4 @@
-# GOModel Testing Strategy
+# GoModel Testing Strategy
 
 A 3-layer testing strategy with **DB state verification** as the highest priority:
 
@@ -189,14 +189,14 @@ make lint && make test-all
 
 ## Test Commands Reference
 
-| Command                                             | Description                   |
-| --------------------------------------------------- | ----------------------------- |
-| `make test`                                         | Unit tests only               |
-| `make test-e2e`                                     | E2E tests with mock providers |
-| `make test-all`                                     | Unit + E2E tests              |
-| `go test -tags=contract -timeout=5m ./tests/contract/...` | Contract tests         |
-| `go test -tags=integration ./tests/integration/...` | Integration tests             |
-| `make lint`                                         | Run golangci-lint             |
+| Command                                                   | Description                   |
+| --------------------------------------------------------- | ----------------------------- |
+| `make test`                                               | Unit tests only               |
+| `make test-e2e`                                           | E2E tests with mock providers |
+| `make test-all`                                           | Unit + E2E tests              |
+| `go test -tags=contract -timeout=5m ./tests/contract/...` | Contract tests                |
+| `go test -tags=integration ./tests/integration/...`       | Integration tests             |
+| `make lint`                                               | Run golangci-lint             |
 
 ## CI/CD Integration
 

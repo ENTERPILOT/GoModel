@@ -1,4 +1,4 @@
-# GOModel Configuration (optional)
+# GoModel Configuration (optional)
 # Copy to config/config.yaml to customize.
 # Environment variables always override values in this file.
 # All settings have sensible defaults — no config file is required.

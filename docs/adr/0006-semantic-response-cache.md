@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-GOModel already has an exact-match response cache (`simpleCacheMiddleware`) that hashes the full request body and returns a stored response on byte-identical requests. This covers trivial cases but misses semantically equivalent requests with different phrasing:
+GoModel already has an exact-match response cache (`simpleCacheMiddleware`) that hashes the full request body and returns a stored response on byte-identical requests. This covers trivial cases but misses semantically equivalent requests with different phrasing:
 
 - "What's the capital of France?" vs. "Which city is France's capital?"
 - "Explain quantum entanglement simply" vs. "ELI5 quantum entanglement"
@@ -53,12 +53,12 @@ Unified `Embedder` interface with a single implementation: an **HTTP client** ca
 
 `VecStore` interface + `type`-switched factory in [`internal/responsecache/vecstore.go`](../../internal/responsecache/vecstore.go). When semantic caching is enabled, **`vector_store.type` is required** (no default). Supported values:
 
-| Type        | Notes |
-| ----------- | ----- |
-| `qdrant`    | HTTP API; `url`, `collection`, optional `api_key`. Collection is created on first insert (vector size from embedding, **Cosine** distance). |
-| `pgvector`  | PostgreSQL + `pgvector`; `url`, required `dimension` for `vector(n)`, optional `table` (default `gomodel_semantic_cache`). |
-| `pinecone`  | Data-plane HTTP (`host`, `api_key`, required `dimension`, optional `namespace`). Full response body is stored in metadata (base64); **Pinecone metadata limits** (~40KB per value) can reject very large cached payloads. |
-| `weaviate`  | HTTP GraphQL + REST; `url`, `class` (GraphQL-safe, **PascalCase**), optional `api_key`. Class is auto-created with `vectorizer: none` if missing. |
+| Type       | Notes                                                                                                                                                                                                                     |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `qdrant`   | HTTP API; `url`, `collection`, optional `api_key`. Collection is created on first insert (vector size from embedding, **Cosine** distance).                                                                               |
+| `pgvector` | PostgreSQL + `pgvector`; `url`, required `dimension` for `vector(n)`, optional `table` (default `gomodel_semantic_cache`).                                                                                                |
+| `pinecone` | Data-plane HTTP (`host`, `api_key`, required `dimension`, optional `namespace`). Full response body is stored in metadata (base64); **Pinecone metadata limits** (~40KB per value) can reject very large cached payloads. |
+| `weaviate` | HTTP GraphQL + REST; `url`, `class` (GraphQL-safe, **PascalCase**), optional `api_key`. Class is auto-created with `vectorizer: none` if missing.                                                                         |
 
 TTL is implemented via `expires_at` (unix seconds, `0` = no expiry) plus read-time filtering and a **background `DeleteExpired` tick** (~1 hour).
 

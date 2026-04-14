@@ -1,19 +1,19 @@
 ---
 title: "Technical Philosophy"
-description: "The engineering ideas that shape how GOModel is designed and maintained."
+description: "The engineering ideas that shape how GoModel is designed and maintained."
 ---
 
 ## Postel's Law
 
 Be conservative in what you send, and liberal in what you accept.
 
-As an AI gateway, GOModel sits between clients and providers that do not always
+As an AI gateway, GoModel sits between clients and providers that do not always
 behave the same way. We want strict, predictable behavior on our side without
 becoming brittle when the outside world is messy.
 
 ## Good defaults
 
-GOModel should be useful with minimal setup.
+GoModel should be useful with minimal setup.
 
 Defaults are not filler. They are part of the product. A gateway should start
 fast, work locally, and make the obvious path easy before asking users to learn
@@ -61,7 +61,7 @@ leaking credentials or other sensitive data.
 
 Configuration should be easy to reason about.
 
-GOModel follows a simple order:
+GoModel follows a simple order:
 
 - Code defaults
 - YAML configuration

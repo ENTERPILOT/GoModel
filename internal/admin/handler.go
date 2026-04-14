@@ -1,4 +1,4 @@
-// Package admin provides the admin REST API and dashboard for GOModel.
+// Package admin provides the admin REST API and dashboard for GoModel.
 package admin
 
 import (

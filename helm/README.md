@@ -1,4 +1,4 @@
-# GOModel Helm Chart
+# GoModel Helm Chart
 
 High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, xAI, Oracle).
 
@@ -44,30 +44,30 @@ helm install gomodel ./helm \
 
 ### Key Values
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `replicaCount` | Number of replicas | `2` |
-| `image.repository` | Image repository | `enterpilot/gomodel` |
-| `image.tag` | Image tag | `""` (uses appVersion) |
-| `server.port` | Server port | `8080` |
-| `server.bodySizeLimit` | Max request body size | `"10M"` |
-| `auth.masterKey` | Master key for auth | `""` |
-| `auth.existingSecret` | Existing secret for auth | `""` |
-| `providers.existingSecret` | Existing secret for API keys | `""` |
-| `providers.openai.enabled` | Enable OpenAI | `false` |
-| `providers.anthropic.enabled` | Enable Anthropic | `false` |
-| `providers.gemini.enabled` | Enable Gemini | `false` |
-| `providers.groq.enabled` | Enable Groq | `false` |
-| `providers.xai.enabled` | Enable xAI | `false` |
-| `providers.oracle.enabled` | Enable Oracle | `false` |
-| `providers.oracle.baseUrl` | Oracle OpenAI-compatible base URL mapped to `ORACLE_BASE_URL`; required when Oracle is enabled | `""` |
-| `cache.type` | Cache type (local/redis) | `"redis"` |
-| `redis.enabled` | Deploy Redis subchart | `true` |
-| `metrics.enabled` | Enable Prometheus metrics | `true` |
-| `metrics.serviceMonitor.enabled` | Create ServiceMonitor | `false` |
-| `ingress.enabled` | Enable Ingress | `false` |
-| `gateway.enabled` | Enable Gateway API HTTPRoute | `false` |
-| `autoscaling.enabled` | Enable HPA | `false` |
+| Parameter                        | Description                                                                                    | Default                |
+| -------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------- |
+| `replicaCount`                   | Number of replicas                                                                             | `2`                    |
+| `image.repository`               | Image repository                                                                               | `enterpilot/gomodel`   |
+| `image.tag`                      | Image tag                                                                                      | `""` (uses appVersion) |
+| `server.port`                    | Server port                                                                                    | `8080`                 |
+| `server.bodySizeLimit`           | Max request body size                                                                          | `"10M"`                |
+| `auth.masterKey`                 | Master key for auth                                                                            | `""`                   |
+| `auth.existingSecret`            | Existing secret for auth                                                                       | `""`                   |
+| `providers.existingSecret`       | Existing secret for API keys                                                                   | `""`                   |
+| `providers.openai.enabled`       | Enable OpenAI                                                                                  | `false`                |
+| `providers.anthropic.enabled`    | Enable Anthropic                                                                               | `false`                |
+| `providers.gemini.enabled`       | Enable Gemini                                                                                  | `false`                |
+| `providers.groq.enabled`         | Enable Groq                                                                                    | `false`                |
+| `providers.xai.enabled`          | Enable xAI                                                                                     | `false`                |
+| `providers.oracle.enabled`       | Enable Oracle                                                                                  | `false`                |
+| `providers.oracle.baseUrl`       | Oracle OpenAI-compatible base URL mapped to `ORACLE_BASE_URL`; required when Oracle is enabled | `""`                   |
+| `cache.type`                     | Cache type (local/redis)                                                                       | `"redis"`              |
+| `redis.enabled`                  | Deploy Redis subchart                                                                          | `true`                 |
+| `metrics.enabled`                | Enable Prometheus metrics                                                                      | `true`                 |
+| `metrics.serviceMonitor.enabled` | Create ServiceMonitor                                                                          | `false`                |
+| `ingress.enabled`                | Enable Ingress                                                                                 | `false`                |
+| `gateway.enabled`                | Enable Gateway API HTTPRoute                                                                   | `false`                |
+| `autoscaling.enabled`            | Enable HPA                                                                                     | `false`                |
 
 ### Using Existing Secrets
 

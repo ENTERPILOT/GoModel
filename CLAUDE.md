@@ -4,10 +4,10 @@ Guidance for AI models (like Claude) working with this codebase.
 
 ## Project Overview
 
-**GOModel** is a high-performance AI gateway in Go that routes requests to multiple AI model providers (OpenAI, Anthropic, Gemini, Groq, xAI, Oracle, Ollama). LiteLLM killer.
+**GoModel** is a high-performance AI gateway in Go that routes requests to multiple AI model providers (OpenAI, Anthropic, Gemini, Groq, xAI, Oracle, Ollama). LiteLLM killer.
 
 **Go:** 1.26.2
-**Repo:** https://github.com/ENTERPILOT/GOModel
+**Repo:** https://github.com/ENTERPILOT/GoModel
 
 - **Stage:** Development - backward compatibility is not a concern
 - **Design philosophy:**
@@ -36,7 +36,7 @@ make clean             # Remove bin/
 make record-api        # Record API responses for contract tests
 make swagger           # Regenerate Swagger docs
 make infra             # Docker Compose: Redis, Postgres, MongoDB, Adminer only
-make image             # Docker Compose: full stack (GOModel + Prometheus)
+make image             # Docker Compose: full stack (GoModel + Prometheus)
 ```
 
 **Single test:** `go test ./internal/providers -v -run TestName`

@@ -1,12 +1,12 @@
 # Prometheus Metrics Configuration Guide
 
-This guide explains how to configure Prometheus metrics in GOModel.
+This guide explains how to configure Prometheus metrics in GoModel.
 
 ## Quick Start
 
 ### Disabled by Default
 
-Metrics are **disabled by default**. To enable metrics collection, set `METRICS_ENABLED=true` and start GOModel:
+Metrics are **disabled by default**. To enable metrics collection, set `METRICS_ENABLED=true` and start GoModel:
 
 ```bash
 export METRICS_ENABLED=true
@@ -174,7 +174,6 @@ If you need to protect the metrics endpoint further:
    ```
 
 2. **Use network-level security:**
-
    - Configure firewall rules to allow only Prometheus server
    - Use private network for metrics collection
    - Deploy Prometheus in the same VPC/network

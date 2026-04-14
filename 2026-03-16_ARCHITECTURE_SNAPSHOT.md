@@ -1,4 +1,4 @@
-# GOModel Architecture Snapshot
+# GoModel Architecture Snapshot
 
 This document is a point-in-time architecture snapshot based on the code and runtime wiring present on March 16, 2026.
 
@@ -153,11 +153,11 @@ Echo + Handler"]
 
 ## 2. Request-Scoped Data Objects
 
-| Object | Created by | Contains | Consumed by |
-| --- | --- | --- | --- |
-| `RequestSnapshot` | `RequestSnapshotCapture()` | Immutable ingress transport data: method, path, route params, query params, headers, content type, captured body bytes, `BodyNotCaptured`, request id, trace metadata | `DeriveWhiteBoxPrompt`, audit logging, passthrough semantic enrichers, any later logic that needs raw ingress fidelity |
-| `WhiteBoxPrompt` | `core.DeriveWhiteBoxPrompt(snapshot)` | Best-effort semantics: route type, operation type, route hints, stream intent, JSON parsed flag, cached typed request objects, cached route metadata | workflow resolution, canonical request decoding, passthrough/file/batch helpers |
-| `Workflow` | `WorkflowResolutionWithResolver(...)` or `ensureTranslatedRequestWorkflow(...)` | Control-plane decision: endpoint descriptor, execution mode, capabilities, provider type, resolved model selector, passthrough info | response cache, translated handlers, passthrough handlers, audit-log enrichment |
+| Object            | Created by                                                                      | Contains                                                                                                                                                              | Consumed by                                                                                                            |
+| ----------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `RequestSnapshot` | `RequestSnapshotCapture()`                                                      | Immutable ingress transport data: method, path, route params, query params, headers, content type, captured body bytes, `BodyNotCaptured`, request id, trace metadata | `DeriveWhiteBoxPrompt`, audit logging, passthrough semantic enrichers, any later logic that needs raw ingress fidelity |
+| `WhiteBoxPrompt`  | `core.DeriveWhiteBoxPrompt(snapshot)`                                           | Best-effort semantics: route type, operation type, route hints, stream intent, JSON parsed flag, cached typed request objects, cached route metadata                  | workflow resolution, canonical request decoding, passthrough/file/batch helpers                                        |
+| `Workflow`        | `WorkflowResolutionWithResolver(...)` or `ensureTranslatedRequestWorkflow(...)` | Control-plane decision: endpoint descriptor, execution mode, capabilities, provider type, resolved model selector, passthrough info                                   | response cache, translated handlers, passthrough handlers, audit-log enrichment                                        |
 
 Important constraints:
 

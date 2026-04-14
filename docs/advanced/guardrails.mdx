@@ -5,7 +5,7 @@ description: "Intercept and modify requests before they reach LLM providers."
 
 ## Overview
 
-Guardrails are a pipeline of rules that run **before** a request reaches any LLM provider. They can inspect, modify, or reject requests — giving you centralized control over every prompt that flows through GOModel.
+Guardrails are a pipeline of rules that run **before** a request reaches any LLM provider. They can inspect, modify, or reject requests — giving you centralized control over every prompt that flows through GoModel.
 
 Guardrails work across all text-based endpoints:
 
@@ -205,7 +205,7 @@ so a minimal config acts as an anonymizing preprocessor.
 | `skip_content_prefix` | No | Skip rewriting when the trimmed message starts with this prefix. |
 | `max_tokens` | No | `max_tokens` for the auxiliary rewrite call. Default: `4096`. |
 
-When `llm_based_altering` calls the auxiliary model, GOModel runs that call
+When `llm_based_altering` calls the auxiliary model, GoModel runs that call
 through the normal translated request path in-process. That means ordinary
 workflow selection, fallback, usage, audit, and cache behavior still apply.
 The internal request uses:

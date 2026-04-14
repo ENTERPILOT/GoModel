@@ -1,0 +1,58 @@
+---
+title: "License"
+description: "The current GoModel license and how we think about long-term project sustainability."
+---
+
+## Summary
+
+GoModel is currently released under the permissive MIT license. We want to keep
+it open and practical for developers, small teams, and independent projects.
+
+There are two cases where we may revisit licensing in the future:
+
+1. We may make the license less permissive to protect the project from
+   extraction by large cloud providers.
+2. We may use a different license for enterprise-grade features to keep the
+   project sustainable.
+
+## Full story
+
+An AI gateway is infrastructure. It sits between every request your application
+makes and every model it talks to. That kind of component should be something
+you can read, audit, extend, and trust. This is why GoModel is open source
+today.
+
+That said, we want to be upfront about the future. There are two reasons the
+license could change down the road.
+
+## Protecting the project
+
+There is a well-documented pattern where large cloud
+providers take open-source infrastructure, ship it as a managed service, and
+give nothing back. It has forced other projects to react:
+
+- [MongoDB changed to the SSPL](https://www.mongodb.com/blog/post/mongodb-now-released-under-the-server-side-public-license)
+  after AWS launched DocumentDB, a compatible managed service built on
+  MongoDB's work.
+- [Elastic moved to a dual license](https://www.elastic.co/blog/licensing-change)
+  after AWS launched its own Elasticsearch service under the OpenSearch name.
+- [Redis switched to a source-available license](https://redis.io/blog/redis-adopts-dual-source-available-licensing/)
+  citing similar concerns about cloud providers.
+
+If GoModel grows to a point where this becomes a real risk, we may adjust the
+license to prevent that kind of extraction.
+
+## Sustainability
+
+Building GoModel is how we make a living. Right now the project is fully open
+source, and we intend to keep it that way for as long as possible. If licensing
+changes ever happen, they will target companies that profit directly from the
+project, not individual developers or small teams building with it.
+
+<Card
+  title="Current license"
+  icon="scale"
+  href="https://github.com/ENTERPILOT/GoModel/blob/main/LICENSE"
+>
+  You can always read the current license here.
+</Card>

@@ -1,4 +1,4 @@
-// Package dashboard provides the embedded admin dashboard UI for GOModel.
+// Package dashboard provides the embedded admin dashboard UI for GoModel.
 package dashboard
 
 import (

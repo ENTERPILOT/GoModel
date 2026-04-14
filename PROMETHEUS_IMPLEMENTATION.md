@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the Prometheus metrics implementation for GOModel, which provides enterprise-grade observability without polluting business logic. The implementation uses a clean **hooks-based architecture** that separates concerns and allows for future extensibility to other observability tools (DataDog, OpenTelemetry, etc.).
+This document describes the Prometheus metrics implementation for GoModel, which provides enterprise-grade observability without polluting business logic. The implementation uses a clean **hooks-based architecture** that separates concerns and allows for future extensibility to other observability tools (DataDog, OpenTelemetry, etc.).
 
 ## Architecture
 
@@ -174,12 +174,10 @@ type Hooks struct {
 The implementation instruments **three critical paths**:
 
 1. **Regular Requests** (`doRequest` method)
-
    - Used by `Do()` and `DoRaw()`
    - Handles chat completions, responses, and model listings
 
 2. **Streaming Requests** (`DoStream` method)
-
    - Used by `StreamChatCompletion()` and `StreamResponses()`
    - Duration measured to stream establishment, not stream close
 
@@ -524,37 +522,30 @@ providers.SetGlobalHooks(combinedHooks)
 ### Issues Fixed
 
 1. **✅ Incomplete Hook Coverage**
-
    - Original: Only instrumented `doRequest`
    - Fixed: Instrumented both `doRequest` AND `DoStream` for complete coverage
 
 2. **✅ Model Extraction**
-
    - Original: Only handled `ChatRequest`
    - Fixed: Handles both `ChatRequest` and `ResponsesRequest`
 
 3. **✅ Status Code Handling**
-
    - Original: Set status to "0" for all errors
    - Fixed: Extract actual status codes from `GatewayError`, use "network_error" label for network failures
 
 4. **✅ Missing Endpoint Information**
-
    - Original: No endpoint tracking
    - Fixed: Added `endpoint` label to all metrics for granular debugging
 
 5. **✅ Streaming Metrics**
-
    - Original: Streaming not explicitly handled
    - Fixed: Separate `stream` label and explicit instrumentation
 
 6. **✅ Missing Imports**
-
    - Original: Missing `fmt` import
    - Fixed: All imports properly added
 
 7. **✅ Factory Wiring Unclear**
-
    - Original: No clear path to inject hooks
    - Fixed: Global hooks registry with `SetGlobalHooks()` and `GetGlobalHooks()`
 
@@ -564,7 +555,7 @@ providers.SetGlobalHooks(combinedHooks)
 
 ## Summary
 
-This implementation provides production-ready Prometheus metrics for GOModel with:
+This implementation provides production-ready Prometheus metrics for GoModel with:
 
 - ✅ Zero impact on business logic
 - ✅ Complete request coverage (regular + streaming)

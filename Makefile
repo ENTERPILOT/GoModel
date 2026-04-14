@@ -1,4 +1,4 @@
-.PHONY: all build run clean tidy test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix record-api swagger install-tools perf-check perf-bench infra image
+.PHONY: all build run clean tidy test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix record-api swagger docs-openapi install-tools perf-check perf-bench infra image
 
 all: build
 
@@ -6,6 +6,7 @@ all: build
 VERSION ?= $(shell git describe --tags --always --dirty)
 COMMIT ?= $(shell git rev-parse --short HEAD)
 DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+DOCS_API_SERVERS ?= http://localhost:8080
 
 # Linker flags to inject version info
 LDFLAGS := -X "gomodel/internal/version.Version=$(VERSION)" \
@@ -35,7 +36,7 @@ tidy:
 infra:
 	docker compose up -d
 
-# Docker Compose: full stack (GOModel + Prometheus; builds app image when needed)
+# Docker Compose: full stack (GoModel + Prometheus; builds app image when needed)
 image:
 	docker compose --profile app up -d
 
@@ -87,8 +88,20 @@ swagger:
 	go run github.com/swaggo/swag/cmd/swag init --generalInfo main.go \
 		--dir cmd/gomodel,internal \
 		--output cmd/gomodel/docs \
-		--outputTypes go,json \
+		--outputTypes go \
 		--parseDependency
+	$(MAKE) docs-openapi
+
+docs-openapi:
+	@tmp_dir=$$(mktemp -d); \
+	trap 'rm -rf "$$tmp_dir"' EXIT; \
+	go run github.com/swaggo/swag/cmd/swag init --quiet --generalInfo main.go \
+		--dir cmd/gomodel,internal \
+		--output "$$tmp_dir" \
+		--outputTypes json \
+		--parseDependency; \
+	npx -y swagger2openapi@7.0.8 --patch -o docs/openapi.json "$$tmp_dir/swagger.json"; \
+	DOCS_API_SERVERS="$(DOCS_API_SERVERS)" node -e 'const fs = require("fs"); const file = "docs/openapi.json"; const urls = (process.env.DOCS_API_SERVERS || "").split(",").map((url) => url.trim()).filter(Boolean); if (!urls.length) throw new Error("DOCS_API_SERVERS must include at least one URL"); const spec = JSON.parse(fs.readFileSync(file, "utf8")); spec.servers = urls.map((url) => ({ url, description: /(^https?:\/\/)?(localhost|127\.0\.0\.1)(:|\/|$$)/.test(url) ? "Local GoModel" : "GoModel" })); fs.writeFileSync(file, JSON.stringify(spec, null, 2) + "\n");'
 
 # Run linter
 lint:

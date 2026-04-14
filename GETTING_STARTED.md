@@ -102,25 +102,23 @@ providers:
     api_key: ${ANTHROPIC_API_KEY}
     resilience:
       retry:
-        max_retries: 5          # Anthropic supports long requests — allow more retries
+        max_retries: 5 # Anthropic supports long requests — allow more retries
   ollama:
     type: ollama
     base_url: ${OLLAMA_BASE_URL:-http://localhost:11434/v1}
     resilience:
       circuit_breaker:
-        failure_threshold: 10   # local service — tolerate more transient failures
+        failure_threshold: 10 # local service — tolerate more transient failures
         timeout: 5s
 ```
 
 **Effective resilience per provider:**
-
 
 | Provider  | max_retries      | failure_threshold | cb timeout        |
 | --------- | ---------------- | ----------------- | ----------------- |
 | openai    | 2 (global)       | 3 (global)        | 15s (global)      |
 | anthropic | **5** (override) | 3 (global)        | 15s (global)      |
 | ollama    | 2 (global)       | **10** (override) | **5s** (override) |
-
 
 Only fields that are explicitly listed under a provider's `resilience:` block are overridden. Everything else silently inherits from the global section.
 
@@ -163,7 +161,6 @@ GROQ_API_KEY=gsk_...
 
 All resilience settings can be overridden at runtime via env vars. Env vars always beat both code defaults and YAML values.
 
-
 | Variable                            | Type     | Default   | Description                                                                                                                                                                                                                                                 |
 | ----------------------------------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `RETRY_MAX_RETRIES`                 | int      | `3`       | Maximum retry attempts per request                                                                                                                                                                                                                          |
@@ -174,36 +171,33 @@ All resilience settings can be overridden at runtime via env vars. Env vars alwa
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int      | `5`       | Consecutive failures before opening                                                                                                                                                                                                                         |
 | `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | int      | `2`       | Consecutive successes to close again                                                                                                                                                                                                                        |
 | `CIRCUIT_BREAKER_TIMEOUT`           | duration | `30s`     | How long the circuit stays open                                                                                                                                                                                                                             |
-| `LOG_FORMAT`                        | string   | *(unset)* | Auto-detects based on environment: colorized text on a TTY, JSON otherwise. Set to `text` to force human-readable output (no colors if not a TTY), or `json` to force structured JSON even on a TTY (recommended for production, CloudWatch, Datadog, GCP). |
-| `LOG_LEVEL`                         | string   | `info`    | Minimum runtime log level. Supported values are `debug`, `info`, `warn`, and `error`. Common aliases such as `dbg`, `inf`, `warning`, and `err` are also accepted.                                                                                      |
-
+| `LOG_FORMAT`                        | string   | _(unset)_ | Auto-detects based on environment: colorized text on a TTY, JSON otherwise. Set to `text` to force human-readable output (no colors if not a TTY), or `json` to force structured JSON even on a TTY (recommended for production, CloudWatch, Datadog, GCP). |
+| `LOG_LEVEL`                         | string   | `info`    | Minimum runtime log level. Supported values are `debug`, `info`, `warn`, and `error`. Common aliases such as `dbg`, `inf`, `warning`, and `err` are also accepted.                                                                                          |
 
 Provider credentials:
 
-
-| Variable             | Provider                                      |
-| -------------------- | --------------------------------------------- |
-| `OPENAI_API_KEY`     | OpenAI                                        |
-| `OPENAI_BASE_URL`    | OpenAI (custom endpoint)                      |
-| `ANTHROPIC_API_KEY`  | Anthropic                                     |
-| `ANTHROPIC_BASE_URL` | Anthropic (custom endpoint)                   |
-| `GEMINI_API_KEY`     | Google Gemini                                 |
-| `GEMINI_BASE_URL`    | Gemini (custom endpoint)                      |
-| `OPENROUTER_API_KEY` | OpenRouter (default base URL: `https://openrouter.ai/api/v1`) |
-| `OPENROUTER_BASE_URL` | OpenRouter (custom endpoint override)        |
+| Variable              | Provider                                                                       |
+| --------------------- | ------------------------------------------------------------------------------ |
+| `OPENAI_API_KEY`      | OpenAI                                                                         |
+| `OPENAI_BASE_URL`     | OpenAI (custom endpoint)                                                       |
+| `ANTHROPIC_API_KEY`   | Anthropic                                                                      |
+| `ANTHROPIC_BASE_URL`  | Anthropic (custom endpoint)                                                    |
+| `GEMINI_API_KEY`      | Google Gemini                                                                  |
+| `GEMINI_BASE_URL`     | Gemini (custom endpoint)                                                       |
+| `OPENROUTER_API_KEY`  | OpenRouter (default base URL: `https://openrouter.ai/api/v1`)                  |
+| `OPENROUTER_BASE_URL` | OpenRouter (custom endpoint override)                                          |
 | `OPENROUTER_SITE_URL` | OpenRouter attribution URL override (default: `https://gomodel.enterpilot.io`) |
-| `OPENROUTER_APP_NAME` | OpenRouter attribution title override (default: `GOModel`) |
-| `XAI_API_KEY`        | xAI / Grok                                    |
-| `XAI_BASE_URL`       | xAI (custom endpoint)                         |
-| `GROQ_API_KEY`       | Groq                                          |
-| `GROQ_BASE_URL`      | Groq (custom endpoint)                        |
-| `AZURE_API_KEY`      | Azure OpenAI                                  |
-| `AZURE_BASE_URL`     | Azure OpenAI deployment base URL              |
-| `AZURE_API_VERSION`  | Azure OpenAI API version override (default: `2024-10-21`) |
-| `ORACLE_API_KEY`     | Oracle                                        |
-| `ORACLE_BASE_URL`    | Oracle OpenAI-compatible base URL             |
-| `OLLAMA_BASE_URL`    | Ollama (default: `http://localhost:11434/v1`) |
-
+| `OPENROUTER_APP_NAME` | OpenRouter attribution title override (default: `GoModel`)                     |
+| `XAI_API_KEY`         | xAI / Grok                                                                     |
+| `XAI_BASE_URL`        | xAI (custom endpoint)                                                          |
+| `GROQ_API_KEY`        | Groq                                                                           |
+| `GROQ_BASE_URL`       | Groq (custom endpoint)                                                         |
+| `AZURE_API_KEY`       | Azure OpenAI                                                                   |
+| `AZURE_BASE_URL`      | Azure OpenAI deployment base URL                                               |
+| `AZURE_API_VERSION`   | Azure OpenAI API version override (default: `2024-10-21`)                      |
+| `ORACLE_API_KEY`      | Oracle                                                                         |
+| `ORACLE_BASE_URL`     | Oracle OpenAI-compatible base URL                                              |
+| `OLLAMA_BASE_URL`     | Ollama (default: `http://localhost:11434/v1`)                                  |
 
 See `.env.template` for the full list of all configurable environment variables.
 
@@ -233,7 +227,7 @@ If your Oracle endpoint does not return a usable model list, configure `provider
 **Azure ships with a pinned API version by default.**
 If you do not set `AZURE_API_VERSION`, the gateway sends `api-version=2024-10-21`. Override it only when you need a different Azure API version.
 
-**OpenRouter gets GOModel attribution headers by default.**
+**OpenRouter gets GoModel attribution headers by default.**
 When the `openrouter` provider is used, the gateway adds `HTTP-Referer` and `X-OpenRouter-Title` unless the request already provides them. Override the defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
 
 **Partial YAML fields leave the rest at defaults.**

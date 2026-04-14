@@ -2,12 +2,12 @@
 
 ## Context
 
-GOModel already has a request-scoped `Workflow` runtime object, but today it
+GoModel already has a request-scoped `Workflow` runtime object, but today it
 is derived in middleware and lives only in request context.
 
 That is not enough for the next stage of the gateway.
 
-GOModel needs:
+GoModel needs:
 
 - durable control over request preprocessing behavior
 - one workflow selected per request, with deterministic matching
@@ -27,7 +27,7 @@ stored, matched, loaded into memory, and referenced from requests.
 
 ### 1. Keep Two Distinct Concepts
 
-GOModel keeps two related but distinct concepts:
+GoModel keeps two related but distinct concepts:
 
 1. persisted workflow versions
 2. request-scoped `core.Workflow`
@@ -111,7 +111,7 @@ This means the database row id is the workflow version identity.
 The database is the source of truth, but request matching must not depend on
 database reads.
 
-GOModel loads active workflow rows into memory and serves request matching
+GoModel loads active workflow rows into memory and serves request matching
 from an immutable in-memory snapshot.
 
 The in-memory snapshot should expose:
@@ -132,7 +132,7 @@ Request-time lookup should be:
 Snapshot refresh must be atomic so hot-path reads never observe a partially
 reloaded workflow set.
 
-This allows each GOModel instance to keep a fast local read model while sharing
+This allows each GoModel instance to keep a fast local read model while sharing
 one persistent source of truth across a cluster.
 
 ### 6. Request Traceability

@@ -1,5 +1,5 @@
 // Package app provides the main application struct for centralized dependency management
-// and lifecycle control of the GOModel server.
+// and lifecycle control of the GoModel server.
 package app
 
 import (

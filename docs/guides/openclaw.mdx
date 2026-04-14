@@ -1,17 +1,17 @@
 ---
-title: "Using GOModel with OpenClaw"
-description: "Use GOModel as an OpenAI-compatible AI gateway for OpenClaw, with recommended OpenAI models and a production-ready setup."
+title: "GoModel & OpenClaw"
+description: "Use GoModel as an OpenAI-compatible AI gateway for OpenClaw, with recommended OpenAI models and a production-ready setup."
 ---
 
 ## Overview
 
-GOModel is an OpenAI-compatible **AI gateway** for OpenClaw. It gives you one
+GoModel is an OpenAI-compatible **AI gateway** for OpenClaw. It gives you one
 stable API endpoint while routing requests to OpenAI and other providers. This
 keeps OpenClaw configuration simple and makes model switching easier.
 
 Flow:
 
-`OpenClaw -> GOModel -> OpenAI/Anthropic/Gemini/...`
+`OpenClaw -> GoModel -> OpenAI/Anthropic/Gemini/...`
 
 ## Recommended OpenAI Models (As of February 28, 2026)
 
@@ -25,7 +25,7 @@ These OpenAI model IDs are currently good defaults for OpenClaw:
 | `gpt-5.2-codex` | Advanced coding workflows in Codex-like environments (Responses API oriented) |
 
 <Note>
-  Verify availability in your GOModel instance first: `GET /v1/models`. Model
+  Verify availability in your GoModel instance first: `GET /v1/models`. Model
   availability depends on your OpenAI account tier and API surface.
 </Note>
 
@@ -33,9 +33,9 @@ Reference:
 - OpenAI GPT-5.2 release: [OpenAI Changelog](https://platform.openai.com/docs/changelog)
 - OpenAI model docs: [Models Overview](https://platform.openai.com/docs/models)
 
-## 1. Run GOModel
+## 1. Run GoModel
 
-Start GOModel with at least one provider and a master key:
+Start GoModel with at least one provider and a master key:
 
 ```bash
 docker run --rm -p 8080:8080 \
@@ -51,7 +51,7 @@ curl -s http://localhost:8080/v1/models \
   -H "Authorization: Bearer change-me"
 ```
 
-## 2. Add a GOModel provider in OpenClaw
+## 2. Add a GoModel provider in OpenClaw
 
 In your OpenClaw config, add a custom provider that uses OpenAI-compatible requests:
 
@@ -70,7 +70,7 @@ In your OpenClaw config, add a custom provider that uses OpenAI-compatible reque
         "models": [
           {
             "id": "gpt-5-mini",
-            "name": "GOModel gpt-5-mini",
+            "name": "GoModel gpt-5-mini",
             "reasoning": false,
             "input": ["text"],
             "cost": {
@@ -84,7 +84,7 @@ In your OpenClaw config, add a custom provider that uses OpenAI-compatible reque
           },
           {
             "id": "gpt-5.2",
-            "name": "GOModel gpt-5.2",
+            "name": "GoModel gpt-5.2",
             "reasoning": true,
             "input": ["text"],
             "cost": {
@@ -110,7 +110,7 @@ In your OpenClaw config, add a custom provider that uses OpenAI-compatible reque
 }
 ```
 
-Replace model IDs with values returned by GOModel at `/v1/models`.
+Replace model IDs with values returned by GoModel at `/v1/models`.
 
 <Tip>
   `gpt-5.2-codex` is highly relevant for coding agents, but OpenAI currently
@@ -126,7 +126,7 @@ If you get `401 Unauthorized`, verify OpenClaw is sending the same value as `GOM
 
 ## Notes
 
-- If GOModel is running in Docker and OpenClaw is not, `http://localhost:8080` is usually correct.
+- If GoModel is running in Docker and OpenClaw is not, `http://localhost:8080` is usually correct.
 - If both run in different containers, use a shared Docker network and container hostname instead of `localhost`.
-- You can expose multiple GOModel-backed models by adding more entries under `models.providers.gomodel.models`.
-- GOModel as an AI gateway also gives you centralized auth, audit logs, usage analytics, and provider abstraction with one OpenAI-compatible endpoint.
+- You can expose multiple GoModel-backed models by adding more entries under `models.providers.gomodel.models`.
+- GoModel as an AI gateway also gives you centralized auth, audit logs, usage analytics, and provider abstraction with one OpenAI-compatible endpoint.

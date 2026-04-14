@@ -1,17 +1,17 @@
 ---
 title: "Cache"
-description: "How GOModel response caching works, how to enable it, and what is included in the exact-cache key."
+description: "How GoModel response caching works, how to enable it, and what is included in the exact-cache key."
 ---
 
 ## Overview
 
-GOModel ships with an exact-match response cache for non-streaming requests on:
+GoModel ships with an exact-match response cache for non-streaming requests on:
 
 - `/v1/chat/completions`
 - `/v1/responses`
 - `/v1/embeddings`
 
-When a response is served from the exact cache, GOModel returns:
+When a response is served from the exact cache, GoModel returns:
 
 ```http
 X-Cache: HIT (exact)

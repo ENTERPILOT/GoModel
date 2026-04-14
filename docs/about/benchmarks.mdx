@@ -1,11 +1,11 @@
 ---
 title: "Benchmarks"
-description: "A summary of GOModel benchmark results, with links to full write-ups and methodology."
+description: "A summary of GoModel benchmark results, with links to full write-ups and methodology."
 ---
 
 ## Benchmark snapshot
 
-This page is a short reference for one public benchmark run comparing GOModel
+This page is a short reference for one public benchmark run comparing GoModel
 and LiteLLM on OpenAI-compatible traffic.
 
 The full article contains the complete write-up, all charts, and the original
@@ -27,7 +27,7 @@ Chart source and full context:
 
 ## At a glance
 
-In this benchmark run, GOModel came out ahead on the main operational signals
+In this benchmark run, GoModel came out ahead on the main operational signals
 most teams care about:
 
 - Added latency
@@ -51,9 +51,9 @@ This docs page keeps only the primary comparison matrix from the blog post.
 
 | Gateway | Concurrency | Success | Error % | Req/s | p50 ms | p95 ms | p99 ms | CPU avg % | RSS avg MB |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| GOModel | `1` | `12/12` | `0.00` | `9.61` | `86.4` | `141.1` | `144.4` | `0.81` | `45.4` |
-| GOModel | `4` | `12/12` | `0.00` | `44.66` | `56.1` | `139.5` | `139.5` | `0.23` | `46.0` |
-| GOModel | `8` | `12/12` | `0.00` | `52.75` | `98.4` | `130.6` | `131.1` | `1.13` | `46.0` |
+| GoModel | `1` | `12/12` | `0.00` | `9.61` | `86.4` | `141.1` | `144.4` | `0.81` | `45.4` |
+| GoModel | `4` | `12/12` | `0.00` | `44.66` | `56.1` | `139.5` | `139.5` | `0.23` | `46.0` |
+| GoModel | `8` | `12/12` | `0.00` | `52.75` | `98.4` | `130.6` | `131.1` | `1.13` | `46.0` |
 | LiteLLM | `1` | `12/12` | `0.00` | `8.64` | `96.2` | `190.3` | `213.9` | `9.21` | `320.3` |
 | LiteLLM | `4` | `12/12` | `0.00` | `36.82` | `104.7` | `149.5` | `149.5` | `5.20` | `320.8` |
 | LiteLLM | `8` | `12/12` | `0.00` | `35.81` | `188.7` | `244.4` | `244.9` | `5.95` | `321.5` |
@@ -62,12 +62,12 @@ This docs page keeps only the primary comparison matrix from the blog post.
 
 Some useful reads from that March 5, 2026 run:
 
-- GOModel posted lower p95 latency at every tested concurrency level.
-- GOModel reached higher throughput across the benchmark matrix.
-- GOModel stayed near `45-46 MB` RSS, while LiteLLM stayed near `320-321 MB`.
-- GOModel also used less CPU in these runs.
+- GoModel posted lower p95 latency at every tested concurrency level.
+- GoModel reached higher throughput across the benchmark matrix.
+- GoModel stayed near `45-46 MB` RSS, while LiteLLM stayed near `320-321 MB`.
+- GoModel also used less CPU in these runs.
 
-At the highest tested concurrency, GOModel reached `52.75 req/s` versus
+At the highest tested concurrency, GoModel reached `52.75 req/s` versus
 LiteLLM at `35.81 req/s`.
 
 ## Reproduce it yourself
@@ -84,19 +84,19 @@ All the tooling used in the published benchmark is available in this repository.
 
 ### Scripts
 
-The benchmark suite lives in [`docs/about/benchmark-tools/`](https://github.com/ENTERPILOT/GOModel/tree/main/docs/about/benchmark-tools):
+The benchmark suite lives in [`docs/about/benchmark-tools/`](https://github.com/ENTERPILOT/GoModel/tree/main/docs/about/benchmark-tools):
 
 | File | Purpose |
 | --- | --- |
-| [`compare.sh`](https://github.com/ENTERPILOT/GOModel/blob/main/docs/about/benchmark-tools/compare.sh) | Builds GoModel, starts both gateways, runs the full benchmark matrix, and writes a `REPORT.md` |
-| [`bench_main.go`](https://github.com/ENTERPILOT/GOModel/blob/main/docs/about/benchmark-tools/bench_main.go) | Source for the `bench` CLI that sends requests and collects latency + process metrics |
-| [`plot_benchmark_charts.py`](https://github.com/ENTERPILOT/GOModel/blob/main/docs/about/benchmark-tools/plot_benchmark_charts.py) | Generates per-metric charts and a combined dashboard from the JSON results |
+| [`compare.sh`](https://github.com/ENTERPILOT/GoModel/blob/main/docs/about/benchmark-tools/compare.sh) | Builds GoModel, starts both gateways, runs the full benchmark matrix, and writes a `REPORT.md` |
+| [`bench_main.go`](https://github.com/ENTERPILOT/GoModel/blob/main/docs/about/benchmark-tools/bench_main.go) | Source for the `bench` CLI that sends requests and collects latency + process metrics |
+| [`plot_benchmark_charts.py`](https://github.com/ENTERPILOT/GoModel/blob/main/docs/about/benchmark-tools/plot_benchmark_charts.py) | Generates per-metric charts and a combined dashboard from the JSON results |
 
 ### Quick start
 
 ```bash
 # 1. Clone GoModel and set up your .env with GROQ_API_KEY
-git clone https://github.com/ENTERPILOT/GOModel.git
+git clone https://github.com/ENTERPILOT/GoModel.git
 cd gomodel
 echo "GROQ_API_KEY=gsk_..." > .env
 

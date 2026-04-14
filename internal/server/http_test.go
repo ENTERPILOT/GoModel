@@ -749,8 +749,8 @@ func TestSwaggerDocJson_ReturnsExpectedContent(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "GOModel") {
-		t.Errorf("expected doc.json to contain GOModel API title, got: %s", body[:min(300, len(body))])
+	if !strings.Contains(body, "GoModel") {
+		t.Errorf("expected doc.json to contain GoModel API title, got: %s", body[:min(300, len(body))])
 	}
 	if !strings.Contains(body, "swagger") {
 		t.Errorf("expected doc.json to contain swagger spec, got: %s", body[:min(300, len(body))])

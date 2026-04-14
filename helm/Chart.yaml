@@ -16,12 +16,12 @@ keywords:
   - xai
   - proxy
 
-home: https://github.com/ENTERPILOT/GOModel
+home: https://github.com/ENTERPILOT/GoModel
 sources:
-  - https://github.com/ENTERPILOT/GOModel
+  - https://github.com/ENTERPILOT/GoModel
 
 maintainers:
-  - name: GOModel Team
+  - name: GoModel Team
 
 dependencies:
   - name: redis

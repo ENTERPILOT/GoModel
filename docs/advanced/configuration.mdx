@@ -1,11 +1,11 @@
 ---
 title: "Configuration"
-description: "How to configure GOModel using environment variables, .env files, and YAML."
+description: "How to configure GoModel using environment variables, .env files, and YAML."
 ---
 
 ## Good defaults
 
-GOModel uses a good defaults philosophy. This means that the default settings should be enough to use it.
+GoModel uses a good defaults philosophy. This means that the default settings should be enough to use it.
 
 ## How to override the default settings?
 
@@ -20,20 +20,20 @@ flowchart LR
 ```
 
 <Tip>
-  As GOModel works out of the box with no configuration files, you can try it in
+  As GoModel works out of the box with no configuration files, you can try it in
   a minute.
 
 Start here: [Quick Start](/getting-started/quickstart)
 
 </Tip>
 
-GOModel automatically discovers providers from well-known environment variables.
+GoModel automatically discovers providers from well-known environment variables.
 
 ## Configuration Methods
 
 ### 1. Environment Variables
 
-The most common way to configure GOModel. Set any of the variables below to override defaults.
+The most common way to configure GoModel. Set any of the variables below to override defaults.
 
 #### Server
 
@@ -143,11 +143,11 @@ Set these to automatically register providers. No YAML configuration required.
 Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
 When using Oracle, `models:` also acts as a fallback inventory if the upstream endpoint does not expose a usable `/models` response.
 
-For OpenRouter, GOModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
+For OpenRouter, GoModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
 
 ### 2. `.env` File
 
-GOModel automatically loads a `.env` file from the working directory at startup. This is convenient for local development.
+GoModel automatically loads a `.env` file from the working directory at startup. This is convenient for local development.
 
 ```bash
 # .env
@@ -169,7 +169,7 @@ cp .env.template .env
 
 ### 3. Configuration File (YAML)
 
-For more complex setups, you can use an optional YAML configuration file. GOModel looks for it in two locations (in order):
+For more complex setups, you can use an optional YAML configuration file. GoModel looks for it in two locations (in order):
 
 1. `config/config.yaml`
 2. `config.yaml`
@@ -233,7 +233,7 @@ providers:
 
 ### Auto-Discovery from Environment Variables
 
-The simplest way to add providers. GOModel checks for well-known API key environment variables and automatically registers providers:
+The simplest way to add providers. GoModel checks for well-known API key environment variables and automatically registers providers:
 
 ```bash
 export OPENAI_API_KEY="sk-..."      # Registers "openai" provider
@@ -249,7 +249,7 @@ export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecl
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registers "ollama" provider
 ```
 
-GOModel also works with additional OpenAI-compatible providers out of the box
+GoModel also works with additional OpenAI-compatible providers out of the box
 through YAML provider blocks.
 
 ### YAML Provider Blocks

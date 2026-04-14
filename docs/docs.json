@@ -3,24 +3,69 @@
     "theme": "maple",
     "name": "GoModel",
     "logo": {
+        "light": "/wordmark-light.svg",
+        "dark": "/wordmark-dark.svg"
+    },
+    "favicon": {
         "light": "/logo.svg",
         "dark": "/logo.svg"
     },
     "colors": {
         "primary": "#755c3d"
     },
+    "icons": {
+        "library": "lucide"
+    },
+    "api": {
+        "url": "full"
+    },
     "navigation": {
-        "pages": [
+        "tabs": [
             {
-                "group": "Getting Started",
-                "pages": ["getting-started/quickstart"]
+                "tab": "Documentation",
+                "icon": "book-open",
+                "pages": [
+                    {
+                        "group": "Getting Started",
+                        "icon": "rocket",
+                        "pages": [
+                            "getting-started/quickstart"
+                        ]
+                    },
+                    {
+                        "group": "Features",
+                        "icon": "sparkles",
+                        "pages": [
+                            "features/cache"
+                        ]
+                    },
+                    {
+                        "group": "Advanced",
+                        "icon": "settings-2",
+                        "pages": [
+                            "advanced/configuration",
+                            "advanced/config-yaml",
+                            "advanced/guardrails",
+                            "advanced/workflows",
+                            "advanced/admin-endpoints"
+                        ]
+                    },
+                    {
+                        "group": "About",
+                        "icon": "info",
+                        "pages": [
+                            "about/who-we-are",
+                            "about/values",
+                            "about/technical-philosophy",
+                            "about/license",
+                            "about/benchmarks"
+                        ]
+                    }
+                ]
             },
             {
-                "group": "Features",
-                "pages": ["features/cache"]
-            },
-            {
-                "group": "Guides",
+                "tab": "Guides",
+                "icon": "compass",
                 "pages": [
                     "guides/openclaw",
                     "guides/oracle",
@@ -31,12 +76,12 @@
                 ]
             },
             {
-                "group": "Advanced",
-                "pages": ["advanced/configuration", "advanced/config-yaml", "advanced/guardrails", "advanced/workflows", "advanced/admin-endpoints"]
-            },
-            {
-                "group": "About",
-                "pages": ["about/who-we-are", "about/values", "about/technical-philosophy", "about/benchmarks"]
+                "tab": "API Reference",
+                "icon": "braces",
+                "openapi": {
+                    "source": "openapi.json",
+                    "directory": "api-reference"
+                }
             }
         ]
     }

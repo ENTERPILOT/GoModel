@@ -1,16 +1,16 @@
 ---
 title: "Quick Start"
-description: "GOModel AI gateway quick start: run an OpenAI-compatible LLM gateway in 30 seconds, send your first request, and open the admin panel."
+description: "GoModel AI gateway quick start: run an OpenAI-compatible LLM gateway in 30 seconds, send your first request, and open the admin panel."
 ---
 
-## Run GOModel in 30 Seconds
+## Run GoModel in 30 Seconds
 
-GOModel is an OpenAI-compatible AI gateway. You can connect one endpoint and
+GoModel is an OpenAI-compatible AI gateway. You can connect one endpoint and
 route traffic across OpenAI, Anthropic, Gemini, xAI, Groq, OpenRouter, Azure
 OpenAI, Oracle, Ollama, and more while keeping auth, audit logs, and admin
 visibility in one place.
 
-### 1. Start GOModel
+### 1. Start GoModel
 
 ```bash
 docker run --rm -p 8080:8080 \
@@ -28,7 +28,7 @@ docker run --rm -p 8080:8080 \
   (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`,
   `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `AZURE_API_KEY` +
   `AZURE_BASE_URL`, `ORACLE_API_KEY` + `ORACLE_BASE_URL`,
-  `OLLAMA_BASE_URL`) or GOModel will have no models to route. GOModel also
+  `OLLAMA_BASE_URL`) or GoModel will have no models to route. GoModel also
   works well with additional OpenAI-compatible providers out of the box.
 </Note>
 
@@ -71,15 +71,15 @@ Use one of those model IDs in your requests.
 
 ### Usage Analytics
 
-![GOModel AI gateway usage analytics dashboard](./images/usage-analytics.png)
+![GoModel AI gateway usage analytics dashboard](./images/usage-analytics.png)
 
 ### Audit Logs
 
-![GOModel AI gateway audit logs dashboard](./images/audit-logs.png)
+![GoModel AI gateway audit logs dashboard](./images/audit-logs.png)
 
 ## Next Steps
 
 - Understand response caching: [Cache](/features/cache)
 - Configure production settings: [Configuration](/advanced/configuration)
 - Add request policies: [Guardrails](/advanced/guardrails)
-- Connect OpenClaw: [Using GOModel with OpenClaw](/guides/openclaw)
+- Connect OpenClaw: [Using GoModel with OpenClaw](/guides/openclaw)
