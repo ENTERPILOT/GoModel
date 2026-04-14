@@ -221,9 +221,8 @@ function dashboard() {
       if (typeof this.initProviderStatusPreferences === "function") {
         this.initProviderStatusPreferences();
       }
-      this.apiKey = this.normalizeApiKey(
-        localStorage.getItem("gomodel_api_key") || "",
-      );
+      // Older dashboard versions persisted this secret. Keep it memory-only.
+      localStorage.removeItem("gomodel_api_key");
       this.theme = localStorage.getItem("gomodel_theme") || "system";
       this.sidebarCollapsed =
         localStorage.getItem("gomodel_sidebar_collapsed") === "true";
@@ -337,11 +336,8 @@ function dashboard() {
 
     saveApiKey() {
       this.apiKey = this.normalizeApiKey(this.apiKey);
-      if (this.apiKey) {
-        localStorage.setItem("gomodel_api_key", this.apiKey);
-      } else {
-        localStorage.removeItem("gomodel_api_key");
-      }
+      // Do not persist auth secrets in browser storage.
+      localStorage.removeItem("gomodel_api_key");
     },
 
     requestOptions(options) {

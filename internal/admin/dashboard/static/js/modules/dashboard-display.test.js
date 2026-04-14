@@ -205,7 +205,29 @@ test('stale unauthorized category responses preserve existing categories', async
     assert.equal(app.authDialogOpen, false);
 });
 
-test('submitApiKey trims bearer input and stores the key before refreshing dashboard data', () => {
+test('init clears legacy stored API key instead of restoring it', () => {
+    const storage = createLocalStorage({
+        gomodel_api_key: 'existing-token',
+        gomodel_theme: 'dark'
+    });
+    const app = loadDashboardApp({
+        window: {
+            localStorage: storage,
+            location: { pathname: '/admin/dashboard/overview' }
+        }
+    });
+
+    app.fetchAll = () => {};
+    app.renderChart = () => {};
+
+    app.init();
+
+    assert.equal(app.apiKey, '');
+    assert.equal(storage.getItem('gomodel_api_key'), null);
+    assert.equal(app.theme, 'dark');
+});
+
+test('submitApiKey trims bearer input and keeps the key in memory before refreshing dashboard data', () => {
     const storage = createLocalStorage();
     const app = loadDashboardApp({
         window: { localStorage: storage }
@@ -221,7 +243,7 @@ test('submitApiKey trims bearer input and stores the key before refreshing dashb
 
     assert.equal(app.apiKey, 'secret-token');
     assert.equal(app.authRequestGeneration, 1);
-    assert.equal(storage.getItem('gomodel_api_key'), 'secret-token');
+    assert.equal(storage.getItem('gomodel_api_key'), null);
     assert.equal(app.authDialogOpen, false);
     assert.equal(fetches, 1);
 });
@@ -245,7 +267,7 @@ test('hasApiKey reflects trimmed bearer input for the sidebar change action', ()
 });
 
 test('submitApiKey rejects blank input without unlocking dashboard', () => {
-    const storage = createLocalStorage({ gomodel_api_key: 'existing-token' });
+    const storage = createLocalStorage();
     const app = loadDashboardApp({
         window: { localStorage: storage }
     });
@@ -260,7 +282,7 @@ test('submitApiKey rejects blank input without unlocking dashboard', () => {
 
     assert.equal(app.apiKey, '');
     assert.equal(app.authRequestGeneration, 0);
-    assert.equal(storage.getItem('gomodel_api_key'), 'existing-token');
+    assert.equal(storage.getItem('gomodel_api_key'), null);
     assert.equal(app.authError, true);
     assert.equal(app.needsAuth, true);
     assert.equal(app.authDialogOpen, true);
@@ -268,7 +290,7 @@ test('submitApiKey rejects blank input without unlocking dashboard', () => {
 });
 
 test('submitApiKey and headers reject a bare bearer scheme without sending authorization', () => {
-    const storage = createLocalStorage({ gomodel_api_key: 'existing-token' });
+    const storage = createLocalStorage();
     const app = loadDashboardApp({
         window: { localStorage: storage }
     });
@@ -283,7 +305,7 @@ test('submitApiKey and headers reject a bare bearer scheme without sending autho
 
     assert.equal(app.apiKey, '');
     assert.equal(app.authRequestGeneration, 0);
-    assert.equal(storage.getItem('gomodel_api_key'), 'existing-token');
+    assert.equal(storage.getItem('gomodel_api_key'), null);
     assert.equal(app.authError, true);
     assert.equal(app.needsAuth, true);
     assert.equal(app.authDialogOpen, true);
