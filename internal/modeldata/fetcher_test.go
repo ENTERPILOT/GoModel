@@ -38,9 +38,11 @@ func TestFetch_Success(t *testing.T) {
 	}
 	if list == nil {
 		t.Fatal("expected non-nil list")
+		return
 	}
 	if raw == nil {
 		t.Fatal("expected non-nil raw bytes")
+		return
 	}
 	if list.Version != 1 {
 		t.Errorf("Version = %d, want 1", list.Version)
@@ -157,6 +159,7 @@ func TestParse_BuildsReverseIndex(t *testing.T) {
 	}
 	if list.providerModelByActualID == nil {
 		t.Fatal("expected providerModelByActualID to be built")
+		return
 	}
 	compositeKey, ok := list.providerModelByActualID["openai/gpt-4o-2024-08-06"]
 	if !ok {

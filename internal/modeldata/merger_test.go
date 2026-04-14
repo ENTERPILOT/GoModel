@@ -53,6 +53,7 @@ func TestResolve_DirectModelMatch(t *testing.T) {
 	meta := Resolve(list, "openai", "gpt-4o")
 	if meta == nil {
 		t.Fatal("expected non-nil metadata")
+		return
 	}
 
 	if meta.DisplayName != "GPT-4o" {
@@ -81,6 +82,7 @@ func TestResolve_DirectModelMatch(t *testing.T) {
 	}
 	if meta.Pricing == nil {
 		t.Fatal("expected non-nil pricing")
+		return
 	}
 	if meta.Pricing.Currency != "USD" {
 		t.Errorf("Currency = %s, want USD", meta.Pricing.Currency)
@@ -125,6 +127,7 @@ func TestResolve_ProviderModelOverride(t *testing.T) {
 	meta := Resolve(list, "azure", "gpt-4o")
 	if meta == nil {
 		t.Fatal("expected non-nil metadata")
+		return
 	}
 
 	// Provider model should override context_window
@@ -169,6 +172,7 @@ func TestResolve_MapsRankingsIntoMetadata(t *testing.T) {
 	meta := Resolve(list, "openai", "gpt-4o")
 	if meta == nil {
 		t.Fatal("expected non-nil metadata")
+		return
 	}
 	ranking, ok := meta.Rankings["chatbot_arena"]
 	if !ok {
@@ -205,6 +209,7 @@ func TestResolve_ProviderModelWithoutBaseModel(t *testing.T) {
 	meta := Resolve(list, "custom", "my-model")
 	if meta == nil {
 		t.Fatal("expected non-nil metadata even without base model")
+		return
 	}
 
 	if *meta.ContextWindow != 32000 {
@@ -229,6 +234,7 @@ func TestResolve_NilPricing(t *testing.T) {
 	meta := Resolve(list, "openai", "text-moderation")
 	if meta == nil {
 		t.Fatal("expected non-nil metadata")
+		return
 	}
 	if meta.Pricing != nil {
 		t.Error("expected nil pricing for model without pricing")
@@ -273,6 +279,7 @@ func TestResolve_SetsCategoriesFromModes(t *testing.T) {
 			meta := Resolve(list, "openai", tt.modelID)
 			if meta == nil {
 				t.Fatal("expected non-nil metadata")
+				return
 			}
 			if len(meta.Categories) != len(tt.wantCats) {
 				t.Fatalf("Categories = %v, want %v", meta.Categories, tt.wantCats)
@@ -330,6 +337,7 @@ func TestResolve_ThreeLayerMerge(t *testing.T) {
 	meta := Resolve(list, "anthropic", "claude-sonnet-4-20250514")
 	if meta == nil {
 		t.Fatal("expected non-nil metadata")
+		return
 	}
 	if *meta.MaxOutputTokens != 16384 {
 		t.Errorf("MaxOutputTokens = %d, want 16384 (base)", *meta.MaxOutputTokens)
@@ -339,6 +347,7 @@ func TestResolve_ThreeLayerMerge(t *testing.T) {
 	meta = Resolve(list, "bedrock", "claude-sonnet-4-20250514")
 	if meta == nil {
 		t.Fatal("expected non-nil metadata for bedrock")
+		return
 	}
 	if *meta.MaxOutputTokens != 8192 {
 		t.Errorf("MaxOutputTokens = %d, want 8192 (bedrock override)", *meta.MaxOutputTokens)
@@ -377,12 +386,14 @@ func TestResolve_ReverseCustomModelIDLookup(t *testing.T) {
 	meta := Resolve(list, "openai", "gpt-4o-2024-08-06")
 	if meta == nil {
 		t.Fatal("expected non-nil metadata via reverse lookup")
+		return
 	}
 	if meta.DisplayName != "GPT-4o" {
 		t.Errorf("DisplayName = %s, want GPT-4o", meta.DisplayName)
 	}
 	if meta.Pricing == nil {
 		t.Fatal("expected non-nil pricing via reverse lookup")
+		return
 	}
 	if *meta.Pricing.InputPerMtok != 2.50 {
 		t.Errorf("InputPerMtok = %f, want 2.50", *meta.Pricing.InputPerMtok)
@@ -446,9 +457,11 @@ func TestResolve_ReverseIndexWithProviderModelOverride(t *testing.T) {
 	meta := Resolve(list, "openai", "gpt-4o-2024-08-06")
 	if meta == nil {
 		t.Fatal("expected non-nil metadata via reverse lookup")
+		return
 	}
 	if meta.Pricing == nil {
 		t.Fatal("expected non-nil pricing")
+		return
 	}
 	// Should use the provider_model override, not the base model pricing
 	if *meta.Pricing.InputPerMtok != 3.00 {
@@ -494,6 +507,7 @@ func TestResolve_ModelAliasUsesProviderOverride(t *testing.T) {
 	meta := Resolve(list, "gemini", "claude-opus-4")
 	if meta == nil {
 		t.Fatal("expected non-nil metadata via model alias")
+		return
 	}
 	if meta.DisplayName != "Claude 4 Opus" {
 		t.Fatalf("DisplayName = %q, want Claude 4 Opus", meta.DisplayName)
