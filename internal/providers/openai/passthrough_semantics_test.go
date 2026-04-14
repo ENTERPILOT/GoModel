@@ -46,6 +46,7 @@ func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {
 			got := enricher.Enrich(nil, nil, tt.info)
 			if got == nil {
 				t.Fatal("Enrich() = nil")
+				return
 			}
 			if got.SemanticOperation != tt.wantOperation {
 				t.Fatalf("SemanticOperation = %q, want %q", got.SemanticOperation, tt.wantOperation)

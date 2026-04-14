@@ -28,6 +28,7 @@ func TestListModels_FallsBackToConfiguredModelsWhenUpstreamFails(t *testing.T) {
 	}
 	if resp == nil {
 		t.Fatal("expected response, got nil")
+		return
 	}
 	if len(resp.Data) != 2 {
 		t.Fatalf("len(resp.Data) = %d, want 2", len(resp.Data))

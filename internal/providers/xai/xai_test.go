@@ -88,6 +88,7 @@ func TestNewWithHTTPClient(t *testing.T) {
 	// Verify provider is non-nil
 	if provider == nil {
 		t.Fatal("provider should not be nil")
+		return
 	}
 	if provider.client == nil {
 		t.Fatal("provider.client should not be nil")

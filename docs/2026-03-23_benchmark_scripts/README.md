@@ -28,7 +28,7 @@ gateway in the middle.
 
 ## Prerequisites
 
-- Go 1.26+
+- Go 1.26.2+
 - Python 3.10+
 - `hey`
 - `litellm`

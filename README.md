@@ -84,7 +84,7 @@ Example model identifiers are illustrative and subject to change; consult provid
 
 ### Running from Source
 
-**Prerequisites:** Go 1.26+
+**Prerequisites:** Go 1.26.2+
 
 1. Create a `.env` file:
 
