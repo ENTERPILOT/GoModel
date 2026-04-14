@@ -184,10 +184,8 @@ test('dashboard auth uses a root-level dialog instead of a hidden sidebar input'
     assert.match(template, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon auth-dialog-submit-btn"[\s\S]*class="auth-dialog-submit-icon"[\s\S]*x-text="needsAuth \? 'Unlock dashboard' : 'Save API key'"/);
     assert.match(template, /placeholder="Master key or bearer token"/);
     assert.match(template, /aria-label="API key"/);
-    assert.doesNotMatch(template, /aria-describedby="authDialogDescription"/);
-    assert.doesNotMatch(template, /Enter a different API key for this browser\./);
-    assert.doesNotMatch(template, /Enter the API key configured for this GoModel instance\./);
-    assert.doesNotMatch(template, /<label for="authDialogApiKey">API key<\/label>/);
+    assert.match(template, /<input id="authDialogApiKey"[\s\S]*type="password"[\s\S]*autocomplete="current-password"[\s\S]*x-model="apiKey"/);
+    assert.match(template, /<p class="auth-dialog-hint">Stored in this browser\. Requests use the Authorization bearer header\.<\/p>/);
     assert.doesNotMatch(template, />Not now<\/button>/);
     assert.match(
         template,

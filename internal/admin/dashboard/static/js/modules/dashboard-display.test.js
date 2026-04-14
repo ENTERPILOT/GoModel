@@ -226,6 +226,14 @@ test('submitApiKey trims bearer input and stores the key before refreshing dashb
     assert.equal(fetches, 1);
 });
 
+test('normalizeApiKey treats a bare bearer scheme as empty', () => {
+    const app = loadDashboardApp();
+
+    assert.equal(app.normalizeApiKey('Bearer'), '');
+    assert.equal(app.normalizeApiKey('Bearer   '), '');
+    assert.equal(app.normalizeApiKey('Bearer secret-token'), 'secret-token');
+});
+
 test('hasApiKey reflects trimmed bearer input for the sidebar change action', () => {
     const app = loadDashboardApp();
 
@@ -257,6 +265,32 @@ test('submitApiKey rejects blank input without unlocking dashboard', () => {
     assert.equal(app.needsAuth, true);
     assert.equal(app.authDialogOpen, true);
     assert.equal(fetches, 0);
+});
+
+test('submitApiKey and headers reject a bare bearer scheme without sending authorization', () => {
+    const storage = createLocalStorage({ gomodel_api_key: 'existing-token' });
+    const app = loadDashboardApp({
+        window: { localStorage: storage }
+    });
+    let fetches = 0;
+    app.fetchAll = () => {
+        fetches++;
+    };
+
+    app.authDialogOpen = true;
+    app.apiKey = 'Bearer   ';
+    app.submitApiKey();
+
+    assert.equal(app.apiKey, '');
+    assert.equal(app.authRequestGeneration, 0);
+    assert.equal(storage.getItem('gomodel_api_key'), 'existing-token');
+    assert.equal(app.authError, true);
+    assert.equal(app.needsAuth, true);
+    assert.equal(app.authDialogOpen, true);
+    assert.equal(fetches, 0);
+
+    app.apiKey = 'Bearer';
+    assert.equal(Object.prototype.hasOwnProperty.call(app.headers(), 'Authorization'), false);
 });
 
 test('headers accept a pasted bearer value without duplicating the prefix', () => {

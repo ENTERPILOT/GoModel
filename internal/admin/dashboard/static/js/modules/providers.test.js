@@ -112,6 +112,41 @@ test('provider detail toggle persists in browser storage and last check formatti
     assert.equal(module.providerLastCheckedTitle(provider), '2026-04-10 14:00:00');
 });
 
+test('fetchProviderStatus ignores responses whose request signal was aborted', async() => {
+    const signal = { aborted: false };
+    let handled = 0;
+    const existingStatus = {
+        summary: { total: 1, healthy: 1, degraded: 0, unhealthy: 0, overall_status: 'healthy' },
+        providers: [{ name: 'openai' }]
+    };
+    const module = createProvidersModule({
+        fetch: async(_url, options) => {
+            options.signal.aborted = true;
+            return {
+                ok: false,
+                status: 401,
+                statusText: 'Unauthorized',
+                json: async() => ({})
+            };
+        }
+    });
+
+    module.providerStatus = existingStatus;
+    module._startAbortableRequest = () => ({ signal });
+    module._clearAbortableRequest = () => {};
+    module.requestOptions = () => ({ headers: {} });
+    module.handleFetchResponse = () => {
+        handled++;
+        return false;
+    };
+    module.isStaleAuthFetchResult = () => false;
+
+    await module.fetchProviderStatus();
+
+    assert.equal(handled, 0);
+    assert.strictEqual(module.providerStatus, existingStatus);
+});
+
 test('provider status summary scrolls to providers overview section', () => {
     const calls = [];
     const section = {

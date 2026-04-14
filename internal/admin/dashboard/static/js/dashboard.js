@@ -269,6 +269,9 @@ function dashboard() {
 
         normalizeApiKey(value) {
             const key = String(value || '').trim();
+            if (/^Bearer\s*$/i.test(key)) {
+                return '';
+            }
             const match = key.match(/^Bearer\s+(.+)$/i);
             return match ? match[1].trim() : key;
         },

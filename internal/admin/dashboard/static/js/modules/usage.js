@@ -1,6 +1,18 @@
 (function(global) {
     function dashboardUsageModule() {
         return {
+            emptyUsageSummary() {
+                return {
+                    total_requests: 0,
+                    total_input_tokens: 0,
+                    total_output_tokens: 0,
+                    total_tokens: 0,
+                    total_input_cost: null,
+                    total_output_cost: null,
+                    total_cost: null
+                };
+            },
+
             emptyCacheOverview() {
                 return {
                     summary: {
@@ -120,6 +132,9 @@
                         return;
                     }
                     if (!summaryHandled || !dailyHandled) {
+                        this.summary = this.emptyUsageSummary();
+                        this.daily = [];
+                        this.renderChart();
                         return;
                     }
 

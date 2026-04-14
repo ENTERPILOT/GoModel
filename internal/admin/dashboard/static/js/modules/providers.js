@@ -72,6 +72,9 @@
                         options.signal = controller.signal;
                     }
                     const res = await fetch('/admin/api/v1/providers/status', options);
+                    if (options.signal && options.signal.aborted) {
+                        return;
+                    }
                     const handled = this.handleFetchResponse(res, 'provider status', options);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;

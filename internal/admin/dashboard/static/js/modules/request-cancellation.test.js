@@ -248,6 +248,37 @@ test('fetchUsage aborts stale in-flight requests before applying new data', asyn
     assert.equal(renderChartCalls, 1);
 });
 
+test('fetchUsage clears stale usage data and rerenders on real response failures', async() => {
+    const app = loadDashboardApp({
+        fetch: async() => ({
+            ok: false,
+            status: 500,
+            statusText: 'Internal Server Error',
+            json: async() => ({})
+        })
+    });
+    let renderChartCalls = 0;
+    app.summary = {
+        total_requests: 12,
+        total_input_tokens: 30,
+        total_output_tokens: 40,
+        total_tokens: 70,
+        total_input_cost: 1,
+        total_output_cost: 2,
+        total_cost: 3
+    };
+    app.daily = [{ date: '2026-03-29', input_tokens: 30, output_tokens: 40 }];
+    app.renderChart = () => {
+        renderChartCalls++;
+    };
+
+    await app.fetchUsage();
+
+    assert.deepEqual(app.summary, app.emptyUsageSummary());
+    assert.equal(app.daily.length, 0);
+    assert.equal(renderChartCalls, 1);
+});
+
 test('fetchModels aborts stale in-flight requests before applying new data', async() => {
     const queue = createPendingFetchQueue();
     const app = loadDashboardApp({ fetch: queue.fetch });

@@ -146,11 +146,17 @@
                 };
             },
 
+            adminRequestOptions(options) {
+                return typeof this.requestOptions === 'function'
+                    ? this.requestOptions(options)
+                    : { ...(options || {}), headers: this.headers() };
+            },
+
             async fetchAliases() {
                 this.aliasLoading = true;
                 this.aliasError = '';
                 try {
-                    const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    const request = this.adminRequestOptions();
                     const res = await fetch('/admin/api/v1/aliases', request);
                     if (res.status === 503) {
                         this.aliasesAvailable = false;
@@ -184,7 +190,7 @@
             async fetchModelOverrides() {
                 this.modelOverrideError = '';
                 try {
-                    const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
+                    const request = this.adminRequestOptions();
                     const res = await fetch('/admin/api/v1/model-overrides', request);
                     if (res.status === 503) {
                         this.modelOverridesAvailable = false;
@@ -695,24 +701,24 @@
                 };
 
                 try {
-                    const res = await fetch('/admin/api/v1/aliases/' + encodeURIComponent(alias.name), {
+                    const request = this.adminRequestOptions({
                         method: 'PUT',
-                        headers: this.headers(),
                         body: JSON.stringify(payload)
                     });
+                    const res = await fetch('/admin/api/v1/aliases/' + encodeURIComponent(alias.name), request);
                     if (res.status === 503) {
                         this.aliasesAvailable = false;
                         this.aliasError = 'Aliases feature is unavailable.';
                         return;
                     }
-                    if (res.status === 401) {
-                        this.authError = true;
-                        this.needsAuth = true;
-                        this.aliasError = 'Authentication required.';
+                    const handled = this.handleFetchResponse(res, 'alias state', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
                     }
-                    if (!res.ok) {
-                        this.aliasError = await this.aliasResponseMessage(res, 'Failed to update alias state.');
+                    if (!handled) {
+                        this.aliasError = res.status === 401
+                            ? 'Authentication required.'
+                            : await this.aliasResponseMessage(res, 'Failed to update alias state.');
                         return;
                     }
 
@@ -896,37 +902,45 @@
                 };
 
                 try {
-                    const saveRes = await fetch('/admin/api/v1/aliases/' + encodeURIComponent(name), {
+                    const saveRequest = this.adminRequestOptions({
                         method: 'PUT',
-                        headers: this.headers(),
                         body: JSON.stringify(payload)
                     });
+                    const saveRes = await fetch('/admin/api/v1/aliases/' + encodeURIComponent(name), saveRequest);
 
                     if (saveRes.status === 503) {
                         this.aliasesAvailable = false;
                         this.aliasFormError = 'Aliases feature is unavailable.';
                         return;
                     }
-                    if (saveRes.status === 401) {
-                        this.authError = true;
-                        this.needsAuth = true;
-                        this.aliasFormError = 'Authentication required.';
+                    const saveHandled = this.handleFetchResponse(saveRes, 'alias', saveRequest);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(saveHandled)) {
                         return;
                     }
-                    if (!saveRes.ok) {
-                        this.aliasFormError = await this.aliasResponseMessage(saveRes, 'Failed to save alias.');
+                    if (!saveHandled) {
+                        this.aliasFormError = saveRes.status === 401
+                            ? 'Authentication required.'
+                            : await this.aliasResponseMessage(saveRes, 'Failed to save alias.');
                         return;
                     }
 
                     if (originalName && originalName !== name) {
-                        const deleteRes = await fetch('/admin/api/v1/aliases/' + encodeURIComponent(originalName), {
-                            method: 'DELETE',
-                            headers: this.headers()
+                        const deleteRequest = this.adminRequestOptions({
+                            method: 'DELETE'
                         });
-                        if (deleteRes.status !== 404 && !deleteRes.ok) {
-                            this.aliasFormError = await this.aliasResponseMessage(deleteRes, 'The alias was saved with the new name, but the previous alias could not be removed.');
-                            await this.fetchAliases();
-                            return;
+                        const deleteRes = await fetch('/admin/api/v1/aliases/' + encodeURIComponent(originalName), deleteRequest);
+                        if (deleteRes.status !== 404) {
+                            const deleteHandled = this.handleFetchResponse(deleteRes, 'previous alias', deleteRequest);
+                            if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(deleteHandled)) {
+                                return;
+                            }
+                            if (!deleteHandled) {
+                                this.aliasFormError = deleteRes.status === 401
+                                    ? 'Authentication required.'
+                                    : await this.aliasResponseMessage(deleteRes, 'The alias was saved with the new name, but the previous alias could not be removed.');
+                                await this.fetchAliases();
+                                return;
+                            }
                         }
                     }
 
@@ -953,23 +967,23 @@
                 this.aliasFormError = '';
 
                 try {
-                    const res = await fetch('/admin/api/v1/aliases/' + encodeURIComponent(alias.name), {
-                        method: 'DELETE',
-                        headers: this.headers()
+                    const request = this.adminRequestOptions({
+                        method: 'DELETE'
                     });
+                    const res = await fetch('/admin/api/v1/aliases/' + encodeURIComponent(alias.name), request);
                     if (res.status === 503) {
                         this.aliasesAvailable = false;
                         this.aliasError = 'Aliases feature is unavailable.';
                         return;
                     }
-                    if (res.status === 401) {
-                        this.authError = true;
-                        this.needsAuth = true;
-                        this.aliasError = 'Authentication required.';
+                    const handled = this.handleFetchResponse(res, 'alias', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
                     }
-                    if (!res.ok) {
-                        this.aliasError = await this.aliasResponseMessage(res, 'Failed to remove alias.');
+                    if (!handled) {
+                        this.aliasError = res.status === 401
+                            ? 'Authentication required.'
+                            : await this.aliasResponseMessage(res, 'Failed to remove alias.');
                         return;
                     }
 
@@ -1008,27 +1022,27 @@
                 const payload = { user_paths: userPaths };
 
                 try {
-                    const res = await fetch('/admin/api/v1/model-overrides/' + encodeURIComponent(selector), {
+                    const request = this.adminRequestOptions({
                         method: 'PUT',
-                        headers: this.headers(),
                         body: JSON.stringify(payload)
                     });
+                    const res = await fetch('/admin/api/v1/model-overrides/' + encodeURIComponent(selector), request);
                     if (res.status === 503) {
                         this.modelOverridesAvailable = false;
                         this.modelOverrideError = 'Model overrides feature is unavailable.';
                         return;
                     }
+                    const handled = this.handleFetchResponse(res, 'model access', request);
+                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                        return;
+                    }
+                    if (!handled) {
+                        this.modelOverrideError = res.status === 401
+                            ? 'Authentication required.'
+                            : await this.aliasResponseMessage(res, 'Failed to save model access.');
+                        return;
+                    }
                     this.modelOverridesAvailable = true;
-                    if (res.status === 401) {
-                        this.authError = true;
-                        this.needsAuth = true;
-                        this.modelOverrideError = 'Authentication required.';
-                        return;
-                    }
-                    if (!res.ok) {
-                        this.modelOverrideError = await this.aliasResponseMessage(res, 'Failed to save model access.');
-                        return;
-                    }
 
                     await Promise.all([this.fetchModels(), this.fetchModelOverrides()]);
                     this.closeModelOverrideForm();
@@ -1055,26 +1069,28 @@
                 this.modelOverrideNotice = '';
 
                 try {
-                    const res = await fetch('/admin/api/v1/model-overrides/' + encodeURIComponent(selector), {
-                        method: 'DELETE',
-                        headers: this.headers()
+                    const request = this.adminRequestOptions({
+                        method: 'DELETE'
                     });
+                    const res = await fetch('/admin/api/v1/model-overrides/' + encodeURIComponent(selector), request);
                     if (res.status === 503) {
                         this.modelOverridesAvailable = false;
                         this.modelOverrideError = 'Model overrides feature is unavailable.';
                         return;
                     }
+                    if (res.status !== 404) {
+                        const handled = this.handleFetchResponse(res, 'model access', request);
+                        if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                            return;
+                        }
+                        if (!handled) {
+                            this.modelOverrideError = res.status === 401
+                                ? 'Authentication required.'
+                                : await this.aliasResponseMessage(res, 'Failed to remove model override.');
+                            return;
+                        }
+                    }
                     this.modelOverridesAvailable = true;
-                    if (res.status === 401) {
-                        this.authError = true;
-                        this.needsAuth = true;
-                        this.modelOverrideError = 'Authentication required.';
-                        return;
-                    }
-                    if (res.status !== 404 && !res.ok) {
-                        this.modelOverrideError = await this.aliasResponseMessage(res, 'Failed to remove model override.');
-                        return;
-                    }
 
                     await Promise.all([this.fetchModels(), this.fetchModelOverrides()]);
                     this.closeModelOverrideForm();
