@@ -118,10 +118,12 @@ func TestNewHTTPClient(t *testing.T) {
 
 			if client == nil {
 				t.Fatal("Expected client to be non-nil")
+				return
 			}
 
 			if client.Transport == nil {
 				t.Fatal("Expected transport to be non-nil")
+				return
 			}
 
 			transport, ok := client.Transport.(*http.Transport)
@@ -183,6 +185,7 @@ func TestNewDefaultHTTPClient(t *testing.T) {
 
 	if client.Transport == nil {
 		t.Fatal("Expected transport to be non-nil")
+		return
 	}
 
 	transport, ok := client.Transport.(*http.Transport)

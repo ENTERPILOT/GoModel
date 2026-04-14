@@ -319,6 +319,7 @@ func TestClient_DoRaw_Success(t *testing.T) {
 	}
 	if resp == nil {
 		t.Fatal("expected response, got nil")
+		return
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status 200, got %d", resp.StatusCode)

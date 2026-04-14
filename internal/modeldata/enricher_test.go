@@ -122,6 +122,7 @@ func TestEnrich_ReverseCustomModelIDLookup(t *testing.T) {
 	meta := accessor.metadata["gpt-4o-2024-08-06"]
 	if meta == nil {
 		t.Fatal("expected gpt-4o-2024-08-06 to be enriched via reverse index")
+		return
 	}
 	if meta.DisplayName != "GPT-4o" {
 		t.Errorf("DisplayName = %s, want GPT-4o", meta.DisplayName)
@@ -158,6 +159,7 @@ func TestEnrich_ProviderModelOverride(t *testing.T) {
 	meta := accessor.metadata["gpt-4o"]
 	if meta == nil {
 		t.Fatal("expected gpt-4o to be enriched")
+		return
 	}
 	if *meta.ContextWindow != 64000 {
 		t.Errorf("ContextWindow = %d, want 64000 (azure override)", *meta.ContextWindow)
