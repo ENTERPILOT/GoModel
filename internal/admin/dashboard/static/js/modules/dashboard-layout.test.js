@@ -327,6 +327,16 @@ test('audit toolbar uses a full-width search row above the select row with a rig
     const searchRule = readCSSRule(css, '.audit-filter-row-search .filter-input');
     assert.match(searchRule, /grid-column:\s*1\s*\/\s*-1/);
 
+    const selectRule = readCSSRule(css, '.usage-log-select');
+    assert.match(selectRule, /appearance:\s*none/);
+    assert.match(selectRule, /-webkit-appearance:\s*none/);
+    assert.match(selectRule, /padding:\s*8px 34px 8px 12px/);
+    assert.match(selectRule, /background-image:[\s\S]*currentcolor/);
+    assert.match(selectRule, /cursor:\s*pointer/);
+
+    const disabledSelectRule = readCSSRule(css, '.usage-log-select:disabled');
+    assert.match(disabledSelectRule, /cursor:\s*default/);
+
     const controlsRule = readCSSRule(css, '.audit-filter-row-controls .pagination-btn');
     assert.match(controlsRule, /grid-column:\s*11\s*\/\s*-1/);
     assert.match(controlsRule, /justify-self:\s*end/);
