@@ -93,6 +93,8 @@ swagger:
 	$(MAKE) docs-openapi
 
 docs-openapi:
+	@command -v node >/dev/null 2>&1 || { echo "node is required to build docs; install from https://nodejs.org" >&2; exit 1; }
+	@command -v npx >/dev/null 2>&1 || { echo "npx is required; install npm (includes npx)" >&2; exit 1; }
 	@tmp_dir=$$(mktemp -d); \
 	trap 'rm -rf "$$tmp_dir"' EXIT; \
 	go run github.com/swaggo/swag/cmd/swag init --quiet --generalInfo main.go \

@@ -965,7 +965,7 @@
             </label>
 
             <p class="alias-form-hint">
-                The selector uses <code>/</code> for all providers and models, <code>{provider_name}/</code> for one provider, or <code>{provider_name}/{model}</code> for one model. <code>user_paths</code> is matched against the effective managed API key <code>user_path</code>.
+                The selector uses <code>/</code> for all providers and models, <code>{provider_name}/</code> for one provider, or <code>{provider_name}/{model}</code> for one model. <code>user_paths</code> is matched against the effective request <code>user_path</code>: the managed API key <code>user_path</code> when present, otherwise the <code>X-GoModel-User-Path</code> request header.
             </p>
             <p class="alias-form-hint" x-text="'Default enabled: ' + (modelOverrideFormDefaultEnabled ? 'yes' : 'no') + ' · Effective now: ' + (modelOverrideFormEffectiveEnabled ? 'yes' : 'no')"></p>
 

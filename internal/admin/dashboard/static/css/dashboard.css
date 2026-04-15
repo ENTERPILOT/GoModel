@@ -451,6 +451,13 @@ body {
   color: #fff;
 }
 
+.theme-btn:focus-visible,
+.theme-toggle-mobile:focus-visible,
+.sidebar-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+  outline-offset: 2px;
+}
+
 /* Theme toggle — single button for mobile */
 .theme-toggle-mobile {
   display: none;
@@ -488,6 +495,9 @@ body {
   top: 0;
   width: 6px;
   height: 100vh;
+  padding: 0;
+  background: transparent;
+  border: none;
   cursor: w-resize;
   z-index: 11;
   transition: background 0.15s;

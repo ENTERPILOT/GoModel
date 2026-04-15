@@ -35,7 +35,7 @@ test('sidebar and main content share the flex layout without manual content offs
     const css = readFixture('../../css/dashboard.css');
 
     assert.match(readFixture('../../../templates/layout.html'), /{{template "sidebar" \.}}/);
-    assert.match(template, /<aside class="sidebar"[\s\S]*<div class="sidebar-toggle"[\s\S]*<main class="content"/);
+    assert.match(template, /<aside class="sidebar"[\s\S]*<button type="button"[\s\S]*class="sidebar-toggle"[\s\S]*<main class="content"/);
     assert.doesNotMatch(template, /content-collapsed/);
     assert.match(
         template,
@@ -65,6 +65,18 @@ test('sidebar and main content share the flex layout without manual content offs
 
     const collapsedSidebarRule = readCSSRule(css, '.sidebar.sidebar-collapsed');
     assert.match(collapsedSidebarRule, /flex-basis:\s*60px/);
+});
+
+test('sidebar theme controls and collapse handle stay keyboard accessible', () => {
+    const template = readDashboardShellTemplate();
+
+    assert.match(template, /class="theme-btn"[\s\S]*@click="setTheme\('light'\)"[\s\S]*title="Light theme"[\s\S]*aria-label="Light theme"/);
+    assert.match(template, /class="theme-btn"[\s\S]*@click="setTheme\('system'\)"[\s\S]*title="System theme"[\s\S]*aria-label="System theme"/);
+    assert.match(template, /class="theme-btn"[\s\S]*@click="setTheme\('dark'\)"[\s\S]*title="Dark theme"[\s\S]*aria-label="Dark theme"/);
+    assert.match(template, /class="theme-toggle-mobile"[\s\S]*@click="toggleTheme\(\)"[\s\S]*:title="theme === 'light' \? 'Light theme' : theme === 'dark' \? 'Dark theme' : 'System theme'"[\s\S]*:aria-label="theme === 'light' \? 'Light theme' : theme === 'dark' \? 'Dark theme' : 'System theme'"/);
+    assert.match(template, /<button type="button"[\s\S]*class="sidebar-toggle"[\s\S]*@click="toggleSidebar\(\)"[\s\S]*:aria-label="sidebarCollapsed \? 'Expand sidebar' : 'Collapse sidebar'"[\s\S]*:aria-expanded="sidebarCollapsed \? 'false' : 'true'"/);
+    assert.doesNotMatch(template, /tabindex="-1"/);
+    assert.doesNotMatch(template, /@mousedown="toggleSidebar\(\)"/);
 });
 
 test('mono utility only sets the font family and font-size-md carries the 13px size', () => {
@@ -443,6 +455,7 @@ test('model category tables lazy mount only the active table body', () => {
     assert.match(modelsBlock, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn"[\s\S]*@click="openAliasCreate\(\)"[\s\S]*data-lucide="plus" class="alias-create-icon"[\s\S]*<span>Create Alias<\/span>/);
     assert.match(modelsBlock, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-submit-btn"[\s\S]*:disabled="aliasSubmitting"[\s\S]*data-lucide="plus" class="form-action-icon" x-show="aliasFormMode !== 'edit'"[\s\S]*data-lucide="save" class="form-action-icon" x-show="aliasFormMode === 'edit'"[\s\S]*x-text="aliasSubmitting \? 'Saving\.\.\.' : \(aliasFormMode === 'edit' \? 'Save Alias' : 'Create Alias'\)"/);
     assert.match(modelsBlock, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon model-access-submit-btn"[\s\S]*:disabled="modelOverrideSubmitting"[\s\S]*data-lucide="save" class="form-action-icon"[\s\S]*x-text="modelOverrideSubmitting \? 'Saving\.\.\.' : 'Save Access'"/);
+    assert.match(modelsBlock, /The selector uses <code>\/<\/code> for all providers and models, <code>\{provider_name\}\/<\/code> for one provider, or <code>\{provider_name\}\/\{model\}<\/code> for one model\.[\s\S]*managed API key <code>user_path<\/code> when present, otherwise the <code>X-GoModel-User-Path<\/code> request header\./);
 
     const loadingRule = readCSSRule(css, '.loading-state');
     assert.match(loadingRule, /display:\s*flex/);

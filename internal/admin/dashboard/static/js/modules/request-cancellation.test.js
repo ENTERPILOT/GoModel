@@ -136,6 +136,38 @@ test('refreshRuntime posts to admin endpoint and refreshes dashboard data', asyn
     assert.equal(app.runtimeRefreshStepLabel(app.runtimeRefreshReport.steps[0]), 'providers: ok - refreshed');
 });
 
+test('refreshRuntime keeps the successful report when dashboard data reload fails', async() => {
+    const queue = createPendingFetchQueue();
+    const app = loadDashboardApp({
+        fetch: queue.fetch,
+        console: { error() {}, log() {} }
+    });
+    let dashboardRefreshes = 0;
+    app.dashboardDataFetches = () => {
+        dashboardRefreshes++;
+        return [Promise.reject(new Error('reload failed'))];
+    };
+
+    const refresh = app.refreshRuntime();
+    assert.equal(app.runtimeRefreshLoading, true);
+    assert.equal(queue.requests.length, 1);
+
+    queue.requests[0].resolve(jsonResponse({
+        status: 'ok',
+        model_count: 4,
+        provider_count: 2,
+        steps: [{ name: 'providers', status: 'ok', message: 'refreshed' }]
+    }));
+    await refresh;
+
+    assert.equal(app.runtimeRefreshLoading, false);
+    assert.equal(dashboardRefreshes, 1);
+    assert.equal(app.runtimeRefreshSucceeded(), true);
+    assert.equal(app.runtimeRefreshNotice, 'Runtime refreshed. 4 models across 2 providers.');
+    assert.equal(app.runtimeRefreshError, 'Runtime refreshed, but dashboard data could not be reloaded.');
+    assert.equal(app.runtimeRefreshStepLabel(app.runtimeRefreshReport.steps[0]), 'providers: ok - refreshed');
+});
+
 test('refreshRuntime leaves dashboard data untouched when the admin request fails', async() => {
     const queue = createPendingFetchQueue();
     const app = loadDashboardApp({ fetch: queue.fetch });

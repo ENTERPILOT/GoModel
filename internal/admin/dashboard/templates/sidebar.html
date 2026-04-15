@@ -47,17 +47,20 @@
     </nav>
     <div class="sidebar-footer">
         <div class="theme-toggle">
-            <button class="theme-btn" :class="{ active: theme === 'light' }" @click="setTheme('light')" title="Light" tabindex="-1">
+            <button class="theme-btn" :class="{ active: theme === 'light' }" @click="setTheme('light')" title="Light theme" aria-label="Light theme">
                 <i data-lucide="sun" class="theme-icon" aria-hidden="true"></i>
             </button>
-            <button class="theme-btn" :class="{ active: theme === 'system' }" @click="setTheme('system')" title="System" tabindex="-1">
+            <button class="theme-btn" :class="{ active: theme === 'system' }" @click="setTheme('system')" title="System theme" aria-label="System theme">
                 <i data-lucide="monitor" class="theme-icon" aria-hidden="true"></i>
             </button>
-            <button class="theme-btn" :class="{ active: theme === 'dark' }" @click="setTheme('dark')" title="Dark" tabindex="-1">
+            <button class="theme-btn" :class="{ active: theme === 'dark' }" @click="setTheme('dark')" title="Dark theme" aria-label="Dark theme">
                 <i data-lucide="moon" class="theme-icon" aria-hidden="true"></i>
             </button>
         </div>
-        <button class="theme-toggle-mobile" @click="toggleTheme()" :title="theme === 'light' ? 'Light' : theme === 'dark' ? 'Dark' : 'System'" tabindex="-1">
+        <button class="theme-toggle-mobile"
+                @click="toggleTheme()"
+                :title="theme === 'light' ? 'Light theme' : theme === 'dark' ? 'Dark theme' : 'System theme'"
+                :aria-label="theme === 'light' ? 'Light theme' : theme === 'dark' ? 'Dark theme' : 'System theme'">
             <template x-if="theme === 'light'">
                 <i data-lucide="sun" class="theme-icon" aria-hidden="true"></i>
             </template>
@@ -79,8 +82,11 @@
         </div>
     </div>
 </aside>
-<div class="sidebar-toggle"
-     @mousedown="toggleSidebar()"
-     :class="{ collapsed: sidebarCollapsed }"
-     :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"></div>
+<button type="button"
+        class="sidebar-toggle"
+        @click="toggleSidebar()"
+        :class="{ collapsed: sidebarCollapsed }"
+        :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        :aria-label="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        :aria-expanded="sidebarCollapsed ? 'false' : 'true'"></button>
 {{end}}

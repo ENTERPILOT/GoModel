@@ -510,7 +510,17 @@ function dashboard() {
         this.runtimeRefreshReport =
           payload && typeof payload === "object" ? payload : null;
         this.runtimeRefreshNotice = this.runtimeRefreshSummary();
-        await this.refreshDashboardDataAfterRuntimeRefresh();
+
+        try {
+          await this.refreshDashboardDataAfterRuntimeRefresh();
+        } catch (e) {
+          console.error(
+            "Failed to reload dashboard data after runtime refresh:",
+            e,
+          );
+          this.runtimeRefreshError =
+            "Runtime refreshed, but dashboard data could not be reloaded.";
+        }
       } catch (e) {
         console.error("Failed to refresh runtime:", e);
         this.runtimeRefreshNotice = "Runtime refresh failed.";
