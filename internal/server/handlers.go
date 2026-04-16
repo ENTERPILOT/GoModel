@@ -30,7 +30,6 @@ type Handler struct {
 	pricingResolver                 usage.PricingResolver
 	batchStore                      batchstore.Store
 	normalizePassthroughV1Prefix    bool
-	enabledPassthroughProviders     map[string]struct{}
 	responseCache                   *responsecache.ResponseCacheMiddleware
 	guardrailsHash                  string
 
@@ -89,7 +88,6 @@ func newHandlerWithAuthorizer(
 		pricingResolver:              pricingResolver,
 		batchStore:                   batchstore.NewMemoryStore(),
 		normalizePassthroughV1Prefix: true,
-		enabledPassthroughProviders:  normalizeEnabledPassthroughProviders(defaultEnabledPassthroughProviders),
 	}
 }
 
@@ -144,13 +142,9 @@ func (h *Handler) nativeFiles() *nativeFileService {
 
 func (h *Handler) passthrough() *passthroughService {
 	return &passthroughService{
-		provider:                     h.provider,
-		modelAuthorizer:              h.modelAuthorizer,
-		logger:                       h.logger,
-		usageLogger:                  h.usageLogger,
-		pricingResolver:              h.pricingResolver,
-		normalizePassthroughV1Prefix: h.normalizePassthroughV1Prefix,
-		enabledPassthroughProviders:  h.enabledPassthroughProviders,
+		logger:            h.logger,
+		responseHandler:   newRawPassthroughResponseHandler(),
+		normalizeV1Prefix: h.normalizePassthroughV1Prefix,
 	}
 }
 

@@ -57,12 +57,13 @@ type LoadResult struct {
 // overrides, credential filtering, or resilience merging. Exported so the
 // providers package can resolve it into a fully-configured ProviderConfig.
 type RawProviderConfig struct {
-	Type       string               `yaml:"type"`
-	APIKey     string               `yaml:"api_key"`
-	BaseURL    string               `yaml:"base_url"`
-	APIVersion string               `yaml:"api_version"`
-	Models     []string             `yaml:"models"`
-	Resilience *RawResilienceConfig `yaml:"resilience"`
+	Type                string               `yaml:"type"`
+	APIKey              string               `yaml:"api_key"`
+	BaseURL             string               `yaml:"base_url"`
+	APIVersion          string               `yaml:"api_version"`
+	Models              []string             `yaml:"models"`
+	Resilience          *RawResilienceConfig `yaml:"resilience"`
+	PassthroughDisabled bool                 `yaml:"passthrough_disabled"`
 }
 
 // RawResilienceConfig holds optional per-provider resilience overrides from YAML.

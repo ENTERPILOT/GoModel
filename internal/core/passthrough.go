@@ -34,6 +34,22 @@ type RoutablePassthrough interface {
 	Passthrough(ctx context.Context, providerType string, req *PassthroughRequest) (*PassthroughResponse, error)
 }
 
+// NamedPassthrough routes an opaque passthrough request to the specific
+// provider instance registered under the given YAML instance name.
+// This is preferred over RoutablePassthrough when multiple instances of the
+// same provider type are configured, as it targets the exact credentials.
+type NamedPassthrough interface {
+	PassthroughByName(ctx context.Context, instanceName string, req *PassthroughRequest) (*PassthroughResponse, error)
+}
+
+// PassthroughProviderResolver resolves the concrete PassthroughProvider and
+// its declared provider type for a given configured instance name, without
+// executing the passthrough call itself. This allows middleware to pre-resolve
+// the provider and store it in context before the handler runs.
+type PassthroughProviderResolver interface {
+	ResolvePassthroughByName(instanceName string) (PassthroughProvider, string, error)
+}
+
 // PassthroughSemanticEnricher derives provider-specific passthrough metadata
 // from ingress transport and best-effort prompt state before execution
 // workflow resolution runs.

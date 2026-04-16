@@ -529,6 +529,41 @@ func (m *mockProvider) NativeFileProviderTypes() []string {
 	return result
 }
 
+// mockDirectPassthroughProvider wraps a mockProvider to implement
+// core.PassthroughProvider (no providerType param). It captures the request for
+// test assertions and delegates the response to the wrapped mockProvider.
+type mockDirectPassthroughProvider struct {
+	inner   *mockProvider
+	lastReq *core.PassthroughRequest
+}
+
+func (p *mockDirectPassthroughProvider) Passthrough(_ context.Context, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+	p.lastReq = req
+	p.inner.lastPassthroughReq = req
+	if p.inner.passthroughErr != nil {
+		return nil, p.inner.passthroughErr
+	}
+	return p.inner.passthroughResponse, nil
+}
+
+// newPassthroughTestEcho creates an Echo instance with the passthrough route
+// registered and pre-wired with inline middleware that injects the resolved
+// provider into context — simulating what PassthroughProviderResolutionMiddleware
+// and GoModelRequestIDMiddleware do in production.
+func newPassthroughTestEcho(h *Handler, pp core.PassthroughProvider, instanceName, providerType string) *echo.Echo {
+	e := echo.New()
+	e.Any("/p/:provider/*", func(c *echo.Context) error {
+		id := strings.TrimSpace(c.Request().Header.Get(goModelRequestIDHeader))
+		if id == "" {
+			id = "test-request-id"
+		}
+		setPassthroughResolution(c, instanceName, providerType, pp)
+		setPassthroughRequestID(c, id)
+		return h.ProviderPassthrough(c)
+	})
+	return e
+}
+
 type providerWithoutFileInventory struct {
 	inner *mockProvider
 }
@@ -637,6 +672,11 @@ func (m *mockProvider) Passthrough(_ context.Context, providerType string, req *
 		return nil, m.passthroughErr
 	}
 	return m.passthroughResponse, nil
+}
+
+func (m *mockProvider) ResolvePassthroughByName(instanceName string) (core.PassthroughProvider, string, error) {
+	m.lastPassthroughProvider = instanceName
+	return &mockDirectPassthroughProvider{inner: m}, instanceName, nil
 }
 
 func (m *mockProvider) CreateBatch(_ context.Context, _ string, req *core.BatchRequest) (*core.BatchResponse, error) {
@@ -5553,9 +5593,9 @@ func TestProviderPassthrough_OpenAI(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+	pp := &mockDirectPassthroughProvider{inner: provider}
+	e := newPassthroughTestEcho(handler, pp, "openai", "openai")
 
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses?api-version=2026-03-10", strings.NewReader(`{"foo":"bar"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -5566,7 +5606,6 @@ func TestProviderPassthrough_OpenAI(t *testing.T) {
 	req.Header.Set("X-Forwarded-For", "10.0.0.1")
 	req.Header.Set("Connection", "X-Debug, keep-alive")
 	req.Header.Set("X-Debug", "secret")
-	req.Header.Set("X-Request-ID", "req_123")
 	req.Header.Set(core.UserPathHeader, "/team/a/user")
 
 	rec := httptest.NewRecorder()
@@ -5587,79 +5626,45 @@ func TestProviderPassthrough_OpenAI(t *testing.T) {
 	if got := rec.Header().Get("X-Upstream-Hop"); got != "" {
 		t.Fatalf("hop-by-hop header should not be forwarded, got %q", got)
 	}
-	if provider.lastPassthroughProvider != "openai" {
-		t.Fatalf("providerType = %q, want openai", provider.lastPassthroughProvider)
+	if pp.lastReq == nil {
+		t.Fatal("lastReq = nil")
 	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("lastPassthroughReq = nil")
-	}
-	if got := provider.lastPassthroughReq.Endpoint; got != "responses?api-version=2026-03-10" {
+	if got := pp.lastReq.Endpoint; got != "responses?api-version=2026-03-10" {
 		t.Fatalf("endpoint = %q", got)
 	}
-	if got := readPassthroughRequestBody(t, provider.lastPassthroughReq.Body); got != `{"foo":"bar"}` {
+	if got := readPassthroughRequestBody(t, pp.lastReq.Body); got != `{"foo":"bar"}` {
 		t.Fatalf("body = %q", got)
 	}
-	if got := provider.lastPassthroughReq.Headers.Get("Authorization"); got != "" {
+	if got := pp.lastReq.Headers.Get("Authorization"); got != "" {
 		t.Fatalf("authorization header should not be forwarded, got %q", got)
 	}
-	if got := provider.lastPassthroughReq.Headers.Get("Cookie"); got != "" {
+	if got := pp.lastReq.Headers.Get("Cookie"); got != "" {
 		t.Fatalf("cookie header should not be forwarded, got %q", got)
 	}
-	if got := provider.lastPassthroughReq.Headers.Get("Forwarded"); got != "" {
+	if got := pp.lastReq.Headers.Get("Forwarded"); got != "" {
 		t.Fatalf("forwarded header should not be forwarded, got %q", got)
 	}
-	if got := provider.lastPassthroughReq.Headers.Get("X-Forwarded-For"); got != "" {
+	if got := pp.lastReq.Headers.Get("X-Forwarded-For"); got != "" {
 		t.Fatalf("x-forwarded-for header should not be forwarded, got %q", got)
 	}
-	if got := provider.lastPassthroughReq.Headers.Get("X-Debug"); got != "" {
+	if got := pp.lastReq.Headers.Get("X-Debug"); got != "" {
 		t.Fatalf("connection-nominated header should not be forwarded, got %q", got)
 	}
-	if got := provider.lastPassthroughReq.Headers.Get("OpenAI-Beta"); got != "responses=v1" {
+	if got := pp.lastReq.Headers.Get("OpenAI-Beta"); got != "responses=v1" {
 		t.Fatalf("OpenAI-Beta = %q, want responses=v1", got)
 	}
-	if got := provider.lastPassthroughReq.Headers.Get("X-Request-ID"); got != "req_123" {
-		t.Fatalf("X-Request-ID = %q, want req_123", got)
+	if got := pp.lastReq.Headers.Get("X-Request-ID"); got != "" {
+		t.Fatalf("X-Request-ID should not be forwarded to upstream; got %q", got)
 	}
-	if got := provider.lastPassthroughReq.Headers.Get(core.UserPathHeader); got != "" {
+	if got := pp.lastReq.Headers.Get(goModelRequestIDHeader); got == "" {
+		t.Fatalf("%s should be set on upstream request", goModelRequestIDHeader)
+	}
+	if got := pp.lastReq.Headers.Get(core.UserPathHeader); got != "" {
 		t.Fatalf("%s should not be forwarded, got %q", core.UserPathHeader, got)
 	}
 }
 
-func TestProviderPassthrough_PrefersContextRequestID(t *testing.T) {
-	provider := &mockProvider{
-		passthroughResponse: &core.PassthroughResponse{
-			StatusCode: http.StatusOK,
-			Headers: map[string][]string{
-				"Content-Type": {"application/json"},
-			},
-			Body: io.NopCloser(strings.NewReader(`{"ok":true}`)),
-		},
-	}
-
-	e := echo.New()
-	handler := NewHandler(provider, nil, nil, nil)
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
-
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{}`))
-	req = req.WithContext(core.WithRequestID(req.Context(), "ctx_req_123"))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "header_req_456")
-
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("lastPassthroughReq = nil")
-	}
-	if got := provider.lastPassthroughReq.Headers.Get("X-Request-ID"); got != "ctx_req_123" {
-		t.Fatalf("X-Request-ID = %q, want ctx_req_123", got)
-	}
-}
-
-func TestProviderPassthrough_NormalizesErrorResponse(t *testing.T) {
+func TestProviderPassthrough_RawErrorResponseForwarded(t *testing.T) {
 	provider := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
 			StatusCode: http.StatusNotFound,
@@ -5671,9 +5676,9 @@ func TestProviderPassthrough_NormalizesErrorResponse(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+	pp := &mockDirectPassthroughProvider{inner: provider}
+	e := newPassthroughTestEcho(handler, pp, "openai", "openai")
 
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -5684,10 +5689,10 @@ func TestProviderPassthrough_NormalizesErrorResponse(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
-	if got := rec.Header().Get("X-Upstream"); got != "" {
-		t.Fatalf("X-Upstream should not be forwarded on normalized errors, got %q", got)
+	if got := rec.Header().Get("X-Upstream"); got != "openai" {
+		t.Fatalf("X-Upstream = %q, want openai (raw response headers forwarded)", got)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, `"message":"upstream missing"`) || !strings.Contains(body, `"error"`) {
+	if body := rec.Body.String(); !strings.Contains(body, `"message":"upstream missing"`) {
 		t.Fatalf("unexpected error body: %s", body)
 	}
 }
@@ -5703,9 +5708,9 @@ func TestProviderPassthrough_OpenAIV1AliasNormalizesByDefault(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+	pp := &mockDirectPassthroughProvider{inner: provider}
+	e := newPassthroughTestEcho(handler, pp, "openai", "openai")
 
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -5715,10 +5720,10 @@ func TestProviderPassthrough_OpenAIV1AliasNormalizesByDefault(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("lastPassthroughReq = nil")
+	if pp.lastReq == nil {
+		t.Fatal("lastReq = nil")
 	}
-	if got := provider.lastPassthroughReq.Endpoint; got != "chat/completions" {
+	if got := pp.lastReq.Endpoint; got != "chat/completions" {
 		t.Fatalf("endpoint = %q, want chat/completions", got)
 	}
 }
@@ -5734,9 +5739,9 @@ func TestProviderPassthrough_AnthropicV1AliasNormalizesByDefault(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+	pp := &mockDirectPassthroughProvider{inner: provider}
+	e := newPassthroughTestEcho(handler, pp, "anthropic", "anthropic")
 
 	req := httptest.NewRequest(http.MethodPost, "/p/anthropic/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -5754,7 +5759,7 @@ func TestProviderPassthrough_AnthropicV1AliasNormalizesByDefault(t *testing.T) {
 	}
 }
 
-func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
+func TestProviderPassthrough_AuditRecordsModelFromBody(t *testing.T) {
 	provider := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
 			StatusCode: http.StatusOK,
@@ -5765,137 +5770,34 @@ func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
-	handler := NewHandler(provider, nil, nil, nil)
+	logger := &capturingAuditLogger{config: auditlog.Config{Enabled: true}}
 
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	handler := NewHandler(provider, logger, nil, nil)
+	pp := &mockDirectPassthroughProvider{inner: provider}
+	e := newPassthroughTestEcho(handler, pp, "openai1", "openai")
+
+	req := httptest.NewRequest(http.MethodPost, "/p/openai1/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
-		Mode:         core.ExecutionModePassthrough,
-		ProviderType: "openai",
-		Passthrough: &core.PassthroughRouteInfo{
-			Provider:           "openai",
-			RawEndpoint:        "chat/completions",
-			NormalizedEndpoint: "chat/completions",
-			Model:              "gpt-5-mini",
-			AuditPath:          "/v1/chat/completions",
-		},
-	}))
-
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	entry := &auditlog.LogEntry{}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	e.ServeHTTP(rec, req)
 
-	if err := handler.ProviderPassthrough(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if entry.RequestedModel != "gpt-5-mini" {
-		t.Fatalf("audit entry requested model = %q, want gpt-5-mini", entry.RequestedModel)
+	if len(logger.entries) != 1 {
+		t.Fatalf("audit entries = %d, want 1", len(logger.entries))
 	}
-	if entry.Provider != "openai" {
-		t.Fatalf("audit entry provider = %q, want openai", entry.Provider)
+	if got := logger.entries[0].RequestedModel; got != "gpt-5-mini" {
+		t.Fatalf("audit entry requested_model = %q, want gpt-5-mini", got)
 	}
-}
-
-func TestProviderPassthrough_UsesConfiguredProviderNameForAccessValidation(t *testing.T) {
-	provider := &mockProvider{
-		passthroughResponse: &core.PassthroughResponse{
-			StatusCode: http.StatusOK,
-			Headers:    http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
-		},
-		providerTypes: map[string]string{
-			"openai_test/gpt-5-mini": "openai",
-		},
-		providerNames: map[string]string{
-			"openai_test/gpt-5-mini": "openai_test",
-		},
+	if got := logger.entries[0].Provider; got != "openai" {
+		t.Fatalf("audit entry provider = %q, want openai", got)
 	}
-	authorizer := &recordingModelAuthorizer{}
-
-	e := echo.New()
-	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, authorizer, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodPost, "/p/openai_test/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
-		Mode:         core.ExecutionModePassthrough,
-		ProviderType: "openai",
-		Passthrough: &core.PassthroughRouteInfo{
-			Provider:           "openai_test",
-			RawEndpoint:        "chat/completions",
-			NormalizedEndpoint: "chat/completions",
-			Model:              "gpt-5-mini",
-			AuditPath:          "/p/openai_test/chat/completions",
-		},
-	}))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.ProviderPassthrough(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if provider.lastPassthroughProvider != "openai" {
-		t.Fatalf("providerType = %q, want openai", provider.lastPassthroughProvider)
-	}
-	if authorizer.lastSelector.Provider != "openai_test" || authorizer.lastSelector.Model != "gpt-5-mini" {
-		t.Fatalf("validated selector = %#v, want openai_test/gpt-5-mini", authorizer.lastSelector)
+	if got := logger.entries[0].ProviderName; got != "openai1" {
+		t.Fatalf("audit entry provider_name = %q, want openai1", got)
 	}
 }
 
-func TestProviderPassthrough_FallsBackFromProviderTypeToCanonicalProviderNameForAccessValidation(t *testing.T) {
-	provider := &mockProvider{
-		passthroughResponse: &core.PassthroughResponse{
-			StatusCode: http.StatusOK,
-			Headers:    http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
-		},
-		providerTypes: map[string]string{
-			"openai_test/gpt-5-mini": "openai",
-		},
-		providerNames: map[string]string{
-			"openai_test/gpt-5-mini": "openai_test",
-		},
-	}
-	authorizer := &recordingModelAuthorizer{}
-
-	e := echo.New()
-	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, authorizer, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
-		Mode:         core.ExecutionModePassthrough,
-		ProviderType: "openai",
-		Passthrough: &core.PassthroughRouteInfo{
-			Provider:           "openai",
-			RawEndpoint:        "chat/completions",
-			NormalizedEndpoint: "chat/completions",
-			Model:              "gpt-5-mini",
-			AuditPath:          "/p/openai/chat/completions",
-		},
-	}))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.ProviderPassthrough(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if provider.lastPassthroughProvider != "openai" {
-		t.Fatalf("providerType = %q, want openai", provider.lastPassthroughProvider)
-	}
-	if authorizer.lastSelector.Provider != "openai_test" || authorizer.lastSelector.Model != "gpt-5-mini" {
-		t.Fatalf("validated selector = %#v, want openai_test/gpt-5-mini", authorizer.lastSelector)
-	}
-}
 
 func TestProviderPassthrough_V1AliasDisabledReturnsBadRequest(t *testing.T) {
 	provider := &mockProvider{
@@ -5908,10 +5810,10 @@ func TestProviderPassthrough_V1AliasDisabledReturnsBadRequest(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 	handler.normalizePassthroughV1Prefix = false
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+	pp := &mockDirectPassthroughProvider{inner: provider}
+	e := newPassthroughTestEcho(handler, pp, "openai", "openai")
 
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -5924,8 +5826,8 @@ func TestProviderPassthrough_V1AliasDisabledReturnsBadRequest(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "v1 alias is disabled") {
 		t.Fatalf("body = %q, want v1 alias error", rec.Body.String())
 	}
-	if provider.lastPassthroughReq != nil {
-		t.Fatalf("provider should not have been called, got endpoint %q", provider.lastPassthroughReq.Endpoint)
+	if pp.lastReq != nil {
+		t.Fatalf("provider should not have been called, got endpoint %q", pp.lastReq.Endpoint)
 	}
 }
 
@@ -5945,9 +5847,9 @@ func TestProviderPassthrough_AnthropicStream(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+	pp := &mockDirectPassthroughProvider{inner: provider}
+	e := newPassthroughTestEcho(handler, pp, "anthropic", "anthropic")
 
 	req := httptest.NewRequest(http.MethodPost, "/p/anthropic/messages", strings.NewReader(`{"model":"claude-sonnet-4-5"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -5988,9 +5890,9 @@ func TestProviderPassthrough_StreamWithoutObserversClosesUpstreamBodyOnce(t *tes
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
+	pp := &mockDirectPassthroughProvider{inner: provider}
+	e := newPassthroughTestEcho(handler, pp, "anthropic", "anthropic")
 
 	req := httptest.NewRequest(http.MethodPost, "/p/anthropic/messages", strings.NewReader(`{"model":"claude-sonnet-4-5"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -6006,207 +5908,6 @@ func TestProviderPassthrough_StreamWithoutObserversClosesUpstreamBodyOnce(t *tes
 	}
 }
 
-func TestProviderPassthrough_OpenAIStreamWritesUsageEntry(t *testing.T) {
-	provider := &mockProvider{
-		passthroughResponse: &core.PassthroughResponse{
-			StatusCode: http.StatusOK,
-			Headers: map[string][]string{
-				"Content-Type": {"text/event-stream"},
-			},
-			Body: io.NopCloser(strings.NewReader(
-				"data: {\"id\":\"resp-123\",\"model\":\"gpt-5-mini\",\"usage\":{\"input_tokens\":7,\"output_tokens\":3,\"total_tokens\":10}}\n\n" +
-					"data: [DONE]\n\n",
-			)),
-		},
-	}
-	usageLog := &collectingUsageLogger{
-		config: usage.Config{Enabled: true},
-	}
-
-	e := echo.New()
-	handler := NewHandler(provider, nil, usageLog, nil)
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
-
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "req-pass-stream-usage")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if len(usageLog.entries) != 1 {
-		t.Fatalf("usage entries = %d, want 1", len(usageLog.entries))
-	}
-
-	entry := usageLog.entries[0]
-	if entry.Provider != "openai" {
-		t.Fatalf("Provider = %q, want openai", entry.Provider)
-	}
-	if entry.Endpoint != "/p/openai/responses" {
-		t.Fatalf("Endpoint = %q, want /p/openai/responses", entry.Endpoint)
-	}
-	if entry.Model != "gpt-5-mini" {
-		t.Fatalf("Model = %q, want gpt-5-mini", entry.Model)
-	}
-	if entry.TotalTokens != 10 {
-		t.Fatalf("TotalTokens = %d, want 10", entry.TotalTokens)
-	}
-	if entry.RequestID != "req-pass-stream-usage" {
-		t.Fatalf("RequestID = %q, want req-pass-stream-usage", entry.RequestID)
-	}
-}
-
-func TestProviderPassthrough_OpenAIStreamUsageKeepsClientVisibleRoute(t *testing.T) {
-	provider := &mockProvider{
-		passthroughResponse: &core.PassthroughResponse{
-			StatusCode: http.StatusOK,
-			Headers: map[string][]string{
-				"Content-Type": {"text/event-stream"},
-			},
-			Body: io.NopCloser(strings.NewReader(
-				"data: {\"id\":\"resp-123\",\"model\":\"gpt-5-mini\",\"usage\":{\"input_tokens\":7,\"output_tokens\":3,\"total_tokens\":10}}\n\n" +
-					"data: [DONE]\n\n",
-			)),
-		},
-	}
-	usageLog := &collectingUsageLogger{
-		config: usage.Config{Enabled: true},
-	}
-
-	e := echo.New()
-	handler := NewHandler(provider, nil, usageLog, nil)
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
-
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "req-pass-stream-visible-path")
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
-		Mode:         core.ExecutionModePassthrough,
-		ProviderType: "openai",
-		Passthrough: &core.PassthroughRouteInfo{
-			Provider:           "openai",
-			RawEndpoint:        "v1/responses",
-			NormalizedEndpoint: "responses",
-			AuditPath:          "/v1/responses",
-			Model:              "gpt-5-mini",
-		},
-	}))
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if len(usageLog.entries) != 1 {
-		t.Fatalf("usage entries = %d, want 1", len(usageLog.entries))
-	}
-	if got := usageLog.entries[0].Endpoint; got != "/p/openai/v1/responses" {
-		t.Fatalf("Endpoint = %q, want /p/openai/v1/responses", got)
-	}
-}
-
-func TestPassthroughStreamAuditPath_NormalizesKnownEndpoints(t *testing.T) {
-	tests := []struct {
-		name        string
-		requestPath string
-		provider    string
-		endpoint    string
-		want        string
-	}{
-		{
-			name:        "openai responses",
-			requestPath: "/p/openai/responses",
-			provider:    "openai",
-			endpoint:    "responses?trace=1",
-			want:        "/v1/responses",
-		},
-		{
-			name:        "anthropic messages",
-			requestPath: "/p/anthropic/messages",
-			provider:    "anthropic",
-			endpoint:    "messages",
-			want:        "/v1/messages",
-		},
-		{
-			name:        "unknown endpoint falls back",
-			requestPath: "/p/openai/unknown",
-			provider:    "openai",
-			endpoint:    "unknown",
-			want:        "/p/openai/unknown",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := passthroughStreamAuditPath(tt.requestPath, tt.provider, tt.endpoint); got != tt.want {
-				t.Fatalf("passthroughStreamAuditPath(%q, %q, %q) = %q, want %q", tt.requestPath, tt.provider, tt.endpoint, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestProviderPassthrough_RejectsUnsupportedProvider(t *testing.T) {
-	provider := &mockProvider{}
-
-	e := echo.New()
-	handler := NewHandler(provider, nil, nil, nil)
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
-
-	req := httptest.NewRequest(http.MethodPost, "/p/groq/chat/completions", strings.NewReader(`{}`))
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), `provider passthrough for \"groq\" is not enabled`) {
-		t.Fatalf("unexpected error body: %s", rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "anthropic, openai") {
-		t.Fatalf("unexpected error body: %s", rec.Body.String())
-	}
-}
-
-func TestProviderPassthrough_UsesConfiguredSupportedProviders(t *testing.T) {
-	provider := &mockProvider{
-		passthroughResponse: &core.PassthroughResponse{
-			StatusCode: http.StatusOK,
-			Headers:    http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
-		},
-	}
-
-	e := echo.New()
-	handler := NewHandler(provider, nil, nil, nil)
-	handler.setEnabledPassthroughProviders([]string{"groq"})
-	e.POST("/p/:provider/*", handler.ProviderPassthrough)
-
-	req := httptest.NewRequest(http.MethodPost, "/p/groq/chat/completions", strings.NewReader(`{}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if provider.lastPassthroughProvider != "groq" {
-		t.Fatalf("providerType = %q, want groq", provider.lastPassthroughProvider)
-	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("lastPassthroughReq = nil")
-	}
-	if got := provider.lastPassthroughReq.Endpoint; got != "chat/completions" {
-		t.Fatalf("endpoint = %q, want chat/completions", got)
-	}
-	if got := readPassthroughRequestBody(t, provider.lastPassthroughReq.Body); got != `{}` {
-		t.Fatalf("body = %q, want {}", got)
-	}
-	if got := rec.Body.String(); !strings.Contains(got, `"ok":true`) {
-		t.Fatalf("unexpected error body: %s", rec.Body.String())
-	}
-}
 
 func TestIsNativeBatchResultsPending(t *testing.T) {
 	provider := &mockProvider{

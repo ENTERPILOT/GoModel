@@ -27,6 +27,10 @@ type providerTypeRegistry interface {
 	ProviderByType(providerType string) core.Provider
 }
 
+type providerNameRegistry interface {
+	ProviderByName(instanceName string) core.Provider
+}
+
 type initializedLookup interface {
 	IsInitialized() bool
 }
@@ -637,6 +641,49 @@ func (r *Router) Passthrough(ctx context.Context, providerType string, req *core
 		return nil, err
 	}
 	return pp.Passthrough(ctx, req)
+}
+
+// PassthroughByName routes an opaque provider-native request to the specific
+// provider instance registered under instanceName (the YAML key). This ensures
+// the correct credentials are used when multiple instances of the same provider
+// type are configured.
+func (r *Router) PassthroughByName(ctx context.Context, instanceName string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+	pp, providerType, err := r.ResolvePassthroughByName(instanceName)
+	if err != nil {
+		return nil, err
+	}
+	_ = providerType
+	return pp.Passthrough(ctx, req)
+}
+
+// ResolvePassthroughByName resolves the concrete PassthroughProvider and its
+// declared provider type for instanceName without executing the passthrough
+// call. This allows callers to pre-validate and cache the provider.
+func (r *Router) ResolvePassthroughByName(instanceName string) (core.PassthroughProvider, string, error) {
+	instanceName = strings.TrimSpace(instanceName)
+	if instanceName == "" {
+		return nil, "", core.NewInvalidRequestError("passthrough instance name is required", nil)
+	}
+
+	var provider core.Provider
+	if named, ok := r.lookup.(providerNameRegistry); ok {
+		provider = named.ProviderByName(instanceName)
+	}
+	if provider == nil {
+		return nil, "", core.NewInvalidRequestError(fmt.Sprintf("no provider configured for instance %q", instanceName), nil)
+	}
+
+	pp, ok := provider.(core.PassthroughProvider)
+	if !ok {
+		return nil, "", core.NewInvalidRequestError(fmt.Sprintf("provider %q does not support passthrough", instanceName), nil)
+	}
+
+	providerType := ""
+	if resolver, ok := r.lookup.(core.ProviderNameTypeResolver); ok {
+		providerType = strings.TrimSpace(resolver.GetProviderTypeForName(instanceName))
+	}
+
+	return pp, providerType, nil
 }
 
 // CreateBatch routes native batch creation to a provider type.

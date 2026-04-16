@@ -3,6 +3,8 @@ package server
 import (
 	"strings"
 
+	"github.com/labstack/echo/v5"
+
 	"gomodel/internal/core"
 )
 
@@ -10,6 +12,46 @@ type passthroughProviderResolution struct {
 	RouteProvider string
 	ProviderType  string
 	ProviderName  string
+}
+
+// passthroughContextKey is a private type for passthrough-specific context values.
+type passthroughContextKey string
+
+const (
+	passthroughInstanceNameKey passthroughContextKey = "passthrough-instance-name"
+	passthroughProviderTypeKey passthroughContextKey = "passthrough-provider-type"
+	passthroughProviderKey     passthroughContextKey = "passthrough-provider"
+	passthroughRequestIDKey    passthroughContextKey = "passthrough-request-id"
+)
+
+func setPassthroughResolution(c *echo.Context, instanceName, providerType string, provider core.PassthroughProvider) {
+	c.Set(string(passthroughInstanceNameKey), instanceName)
+	c.Set(string(passthroughProviderTypeKey), providerType)
+	c.Set(string(passthroughProviderKey), provider)
+}
+
+func getPassthroughInstanceName(c *echo.Context) string {
+	v, _ := c.Get(string(passthroughInstanceNameKey)).(string)
+	return v
+}
+
+func getPassthroughProviderType(c *echo.Context) string {
+	v, _ := c.Get(string(passthroughProviderTypeKey)).(string)
+	return v
+}
+
+func getPassthroughProvider(c *echo.Context) core.PassthroughProvider {
+	v, _ := c.Get(string(passthroughProviderKey)).(core.PassthroughProvider)
+	return v
+}
+
+func setPassthroughRequestID(c *echo.Context, id string) {
+	c.Set(string(passthroughRequestIDKey), id)
+}
+
+func getPassthroughRequestID(c *echo.Context) string {
+	v, _ := c.Get(string(passthroughRequestIDKey)).(string)
+	return v
 }
 
 func resolvePassthroughProvider(provider core.RoutableProvider, routeProvider string) passthroughProviderResolution {

@@ -250,25 +250,21 @@ func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo
 		Method:   c.Request().Method,
 		Endpoint: endpoint,
 		Body:     c.Request().Body,
-		Headers:  buildPassthroughHeaders(ctx, c.Request().Header),
+		Headers:  buildPassthroughHeaders(ctx, c.Request().Header, ""),
 	})
 	if err != nil {
 		return true, handleError(c, err)
 	}
 
-	info := &core.PassthroughRouteInfo{
-		Provider:    providerType,
-		RawEndpoint: strings.TrimPrefix(endpoint, "/"),
-		AuditPath:   c.Request().URL.Path,
-		Model:       resolvedModelFromWorkflow(workflow, req.Model),
+	if resp == nil || resp.StatusCode >= http.StatusBadRequest {
+		requestID := requestIDFromContextOrHeader(c.Request())
+		return true, newRawPassthroughResponseHandler().Handle(c, requestID, resp)
 	}
-	passthrough := passthroughService{
-		provider:        s.provider,
-		logger:          s.logger,
-		usageLogger:     s.usageLogger,
-		pricingResolver: s.pricingResolver,
-	}
-	return true, passthrough.proxyPassthroughResponse(c, providerType, providerNameFromWorkflow(workflow), endpoint, info, resp)
+
+	copyPassthroughResponseHeaders(c.Response().Header(), resp.Headers)
+	model := resolvedModelFromWorkflow(workflow, req.Model)
+	providerName := providerNameFromWorkflow(workflow)
+	return true, s.handleStreamingReadCloser(c, workflow, model, providerType, providerName, resp.Body)
 }
 
 func (s *translatedInferenceService) canFastPathStreamingChatPassthrough(workflow *core.Workflow, req *core.ChatRequest) bool {
