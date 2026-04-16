@@ -22,7 +22,8 @@ fallback:
   manual_rules_path: "config/fallback.json"
 ```
 
-`config/fallback.json` is an ordered JSON map:
+`config/fallback.json` is a JSON object where each model entry contains an
+ordered candidate list (array); top-level keys are not ordered:
 
 ```json
 {
@@ -32,6 +33,8 @@ fallback:
   ]
 }
 ```
+
+The order-sensitive part is the array under each model entry.
 
 GoModel tries the listed candidates in order and stops on the first success.
 Use bare model names like `gpt-4o` or provider-qualified selectors like
