@@ -282,6 +282,18 @@
                 return this._usageRowsBySelectedValue(this.userPathUsage || []);
             },
 
+            userPathUsageChartVisible() {
+                const rows = Array.isArray(this.userPathUsage) ? this.userPathUsage : [];
+                if (rows.length === 0) {
+                    return false;
+                }
+                if (rows.length !== 1) {
+                    return true;
+                }
+                const onlyPath = String(rows[0] && rows[0].user_path || '').trim();
+                return onlyPath !== '' && onlyPath !== '/';
+            },
+
             _barData() {
                 return this._barDataFrom(this.modelUsage, (m) => typeof this.qualifiedModelDisplay === 'function'
                     ? this.qualifiedModelDisplay(m)
@@ -351,7 +363,7 @@
             renderUserPathChart(retries) {
                 if (retries === undefined) retries = 3;
                 this.$nextTick(() => {
-                    if (!this.userPathUsage || this.userPathUsage.length === 0 || this.page !== 'usage' || (this.userPathUsageView || 'chart') !== 'chart') {
+                    if (!this.userPathUsageChartVisible() || this.page !== 'usage' || (this.userPathUsageView || 'chart') !== 'chart') {
                         if (this.usageUserPathChart) {
                             this.usageUserPathChart.destroy();
                             this.usageUserPathChart = null;

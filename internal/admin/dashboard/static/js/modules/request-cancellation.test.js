@@ -199,6 +199,21 @@ test('refreshRuntime leaves dashboard data untouched when the admin request fail
     assert.match(app.runtimeRefreshNotice, /Runtime refresh failed/);
 });
 
+test('runtimeRefreshSteps returns a safe array while the report is empty', () => {
+    const app = loadDashboardApp();
+
+    assert.equal(Array.isArray(app.runtimeRefreshSteps()), true);
+    assert.equal(app.runtimeRefreshSteps().length, 0);
+
+    app.runtimeRefreshReport = { steps: null };
+    assert.equal(Array.isArray(app.runtimeRefreshSteps()), true);
+    assert.equal(app.runtimeRefreshSteps().length, 0);
+
+    const steps = [{ name: 'providers', status: 'ok' }];
+    app.runtimeRefreshReport = { steps };
+    assert.strictEqual(app.runtimeRefreshSteps(), steps);
+});
+
 function loadDashboardApp(overrides = {}) {
     const sources = [
         fs.readFileSync(path.join(__dirname, 'usage.js'), 'utf8'),

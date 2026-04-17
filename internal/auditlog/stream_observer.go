@@ -1,9 +1,22 @@
 package auditlog
 
 import (
+	"bytes"
+	"io"
+	"net/http"
 	"strings"
 	"time"
+
+	"github.com/labstack/echo/v5"
+
+	"gomodel/internal/streaming"
 )
+
+type responseWriterUnwrapper interface {
+	Unwrap() http.ResponseWriter
+}
+
+const maxResponseWriterUnwrapDepth = 10
 
 // StreamLogObserver reconstructs stream metadata and optional response bodies
 // from parsed SSE JSON payloads.
@@ -42,11 +55,7 @@ func (o *StreamLogObserver) OnJSONEvent(event map[string]any) {
 	if !o.logBodies || o.builder == nil {
 		return
 	}
-	if o.builder.IsResponsesAPI {
-		o.parseResponsesAPIEvent(event)
-		return
-	}
-	o.parseChatCompletionEvent(event)
+	observeStreamJSONEvent(o.builder, event)
 }
 
 func (o *StreamLogObserver) OnStreamClose() {
@@ -73,43 +82,117 @@ func (o *StreamLogObserver) OnStreamClose() {
 	}
 }
 
-func (o *StreamLogObserver) parseChatCompletionEvent(event map[string]any) {
-	if o.builder == nil {
+// EnrichEntryWithCachedStreamResponse reconstructs the OpenAI-compatible
+// response body for a cached SSE replay when audit body capture is enabled.
+func EnrichEntryWithCachedStreamResponse(c *echo.Context, path string, body []byte) {
+	if c == nil || len(body) == 0 {
+		return
+	}
+	if !hasResponseBodyCapture(c.Response()) {
 		return
 	}
 
-	if o.builder.ID == "" {
+	entry := GetStreamEntryFromContext(c)
+	if entry == nil {
+		return
+	}
+
+	builder := &streamResponseBuilder{
+		IsResponsesAPI: strings.HasPrefix(path, "/v1/responses"),
+	}
+	observer := &cachedStreamObserver{builder: builder}
+	stream := streaming.NewObservedSSEStream(io.NopCloser(bytes.NewReader(body)), observer)
+	_, _ = io.Copy(io.Discard, stream)
+	_ = stream.Close()
+
+	data := ensureLogData(entry)
+	if builder.IsResponsesAPI {
+		data.ResponseBody = builder.buildResponsesAPIResponse()
+	} else {
+		data.ResponseBody = builder.buildChatCompletionResponse()
+	}
+	data.ResponseBodyTooBigToHandle = builder.truncated
+}
+
+type cachedStreamObserver struct {
+	builder *streamResponseBuilder
+}
+
+func (o *cachedStreamObserver) OnJSONEvent(event map[string]any) {
+	if o == nil || o.builder == nil {
+		return
+	}
+	observeStreamJSONEvent(o.builder, event)
+}
+
+func (o *cachedStreamObserver) OnStreamClose() {}
+
+func hasResponseBodyCapture(w http.ResponseWriter) bool {
+	for depth := 0; w != nil && depth < maxResponseWriterUnwrapDepth; depth++ {
+		if _, ok := w.(*responseBodyCapture); ok {
+			return true
+		}
+		unwrapper, ok := w.(responseWriterUnwrapper)
+		if !ok {
+			return false
+		}
+		next := unwrapper.Unwrap()
+		if next == w {
+			return false
+		}
+		w = next
+	}
+	return false
+}
+
+func observeStreamJSONEvent(builder *streamResponseBuilder, event map[string]any) {
+	if builder == nil {
+		return
+	}
+	if builder.IsResponsesAPI {
+		parseResponsesAPIEvent(builder, event)
+		return
+	}
+	parseChatCompletionEvent(builder, event)
+}
+
+func parseChatCompletionEvent(builder *streamResponseBuilder, event map[string]any) {
+	if builder == nil {
+		return
+	}
+
+	if builder.ID == "" {
 		if id, ok := event["id"].(string); ok {
-			o.builder.ID = id
+			builder.ID = id
 		}
 		if model, ok := event["model"].(string); ok {
-			o.builder.Model = model
+			builder.Model = model
 		}
 		if created, ok := event["created"].(float64); ok {
-			o.builder.Created = int64(created)
+			builder.Created = int64(created)
 		}
 	}
 
 	if choices, ok := event["choices"].([]any); ok && len(choices) > 0 {
 		if choice, ok := choices[0].(map[string]any); ok {
 			if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
-				o.builder.FinishReason = fr
+				builder.FinishReason = fr
 			}
 
 			if delta, ok := choice["delta"].(map[string]any); ok {
 				if role, ok := delta["role"].(string); ok {
-					o.builder.Role = role
+					builder.Role = role
 				}
 				if content, ok := delta["content"].(string); ok && content != "" {
-					o.appendContent(content)
+					appendStreamContent(builder, content)
 				}
 			}
 		}
 	}
 }
 
-func (o *StreamLogObserver) parseResponsesAPIEvent(event map[string]any) {
-	if o.builder == nil {
+func parseResponsesAPIEvent(builder *streamResponseBuilder, event map[string]any) {
+	if builder == nil {
 		return
 	}
 
@@ -118,35 +201,35 @@ func (o *StreamLogObserver) parseResponsesAPIEvent(event map[string]any) {
 	case "response.created", "response.completed", "response.done":
 		if resp, ok := event["response"].(map[string]any); ok {
 			if id, ok := resp["id"].(string); ok {
-				o.builder.ResponseID = id
+				builder.ResponseID = id
 			}
 			if status, ok := resp["status"].(string); ok {
-				o.builder.Status = status
+				builder.Status = status
 			}
 			if model, ok := resp["model"].(string); ok {
-				o.builder.Model = model
+				builder.Model = model
 			}
 			if createdAt, ok := resp["created_at"].(float64); ok {
-				o.builder.CreatedAt = int64(createdAt)
+				builder.CreatedAt = int64(createdAt)
 			}
 		}
 	case "response.output_text.delta":
 		if delta, ok := event["delta"].(string); ok && delta != "" {
-			o.appendContent(delta)
+			appendStreamContent(builder, delta)
 		}
 	}
 }
 
-func (o *StreamLogObserver) appendContent(content string) {
-	if o.builder == nil || o.builder.truncated || o.builder.contentLen >= MaxContentCapture {
+func appendStreamContent(builder *streamResponseBuilder, content string) {
+	if builder == nil || builder.truncated || builder.contentLen >= MaxContentCapture {
 		return
 	}
 
-	remaining := MaxContentCapture - o.builder.contentLen
+	remaining := MaxContentCapture - builder.contentLen
 	if len(content) > remaining {
 		content = content[:remaining]
-		o.builder.truncated = true
+		builder.truncated = true
 	}
-	o.builder.Content.WriteString(content)
-	o.builder.contentLen += len(content)
+	builder.Content.WriteString(content)
+	builder.contentLen += len(content)
 }

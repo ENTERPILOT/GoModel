@@ -4,6 +4,22 @@
       "choices": [
         {
           "delta": {
+            "role": "assistant"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "msg_\u003cgenerated\u003e",
+      "model": "claude-sonnet-4-20250514",
+      "object": "chat.completion.chunk",
+      "provider": "anthropic"
+    },
+    {
+      "choices": [
+        {
+          "delta": {
             "content": "Hello World"
           },
           "finish_reason": null,

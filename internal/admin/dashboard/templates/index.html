@@ -294,7 +294,7 @@
     </div>
 
     <!-- Usage by User Path Chart -->
-    <div class="model-chart-section" x-show="userPathUsage.length > 0">
+    <div class="model-chart-section" x-show="userPathUsageChartVisible()">
         <div class="model-chart-header">
             <h3 x-text="usageMode === 'costs' ? 'Cost by User Path' : 'Usage by User Path'"></h3>
             <div class="chart-view-toggle" role="group" aria-label="User path usage view">
@@ -345,7 +345,10 @@
     <div class="usage-log-section">
         <h3>Request Log</h3>
         <div class="usage-log-toolbar">
-            <input type="text" placeholder="Search by request ID, model, provider..." x-model="usageLogSearch" @input.debounce.300ms="fetchUsageLog(true)" class="filter-input">
+            <div class="filter-input-wrap">
+                <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                <input type="text" placeholder="Search by request ID, model, provider..." x-model="usageLogSearch" @input.debounce.300ms="fetchUsageLog(true)" class="filter-input">
+            </div>
             <select x-model="usageLogModel" @change="fetchUsageLog(true)" class="usage-log-select">
                 <option value="">All Models</option>
                 <template x-for="m in usageLogModelOptions()" :key="m">
@@ -358,7 +361,10 @@
                     <option :value="p" x-text="p"></option>
                 </template>
             </select>
-            <input type="text" placeholder="User path /team/alpha" aria-label="Filter by user path" x-model="usageLogUserPath" @input.debounce.300ms="fetchUsageLog(true)" class="filter-input">
+            <div class="filter-input-wrap">
+                <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                <input type="text" placeholder="User path /team/alpha" aria-label="Filter by user path" x-model="usageLogUserPath" @input.debounce.300ms="fetchUsageLog(true)" class="filter-input">
+            </div>
         </div>
         <div class="table-wrapper" x-show="usageLog.entries.length > 0">
             <table class="data-table usage-log-table">
@@ -478,7 +484,7 @@
                 role="status"
                 aria-live="polite"
                 x-show="runtimeRefreshReport && runtimeRefreshReport.steps && runtimeRefreshReport.steps.length > 0">
-                <template x-for="step in runtimeRefreshReport.steps" :key="step.name">
+                <template x-for="step in runtimeRefreshSteps()" :key="step.name">
                     <li :class="'runtime-refresh-step is-' + step.status" x-text="runtimeRefreshStepLabel(step)"></li>
                 </template>
             </ul>
@@ -628,7 +634,10 @@
 
             <div class="table-toolbar" x-show="guardrailsAvailable">
                 <div class="table-toolbar-main">
-                    <input type="text" id="guardrail-filter" class="filter-input" placeholder="Filter by name, type, user path, summary..." aria-label="Guardrail filter" x-model="guardrailFilter">
+                    <div class="filter-input-wrap">
+                        <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                        <input type="text" id="guardrail-filter" class="filter-input" placeholder="Filter by name, type, user path, summary..." aria-label="Guardrail filter" x-model="guardrailFilter">
+                    </div>
                 </div>
             </div>
 
@@ -872,7 +881,10 @@
     <!-- Filter -->
     <div class="table-toolbar" x-show="displayModels.length > 0 || modelFilter || aliasesAvailable">
         <div class="table-toolbar-main">
-            <input type="text" placeholder="Filter by provider, provider/model, alias, or owner..." x-model="modelFilter" class="filter-input models-filter-input">
+            <div class="filter-input-wrap">
+                <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                <input type="text" placeholder="Filter by provider, provider/model, alias, or owner..." aria-label="Filter models by provider, provider/model, alias, or owner" x-model="modelFilter" class="filter-input">
+            </div>
         </div>
         <div class="table-toolbar-actions">
             <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn" x-show="aliasesAvailable" @click="openAliasCreate()">
@@ -1178,7 +1190,10 @@
 
     <div class="table-toolbar" x-show="workflowsAvailable">
         <div class="table-toolbar-main">
-            <input type="text" placeholder="Filter by scope, name, hash, or guardrail..." x-model="workflowFilter" class="filter-input" aria-label="Filter workflows by scope, name, hash, or guardrail">
+            <div class="filter-input-wrap">
+                <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                <input type="text" placeholder="Filter by scope, name, hash, or guardrail..." x-model="workflowFilter" class="filter-input" aria-label="Filter workflows by scope, name, hash, or guardrail">
+            </div>
         </div>
         <div class="table-toolbar-actions">
             <span class="model-count" x-text="filteredWorkflows.length + ' active scopes'"></span>
@@ -1441,7 +1456,10 @@
     <div class="audit-log-section">
         <div class="audit-log-toolbar">
             <div class="audit-filter-row audit-filter-row-search">
-                <input id="audit-filter-search" type="text" placeholder="Search by request ID, model, provider, path, user path, or error..." aria-label="Search by request ID, model, provider, path, user path, or error" x-model="auditSearch" @input.debounce.300ms="fetchAuditLog(true)" class="filter-input">
+                <div class="filter-input-wrap">
+                    <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                    <input id="audit-filter-search" type="text" placeholder="Search by request ID, model, provider, path, user path, or error..." aria-label="Search by request ID, model, provider, path, user path, or error" x-model="auditSearch" @input.debounce.300ms="fetchAuditLog(true)" class="filter-input">
+                </div>
             </div>
             <div class="audit-filter-row audit-filter-row-controls">
                 <select id="audit-filter-method" aria-label="HTTP method filter" x-model="auditMethod" @change="fetchAuditLog(true)" class="usage-log-select audit-filter-select">

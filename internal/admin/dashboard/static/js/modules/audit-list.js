@@ -174,6 +174,7 @@
                 return {
                     title: 'Request',
                     entry,
+                    copyHeaders: data && data.request_headers,
                     copyBody: data && data.request_body,
                     showErrorMessage: false,
                     errorMessage: null,
@@ -194,6 +195,7 @@
                 return {
                     title: 'Response',
                     entry,
+                    copyHeaders: data && data.response_headers,
                     copyBody: data && data.response_body,
                     showErrorMessage: !!(data && data.error_message),
                     errorMessage: data && data.error_message,
@@ -213,25 +215,34 @@
                 const renderBody = typeof this.renderBodyWithConversationHighlights === 'function'
                     ? this.renderBodyWithConversationHighlights.bind(this)
                     : (_entry, body) => formatJSON(body);
+                const createCopyState = () => clipboard
+                    ? clipboard.createClipboardButtonState({
+                        logPrefix: 'Failed to copy audit payload:'
+                    })
+                    : {
+                        copied: false,
+                        error: false,
+                        copy() {
+                            return Promise.resolve();
+                        }
+                    };
+                const copyBodyState = createCopyState();
+                const copyHeadersState = createCopyState();
 
                 return {
                     pane,
                     formattedHeaders: pane && pane.showHeaders ? formatJSON(pane.headers) : '',
                     renderedBody: pane && pane.showBody ? renderBody(pane.entry, pane.body) : '',
-                    copyState: clipboard
-                        ? clipboard.createClipboardButtonState({
-                            logPrefix: 'Failed to copy audit payload:'
-                        })
-                        : {
-                            copied: false,
-                            error: false,
-                            copy() {
-                                return Promise.resolve();
-                            }
-                        },
+                    copyBodyState,
+                    copyHeadersState,
+                    copyState: copyBodyState,
 
                     copyBody() {
-                        return this.copyState.copy(this.pane.copyBody, formatJSON);
+                        return this.copyBodyState.copy(this.pane.copyBody, formatJSON);
+                    },
+
+                    copyHeaders() {
+                        return this.copyHeadersState.copy(this.pane.copyHeaders, formatJSON);
                     }
                 };
             }

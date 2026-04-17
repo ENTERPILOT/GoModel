@@ -52,7 +52,7 @@ test('dashboard templates expose a settings page and timezone context in activit
     assert.match(template, /class="alert alert-success settings-refresh-alert"[\s\S]*role="status"[\s\S]*aria-live="polite"[\s\S]*runtimeRefreshSucceeded\(\)/);
     assert.match(template, /class="alert alert-warning settings-refresh-alert"[\s\S]*role="alert"[\s\S]*aria-live="assertive"[\s\S]*runtimeRefreshError \|\| runtimeRefreshNotice/);
     assert.match(template, /class="runtime-refresh-steps"[\s\S]*role="status"[\s\S]*aria-live="polite"[\s\S]*runtimeRefreshStepLabel\(step\)/);
-    assert.match(template, /runtimeRefreshReport\.steps/);
+    assert.match(template, /x-for="step in runtimeRefreshSteps\(\)"/);
     assert.match(template, /{{template "helper-disclosure" "\{ heading: 'Timezone', open: false, copyId: 'timezone-help-copy'/);
     assert.match(template, /class="inline-help-toggle"/);
     assert.match(template, /class="inline-help-toggle-icon"/);
