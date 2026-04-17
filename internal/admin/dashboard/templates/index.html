@@ -1464,6 +1464,7 @@
                     <option value="500">500</option>
                     <option value="502">502</option>
                     <option value="503">503</option>
+                    <option value="504">504</option>
                 </select>
                 <select id="audit-filter-stream" aria-label="Streaming mode filter" x-model="auditStream" @change="fetchAuditLog(true)" class="usage-log-select audit-filter-select">
                     <option value="">All Modes</option>
@@ -1524,6 +1525,7 @@
                                     <span class="provider-badge mono" x-show="entry.auth_key_id" x-text="'auth_key_id: ' + entry.auth_key_id"></span>
                                     <span class="provider-badge audit-alias-badge" x-show="entry.alias_used">alias</span>
                                     <span class="provider-badge mono" x-show="entry.alias_used && entry.resolved_model" x-text="'resolved: ' + qualifiedResolvedModelDisplay(entry)"></span>
+                                    <span class="provider-badge mono" x-show="workflowFailoverTarget(entry)" x-text="'failover: ' + workflowFailoverTarget(entry)"></span>
                                     <span class="provider-badge" x-show="entry.stream">stream</span>
                                     <span class="provider-badge" x-show="entry.error_type" x-text="entry.error_type"></span>
                                 </div>

@@ -73,8 +73,8 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 	}
 	if params.Search != "" {
 		s := "%" + escapeLikeWildcards(params.Search) + "%"
-		conditions = append(conditions, `(request_id LIKE ? ESCAPE '\' OR auth_key_id LIKE ? ESCAPE '\' OR requested_model LIKE ? ESCAPE '\' OR provider LIKE ? ESCAPE '\' OR provider_name LIKE ? ESCAPE '\' OR method LIKE ? ESCAPE '\' OR path LIKE ? ESCAPE '\' OR user_path LIKE ? ESCAPE '\' OR error_type LIKE ? ESCAPE '\')`)
-		args = append(args, s, s, s, s, s, s, s, s, s)
+		conditions = append(conditions, `(request_id LIKE ? ESCAPE '\' OR auth_key_id LIKE ? ESCAPE '\' OR requested_model LIKE ? ESCAPE '\' OR provider LIKE ? ESCAPE '\' OR provider_name LIKE ? ESCAPE '\' OR method LIKE ? ESCAPE '\' OR path LIKE ? ESCAPE '\' OR user_path LIKE ? ESCAPE '\' OR error_type LIKE ? ESCAPE '\' OR json_extract(data, '$.error_message') LIKE ? ESCAPE '\')`)
+		args = append(args, s, s, s, s, s, s, s, s, s, s)
 	}
 
 	where := buildWhereClause(conditions)

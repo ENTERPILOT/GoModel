@@ -135,6 +135,9 @@ func TestLogEntryJSON(t *testing.T) {
 		Stream:         false,
 		Data: &LogData{
 			UserAgent: "test-agent",
+			Failover: &FailoverSnapshot{
+				TargetModel: "azure/gpt-4o",
+			},
 		},
 	}
 
@@ -174,6 +177,12 @@ func TestLogEntryJSON(t *testing.T) {
 	}
 	if decoded.RequestID != entry.RequestID {
 		t.Errorf("RequestID mismatch: expected %q, got %q", entry.RequestID, decoded.RequestID)
+	}
+	if decoded.Data == nil || decoded.Data.Failover == nil {
+		t.Fatal("expected Failover snapshot to survive JSON round-trip")
+	}
+	if decoded.Data.Failover.TargetModel != "azure/gpt-4o" {
+		t.Errorf("Failover.TargetModel mismatch: got %q, want %q", decoded.Data.Failover.TargetModel, "azure/gpt-4o")
 	}
 }
 
@@ -968,6 +977,9 @@ func TestCreateStreamEntry(t *testing.T) {
 				Guardrails: false,
 				Fallback:   true,
 			},
+			Failover: &FailoverSnapshot{
+				TargetModel: "azure/gpt-4o",
+			},
 			RequestHeaders: map[string]string{
 				"Content-Type": "application/json",
 			},
@@ -1013,6 +1025,12 @@ func TestCreateStreamEntry(t *testing.T) {
 	}
 	if streamEntry.AuthMethod != baseEntry.AuthMethod {
 		t.Error("AuthMethod not copied")
+	}
+	if streamEntry.Data == nil || streamEntry.Data.Failover == nil {
+		t.Fatal("Failover snapshot not copied")
+	}
+	if streamEntry.Data.Failover.TargetModel != "azure/gpt-4o" {
+		t.Errorf("Failover.TargetModel = %q, want %q", streamEntry.Data.Failover.TargetModel, "azure/gpt-4o")
 	}
 	if streamEntry.ClientIP != baseEntry.ClientIP {
 		t.Error("ClientIP not copied")

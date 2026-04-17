@@ -9,10 +9,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -538,7 +540,7 @@ func (c *Client) doHTTPRequest(ctx context.Context, req Request) (*http.Response
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, core.NewProviderError(c.config.ProviderName, http.StatusBadGateway, "failed to send request: "+err.Error(), err)
+		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), "failed to send request: "+err.Error(), err)
 	}
 	return resp, nil
 }
@@ -557,7 +559,7 @@ func (c *Client) doRequest(ctx context.Context, req Request) (*Response, error) 
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, core.NewProviderError(c.config.ProviderName, http.StatusBadGateway, "failed to read response: "+err.Error(), err)
+		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), "failed to read response: "+err.Error(), err)
 	}
 
 	return &Response{
@@ -662,6 +664,31 @@ func (c *Client) isRetryable(statusCode int) bool {
 		statusCode == http.StatusServiceUnavailable ||
 		statusCode == http.StatusBadGateway ||
 		statusCode == http.StatusGatewayTimeout
+}
+
+func providerErrorStatusCode(err error) int {
+	if isTimeoutError(err) {
+		return http.StatusGatewayTimeout
+	}
+	return http.StatusBadGateway
+}
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "client.timeout exceeded") ||
+		strings.Contains(message, "timeout awaiting response headers")
 }
 
 // circuitBreaker implements a circuit breaker pattern with half-open state protection

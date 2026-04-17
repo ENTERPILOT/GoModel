@@ -87,8 +87,9 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 	var cacheType string
 	var providerType string
 	var providerName string
+	var failoverModel string
 	defer func() {
-		e.finishAuditEntry(ctx, entry, start, workflow, req, resp, err, cacheType, providerType, providerName)
+		e.finishAuditEntry(ctx, entry, start, workflow, req, resp, err, cacheType, providerType, providerName, failoverModel)
 	}()
 
 	resolution, err := resolveRequestModelWithAuthorizer(ctx, e.provider, e.modelResolver, e.modelAuthorizer, requested)
@@ -108,7 +109,7 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 
 	ctx = e.service.withCacheRequestContext(ctx, workflow)
 	execReq := cloneChatRequestForSelector(req, resolution.ResolvedSelector)
-	resp, providerType, providerName, _, cacheType, err = e.executeChatCompletion(ctx, workflow, execReq)
+	resp, providerType, providerName, failoverModel, _, cacheType, err = e.executeChatCompletion(ctx, workflow, execReq)
 	if err != nil {
 		return nil, err
 	}
@@ -125,30 +126,31 @@ func (e *InternalChatCompletionExecutor) executeChatCompletion(
 	ctx context.Context,
 	workflow *core.Workflow,
 	req *core.ChatRequest,
-) (*core.ChatResponse, string, string, bool, string, error) {
+) (*core.ChatResponse, string, string, string, bool, string, error) {
 	if e.service.responseCache == nil || (workflow != nil && !workflow.CacheEnabled()) {
-		resp, providerType, providerName, usedFallback, err := e.service.executeChatCompletion(ctx, workflow, req)
-		return resp, providerType, providerName, usedFallback, "", err
+		resp, providerType, providerName, failoverModel, usedFallback, err := e.service.executeChatCompletion(ctx, workflow, req)
+		return resp, providerType, providerName, failoverModel, usedFallback, "", err
 	}
 
 	body, err := marshalRequestBody(req)
 	if err != nil {
-		resp, providerType, providerName, usedFallback, execErr := e.service.executeChatCompletion(ctx, workflow, req)
+		resp, providerType, providerName, failoverModel, usedFallback, execErr := e.service.executeChatCompletion(ctx, workflow, req)
 		if execErr != nil {
-			return nil, "", "", false, "", execErr
+			return nil, "", "", "", false, "", execErr
 		}
-		return resp, providerType, providerName, usedFallback, "", nil
+		return resp, providerType, providerName, failoverModel, usedFallback, "", nil
 	}
 
 	var (
-		resp         *core.ChatResponse
-		providerType string
-		providerName string
-		usedFallback bool
+		resp          *core.ChatResponse
+		providerType  string
+		providerName  string
+		failoverModel string
+		usedFallback  bool
 	)
 	result, err := e.service.responseCache.HandleInternalRequest(ctx, http.MethodPost, "/v1/chat/completions", body, func(c *echo.Context) error {
 		var execErr error
-		resp, providerType, providerName, usedFallback, execErr = e.service.executeChatCompletion(c.Request().Context(), workflow, req)
+		resp, providerType, providerName, failoverModel, usedFallback, execErr = e.service.executeChatCompletion(c.Request().Context(), workflow, req)
 		if execErr != nil {
 			return execErr
 		}
@@ -158,16 +160,16 @@ func (e *InternalChatCompletionExecutor) executeChatCompletion(
 		return c.JSON(http.StatusOK, resp)
 	})
 	if err != nil {
-		return nil, "", "", false, "", err
+		return nil, "", "", "", false, "", err
 	}
 	if result != nil && result.CacheType != "" {
 		var cached core.ChatResponse
 		if err := json.Unmarshal(result.Body, &cached); err != nil {
-			return nil, "", "", false, "", err
+			return nil, "", "", "", false, "", err
 		}
-		return &cached, workflow.ProviderType, providerNameFromWorkflow(workflow), false, result.CacheType, nil
+		return &cached, workflow.ProviderType, providerNameFromWorkflow(workflow), "", false, result.CacheType, nil
 	}
-	return resp, providerType, providerName, usedFallback, "", nil
+	return resp, providerType, providerName, failoverModel, usedFallback, "", nil
 }
 
 func (e *InternalChatCompletionExecutor) newAuditEntry(
@@ -210,6 +212,7 @@ func (e *InternalChatCompletionExecutor) finishAuditEntry(
 	cacheType string,
 	providerType string,
 	providerName string,
+	failoverModel string,
 ) {
 	if entry == nil || e.logger == nil || !e.logger.Config().Enabled {
 		return
@@ -217,6 +220,7 @@ func (e *InternalChatCompletionExecutor) finishAuditEntry(
 
 	entry.DurationNs = time.Since(start).Nanoseconds()
 	auditlog.EnrichLogEntryWithWorkflow(entry, workflow)
+	auditlog.EnrichLogEntryWithFailover(entry, failoverModel)
 	auditlog.EnrichLogEntryWithResolvedRoute(entry, qualifyExecutedModel(workflow, chatResponseModel(resp), providerName), providerType, providerName)
 	auditlog.EnrichLogEntryWithRequestContext(entry, ctx)
 	if workflow != nil && !workflow.AuditEnabled() {

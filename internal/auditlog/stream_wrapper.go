@@ -117,6 +117,10 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 			snapshot := *baseEntry.Data.WorkflowFeatures
 			entryCopy.Data.WorkflowFeatures = &snapshot
 		}
+		if baseEntry.Data.Failover != nil {
+			snapshot := *baseEntry.Data.Failover
+			entryCopy.Data.Failover = &snapshot
+		}
 	}
 
 	return entryCopy

@@ -1210,6 +1210,76 @@ func TestClient_ContextCancellation(t *testing.T) {
 	}
 }
 
+func TestClient_Do_HTTPTimeoutReturnsGatewayTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	cfg := DefaultConfig("test", server.URL)
+	cfg.Retry.MaxRetries = 0
+	client := NewWithHTTPClient(&http.Client{Timeout: 50 * time.Millisecond}, cfg, nil)
+
+	err := client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, nil)
+
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+
+	gatewayErr, ok := err.(*core.GatewayError)
+	if !ok {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
+	}
+	if !strings.Contains(gatewayErr.Message, "failed to send request") {
+		t.Fatalf("Message = %q, want send-request timeout context", gatewayErr.Message)
+	}
+}
+
+func TestClient_Do_BodyReadTimeoutReturnsGatewayTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"partial":"`))
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write([]byte(`done"}`))
+	}))
+	defer server.Close()
+
+	cfg := DefaultConfig("test", server.URL)
+	cfg.Retry.MaxRetries = 0
+	client := NewWithHTTPClient(&http.Client{Timeout: 50 * time.Millisecond}, cfg, nil)
+
+	err := client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, nil)
+
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+
+	gatewayErr, ok := err.(*core.GatewayError)
+	if !ok {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
+	}
+	if !strings.Contains(gatewayErr.Message, "failed to read response") {
+		t.Fatalf("Message = %q, want read-response timeout context", gatewayErr.Message)
+	}
+}
+
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig("test-provider", "https://api.test.com")
 

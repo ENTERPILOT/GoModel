@@ -84,6 +84,10 @@ type LogData struct {
 	// even if the active process config changes later.
 	WorkflowFeatures *WorkflowFeaturesSnapshot `json:"workflow_features,omitempty" bson:"workflow_features,omitempty"`
 
+	// Failover captures runtime redirect details when translated execution
+	// moved from the primary selector to a configured failover target.
+	Failover *FailoverSnapshot `json:"failover,omitempty" bson:"failover,omitempty"`
+
 	// Request parameters
 	Temperature *float64 `json:"temperature,omitempty" bson:"temperature,omitempty"`
 	MaxTokens   *int     `json:"max_tokens,omitempty" bson:"max_tokens,omitempty"`
@@ -116,6 +120,13 @@ type WorkflowFeaturesSnapshot struct {
 	Usage      bool `json:"usage" bson:"usage"`
 	Guardrails bool `json:"guardrails" bson:"guardrails"`
 	Fallback   bool `json:"fallback" bson:"fallback"`
+}
+
+// FailoverSnapshot stores the runtime failover selection used for one request.
+// The target model is the configured failover selector, not the model echoed by
+// the provider response body.
+type FailoverSnapshot struct {
+	TargetModel string `json:"target_model,omitempty" bson:"target_model,omitempty"`
 }
 
 // marshalLogData marshals the Data field to JSON for SQL storage.

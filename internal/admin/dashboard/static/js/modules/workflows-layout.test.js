@@ -218,7 +218,7 @@ test('workflow editor renders a live preview card from the draft workflow state'
     );
     assert.match(
         chartTemplate,
-        /{{define "workflow-chart"}}[\s\S]*x-data="\{ workflow: {{\.}} \|\| \{\} \}"[\s\S]*x-effect="workflow = {{\.}} \|\| \{\}"[\s\S]*<span class="workflow-node-label">Auth<\/span>[\s\S]*x-text="workflow\.authNodeSublabel"[\s\S]*x-show="workflow\.showGuardrails"[\s\S]*x-show="workflow\.showCache"[\s\S]*x-text="workflow\.aiLabel"/
+        /{{define "workflow-chart"}}[\s\S]*x-data="\{ workflow: {{\.}} \|\| \{\} \}"[\s\S]*x-effect="workflow = {{\.}} \|\| \{\}"[\s\S]*<span class="workflow-node-label">Auth<\/span>[\s\S]*x-text="workflow\.authNodeSublabel"[\s\S]*x-show="workflow\.showGuardrails"[\s\S]*x-show="workflow\.showCache"[\s\S]*x-text="workflow\.aiLabel"[\s\S]*x-show="workflow\.showFailover"[\s\S]*x-text="workflow\.failoverTargetLabel"/
     );
 });
 
@@ -228,7 +228,7 @@ test('audit log pipeline binds cache visibility and runtime highlight classes ac
 
     assert.match(
         template,
-        /{{template "workflow-chart" "workflowAuditChart\(entry\)"}}[\s\S]*<div class="workflow-conn" x-show="workflow\.showCache" :class="workflow\.cacheConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-cache" x-show="workflow\.showCache" :class="workflow\.cacheNodeClass">[\s\S]*x-text="workflow\.cacheStatusLabel"/
+        /{{template "workflow-chart" "workflowAuditChart\(entry\)"}}[\s\S]*<div class="workflow-conn" x-show="workflow\.showCache" :class="workflow\.cacheConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-cache" x-show="workflow\.showCache" :class="workflow\.cacheNodeClass">[\s\S]*x-text="workflow\.cacheStatusLabel"[\s\S]*<div class="workflow-conn" x-show="workflow\.showFailover" :class="workflow\.failoverConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-failover" x-show="workflow\.showFailover" :class="workflow\.failoverNodeClass">[\s\S]*x-text="workflow\.failoverStatusLabel"[\s\S]*x-text="workflow\.failoverTargetLabel"/
     );
     assert.match(
         template,

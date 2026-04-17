@@ -366,6 +366,7 @@ test('audit toolbar uses a full-width search row above the select row with a rig
         indexTemplate,
         /id="audit-filter-search"[^>]*placeholder="Search by request ID, model, provider, path, user path, or error\.\.\."/
     );
+    assert.match(indexTemplate, /id="audit-filter-status"[\s\S]*<option value="504">504<\/option>/);
     assert.doesNotMatch(indexTemplate, /id="audit-filter-model"/);
     assert.doesNotMatch(indexTemplate, /id="audit-filter-provider"/);
     assert.doesNotMatch(indexTemplate, /id="audit-filter-path"/);
@@ -419,6 +420,7 @@ test('audit entry metadata is rendered as a labeled pill row at the bottom of th
     assert.match(auditEntry, /<span class="provider-badge mono" x-text="entry\.requested_model \|\| entry\.model \|\| '-'"><\/span>/);
     assert.match(auditEntry, /<span class="provider-badge mono" x-text="'request_id: ' \+ \(entry\.request_id \|\| '-'\)"><\/span>/);
     assert.match(auditEntry, /<span class="provider-badge mono" x-show="entry\.client_ip" x-text="'ip: ' \+ entry\.client_ip"><\/span>/);
+    assert.match(auditEntry, /<span class="provider-badge mono" x-show="workflowFailoverTarget\(entry\)" x-text="'failover: ' \+ workflowFailoverTarget\(entry\)"><\/span>/);
 
     const metadataRule = readCSSRule(css, '.audit-entry-metadata');
     assert.match(metadataRule, /display:\s*flex/);

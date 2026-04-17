@@ -128,3 +128,62 @@ func TestSQLiteReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
 		t.Fatalf("expected matching entry %q, got %q", "team-match", result.Entries[0].ID)
 	}
 }
+
+func TestSQLiteReaderGetLogs_SearchMatchesErrorMessage(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := store.WriteBatch(ctx, []*LogEntry{
+		{
+			ID:             "timeout-match",
+			Timestamp:      time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
+			RequestedModel: "gpt-5",
+			Provider:       "openai",
+			ErrorType:      "provider_error",
+			Data: &LogData{
+				ErrorMessage: `failed to send request: Post "https://api.openai.com/v1/chat/completions": http2: timeout awaiting response headers`,
+			},
+		},
+		{
+			ID:             "other-error",
+			Timestamp:      time.Date(2026, 1, 16, 11, 0, 0, 0, time.UTC),
+			RequestedModel: "gpt-5",
+			Provider:       "openai",
+			ErrorType:      "provider_error",
+			Data: &LogData{
+				ErrorMessage: "upstream refused connection",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("failed to seed audit logs: %v", err)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create sqlite reader: %v", err)
+	}
+
+	result, err := reader.GetLogs(ctx, LogQueryParams{
+		Search: "timeout awaiting response headers",
+		Limit:  10,
+	})
+	if err != nil {
+		t.Fatalf("GetLogs returned error: %v", err)
+	}
+
+	if result.Total != 1 {
+		t.Fatalf("expected 1 log in search result, got %d", result.Total)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("expected 1 returned entry, got %d", len(result.Entries))
+	}
+	if result.Entries[0].ID != "timeout-match" {
+		t.Fatalf("expected matching entry %q, got %q", "timeout-match", result.Entries[0].ID)
+	}
+}

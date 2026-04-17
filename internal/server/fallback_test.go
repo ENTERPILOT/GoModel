@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 )
 
@@ -142,6 +143,8 @@ func TestChatCompletion_FallsBackToAlternateModel(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
 
 	if err := handler.ChatCompletion(c); err != nil {
 		t.Fatalf("handler.ChatCompletion() error = %v", err)
@@ -160,6 +163,12 @@ func TestChatCompletion_FallsBackToAlternateModel(t *testing.T) {
 	}
 	if !core.GetFallbackUsed(c.Request().Context()) {
 		t.Fatal("expected request context to be marked as fallback-used")
+	}
+	if entry.Data == nil || entry.Data.Failover == nil {
+		t.Fatal("expected audit entry to capture failover details")
+	}
+	if got := entry.Data.Failover.TargetModel; got != "azure/gpt-4o" {
+		t.Fatalf("failover target = %q, want %q", got, "azure/gpt-4o")
 	}
 }
 
@@ -380,6 +389,8 @@ func TestResponses_FallsBackToAlternateModel(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
 
 	if err := handler.Responses(c); err != nil {
 		t.Fatalf("handler.Responses() error = %v", err)
@@ -405,6 +416,12 @@ func TestResponses_FallsBackToAlternateModel(t *testing.T) {
 	}
 	if !core.GetFallbackUsed(c.Request().Context()) {
 		t.Fatal("expected request context to be marked as fallback-used")
+	}
+	if entry.Data == nil || entry.Data.Failover == nil {
+		t.Fatal("expected audit entry to capture streaming failover details")
+	}
+	if got := entry.Data.Failover.TargetModel; got != "azure/gpt-4o" {
+		t.Fatalf("streaming failover target = %q, want %q", got, "azure/gpt-4o")
 	}
 }
 

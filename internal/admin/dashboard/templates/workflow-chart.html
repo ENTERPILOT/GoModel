@@ -58,6 +58,16 @@
             <span class="workflow-node-sub" x-show="workflow.aiSublabel" x-text="workflow.aiSublabel"></span>
         </div>
 
+        <div class="workflow-conn" x-show="workflow.showFailover" :class="workflow.failoverConnClass"></div>
+        <div class="workflow-node workflow-node-feature workflow-node-failover" x-show="workflow.showFailover" :class="workflow.failoverNodeClass">
+            <div class="workflow-node-icon">
+                <svg viewBox="0 0 24 24"><path d="M17 3h4v4"/><path d="M7 21H3v-4"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+            </div>
+            <span class="workflow-node-label">Failover</span>
+            <span class="workflow-node-badge" x-show="workflow.failoverStatusLabel" x-text="workflow.failoverStatusLabel"></span>
+            <span class="workflow-node-sub" x-show="workflow.failoverTargetLabel" x-text="workflow.failoverTargetLabel"></span>
+        </div>
+
         <div class="workflow-conn" :class="workflow.responseConnClass"></div>
         <div class="workflow-node workflow-node-endpoint" :class="workflow.responseNodeClass">
             <div class="workflow-node-icon workflow-node-icon-endpoint">

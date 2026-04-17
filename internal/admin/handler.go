@@ -624,7 +624,7 @@ func (h *Handler) CacheOverview(c *echo.Context) error {
 // @Param        error_type   query     string  false  "Filter by error type"
 // @Param        status_code  query     int     false  "Filter by status code"
 // @Param        stream       query     bool    false  "Filter by stream mode (true/false)"
-// @Param        search       query     string  false  "Search across request_id/requested_model/provider/method/path/error_type"
+// @Param        search       query     string  false  "Search across request_id/requested_model/provider/method/path/error_type/error_message"
 // @Param        limit        query     int     false  "Page size (default 25, max 100)"
 // @Param        offset       query     int     false  "Offset for pagination"
 // @Success      200  {object}  auditlog.LogListResult
