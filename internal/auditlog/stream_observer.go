@@ -16,6 +16,8 @@ type responseWriterUnwrapper interface {
 	Unwrap() http.ResponseWriter
 }
 
+const maxResponseWriterUnwrapDepth = 10
+
 // StreamLogObserver reconstructs stream metadata and optional response bodies
 // from parsed SSE JSON payloads.
 type StreamLogObserver struct {
@@ -126,7 +128,7 @@ func (o *cachedStreamObserver) OnJSONEvent(event map[string]any) {
 func (o *cachedStreamObserver) OnStreamClose() {}
 
 func hasResponseBodyCapture(w http.ResponseWriter) bool {
-	for w != nil {
+	for depth := 0; w != nil && depth < maxResponseWriterUnwrapDepth; depth++ {
 		if _, ok := w.(*responseBodyCapture); ok {
 			return true
 		}
@@ -134,7 +136,11 @@ func hasResponseBodyCapture(w http.ResponseWriter) bool {
 		if !ok {
 			return false
 		}
-		w = unwrapper.Unwrap()
+		next := unwrapper.Unwrap()
+		if next == w {
+			return false
+		}
+		w = next
 	}
 	return false
 }

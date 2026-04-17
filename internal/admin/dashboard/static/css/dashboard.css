@@ -1324,7 +1324,7 @@ body {
 
 .filter-input {
   flex: 1;
-  min-width: 400px;
+  min-width: min(400px, 100%);
   padding: 8px 12px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -1332,6 +1332,31 @@ body {
   color: var(--text);
   font-size: 13px;
   outline: none;
+}
+
+.filter-input-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: min(400px, 100%);
+  width: 100%;
+}
+
+.filter-input-wrap .filter-input {
+  min-width: 0;
+  width: 100%;
+  padding-left: 34px;
+}
+
+.filter-input-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  pointer-events: none;
+  transform: translateY(-50%);
 }
 
 .filter-input:focus {
@@ -2212,7 +2237,7 @@ td.col-price {
   margin-bottom: 16px;
 }
 
-.usage-log-toolbar .filter-input {
+.usage-log-toolbar .filter-input-wrap {
   flex: 1;
   max-width: none;
 }
@@ -2280,7 +2305,7 @@ td.col-price {
   min-width: 0;
 }
 
-.audit-filter-row-search .filter-input {
+.audit-filter-row-search .filter-input-wrap {
   grid-column: 1 / -1;
   max-width: none;
 }
@@ -3710,6 +3735,7 @@ body.conversation-drawer-open {
   .audit-filter-row {
     grid-template-columns: 1fr;
   }
+  .audit-filter-row .filter-input-wrap,
   .audit-filter-row .filter-input,
   .audit-filter-select,
   .audit-filter-row .pagination-btn {

@@ -366,6 +366,7 @@ test('audit toolbar uses a full-width search row above the select row with a rig
         indexTemplate,
         /id="audit-filter-search"[^>]*placeholder="Search by request ID, model, provider, path, user path, or error\.\.\."/
     );
+    assert.match(indexTemplate, /class="audit-filter-row audit-filter-row-search"[\s\S]*data-lucide="search" class="filter-input-icon"[\s\S]*id="audit-filter-search"/);
     assert.match(indexTemplate, /id="audit-filter-status"[\s\S]*<option value="504">504<\/option>/);
     assert.doesNotMatch(indexTemplate, /id="audit-filter-model"/);
     assert.doesNotMatch(indexTemplate, /id="audit-filter-provider"/);
@@ -378,7 +379,7 @@ test('audit toolbar uses a full-width search row above the select row with a rig
     assert.match(clearRule, /background:\s*#fff/);
     assert.match(clearRule, /color:\s*#111110/);
 
-    const searchRule = readCSSRule(css, '.audit-filter-row-search .filter-input');
+    const searchRule = readCSSRule(css, '.audit-filter-row-search .filter-input-wrap');
     assert.match(searchRule, /grid-column:\s*1\s*\/\s*-1/);
 
     const selectRule = readCSSRule(css, '.usage-log-select');
@@ -466,6 +467,8 @@ test('model category tables lazy mount only the active table body', () => {
     assert.match(modelsBlock, /activeCategory === 'utility'[\s\S]*{{template "model-table-body" \.}}/);
     assert.match(modelsBlock, /class="loading-state" x-show="modelsLoading && !authError" role="status" aria-live="polite"/);
     assert.match(modelsBlock, /x-text="displayModels\.length > 0 \? 'Refreshing models\.\.\.' : 'Loading models\.\.\.'"/);
+    assert.match(modelsBlock, /class="filter-input-wrap"[\s\S]*data-lucide="search" class="filter-input-icon"[\s\S]*x-model="modelFilter"/);
+    assert.match(modelsBlock, /placeholder="Filter by provider, provider\/model, alias, or owner\.\.\." aria-label="Filter models by provider, provider\/model, alias, or owner" x-model="modelFilter" class="filter-input"/);
     assert.match(modelsBlock, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn"[\s\S]*@click="openAliasCreate\(\)"[\s\S]*data-lucide="plus" class="alias-create-icon"[\s\S]*<span>Create Alias<\/span>/);
     assert.match(modelsBlock, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-submit-btn"[\s\S]*:disabled="aliasSubmitting"[\s\S]*data-lucide="plus" class="form-action-icon" x-show="aliasFormMode !== 'edit'"[\s\S]*data-lucide="save" class="form-action-icon" x-show="aliasFormMode === 'edit'"[\s\S]*x-text="aliasSubmitting \? 'Saving\.\.\.' : \(aliasFormMode === 'edit' \? 'Save Alias' : 'Create Alias'\)"/);
     assert.match(modelsBlock, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon model-access-submit-btn"[\s\S]*:disabled="modelOverrideSubmitting"[\s\S]*data-lucide="save" class="form-action-icon"[\s\S]*x-text="modelOverrideSubmitting \? 'Saving\.\.\.' : 'Save Access'"/);
@@ -474,6 +477,16 @@ test('model category tables lazy mount only the active table body', () => {
     const loadingRule = readCSSRule(css, '.loading-state');
     assert.match(loadingRule, /display:\s*flex/);
     assert.match(loadingRule, /min-height:\s*64px/);
+
+    const filterInputRule = readCSSRule(css, '.filter-input');
+    assert.match(filterInputRule, /min-width:\s*min\(400px,\s*100%\)/);
+
+    const filterInputWrapRule = readCSSRule(css, '.filter-input-wrap');
+    assert.match(filterInputWrapRule, /position:\s*relative/);
+    assert.match(filterInputWrapRule, /min-width:\s*min\(400px,\s*100%\)/);
+
+    const filterInputIconRule = readCSSRule(css, '.filter-input-icon');
+    assert.match(filterInputIconRule, /pointer-events:\s*none/);
 
     const spinnerRule = readCSSRule(css, '.loading-spinner');
     assert.match(spinnerRule, /animation:\s*loading-spin 0\.8s linear infinite/);
@@ -535,6 +548,8 @@ test('audit request and response sections reuse a shared audit pane template', (
         auditPaneTemplate,
         /{{define "audit-pane"}}[\s\S]*x-data="auditPaneState\({{\.\}}\)"[\s\S]*x-text="pane\.title"[\s\S]*x-show="pane\.showHeaders"[\s\S]*@click\.prevent="copyHeaders\(\)"[\s\S]*x-text="formattedHeaders"[\s\S]*x-show="pane\.showBody"[\s\S]*@click\.prevent="copyBody\(\)"[\s\S]*x-html="renderedBody"[\s\S]*x-text="pane\.emptyMessage"[\s\S]*x-text="pane\.tooLargeMessage"[\s\S]*{{end}}/
     );
+    assert.match(auditPaneTemplate, /aria-live="polite" aria-atomic="true" x-text="copyHeadersState\.error \? 'Copy failed' : \(copyHeadersState\.copied \? 'Copied' : 'Copy Headers'\)"/);
+    assert.match(auditPaneTemplate, /aria-live="polite" aria-atomic="true" x-text="copyBodyState\.error \? 'Copy failed' : \(copyBodyState\.copied \? 'Copied' : 'Copy Body'\)"/);
     assert.match(indexTemplate, /{{template "audit-pane" "auditRequestPane\(entry\)"}}/);
     assert.match(indexTemplate, /{{template "audit-pane" "auditResponsePane\(entry\)"}}/);
     assert.doesNotMatch(indexTemplate, /<section class="audit-pane">[\s\S]*<h4>Request<\/h4>/);

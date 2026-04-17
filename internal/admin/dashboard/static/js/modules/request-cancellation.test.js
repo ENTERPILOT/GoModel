@@ -211,7 +211,7 @@ test('runtimeRefreshSteps returns a safe array while the report is empty', () =>
 
     const steps = [{ name: 'providers', status: 'ok' }];
     app.runtimeRefreshReport = { steps };
-    assert.equal(app.runtimeRefreshSteps(), steps);
+    assert.strictEqual(app.runtimeRefreshSteps(), steps);
 });
 
 function loadDashboardApp(overrides = {}) {

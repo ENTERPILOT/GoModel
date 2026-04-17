@@ -1445,6 +1445,29 @@ func TestResponseBodyCapture_Write_SkipsWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestHasResponseBodyCaptureHandlesWrappedAndCyclicWriters(t *testing.T) {
+	capture := &responseBodyCapture{
+		ResponseWriter: &discardWriter{},
+		body:           &bytes.Buffer{},
+	}
+	wrapped := &unwrapTestWriter{ResponseWriter: &discardWriter{}, next: capture}
+	if !hasResponseBodyCapture(wrapped) {
+		t.Fatal("expected wrapped responseBodyCapture to be detected")
+	}
+
+	self := &selfUnwrapTestWriter{ResponseWriter: &discardWriter{}}
+	if hasResponseBodyCapture(self) {
+		t.Fatal("expected self-unwrapping writer not to report responseBodyCapture")
+	}
+
+	first := &unwrapTestWriter{ResponseWriter: &discardWriter{}}
+	second := &unwrapTestWriter{ResponseWriter: &discardWriter{}, next: first}
+	first.next = second
+	if hasResponseBodyCapture(first) {
+		t.Fatal("expected cyclic wrapper chain not to report responseBodyCapture")
+	}
+}
+
 // trackingReadCloser wraps an io.Reader and tracks whether Close was called.
 type trackingReadCloser struct {
 	io.Reader
@@ -1474,6 +1497,23 @@ type discardWriter struct{}
 func (d *discardWriter) Header() http.Header         { return http.Header{} }
 func (d *discardWriter) Write(b []byte) (int, error) { return len(b), nil }
 func (d *discardWriter) WriteHeader(int)             {}
+
+type unwrapTestWriter struct {
+	http.ResponseWriter
+	next http.ResponseWriter
+}
+
+func (w *unwrapTestWriter) Unwrap() http.ResponseWriter {
+	return w.next
+}
+
+type selfUnwrapTestWriter struct {
+	http.ResponseWriter
+}
+
+func (w *selfUnwrapTestWriter) Unwrap() http.ResponseWriter {
+	return w
+}
 
 func TestLimitedReaderRequestBodyCapture(t *testing.T) {
 	t.Run("chunked request body under limit is captured", func(t *testing.T) {
