@@ -40,6 +40,7 @@ test('auditRequestPane returns the shared request-pane contract', () => {
 
     assert.equal(pane.title, 'Request');
     assert.equal(pane.entry, entry);
+    assert.equal(JSON.stringify(pane.copyHeaders), JSON.stringify(entry.data.request_headers));
     assert.equal(JSON.stringify(pane.copyBody), JSON.stringify(entry.data.request_body));
     assert.equal(pane.showErrorMessage, false);
     assert.equal(pane.errorMessage, null);
@@ -68,6 +69,7 @@ test('auditResponsePane returns the shared response-pane contract', () => {
 
     assert.equal(pane.title, 'Response');
     assert.equal(pane.entry, entry);
+    assert.equal(JSON.stringify(pane.copyHeaders), JSON.stringify(entry.data.response_headers));
     assert.equal(JSON.stringify(pane.copyBody), JSON.stringify(entry.data.response_body));
     assert.equal(pane.showErrorMessage, true);
     assert.equal(pane.errorMessage, 'provider timeout');
@@ -254,14 +256,47 @@ test('auditPaneState copies the formatted body and resets success feedback', asy
     await paneState.copyBody();
 
     assert.deepEqual(writes, ['{\n  "model": "gpt-5",\n  "stream": false\n}']);
-    assert.equal(paneState.copyState.copied, true);
-    assert.equal(paneState.copyState.error, false);
+    assert.equal(paneState.copyBodyState.copied, true);
+    assert.equal(paneState.copyBodyState.error, false);
 
     assert.equal(typeof resetCallback, 'function');
     resetCallback();
 
-    assert.equal(paneState.copyState.copied, false);
-    assert.equal(paneState.copyState.error, false);
+    assert.equal(paneState.copyBodyState.copied, false);
+    assert.equal(paneState.copyBodyState.error, false);
+});
+
+test('auditPaneState copies the formatted headers independently from body feedback', async () => {
+    const writes = [];
+    const module = createAuditListModule({
+        setTimeout() {
+            return 1;
+        },
+        clearTimeout() {},
+        window: {
+            navigator: {
+                clipboard: {
+                    writeText(value) {
+                        writes.push(value);
+                        return Promise.resolve();
+                    }
+                }
+            }
+        }
+    });
+
+    const paneState = module.auditPaneState({
+        copyHeaders: { 'x-request-id': 'req-123' },
+        copyBody: { id: 'body-1' }
+    });
+
+    await paneState.copyHeaders();
+
+    assert.deepEqual(writes, ['{\n  "x-request-id": "req-123"\n}']);
+    assert.equal(paneState.copyHeadersState.copied, true);
+    assert.equal(paneState.copyHeadersState.error, false);
+    assert.equal(paneState.copyBodyState.copied, false);
+    assert.equal(paneState.copyBodyState.error, false);
 });
 
 test('auditPaneState marks copy failures and clears the error after reset', async () => {
@@ -292,12 +327,12 @@ test('auditPaneState marks copy failures and clears the error after reset', asyn
 
     await paneState.copyBody();
 
-    assert.equal(paneState.copyState.copied, false);
-    assert.equal(paneState.copyState.error, true);
+    assert.equal(paneState.copyBodyState.copied, false);
+    assert.equal(paneState.copyBodyState.error, true);
 
     assert.equal(typeof resetCallback, 'function');
     resetCallback();
 
-    assert.equal(paneState.copyState.copied, false);
-    assert.equal(paneState.copyState.error, false);
+    assert.equal(paneState.copyBodyState.copied, false);
+    assert.equal(paneState.copyBodyState.error, false);
 });

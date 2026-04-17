@@ -394,9 +394,6 @@ test('audit toolbar uses a full-width search row above the select row with a rig
     const controlsRule = readCSSRule(css, '.audit-filter-row-controls .pagination-btn');
     assert.match(controlsRule, /grid-column:\s*11\s*\/\s*-1/);
     assert.match(controlsRule, /justify-self:\s*end/);
-
-    const modelsFilterRule = readCSSRule(css, '.models-filter-input');
-    assert.match(modelsFilterRule, /max-width:\s*840px/);
 });
 
 test('audit entry metadata is rendered as a labeled pill row at the bottom of the expanded entry', () => {
@@ -422,8 +419,23 @@ test('audit entry metadata is rendered as a labeled pill row at the bottom of th
     assert.match(auditEntry, /<span class="provider-badge mono" x-show="entry\.client_ip" x-text="'ip: ' \+ entry\.client_ip"><\/span>/);
     assert.match(auditEntry, /<span class="provider-badge mono" x-show="workflowFailoverTarget\(entry\)" x-text="'failover: ' \+ workflowFailoverTarget\(entry\)"><\/span>/);
 
+    const requestResponseRule = readCSSRule(css, '.audit-request-response');
+    assert.match(requestResponseRule, /grid-template-columns:\s*minmax\(0,\s*1fr\) minmax\(0,\s*1fr\)/);
+    assert.match(requestResponseRule, /overflow-x:\s*auto/);
+
+    const paneRule = readCSSRule(css, '.audit-pane');
+    assert.match(paneRule, /min-width:\s*0/);
+
+    const paneBlockRule = readCSSRule(css, '.audit-pane-block');
+    assert.match(paneBlockRule, /min-width:\s*0/);
+
+    const auditJSONRule = readCSSRule(css, '.audit-json');
+    assert.match(auditJSONRule, /max-width:\s*100%/);
+    assert.match(auditJSONRule, /overflow-x:\s*auto/);
+
     const metadataRule = readCSSRule(css, '.audit-entry-metadata');
     assert.match(metadataRule, /display:\s*flex/);
+    assert.match(metadataRule, /align-items:\s*center/);
     assert.match(metadataRule, /margin-top:\s*12px/);
     assert.match(metadataRule, /padding-top:\s*12px/);
     assert.match(metadataRule, /border-top:\s*1px solid var\(--border\)/);
@@ -510,7 +522,7 @@ test('usage charts can switch between chart and table views', () => {
     assert.match(indexTemplate, /<div class="bar-chart-wrap" x-show="modelUsageView === 'chart'">[\s\S]*<canvas id="usageBarChart"><\/canvas>/);
     assert.match(indexTemplate, /<template x-if="modelUsageView === 'table'">[\s\S]*modelUsageTableRows\(\)/);
     assert.match(indexTemplate, /class="chart-view-toggle"[\s\S]*@click="toggleUsageChartView\('userPath', 'chart'\)"[\s\S]*@click="toggleUsageChartView\('userPath', 'table'\)"/);
-    assert.match(indexTemplate, /<h3 x-text="usageMode === 'costs' \? 'Cost by User Path' : 'Usage by User Path'"><\/h3>/);
+    assert.match(indexTemplate, /<div class="model-chart-section" x-show="userPathUsageChartVisible\(\)">[\s\S]*<h3 x-text="usageMode === 'costs' \? 'Cost by User Path' : 'Usage by User Path'"><\/h3>/);
     assert.match(indexTemplate, /<div class="bar-chart-wrap" x-show="userPathUsageView === 'chart'">[\s\S]*<canvas id="usageUserPathChart"><\/canvas>/);
     assert.match(indexTemplate, /<template x-if="userPathUsageView === 'table'">[\s\S]*userPathUsageTableRows\(\)/);
 });
@@ -521,7 +533,7 @@ test('audit request and response sections reuse a shared audit pane template', (
 
     assert.match(
         auditPaneTemplate,
-        /{{define "audit-pane"}}[\s\S]*x-data="auditPaneState\({{\.\}}\)"[\s\S]*x-text="pane\.title"[\s\S]*type="button"[\s\S]*@click\.prevent="copyBody\(\)"[\s\S]*x-text="formattedHeaders"[\s\S]*x-html="renderedBody"[\s\S]*x-text="pane\.emptyMessage"[\s\S]*x-text="pane\.tooLargeMessage"[\s\S]*{{end}}/
+        /{{define "audit-pane"}}[\s\S]*x-data="auditPaneState\({{\.\}}\)"[\s\S]*x-text="pane\.title"[\s\S]*x-show="pane\.showHeaders"[\s\S]*@click\.prevent="copyHeaders\(\)"[\s\S]*x-text="formattedHeaders"[\s\S]*x-show="pane\.showBody"[\s\S]*@click\.prevent="copyBody\(\)"[\s\S]*x-html="renderedBody"[\s\S]*x-text="pane\.emptyMessage"[\s\S]*x-text="pane\.tooLargeMessage"[\s\S]*{{end}}/
     );
     assert.match(indexTemplate, /{{template "audit-pane" "auditRequestPane\(entry\)"}}/);
     assert.match(indexTemplate, /{{template "audit-pane" "auditResponsePane\(entry\)"}}/);

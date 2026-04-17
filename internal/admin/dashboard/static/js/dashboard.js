@@ -604,6 +604,11 @@ function dashboard() {
       );
     },
 
+    runtimeRefreshSteps() {
+      const steps = this.runtimeRefreshReport && this.runtimeRefreshReport.steps;
+      return Array.isArray(steps) ? steps : [];
+    },
+
     runtimeRefreshStepLabel(step) {
       const name = String((step && step.name) || "").replace(/_/g, " ");
       const status = String((step && step.status) || "").trim();

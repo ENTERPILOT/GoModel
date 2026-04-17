@@ -2,28 +2,43 @@
 <section class="audit-pane" x-data="auditPaneState({{.}})">
     <div class="audit-pane-head">
         <h4 x-text="pane.title"></h4>
-        <button type="button" class="pagination-btn copy-feedback-btn"
-            :class="{ 'copy-feedback-btn-copied': copyState.copied }"
-            @click.prevent="copyBody()">
-            <template x-if="!copyState.copied">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            </template>
-            <template x-if="copyState.copied">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>
-            </template>
-            <span x-text="copyState.error ? 'Copy failed' : (copyState.copied ? 'Copied' : 'Copy Body')"></span>
-        </button>
     </div>
     <div class="audit-pane-block" x-show="pane.showErrorMessage">
         <h5>Error Message</h5>
         <pre class="audit-json" x-text="pane.errorMessage"></pre>
     </div>
     <div class="audit-pane-block" x-show="pane.showHeaders">
-        <h5>Headers</h5>
+        <div class="audit-pane-block-head">
+            <h5>Headers</h5>
+            <button type="button" class="copy-feedback-btn audit-copy-btn"
+                :class="{ 'copy-feedback-btn-copied': copyHeadersState.copied }"
+                @click.prevent="copyHeaders()">
+                <template x-if="!copyHeadersState.copied">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </template>
+                <template x-if="copyHeadersState.copied">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>
+                </template>
+                <span x-text="copyHeadersState.error ? 'Copy failed' : (copyHeadersState.copied ? 'Copied' : 'Copy Headers')"></span>
+            </button>
+        </div>
         <pre class="audit-json" x-text="formattedHeaders"></pre>
     </div>
     <div class="audit-pane-block" x-show="pane.showBody">
-        <h5>Body</h5>
+        <div class="audit-pane-block-head">
+            <h5>Body</h5>
+            <button type="button" class="copy-feedback-btn audit-copy-btn"
+                :class="{ 'copy-feedback-btn-copied': copyBodyState.copied }"
+                @click.prevent="copyBody()">
+                <template x-if="!copyBodyState.copied">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </template>
+                <template x-if="copyBodyState.copied">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>
+                </template>
+                <span x-text="copyBodyState.error ? 'Copy failed' : (copyBodyState.copied ? 'Copied' : 'Copy Body')"></span>
+            </button>
+        </div>
         <pre class="audit-json audit-json-body"
              x-html="renderedBody"
              @mousedown="startBodyInteraction($event)"

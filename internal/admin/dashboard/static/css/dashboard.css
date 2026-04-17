@@ -1324,7 +1324,7 @@ body {
 
 .filter-input {
   flex: 1;
-  max-width: 420px;
+  min-width: 400px;
   padding: 8px 12px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -1336,10 +1336,6 @@ body {
 
 .filter-input:focus {
   border-color: var(--accent);
-}
-
-.models-filter-input {
-  max-width: 840px;
 }
 
 .table-wrapper {
@@ -2472,13 +2468,14 @@ td.col-price {
 
 .audit-request-response {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
+  overflow-x: auto;
 }
 
 .audit-entry-metadata {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   margin-top: 12px;
   padding-top: 12px;
@@ -2505,6 +2502,7 @@ td.col-price {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
+  min-width: 0;
   padding: 12px;
 }
 
@@ -2527,30 +2525,76 @@ td.col-price {
   text-transform: uppercase;
   letter-spacing: 0.4px;
   color: var(--text-muted);
-  margin-bottom: 6px;
+}
+
+.audit-pane-block {
+  min-width: 0;
 }
 
 .audit-pane-block + .audit-pane-block {
   margin-top: 10px;
 }
 
+.audit-pane-block > h5 {
+  margin-bottom: 6px;
+}
+
+.audit-pane-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.audit-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  background-color: var(--bg-surface);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--text) 30%);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.audit-copy-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-surface) 80%, var(--text) 20%);
+  border-color: color-mix(in srgb, var(--border) 45%, var(--text) 55%);
+}
+
+.audit-copy-btn.copy-feedback-btn-copied {
+  background: color-mix(in srgb, var(--success) 18%, var(--bg-surface));
+}
+
 .audit-json {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 6px;
+  box-sizing: border-box;
   font-family: "SF Mono", Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.45;
+  max-width: 100%;
   padding: 10px;
   max-height: 220px;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
   white-space: pre;
   color: var(--text);
 }
 
 .audit-json-body {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
+  overflow-wrap: normal;
 }
 
 .conversation-body-highlight {
@@ -3681,10 +3725,11 @@ body.conversation-drawer-open {
   }
   .audit-entry-metadata {
     flex-direction: column;
+    align-items: flex-start;
     gap: 8px;
   }
   .audit-request-response {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .conversation-drawer {
     width: 100%;
@@ -3914,6 +3959,7 @@ body.conversation-drawer-open {
   align-items: center;
   width: 100%;
   min-width: 0;
+  overflow-x: auto;
 }
 
 /* ─── Connectors ─── */

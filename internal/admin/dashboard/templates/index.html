@@ -294,7 +294,7 @@
     </div>
 
     <!-- Usage by User Path Chart -->
-    <div class="model-chart-section" x-show="userPathUsage.length > 0">
+    <div class="model-chart-section" x-show="userPathUsageChartVisible()">
         <div class="model-chart-header">
             <h3 x-text="usageMode === 'costs' ? 'Cost by User Path' : 'Usage by User Path'"></h3>
             <div class="chart-view-toggle" role="group" aria-label="User path usage view">
@@ -478,7 +478,7 @@
                 role="status"
                 aria-live="polite"
                 x-show="runtimeRefreshReport && runtimeRefreshReport.steps && runtimeRefreshReport.steps.length > 0">
-                <template x-for="step in runtimeRefreshReport.steps" :key="step.name">
+                <template x-for="step in runtimeRefreshSteps()" :key="step.name">
                     <li :class="'runtime-refresh-step is-' + step.status" x-text="runtimeRefreshStepLabel(step)"></li>
                 </template>
             </ul>
@@ -872,7 +872,7 @@
     <!-- Filter -->
     <div class="table-toolbar" x-show="displayModels.length > 0 || modelFilter || aliasesAvailable">
         <div class="table-toolbar-main">
-            <input type="text" placeholder="Filter by provider, provider/model, alias, or owner..." x-model="modelFilter" class="filter-input models-filter-input">
+            <input type="text" placeholder="Filter by provider, provider/model, alias, or owner..." x-model="modelFilter" class="filter-input">
         </div>
         <div class="table-toolbar-actions">
             <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn" x-show="aliasesAvailable" @click="openAliasCreate()">

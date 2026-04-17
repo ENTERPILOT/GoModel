@@ -737,14 +737,24 @@ func (sc *streamConverter) formatChatChunk(delta map[string]any, finishReason an
 func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 	switch event.Type {
 	case "message_start":
+		role := ""
 		if event.Message != nil {
 			sc.msgID = event.Message.ID
 			if mergeAnthropicUsage(&sc.usage, &event.Message.Usage) {
 				sc.hasUsage = true
 			}
+			role = strings.TrimSpace(event.Message.Role)
 		}
 		if mergeAnthropicUsage(&sc.usage, event.Usage) {
 			sc.hasUsage = true
+		}
+		if event.Message != nil {
+			if role == "" {
+				role = "assistant"
+			}
+			return sc.formatChatChunk(map[string]any{
+				"role": role,
+			}, nil, nil)
 		}
 		return ""
 

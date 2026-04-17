@@ -931,6 +931,53 @@ data: [DONE]
 	}
 }
 
+func TestStreamLogObserverDefaultsMissingChatRoleToAssistant(t *testing.T) {
+	streamContent := `data: {"id":"chatcmpl-123","model":"claude-sonnet","choices":[{"delta":{"content":"Hello"}}]}
+
+data: {"id":"chatcmpl-123","model":"claude-sonnet","choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`
+	logger := &capturingLogger{cfg: Config{Enabled: true, LogBodies: true}}
+	entry := &LogEntry{
+		ID:        "test-entry",
+		Timestamp: time.Now(),
+		Data:      &LogData{},
+	}
+
+	observedStream := streaming.NewObservedSSEStream(
+		io.NopCloser(strings.NewReader(streamContent)),
+		NewStreamLogObserver(logger, entry, "/v1/chat/completions"),
+	)
+	_, err := io.Copy(io.Discard, observedStream)
+	if err != nil {
+		t.Fatalf("failed to read stream: %v", err)
+	}
+	if err := observedStream.Close(); err != nil {
+		t.Fatalf("failed to close stream: %v", err)
+	}
+
+	if len(logger.entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(logger.entries))
+	}
+	response, ok := logger.entries[0].Data.ResponseBody.(map[string]any)
+	if !ok {
+		t.Fatalf("response body type = %T, want map[string]any", logger.entries[0].Data.ResponseBody)
+	}
+	choices, ok := response["choices"].([]map[string]any)
+	if !ok || len(choices) != 1 {
+		t.Fatalf("choices = %#v, want one choice", response["choices"])
+	}
+	message, ok := choices[0]["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("message = %#v, want map[string]any", choices[0]["message"])
+	}
+	if got := message["role"]; got != "assistant" {
+		t.Fatalf("message role = %#v, want assistant", got)
+	}
+}
+
 func TestNewStreamLogObserverNilInputs(t *testing.T) {
 	if observer := NewStreamLogObserver(nil, &LogEntry{}, "/v1/chat/completions"); observer != nil {
 		t.Error("expected nil observer with nil logger")

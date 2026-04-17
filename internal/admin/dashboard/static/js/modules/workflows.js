@@ -1196,46 +1196,47 @@
                 };
             },
 
-	            workflowChartModel(source, runtime, options) {
-	                const config = options || {};
-	                const features = config.features && typeof config.features === 'object' && !Array.isArray(config.features)
+            workflowChartModel(source, runtime, options) {
+                const config = options || {};
+                const features = config.features && typeof config.features === 'object' && !Array.isArray(config.features)
                     ? this.workflowNormalizedFeatures(config.features)
                     : this.workflowSourceFeatures(source);
-	                const forceAudit = !!config.forceAudit;
-                    const highlightAsyncPresent = !!config.highlightAsyncPresent;
-	                const showGuardrails = !!features.guardrails;
-	                const showUsage = !!features.usage;
-	                const showAudit = forceAudit || !!features.audit;
-	                const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
-                    const workflowID = this.workflowChartWorkflowID(source, config.entry);
-	                return {
-	                    showGuardrails,
-	                    guardrailLabel: showGuardrails ? this.workflowGuardrailLabel(source) : '',
-	                    showCache: !!config.forceCache || !!features.cache || this.workflowRuntimeHasCache(runtime),
+                const forceAudit = !!config.forceAudit;
+                const highlightAsyncPresent = !!config.highlightAsyncPresent;
+                const showGuardrails = !!features.guardrails;
+                const showUsage = !!features.usage;
+                const showAudit = forceAudit || !!features.audit;
+                const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
+                const showFailover = !!features.fallback || this.workflowRuntimeUsedFailover(runtime);
+                const workflowID = this.workflowChartWorkflowID(source, config.entry);
+                return {
+                    showGuardrails,
+                    guardrailLabel: showGuardrails ? this.workflowGuardrailLabel(source) : '',
+                    showCache: !!config.forceCache || !!features.cache || this.workflowRuntimeHasCache(runtime),
                     cacheNodeClass: this.workflowCacheNodeClass(runtime),
                     cacheConnClass: this.workflowCacheConnClass(runtime),
                     cacheStatusLabel: this.workflowCacheStatusLabel(runtime),
-                    showFailover: !!features.fallback || this.workflowRuntimeUsedFailover(runtime),
-                    failoverNodeClass: this.workflowFailoverNodeClass(runtime),
-                    failoverConnClass: this.workflowFailoverConnClass(runtime),
-                    failoverStatusLabel: this.workflowFailoverStatusLabel(runtime),
-                    failoverTargetLabel: this.workflowFailoverTargetLabel(runtime),
+                    showFailover,
+                    failoverNodeClass: showFailover ? this.workflowFailoverNodeClass(runtime) : '',
+                    failoverConnClass: showFailover ? this.workflowFailoverConnClass(runtime) : '',
+                    failoverStatusLabel: showFailover ? this.workflowFailoverStatusLabel(runtime) : null,
+                    failoverTargetLabel: showFailover ? this.workflowFailoverTargetLabel(runtime) : null,
                     aiLabel: this.workflowAiLabel(source, runtime),
                     aiSublabel: this.workflowAiSublabel(source, runtime),
-	                    aiConnClass: this.workflowAiConnClass(runtime),
-	                    aiNodeClass: this.workflowAiNodeClass(runtime),
-	                    responseConnClass: this.workflowResponseConnClass(runtime),
-	                    responseNodeClass: this.workflowResponseNodeClass(runtime),
-				    authNodeClass: this.workflowAuthNodeClass(runtime),
-				    authNodeSublabel: this.workflowAuthNodeSublabel(runtime),
-                        usageNodeClass: this.workflowAsyncNodeClass(showUsage, highlightAsyncPresent),
-                        auditNodeClass: this.workflowAsyncNodeClass(showAudit, highlightAsyncPresent),
-	                    showAsync,
-	                    showUsage,
-	                    showAudit,
-                        workflowID
-	                };
-	            },
+                    aiConnClass: this.workflowAiConnClass(runtime),
+                    aiNodeClass: this.workflowAiNodeClass(runtime),
+                    responseConnClass: this.workflowResponseConnClass(runtime),
+                    responseNodeClass: this.workflowResponseNodeClass(runtime),
+                    authNodeClass: this.workflowAuthNodeClass(runtime),
+                    authNodeSublabel: this.workflowAuthNodeSublabel(runtime),
+                    usageNodeClass: this.workflowAsyncNodeClass(showUsage, highlightAsyncPresent),
+                    auditNodeClass: this.workflowAsyncNodeClass(showAudit, highlightAsyncPresent),
+                    showAsync,
+                    showUsage,
+                    showAudit,
+                    workflowID
+                };
+            },
 
             workflowChart(source) {
                 return this.workflowChartModel(source, null, { forceCache: false });
@@ -1300,10 +1301,12 @@
             },
 
             workflowFailoverNodeClass(runtime) {
+                if (runtime && runtime.cacheHit) return 'workflow-node-skipped';
                 return runtime && runtime.failoverTarget ? 'workflow-node-success' : '';
             },
 
             workflowFailoverConnClass(runtime) {
+                if (runtime && runtime.cacheHit) return 'workflow-conn-dim';
                 return runtime && runtime.failoverTarget ? 'workflow-conn-hit' : '';
             },
 

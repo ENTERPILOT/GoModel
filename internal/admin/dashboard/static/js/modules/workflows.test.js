@@ -429,8 +429,8 @@ test('workflowAuditChart returns the shared chart contract for audit runtime ent
             cacheConnClass: 'workflow-conn-hit',
             cacheStatusLabel: 'Hit (Semantic)',
             showFailover: true,
-            failoverNodeClass: '',
-            failoverConnClass: '',
+            failoverNodeClass: 'workflow-node-skipped',
+            failoverConnClass: 'workflow-conn-dim',
             failoverStatusLabel: null,
             failoverTargetLabel: null,
             aiLabel: 'openai',
@@ -1799,6 +1799,8 @@ test('audit runtime uses explicit cache-hit labels and highlights the uncached 2
     assert.equal(module.workflowCacheNodeClass(semanticHit), 'workflow-node-success');
     assert.equal(module.workflowCacheConnClass(semanticHit), 'workflow-conn-hit');
     assert.equal(module.workflowCacheStatusLabel(semanticHit), 'Hit (Semantic)');
+    assert.equal(module.workflowFailoverNodeClass(semanticHit), 'workflow-node-skipped');
+    assert.equal(module.workflowFailoverConnClass(semanticHit), 'workflow-conn-dim');
     assert.equal(module.workflowAiConnClass(semanticHit), 'workflow-conn-dim');
     assert.equal(module.workflowAiNodeClass(semanticHit), 'workflow-node-skipped');
     assert.equal(module.workflowResponseConnClass(semanticHit), 'workflow-conn-dim');

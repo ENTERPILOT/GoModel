@@ -174,6 +174,32 @@ test('renderUserPathChart recreates the user path chart and uses usage mode valu
     assert.equal(JSON.stringify(module.usageUserPathChart.data.datasets[0].data), JSON.stringify([0.03]));
 });
 
+test('user path usage chart hides when the only path is root', () => {
+    FakeChart.instances = [];
+    const { module } = createChartsContext();
+    module.page = 'usage';
+    module.usageUserPathChart = null;
+    module.userPathUsage = [
+        { user_path: '/', input_tokens: 21, output_tokens: 34, total_tokens: 55, total_cost: 0.03 }
+    ];
+
+    assert.equal(module.userPathUsageChartVisible(), false);
+    module.renderUserPathChart();
+
+    assert.equal(FakeChart.instances.length, 0);
+    assert.equal(module.usageUserPathChart, null);
+
+    module.userPathUsage = [
+        { user_path: '/team/alpha', input_tokens: 21, output_tokens: 34, total_tokens: 55, total_cost: 0.03 }
+    ];
+
+    assert.equal(module.userPathUsageChartVisible(), true);
+    module.renderUserPathChart();
+
+    assert.equal(FakeChart.instances.length, 1);
+    assert.notEqual(module.usageUserPathChart, null);
+});
+
 test('usage chart table rows use the same selected metric ordering as charts', () => {
     const { module } = createChartsContext();
     module.usageMode = 'tokens';
