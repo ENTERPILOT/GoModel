@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+const (
+	// DefaultMemoryStoreTTL bounds in-memory response retention by age.
+	DefaultMemoryStoreTTL = 24 * time.Hour
+	// DefaultMemoryStoreMaxEntries bounds in-memory response retention by count.
+	DefaultMemoryStoreMaxEntries = 10000
+)
+
 // MemoryStore keeps response snapshots in process memory.
 // Data survives across requests but not process restarts.
 type MemoryStore struct {
@@ -22,26 +29,32 @@ type MemoryStoreOption func(*MemoryStore)
 // WithTTL expires stored responses after ttl. Non-positive values disable TTL.
 func WithTTL(ttl time.Duration) MemoryStoreOption {
 	return func(s *MemoryStore) {
-		if ttl > 0 {
-			s.ttl = ttl
-		}
+		s.ttl = ttl
 	}
 }
 
 // WithMaxEntries caps stored responses with FIFO eviction. Non-positive values disable the cap.
 func WithMaxEntries(maxEntries int) MemoryStoreOption {
 	return func(s *MemoryStore) {
-		if maxEntries > 0 {
-			s.maxEntries = maxEntries
-		}
+		s.maxEntries = maxEntries
+	}
+}
+
+// WithUnboundedRetention disables default in-memory retention bounds.
+func WithUnboundedRetention() MemoryStoreOption {
+	return func(s *MemoryStore) {
+		s.ttl = 0
+		s.maxEntries = 0
 	}
 }
 
 // NewMemoryStore creates an empty in-memory response store.
-// By default retention is unbounded; pass WithTTL or WithMaxEntries to opt in.
+// By default retention is bounded; pass WithUnboundedRetention to opt out.
 func NewMemoryStore(options ...MemoryStoreOption) *MemoryStore {
 	store := &MemoryStore{
-		items: make(map[string]*StoredResponse),
+		items:      make(map[string]*StoredResponse),
+		ttl:        DefaultMemoryStoreTTL,
+		maxEntries: DefaultMemoryStoreMaxEntries,
 	}
 	for _, option := range options {
 		if option != nil {

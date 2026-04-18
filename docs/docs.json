@@ -39,7 +39,6 @@
                             "features/aliases",
                             "features/user-path",
                             "features/passthrough-api",
-                            "features/responses-api",
                             "features/cache",
                             "features/failover"
                         ]
@@ -50,6 +49,7 @@
                         "pages": [
                             "advanced/configuration",
                             "advanced/config-yaml",
+                            "advanced/responses-api",
                             "advanced/guardrails",
                             "advanced/workflows",
                             "advanced/admin-endpoints"

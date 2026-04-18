@@ -69,7 +69,11 @@ func normalizedResponseInputAny(responseID string, index int, item any) json.Raw
 func normalizedResponseInputRaw(responseID string, index int, raw json.RawMessage) json.RawMessage {
 	var item map[string]any
 	if err := json.Unmarshal(raw, &item); err != nil {
+		var decoded string
 		text := strings.TrimSpace(string(raw))
+		if stringErr := json.Unmarshal(raw, &decoded); stringErr == nil {
+			text = strings.TrimSpace(decoded)
+		}
 		if text == "" || text == "null" {
 			return nil
 		}

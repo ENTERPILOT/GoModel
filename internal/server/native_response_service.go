@@ -121,8 +121,9 @@ func (s *nativeResponseService) CancelResponse(c *echo.Context) error {
 		if resp == nil {
 			return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty response", nil))
 		}
+		normalizeCanceledResponse(resp, id, providerType)
 		stored.Response = resp
-		stored.Provider = firstNonEmpty(resp.Provider, providerType)
+		stored.Provider = providerType
 		if updateErr := s.responseStore.Update(ctx, stored); updateErr != nil && !errors.Is(updateErr, responsestore.ErrNotFound) {
 			return handleError(c, core.NewProviderError("response_store", http.StatusInternalServerError, "failed to persist cancelled response", updateErr))
 		}
@@ -139,6 +140,7 @@ func (s *nativeResponseService) CancelResponse(c *echo.Context) error {
 	if resp == nil {
 		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty response", nil))
 	}
+	normalizeCanceledResponse(resp, id, providerType)
 	auditResponseEntry(c, providerType)
 	return c.JSON(http.StatusOK, resp)
 }
@@ -329,6 +331,15 @@ func (s *nativeResponseService) cancelNativeResponseByRequest(ctx context.Contex
 	return nativeResponseByProvider(ctx, s.provider, providerType, func(router core.NativeResponseLifecycleRoutableProvider, candidate string) (*core.ResponsesResponse, error) {
 		return router.CancelResponse(ctx, candidate, id)
 	})
+}
+
+func normalizeCanceledResponse(resp *core.ResponsesResponse, id, providerType string) {
+	if resp == nil {
+		return
+	}
+	resp.ID = id
+	resp.Object = "response"
+	resp.Provider = providerType
 }
 
 func (s *nativeResponseService) deleteNativeResponse(ctx context.Context, providerType, id string) (*core.ResponseDeleteResponse, error) {

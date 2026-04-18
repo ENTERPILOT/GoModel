@@ -1010,17 +1010,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1030,17 +1030,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1050,17 +1050,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1193,17 +1193,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1213,17 +1213,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1233,17 +1233,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1376,17 +1376,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1396,17 +1396,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1416,17 +1416,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1559,17 +1559,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1579,17 +1579,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1599,17 +1599,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1742,17 +1742,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1762,17 +1762,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1782,17 +1782,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1925,17 +1925,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1945,17 +1945,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1965,17 +1965,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2108,17 +2108,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2128,17 +2128,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2148,17 +2148,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2211,7 +2211,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2221,7 +2221,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2231,7 +2231,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2241,7 +2241,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2285,7 +2285,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2295,7 +2295,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2305,7 +2305,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2351,7 +2351,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2361,7 +2361,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2371,7 +2371,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2381,7 +2381,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2391,7 +2391,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2437,7 +2437,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2447,7 +2447,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2457,7 +2457,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2467,7 +2467,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2477,7 +2477,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2523,7 +2523,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2533,7 +2533,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2543,7 +2543,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2553,7 +2553,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2563,7 +2563,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2573,7 +2573,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2624,12 +2624,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2639,12 +2639,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2654,12 +2654,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2669,12 +2669,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2720,7 +2720,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2730,7 +2730,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2740,7 +2740,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2750,7 +2750,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2819,7 +2819,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2829,7 +2829,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2839,7 +2839,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2849,7 +2849,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2917,7 +2917,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2927,7 +2927,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2937,7 +2937,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2991,7 +2991,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3001,7 +3001,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3011,7 +3011,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3021,7 +3021,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3073,7 +3073,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3083,7 +3083,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3093,7 +3093,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3103,7 +3103,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3158,7 +3158,7 @@
             "content": {
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3168,7 +3168,7 @@
             "content": {
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3178,7 +3178,7 @@
             "content": {
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3188,7 +3188,7 @@
             "content": {
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3223,7 +3223,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3233,7 +3233,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3276,12 +3276,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3291,12 +3291,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3306,12 +3306,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3321,12 +3321,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3364,7 +3364,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3374,7 +3374,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3384,7 +3384,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3394,7 +3394,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3432,7 +3432,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3442,7 +3442,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3452,7 +3452,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3462,7 +3462,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3498,6 +3498,54 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Fields to include in the response",
+            "name": "include",
+            "in": "query",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "description": "Fields to include in the response",
+            "name": "include[]",
+            "in": "query",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "description": "Whether to include obfuscated response data",
+            "name": "include_obfuscation",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Input item offset for providers that support it",
+            "name": "starting_after",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Whether to stream the retrieved response",
+            "name": "stream",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -3516,7 +3564,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3526,7 +3574,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3536,7 +3584,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3546,7 +3594,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3556,7 +3604,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3608,7 +3656,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3618,7 +3666,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3628,7 +3676,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3638,7 +3686,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3648,7 +3696,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3702,7 +3750,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3712,7 +3760,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3722,7 +3770,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3732,7 +3780,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3742,7 +3790,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3788,6 +3836,30 @@
             }
           },
           {
+            "description": "Fields to include in listed input items",
+            "name": "include",
+            "in": "query",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "description": "Fields to include in listed input items",
+            "name": "include[]",
+            "in": "query",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
             "description": "Maximum items to return (1-100, default 20)",
             "name": "limit",
             "in": "query",
@@ -3824,7 +3896,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3834,7 +3906,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3844,7 +3916,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3854,7 +3926,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3864,7 +3936,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -4901,6 +4973,33 @@
           },
           "object": {
             "type": "string"
+          }
+        }
+      },
+      "core.OpenAIErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/core.OpenAIErrorObject"
+          }
+        }
+      },
+      "core.OpenAIErrorObject": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string"
+          },
+          "param": {
+            "type": "string",
+            "nullable": true
+          },
+          "type": {
+            "$ref": "#/components/schemas/core.ErrorType"
           }
         }
       },

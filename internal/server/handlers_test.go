@@ -396,11 +396,17 @@ type mockProvider struct {
 	responseCancelCalls         []responseCall
 	responseDeleteCalls         []responseCall
 	capturedResponseUtilityReqs []*core.ResponsesRequest
+	capturedResponseUtility     []responseUtilityCall
 }
 
 type responseCall struct {
 	provider string
 	id       string
+}
+
+type responseUtilityCall struct {
+	provider  string
+	operation string
 }
 
 type fileListCall struct {
@@ -776,8 +782,12 @@ func (m *mockProvider) DeleteResponse(_ context.Context, providerType, id string
 	return &core.ResponseDeleteResponse{ID: id, Object: "response", Deleted: true}, nil
 }
 
-func (m *mockProvider) CountResponseInputTokens(_ context.Context, _ string, req *core.ResponsesRequest) (*core.ResponseInputTokensResponse, error) {
+func (m *mockProvider) CountResponseInputTokens(_ context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseInputTokensResponse, error) {
 	m.capturedResponseUtilityReqs = append(m.capturedResponseUtilityReqs, req)
+	m.capturedResponseUtility = append(m.capturedResponseUtility, responseUtilityCall{
+		provider:  providerType,
+		operation: "CountResponseInputTokens",
+	})
 	if m.responseUtilityErr != nil {
 		return nil, m.responseUtilityErr
 	}
@@ -789,6 +799,10 @@ func (m *mockProvider) CountResponseInputTokens(_ context.Context, _ string, req
 
 func (m *mockProvider) CompactResponse(_ context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseCompactResponse, error) {
 	m.capturedResponseUtilityReqs = append(m.capturedResponseUtilityReqs, req)
+	m.capturedResponseUtility = append(m.capturedResponseUtility, responseUtilityCall{
+		provider:  providerType,
+		operation: "CompactResponse",
+	})
 	if m.responseUtilityErr != nil {
 		return nil, m.responseUtilityErr
 	}
@@ -4636,7 +4650,7 @@ func TestResponsesLifecycle_RetrievesStoredResponseAndInputItems(t *testing.T) {
 }
 
 func TestResponsesLifecycle_StoresConcreteProviderName(t *testing.T) {
-	store := responsestore.NewMemoryStore()
+	store := responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
 	provider := &mockProvider{
 		supportedModels: []string{"gpt-5-mini"},
 		providerTypes: map[string]string{
@@ -4714,8 +4728,8 @@ func TestResponsesLifecycle_ReturnsSuccessWhenSnapshotStoreFails(t *testing.T) {
 
 func TestHandlerSetResponseStoreUpdatesCachedTranslatedInferenceService(t *testing.T) {
 	handler := NewHandler(&mockProvider{}, nil, nil, nil)
-	first := responsestore.NewMemoryStore()
-	second := responsestore.NewMemoryStore()
+	first := responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
+	second := responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
 
 	handler.SetResponseStore(first)
 	service := handler.translatedInference()
@@ -4860,6 +4874,13 @@ func TestResponsesUtilityRoutes(t *testing.T) {
 	}
 	if len(provider.capturedResponseUtilityReqs) != 2 {
 		t.Fatalf("utility calls = %d, want 2", len(provider.capturedResponseUtilityReqs))
+	}
+	wantUtility := []responseUtilityCall{
+		{provider: "mock", operation: "CountResponseInputTokens"},
+		{provider: "mock", operation: "CompactResponse"},
+	}
+	if !reflect.DeepEqual(provider.capturedResponseUtility, wantUtility) {
+		t.Fatalf("utility routing = %+v, want %+v", provider.capturedResponseUtility, wantUtility)
 	}
 }
 

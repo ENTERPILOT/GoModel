@@ -28,7 +28,7 @@ func TestMemoryStoreExpiresResponses(t *testing.T) {
 
 func TestMemoryStoreMaxEntriesEvictsOldest(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(WithMaxEntries(2))
+	store := NewMemoryStore(WithTTL(0), WithMaxEntries(2))
 	now := time.Now().UTC()
 
 	for _, response := range []*StoredResponse{
@@ -51,9 +51,20 @@ func TestMemoryStoreMaxEntriesEvictsOldest(t *testing.T) {
 	}
 }
 
-func TestMemoryStoreDefaultRetentionIsUnbounded(t *testing.T) {
-	ctx := context.Background()
+func TestMemoryStoreDefaultRetentionIsBounded(t *testing.T) {
 	store := NewMemoryStore()
+
+	if store.ttl != DefaultMemoryStoreTTL {
+		t.Fatalf("ttl = %s, want %s", store.ttl, DefaultMemoryStoreTTL)
+	}
+	if store.maxEntries != DefaultMemoryStoreMaxEntries {
+		t.Fatalf("maxEntries = %d, want %d", store.maxEntries, DefaultMemoryStoreMaxEntries)
+	}
+}
+
+func TestMemoryStoreAllowsExplicitUnboundedRetention(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(WithUnboundedRetention())
 
 	err := store.Create(ctx, &StoredResponse{
 		Response: &core.ResponsesResponse{ID: "resp_old", Object: "response"},

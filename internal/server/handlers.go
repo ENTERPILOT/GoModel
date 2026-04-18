@@ -80,17 +80,20 @@ func newHandlerWithAuthorizer(
 	translatedRequestPatcher TranslatedRequestPatcher,
 ) *Handler {
 	return &Handler{
-		provider:                     provider,
-		modelResolver:                modelResolver,
-		modelAuthorizer:              modelAuthorizer,
-		fallbackResolver:             fallbackResolver,
-		workflowPolicyResolver:       workflowPolicyResolver,
-		translatedRequestPatcher:     translatedRequestPatcher,
-		logger:                       logger,
-		usageLogger:                  usageLogger,
-		pricingResolver:              pricingResolver,
-		batchStore:                   batchstore.NewMemoryStore(),
-		responseStore:                responsestore.NewMemoryStore(),
+		provider:                 provider,
+		modelResolver:            modelResolver,
+		modelAuthorizer:          modelAuthorizer,
+		fallbackResolver:         fallbackResolver,
+		workflowPolicyResolver:   workflowPolicyResolver,
+		translatedRequestPatcher: translatedRequestPatcher,
+		logger:                   logger,
+		usageLogger:              usageLogger,
+		pricingResolver:          pricingResolver,
+		batchStore:               batchstore.NewMemoryStore(),
+		responseStore: responsestore.NewMemoryStore(
+			responsestore.WithTTL(responsestore.DefaultMemoryStoreTTL),
+			responsestore.WithMaxEntries(responsestore.DefaultMemoryStoreMaxEntries),
+		),
 		normalizePassthroughV1Prefix: true,
 		enabledPassthroughProviders:  normalizeEnabledPassthroughProviders(defaultEnabledPassthroughProviders),
 	}
@@ -201,9 +204,9 @@ func (h *Handler) passthrough() *passthroughService {
 // @Success      201       {file}    file    "Opaque upstream response body"
 // @Success      202       {file}    file    "Opaque upstream response body"
 // @Success      204       {string}  string  "No Content passthrough response"
-// @Failure      400       {object}  core.GatewayError
-// @Failure      401       {object}  core.GatewayError
-// @Failure      502       {object}  core.GatewayError
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /p/{provider}/{endpoint} [get]
 // @Router       /p/{provider}/{endpoint} [post]
 // @Router       /p/{provider}/{endpoint} [put]
@@ -225,10 +228,10 @@ func (h *Handler) ProviderPassthrough(c *echo.Context) error {
 // @Security     BearerAuth
 // @Param        request  body      core.ChatRequest  true  "Chat completion request"
 // @Success      200      {object}  core.ChatResponse  "JSON response or SSE stream when stream=true"
-// @Failure      400      {object}  core.GatewayError
-// @Failure      401      {object}  core.GatewayError
-// @Failure      429      {object}  core.GatewayError
-// @Failure      502      {object}  core.GatewayError
+// @Failure      400      {object}  core.OpenAIErrorEnvelope
+// @Failure      401      {object}  core.OpenAIErrorEnvelope
+// @Failure      429      {object}  core.OpenAIErrorEnvelope
+// @Failure      502      {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/chat/completions [post]
 func (h *Handler) ChatCompletion(c *echo.Context) error {
 	return h.translatedInference().ChatCompletion(c)
@@ -252,8 +255,8 @@ func (h *Handler) Health(c *echo.Context) error {
 // @Produce      json
 // @Security     BearerAuth
 // @Success      200  {object}  core.ModelsResponse
-// @Failure      401  {object}  core.GatewayError
-// @Failure      502  {object}  core.GatewayError
+// @Failure      401  {object}  core.OpenAIErrorEnvelope
+// @Failure      502  {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/models [get]
 func (h *Handler) ListModels(c *echo.Context) error {
 	// Create context with request ID for provider
@@ -313,9 +316,9 @@ func (h *Handler) ListModels(c *echo.Context) error {
 // @Param        purpose   formData  string  true   "File purpose"
 // @Param        file      formData  file    true   "File to upload"
 // @Success      200       {object}  core.FileObject
-// @Failure      400       {object}  core.GatewayError
-// @Failure      401       {object}  core.GatewayError
-// @Failure      502       {object}  core.GatewayError
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/files [post]
 func (h *Handler) CreateFile(c *echo.Context) error {
 	return h.nativeFiles().CreateFile(c)
@@ -332,10 +335,10 @@ func (h *Handler) CreateFile(c *echo.Context) error {
 // @Param        after     query     string  false  "Pagination cursor"
 // @Param        limit     query     int     false  "Maximum items to return (1-100, default 20)"
 // @Success      200       {object}  core.FileListResponse
-// @Failure      400       {object}  core.GatewayError
-// @Failure      401       {object}  core.GatewayError
-// @Failure      404       {object}  core.GatewayError
-// @Failure      502       {object}  core.GatewayError
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      404       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/files [get]
 func (h *Handler) ListFiles(c *echo.Context) error {
 	return h.nativeFiles().ListFiles(c)
@@ -350,10 +353,10 @@ func (h *Handler) ListFiles(c *echo.Context) error {
 // @Param        id        path      string  true   "File ID"
 // @Param        provider  query     string  false  "Provider override"
 // @Success      200       {object}  core.FileObject
-// @Failure      400       {object}  core.GatewayError
-// @Failure      401       {object}  core.GatewayError
-// @Failure      404       {object}  core.GatewayError
-// @Failure      502       {object}  core.GatewayError
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      404       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/files/{id} [get]
 func (h *Handler) GetFile(c *echo.Context) error {
 	return h.nativeFiles().GetFile(c)
@@ -368,10 +371,10 @@ func (h *Handler) GetFile(c *echo.Context) error {
 // @Param        id        path      string  true   "File ID"
 // @Param        provider  query     string  false  "Provider override"
 // @Success      200       {object}  core.FileDeleteResponse
-// @Failure      400       {object}  core.GatewayError
-// @Failure      401       {object}  core.GatewayError
-// @Failure      404       {object}  core.GatewayError
-// @Failure      502       {object}  core.GatewayError
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      404       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/files/{id} [delete]
 func (h *Handler) DeleteFile(c *echo.Context) error {
 	return h.nativeFiles().DeleteFile(c)
@@ -386,10 +389,10 @@ func (h *Handler) DeleteFile(c *echo.Context) error {
 // @Param        id        path   string  true   "File ID"
 // @Param        provider  query  string  false  "Provider override"
 // @Success      200       {file}  file  "Raw file content"
-// @Failure      400       {object}  core.GatewayError
-// @Failure      401       {object}  core.GatewayError
-// @Failure      404       {object}  core.GatewayError
-// @Failure      502       {object}  core.GatewayError
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      404       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/files/{id}/content [get]
 func (h *Handler) GetFileContent(c *echo.Context) error {
 	return h.nativeFiles().GetFileContent(c)
@@ -405,10 +408,10 @@ func (h *Handler) GetFileContent(c *echo.Context) error {
 // @Security     BearerAuth
 // @Param        request  body      core.ResponsesRequest  true  "Responses API request"
 // @Success      200      {object}  core.ResponsesResponse  "JSON response or SSE stream when stream=true"
-// @Failure      400      {object}  core.GatewayError
-// @Failure      401      {object}  core.GatewayError
-// @Failure      429      {object}  core.GatewayError
-// @Failure      502      {object}  core.GatewayError
+// @Failure      400      {object}  core.OpenAIErrorEnvelope
+// @Failure      401      {object}  core.OpenAIErrorEnvelope
+// @Failure      429      {object}  core.OpenAIErrorEnvelope
+// @Failure      502      {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/responses [post]
 func (h *Handler) Responses(c *echo.Context) error {
 	return h.translatedInference().Responses(c)
@@ -422,12 +425,17 @@ func (h *Handler) Responses(c *echo.Context) error {
 // @Security     BearerAuth
 // @Param        id        path      string  true   "Response ID"
 // @Param        provider  query     string  false  "Provider override for native lookups"
+// @Param        include   query     []string false "Fields to include in the response" collectionFormat(multi)
+// @Param        include[] query     []string false "Fields to include in the response" collectionFormat(multi)
+// @Param        include_obfuscation query bool false "Whether to include obfuscated response data"
+// @Param        starting_after query int false "Input item offset for providers that support it"
+// @Param        stream    query     bool    false  "Whether to stream the retrieved response"
 // @Success      200       {object}  core.ResponsesResponse
-// @Failure      400       {object}  core.GatewayError
-// @Failure      401       {object}  core.GatewayError
-// @Failure      404       {object}  core.GatewayError
-// @Failure      501       {object}  core.GatewayError
-// @Failure      502       {object}  core.GatewayError
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      404       {object}  core.OpenAIErrorEnvelope
+// @Failure      501       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/responses/{id} [get]
 func (h *Handler) GetResponse(c *echo.Context) error {
 	return h.nativeResponses().GetResponse(c)
@@ -442,14 +450,16 @@ func (h *Handler) GetResponse(c *echo.Context) error {
 // @Param        id        path      string  true   "Response ID"
 // @Param        provider  query     string  false  "Provider override for native lookups"
 // @Param        after     query     string  false  "Pagination cursor"
+// @Param        include   query     []string false "Fields to include in listed input items" collectionFormat(multi)
+// @Param        include[] query     []string false "Fields to include in listed input items" collectionFormat(multi)
 // @Param        limit     query     int     false  "Maximum items to return (1-100, default 20)"
 // @Param        order     query     string  false  "Sort order: asc or desc"  Enums(asc, desc)
 // @Success      200       {object}  core.ResponseInputItemListResponse
-// @Failure      400       {object}  core.GatewayError
-// @Failure      401       {object}  core.GatewayError
-// @Failure      404       {object}  core.GatewayError
-// @Failure      501       {object}  core.GatewayError
-// @Failure      502       {object}  core.GatewayError
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      404       {object}  core.OpenAIErrorEnvelope
+// @Failure      501       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/responses/{id}/input_items [get]
 func (h *Handler) ListResponseInputItems(c *echo.Context) error {
 	return h.nativeResponses().ListResponseInputItems(c)
@@ -464,11 +474,11 @@ func (h *Handler) ListResponseInputItems(c *echo.Context) error {
 // @Param        id        path      string  true   "Response ID"
 // @Param        provider  query     string  false  "Provider override for native cancellation"
 // @Success      200       {object}  core.ResponsesResponse
-// @Failure      400       {object}  core.GatewayError
-// @Failure      401       {object}  core.GatewayError
-// @Failure      404       {object}  core.GatewayError
-// @Failure      501       {object}  core.GatewayError
-// @Failure      502       {object}  core.GatewayError
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      404       {object}  core.OpenAIErrorEnvelope
+// @Failure      501       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/responses/{id}/cancel [post]
 func (h *Handler) CancelResponse(c *echo.Context) error {
 	return h.nativeResponses().CancelResponse(c)
@@ -483,11 +493,11 @@ func (h *Handler) CancelResponse(c *echo.Context) error {
 // @Param        id        path      string  true   "Response ID"
 // @Param        provider  query     string  false  "Provider override for native deletion"
 // @Success      200       {object}  core.ResponseDeleteResponse
-// @Failure      400       {object}  core.GatewayError
-// @Failure      401       {object}  core.GatewayError
-// @Failure      404       {object}  core.GatewayError
-// @Failure      501       {object}  core.GatewayError
-// @Failure      502       {object}  core.GatewayError
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      404       {object}  core.OpenAIErrorEnvelope
+// @Failure      501       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/responses/{id} [delete]
 func (h *Handler) DeleteResponse(c *echo.Context) error {
 	return h.nativeResponses().DeleteResponse(c)
@@ -502,10 +512,10 @@ func (h *Handler) DeleteResponse(c *echo.Context) error {
 // @Security     BearerAuth
 // @Param        request  body      core.ResponsesRequest  true  "Responses API request"
 // @Success      200      {object}  core.ResponseInputTokensResponse
-// @Failure      400      {object}  core.GatewayError
-// @Failure      401      {object}  core.GatewayError
-// @Failure      501      {object}  core.GatewayError
-// @Failure      502      {object}  core.GatewayError
+// @Failure      400      {object}  core.OpenAIErrorEnvelope
+// @Failure      401      {object}  core.OpenAIErrorEnvelope
+// @Failure      501      {object}  core.OpenAIErrorEnvelope
+// @Failure      502      {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/responses/input_tokens [post]
 func (h *Handler) ResponseInputTokens(c *echo.Context) error {
 	return h.nativeResponses().CountResponseInputTokens(c)
@@ -520,10 +530,10 @@ func (h *Handler) ResponseInputTokens(c *echo.Context) error {
 // @Security     BearerAuth
 // @Param        request  body      core.ResponsesRequest  true  "Responses API request"
 // @Success      200      {object}  core.ResponseCompactResponse
-// @Failure      400      {object}  core.GatewayError
-// @Failure      401      {object}  core.GatewayError
-// @Failure      501      {object}  core.GatewayError
-// @Failure      502      {object}  core.GatewayError
+// @Failure      400      {object}  core.OpenAIErrorEnvelope
+// @Failure      401      {object}  core.OpenAIErrorEnvelope
+// @Failure      501      {object}  core.OpenAIErrorEnvelope
+// @Failure      502      {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/responses/compact [post]
 func (h *Handler) CompactResponse(c *echo.Context) error {
 	return h.nativeResponses().CompactResponse(c)
@@ -538,10 +548,10 @@ func (h *Handler) CompactResponse(c *echo.Context) error {
 // @Security     BearerAuth
 // @Param        request  body      core.EmbeddingRequest  true  "Embeddings request"
 // @Success      200      {object}  core.EmbeddingResponse
-// @Failure      400      {object}  core.GatewayError
-// @Failure      401      {object}  core.GatewayError
-// @Failure      429      {object}  core.GatewayError
-// @Failure      502      {object}  core.GatewayError
+// @Failure      400      {object}  core.OpenAIErrorEnvelope
+// @Failure      401      {object}  core.OpenAIErrorEnvelope
+// @Failure      429      {object}  core.OpenAIErrorEnvelope
+// @Failure      502      {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/embeddings [post]
 func (h *Handler) Embeddings(c *echo.Context) error {
 	return h.translatedInference().Embeddings(c)
@@ -559,9 +569,9 @@ func (h *Handler) Embeddings(c *echo.Context) error {
 // @Security     BearerAuth
 // @Param        request  body      core.BatchRequest  true  "Batch request"
 // @Success      200      {object}  core.BatchResponse
-// @Failure      400      {object}  core.GatewayError
-// @Failure      401      {object}  core.GatewayError
-// @Failure      502      {object}  core.GatewayError
+// @Failure      400      {object}  core.OpenAIErrorEnvelope
+// @Failure      401      {object}  core.OpenAIErrorEnvelope
+// @Failure      502      {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/batches [post]
 func (h *Handler) Batches(c *echo.Context) error {
 	return h.nativeBatch().Batches(c)
@@ -575,11 +585,11 @@ func (h *Handler) Batches(c *echo.Context) error {
 // @Security     BearerAuth
 // @Param        id   path      string  true  "Batch ID"
 // @Success      200  {object}  core.BatchResponse
-// @Failure      400  {object}  core.GatewayError
-// @Failure      401  {object}  core.GatewayError
-// @Failure      404  {object}  core.GatewayError
-// @Failure      500  {object}  core.GatewayError
-// @Failure      502  {object}  core.GatewayError
+// @Failure      400  {object}  core.OpenAIErrorEnvelope
+// @Failure      401  {object}  core.OpenAIErrorEnvelope
+// @Failure      404  {object}  core.OpenAIErrorEnvelope
+// @Failure      500  {object}  core.OpenAIErrorEnvelope
+// @Failure      502  {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/batches/{id} [get]
 func (h *Handler) GetBatch(c *echo.Context) error {
 	return h.nativeBatch().GetBatch(c)
@@ -594,10 +604,10 @@ func (h *Handler) GetBatch(c *echo.Context) error {
 // @Param        after  query     string  false  "Pagination cursor"
 // @Param        limit  query     int     false  "Maximum items to return (1-100, default 20)"
 // @Success      200    {object}  core.BatchListResponse
-// @Failure      400    {object}  core.GatewayError
-// @Failure      401    {object}  core.GatewayError
-// @Failure      404    {object}  core.GatewayError
-// @Failure      500    {object}  core.GatewayError
+// @Failure      400    {object}  core.OpenAIErrorEnvelope
+// @Failure      401    {object}  core.OpenAIErrorEnvelope
+// @Failure      404    {object}  core.OpenAIErrorEnvelope
+// @Failure      500    {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/batches [get]
 func (h *Handler) ListBatches(c *echo.Context) error {
 	return h.nativeBatch().ListBatches(c)
@@ -612,11 +622,11 @@ func (h *Handler) ListBatches(c *echo.Context) error {
 // @Security     BearerAuth
 // @Param        id   path      string  true  "Batch ID"
 // @Success      200  {object}  core.BatchResponse
-// @Failure      400  {object}  core.GatewayError
-// @Failure      401  {object}  core.GatewayError
-// @Failure      404  {object}  core.GatewayError
-// @Failure      500  {object}  core.GatewayError
-// @Failure      502  {object}  core.GatewayError
+// @Failure      400  {object}  core.OpenAIErrorEnvelope
+// @Failure      401  {object}  core.OpenAIErrorEnvelope
+// @Failure      404  {object}  core.OpenAIErrorEnvelope
+// @Failure      500  {object}  core.OpenAIErrorEnvelope
+// @Failure      502  {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/batches/{id}/cancel [post]
 func (h *Handler) CancelBatch(c *echo.Context) error {
 	return h.nativeBatch().CancelBatch(c)
@@ -630,12 +640,12 @@ func (h *Handler) CancelBatch(c *echo.Context) error {
 // @Security     BearerAuth
 // @Param        id   path      string  true  "Batch ID"
 // @Success      200  {object}  core.BatchResultsResponse
-// @Failure      400  {object}  core.GatewayError
-// @Failure      401  {object}  core.GatewayError
-// @Failure      404  {object}  core.GatewayError
-// @Failure      409  {object}  core.GatewayError
-// @Failure      500  {object}  core.GatewayError
-// @Failure      502  {object}  core.GatewayError
+// @Failure      400  {object}  core.OpenAIErrorEnvelope
+// @Failure      401  {object}  core.OpenAIErrorEnvelope
+// @Failure      404  {object}  core.OpenAIErrorEnvelope
+// @Failure      409  {object}  core.OpenAIErrorEnvelope
+// @Failure      500  {object}  core.OpenAIErrorEnvelope
+// @Failure      502  {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/batches/{id}/results [get]
 func (h *Handler) BatchResults(c *echo.Context) error {
 	return h.nativeBatch().BatchResults(c)

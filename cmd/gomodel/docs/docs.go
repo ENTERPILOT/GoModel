@@ -768,19 +768,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -849,19 +849,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -930,19 +930,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1011,19 +1011,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1092,19 +1092,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1173,19 +1173,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1254,19 +1254,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1310,25 +1310,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1370,19 +1370,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1421,31 +1421,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1487,31 +1487,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1550,37 +1550,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1625,25 +1625,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "429": {
                         "description": "Too Many Requests",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1687,25 +1687,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "429": {
                         "description": "Too Many Requests",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1761,25 +1761,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1832,19 +1832,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1889,25 +1889,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -1950,25 +1950,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -2013,25 +2013,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -2061,13 +2061,13 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -2112,25 +2112,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "429": {
                         "description": "Too Many Requests",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -2174,25 +2174,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "501": {
                         "description": "Not Implemented",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -2236,25 +2236,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "501": {
                         "description": "Not Implemented",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -2287,6 +2287,44 @@ const docTemplate = `{
                         "description": "Provider override for native lookups",
                         "name": "provider",
                         "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Fields to include in the response",
+                        "name": "include",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Fields to include in the response",
+                        "name": "include[]",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Whether to include obfuscated response data",
+                        "name": "include_obfuscation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Input item offset for providers that support it",
+                        "name": "starting_after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Whether to stream the retrieved response",
+                        "name": "stream",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2299,31 +2337,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "501": {
                         "description": "Not Implemented",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -2366,31 +2404,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "501": {
                         "description": "Not Implemented",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -2435,31 +2473,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "501": {
                         "description": "Not Implemented",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -2500,6 +2538,26 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Fields to include in listed input items",
+                        "name": "include",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Fields to include in listed input items",
+                        "name": "include[]",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "Maximum items to return (1-100, default 20)",
                         "name": "limit",
@@ -2526,31 +2584,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "501": {
                         "description": "Not Implemented",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     }
                 },
@@ -3558,6 +3616,33 @@ const docTemplate = `{
                 },
                 "object": {
                     "type": "string"
+                }
+            }
+        },
+        "core.OpenAIErrorEnvelope": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/core.OpenAIErrorObject"
+                }
+            }
+        },
+        "core.OpenAIErrorObject": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "message": {
+                    "type": "string"
+                },
+                "param": {
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "type": {
+                    "$ref": "#/definitions/core.ErrorType"
                 }
             }
         },
