@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -4733,14 +4734,34 @@ func TestHandlerSetResponseStoreUpdatesCachedTranslatedInferenceService(t *testi
 
 	handler.SetResponseStore(first)
 	service := handler.translatedInference()
-	if service.responseStore != first {
+	if service.currentResponseStore() != first {
 		t.Fatal("translatedInferenceService did not capture first response store")
 	}
 
 	handler.SetResponseStore(second)
-	if service.responseStore != second {
+	if service.currentResponseStore() != second {
 		t.Fatal("SetResponseStore did not update cached translatedInferenceService response store")
 	}
+}
+
+func TestHandlerSetResponseStoreIsConcurrentSafe(t *testing.T) {
+	handler := NewHandler(&mockProvider{}, nil, nil, nil)
+	_ = handler.translatedInference()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			handler.SetResponseStore(responsestore.NewMemoryStore(responsestore.WithUnboundedRetention()))
+		}()
+		go func() {
+			defer wg.Done()
+			_ = handler.translatedInference().currentResponseStore()
+			_ = handler.nativeResponses()
+		}()
+	}
+	wg.Wait()
 }
 
 func TestResponsesLifecycle_CancelUnsupportedProviderReturnsCompatibilityError(t *testing.T) {

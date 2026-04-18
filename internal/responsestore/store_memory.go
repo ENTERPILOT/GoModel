@@ -3,6 +3,7 @@ package responsestore
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -12,15 +13,19 @@ const (
 	DefaultMemoryStoreTTL = 24 * time.Hour
 	// DefaultMemoryStoreMaxEntries bounds in-memory response retention by count.
 	DefaultMemoryStoreMaxEntries = 10000
+	// DefaultMemoryStoreCleanupInterval limits full expired-entry sweeps.
+	DefaultMemoryStoreCleanupInterval = time.Minute
 )
 
 // MemoryStore keeps response snapshots in process memory.
 // Data survives across requests but not process restarts.
 type MemoryStore struct {
-	mu         sync.RWMutex
-	items      map[string]*StoredResponse
-	ttl        time.Duration
-	maxEntries int
+	mu              sync.RWMutex
+	items           map[string]*StoredResponse
+	ttl             time.Duration
+	maxEntries      int
+	lastCleanup     time.Time
+	cleanupInterval time.Duration
 }
 
 // MemoryStoreOption configures bounded in-memory response retention.
@@ -52,9 +57,10 @@ func WithUnboundedRetention() MemoryStoreOption {
 // By default retention is bounded; pass WithUnboundedRetention to opt out.
 func NewMemoryStore(options ...MemoryStoreOption) *MemoryStore {
 	store := &MemoryStore{
-		items:      make(map[string]*StoredResponse),
-		ttl:        DefaultMemoryStoreTTL,
-		maxEntries: DefaultMemoryStoreMaxEntries,
+		items:           make(map[string]*StoredResponse),
+		ttl:             DefaultMemoryStoreTTL,
+		maxEntries:      DefaultMemoryStoreMaxEntries,
+		cleanupInterval: DefaultMemoryStoreCleanupInterval,
 	}
 	for _, option := range options {
 		if option != nil {
@@ -84,8 +90,11 @@ func (s *MemoryStore) Create(_ context.Context, response *StoredResponse) error 
 	if responseExpired(c, now) {
 		return nil
 	}
-	if _, exists := s.items[c.Response.ID]; exists {
-		return fmt.Errorf("response already exists: %s", c.Response.ID)
+	if existing, exists := s.items[c.Response.ID]; exists {
+		if !responseExpired(existing, now) {
+			return fmt.Errorf("response already exists: %s", c.Response.ID)
+		}
+		delete(s.items, c.Response.ID)
 	}
 	s.items[c.Response.ID] = c
 	s.enforceMaxEntriesLocked()
@@ -127,6 +136,10 @@ func (s *MemoryStore) Update(_ context.Context, response *StoredResponse) error 
 	s.cleanupExpiredLocked(now)
 	existing, exists := s.items[c.Response.ID]
 	if !exists {
+		return ErrNotFound
+	}
+	if responseExpired(existing, now) {
+		delete(s.items, c.Response.ID)
 		return ErrNotFound
 	}
 	if c.StoredAt.IsZero() {
@@ -175,6 +188,10 @@ func (s *MemoryStore) cleanupExpiredLocked(now time.Time) {
 	if s.ttl <= 0 {
 		return
 	}
+	if s.cleanupInterval > 0 && !s.lastCleanup.IsZero() && now.Sub(s.lastCleanup) < s.cleanupInterval {
+		return
+	}
+	s.lastCleanup = now
 	for id, response := range s.items {
 		if responseExpired(response, now) {
 			delete(s.items, id)
@@ -186,21 +203,32 @@ func (s *MemoryStore) enforceMaxEntriesLocked() {
 	if s.maxEntries <= 0 {
 		return
 	}
-	for len(s.items) > s.maxEntries {
-		oldestID := ""
-		var oldest time.Time
-		for id, response := range s.items {
-			storedAt := responseStoredAt(response)
-			if oldestID == "" || storedAt.Before(oldest) {
-				oldestID = id
-				oldest = storedAt
-			}
-		}
-		if oldestID == "" {
-			return
-		}
-		delete(s.items, oldestID)
+	overLimit := len(s.items) - s.maxEntries
+	if overLimit <= 0 {
+		return
 	}
+
+	entries := make([]memoryStoreEntry, 0, len(s.items))
+	for id, response := range s.items {
+		entries = append(entries, memoryStoreEntry{
+			id:       id,
+			storedAt: responseStoredAt(response),
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].storedAt.Equal(entries[j].storedAt) {
+			return entries[i].id < entries[j].id
+		}
+		return entries[i].storedAt.Before(entries[j].storedAt)
+	})
+	for i := 0; i < overLimit && i < len(entries); i++ {
+		delete(s.items, entries[i].id)
+	}
+}
+
+type memoryStoreEntry struct {
+	id       string
+	storedAt time.Time
 }
 
 func responseExpired(response *StoredResponse, now time.Time) bool {

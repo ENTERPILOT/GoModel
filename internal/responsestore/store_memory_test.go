@@ -62,6 +62,27 @@ func TestMemoryStoreDefaultRetentionIsBounded(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreCleanupExpiredRunsPeriodically(t *testing.T) {
+	now := time.Now().UTC()
+	store := NewMemoryStore(WithTTL(time.Second))
+	store.items["resp_expired"] = &StoredResponse{
+		Response:  &core.ResponsesResponse{ID: "resp_expired", Object: "response"},
+		StoredAt:  now.Add(-2 * time.Second),
+		ExpiresAt: now.Add(-time.Second),
+	}
+	store.lastCleanup = now
+
+	store.cleanupExpiredLocked(now.Add(time.Second / 2))
+	if _, ok := store.items["resp_expired"]; !ok {
+		t.Fatal("expired response removed before cleanup interval elapsed")
+	}
+
+	store.cleanupExpiredLocked(now.Add(DefaultMemoryStoreCleanupInterval + time.Second))
+	if _, ok := store.items["resp_expired"]; ok {
+		t.Fatal("expired response retained after cleanup interval elapsed")
+	}
+}
+
 func TestMemoryStoreAllowsExplicitUnboundedRetention(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore(WithUnboundedRetention())

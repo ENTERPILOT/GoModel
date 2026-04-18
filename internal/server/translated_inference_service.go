@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/labstack/echo/v5"
 
@@ -35,6 +36,7 @@ type translatedInferenceService struct {
 	responseCache            *responsecache.ResponseCacheMiddleware
 	guardrailsHash           string
 	responseStore            responsestore.Store
+	responseStoreMu          sync.RWMutex
 
 	// Pre-built handlers initialized via initHandlers.
 	chatCompletionHandler echo.HandlerFunc
@@ -241,7 +243,8 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 }
 
 func (s *translatedInferenceService) storeResponseSnapshot(ctx context.Context, workflow *core.Workflow, req *core.ResponsesRequest, resp *core.ResponsesResponse, providerType, providerName, requestID string) error {
-	if s.responseStore == nil || resp == nil || resp.ID == "" {
+	store := s.currentResponseStore()
+	if store == nil || resp == nil || resp.ID == "" {
 		return nil
 	}
 
@@ -255,13 +258,25 @@ func (s *translatedInferenceService) storeResponseSnapshot(ctx context.Context, 
 		UserPath:           core.UserPathFromContext(ctx),
 		WorkflowVersionID:  workflowVersionID(workflow),
 	}
-	if err := s.responseStore.Create(ctx, stored); err != nil {
-		if updateErr := s.responseStore.Update(ctx, stored); updateErr == nil {
+	if err := store.Create(ctx, stored); err != nil {
+		if updateErr := store.Update(ctx, stored); updateErr == nil {
 			return nil
 		}
 		return core.NewProviderError("response_store", http.StatusInternalServerError, "failed to persist response", err)
 	}
 	return nil
+}
+
+func (s *translatedInferenceService) currentResponseStore() responsestore.Store {
+	s.responseStoreMu.RLock()
+	defer s.responseStoreMu.RUnlock()
+	return s.responseStore
+}
+
+func (s *translatedInferenceService) setResponseStore(store responsestore.Store) {
+	s.responseStoreMu.Lock()
+	defer s.responseStoreMu.Unlock()
+	s.responseStore = store
 }
 
 func (s *translatedInferenceService) recordResponseSnapshotStoreFailure(workflow *core.Workflow, resp *core.ResponsesResponse, providerType, providerName, requestID string, err error) {

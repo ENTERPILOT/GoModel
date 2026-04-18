@@ -2155,12 +2155,12 @@ const docTemplate = `{
                 "summary": "Compact response input",
                 "parameters": [
                     {
-                        "description": "Responses API request",
+                        "description": "Response compact request",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/core.ResponsesRequest"
+                            "$ref": "#/definitions/core.ResponseCompactRequest"
                         }
                     }
                 ],
@@ -2217,12 +2217,12 @@ const docTemplate = `{
                 "summary": "Count response input tokens",
                 "parameters": [
                     {
-                        "description": "Responses API request",
+                        "description": "Response input token request",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/core.ResponsesRequest"
+                            "$ref": "#/definitions/core.ResponseInputTokensRequest"
                         }
                     }
                 ],
@@ -2318,12 +2318,6 @@ const docTemplate = `{
                         "type": "integer",
                         "description": "Input item offset for providers that support it",
                         "name": "starting_after",
-                        "in": "query"
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "Whether to stream the retrieved response",
-                        "name": "stream",
                         "in": "query"
                     }
                 ],
@@ -3621,6 +3615,9 @@ const docTemplate = `{
         },
         "core.OpenAIErrorEnvelope": {
             "type": "object",
+            "required": [
+                "error"
+            ],
             "properties": {
                 "error": {
                     "$ref": "#/definitions/core.OpenAIErrorObject"
@@ -3629,6 +3626,12 @@ const docTemplate = `{
         },
         "core.OpenAIErrorObject": {
             "type": "object",
+            "required": [
+                "code",
+                "message",
+                "param",
+                "type"
+            ],
             "properties": {
                 "code": {
                     "type": "string",
@@ -3672,6 +3675,33 @@ const docTemplate = `{
                 }
             }
         },
+        "core.ResponseCompactRequest": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ResponsesInputElement"
+                    },
+                    "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"
+                },
+                "instructions": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "model": {
+                    "type": "string"
+                },
+                "reasoning": {
+                    "$ref": "#/definitions/core.Reasoning"
+                }
+            }
+        },
         "core.ResponseCompactResponse": {
             "type": "object",
             "properties": {
@@ -3696,7 +3726,7 @@ const docTemplate = `{
                 "output": {
                     "type": "array",
                     "items": {
-                        "type": "object"
+                        "$ref": "#/definitions/core.ResponsesOutputItem"
                     }
                 },
                 "provider": {
@@ -3741,6 +3771,33 @@ const docTemplate = `{
                 },
                 "object": {
                     "type": "string"
+                }
+            }
+        },
+        "core.ResponseInputTokensRequest": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ResponsesInputElement"
+                    },
+                    "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"
+                },
+                "instructions": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "model": {
+                    "type": "string"
+                },
+                "reasoning": {
+                    "$ref": "#/definitions/core.Reasoning"
                 }
             }
         },

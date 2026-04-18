@@ -129,3 +129,13 @@ func TestNativeResponseByProviderWrapsContextCancellation(t *testing.T) {
 		t.Fatalf("status = %d, want 408", gatewayErr.HTTPStatusCode())
 	}
 }
+
+func TestIsUnsupportedNativeResponseErrorUsesCode(t *testing.T) {
+	if !isUnsupportedNativeResponseError(unsupportedResponseOperation("response compaction is not supported")) {
+		t.Fatal("unsupportedResponseOperation should be recognized")
+	}
+	messageOnly := core.NewInvalidRequestErrorWithStatus(http.StatusNotImplemented, "response compaction is not supported", nil)
+	if isUnsupportedNativeResponseError(messageOnly) {
+		t.Fatal("message-only unsupported error should not be recognized")
+	}
+}

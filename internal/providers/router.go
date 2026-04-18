@@ -303,7 +303,7 @@ func (r *Router) resolveNativeResponseLifecycleProvider(providerType string) (co
 	}
 	rp, ok := provider.(core.NativeResponseLifecycleProvider)
 	if !ok {
-		return nil, "", core.NewInvalidRequestError(fmt.Sprintf("%s does not support native response lifecycle operations", providerType), nil)
+		return nil, "", unsupportedNativeResponseOperation(fmt.Sprintf("%s does not support native response lifecycle operations", providerType))
 	}
 	return rp, resolvedProviderType, nil
 }
@@ -315,9 +315,13 @@ func (r *Router) resolveNativeResponseUtilityProvider(providerType string) (core
 	}
 	rp, ok := provider.(core.NativeResponseUtilityProvider)
 	if !ok {
-		return nil, "", core.NewInvalidRequestError(fmt.Sprintf("%s does not support native response utility operations", providerType), nil)
+		return nil, "", unsupportedNativeResponseOperation(fmt.Sprintf("%s does not support native response utility operations", providerType))
 	}
 	return rp, resolvedProviderType, nil
+}
+
+func unsupportedNativeResponseOperation(message string) *core.GatewayError {
+	return core.NewInvalidRequestErrorWithStatus(http.StatusNotImplemented, message, nil).WithCode("unsupported_response_operation")
 }
 
 func (r *Router) resolvePassthroughProvider(providerType string) (core.PassthroughProvider, error) {

@@ -1155,6 +1155,80 @@ func TestResponses(t *testing.T) {
 	}
 }
 
+func TestResponsesUtilitiesForwardNarrowRequests(t *testing.T) {
+	var inputTokensBody map[string]any
+	var compactBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/responses/input_tokens":
+			inputTokensBody = body
+			_, _ = w.Write([]byte(`{"object":"response.input_tokens","input_tokens":10}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/responses/compact":
+			compactBody = body
+			_, _ = w.Write([]byte(`{"id":"cmp_1","object":"response.compaction","output":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	maxOutputTokens := 128
+	parallelToolCalls := true
+	temperature := 0.2
+	req := &core.ResponsesRequest{
+		Model:             "gpt-4o",
+		Provider:          "openai_primary",
+		Input:             "hello",
+		Instructions:      "be brief",
+		Tools:             []map[string]any{{"type": "function"}},
+		ToolChoice:        "auto",
+		ParallelToolCalls: &parallelToolCalls,
+		Temperature:       &temperature,
+		MaxOutputTokens:   &maxOutputTokens,
+		Stream:            true,
+		StreamOptions:     &core.StreamOptions{IncludeUsage: true},
+		Metadata:          map[string]string{"team": "alpha"},
+		Reasoning:         &core.Reasoning{Effort: "low"},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"custom": json.RawMessage(`"value"`),
+		}),
+	}
+
+	if _, err := provider.CountResponseInputTokens(context.Background(), req); err != nil {
+		t.Fatalf("CountResponseInputTokens() error = %v", err)
+	}
+	if _, err := provider.CompactResponse(context.Background(), req); err != nil {
+		t.Fatalf("CompactResponse() error = %v", err)
+	}
+	for name, body := range map[string]map[string]any{
+		"input_tokens": inputTokensBody,
+		"compact":      compactBody,
+	} {
+		if body["model"] != "gpt-4o" || body["input"] != "hello" || body["instructions"] != "be brief" {
+			t.Fatalf("%s body kept fields = %+v, want model/input/instructions", name, body)
+		}
+		if _, ok := body["metadata"]; !ok {
+			t.Fatalf("%s body missing metadata: %+v", name, body)
+		}
+		if _, ok := body["reasoning"]; !ok {
+			t.Fatalf("%s body missing reasoning: %+v", name, body)
+		}
+		for _, field := range []string{"provider", "tools", "tool_choice", "parallel_tool_calls", "temperature", "max_output_tokens", "stream", "stream_options", "custom"} {
+			if _, ok := body[field]; ok {
+				t.Fatalf("%s body includes filtered field %q: %+v", name, field, body)
+			}
+		}
+	}
+}
+
 func TestResponsesWithArrayInput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request body contains array input

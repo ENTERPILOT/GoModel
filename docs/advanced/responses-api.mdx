@@ -95,6 +95,10 @@ OpenAI-compatible error with:
 }
 ```
 
+GoModel uses OpenAI's `invalid_request_error` type for unsupported operations
+so the public error type set stays closed. The `501` status and
+`unsupported_response_operation` code identify the unsupported operation.
+
 The HTTP status is `501 Not Implemented`.
 
 ## Example

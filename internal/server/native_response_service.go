@@ -322,7 +322,7 @@ func (s *nativeResponseService) listNativeResponseInputItems(ctx context.Context
 func (s *nativeResponseService) cancelNativeResponse(ctx context.Context, providerType, id string) (*core.ResponsesResponse, error) {
 	router, ok := s.provider.(core.NativeResponseLifecycleRoutableProvider)
 	if !ok {
-		return nil, core.NewInvalidRequestError("response lifecycle routing is not supported by the current provider router", nil)
+		return nil, unsupportedResponseOperation("response lifecycle routing is not supported by the current provider router")
 	}
 	return router.CancelResponse(ctx, providerType, id)
 }
@@ -345,7 +345,7 @@ func normalizeCanceledResponse(resp *core.ResponsesResponse, id, providerType st
 func (s *nativeResponseService) deleteNativeResponse(ctx context.Context, providerType, id string) (*core.ResponseDeleteResponse, error) {
 	router, ok := s.provider.(core.NativeResponseLifecycleRoutableProvider)
 	if !ok {
-		return nil, core.NewInvalidRequestError("response lifecycle routing is not supported by the current provider router", nil)
+		return nil, unsupportedResponseOperation("response lifecycle routing is not supported by the current provider router")
 	}
 	return router.DeleteResponse(ctx, providerType, id)
 }
@@ -607,12 +607,7 @@ func isUnsupportedNativeResponseError(err error) bool {
 	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest && gatewayErr.HTTPStatusCode() != http.StatusNotImplemented {
 		return false
 	}
-	message := strings.ToLower(gatewayErr.Message)
-	return strings.Contains(message, "response lifecycle") ||
-		strings.Contains(message, "response utility") ||
-		strings.Contains(message, "native response") ||
-		strings.Contains(message, "responses lifecycle") ||
-		strings.Contains(message, "responses utility")
+	return gatewayErr.Code != nil && strings.TrimSpace(*gatewayErr.Code) == "unsupported_response_operation"
 }
 
 func auditResponseEntry(c *echo.Context, providerType string) {

@@ -3253,7 +3253,15 @@
         ],
         "summary": "Create a model response (Responses API)",
         "requestBody": {
-          "$ref": "#/components/requestBodies/core.ResponsesRequest"
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/core.ResponsesRequest"
+              }
+            }
+          },
+          "description": "Responses API request",
+          "required": true
         },
         "responses": {
           "200": {
@@ -3346,7 +3354,15 @@
         ],
         "summary": "Compact response input",
         "requestBody": {
-          "$ref": "#/components/requestBodies/core.ResponsesRequest"
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/core.ResponseCompactRequest"
+              }
+            }
+          },
+          "description": "Response compact request",
+          "required": true
         },
         "responses": {
           "200": {
@@ -3414,7 +3430,15 @@
         ],
         "summary": "Count response input tokens",
         "requestBody": {
-          "$ref": "#/components/requestBodies/core.ResponsesRequest"
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/core.ResponseInputTokensRequest"
+              }
+            }
+          },
+          "description": "Response input token request",
+          "required": true
         },
         "responses": {
           "200": {
@@ -3537,14 +3561,6 @@
             "in": "query",
             "schema": {
               "type": "integer"
-            }
-          },
-          {
-            "description": "Whether to stream the retrieved response",
-            "name": "stream",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
             }
           }
         ],
@@ -3957,19 +3973,6 @@
     }
   ],
   "components": {
-    "requestBodies": {
-      "core.ResponsesRequest": {
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/core.ResponsesRequest"
-            }
-          }
-        },
-        "description": "Responses API request",
-        "required": true
-      }
-    },
     "securitySchemes": {
       "BearerAuth": {
         "type": "apiKey",
@@ -4978,6 +4981,9 @@
       },
       "core.OpenAIErrorEnvelope": {
         "type": "object",
+        "required": [
+          "error"
+        ],
         "properties": {
           "error": {
             "$ref": "#/components/schemas/core.OpenAIErrorObject"
@@ -4986,6 +4992,12 @@
       },
       "core.OpenAIErrorObject": {
         "type": "object",
+        "required": [
+          "code",
+          "message",
+          "param",
+          "type"
+        ],
         "properties": {
           "code": {
             "type": "string",
@@ -5029,6 +5041,33 @@
           }
         }
       },
+      "core.ResponseCompactRequest": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/core.ResponsesInputElement"
+            },
+            "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "model": {
+            "type": "string"
+          },
+          "reasoning": {
+            "$ref": "#/components/schemas/core.Reasoning"
+          }
+        }
+      },
       "core.ResponseCompactResponse": {
         "type": "object",
         "properties": {
@@ -5053,7 +5092,7 @@
           "output": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/core.ResponsesOutputItem"
             }
           },
           "provider": {
@@ -5098,6 +5137,33 @@
           },
           "object": {
             "type": "string"
+          }
+        }
+      },
+      "core.ResponseInputTokensRequest": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/core.ResponsesInputElement"
+            },
+            "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "model": {
+            "type": "string"
+          },
+          "reasoning": {
+            "$ref": "#/components/schemas/core.Reasoning"
           }
         }
       },

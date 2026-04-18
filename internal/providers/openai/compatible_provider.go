@@ -234,7 +234,7 @@ func (p *CompatibleProvider) CountResponseInputTokens(ctx context.Context, req *
 	err := p.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/responses/input_tokens",
-		Body:     req,
+		Body:     responseInputTokensRequestFromResponses(req),
 	}, &resp)
 	if err != nil {
 		return nil, err
@@ -253,7 +253,7 @@ func (p *CompatibleProvider) CompactResponse(ctx context.Context, req *core.Resp
 	err := p.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/responses/compact",
-		Body:     req,
+		Body:     responseCompactRequestFromResponses(req),
 	}, &resp)
 	if err != nil {
 		return nil, err
@@ -262,6 +262,32 @@ func (p *CompatibleProvider) CompactResponse(ctx context.Context, req *core.Resp
 		resp.Object = "response.compaction"
 	}
 	return &resp, nil
+}
+
+func responseInputTokensRequestFromResponses(req *core.ResponsesRequest) *core.ResponseInputTokensRequest {
+	if req == nil {
+		return nil
+	}
+	return &core.ResponseInputTokensRequest{
+		Model:        req.Model,
+		Input:        req.Input,
+		Instructions: req.Instructions,
+		Metadata:     req.Metadata,
+		Reasoning:    req.Reasoning,
+	}
+}
+
+func responseCompactRequestFromResponses(req *core.ResponsesRequest) *core.ResponseCompactRequest {
+	if req == nil {
+		return nil
+	}
+	return &core.ResponseCompactRequest{
+		Model:        req.Model,
+		Input:        req.Input,
+		Instructions: req.Instructions,
+		Metadata:     req.Metadata,
+		Reasoning:    req.Reasoning,
+	}
 }
 
 func (p *CompatibleProvider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {

@@ -112,6 +112,40 @@ func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
 	}, r.ExtraFields)
 }
 
+// MarshalJSON preserves the dynamic input payload while omitting Swagger-only schema fields.
+func (r ResponseInputTokensRequest) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Model        string            `json:"model,omitempty"`
+		Input        any               `json:"input,omitempty"`
+		Instructions string            `json:"instructions,omitempty"`
+		Metadata     map[string]string `json:"metadata,omitempty"`
+		Reasoning    *Reasoning        `json:"reasoning,omitempty"`
+	}{
+		Model:        r.Model,
+		Input:        r.Input,
+		Instructions: r.Instructions,
+		Metadata:     r.Metadata,
+		Reasoning:    r.Reasoning,
+	})
+}
+
+// MarshalJSON preserves the dynamic input payload while omitting Swagger-only schema fields.
+func (r ResponseCompactRequest) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Model        string            `json:"model,omitempty"`
+		Input        any               `json:"input,omitempty"`
+		Instructions string            `json:"instructions,omitempty"`
+		Metadata     map[string]string `json:"metadata,omitempty"`
+		Reasoning    *Reasoning        `json:"reasoning,omitempty"`
+	}{
+		Model:        r.Model,
+		Input:        r.Input,
+		Instructions: r.Instructions,
+		Metadata:     r.Metadata,
+		Reasoning:    r.Reasoning,
+	})
+}
+
 // UnmarshalJSON deserializes a ResponsesInputElement, switching on the "type"
 // field to populate variant-specific fields.
 func (e *ResponsesInputElement) UnmarshalJSON(data []byte) error {

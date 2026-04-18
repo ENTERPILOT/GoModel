@@ -27,6 +27,30 @@ type ResponsesRequest struct {
 	ExtraFields       UnknownJSONFields       `json:"-" swaggerignore:"true"`
 }
 
+// ResponseInputTokensRequest documents the request body accepted by
+// POST /v1/responses/input_tokens.
+type ResponseInputTokensRequest struct {
+	Model        string            `json:"model,omitempty"`
+	Input        any               `json:"input,omitempty"` // string or []ResponsesInputElement — see docs for array form
+	Instructions string            `json:"instructions,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+	Reasoning    *Reasoning        `json:"reasoning,omitempty"`
+	//nolint:govet // Intentional duplicate json tag for Swagger docs: input is string OR []ResponsesInputElement.
+	InputSchema []ResponsesInputElement `json:"input,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"`
+}
+
+// ResponseCompactRequest documents the request body accepted by
+// POST /v1/responses/compact.
+type ResponseCompactRequest struct {
+	Model        string            `json:"model,omitempty"`
+	Input        any               `json:"input,omitempty"` // string or []ResponsesInputElement — see docs for array form
+	Instructions string            `json:"instructions,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+	Reasoning    *Reasoning        `json:"reasoning,omitempty"`
+	//nolint:govet // Intentional duplicate json tag for Swagger docs: input is string OR []ResponsesInputElement.
+	InputSchema []ResponsesInputElement `json:"input,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"`
+}
+
 func (r *ResponsesRequest) semanticSelector() (string, string) {
 	if r == nil {
 		return "", ""
@@ -160,14 +184,14 @@ type ResponseInputTokensResponse struct {
 
 // ResponseCompactResponse is returned by POST /v1/responses/compact.
 type ResponseCompactResponse struct {
-	ID        string            `json:"id"`
-	Object    string            `json:"object"`
-	CreatedAt int64             `json:"created_at"`
-	Output    []json.RawMessage `json:"output" swaggertype:"array,object"`
-	Usage     *ResponsesUsage   `json:"usage,omitempty"`
-	Error     *ResponsesError   `json:"error,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	Provider  string            `json:"provider,omitempty"`
+	ID        string                `json:"id"`
+	Object    string                `json:"object"`
+	CreatedAt int64                 `json:"created_at"`
+	Output    []ResponsesOutputItem `json:"output"`
+	Usage     *ResponsesUsage       `json:"usage,omitempty"`
+	Error     *ResponsesError       `json:"error,omitempty"`
+	Metadata  map[string]string     `json:"metadata,omitempty"`
+	Provider  string                `json:"provider,omitempty"`
 }
 
 // ResponseDeleteResponse is returned by DELETE /v1/responses/{id}.

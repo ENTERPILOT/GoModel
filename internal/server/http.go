@@ -359,7 +359,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		echo:                    e,
 		handler:                 handler,
 		responseCacheMiddleware: rcm,
-		responseStore:           handler.responseStore,
+		responseStore:           handler.currentResponseStore(),
 	}
 }
 

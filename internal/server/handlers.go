@@ -31,6 +31,7 @@ type Handler struct {
 	pricingResolver                 usage.PricingResolver
 	batchStore                      batchstore.Store
 	responseStore                   responsestore.Store
+	responseStoreMu                 sync.RWMutex
 	normalizePassthroughV1Prefix    bool
 	enabledPassthroughProviders     map[string]struct{}
 	responseCache                   *responsecache.ResponseCacheMiddleware
@@ -114,9 +115,11 @@ func (h *Handler) SetResponseStore(store responsestore.Store) {
 	if store == nil {
 		return
 	}
+	h.responseStoreMu.Lock()
+	defer h.responseStoreMu.Unlock()
 	h.responseStore = store
 	if h.translatedSvc != nil {
-		h.translatedSvc.responseStore = store
+		h.translatedSvc.setResponseStore(store)
 	}
 }
 
@@ -134,11 +137,16 @@ func (h *Handler) translatedInference() *translatedInferenceService {
 			pricingResolver:          h.pricingResolver,
 			responseCache:            h.responseCache,
 			guardrailsHash:           h.guardrailsHash,
-			responseStore:            h.responseStore,
+			responseStore:            h.currentResponseStore(),
 		}
 		s.initHandlers()
+		h.responseStoreMu.Lock()
+		s.setResponseStore(h.responseStore)
 		h.translatedSvc = s
+		h.responseStoreMu.Unlock()
 	})
+	h.responseStoreMu.RLock()
+	defer h.responseStoreMu.RUnlock()
 	return h.translatedSvc
 }
 
@@ -168,8 +176,14 @@ func (h *Handler) nativeResponses() *nativeResponseService {
 		modelAuthorizer:          h.modelAuthorizer,
 		workflowPolicyResolver:   h.workflowPolicyResolver,
 		translatedRequestPatcher: h.translatedRequestPatcher,
-		responseStore:            h.responseStore,
+		responseStore:            h.currentResponseStore(),
 	}
+}
+
+func (h *Handler) currentResponseStore() responsestore.Store {
+	h.responseStoreMu.RLock()
+	defer h.responseStoreMu.RUnlock()
+	return h.responseStore
 }
 
 func (h *Handler) passthrough() *passthroughService {
@@ -429,7 +443,6 @@ func (h *Handler) Responses(c *echo.Context) error {
 // @Param        include[] query     []string false "Fields to include in the response" collectionFormat(multi)
 // @Param        include_obfuscation query bool false "Whether to include obfuscated response data"
 // @Param        starting_after query int false "Input item offset for providers that support it"
-// @Param        stream    query     bool    false  "Whether to stream the retrieved response"
 // @Success      200       {object}  core.ResponsesResponse
 // @Failure      400       {object}  core.OpenAIErrorEnvelope
 // @Failure      401       {object}  core.OpenAIErrorEnvelope
@@ -510,7 +523,7 @@ func (h *Handler) DeleteResponse(c *echo.Context) error {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        request  body      core.ResponsesRequest  true  "Responses API request"
+// @Param        request  body      core.ResponseInputTokensRequest  true  "Response input token request"
 // @Success      200      {object}  core.ResponseInputTokensResponse
 // @Failure      400      {object}  core.OpenAIErrorEnvelope
 // @Failure      401      {object}  core.OpenAIErrorEnvelope
@@ -528,7 +541,7 @@ func (h *Handler) ResponseInputTokens(c *echo.Context) error {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        request  body      core.ResponsesRequest  true  "Responses API request"
+// @Param        request  body      core.ResponseCompactRequest  true  "Response compact request"
 // @Success      200      {object}  core.ResponseCompactResponse
 // @Failure      400      {object}  core.OpenAIErrorEnvelope
 // @Failure      401      {object}  core.OpenAIErrorEnvelope
