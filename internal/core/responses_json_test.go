@@ -160,6 +160,47 @@ func TestResponsesRequestMarshalJSON_PreservesInput(t *testing.T) {
 	}
 }
 
+func TestResponseUtilityRequestMarshalJSON_PreservesProvider(t *testing.T) {
+	tests := []struct {
+		name string
+		req  any
+	}{
+		{
+			name: "input tokens",
+			req: ResponseInputTokensRequest{
+				Model:    "gpt-4o-mini",
+				Provider: "openai_primary",
+				Input:    "hello",
+			},
+		},
+		{
+			name: "compact",
+			req: ResponseCompactRequest{
+				Model:    "gpt-4o-mini",
+				Provider: "openai_primary",
+				Input:    "hello",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(tt.req)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+
+			var decoded map[string]any
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+			if decoded["provider"] != "openai_primary" {
+				t.Fatalf("provider = %#v, want openai_primary in %s", decoded["provider"], string(body))
+			}
+		})
+	}
+}
+
 func TestResponsesRequestMarshalJSON_PreservesToolCallingControls(t *testing.T) {
 	parallelToolCalls := false
 	body, err := json.Marshal(ResponsesRequest{

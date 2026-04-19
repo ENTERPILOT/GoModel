@@ -3697,6 +3697,10 @@ const docTemplate = `{
                 "model": {
                     "type": "string"
                 },
+                "provider": {
+                    "description": "Gateway routing hint; stripped before upstream execution.",
+                    "type": "string"
+                },
                 "reasoning": {
                     "$ref": "#/definitions/core.Reasoning"
                 }
@@ -3794,6 +3798,10 @@ const docTemplate = `{
                     }
                 },
                 "model": {
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "Gateway routing hint; stripped before upstream execution.",
                     "type": "string"
                 },
                 "reasoning": {

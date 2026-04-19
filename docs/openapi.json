@@ -5063,6 +5063,10 @@
           "model": {
             "type": "string"
           },
+          "provider": {
+            "description": "Gateway routing hint; stripped before upstream execution.",
+            "type": "string"
+          },
           "reasoning": {
             "$ref": "#/components/schemas/core.Reasoning"
           }
@@ -5160,6 +5164,10 @@
             }
           },
           "model": {
+            "type": "string"
+          },
+          "provider": {
+            "description": "Gateway routing hint; stripped before upstream execution.",
             "type": "string"
           },
           "reasoning": {

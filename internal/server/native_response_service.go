@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -509,31 +508,24 @@ func appendQueryArray(values ...[]string) []string {
 }
 
 func paginateStoredResponseInputItems(items []json.RawMessage, params core.ResponseInputItemsParams) core.ResponseInputItemListResponse {
-	ordered := make([]json.RawMessage, 0, len(items))
-	for _, item := range items {
-		ordered = append(ordered, core.CloneRawJSON(item))
-	}
-	if params.Order != "asc" {
-		slices.Reverse(ordered)
-	}
-
+	count := len(items)
 	start := 0
 	if params.After != "" {
 		idx := -1
-		for i, item := range ordered {
-			if responseInputItemID(item) == params.After {
-				idx = i
+		for pos := 0; pos < count; pos++ {
+			if responseInputItemID(items[orderedInputItemIndex(count, pos, params.Order)]) == params.After {
+				idx = pos
 				break
 			}
 		}
 		if idx >= 0 {
 			start = idx + 1
 		} else {
-			ordered = nil
+			count = 0
 		}
 	}
-	if start > len(ordered) {
-		start = len(ordered)
+	if start > count {
+		start = count
 	}
 
 	limit := params.Limit
@@ -544,22 +536,38 @@ func paginateStoredResponseInputItems(items []json.RawMessage, params core.Respo
 		limit = 100
 	}
 
-	remaining := ordered[start:]
-	hasMore := len(remaining) > limit
-	if hasMore {
-		remaining = remaining[:limit]
+	remaining := count - start
+	if remaining < 0 {
+		remaining = 0
+	}
+	hasMore := remaining > limit
+	if remaining > limit {
+		remaining = limit
+	}
+
+	data := make([]json.RawMessage, 0, remaining)
+	for offset := 0; offset < remaining; offset++ {
+		idx := orderedInputItemIndex(len(items), start+offset, params.Order)
+		data = append(data, core.CloneRawJSON(items[idx]))
 	}
 
 	resp := core.ResponseInputItemListResponse{
 		Object:  "list",
-		Data:    remaining,
+		Data:    data,
 		HasMore: hasMore,
 	}
-	if len(remaining) > 0 {
-		resp.FirstID = responseInputItemID(remaining[0])
-		resp.LastID = responseInputItemID(remaining[len(remaining)-1])
+	if len(data) > 0 {
+		resp.FirstID = responseInputItemID(data[0])
+		resp.LastID = responseInputItemID(data[len(data)-1])
 	}
 	return resp
+}
+
+func orderedInputItemIndex(count, position int, order string) int {
+	if order == "asc" {
+		return position
+	}
+	return count - 1 - position
 }
 
 func responseInputItemID(raw json.RawMessage) string {

@@ -31,7 +31,8 @@ type ResponsesRequest struct {
 // POST /v1/responses/input_tokens.
 type ResponseInputTokensRequest struct {
 	Model        string            `json:"model,omitempty"`
-	Input        any               `json:"input,omitempty"` // string or []ResponsesInputElement — see docs for array form
+	Provider     string            `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
+	Input        any               `json:"input,omitempty"`    // string or []ResponsesInputElement — see docs for array form
 	Instructions string            `json:"instructions,omitempty"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
 	Reasoning    *Reasoning        `json:"reasoning,omitempty"`
@@ -43,7 +44,8 @@ type ResponseInputTokensRequest struct {
 // POST /v1/responses/compact.
 type ResponseCompactRequest struct {
 	Model        string            `json:"model,omitempty"`
-	Input        any               `json:"input,omitempty"` // string or []ResponsesInputElement — see docs for array form
+	Provider     string            `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
+	Input        any               `json:"input,omitempty"`    // string or []ResponsesInputElement — see docs for array form
 	Instructions string            `json:"instructions,omitempty"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
 	Reasoning    *Reasoning        `json:"reasoning,omitempty"`

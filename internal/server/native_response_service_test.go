@@ -139,3 +139,37 @@ func TestIsUnsupportedNativeResponseErrorUsesCode(t *testing.T) {
 		t.Fatal("message-only unsupported error should not be recognized")
 	}
 }
+
+func TestPaginateStoredResponseInputItemsSelectsOrderedWindow(t *testing.T) {
+	items := []json.RawMessage{
+		json.RawMessage(`{"id":"item_1"}`),
+		json.RawMessage(`{"id":"item_2"}`),
+		json.RawMessage(`{"id":"item_3"}`),
+		json.RawMessage(`{"id":"item_4"}`),
+		json.RawMessage(`{"id":"item_5"}`),
+	}
+
+	resp := paginateStoredResponseInputItems(items, core.ResponseInputItemsParams{
+		Order: "desc",
+		After: "item_4",
+		Limit: 2,
+	})
+
+	if !resp.HasMore {
+		t.Fatal("HasMore = false, want true")
+	}
+	if resp.FirstID != "item_3" || resp.LastID != "item_2" {
+		t.Fatalf("first/last = %q/%q, want item_3/item_2", resp.FirstID, resp.LastID)
+	}
+	if got := responseInputItemID(resp.Data[0]); got != "item_3" {
+		t.Fatalf("data[0] id = %q, want item_3", got)
+	}
+	if got := responseInputItemID(resp.Data[1]); got != "item_2" {
+		t.Fatalf("data[1] id = %q, want item_2", got)
+	}
+
+	items[2][len(`{"id":"item_`)] = 'x'
+	if len(resp.Data) != 2 || responseInputItemID(resp.Data[0]) != "item_3" {
+		t.Fatal("paginated data should be cloned from the source items")
+	}
+}

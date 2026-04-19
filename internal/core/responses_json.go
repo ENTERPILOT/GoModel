@@ -116,12 +116,14 @@ func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
 func (r ResponseInputTokensRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Model        string            `json:"model,omitempty"`
+		Provider     string            `json:"provider,omitempty"`
 		Input        any               `json:"input,omitempty"`
 		Instructions string            `json:"instructions,omitempty"`
 		Metadata     map[string]string `json:"metadata,omitempty"`
 		Reasoning    *Reasoning        `json:"reasoning,omitempty"`
 	}{
 		Model:        r.Model,
+		Provider:     r.Provider,
 		Input:        r.Input,
 		Instructions: r.Instructions,
 		Metadata:     r.Metadata,
@@ -133,12 +135,14 @@ func (r ResponseInputTokensRequest) MarshalJSON() ([]byte, error) {
 func (r ResponseCompactRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Model        string            `json:"model,omitempty"`
+		Provider     string            `json:"provider,omitempty"`
 		Input        any               `json:"input,omitempty"`
 		Instructions string            `json:"instructions,omitempty"`
 		Metadata     map[string]string `json:"metadata,omitempty"`
 		Reasoning    *Reasoning        `json:"reasoning,omitempty"`
 	}{
 		Model:        r.Model,
+		Provider:     r.Provider,
 		Input:        r.Input,
 		Instructions: r.Instructions,
 		Metadata:     r.Metadata,

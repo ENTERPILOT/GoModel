@@ -258,11 +258,12 @@ func (s *translatedInferenceService) storeResponseSnapshot(ctx context.Context, 
 		UserPath:           core.UserPathFromContext(ctx),
 		WorkflowVersionID:  workflowVersionID(workflow),
 	}
-	if err := store.Create(ctx, stored); err != nil {
-		if updateErr := store.Update(ctx, stored); updateErr == nil {
+	if createErr := store.Create(ctx, stored); createErr != nil {
+		updateErr := store.Update(ctx, stored)
+		if updateErr == nil {
 			return nil
 		}
-		return core.NewProviderError("response_store", http.StatusInternalServerError, "failed to persist response", err)
+		return core.NewProviderError("response_store", http.StatusInternalServerError, "failed to persist response", errors.Join(createErr, updateErr))
 	}
 	return nil
 }
@@ -292,7 +293,7 @@ func (s *translatedInferenceService) recordResponseSnapshotStoreFailure(workflow
 		"provider_name", providerName,
 		"workflow_version_id", workflowVersionID(workflow),
 		"response_id", responseIDForLog(resp),
-		"err", err,
+		"error", err,
 	)
 }
 
