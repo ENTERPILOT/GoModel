@@ -74,7 +74,7 @@
             entry && entry.status_code,
             entry && entry.status,
             data && data.status_code,
-            data && data.status
+            data.status
         ];
 
         for (let i = 0; i < candidates.length; i++) {
