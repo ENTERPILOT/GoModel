@@ -172,6 +172,124 @@ func (p *CompatibleProvider) StreamResponses(ctx context.Context, req *core.Resp
 	return providers.EnsureResponsesDone(stream), nil
 }
 
+func (p *CompatibleProvider) GetResponse(ctx context.Context, id string, params core.ResponseRetrieveParams) (*core.ResponsesResponse, error) {
+	var resp core.ResponsesResponse
+	err := p.Do(ctx, llmclient.Request{
+		Method:   http.MethodGet,
+		Endpoint: responseRetrieveEndpoint(id, params),
+	}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (p *CompatibleProvider) ListResponseInputItems(ctx context.Context, id string, params core.ResponseInputItemsParams) (*core.ResponseInputItemListResponse, error) {
+	var resp core.ResponseInputItemListResponse
+	err := p.Do(ctx, llmclient.Request{
+		Method:   http.MethodGet,
+		Endpoint: responseInputItemsEndpoint(id, params),
+	}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Object == "" {
+		resp.Object = "list"
+	}
+	return &resp, nil
+}
+
+func (p *CompatibleProvider) CancelResponse(ctx context.Context, id string) (*core.ResponsesResponse, error) {
+	var resp core.ResponsesResponse
+	err := p.Do(ctx, llmclient.Request{
+		Method:   http.MethodPost,
+		Endpoint: "/responses/" + url.PathEscape(id) + "/cancel",
+	}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (p *CompatibleProvider) DeleteResponse(ctx context.Context, id string) (*core.ResponseDeleteResponse, error) {
+	var resp core.ResponseDeleteResponse
+	err := p.Do(ctx, llmclient.Request{
+		Method:   http.MethodDelete,
+		Endpoint: "/responses/" + url.PathEscape(id),
+	}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Object == "" {
+		resp.Object = "response"
+	}
+	return &resp, nil
+}
+
+func (p *CompatibleProvider) CountResponseInputTokens(ctx context.Context, req *core.ResponsesRequest) (*core.ResponseInputTokensResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("responses input token request is required", nil)
+	}
+	var resp core.ResponseInputTokensResponse
+	err := p.Do(ctx, llmclient.Request{
+		Method:   http.MethodPost,
+		Endpoint: "/responses/input_tokens",
+		Body:     responseInputTokensRequestFromResponses(req),
+	}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Object == "" {
+		resp.Object = "response.input_tokens"
+	}
+	return &resp, nil
+}
+
+func (p *CompatibleProvider) CompactResponse(ctx context.Context, req *core.ResponsesRequest) (*core.ResponseCompactResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("responses compact request is required", nil)
+	}
+	var resp core.ResponseCompactResponse
+	err := p.Do(ctx, llmclient.Request{
+		Method:   http.MethodPost,
+		Endpoint: "/responses/compact",
+		Body:     responseCompactRequestFromResponses(req),
+	}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Object == "" {
+		resp.Object = "response.compaction"
+	}
+	return &resp, nil
+}
+
+func responseInputTokensRequestFromResponses(req *core.ResponsesRequest) *core.ResponseInputTokensRequest {
+	if req == nil {
+		return nil
+	}
+	return &core.ResponseInputTokensRequest{
+		Model:        req.Model,
+		Input:        req.Input,
+		Instructions: req.Instructions,
+		Metadata:     req.Metadata,
+		Reasoning:    req.Reasoning,
+	}
+}
+
+func responseCompactRequestFromResponses(req *core.ResponsesRequest) *core.ResponseCompactRequest {
+	if req == nil {
+		return nil
+	}
+	return &core.ResponseCompactRequest{
+		Model:        req.Model,
+		Input:        req.Input,
+		Instructions: req.Instructions,
+		Metadata:     req.Metadata,
+		Reasoning:    req.Reasoning,
+	}
+}
+
 func (p *CompatibleProvider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("embedding request is required", nil)
@@ -330,4 +448,47 @@ func (p *CompatibleProvider) DeleteFile(ctx context.Context, id string) (*core.F
 
 func (p *CompatibleProvider) GetFileContent(ctx context.Context, id string) (*core.FileContentResponse, error) {
 	return providers.GetOpenAICompatibleFileContentWithPreparer(ctx, p.client, id, p.prepareRequest)
+}
+
+func responseRetrieveEndpoint(id string, params core.ResponseRetrieveParams) string {
+	values := url.Values{}
+	for _, include := range params.Include {
+		if include != "" {
+			values.Add("include[]", include)
+		}
+	}
+	if params.IncludeObfuscation != nil {
+		values.Set("include_obfuscation", strconv.FormatBool(*params.IncludeObfuscation))
+	}
+	if params.StartingAfter != nil {
+		values.Set("starting_after", strconv.Itoa(*params.StartingAfter))
+	}
+	endpoint := "/responses/" + url.PathEscape(id)
+	if encoded := values.Encode(); encoded != "" {
+		endpoint += "?" + encoded
+	}
+	return endpoint
+}
+
+func responseInputItemsEndpoint(id string, params core.ResponseInputItemsParams) string {
+	values := url.Values{}
+	for _, include := range params.Include {
+		if include != "" {
+			values.Add("include[]", include)
+		}
+	}
+	if params.After != "" {
+		values.Set("after", params.After)
+	}
+	if params.Limit > 0 {
+		values.Set("limit", strconv.Itoa(params.Limit))
+	}
+	if params.Order != "" {
+		values.Set("order", params.Order)
+	}
+	endpoint := "/responses/" + url.PathEscape(id) + "/input_items"
+	if encoded := values.Encode(); encoded != "" {
+		endpoint += "?" + encoded
+	}
+	return endpoint
 }

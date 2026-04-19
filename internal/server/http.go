@@ -23,6 +23,7 @@ import (
 	batchstore "gomodel/internal/batch"
 	"gomodel/internal/core"
 	"gomodel/internal/responsecache"
+	"gomodel/internal/responsestore"
 	"gomodel/internal/usage"
 
 	echoswagger "github.com/swaggo/echo-swagger"
@@ -33,6 +34,7 @@ type Server struct {
 	echo                    *echo.Echo
 	handler                 *Handler
 	responseCacheMiddleware *responsecache.ResponseCacheMiddleware
+	responseStore           responsestore.Store
 }
 
 const (
@@ -62,6 +64,7 @@ type Config struct {
 	KeepOnlyAliasesAtModelsEndpoint bool                                   // Whether GET /v1/models should hide concrete provider models
 	PassthroughSemanticEnrichers    []core.PassthroughSemanticEnricher     // Optional: provider-owned passthrough semantic enrichers before workflow resolution
 	BatchStore                      batchstore.Store                       // Optional: Batch lifecycle persistence store
+	ResponseStore                   responsestore.Store                    // Optional: Responses lifecycle persistence store
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
 	EnabledPassthroughProviders     []string                               // Provider types enabled on /p/{provider}/... passthrough routes
@@ -127,6 +130,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	if cfg != nil && cfg.BatchStore != nil {
 		handler.SetBatchStore(cfg.BatchStore)
+	}
+	if cfg != nil && cfg.ResponseStore != nil {
+		handler.SetResponseStore(cfg.ResponseStore)
 	}
 
 	// Build list of paths that skip authentication
@@ -283,6 +289,12 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	e.GET("/v1/models", handler.ListModels)
 	e.POST("/v1/chat/completions", handler.ChatCompletion)
+	e.POST("/v1/responses/input_tokens", handler.ResponseInputTokens)
+	e.POST("/v1/responses/compact", handler.CompactResponse)
+	e.GET("/v1/responses/:id/input_items", handler.ListResponseInputItems)
+	e.POST("/v1/responses/:id/cancel", handler.CancelResponse)
+	e.GET("/v1/responses/:id", handler.GetResponse)
+	e.DELETE("/v1/responses/:id", handler.DeleteResponse)
 	e.POST("/v1/responses", handler.Responses)
 	e.POST("/v1/embeddings", handler.Embeddings)
 	e.POST("/v1/files", handler.CreateFile)
@@ -347,6 +359,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		echo:                    e,
 		handler:                 handler,
 		responseCacheMiddleware: rcm,
+		responseStore:           handler.currentResponseStore(),
 	}
 }
 
@@ -374,12 +387,24 @@ func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) e
 
 // Shutdown releases server resources. The HTTP server itself is stopped by
 // cancelling the context passed to Start; this method drains any in-flight
-// response cache writes and closes the cache store.
+// response cache writes, closes the cache store, and closes the response store.
 func (s *Server) Shutdown(_ context.Context) error {
+	var firstErr error
 	if s.responseCacheMiddleware != nil {
-		return s.responseCacheMiddleware.Close()
+		if err := s.responseCacheMiddleware.Close(); err != nil {
+			firstErr = err
+		}
 	}
-	return nil
+	if s.responseStore != nil {
+		if err := s.responseStore.Close(); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			} else {
+				slog.Warn("response store close failed during shutdown", "error", err)
+			}
+		}
+	}
+	return firstErr
 }
 
 // ServeHTTP implements the http.Handler interface, allowing Server to be used with httptest

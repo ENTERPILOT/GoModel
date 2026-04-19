@@ -843,6 +843,24 @@ func (r *ModelRegistry) ProviderByType(providerType string) core.Provider {
 	return nil
 }
 
+// ProviderByName returns the registered provider for a configured provider
+// instance name.
+func (r *ModelRegistry) ProviderByName(providerName string) core.Provider {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return nil
+	}
+	for _, provider := range r.providers {
+		if strings.TrimSpace(r.providerNames[provider]) == providerName {
+			return provider
+		}
+	}
+	return nil
+}
+
 // ProviderTypes returns the unique registered provider types in sorted order.
 // This inventory is independent of discovered models.
 func (r *ModelRegistry) ProviderTypes() []string {

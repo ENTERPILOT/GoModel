@@ -35,6 +35,19 @@ type GatewayError struct {
 	Err error `json:"-"`
 }
 
+// OpenAIErrorEnvelope documents the public OpenAI-compatible error response.
+type OpenAIErrorEnvelope struct {
+	Error OpenAIErrorObject `json:"error" binding:"required"`
+}
+
+// OpenAIErrorObject is the error object exposed in public API responses.
+type OpenAIErrorObject struct {
+	Type    ErrorType `json:"type" binding:"required"`
+	Message string    `json:"message" binding:"required"`
+	Param   *string   `json:"param" binding:"required" extensions:"x-nullable"`
+	Code    *string   `json:"code" binding:"required" extensions:"x-nullable"`
+}
+
 // Error implements the error interface
 func (e *GatewayError) Error() string {
 	if e.Provider != "" {

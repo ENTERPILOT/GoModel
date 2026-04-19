@@ -42,6 +42,15 @@ var (
 		},
 		[]string{"provider", "endpoint", "stream"},
 	)
+
+	// ResponseSnapshotStoreFailures counts failures while storing response snapshots.
+	ResponseSnapshotStoreFailures = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gomodel_response_snapshot_store_failures_total",
+			Help: "Total number of response snapshot store failures",
+		},
+		[]string{"provider", "provider_name", "operation"},
+	)
 )
 
 // NewPrometheusHooks returns hooks that instrument LLM requests with Prometheus metrics.
@@ -138,17 +147,19 @@ func NewPrometheusHooks() llmclient.Hooks {
 
 // PrometheusMetrics provides access to all registered metrics for testing
 type PrometheusMetrics struct {
-	RequestsTotal    *prometheus.CounterVec
-	RequestDuration  *prometheus.HistogramVec
-	InFlightRequests *prometheus.GaugeVec
+	RequestsTotal                 *prometheus.CounterVec
+	RequestDuration               *prometheus.HistogramVec
+	InFlightRequests              *prometheus.GaugeVec
+	ResponseSnapshotStoreFailures *prometheus.CounterVec
 }
 
 // GetMetrics returns the prometheus metrics for testing and introspection
 func GetMetrics() *PrometheusMetrics {
 	return &PrometheusMetrics{
-		RequestsTotal:    RequestsTotal,
-		RequestDuration:  RequestDuration,
-		InFlightRequests: InFlightRequests,
+		RequestsTotal:                 RequestsTotal,
+		RequestDuration:               RequestDuration,
+		InFlightRequests:              InFlightRequests,
+		ResponseSnapshotStoreFailures: ResponseSnapshotStoreFailures,
 	}
 }
 
@@ -157,6 +168,7 @@ func ResetMetrics() {
 	RequestsTotal.Reset()
 	RequestDuration.Reset()
 	InFlightRequests.Reset()
+	ResponseSnapshotStoreFailures.Reset()
 }
 
 // HealthCheck verifies that metrics are being collected

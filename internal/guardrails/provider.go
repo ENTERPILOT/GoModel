@@ -73,6 +73,15 @@ func (g *GuardedProvider) NativeFileProviderTypes() []string {
 	return nil
 }
 
+// NativeResponseProviderTypes delegates provider capability inventory to the
+// inner provider when available.
+func (g *GuardedProvider) NativeResponseProviderTypes() []string {
+	if typed, ok := g.inner.(core.NativeResponseProviderTypeLister); ok {
+		return typed.NativeResponseProviderTypes()
+	}
+	return nil
+}
+
 // ChatCompletion extracts messages, applies guardrails, then routes the request.
 func (g *GuardedProvider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
 	if g.options.DisableTranslatedRequestProcessing {
@@ -153,6 +162,22 @@ func (g *GuardedProvider) nativeFileRouter() (core.NativeFileRoutableProvider, e
 		return nil, core.NewInvalidRequestError("file routing is not supported by the current provider router", nil)
 	}
 	return fp, nil
+}
+
+func (g *GuardedProvider) nativeResponseLifecycleRouter() (core.NativeResponseLifecycleRoutableProvider, error) {
+	responses, ok := g.inner.(core.NativeResponseLifecycleRoutableProvider)
+	if !ok {
+		return nil, core.NewInvalidRequestError("response lifecycle routing is not supported by the current provider router", nil)
+	}
+	return responses, nil
+}
+
+func (g *GuardedProvider) nativeResponseUtilityRouter() (core.NativeResponseUtilityRoutableProvider, error) {
+	responses, ok := g.inner.(core.NativeResponseUtilityRoutableProvider)
+	if !ok {
+		return nil, core.NewInvalidRequestError("response utility routing is not supported by the current provider router", nil)
+	}
+	return responses, nil
 }
 
 func (g *GuardedProvider) batchFileTransport() core.BatchFileTransport {
@@ -507,6 +532,60 @@ func (g *GuardedProvider) Passthrough(ctx context.Context, providerType string, 
 		return nil, err
 	}
 	return pp.Passthrough(ctx, providerType, req)
+}
+
+// GetResponse delegates native response lookup.
+func (g *GuardedProvider) GetResponse(ctx context.Context, providerType, id string, params core.ResponseRetrieveParams) (*core.ResponsesResponse, error) {
+	responses, err := g.nativeResponseLifecycleRouter()
+	if err != nil {
+		return nil, err
+	}
+	return responses.GetResponse(ctx, providerType, id, params)
+}
+
+// ListResponseInputItems delegates native response input item listing.
+func (g *GuardedProvider) ListResponseInputItems(ctx context.Context, providerType, id string, params core.ResponseInputItemsParams) (*core.ResponseInputItemListResponse, error) {
+	responses, err := g.nativeResponseLifecycleRouter()
+	if err != nil {
+		return nil, err
+	}
+	return responses.ListResponseInputItems(ctx, providerType, id, params)
+}
+
+// CancelResponse delegates native response cancellation.
+func (g *GuardedProvider) CancelResponse(ctx context.Context, providerType, id string) (*core.ResponsesResponse, error) {
+	responses, err := g.nativeResponseLifecycleRouter()
+	if err != nil {
+		return nil, err
+	}
+	return responses.CancelResponse(ctx, providerType, id)
+}
+
+// DeleteResponse delegates native response deletion.
+func (g *GuardedProvider) DeleteResponse(ctx context.Context, providerType, id string) (*core.ResponseDeleteResponse, error) {
+	responses, err := g.nativeResponseLifecycleRouter()
+	if err != nil {
+		return nil, err
+	}
+	return responses.DeleteResponse(ctx, providerType, id)
+}
+
+// CountResponseInputTokens delegates native response token counting.
+func (g *GuardedProvider) CountResponseInputTokens(ctx context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseInputTokensResponse, error) {
+	responses, err := g.nativeResponseUtilityRouter()
+	if err != nil {
+		return nil, err
+	}
+	return responses.CountResponseInputTokens(ctx, providerType, req)
+}
+
+// CompactResponse delegates native response compaction.
+func (g *GuardedProvider) CompactResponse(ctx context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseCompactResponse, error) {
+	responses, err := g.nativeResponseUtilityRouter()
+	if err != nil {
+		return nil, err
+	}
+	return responses.CompactResponse(ctx, providerType, req)
 }
 
 // PatchChatRequest applies guardrails to a translated chat request without

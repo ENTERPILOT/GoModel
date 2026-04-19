@@ -167,7 +167,7 @@
             }
           },
           {
-            "description": "Search across request_id/requested_model/provider/method/path/error_type",
+            "description": "Search across request_id/requested_model/provider/method/path/error_type/error_message",
             "name": "search",
             "in": "query",
             "schema": {
@@ -1010,17 +1010,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1030,17 +1030,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1050,17 +1050,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1193,17 +1193,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1213,17 +1213,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1233,17 +1233,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1376,17 +1376,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1396,17 +1396,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1416,17 +1416,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1559,17 +1559,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1579,17 +1579,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1599,17 +1599,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1742,17 +1742,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1762,17 +1762,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1782,17 +1782,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1925,17 +1925,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1945,17 +1945,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -1965,17 +1965,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2108,17 +2108,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2128,17 +2128,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2148,17 +2148,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2211,7 +2211,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2221,7 +2221,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2231,7 +2231,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2241,7 +2241,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2285,7 +2285,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2295,7 +2295,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2305,7 +2305,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2351,7 +2351,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2361,7 +2361,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2371,7 +2371,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2381,7 +2381,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2391,7 +2391,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2437,7 +2437,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2447,7 +2447,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2457,7 +2457,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2467,7 +2467,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2477,7 +2477,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2523,7 +2523,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2533,7 +2533,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2543,7 +2543,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2553,7 +2553,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2563,7 +2563,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2573,7 +2573,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2624,12 +2624,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2639,12 +2639,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2654,12 +2654,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2669,12 +2669,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2720,7 +2720,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2730,7 +2730,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2740,7 +2740,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2750,7 +2750,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2819,7 +2819,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2829,7 +2829,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2839,7 +2839,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2849,7 +2849,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2917,7 +2917,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2927,7 +2927,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2937,7 +2937,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -2991,7 +2991,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3001,7 +3001,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3011,7 +3011,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3021,7 +3021,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3073,7 +3073,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3083,7 +3083,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3093,7 +3093,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3103,7 +3103,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3158,7 +3158,7 @@
             "content": {
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3168,7 +3168,7 @@
             "content": {
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3178,7 +3178,7 @@
             "content": {
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3188,7 +3188,7 @@
             "content": {
               "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3223,7 +3223,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3233,7 +3233,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3284,12 +3284,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3299,12 +3299,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3314,12 +3314,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3329,12 +3329,630 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/responses/compact": {
+      "post": {
+        "tags": [
+          "responses"
+        ],
+        "summary": "Compact response input",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/core.ResponseCompactRequest"
+              }
+            }
+          },
+          "description": "Response compact request",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.ResponseCompactResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/responses/input_tokens": {
+      "post": {
+        "tags": [
+          "responses"
+        ],
+        "summary": "Count response input tokens",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/core.ResponseInputTokensRequest"
+              }
+            }
+          },
+          "description": "Response input token request",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.ResponseInputTokensResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/responses/{id}": {
+      "get": {
+        "tags": [
+          "responses"
+        ],
+        "summary": "Get a response",
+        "parameters": [
+          {
+            "description": "Response ID",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider override for native lookups",
+            "name": "provider",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Fields to include in the response",
+            "name": "include",
+            "in": "query",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "description": "Fields to include in the response",
+            "name": "include[]",
+            "in": "query",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "description": "Whether to include obfuscated response data",
+            "name": "include_obfuscation",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Input item offset for providers that support it",
+            "name": "starting_after",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.ResponsesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "responses"
+        ],
+        "summary": "Delete a response",
+        "parameters": [
+          {
+            "description": "Response ID",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider override for native deletion",
+            "name": "provider",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.ResponseDeleteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/responses/{id}/cancel": {
+      "post": {
+        "tags": [
+          "responses"
+        ],
+        "summary": "Cancel a response",
+        "parameters": [
+          {
+            "description": "Response ID",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider override for native cancellation",
+            "name": "provider",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.ResponsesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/responses/{id}/input_items": {
+      "get": {
+        "tags": [
+          "responses"
+        ],
+        "summary": "List response input items",
+        "parameters": [
+          {
+            "description": "Response ID",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider override for native lookups",
+            "name": "provider",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Pagination cursor",
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Fields to include in listed input items",
+            "name": "include",
+            "in": "query",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "description": "Fields to include in listed input items",
+            "name": "include[]",
+            "in": "query",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "description": "Maximum items to return (1-100, default 20)",
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sort order: asc or desc",
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.ResponseInputItemListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }
@@ -3349,6 +3967,10 @@
     }
   },
   "servers": [
+    {
+      "url": "https://gomodel.example.com",
+      "description": "GoModel HTTPS deployment"
+    },
     {
       "url": "http://localhost:8080",
       "description": "Local GoModel"
@@ -3377,6 +3999,14 @@
           }
         }
       },
+      "auditlog.FailoverSnapshot": {
+        "type": "object",
+        "properties": {
+          "target_model": {
+            "type": "string"
+          }
+        }
+      },
       "auditlog.LogData": {
         "type": "object",
         "properties": {
@@ -3386,6 +4016,14 @@
           "error_message": {
             "description": "Error details (message can be long, so kept in JSON)",
             "type": "string"
+          },
+          "failover": {
+            "description": "Failover captures runtime redirect details when translated execution\nmoved from the primary selector to a configured failover target.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/auditlog.FailoverSnapshot"
+              }
+            ]
           },
           "max_tokens": {
             "type": "integer"
@@ -4345,6 +4983,42 @@
           }
         }
       },
+      "core.OpenAIErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/core.OpenAIErrorObject"
+          }
+        }
+      },
+      "core.OpenAIErrorObject": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "param",
+          "type"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string"
+          },
+          "param": {
+            "type": "string",
+            "nullable": true
+          },
+          "type": {
+            "$ref": "#/components/schemas/core.ErrorType"
+          }
+        }
+      },
       "core.PromptTokensDetails": {
         "type": "object",
         "properties": {
@@ -4367,6 +5041,165 @@
         "properties": {
           "effort": {
             "description": "Effort controls how much reasoning effort the model should use.\nValid values are \"low\", \"medium\", and \"high\".",
+            "type": "string"
+          }
+        }
+      },
+      "core.ResponseCompactRequest": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "description": "string or []ResponsesInputElement — see docs for array form",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/core.ResponsesInputElement"
+                }
+              }
+            ]
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "description": "Gateway routing hint; stripped before upstream execution.",
+            "type": "string"
+          },
+          "reasoning": {
+            "$ref": "#/components/schemas/core.Reasoning"
+          }
+        }
+      },
+      "core.ResponseCompactResponse": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "integer"
+          },
+          "error": {
+            "$ref": "#/components/schemas/core.ResponsesError"
+          },
+          "id": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "object": {
+            "type": "string"
+          },
+          "output": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/core.ResponsesOutputItem"
+            }
+          },
+          "provider": {
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/core.ResponsesUsage"
+          }
+        }
+      },
+      "core.ResponseDeleteResponse": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          }
+        }
+      },
+      "core.ResponseInputItemListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/core.ResponsesInputElement"
+            }
+          },
+          "first_id": {
+            "type": "string"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "last_id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          }
+        }
+      },
+      "core.ResponseInputTokensRequest": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "description": "string or []ResponsesInputElement — see docs for array form",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/core.ResponsesInputElement"
+                }
+              }
+            ]
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "description": "Gateway routing hint; stripped before upstream execution.",
+            "type": "string"
+          },
+          "reasoning": {
+            "$ref": "#/components/schemas/core.Reasoning"
+          }
+        }
+      },
+      "core.ResponseInputTokensResponse": {
+        "type": "object",
+        "properties": {
+          "input_tokens": {
+            "type": "integer"
+          },
+          "object": {
             "type": "string"
           }
         }
@@ -4428,43 +5261,6 @@
           }
         }
       },
-      "core.ResponsesInputElement": {
-        "type": "object",
-        "properties": {
-          "arguments": {
-            "type": "string"
-          },
-          "call_id": {
-            "description": "Function call fields (type=\"function_call\")",
-            "type": "string"
-          },
-          "content": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/core.ContentPart"
-            },
-            "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"
-          },
-          "name": {
-            "type": "string"
-          },
-          "output": {
-            "description": "Function call output fields (type=\"function_call_output\") — CallID shared above",
-            "type": "string"
-          },
-          "role": {
-            "description": "Message fields (type=\"\" or \"message\")",
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "type": {
-            "description": "\"message\", \"function_call\", \"function_call_output\"",
-            "type": "string"
-          }
-        }
-      },
       "core.ResponsesOutputItem": {
         "type": "object",
         "properties": {
@@ -4502,11 +5298,18 @@
         "type": "object",
         "properties": {
           "input": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/core.ResponsesInputElement"
-            },
-            "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"
+            "description": "string or []ResponsesInputElement — see docs for array form",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/core.ResponsesInputElement"
+                }
+              }
+            ]
           },
           "instructions": {
             "type": "string"
@@ -4934,6 +5737,50 @@
             "type": "integer"
           },
           "user_path": {
+            "type": "string"
+          }
+        }
+      },
+      "core.ResponsesInputElement": {
+        "type": "object",
+        "properties": {
+          "arguments": {
+            "type": "string"
+          },
+          "call_id": {
+            "description": "Function call fields (type=\"function_call\")",
+            "type": "string"
+          },
+          "content": {
+            "description": "Can be string or []ContentPart",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/core.ContentPart"
+                }
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "output": {
+            "description": "Function call output fields (type=\"function_call_output\") - CallID shared above",
+            "type": "string"
+          },
+          "role": {
+            "description": "Message fields (type=\"\" or \"message\")",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "type": {
+            "description": "\"message\", \"function_call\", \"function_call_output\"",
             "type": "string"
           }
         }

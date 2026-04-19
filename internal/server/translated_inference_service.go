@@ -3,17 +3,21 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 	"gomodel/internal/gateway"
+	"gomodel/internal/observability"
 	"gomodel/internal/responsecache"
+	"gomodel/internal/responsestore"
 	"gomodel/internal/streaming"
 	"gomodel/internal/usage"
 )
@@ -32,6 +36,8 @@ type translatedInferenceService struct {
 	pricingResolver          usage.PricingResolver
 	responseCache            *responsecache.ResponseCacheMiddleware
 	guardrailsHash           string
+	responseStore            responsestore.Store
+	responseStoreMu          sync.RWMutex
 
 	orchestrator *gateway.InferenceOrchestrator
 
@@ -249,7 +255,73 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		result.Meta.ProviderName,
 	)
 
+	if err := s.storeResponseSnapshot(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID); err != nil {
+		s.recordResponseSnapshotStoreFailure(workflow, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID, err)
+	}
+
 	return c.JSON(http.StatusOK, result.Response)
+}
+
+func (s *translatedInferenceService) storeResponseSnapshot(ctx context.Context, workflow *core.Workflow, req *core.ResponsesRequest, resp *core.ResponsesResponse, providerType, providerName, requestID string) error {
+	store := s.currentResponseStore()
+	if store == nil || resp == nil || resp.ID == "" {
+		return nil
+	}
+
+	stored := &responsestore.StoredResponse{
+		Response:           resp,
+		InputItems:         normalizedResponseInputItems(resp.ID, req),
+		Provider:           strings.TrimSpace(providerType),
+		ProviderName:       strings.TrimSpace(providerName),
+		ProviderResponseID: resp.ID,
+		RequestID:          requestID,
+		UserPath:           core.UserPathFromContext(ctx),
+		WorkflowVersionID:  workflow.WorkflowVersionID(),
+	}
+	if createErr := store.Create(ctx, stored); createErr != nil {
+		updateErr := store.Update(ctx, stored)
+		if updateErr == nil {
+			return nil
+		}
+		return core.NewProviderError("response_store", http.StatusInternalServerError, "failed to persist response", errors.Join(createErr, updateErr))
+	}
+	return nil
+}
+
+func (s *translatedInferenceService) currentResponseStore() responsestore.Store {
+	s.responseStoreMu.RLock()
+	defer s.responseStoreMu.RUnlock()
+	return s.responseStore
+}
+
+func (s *translatedInferenceService) setResponseStore(store responsestore.Store) {
+	s.responseStoreMu.Lock()
+	defer s.responseStoreMu.Unlock()
+	s.responseStore = store
+}
+
+func (s *translatedInferenceService) recordResponseSnapshotStoreFailure(workflow *core.Workflow, resp *core.ResponsesResponse, providerType, providerName, requestID string, err error) {
+	observability.ResponseSnapshotStoreFailures.WithLabelValues(
+		strings.TrimSpace(providerType),
+		strings.TrimSpace(providerName),
+		"store",
+	).Inc()
+
+	slog.Warn("response snapshot store failed",
+		"request_id", requestID,
+		"provider_type", providerType,
+		"provider_name", providerName,
+		"workflow_version_id", workflow.WorkflowVersionID(),
+		"response_id", responseIDForLog(resp),
+		"error", err,
+	)
+}
+
+func responseIDForLog(resp *core.ResponsesResponse) string {
+	if resp == nil {
+		return ""
+	}
+	return strings.TrimSpace(resp.ID)
 }
 
 func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo.Context, workflow *core.Workflow, req *core.ChatRequest) (bool, error) {

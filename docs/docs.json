@@ -49,6 +49,7 @@
                         "pages": [
                             "advanced/configuration",
                             "advanced/config-yaml",
+                            "advanced/responses-api",
                             "advanced/guardrails",
                             "advanced/workflows",
                             "advanced/admin-endpoints"

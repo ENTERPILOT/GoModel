@@ -199,6 +199,40 @@ type mockBatchProvider struct {
 	clearedBatchHintID string
 }
 
+type mockResponseProvider struct {
+	mockProvider
+	lastInputTokensReq *core.ResponsesRequest
+	lastCompactReq     *core.ResponsesRequest
+	cancelledResponse  string
+}
+
+func (m *mockResponseProvider) GetResponse(_ context.Context, id string, _ core.ResponseRetrieveParams) (*core.ResponsesResponse, error) {
+	return &core.ResponsesResponse{ID: id, Object: "response", Status: "completed"}, nil
+}
+
+func (m *mockResponseProvider) ListResponseInputItems(_ context.Context, _ string, _ core.ResponseInputItemsParams) (*core.ResponseInputItemListResponse, error) {
+	return &core.ResponseInputItemListResponse{Object: "list"}, nil
+}
+
+func (m *mockResponseProvider) CancelResponse(_ context.Context, id string) (*core.ResponsesResponse, error) {
+	m.cancelledResponse = id
+	return &core.ResponsesResponse{ID: id, Object: "response", Status: "cancelled"}, nil
+}
+
+func (m *mockResponseProvider) DeleteResponse(_ context.Context, id string) (*core.ResponseDeleteResponse, error) {
+	return &core.ResponseDeleteResponse{ID: id, Object: "response", Deleted: true}, nil
+}
+
+func (m *mockResponseProvider) CountResponseInputTokens(_ context.Context, req *core.ResponsesRequest) (*core.ResponseInputTokensResponse, error) {
+	m.lastInputTokensReq = req
+	return &core.ResponseInputTokensResponse{Object: "response.input_tokens", InputTokens: 42}, nil
+}
+
+func (m *mockResponseProvider) CompactResponse(_ context.Context, req *core.ResponsesRequest) (*core.ResponseCompactResponse, error) {
+	m.lastCompactReq = req
+	return &core.ResponseCompactResponse{ID: "cmp_1", Object: "response.compaction"}, nil
+}
+
 func (m *mockBatchProvider) CreateBatch(_ context.Context, _ *core.BatchRequest) (*core.BatchResponse, error) {
 	return &core.BatchResponse{ID: "provider-batch-1", Object: "batch"}, nil
 }
@@ -680,6 +714,81 @@ func TestRouterResponses(t *testing.T) {
 			t.Fatalf("expected provider field stripped upstream, got %q", altProvider.lastResponsesReq.Provider)
 		}
 	})
+}
+
+func TestRouterResponseUtilitiesStripProviderHint(t *testing.T) {
+	provider := &mockResponseProvider{}
+	lookup := newTestRegistryWithModels(registryModelEntry{
+		provider:     provider,
+		providerName: "openai_primary",
+		providerType: "openai",
+		modelID:      "gpt-4o",
+	})
+	router, _ := NewRouter(lookup)
+
+	req := &core.ResponsesRequest{
+		Model:    "gpt-4o",
+		Provider: "openai_primary",
+		Input:    "hello",
+	}
+	_, err := router.CountResponseInputTokens(context.Background(), "openai", req)
+	if err != nil {
+		t.Fatalf("CountResponseInputTokens() error = %v", err)
+	}
+	if provider.lastInputTokensReq == nil {
+		t.Fatal("expected input token request to be captured")
+	}
+	if provider.lastInputTokensReq.Provider != "" {
+		t.Fatalf("upstream provider hint = %q, want empty", provider.lastInputTokensReq.Provider)
+	}
+	if req.Provider != "openai_primary" {
+		t.Fatalf("original request provider mutated to %q", req.Provider)
+	}
+
+	_, err = router.CompactResponse(context.Background(), "openai", req)
+	if err != nil {
+		t.Fatalf("CompactResponse() error = %v", err)
+	}
+	if provider.lastCompactReq == nil {
+		t.Fatal("expected compact request to be captured")
+	}
+	if provider.lastCompactReq.Provider != "" {
+		t.Fatalf("upstream provider hint = %q, want empty", provider.lastCompactReq.Provider)
+	}
+}
+
+func TestRouterResponseLifecycleRoutesByProviderName(t *testing.T) {
+	primary := &mockResponseProvider{}
+	backup := &mockResponseProvider{}
+	lookup := newTestRegistryWithModels(
+		registryModelEntry{
+			provider:     primary,
+			providerName: "openai_primary",
+			providerType: "openai",
+			modelID:      "gpt-4o",
+		},
+		registryModelEntry{
+			provider:     backup,
+			providerName: "openai_backup",
+			providerType: "openai",
+			modelID:      "gpt-4o",
+		},
+	)
+	router, _ := NewRouter(lookup)
+
+	resp, err := router.CancelResponse(context.Background(), "openai_backup", "resp_1")
+	if err != nil {
+		t.Fatalf("CancelResponse() error = %v", err)
+	}
+	if backup.cancelledResponse != "resp_1" {
+		t.Fatalf("backup cancelled response = %q, want resp_1", backup.cancelledResponse)
+	}
+	if primary.cancelledResponse != "" {
+		t.Fatalf("primary cancelled response = %q, want empty", primary.cancelledResponse)
+	}
+	if resp.Provider != "openai" {
+		t.Fatalf("response provider = %q, want openai", resp.Provider)
+	}
 }
 
 func TestRouterListModels(t *testing.T) {

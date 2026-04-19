@@ -106,8 +106,13 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 	path = normalizeEndpointPath(path)
 
 	switch operation {
-	case OperationChatCompletions, OperationResponses, OperationEmbeddings:
+	case OperationChatCompletions, OperationEmbeddings:
 		return BodyModeJSON
+	case OperationResponses:
+		if method == http.MethodPost && (path == "/v1/responses" || path == "/v1/responses/input_tokens" || path == "/v1/responses/compact") {
+			return BodyModeJSON
+		}
+		return BodyModeNone
 	case OperationBatches:
 		switch method {
 		case http.MethodPost:
