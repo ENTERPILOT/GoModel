@@ -454,6 +454,169 @@ func TestHandleRequest_ExactHitWritesSyntheticUsageEntry(t *testing.T) {
 	}
 }
 
+func TestHandleRequest_AuditMiddlewarePreservesCommittedErrorStatus(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+
+	m := &ResponseCacheMiddleware{
+		simple: newSimpleCacheMiddleware(store, time.Hour, nil),
+	}
+	logger := &recordingAuditLogger{
+		config: auditlog.Config{
+			Enabled:   true,
+			LogBodies: true,
+		},
+	}
+
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"cache-audit-error-status"}]}`)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
+		return m.HandleRequest(c, body, func() error {
+			return c.JSON(http.StatusGatewayTimeout, map[string]any{
+				"error": map[string]any{
+					"message": "provider timeout",
+				},
+			})
+		})
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("response status = %d, want %d", rec.Code, http.StatusGatewayTimeout)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("expected 1 audit log entry, got %d", len(logger.entries))
+	}
+	if got := logger.entries[0].StatusCode; got != http.StatusGatewayTimeout {
+		t.Fatalf("audit status = %d, want %d", got, http.StatusGatewayTimeout)
+	}
+}
+
+func TestHandleRequest_GatewayTimeoutDoesNotPopulateExactCache(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+
+	m := &ResponseCacheMiddleware{
+		simple: newSimpleCacheMiddleware(store, time.Hour, nil),
+	}
+
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"do-not-cache-timeout"}]}`)
+	e := echo.New()
+	handlerCalls := 0
+
+	run := func() *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		if err := m.HandleRequest(c, body, func() error {
+			handlerCalls++
+			return c.JSON(http.StatusGatewayTimeout, map[string]any{
+				"error": map[string]any{
+					"message": "timeout awaiting response headers",
+				},
+			})
+		}); err != nil {
+			t.Fatalf("HandleRequest: %v", err)
+		}
+		return rec
+	}
+
+	rec1 := run()
+	if rec1.Code != http.StatusGatewayTimeout {
+		t.Fatalf("first response status = %d, want %d", rec1.Code, http.StatusGatewayTimeout)
+	}
+	if got := rec1.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("first timeout response should not be cached, got X-Cache=%q", got)
+	}
+
+	m.simple.wg.Wait()
+
+	rec2 := run()
+	if rec2.Code != http.StatusGatewayTimeout {
+		t.Fatalf("second response status = %d, want %d", rec2.Code, http.StatusGatewayTimeout)
+	}
+	if got := rec2.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("timeout response should not become an exact cache hit, got X-Cache=%q", got)
+	}
+	if handlerCalls != 2 {
+		t.Fatalf("timeout response should execute handler twice, got %d calls", handlerCalls)
+	}
+}
+
+func TestHandleRequest_GatewayTimeoutDoesNotPopulateSemanticCache(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+
+	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
+	vecStore := NewMapVecStore()
+	semCfg := config.SemanticCacheConfig{
+		Enabled:                 boolPtr(true),
+		SimilarityThreshold:     0.90,
+		TTL:                     intPtr(3600),
+		MaxConversationMessages: intPtr(10),
+	}
+	m := &ResponseCacheMiddleware{
+		simple:   newSimpleCacheMiddleware(store, time.Hour, nil),
+		semantic: newSemanticCacheMiddleware(emb, vecStore, semCfg, nil),
+	}
+
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"do-not-semantic-cache-timeout"}]}`)
+	e := echo.New()
+	handlerCalls := 0
+
+	run := func() *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Cache-Type", CacheTypeSemantic)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		if err := m.HandleRequest(c, body, func() error {
+			handlerCalls++
+			return c.JSON(http.StatusGatewayTimeout, map[string]any{
+				"error": map[string]any{
+					"message": "timeout awaiting response headers",
+				},
+			})
+		}); err != nil {
+			t.Fatalf("HandleRequest: %v", err)
+		}
+		return rec
+	}
+
+	rec1 := run()
+	if rec1.Code != http.StatusGatewayTimeout {
+		t.Fatalf("first response status = %d, want %d", rec1.Code, http.StatusGatewayTimeout)
+	}
+	if got := rec1.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("first timeout response should not be cached semantically, got X-Cache=%q", got)
+	}
+
+	m.simple.wg.Wait()
+	m.semantic.wg.Wait()
+
+	rec2 := run()
+	if rec2.Code != http.StatusGatewayTimeout {
+		t.Fatalf("second response status = %d, want %d", rec2.Code, http.StatusGatewayTimeout)
+	}
+	if got := rec2.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("timeout response should not become a semantic cache hit, got X-Cache=%q", got)
+	}
+	if handlerCalls != 2 {
+		t.Fatalf("timeout response should execute handler twice, got %d calls", handlerCalls)
+	}
+}
+
 func TestHandleRequest_CacheControlNoCacheBypassesAllLayers(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()

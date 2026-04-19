@@ -725,7 +725,6 @@
         <form class="alias-form" @submit.prevent="submitAuthKeyForm()">
             <div class="aliases-editor-header">
                 <div>
-                    <p class="alias-form-kicker">Managed key</p>
                     <h3>Create API Key</h3>
                 </div>
                 <button type="button" class="table-action-btn alias-close-btn"
@@ -771,13 +770,15 @@
                         <input type="date" class="filter-input" x-model="authKeyForm.expires_at">
                     </label>
                 </div>
-                <label class="alias-form-field">
-                    <span>User Path (optional)</span>
-                    <input type="text" class="filter-input" placeholder="ex. /department1/team-a"
+                <div class="alias-form-field">
+                    <div class="alias-form-label-with-help">
+                        <label for="auth-key-user-path">User Path (optional)</label>
+                        <div class="auth-key-inline-help">
+                            {{template "helper-disclosure" "{ heading: '', open: false, copyId: 'auth-key-user-path-help-copy', showLabel: 'Show API key user path help', hideLabel: 'Hide API key user path help', text: 'When set, this key overrides X-GoModel-User-Path for audit logging and downstream request context.' }"}}
+                        </div>
+                    </div>
+                    <input id="auth-key-user-path" type="text" class="filter-input" placeholder="ex. /department1/team-a"
                         x-model="authKeyForm.user_path" aria-label="API key user path" aria-describedby="auth-key-user-path-help-copy">
-                </label>
-                <div class="auth-key-inline-help">
-                    {{template "helper-disclosure" "{ heading: 'User Path Override', open: false, copyId: 'auth-key-user-path-help-copy', showLabel: 'Show API key user path help', hideLabel: 'Hide API key user path help', text: 'When set, this key overrides X-GoModel-User-Path for audit logging and downstream request context.' }"}}
                 </div>
                 <label class="alias-form-field">
                     <span>Description (optional)</span>

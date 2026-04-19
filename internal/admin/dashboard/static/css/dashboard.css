@@ -1765,13 +1765,8 @@ td.col-price {
 }
 
 .auth-key-inline-help {
-  margin-top: -2px;
-  margin-bottom: 8px;
-}
-
-.auth-key-inline-help .inline-help-title-row h3 {
-  font-size: 13px;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
 }
 
 .auth-key-inline-help .inline-help-copy {
@@ -1796,6 +1791,21 @@ td.col-price {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-muted);
+}
+
+.alias-form-label-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.alias-form-label-with-help > label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .alias-form-field-fieldset {
@@ -2617,6 +2627,10 @@ td.col-price {
   color: var(--text);
 }
 
+.audit-pane-error-message {
+  color: var(--danger);
+}
+
 .audit-json-body {
   white-space: pre;
   overflow-wrap: normal;
@@ -3180,6 +3194,10 @@ body.conversation-drawer-open {
 
 .inline-help-title-row h3 {
   margin-bottom: 0;
+}
+
+.inline-help-title-row h3:empty {
+  display: none;
 }
 
 .inline-help-toggle {

@@ -83,6 +83,58 @@ test('auditResponsePane returns the shared response-pane contract', () => {
     assert.equal(pane.tooLargeMessage, 'Response body was too large to capture.');
 });
 
+test('auditResponsePane surfaces error message from captured error body', () => {
+    const module = createAuditListModule();
+    const entry = {
+        data: {
+            response_body: {
+                error: {
+                    type: 'provider_error',
+                    message: 'http2: timeout awaiting response headers'
+                }
+            }
+        }
+    };
+
+    const pane = module.auditResponsePane(entry);
+
+    assert.equal(module.auditEntryErrorMessage(entry), 'http2: timeout awaiting response headers');
+    assert.equal(pane.showErrorMessage, true);
+    assert.equal(pane.errorMessage, 'http2: timeout awaiting response headers');
+    assert.equal(pane.showEmpty, false);
+});
+
+test('auditEntryErrorMessage extracts JSON encoded gateway error text', () => {
+    const module = createAuditListModule();
+    const entry = {
+        data: {
+            error_message: '{"error":{"message":"circuit breaker is open - provider temporarily unavailable"}}'
+        }
+    };
+
+    assert.equal(
+        module.auditEntryErrorMessage(entry),
+        'circuit breaker is open - provider temporarily unavailable'
+    );
+});
+
+test('auditEntryErrorMessage ignores successful response fields', () => {
+    const module = createAuditListModule();
+    const entry = {
+        data: {
+            response_body: {
+                id: 'chatcmpl_123',
+                choices: [{ message: { content: 'hello' } }]
+            }
+        }
+    };
+
+    const pane = module.auditResponsePane(entry);
+
+    assert.equal(module.auditEntryErrorMessage(entry), '');
+    assert.equal(pane.showErrorMessage, false);
+});
+
 test('fetchAuditLog preserves a successful payload when workflow prefetch fails', async () => {
     const loggedErrors = [];
     const module = createAuditListModule({

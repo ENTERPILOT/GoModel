@@ -298,25 +298,31 @@ test('auth key expirations render as a UTC date with the full UTC timestamp in t
     assert.ok(authKeyFormMatch, 'Expected auth key editor block');
 
     const authKeyForm = authKeyFormMatch[0];
-    const userPathIndex = authKeyForm.indexOf('<span>User Path (optional)</span>');
-    const helperIndex = authKeyForm.indexOf("{{template \"helper-disclosure\" \"{ heading: 'User Path Override'");
+    const userPathIndex = authKeyForm.indexOf('<label for="auth-key-user-path">User Path (optional)</label>');
+    const helperIndex = authKeyForm.indexOf("{{template \"helper-disclosure\" \"{ heading: ''");
+    const userPathInputIndex = authKeyForm.indexOf('id="auth-key-user-path"');
     const descriptionIndex = authKeyForm.indexOf('<span>Description (optional)</span>');
 
     assert.match(indexTemplate, /x-text="key\.expires_at \? formatDateUTC\(key\.expires_at\) : '\\u2014'"/);
     assert.match(indexTemplate, /:title="key\.expires_at \? formatTimestampUTC\(key\.expires_at\) : ''"/);
-    assert.match(indexTemplate, /x-model="authKeyForm\.user_path"[^>]*aria-label="API key user path"/);
+    assert.match(indexTemplate, /id="auth-key-user-path"[^>]*x-model="authKeyForm\.user_path"[^>]*aria-label="API key user path"/);
     assert.match(indexTemplate, /class="model-alias-editor auth-key-editor"/);
     assert.match(plusIconTemplate, /{{define "plus-icon"}}[\s\S]*<path d="M12 5v14"><\/path>[\s\S]*<path d="M5 12h14"><\/path>[\s\S]*{{end}}/);
     assert.match(indexTemplate, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon"[\s\S]*{{template "plus-icon"}}[\s\S]*<span>Create API Key<\/span>/);
     assert.match(authKeyForm, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon"[\s\S]*x-show="!authKeyFormSubmitting"[\s\S]*{{template "plus-icon"}}[\s\S]*x-text="authKeyFormSubmitting \? 'Creating\.\.\.' : 'Create API Key'"/);
     assert.notEqual(userPathIndex, -1);
     assert.notEqual(helperIndex, -1);
+    assert.notEqual(userPathInputIndex, -1);
     assert.notEqual(descriptionIndex, -1);
     assert.ok(userPathIndex < helperIndex);
-    assert.ok(helperIndex < descriptionIndex);
+    assert.ok(helperIndex < userPathInputIndex);
+    assert.ok(userPathInputIndex < descriptionIndex);
+    assert.match(authKeyForm, /class="alias-form-label-with-help"[\s\S]*<label for="auth-key-user-path">User Path \(optional\)<\/label>[\s\S]*class="auth-key-inline-help"[\s\S]*copyId: 'auth-key-user-path-help-copy'/);
     assert.match(authKeyForm, /placeholder="ex\. \/department1\/team-a"/);
     assert.match(authKeyForm, /copyId: 'auth-key-user-path-help-copy'/);
     assert.match(authKeyForm, /When set, this key overrides X-GoModel-User-Path for audit logging and downstream request context\./);
+    assert.doesNotMatch(authKeyForm, /User Path Override/);
+    assert.doesNotMatch(authKeyForm, /Managed key/);
     assert.doesNotMatch(
         indexTemplate,
         /<p class="alias-form-hint">\s*When set, this key overrides <code>X-GoModel-User-Path<\/code> for audit logging and downstream request context\.\s*<\/p>/
@@ -434,6 +440,9 @@ test('audit entry metadata is rendered as a labeled pill row at the bottom of th
     assert.match(auditJSONRule, /max-width:\s*100%/);
     assert.match(auditJSONRule, /overflow-x:\s*auto/);
 
+    const auditErrorRule = readCSSRule(css, '.audit-pane-error-message');
+    assert.match(auditErrorRule, /color:\s*var\(--danger\)/);
+
     const metadataRule = readCSSRule(css, '.audit-entry-metadata');
     assert.match(metadataRule, /display:\s*flex/);
     assert.match(metadataRule, /align-items:\s*center/);
@@ -550,8 +559,10 @@ test('audit request and response sections reuse a shared audit pane template', (
     );
     assert.match(auditPaneTemplate, /aria-live="polite" aria-atomic="true" x-text="copyHeadersState\.error \? 'Copy failed' : \(copyHeadersState\.copied \? 'Copied' : 'Copy Headers'\)"/);
     assert.match(auditPaneTemplate, /aria-live="polite" aria-atomic="true" x-text="copyBodyState\.error \? 'Copy failed' : \(copyBodyState\.copied \? 'Copied' : 'Copy Body'\)"/);
+    assert.match(auditPaneTemplate, /<pre class="audit-json audit-pane-error-message" x-text="pane\.errorMessage"><\/pre>/);
     assert.match(indexTemplate, /{{template "audit-pane" "auditRequestPane\(entry\)"}}/);
     assert.match(indexTemplate, /{{template "audit-pane" "auditResponsePane\(entry\)"}}/);
+    assert.doesNotMatch(indexTemplate, /audit-error-summary/);
     assert.doesNotMatch(indexTemplate, /<section class="audit-pane">[\s\S]*<h4>Request<\/h4>/);
     assert.doesNotMatch(indexTemplate, /<section class="audit-pane">[\s\S]*<h4>Response<\/h4>/);
 });
