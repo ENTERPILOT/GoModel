@@ -241,7 +241,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for testing, linting, and pre-commit setup.
 ### Must Have
 
 - [ ] Intelligent routing
-- [ ] Broader provider support: Cohere, Command A, Operational, and DeepSeek V3
+- [ ] Broader provider support: Oracle model configuration via environment variables, plus Cohere, Command A, Operational, and DeepSeek V3
 - [ ] Budget management with limits per `user_path` and/or API key
 - [ ] Editable model pricing for accurate cost tracking and budgeting
 - [ ] Full support for the OpenAI `/responses` and `/conversations` lifecycle
