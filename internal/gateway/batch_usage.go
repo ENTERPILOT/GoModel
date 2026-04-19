@@ -309,7 +309,7 @@ func intFromFloat64(v float64) (int, bool) {
 	if v < minInt || v > maxInt {
 		return 0, false
 	}
-	if intBits == 64 && v == maxInt && v > 0 {
+	if intBits == 64 && v == maxInt {
 		return 0, false
 	}
 	if math.Trunc(v) != v {
