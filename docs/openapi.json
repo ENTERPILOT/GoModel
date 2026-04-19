@@ -3968,6 +3968,10 @@
   },
   "servers": [
     {
+      "url": "https://gomodel.example.com",
+      "description": "GoModel HTTPS deployment"
+    },
+    {
       "url": "http://localhost:8080",
       "description": "Local GoModel"
     }
@@ -5045,11 +5049,18 @@
         "type": "object",
         "properties": {
           "input": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/core.ResponsesInputElement"
-            },
-            "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"
+            "description": "string or []ResponsesInputElement — see docs for array form",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/core.ResponsesInputElement"
+                }
+              }
+            ]
           },
           "instructions": {
             "type": "string"
@@ -5127,7 +5138,7 @@
           "data": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/core.ResponsesInputElement"
             }
           },
           "first_id": {
@@ -5148,11 +5159,18 @@
         "type": "object",
         "properties": {
           "input": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/core.ResponsesInputElement"
-            },
-            "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"
+            "description": "string or []ResponsesInputElement — see docs for array form",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/core.ResponsesInputElement"
+                }
+              }
+            ]
           },
           "instructions": {
             "type": "string"
@@ -5243,43 +5261,6 @@
           }
         }
       },
-      "core.ResponsesInputElement": {
-        "type": "object",
-        "properties": {
-          "arguments": {
-            "type": "string"
-          },
-          "call_id": {
-            "description": "Function call fields (type=\"function_call\")",
-            "type": "string"
-          },
-          "content": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/core.ContentPart"
-            },
-            "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"
-          },
-          "name": {
-            "type": "string"
-          },
-          "output": {
-            "description": "Function call output fields (type=\"function_call_output\") — CallID shared above",
-            "type": "string"
-          },
-          "role": {
-            "description": "Message fields (type=\"\" or \"message\")",
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "type": {
-            "description": "\"message\", \"function_call\", \"function_call_output\"",
-            "type": "string"
-          }
-        }
-      },
       "core.ResponsesOutputItem": {
         "type": "object",
         "properties": {
@@ -5317,11 +5298,18 @@
         "type": "object",
         "properties": {
           "input": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/core.ResponsesInputElement"
-            },
-            "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"
+            "description": "string or []ResponsesInputElement — see docs for array form",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/core.ResponsesInputElement"
+                }
+              }
+            ]
           },
           "instructions": {
             "type": "string"
@@ -5749,6 +5737,50 @@
             "type": "integer"
           },
           "user_path": {
+            "type": "string"
+          }
+        }
+      },
+      "core.ResponsesInputElement": {
+        "type": "object",
+        "properties": {
+          "arguments": {
+            "type": "string"
+          },
+          "call_id": {
+            "description": "Function call fields (type=\"function_call\")",
+            "type": "string"
+          },
+          "content": {
+            "description": "Can be string or []ContentPart",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/core.ContentPart"
+                }
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "output": {
+            "description": "Function call output fields (type=\"function_call_output\") - CallID shared above",
+            "type": "string"
+          },
+          "role": {
+            "description": "Message fields (type=\"\" or \"message\")",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "type": {
+            "description": "\"message\", \"function_call\", \"function_call_output\"",
             "type": "string"
           }
         }

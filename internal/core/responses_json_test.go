@@ -197,6 +197,33 @@ func TestResponseUtilityRequestMarshalJSON_PreservesProvider(t *testing.T) {
 			if decoded["provider"] != "openai_primary" {
 				t.Fatalf("provider = %#v, want openai_primary in %s", decoded["provider"], string(body))
 			}
+
+			switch original := tt.req.(type) {
+			case ResponseInputTokensRequest:
+				var roundTripped ResponseInputTokensRequest
+				if err := json.Unmarshal(body, &roundTripped); err != nil {
+					t.Fatalf("json.Unmarshal(ResponseInputTokensRequest) error = %v", err)
+				}
+				if roundTripped.Provider != original.Provider {
+					t.Fatalf("round-tripped provider = %q, want %q", roundTripped.Provider, original.Provider)
+				}
+				if input, ok := roundTripped.Input.(string); !ok || input != original.Input {
+					t.Fatalf("round-tripped input = %#v, want %#v", roundTripped.Input, original.Input)
+				}
+			case ResponseCompactRequest:
+				var roundTripped ResponseCompactRequest
+				if err := json.Unmarshal(body, &roundTripped); err != nil {
+					t.Fatalf("json.Unmarshal(ResponseCompactRequest) error = %v", err)
+				}
+				if roundTripped.Provider != original.Provider {
+					t.Fatalf("round-tripped provider = %q, want %q", roundTripped.Provider, original.Provider)
+				}
+				if input, ok := roundTripped.Input.(string); !ok || input != original.Input {
+					t.Fatalf("round-tripped input = %#v, want %#v", roundTripped.Input, original.Input)
+				}
+			default:
+				t.Fatalf("unexpected request type %T", tt.req)
+			}
 		})
 	}
 }

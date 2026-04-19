@@ -3679,11 +3679,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "input": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/core.ResponsesInputElement"
-                    },
-                    "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"
+                    "description": "string or []ResponsesInputElement — see docs for array form"
                 },
                 "instructions": {
                     "type": "string"
@@ -3782,11 +3778,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "input": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/core.ResponsesInputElement"
-                    },
-                    "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"
+                    "description": "string or []ResponsesInputElement — see docs for array form"
                 },
                 "instructions": {
                     "type": "string"
@@ -3877,43 +3869,6 @@ const docTemplate = `{
                 }
             }
         },
-        "core.ResponsesInputElement": {
-            "type": "object",
-            "properties": {
-                "arguments": {
-                    "type": "string"
-                },
-                "call_id": {
-                    "description": "Function call fields (type=\"function_call\")",
-                    "type": "string"
-                },
-                "content": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/core.ContentPart"
-                    },
-                    "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ContentPart\"}}]"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "output": {
-                    "description": "Function call output fields (type=\"function_call_output\") — CallID shared above",
-                    "type": "string"
-                },
-                "role": {
-                    "description": "Message fields (type=\"\" or \"message\")",
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "type": {
-                    "description": "\"message\", \"function_call\", \"function_call_output\"",
-                    "type": "string"
-                }
-            }
-        },
         "core.ResponsesOutputItem": {
             "type": "object",
             "properties": {
@@ -3951,11 +3906,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "input": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/core.ResponsesInputElement"
-                    },
-                    "x-oneof": "[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"
+                    "description": "string or []ResponsesInputElement — see docs for array form"
                 },
                 "instructions": {
                     "type": "string"

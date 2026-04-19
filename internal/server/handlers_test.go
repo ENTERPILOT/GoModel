@@ -4905,6 +4905,28 @@ func TestResponsesUtilityRoutes(t *testing.T) {
 	}
 }
 
+func TestResponsesUtilityRoutesReturnProviderErrorWhenProviderTypeMissing(t *testing.T) {
+	provider := &mockProvider{
+		supportedModels: []string{"gpt-5-mini"},
+		providerTypes: map[string]string{
+			"gpt-5-mini": "",
+		},
+	}
+	srv := New(provider, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", strings.NewReader(`{"model":"gpt-5-mini","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
+	var envelope core.OpenAIErrorEnvelope
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	require.Equal(t, core.ErrorTypeProvider, envelope.Error.Type)
+	require.Equal(t, "unable to resolve provider for response utility operation", envelope.Error.Message)
+	require.Empty(t, provider.capturedResponseUtilityReqs)
+}
+
 // mockUsageLogger implements usage.LoggerInterface for testing.
 type mockUsageLogger struct {
 	config usage.Config

@@ -284,7 +284,7 @@ func (s *nativeResponseService) utilityRequest(c *echo.Context) (*core.Responses
 		providerType = strings.TrimSpace(workflow.ProviderType)
 	}
 	if providerType == "" {
-		return nil, "", unsupportedResponseOperation("unable to resolve provider for response utility operation")
+		return nil, "", core.NewProviderError("response_router", http.StatusBadGateway, "unable to resolve provider for response utility operation", nil)
 	}
 	return req, providerType, nil
 }

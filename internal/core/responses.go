@@ -9,22 +9,20 @@ import "encoding/json"
 // can round-trip extensions; Swagger ignores ExtraFields, and typed fields
 // should be preferred when available.
 type ResponsesRequest struct {
-	Model    string `json:"model"`
-	Provider string `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
-	Input    any    `json:"input"`              // string or []ResponsesInputElement — see docs for array form
-	//nolint:govet // Intentional duplicate json tag for Swagger docs: input is string OR []ResponsesInputElement.
-	InputSchema       []ResponsesInputElement `json:"input,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"`
-	Instructions      string                  `json:"instructions,omitempty"`
-	Tools             []map[string]any        `json:"tools,omitempty"`
-	ToolChoice        any                     `json:"tool_choice,omitempty"` // string or object
-	ParallelToolCalls *bool                   `json:"parallel_tool_calls,omitempty"`
-	Temperature       *float64                `json:"temperature,omitempty"`
-	MaxOutputTokens   *int                    `json:"max_output_tokens,omitempty"`
-	Stream            bool                    `json:"stream,omitempty"`
-	StreamOptions     *StreamOptions          `json:"stream_options,omitempty"`
-	Metadata          map[string]string       `json:"metadata,omitempty"`
-	Reasoning         *Reasoning              `json:"reasoning,omitempty"`
-	ExtraFields       UnknownJSONFields       `json:"-" swaggerignore:"true"`
+	Model             string            `json:"model"`
+	Provider          string            `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
+	Input             any               `json:"input"`              // string or []ResponsesInputElement — see docs for array form
+	Instructions      string            `json:"instructions,omitempty"`
+	Tools             []map[string]any  `json:"tools,omitempty"`
+	ToolChoice        any               `json:"tool_choice,omitempty"` // string or object
+	ParallelToolCalls *bool             `json:"parallel_tool_calls,omitempty"`
+	Temperature       *float64          `json:"temperature,omitempty"`
+	MaxOutputTokens   *int              `json:"max_output_tokens,omitempty"`
+	Stream            bool              `json:"stream,omitempty"`
+	StreamOptions     *StreamOptions    `json:"stream_options,omitempty"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
+	Reasoning         *Reasoning        `json:"reasoning,omitempty"`
+	ExtraFields       UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
 // ResponseInputTokensRequest documents the request body accepted by
@@ -36,8 +34,6 @@ type ResponseInputTokensRequest struct {
 	Instructions string            `json:"instructions,omitempty"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
 	Reasoning    *Reasoning        `json:"reasoning,omitempty"`
-	//nolint:govet // Intentional duplicate json tag for Swagger docs: input is string OR []ResponsesInputElement.
-	InputSchema []ResponsesInputElement `json:"input,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"`
 }
 
 // ResponseCompactRequest documents the request body accepted by
@@ -49,8 +45,6 @@ type ResponseCompactRequest struct {
 	Instructions string            `json:"instructions,omitempty"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
 	Reasoning    *Reasoning        `json:"reasoning,omitempty"`
-	//nolint:govet // Intentional duplicate json tag for Swagger docs: input is string OR []ResponsesInputElement.
-	InputSchema []ResponsesInputElement `json:"input,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"`
 }
 
 func (r *ResponsesRequest) semanticSelector() (string, string) {
