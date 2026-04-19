@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 79 end-to-end curl scenarios for release validation.
+This file contains 85 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -33,6 +33,7 @@ Stateful note:
 
 - `S13`-`S60` mutate shared aliases/files/batches
 - `S64`-`S79` mutate managed keys, workflows, and auth artifacts
+- `S80`-`S85` mutate response snapshots and response-cache artifacts
 - For stateful partial reruns, prefer a contiguous range that includes the
   prerequisite setup scenarios, or rerun with the same `--qa-suffix` and
   `--keep-artifacts`
@@ -102,7 +103,11 @@ export QA_AUTH_REQ2="qa-auth-cacheoff-$QA_SUFFIX-2"
 export QA_CACHE_REQ1="qa-cache-exact-$QA_SUFFIX-1"
 export QA_CACHE_REQ2="qa-cache-exact-$QA_SUFFIX-2"
 export QA_DEACTIVATED_REQ="qa-auth-deactivated-$QA_SUFFIX"
-export QA_CACHE_REPLY="QA_CACHE_EXACT_OK"
+export QA_REPLY_SUFFIX="${QA_SUFFIX//[^[:alnum:]]/_}"
+export QA_CACHE_REPLY="QA_CACHE_EXACT_OK_$QA_REPLY_SUFFIX"
+export QA_RESP_CACHE_REQ1="qa-responses-cache-$QA_SUFFIX-1"
+export QA_RESP_CACHE_REQ2="qa-responses-cache-$QA_SUFFIX-2"
+export QA_RESP_CACHE_REPLY="QA_RESPONSES_CACHE_OK_$QA_REPLY_SUFFIX"
 
 cleanup_release_auth_artifacts() {
   rm -f "$QA_AUTH_KEY_JSON" "$QA_AUTH_KEY_VALUE_FILE" "$QA_WORKFLOW_JSON" "$QA_WORKFLOW_ID_FILE"
@@ -997,7 +1002,7 @@ curl -fsS -D "$HEADERS_FILE" -o "$BODY_FILE" "$AUTH_BASE_URL/v1/chat/completions
   -H 'Content-Type: application/json' \
   -H "X-Request-ID: $QA_CACHE_REQ1" \
   -H "X-GoModel-User-Path: $QA_CACHE_USER_PATH" \
-  -d "{\"model\":\"openai/gpt-4.1-nano\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly $QA_CACHE_REPLY\"}],\"max_tokens\":16}"
+  -d "{\"model\":\"openai/gpt-4.1-nano\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly $QA_CACHE_REPLY\"}],\"max_tokens\":32}"
 sed -n '1,20p' "$HEADERS_FILE"
 sed -n '1,20p' "$BODY_FILE"
 jq -e --arg reply "$QA_CACHE_REPLY" '.choices[0].message.content == $reply' "$BODY_FILE" >/dev/null
@@ -1019,7 +1024,7 @@ curl -fsS -D "$HEADERS_FILE" -o "$BODY_FILE" "$AUTH_BASE_URL/v1/chat/completions
   -H 'Content-Type: application/json' \
   -H "X-Request-ID: $QA_CACHE_REQ2" \
   -H "X-GoModel-User-Path: $QA_CACHE_USER_PATH" \
-  -d "{\"model\":\"openai/gpt-4.1-nano\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly $QA_CACHE_REPLY\"}],\"max_tokens\":16}"
+  -d "{\"model\":\"openai/gpt-4.1-nano\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly $QA_CACHE_REPLY\"}],\"max_tokens\":32}"
 sed -n '1,20p' "$HEADERS_FILE"
 sed -n '1,20p' "$BODY_FILE"
 jq -e --arg reply "$QA_CACHE_REPLY" '.choices[0].message.content == $reply' "$BODY_FILE" >/dev/null
@@ -1145,4 +1150,127 @@ curl -sS -D "$HEADERS_FILE" -o /dev/null -X POST "$AUTH_BASE_URL/admin/api/v1/wo
 sed -n '1,20p' "$HEADERS_FILE"
 grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"
 rm -f "$QA_AUTH_KEY_JSON" "$QA_AUTH_KEY_VALUE_FILE" "$QA_WORKFLOW_JSON" "$QA_WORKFLOW_ID_FILE"
+```
+
+## 14. Responses lifecycle and cache
+
+### S80 Create stored Responses snapshot
+
+Creates a non-streaming Responses API result and stores its gateway response ID for lifecycle retrieval.
+
+```bash
+RESPONSE_JSON_FILE="$QA_RUN_DIR/s80.response.json"
+RESPONSE_ID_FILE="$QA_RUN_DIR/s80.response.id"
+curl -fsS "$BASE_URL/v1/responses" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4.1-mini","input":"Reply with exactly QA_RESPONSE_LIFECYCLE_OK","max_output_tokens":20}' \
+  > "$RESPONSE_JSON_FILE"
+jq '{id,object,status,model,provider,output}' "$RESPONSE_JSON_FILE"
+jq -er '.id | select(type == "string" and length > 0)' "$RESPONSE_JSON_FILE" > "$RESPONSE_ID_FILE"
+jq -e '.object == "response" and (.output | length) >= 1' "$RESPONSE_JSON_FILE" >/dev/null
+```
+
+### S81 Retrieve stored Responses snapshot
+
+Reads the response created in `S80` through `GET /v1/responses/{id}`.
+
+```bash
+RESPONSE_ID_FILE="$QA_RUN_DIR/s80.response.id"
+RETRIEVED_JSON_FILE="$QA_RUN_DIR/s81.response-retrieved.json"
+require_release_artifact "$RESPONSE_ID_FILE"
+RESPONSE_ID=$(<"$RESPONSE_ID_FILE")
+curl -fsS "$BASE_URL/v1/responses/$RESPONSE_ID" \
+  > "$RETRIEVED_JSON_FILE"
+jq '{id,object,status,model,provider,output}' "$RETRIEVED_JSON_FILE"
+jq -e --arg response_id "$RESPONSE_ID" '
+    .id == $response_id
+    and .object == "response"
+    and (.output | length) >= 1
+  ' "$RETRIEVED_JSON_FILE" >/dev/null
+```
+
+### S82 List stored Responses input items
+
+Reads normalized input items captured from the `S80` create request.
+
+```bash
+RESPONSE_ID_FILE="$QA_RUN_DIR/s80.response.id"
+INPUT_ITEMS_JSON_FILE="$QA_RUN_DIR/s82.response-input-items.json"
+require_release_artifact "$RESPONSE_ID_FILE"
+RESPONSE_ID=$(<"$RESPONSE_ID_FILE")
+curl -fsS "$BASE_URL/v1/responses/$RESPONSE_ID/input_items?limit=10" \
+  > "$INPUT_ITEMS_JSON_FILE"
+jq '{object,has_more,first_id,last_id,data}' "$INPUT_ITEMS_JSON_FILE"
+jq -e '
+    .object == "list"
+    and (.data | length) >= 1
+    and .data[0].type == "message"
+    and .data[0].role == "user"
+    and .data[0].content[0].type == "input_text"
+    and (.data[0].content[0].text | contains("QA_RESPONSE_LIFECYCLE_OK"))
+  ' "$INPUT_ITEMS_JSON_FILE" >/dev/null
+```
+
+### S83 Delete stored Responses snapshot
+
+Deletes the stored gateway response created in `S80`.
+
+```bash
+RESPONSE_ID_FILE="$QA_RUN_DIR/s80.response.id"
+DELETE_JSON_FILE="$QA_RUN_DIR/s83.response-delete.json"
+require_release_artifact "$RESPONSE_ID_FILE"
+RESPONSE_ID=$(<"$RESPONSE_ID_FILE")
+curl -fsS -X DELETE "$BASE_URL/v1/responses/$RESPONSE_ID" \
+  > "$DELETE_JSON_FILE"
+jq '{id,object,deleted}' "$DELETE_JSON_FILE"
+jq -e --arg response_id "$RESPONSE_ID" '
+    .id == $response_id
+    and .object == "response.deleted"
+    and .deleted == true
+  ' "$DELETE_JSON_FILE" >/dev/null
+```
+
+### S84 Responses exact-cache warm request
+
+Warms the exact response cache for `/v1/responses` on the auth/cache gateway.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s84.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s84.body.XXXXXX")
+curl -fsS -D "$HEADERS_FILE" -o "$BODY_FILE" "$AUTH_BASE_URL/v1/responses" \
+  -H "$ADMIN_AUTH_HEADER" \
+  -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $QA_RESP_CACHE_REQ1" \
+  -H "X-GoModel-User-Path: $QA_CACHE_USER_PATH" \
+  -d "{\"model\":\"openai/gpt-4.1-nano\",\"input\":\"Reply with exactly $QA_RESP_CACHE_REPLY\",\"max_output_tokens\":32}"
+sed -n '1,20p' "$HEADERS_FILE"
+jq '{id,model,provider,status,output}' "$BODY_FILE"
+jq -e --arg reply "$QA_RESP_CACHE_REPLY" '
+    any(.output[]?.content[]?; .text == $reply)
+  ' "$BODY_FILE" >/dev/null
+if grep -Eiq '^X-Cache:' "$HEADERS_FILE"; then
+  echo "error: initial responses cache warm request unexpectedly returned an X-Cache header" >&2
+  exit 1
+fi
+```
+
+### S85 Repeated Responses request should hit exact cache
+
+Repeats the same `/v1/responses` request and expects `X-Cache: HIT (exact)`.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s85.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s85.body.XXXXXX")
+curl -fsS -D "$HEADERS_FILE" -o "$BODY_FILE" "$AUTH_BASE_URL/v1/responses" \
+  -H "$ADMIN_AUTH_HEADER" \
+  -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $QA_RESP_CACHE_REQ2" \
+  -H "X-GoModel-User-Path: $QA_CACHE_USER_PATH" \
+  -d "{\"model\":\"openai/gpt-4.1-nano\",\"input\":\"Reply with exactly $QA_RESP_CACHE_REPLY\",\"max_output_tokens\":32}"
+sed -n '1,20p' "$HEADERS_FILE"
+jq '{id,model,provider,status,output}' "$BODY_FILE"
+jq -e --arg reply "$QA_RESP_CACHE_REPLY" '
+    any(.output[]?.content[]?; .text == $reply)
+  ' "$BODY_FILE" >/dev/null
+grep -Eiq '^X-Cache: HIT \(exact\)' "$HEADERS_FILE"
 ```
