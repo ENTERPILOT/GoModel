@@ -143,7 +143,7 @@ Set these to automatically register providers. No YAML configuration required.
 | `OLLAMA_BASE_URL`    | Ollama (no API key needed)                        |
 
 Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
-When using Oracle, `models:` also acts as a fallback inventory if the upstream endpoint does not expose a usable `/models` response.
+When using Oracle, set `ORACLE_MODELS` to a comma-separated list such as `openai.gpt-oss-120b,xai.grok-3` if the upstream endpoint does not expose a usable `/models` response. YAML `models:` remains available for custom provider names and multi-provider Oracle setups.
 
 For OpenRouter, GoModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
 
@@ -250,6 +250,7 @@ export AZURE_API_KEY="..."           # Registers "azure" provider when paired wi
 export AZURE_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment"
 export ORACLE_API_KEY="..."          # Registers "oracle" provider when paired with ORACLE_BASE_URL
 export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1"
+export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Optional fallback inventory for Oracle
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registers "ollama" provider
 ```
 
@@ -294,14 +295,14 @@ providers:
 ```
 
 <Note>
-  For Oracle, prefer YAML configuration over env-only auto-discovery. Oracle
-  inference can work even when the upstream `/models` endpoint is unavailable,
-  so setting `models:` gives GoModel a reliable fallback inventory. See the
-  [Oracle guide](/guides/oracle) for the required OCI policy and a tested
-  configuration. Automatic model discovery is not yet a reliable, validated
-  path for this provider: GoModel can try Oracle's OpenAI-compatible `/models`
-  endpoint, but Oracle may not return a usable inventory there. OCI-native
-  Oracle model discovery is not integrated yet.
+  For Oracle, give GoModel a fallback inventory with `ORACLE_MODELS` or
+  `models:`. `ORACLE_MODELS` is enough for the default single-provider setup;
+  use YAML when you need custom provider names or multiple Oracle providers.
+  See the [Oracle guide](/guides/oracle) for the required OCI policy and a
+  tested configuration. Automatic model discovery is not yet a reliable,
+  validated path for this provider: GoModel can try Oracle's OpenAI-compatible
+  `/models` endpoint, but Oracle may not return a usable inventory there.
+  OCI-native Oracle model discovery is not integrated yet.
 </Note>
 
 ### Ollama (Local Models)

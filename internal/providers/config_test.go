@@ -471,6 +471,7 @@ func TestApplyProviderEnvVars_DoesNotDiscoverAzureWithoutBaseURL(t *testing.T) {
 func TestApplyProviderEnvVars_DiscoversOracleFromExplicitEnvVars(t *testing.T) {
 	t.Setenv("ORACLE_API_KEY", "oracle-key")
 	t.Setenv("ORACLE_BASE_URL", "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1")
+	t.Setenv("ORACLE_MODELS", " openai.gpt-oss-120b, xai.grok-3 ,, ")
 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
@@ -487,6 +488,9 @@ func TestApplyProviderEnvVars_DiscoversOracleFromExplicitEnvVars(t *testing.T) {
 	if p.BaseURL != "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1" {
 		t.Errorf("BaseURL = %q, want Oracle base URL", p.BaseURL)
 	}
+	if len(p.Models) != 2 || p.Models[0] != "openai.gpt-oss-120b" || p.Models[1] != "xai.grok-3" {
+		t.Errorf("Models = %v, want [openai.gpt-oss-120b xai.grok-3]", p.Models)
+	}
 }
 
 func TestApplyProviderEnvVars_DoesNotDiscoverOracleWithoutBaseURL(t *testing.T) {
@@ -496,6 +500,31 @@ func TestApplyProviderEnvVars_DoesNotDiscoverOracleWithoutBaseURL(t *testing.T) 
 
 	if _, exists := got["oracle"]; exists {
 		t.Fatal("expected oracle not to be discovered without ORACLE_BASE_URL")
+	}
+}
+
+func TestApplyProviderEnvVars_OracleModelsEnvWinsOverYAMLWithoutOtherOracleEnvVars(t *testing.T) {
+	raw := map[string]config.RawProviderConfig{
+		"oracle": {
+			Type:    "oracle",
+			APIKey:  "oracle-key",
+			BaseURL: "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1",
+			Models:  []string{"yaml-model"},
+		},
+	}
+	t.Setenv("ORACLE_MODELS", "openai.gpt-oss-120b, xai.grok-3")
+
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+
+	p := got["oracle"]
+	if p.APIKey != "oracle-key" {
+		t.Fatalf("APIKey = %q, want oracle-key", p.APIKey)
+	}
+	if p.BaseURL != "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1" {
+		t.Fatalf("BaseURL = %q, want Oracle base URL", p.BaseURL)
+	}
+	if len(p.Models) != 2 || p.Models[0] != "openai.gpt-oss-120b" || p.Models[1] != "xai.grok-3" {
+		t.Fatalf("Models = %v, want [openai.gpt-oss-120b xai.grok-3]", p.Models)
 	}
 }
 
@@ -636,6 +665,7 @@ func TestApplyProviderEnvVars_SkipsWhenNoEnvVars(t *testing.T) {
 		envNames := derivedEnvNames(providerType)
 		t.Setenv(envNames.APIKey, "")
 		t.Setenv(envNames.BaseURL, "")
+		t.Setenv(envNames.Models, "")
 		if spec.SupportsAPIVersion {
 			t.Setenv(envNames.APIVersion, "")
 		}

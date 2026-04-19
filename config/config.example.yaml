@@ -231,6 +231,7 @@ providers:
   #   type: "oracle"
   #   base_url: "${ORACLE_BASE_URL}"
   #   api_key: "${ORACLE_API_KEY}"
+  #   # Optional when ORACLE_MODELS is set as a comma-separated env var instead.
   #   models:
   #     - openai.gpt-oss-120b
   #     - xai.grok-3

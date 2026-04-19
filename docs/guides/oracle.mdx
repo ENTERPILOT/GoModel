@@ -16,7 +16,7 @@ Flow:
 - Create an Oracle Generative AI API key.
 - Add an OCI IAM policy for `generativeaiapikey`.
 - Choose a supported Oracle region and model.
-- Prefer YAML configuration for Oracle so you can set `models:`.
+- Decide whether you want env-only `ORACLE_MODELS` or YAML `models:`.
 
 ## 1. Add the OCI policy
 
@@ -42,7 +42,18 @@ export ORACLE_API_KEY="..."
 
 ## 3. Configure Oracle in GoModel
 
-Use a YAML provider block and set `models:` explicitly:
+For the default single `oracle` provider, env-only configuration is enough:
+
+```bash
+export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3"
+```
+
+`ORACLE_MODELS` is a comma-separated list. GoModel trims whitespace around each
+entry and uses the list as the fallback inventory when Oracle's `/models`
+endpoint is unavailable.
+
+Use a YAML provider block when you want a custom provider name, multiple Oracle
+providers, or prefer to keep the model list in `config.yaml`:
 
 ```yaml
 providers:
@@ -61,15 +72,15 @@ Why `models:` matters:
 - GoModel can fall back to the configured model list when `/models` is
   unavailable
 
-For Oracle, YAML is the recommended path. Environment-only auto-discovery is
-not enough if you need the configured-model fallback.
+If both are set, `ORACLE_MODELS` overrides YAML `models:` for the default
+`oracle` provider.
 
 ## Current status
 
 What is integrated today:
 
 - Oracle's OpenAI-compatible inference endpoints
-- manual model configuration through `models:`
+- manual model configuration through `ORACLE_MODELS` or `models:`
 - GoModel `/v1/models` from the configured-model fallback
 
 What is not yet validated as reliable:
@@ -79,11 +90,12 @@ What is not yet validated as reliable:
 What is not integrated yet:
 
 - native Oracle model auto-discovery through OCI APIs
-- automatic population of the Oracle model inventory without `models:`
+- automatic population of the Oracle model inventory without `ORACLE_MODELS` or
+  `models:`
 
 If Oracle later exposes a reliable `/models` endpoint for this API-key flow, or
-GoModel adds a separate OCI-native discovery path, this manual `models:`
-requirement can be relaxed.
+GoModel adds a separate OCI-native discovery path, this manual fallback
+configuration requirement can be relaxed.
 
 ## 4. Start GoModel
 
@@ -100,7 +112,7 @@ curl -s http://localhost:8080/v1/models
 Expected result:
 
 - a `200 OK`
-- an Oracle-owned model such as `oracle/openai.gpt-oss-120b`
+- a model such as `openai.gpt-oss-120b` with `owned_by: "oracle"`
 
 ## 6. Verify Responses
 
@@ -140,7 +152,8 @@ text.
   Usually means the Generative AI API key policy is missing, the region is
   wrong, or the model is not available to the account.
 - `model registry has no models`
-  Add `models:` to the Oracle provider config so GoModel can use the fallback.
+  Set `ORACLE_MODELS` or add `models:` to the Oracle provider config so GoModel
+  can use the fallback.
 - OCI CLI works but Oracle bearer requests fail
   These are different auth flows. OCI CLI uses API signing keys; Oracle
   Generative AI inference uses the Generative AI bearer API key.

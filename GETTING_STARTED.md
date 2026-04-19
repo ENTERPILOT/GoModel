@@ -199,6 +199,7 @@ Provider credentials:
 | `AZURE_API_VERSION`   | Azure OpenAI API version override (default: `2024-10-21`)                      |
 | `ORACLE_API_KEY`      | Oracle                                                                         |
 | `ORACLE_BASE_URL`     | Oracle OpenAI-compatible base URL                                              |
+| `ORACLE_MODELS`       | Oracle fallback model inventory (comma-separated, used when `/models` is unavailable) |
 | `OLLAMA_BASE_URL`     | Ollama (default: `http://localhost:11434/v1`)                                  |
 
 See `.env.template` for the full list of all configurable environment variables.
@@ -224,7 +225,7 @@ Ollama requires no API key. Even with no YAML and no `OLLAMA_BASE_URL` set, an O
 
 **Oracle requires both key and base URL.**
 `ORACLE_API_KEY` alone is not enough for auto-discovery. Set `ORACLE_BASE_URL` to the Oracle OpenAI-compatible endpoint, otherwise the provider is ignored.
-If your Oracle endpoint does not return a usable model list, configure `providers.<name>.models` in YAML to seed the router with explicit model IDs.
+If your Oracle endpoint does not return a usable model list, set `ORACLE_MODELS` or configure `providers.<name>.models` in YAML to seed the router with explicit model IDs.
 
 **Azure ships with a pinned API version by default.**
 If you do not set `AZURE_API_VERSION`, the gateway sends `api-version=2024-10-21`. Override it only when you need a different Azure API version.

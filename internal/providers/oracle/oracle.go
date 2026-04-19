@@ -70,7 +70,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 			return nil, core.NewProviderError(
 				"oracle",
 				http.StatusBadGateway,
-				"oracle ListModels failed: "+err.Error()+"; add providers.<name>.models in config.yaml to use Oracle when upstream /models is unavailable",
+				"oracle ListModels failed: "+err.Error()+"; set ORACLE_MODELS or add providers.<name>.models in config.yaml to use Oracle when upstream /models is unavailable",
 				err,
 			)
 		}
