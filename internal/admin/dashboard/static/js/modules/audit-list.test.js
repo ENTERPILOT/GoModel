@@ -135,6 +135,38 @@ test('auditEntryErrorMessage ignores successful response fields', () => {
     assert.equal(pane.showErrorMessage, false);
 });
 
+test('auditEntryErrorMessage ignores nested error objects on successful responses without top-level error shape', () => {
+    const module = createAuditListModule();
+    const entry = {
+        status_code: 200,
+        data: {
+            response_body: {
+                output: {
+                    error: {
+                        message: 'should not be treated as a response error'
+                    }
+                }
+            }
+        }
+    };
+
+    assert.equal(module.auditEntryErrorMessage(entry), '');
+});
+
+test('auditEntryErrorMessage reads top-level provider error shapes without relying on status code', () => {
+    const module = createAuditListModule();
+    const entry = {
+        data: {
+            response_body: {
+                message: 'provider timeout',
+                type: 'provider_error'
+            }
+        }
+    };
+
+    assert.equal(module.auditEntryErrorMessage(entry), 'provider timeout');
+});
+
 test('fetchAuditLog preserves a successful payload when workflow prefetch fails', async () => {
     const loggedErrors = [];
     const module = createAuditListModule({

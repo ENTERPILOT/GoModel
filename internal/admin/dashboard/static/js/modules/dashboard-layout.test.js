@@ -305,7 +305,7 @@ test('auth key expirations render as a UTC date with the full UTC timestamp in t
 
     assert.match(indexTemplate, /x-text="key\.expires_at \? formatDateUTC\(key\.expires_at\) : '\\u2014'"/);
     assert.match(indexTemplate, /:title="key\.expires_at \? formatTimestampUTC\(key\.expires_at\) : ''"/);
-    assert.match(indexTemplate, /id="auth-key-user-path"[^>]*x-model="authKeyForm\.user_path"[^>]*aria-label="API key user path"/);
+    assert.match(indexTemplate, /id="auth-key-user-path"[^>]*x-model="authKeyForm\.user_path"[^>]*aria-describedby="auth-key-user-path-help-copy"/);
     assert.match(indexTemplate, /class="model-alias-editor auth-key-editor"/);
     assert.match(plusIconTemplate, /{{define "plus-icon"}}[\s\S]*<path d="M12 5v14"><\/path>[\s\S]*<path d="M5 12h14"><\/path>[\s\S]*{{end}}/);
     assert.match(indexTemplate, /class="pagination-btn pagination-btn-primary pagination-btn-with-icon"[\s\S]*{{template "plus-icon"}}[\s\S]*<span>Create API Key<\/span>/);
@@ -321,6 +321,7 @@ test('auth key expirations render as a UTC date with the full UTC timestamp in t
     assert.match(authKeyForm, /placeholder="ex\. \/department1\/team-a"/);
     assert.match(authKeyForm, /copyId: 'auth-key-user-path-help-copy'/);
     assert.match(authKeyForm, /When set, this key overrides X-GoModel-User-Path for audit logging and downstream request context\./);
+    assert.doesNotMatch(authKeyForm, /id="auth-key-user-path"[^>]*aria-label=/);
     assert.doesNotMatch(authKeyForm, /User Path Override/);
     assert.doesNotMatch(authKeyForm, /Managed key/);
     assert.doesNotMatch(

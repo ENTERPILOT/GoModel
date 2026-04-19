@@ -69,6 +69,51 @@
         return '';
     }
 
+    function auditEntryStatusCode(entry, data) {
+        const candidates = [
+            entry && entry.status_code,
+            entry && entry.status,
+            data && data.status_code,
+            data && data.status
+        ];
+
+        for (let i = 0; i < candidates.length; i++) {
+            const parsed = Number(candidates[i]);
+            if (Number.isFinite(parsed)) return parsed;
+        }
+
+        return null;
+    }
+
+    function hasTopLevelAuditErrorShape(value) {
+        if (value == null) return false;
+
+        let candidate = value;
+        if (typeof candidate === 'string') {
+            const parsed = tryParseJSON(candidate.trim());
+            if (parsed == null) return false;
+            candidate = parsed;
+        }
+
+        if (Array.isArray(candidate) || typeof candidate !== 'object') return false;
+        if (candidate.error !== undefined) return true;
+        if (typeof candidate.message === 'string' && candidate.message.trim()) return true;
+
+        const topLevelErrorFields = ['detail', 'error_message', 'error_msg', 'title'];
+        for (let i = 0; i < topLevelErrorFields.length; i++) {
+            const field = topLevelErrorFields[i];
+            if (typeof candidate[field] === 'string' && candidate[field].trim()) return true;
+        }
+
+        return false;
+    }
+
+    function shouldInspectAuditResponseBody(entry, data) {
+        const statusCode = auditEntryStatusCode(entry, data);
+        if (statusCode !== null && statusCode >= 400) return true;
+        return hasTopLevelAuditErrorShape(data && data.response_body);
+    }
+
     function dashboardAuditListModule() {
         const clipboardModuleFactory = typeof global.dashboardClipboardModule === 'function'
             ? global.dashboardClipboardModule
@@ -219,8 +264,10 @@
             auditEntryErrorMessage(entry) {
                 const data = entry && entry.data ? entry.data : null;
                 if (!data) return '';
-                return auditErrorMessageFromField(data.error_message) ||
-                    findNestedAuditErrorMessage(data.response_body, 0);
+                const fieldMessage = auditErrorMessageFromField(data.error_message);
+                if (fieldMessage) return fieldMessage;
+                if (!shouldInspectAuditResponseBody(entry, data)) return '';
+                return findNestedAuditErrorMessage(data.response_body, 0);
             },
 
             formatJSON(v) {

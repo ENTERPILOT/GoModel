@@ -4041,7 +4041,6 @@ body.conversation-drawer-open {
 /* Dimmed connector — path not taken */
 .workflow-conn-dim {
   background: color-mix(in srgb, var(--border) 75%, transparent);
-  opacity: 0.4;
 }
 
 .workflow-conn-dim::after {

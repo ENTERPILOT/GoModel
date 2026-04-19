@@ -220,6 +220,9 @@ func readFirstInt(values map[string]any, keys ...string) (int, bool) {
 			continue
 		}
 		if num, ok := intFromAny(value); ok {
+			if num < 0 {
+				continue
+			}
 			return num, true
 		}
 	}
