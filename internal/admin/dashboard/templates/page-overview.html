@@ -1,0 +1,217 @@
+{{define "dashboard-page-overview"}}
+<!-- Overview Page -->
+<template x-if="page==='overview'">
+<div>
+    <div class="page-header">
+        <h2>Usage Overview</h2>
+        <div class="page-header-controls">
+            <div class="interval-picker">
+                <button class="interval-btn" :class="{active: interval==='daily'}" @click="setInterval('daily')">Daily</button>
+                <button class="interval-btn" :class="{active: interval==='weekly'}" @click="setInterval('weekly')">Weekly</button>
+                <button class="interval-btn" :class="{active: interval==='monthly'}" @click="setInterval('monthly')">Monthly</button>
+                <button class="interval-btn" :class="{active: interval==='yearly'}" @click="setInterval('yearly')">Yearly</button>
+            </div>
+            {{template "date-picker" .}}
+        </div>
+    </div>
+
+    <!-- Auth Error Banner -->
+    {{template "auth-banner" .}}
+
+    <!-- Summary Cards -->
+    <div class="cards">
+        <div class="card">
+            <div class="card-label">Total Requests</div>
+            <div class="card-value" x-text="formatNumber(summary.total_requests)">-</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Input Tokens</div>
+            <div class="card-value" x-text="formatNumber(summary.total_input_tokens)">-</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Output Tokens</div>
+            <div class="card-value" x-text="formatNumber(summary.total_output_tokens)">-</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Total Tokens</div>
+            <div class="card-value" x-text="formatNumber(summary.total_tokens)">-</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Estimated Cost</div>
+            <div class="card-value" x-text="formatCost(summary.total_cost)">-</div>
+        </div>
+        <div class="card" x-show="cacheAnalyticsEnabled()">
+            <div class="card-label">Cache Hits</div>
+            <div class="card-value" x-text="formatNumber(cacheOverview.summary.total_hits)">-</div>
+        </div>
+        <div class="card" x-show="cacheAnalyticsEnabled()">
+            <div class="card-label">Local Cache Input Tokens</div>
+            <div class="card-value" x-text="formatNumber(cacheOverview.summary.total_input_tokens)">-</div>
+        </div>
+        <div class="card" x-show="cacheAnalyticsEnabled()">
+            <div class="card-label">Local Cache Output Tokens</div>
+            <div class="card-value" x-text="formatNumber(cacheOverview.summary.total_output_tokens)">-</div>
+        </div>
+        <div class="card provider-status-flag" x-show="providerStatus.summary.total > 0" :class="providerStatusSummaryClass()">
+            <div class="card-label">Provider Status</div>
+            <div class="card-value provider-status-value" x-text="providerStatusRatioText()">-</div>
+            <button type="button"
+                    class="provider-status-card-link"
+                    x-show="providerStatusHasIssues()"
+                    aria-label="View providers overview"
+                    title="View providers overview"
+                    x-text="providerStatusSummaryText()"
+                    @click="scrollToProviderStatusSection()"></button>
+            <span class="provider-status-card-note" x-show="!providerStatusHasIssues()" x-text="providerStatusSummaryText()"></span>
+        </div>
+    </div>
+
+    <!-- Usage Chart -->
+    <div class="chart-container">
+        <h3 x-text="chartTitle()">Daily Token Usage</h3>
+        <div class="chart-wrapper">
+            <canvas id="usageChart"></canvas>
+        </div>
+        <p class="empty-state" x-show="daily.length === 0 && !loading && !authError">No usage data yet.</p>
+    </div>
+
+    <!-- Contribution Calendar -->
+    <div class="contribution-calendar-section">
+        <div class="contribution-calendar-header">
+            <h3>Activity</h3>
+            <div class="usage-mode-toggle">
+                <button type="button" class="usage-mode-btn" :class="{active: calendarMode==='tokens'}" @click="toggleCalendarMode('tokens')">Tokens</button>
+                <button type="button" class="usage-mode-btn" :class="{active: calendarMode==='costs'}" @click="toggleCalendarMode('costs')">Costs</button>
+            </div>
+        </div>
+        <div class="contribution-calendar-grid-wrapper">
+            <div class="contribution-calendar-day-labels">
+                <span></span>
+                <span>Mon</span>
+                <span></span>
+                <span>Wed</span>
+                <span></span>
+                <span>Fri</span>
+                <span></span>
+            </div>
+            <div class="contribution-calendar-scroll">
+                <div class="contribution-calendar-months">
+                    <template x-for="ml in calendarMonthLabels()" :key="ml.key">
+                        <span class="contribution-calendar-month-label" :style="'grid-column: ' + (ml.col + 1) + ' / span ' + ml.span" x-text="ml.label"></span>
+                    </template>
+                </div>
+                <div class="contribution-calendar-grid">
+                    <template x-for="(week, wi) in buildCalendarGrid()" :key="wi">
+                        <div class="contribution-calendar-week">
+                            <template x-for="(day, di) in week" :key="wi + '-' + di">
+                                <div class="contribution-calendar-cell"
+                                     :class="[day.empty ? 'empty' : 'level-' + day.level]"
+                                     @mouseenter="showCalendarTooltip($event, day)"
+                                     @mouseleave="hideCalendarTooltip()"></div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+        <div class="contribution-calendar-footer">
+            <div class="contribution-calendar-meta">
+                <span class="contribution-calendar-summary" x-text="calendarSummaryText()"></span>
+            </div>
+            <div class="contribution-calendar-legend">
+                <span>Less</span>
+                <div class="contribution-calendar-cell level-0"></div>
+                <div class="contribution-calendar-cell level-1"></div>
+                <div class="contribution-calendar-cell level-2"></div>
+                <div class="contribution-calendar-cell level-3"></div>
+                <div class="contribution-calendar-cell level-4"></div>
+                <span>More</span>
+            </div>
+        </div>
+    </div>
+    <div class="contribution-calendar-tooltip"
+         x-show="calendarTooltip.show"
+         x-text="calendarTooltip.text"
+         :style="'left: ' + calendarTooltip.x + 'px; top: ' + (calendarTooltip.y - 40) + 'px'"></div>
+
+    <div id="provider-status-section" class="provider-status-section" tabindex="-1" x-show="providerStatus.providers.length > 0">
+        <div class="provider-status-section-header">
+            <div>
+                <h3>Providers Overview</h3>
+            </div>
+            <button type="button"
+                    class="provider-status-toggle"
+                    role="switch"
+                    :aria-checked="providerStatusDetailsExpanded ? 'true' : 'false'"
+                    :title="providerStatusDetailsToggleLabel()"
+                    @click="toggleProviderStatusDetails()">
+                <span class="provider-status-toggle-copy" x-text="providerStatusDetailsToggleLabel()"></span>
+                <span class="provider-status-toggle-track" :class="{ 'is-active': providerStatusDetailsExpanded }">
+                    <span class="provider-status-toggle-thumb"></span>
+                </span>
+            </button>
+        </div>
+        <div class="provider-status-grid">
+            <template x-for="provider in providerStatus.providers" :key="provider.name">
+                <article class="provider-status-card">
+                    <div class="provider-status-card-head">
+                        <div>
+                            <h4 class="provider-status-name">
+                                <span x-text="provider.name"></span>
+                                <span class="provider-status-name-type" x-show="providerTypeLabel(provider)" x-text="'(' + providerTypeLabel(provider) + ')'"></span>
+                            </h4>
+                        </div>
+                        <span class="provider-status-pill" :class="providerStatusBadgeClass(provider.status)" x-text="provider.status_label"></span>
+                    </div>
+
+                    <div class="provider-status-meta">
+                        <div class="provider-status-meta-item">
+                            <span class="provider-status-meta-label">Models Available</span>
+                            <span class="provider-status-meta-value mono" x-text="formatNumber(provider.runtime.discovered_model_count)"></span>
+                        </div>
+                        <div class="provider-status-meta-item">
+                            <span class="provider-status-meta-label">Last Checked</span>
+                            <span class="provider-status-meta-value mono"
+                                  x-text="providerLastCheckedTime(provider)"
+                                  :title="providerLastCheckedTitle(provider)"></span>
+                        </div>
+                    </div>
+
+                    <div class="provider-status-details"
+                         :class="{ 'is-expanded': providerStatusDetailsExpanded, 'is-collapsed': !providerStatusDetailsExpanded }"
+                         :aria-hidden="providerStatusDetailsExpanded ? 'false' : 'true'">
+                        <div class="provider-status-details-inner">
+                            <p class="provider-status-reason" x-text="provider.status_reason"></p>
+                            <p class="provider-status-error" x-show="provider.last_error" x-text="provider.last_error"></p>
+
+                            <div class="provider-status-config">
+                                <div class="provider-status-config-row" x-show="provider.config.base_url">
+                                    <span class="provider-status-config-label">Base URL</span>
+                                    <code class="provider-status-config-value" x-text="provider.config.base_url"></code>
+                                </div>
+                                <div class="provider-status-config-row" x-show="provider.config.api_version">
+                                    <span class="provider-status-config-label">API Version</span>
+                                    <code class="provider-status-config-value" x-text="provider.config.api_version"></code>
+                                </div>
+                                <div class="provider-status-config-row">
+                                    <span class="provider-status-config-label">Configured Models</span>
+                                    <span class="provider-status-config-value" x-text="providerModelsSummary(provider)"></span>
+                                </div>
+                                <div class="provider-status-config-row">
+                                    <span class="provider-status-config-label">Retry</span>
+                                    <span class="provider-status-config-value" x-text="providerRetrySummary(provider)"></span>
+                                </div>
+                                <div class="provider-status-config-row">
+                                    <span class="provider-status-config-label">Circuit Breaker</span>
+                                    <span class="provider-status-config-value" x-text="providerCircuitBreakerSummary(provider)"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+            </template>
+        </div>
+    </div>
+</div>
+</template>
+{{end}}

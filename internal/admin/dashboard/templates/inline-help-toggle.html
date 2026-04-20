@@ -1,0 +1,11 @@
+{{define "inline-help-toggle"}}
+<button type="button"
+        class="inline-help-toggle"
+        :class="{ 'is-open': open }"
+        :aria-label="open ? hideLabel : showLabel"
+        :aria-expanded="open.toString()"
+        :aria-controls="copyId"
+        @click="open = !open">
+    <span class="inline-help-toggle-icon" aria-hidden="true">?</span>
+</button>
+{{end}}

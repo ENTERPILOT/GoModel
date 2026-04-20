@@ -1,0 +1,292 @@
+{{define "dashboard-page-workflows"}}
+<!-- Workflows Page -->
+<template x-if="page==='workflows'">
+<div>
+    <div class="page-header">
+        <div>
+            <h2>Workflows</h2>
+            <p class="workflow-page-note">Active workflows are matched path-first: deepest user path wins first, then provider name and model specificity, then broader matches, then global.</p>
+        </div>
+        <div class="page-header-controls">
+            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon workflow-create-btn" x-show="workflowsAvailable" @click="openWorkflowCreate()">
+                <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                <span>New&nbsp;Workflow</span>
+            </button>
+        </div>
+    </div>
+
+    {{template "auth-banner" .}}
+    <div class="alert alert-warning" x-show="!workflowsAvailable && !authError">
+        Workflows feature is unavailable.
+    </div>
+    <div class="alert alert-warning" x-show="workflowError && !authError" x-text="workflowError"></div>
+    <div class="alert alert-success" x-show="workflowNotice" x-text="workflowNotice"></div>
+
+    <div class="table-toolbar" x-show="workflowsAvailable">
+        <div class="table-toolbar-main">
+            <div class="filter-input-wrap">
+                <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                <input type="text" placeholder="Filter by scope, name, hash, or guardrail..." x-model="workflowFilter" class="filter-input" aria-label="Filter workflows by scope, name, hash, or guardrail">
+            </div>
+        </div>
+        <div class="table-toolbar-actions">
+            <span class="model-count" x-text="filteredWorkflows.length + ' active scopes'"></span>
+        </div>
+    </div>
+
+    <div class="editor-modal-backdrop"
+         x-cloak
+         x-show="workflowFormOpen"
+         aria-hidden="true"></div>
+    <div class="editor-modal-shell editor-modal-shell-wide"
+         x-cloak
+         x-show="workflowFormOpen"
+         @click="closeWorkflowForm()"
+         @keydown.escape.window="workflowFormOpen && closeWorkflowForm()">
+        <section class="model-editor workflow-editor" x-show="workflowFormOpen" x-ref="workflowEditor" role="dialog" aria-modal="true" aria-label="Workflow editor" @click.stop>
+            <form class="form" @submit.prevent="submitWorkflowForm()">
+                <div class="editor-header">
+                    <div>
+                        <div class="inline-help-section" x-data="{ open: false, copyId: 'workflow-help-copy', showLabel: 'Show workflow help', hideLabel: 'Hide workflow help', text: 'Create immutable version. Submitting activates it for the selected scope.' }">
+                            <div class="inline-help-title-row">
+                                <h3 x-text="workflowSubmitMode() === 'save' ? 'Edit Workflow' : 'Create Workflow'"></h3>
+                                {{template "inline-help-toggle" .}}
+                            </div>
+                            <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+                        </div>
+                    </div>
+                    <button type="button" class="table-action-btn alias-close-btn table-icon-btn" aria-label="Close workflow editor" @click="closeWorkflowForm()">
+                        {{template "x-icon"}}
+                    </button>
+                </div>
+
+                <p class="form-error" x-show="workflowFormError" x-text="workflowFormError" role="alert" aria-live="assertive"></p>
+
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label class="form-field-label" for="workflow-scope-provider">Provider Name</label>
+                        <select id="workflow-scope-provider" class="usage-log-select workflow-input" x-model="workflowForm.scope_provider" @change="setWorkflowProvider(workflowForm.scope_provider)" data-modal-autofocus>
+                            <option value="">All providers and models</option>
+                            <template x-for="providerName in workflowProviderOptions()" :key="providerName">
+                                <option :value="providerName" x-text="providerName"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <div class="form-field" x-show="workflowForm.scope_provider">
+                        <label class="form-field-label" for="workflow-scope-model">Model</label>
+                        <select id="workflow-scope-model" class="usage-log-select workflow-input" x-model="workflowForm.scope_model">
+                            <option value="">All models for provider</option>
+                            <template x-for="modelID in workflowModelOptions(workflowForm.scope_provider)" :key="workflowForm.scope_provider + '-' + modelID">
+                                <option :value="modelID" x-text="modelID"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <div class="form-field">
+                        <label class="form-field-label" for="workflow-name">Name</label>
+                        <input id="workflow-name" type="text" class="workflow-input" placeholder="Optional. Defaults to scope label." x-model="workflowForm.name">
+                    </div>
+
+                    <div class="form-field">
+                        <label class="form-field-label" for="workflow-user-path">User Path</label>
+                        <input id="workflow-user-path" type="text" class="workflow-input" placeholder="team/alpha or /team/alpha" x-model="workflowForm.scope_user_path">
+                    </div>
+                </div>
+
+                <p class="form-hint">Leave provider name empty to target all providers and models. Select a provider name without a model to target all models for that configured provider.</p>
+                <p class="form-hint">Add a path to scope the workflow to that subtree. Leading slashes are optional and will be normalized; you can enter &quot;team/alpha&quot; or &quot;/team/alpha&quot;. Matching checks the deepest user path first, then falls back toward the root.</p>
+                <p class="form-hint">If you leave the name empty, the workflow will display as the matched provider/model scope or “All models”.</p>
+
+                <div class="form-field">
+                    <label class="form-field-label" for="workflow-description">Description</label>
+                    <textarea id="workflow-description" placeholder="Optional operator note for why this version exists." x-model="workflowForm.description"></textarea>
+                </div>
+
+                <div class="workflow-feature-toggles">
+                    <label class="workflow-feature-toggle" x-show="workflowCacheVisible()">
+                        <input type="checkbox" x-model="workflowForm.features.cache">
+                        <span>Cache</span>
+                    </label>
+                    <label class="workflow-feature-toggle" x-show="workflowAuditVisible()">
+                        <input type="checkbox" x-model="workflowForm.features.audit">
+                        <span>Audit Logs</span>
+                    </label>
+                    <label class="workflow-feature-toggle" x-show="workflowUsageVisible()">
+                        <input type="checkbox" x-model="workflowForm.features.usage">
+                        <span>Usage</span>
+                    </label>
+                    <label class="workflow-feature-toggle" x-show="workflowGuardrailsVisible()">
+                        <input type="checkbox" x-model="workflowForm.features.guardrails">
+                        <span>Guardrails</span>
+                    </label>
+                    <label class="workflow-feature-toggle" x-show="workflowFailoverVisible()">
+                        <input type="checkbox" x-model="workflowForm.features.fallback">
+                        <span>Failover</span>
+                    </label>
+                </div>
+
+                <div class="workflow-preview">
+                    <div class="workflow-section-head">
+                        <h4>Preview</h4>
+                        <span class="provider-badge">Live</span>
+                    </div>
+
+                    <article class="workflow-card workflow-preview-card">
+                        <div class="workflow-card-head">
+                            <div>
+                                <p class="form-kicker" x-text="workflowScopeTypeLabel(workflowPreview())"></p>
+                                <h3 x-text="workflowDisplayName(workflowPreview())"></h3>
+                            </div>
+                            <div class="workflow-card-badges">
+                                <span class="provider-badge" x-text="workflowScopeLabel(workflowPreview())"></span>
+                            </div>
+                        </div>
+
+                        <p class="workflow-card-description" x-show="workflowPreview().description" x-text="workflowPreview().description"></p>
+                        <p class="form-hint" x-show="workflowFailoverVisible()" x-text="'Failover: ' + workflowFallbackLabel(workflowPreview())"></p>
+
+                        {{template "workflow-chart" "workflowChart(workflowPreview())"}}
+
+                        <div class="workflow-guardrails" x-show="workflowGuardrailsVisible()">
+                            <div class="workflow-section-head">
+                                <h4>Guardrails</h4>
+                                <span class="provider-badge" x-text="workflowGuardrails(workflowPreview()).length ? workflowGuardrails(workflowPreview()).length + ' steps' : 'None'"></span>
+                            </div>
+                            <div class="workflow-guardrail-list" x-show="workflowGuardrails(workflowPreview()).length > 0">
+                                <template x-for="(step, stepIndex) in workflowGuardrails(workflowPreview())" :key="'draft-workflow-preview-guardrail-' + stepIndex">
+                                    <div class="workflow-guardrail-item">
+                                        <span class="mono font-size-md" x-text="step.ref"></span>
+                                        <span class="provider-badge" x-text="'step ' + step.step"></span>
+                                    </div>
+                                </template>
+                            </div>
+                            <p class="form-hint" x-show="workflowGuardrails(workflowPreview()).length === 0">No guardrails configured for this workflow.</p>
+                        </div>
+                    </article>
+                </div>
+
+	                <div class="workflow-guardrail-editor" x-show="workflowForm.features.guardrails && workflowGuardrailsVisible()">
+                    <div class="workflow-section-head">
+                        <div>
+                            <h4>Guardrail Steps</h4>
+                            <p class="form-hint">Guardrails in the same numeric step run together. Later steps wait for earlier ones to finish.</p>
+                        </div>
+                        <button type="button" class="table-action-btn" @click="addWorkflowGuardrailStep()">Add Step</button>
+                    </div>
+
+                    <div class="alert alert-warning alert-inline-actions" x-show="guardrailRefs.length === 0">
+                        <span>No named guardrails are currently registered on this deployment. You can still draft a workflow, but guardrail-backed creation may be rejected.</span>
+                        <button type="button" class="table-action-btn" @click="navigate('guardrails')">Open Guardrails</button>
+                    </div>
+
+                    <div class="workflow-guardrail-list-editor" x-show="workflowForm.guardrails.length > 0">
+                        <template x-for="(step, index) in workflowForm.guardrails" :key="'workflow-form-guardrail-' + index">
+                            <div class="workflow-guardrail-row">
+                                <div class="form-field workflow-guardrail-field">
+                                    <label class="form-field-label" :for="'workflow-guardrail-ref-' + index">Guardrail reference</label>
+                                    <input type="text" class="workflow-input" :id="'workflow-guardrail-ref-' + index" list="workflow-guardrail-options" placeholder="Guardrail ref" x-model="step.ref" :aria-label="'Guardrail reference ' + (index + 1)">
+                                </div>
+                                <div class="form-field workflow-guardrail-step-field">
+                                    <label class="form-field-label" :for="'workflow-guardrail-step-' + index">Step</label>
+                                    <input type="number" class="workflow-step-input" :id="'workflow-guardrail-step-' + index" min="0" step="10" placeholder="Step" x-model.number="step.step" :aria-label="'Guardrail step ' + (index + 1)">
+                                </div>
+                                <button type="button" class="table-action-btn table-action-btn-danger" @click="removeWorkflowGuardrailStep(index)">Remove</button>
+                            </div>
+                        </template>
+                    </div>
+
+                    <p class="form-hint" x-show="workflowForm.guardrails.length === 0">No guardrail steps configured yet.</p>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="pagination-btn" @click="closeWorkflowForm()">Cancel</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon workflow-submit-btn" :disabled="workflowSubmitting">
+                        <i data-lucide="plus" class="form-action-icon" x-show="workflowSubmitMode() === 'create'" aria-hidden="true"></i>
+                        <i data-lucide="save" class="form-action-icon" x-show="workflowSubmitMode() === 'save'" aria-hidden="true"></i>
+                        <span x-text="workflowSubmitting ? workflowSubmittingLabel() : workflowSubmitLabel()"></span>
+                    </button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <div class="workflows-layout">
+        <section class="workflows-list">
+            <p class="empty-state" x-show="workflowsLoading && !authError">Loading workflows...</p>
+
+            <div class="workflow-card-grid" x-show="filteredWorkflows.length > 0">
+                <template x-for="workflow in filteredWorkflows" :key="workflow.id">
+                    <article class="workflow-card">
+                        <div class="workflow-card-head">
+                            <div>
+                                <p class="form-kicker" x-text="workflowScopeTypeLabel(workflow)"></p>
+                                <h3 x-text="workflowDisplayName(workflow)"></h3>
+                            </div>
+                            <div class="workflow-card-badges">
+                                <span class="provider-badge" x-text="workflowScopeLabel(workflow)"></span>
+                            </div>
+                        </div>
+
+                        <p class="workflow-card-description" x-show="workflow.description" x-text="workflow.description"></p>
+                        <p class="form-hint" x-show="workflowFailoverVisible()" x-text="'Failover: ' + workflowFallbackLabel(workflow)"></p>
+
+                        {{template "workflow-chart" "workflowChart(workflow)"}}
+
+	                        <div class="workflow-guardrails" x-show="workflowGuardrailsVisible()">
+                            <div class="workflow-section-head">
+                                <h4>Guardrails</h4>
+                                <span class="provider-badge" x-text="workflowGuardrails(workflow).length ? workflowGuardrails(workflow).length + ' steps' : 'None'"></span>
+                            </div>
+                            <div class="workflow-guardrail-list" x-show="workflowGuardrails(workflow).length > 0">
+                                <template x-for="(step, stepIndex) in workflowGuardrails(workflow)" :key="workflow.id + '-guardrail-' + stepIndex">
+                                    <div class="workflow-guardrail-item">
+                                        <span class="mono font-size-md" x-text="step.ref"></span>
+                                        <span class="provider-badge" x-text="'step ' + step.step"></span>
+                                    </div>
+                                </template>
+                            </div>
+                            <p class="form-hint" x-show="workflowGuardrails(workflow).length === 0">No guardrails configured for this workflow.</p>
+                        </div>
+
+                        <div class="workflow-card-footer">
+                            <div class="alias-actions-cell">
+                                <button type="button"
+                                        class="table-action-btn table-action-btn-danger"
+                                        :disabled="workflowDeactivatingID === workflow.id || !canDeactivateWorkflow(workflow)"
+                                        :aria-label="'Deactivate workflow ' + workflowDisplayName(workflow)"
+                                        :title="canDeactivateWorkflow(workflow) ? 'Deactivate active workflow' : 'The global workflow cannot be deactivated.'"
+                                        @click="deactivateWorkflow(workflow)"
+                                        x-text="workflowDeactivatingID === workflow.id ? 'Deactivating...' : 'Deactivate'"></button>
+                                <button type="button"
+                                        class="table-action-btn table-icon-btn"
+                                        :aria-label="'Edit workflow ' + workflowDisplayName(workflow)"
+                                        :title="'Edit workflow ' + workflowDisplayName(workflow)"
+                                        @click="openWorkflowCreate(workflow)">
+                                    {{template "edit-icon"}}
+                                </button>
+                            </div>
+                            <div class="workflow-card-meta workflow-card-meta-footer">
+                                <span class="provider-badge mono" x-text="'version: v' + workflow.version"></span>
+                                <span class="provider-badge mono" x-text="'created: ' + formatTimestamp(workflow.created_at)"></span>
+                                <span class="provider-badge mono" x-text="'hash: ' + shortHash(workflow.workflow_hash)"></span>
+                            </div>
+                        </div>
+                    </article>
+                </template>
+            </div>
+
+            <p class="empty-state" x-show="workflows.length === 0 && !workflowsLoading && !authError && workflowsAvailable">No active workflows found.</p>
+            <p class="empty-state" x-show="workflows.length > 0 && filteredWorkflows.length === 0 && !workflowsLoading">No workflows match your filter.</p>
+        </section>
+
+    </div>
+
+    <datalist id="workflow-guardrail-options">
+        <template x-for="guardrailRef in guardrailRefs" :key="guardrailRef">
+            <option :value="guardrailRef"></option>
+        </template>
+    </datalist>
+</div>
+</template>
+{{end}}

@@ -1,0 +1,341 @@
+{{define "dashboard-page-models"}}
+<!-- Models Page -->
+<template x-if="page==='models'">
+<div>
+    <div class="page-header">
+        <h2>Registered Models</h2>
+        <div class="model-count" x-show="displayModels.length > 0">
+            <span x-text="modelFilter ? filteredDisplayModels.length + ' / ' + displayModels.length : displayModels.length"></span> models
+        </div>
+    </div>
+
+    <!-- Auth Error Banner -->
+    {{template "auth-banner" .}}
+    <div class="alert alert-warning" x-show="!aliasesAvailable && !authError">
+        Aliases feature is unavailable.
+    </div>
+    <div class="alert alert-warning" x-show="aliasError && !authError" x-text="aliasError"></div>
+    <div class="alert alert-success" x-show="aliasNotice" x-text="aliasNotice"></div>
+    <div class="alert alert-warning" x-show="modelOverrideError && !authError && !modelOverrideFormOpen" x-text="modelOverrideError"></div>
+    <div class="alert alert-success" x-show="modelOverrideNotice && !modelOverrideError" x-text="modelOverrideNotice"></div>
+
+    <!-- Category Tabs -->
+    <div class="category-tabs" x-show="categories.length > 0">
+        <template x-for="cat in categories" :key="cat.category">
+            <button class="category-tab" :class="{ active: activeCategory === cat.category }" @click="selectCategory(cat.category)">
+                <span x-text="cat.display_name"></span>
+                <span class="tab-count" x-text="cat.count"></span>
+            </button>
+        </template>
+    </div>
+
+    <!-- Filter -->
+    <div class="table-toolbar" x-show="displayModels.length > 0 || modelFilter || aliasesAvailable">
+        <div class="table-toolbar-main">
+            <div class="filter-input-wrap">
+                <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                <input type="text" placeholder="Filter by provider, provider/model, alias, or owner..." aria-label="Filter models by provider, provider/model, alias, or owner" x-model="modelFilter" class="filter-input">
+            </div>
+        </div>
+        <div class="table-toolbar-actions">
+            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn" x-show="aliasesAvailable" @click="openAliasCreate()">
+                <i data-lucide="plus" class="alias-create-icon" aria-hidden="true"></i>
+                <span>Create&nbsp;Alias</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="loading-state" x-show="modelsLoading && !authError" role="status" aria-live="polite">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <span x-text="displayModels.length > 0 ? 'Refreshing models...' : 'Loading models...'"></span>
+    </div>
+
+    <div class="editor-modal-backdrop"
+         x-cloak
+         x-show="aliasFormOpen"
+         x-transition.opacity.duration.160ms
+         aria-hidden="true"></div>
+    <div class="editor-modal-shell"
+         x-cloak
+         x-show="aliasFormOpen"
+         x-transition.opacity.duration.160ms
+         @click="closeAliasForm()"
+         @keydown.escape.window="aliasFormOpen && closeAliasForm()">
+        <div class="model-editor" x-show="aliasFormOpen" x-ref="aliasEditor" role="dialog" aria-modal="true" aria-label="Alias editor" @click.stop>
+            <form class="form" @submit.prevent="submitAliasForm()">
+                <div class="editor-header">
+                    <div>
+                        <h3 x-text="aliasFormMode === 'edit' ? 'Edit alias' : 'Create alias'"></h3>
+                    </div>
+                    <button type="button" class="table-action-btn alias-close-btn table-icon-btn" aria-label="Close alias editor" @click="closeAliasForm()">
+                        {{template "x-icon"}}
+                    </button>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label class="form-field-label" for="alias-name">Alias name</label>
+                        <input id="alias-name" type="text" class="mono" placeholder="smart" x-model="aliasForm.name" data-modal-autofocus>
+                    </div>
+
+                    <div class="form-field">
+                        <label class="form-field-label" for="alias-target-model">Target model</label>
+                        <input id="alias-target-model" type="text" list="alias-model-options" class="mono" placeholder="openai/gpt-4o" x-model="aliasForm.target_model">
+                    </div>
+                </div>
+
+                <datalist id="alias-model-options">
+                    <template x-for="m in models" :key="qualifiedModelName(m)">
+                        <option :value="qualifiedModelName(m)" x-text="qualifiedModelName(m)"></option>
+                    </template>
+                </datalist>
+
+                <div class="form-field">
+                    <label class="form-field-label" for="alias-description">Description</label>
+                    <textarea id="alias-description" rows="3" placeholder="Optional description" x-model="aliasForm.description"></textarea>
+                </div>
+
+                <p class="form-hint">
+                    Aliases are not supported on pass-through endpoints.
+                </p>
+
+                <label class="alias-checkbox">
+                    <input type="checkbox" x-model="aliasForm.enabled">
+                    <span>Alias is enabled</span>
+                </label>
+
+                <p class="form-hint" x-show="aliasFormMode === 'edit'">
+                    Renaming an alias creates the new name first, then removes the old one.
+                </p>
+
+                <p class="form-error" x-show="aliasFormError" x-text="aliasFormError" role="alert" aria-live="assertive"></p>
+
+                <div class="form-actions">
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-submit-btn" :disabled="aliasSubmitting">
+                        <i data-lucide="plus" class="form-action-icon" x-show="aliasFormMode !== 'edit'" aria-hidden="true"></i>
+                        <i data-lucide="save" class="form-action-icon" x-show="aliasFormMode === 'edit'" aria-hidden="true"></i>
+                        <span x-text="aliasSubmitting ? 'Saving...' : (aliasFormMode === 'edit' ? 'Save Alias' : 'Create Alias')"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="editor-modal-backdrop"
+         x-cloak
+         x-show="modelOverrideFormOpen"
+         x-transition.opacity.duration.160ms
+         aria-hidden="true"></div>
+    <div class="editor-modal-shell"
+         x-cloak
+         x-show="modelOverrideFormOpen"
+         x-transition.opacity.duration.160ms
+         @click="closeModelOverrideForm()"
+         @keydown.escape.window="modelOverrideFormOpen && closeModelOverrideForm()">
+        <div class="model-editor" x-show="modelOverrideFormOpen" x-ref="modelOverrideEditor" role="dialog" aria-modal="true" aria-label="Model access editor" @click.stop>
+            <form class="form" @submit.prevent="submitModelOverrideForm()">
+                    <div class="editor-header">
+                        <div>
+                        <p class="form-kicker">Access override</p>
+                        <h3 x-text="modelOverrideFormDisplayName || modelOverrideForm.selector || 'Access'"></h3>
+                        </div>
+                        <button type="button" class="table-action-btn alias-close-btn table-icon-btn" aria-label="Close model access editor" @click="closeModelOverrideForm()">
+                            {{template "x-icon"}}
+                        </button>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-field-label" for="model-override-selector">Selector</label>
+                    <input id="model-override-selector" type="text" class="mono" x-model="modelOverrideForm.selector" disabled>
+                </div>
+
+                <p class="form-hint">
+                    The selector uses <code>/</code> for all providers and models, <code>{provider_name}/</code> for one provider, or <code>{provider_name}/{model}</code> for one model. <code>user_paths</code> is matched against the effective request <code>user_path</code>: the managed API key <code>user_path</code> when present, otherwise the <code>X-GoModel-User-Path</code> request header.
+                </p>
+                <p class="form-hint" x-text="'Default enabled: ' + (modelOverrideFormDefaultEnabled ? 'yes' : 'no') + ' · Effective now: ' + (modelOverrideFormEffectiveEnabled ? 'yes' : 'no')"></p>
+
+                <div class="form-field">
+                    <label class="form-field-label" for="model-override-user-paths">User Paths</label>
+                    <textarea id="model-override-user-paths" rows="4" class="mono" placeholder="/&#10;/team/alpha&#10;/non-existing" x-model="modelOverrideForm.user_paths" data-modal-autofocus></textarea>
+                </div>
+
+                <p class="form-hint">
+                    Use <code>/</code> to allow every user path. Use a team path to restrict to that subtree, or an unused path to make the selector unavailable.
+                </p>
+
+                <p class="form-error" x-show="modelOverrideError" x-text="modelOverrideError" role="alert" aria-live="assertive"></p>
+
+                <div class="form-actions">
+                    <button type="button" class="pagination-btn" @click="closeModelOverrideForm()">Cancel</button>
+                    <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="modelOverrideFormHasExistingOverride" :disabled="modelOverrideSubmitting" @click="deleteModelOverride()">Remove Override</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon model-access-submit-btn" :disabled="modelOverrideSubmitting">
+                        <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                        <span x-text="modelOverrideSubmitting ? 'Saving...' : 'Save Access'"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Models Table: All / Text Generation -->
+    <template x-if="(displayModels.length > 0 || modelFilter) && (activeCategory === 'all' || activeCategory === 'text_generation')">
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Model</th>
+                    <th>Modes</th>
+                    <th class="col-price">Input<br>$/MTok</th>
+                    <th class="col-price">Output<br>$/MTok</th>
+                    <th class="col-price" x-show="activeCategory === 'text_generation'">Cached $/MTok</th>
+                    <th class="model-actions-header">
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable"
+                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            @click="openGlobalModelOverrideEdit()">
+                            {{template "edit-icon"}}
+                        </button>
+                    </th>
+                </tr>
+            </thead>
+            {{template "model-table-body" .}}
+        </table>
+    </div>
+    </template>
+
+    <!-- Models Table: Embeddings -->
+    <template x-if="(displayModels.length > 0 || modelFilter) && activeCategory === 'embedding'">
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Model</th>
+                    <th class="col-price">Input<br>$/MTok</th>
+                    <th class="model-actions-header">
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable"
+                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            @click="openGlobalModelOverrideEdit()">
+                            {{template "edit-icon"}}
+                        </button>
+                    </th>
+                </tr>
+            </thead>
+            {{template "model-table-body" .}}
+        </table>
+    </div>
+    </template>
+
+    <!-- Models Table: Image -->
+    <template x-if="(displayModels.length > 0 || modelFilter) && activeCategory === 'image'">
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Model</th>
+                    <th class="col-price">$/Image</th>
+                    <th class="model-actions-header">
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable"
+                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            @click="openGlobalModelOverrideEdit()">
+                            {{template "edit-icon"}}
+                        </button>
+                    </th>
+                </tr>
+            </thead>
+            {{template "model-table-body" .}}
+        </table>
+    </div>
+    </template>
+
+    <!-- Models Table: Audio -->
+    <template x-if="(displayModels.length > 0 || modelFilter) && activeCategory === 'audio'">
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Model</th>
+                    <th class="col-price">$/Second</th>
+                    <th class="col-price">$/Character</th>
+                    <th class="model-actions-header">
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable"
+                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            @click="openGlobalModelOverrideEdit()">
+                            {{template "edit-icon"}}
+                        </button>
+                    </th>
+                </tr>
+            </thead>
+            {{template "model-table-body" .}}
+        </table>
+    </div>
+    </template>
+
+    <!-- Models Table: Video -->
+    <template x-if="(displayModels.length > 0 || modelFilter) && activeCategory === 'video'">
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Model</th>
+                    <th class="col-price">$/Second (In)</th>
+                    <th class="col-price">$/Second (Out)</th>
+                    <th class="model-actions-header">
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable"
+                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            @click="openGlobalModelOverrideEdit()">
+                            {{template "edit-icon"}}
+                        </button>
+                    </th>
+                </tr>
+            </thead>
+            {{template "model-table-body" .}}
+        </table>
+    </div>
+    </template>
+
+    <!-- Models Table: Utility -->
+    <template x-if="(displayModels.length > 0 || modelFilter) && activeCategory === 'utility'">
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Model</th>
+                    <th class="col-price">$/Page</th>
+                    <th class="col-price">$/Request</th>
+                    <th class="model-actions-header">
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelOverridesAvailable"
+                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+                            @click="openGlobalModelOverrideEdit()">
+                            {{template "edit-icon"}}
+                        </button>
+                    </th>
+                </tr>
+            </thead>
+            {{template "model-table-body" .}}
+        </table>
+    </div>
+    </template>
+
+    <p class="empty-state" x-show="displayModels.length === 0 && !loading && !authError && !modelFilter && (activeCategory === 'all' || !activeCategory)">No models registered.</p>
+    <p class="empty-state" x-show="displayModels.length === 0 && !loading && !authError && !modelFilter && activeCategory && activeCategory !== 'all'">No models in this category.</p>
+    <p class="empty-state" x-show="displayModels.length > 0 && filteredDisplayModels.length === 0 && modelFilter">No models match your filter.</p>
+</div>
+</template>
+{{end}}

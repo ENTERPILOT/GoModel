@@ -1,0 +1,207 @@
+{{define "dashboard-page-usage"}}
+<!-- Usage Page -->
+<template x-if="page==='usage'">
+<div>
+    <div class="page-header">
+        <h2>Usage Analytics</h2>
+        <div class="page-header-controls">
+            <div class="usage-mode-toggle">
+                <button class="usage-mode-btn" :class="{active: usageMode==='tokens'}" @click="toggleUsageMode('tokens')">Tokens</button>
+                <button class="usage-mode-btn" :class="{active: usageMode==='costs'}" @click="toggleUsageMode('costs')">Costs</button>
+            </div>
+            {{template "date-picker" .}}
+        </div>
+    </div>
+
+    <!-- Auth Error Banner -->
+    {{template "auth-banner" .}}
+
+    <div class="cards" x-show="cacheAnalyticsEnabled()">
+        <div class="card">
+            <div class="card-label">Cache Saved</div>
+            <div class="card-value" x-text="formatCost(cacheOverview.summary.total_saved_cost)">-</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Cache Hits</div>
+            <div class="card-value" x-text="formatNumber(cacheOverview.summary.total_hits)">-</div>
+        </div>
+    </div>
+
+    <!-- Usage by Model Chart -->
+    <div class="model-chart-section" x-show="modelUsage.length > 0">
+        <div class="model-chart-header">
+            <h3 x-text="usageMode === 'tokens' ? 'Token Usage by Model' : 'Cost by Model'"></h3>
+            <div class="chart-view-toggle" role="group" aria-label="Model usage view">
+                <button type="button" class="chart-view-btn" :class="{active: modelUsageView === 'chart'}" :aria-pressed="modelUsageView === 'chart' ? 'true' : 'false'" aria-label="Show model usage chart" title="Chart" @click="toggleUsageChartView('model', 'chart')">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V11M12 19V5M19 19v-8"/></svg>
+                </button>
+                <button type="button" class="chart-view-btn" :class="{active: modelUsageView === 'table'}" :aria-pressed="modelUsageView === 'table' ? 'true' : 'false'" aria-label="Show model usage table" title="Table" @click="toggleUsageChartView('model', 'table')">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M9 6v12M15 6v12"/></svg>
+                </button>
+            </div>
+        </div>
+        <div class="bar-chart-wrap" x-show="modelUsageView === 'chart'">
+            <canvas id="usageBarChart"></canvas>
+        </div>
+        <template x-if="modelUsageView === 'table'">
+            <div class="table-wrapper usage-chart-table-wrapper">
+                <table class="data-table usage-chart-data-table">
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th>Provider</th>
+                            <th class="col-price">Input Tokens</th>
+                            <th class="col-price">Output Tokens</th>
+                            <th class="col-price">Total Tokens</th>
+                            <th class="col-price">Input Cost</th>
+                            <th class="col-price">Output Cost</th>
+                            <th class="col-price">Total Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="row in modelUsageTableRows()" :key="(row.provider_name || row.provider || '-') + '/' + row.model">
+                            <tr>
+                                <td class="mono font-size-md" x-text="row.model || '-'"></td>
+                                <td><span class="provider-badge" x-text="providerDisplayValue(row) || '-'"></span></td>
+                                <td class="col-price" x-text="formatNumber(row.input_tokens)"></td>
+                                <td class="col-price" x-text="formatNumber(row.output_tokens)"></td>
+                                <td class="col-price" x-text="formatNumber(usageRowTotalTokens(row))"></td>
+                                <td class="col-price" x-text="formatCost(row.input_cost)"></td>
+                                <td class="col-price" x-text="formatCost(row.output_cost)"></td>
+                                <td class="col-price" x-text="formatCost(row.total_cost)"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+    </div>
+
+    <!-- Usage by User Path Chart -->
+    <div class="model-chart-section" x-show="userPathUsageChartVisible()">
+        <div class="model-chart-header">
+            <h3 x-text="usageMode === 'costs' ? 'Cost by User Path' : 'Usage by User Path'"></h3>
+            <div class="chart-view-toggle" role="group" aria-label="User path usage view">
+                <button type="button" class="chart-view-btn" :class="{active: userPathUsageView === 'chart'}" :aria-pressed="userPathUsageView === 'chart' ? 'true' : 'false'" aria-label="Show user path usage chart" title="Chart" @click="toggleUsageChartView('userPath', 'chart')">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V11M12 19V5M19 19v-8"/></svg>
+                </button>
+                <button type="button" class="chart-view-btn" :class="{active: userPathUsageView === 'table'}" :aria-pressed="userPathUsageView === 'table' ? 'true' : 'false'" aria-label="Show user path usage table" title="Table" @click="toggleUsageChartView('userPath', 'table')">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M9 6v12M15 6v12"/></svg>
+                </button>
+            </div>
+        </div>
+        <div class="bar-chart-wrap" x-show="userPathUsageView === 'chart'">
+            <canvas id="usageUserPathChart"></canvas>
+        </div>
+        <template x-if="userPathUsageView === 'table'">
+            <div class="table-wrapper usage-chart-table-wrapper">
+                <table class="data-table usage-chart-data-table">
+                    <thead>
+                        <tr>
+                            <th>User Path</th>
+                            <th class="col-price">Input Tokens</th>
+                            <th class="col-price">Output Tokens</th>
+                            <th class="col-price">Total Tokens</th>
+                            <th class="col-price">Input Cost</th>
+                            <th class="col-price">Output Cost</th>
+                            <th class="col-price">Total Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="row in userPathUsageTableRows()" :key="row.user_path || '/'">
+                            <tr>
+                                <td class="mono font-size-md" x-text="row.user_path || '/'"></td>
+                                <td class="col-price" x-text="formatNumber(row.input_tokens)"></td>
+                                <td class="col-price" x-text="formatNumber(row.output_tokens)"></td>
+                                <td class="col-price" x-text="formatNumber(usageRowTotalTokens(row))"></td>
+                                <td class="col-price" x-text="formatCost(row.input_cost)"></td>
+                                <td class="col-price" x-text="formatCost(row.output_cost)"></td>
+                                <td class="col-price" x-text="formatCost(row.total_cost)"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+    </div>
+
+    <!-- Request Log Section -->
+    <div class="usage-log-section">
+        <h3>Request Log</h3>
+        <div class="usage-log-toolbar">
+            <div class="usage-filter-row usage-filter-row-search">
+                <div class="filter-input-wrap">
+                    <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                    <input type="text" placeholder="Search by request ID, model, provider..." x-model="usageLogSearch" @input.debounce.300ms="fetchUsageLog(true)" class="filter-input">
+                </div>
+            </div>
+            <div class="usage-filter-row usage-filter-row-controls">
+                <select x-model="usageLogModel" @change="fetchUsageLog(true)" class="usage-log-select">
+                    <option value="">All Models</option>
+                    <template x-for="m in usageLogModelOptions()" :key="m">
+                        <option :value="m" x-text="m"></option>
+                    </template>
+                </select>
+                <select x-model="usageLogProvider" @change="fetchUsageLog(true)" class="usage-log-select">
+                    <option value="">All Providers</option>
+                    <template x-for="p in usageLogProviderOptions()" :key="p">
+                        <option :value="p" x-text="p"></option>
+                    </template>
+                </select>
+                <div class="filter-input-wrap">
+                    <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                    <input type="text" placeholder="User path /team/alpha" aria-label="Filter by user path" x-model="usageLogUserPath" @input.debounce.300ms="fetchUsageLog(true)" class="filter-input">
+                </div>
+            </div>
+        </div>
+        <div class="table-wrapper" x-show="usageLog.entries.length > 0">
+            <table class="data-table usage-log-table">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Model</th>
+                        <th>Provider</th>
+                        <th>User Path</th>
+                        <th class="col-price" x-text="usageMode === 'costs' ? 'Input Cost' : 'Input'"></th>
+                        <th class="col-price" x-text="usageMode === 'costs' ? 'Output Cost' : 'Output'"></th>
+                        <th class="col-price" x-text="usageMode === 'costs' ? 'Total Cost' : 'Total'"></th>
+                        <th class="col-price" x-show="usageMode === 'tokens'">Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="entry in usageLog.entries" :key="entry.id">
+                        <tr>
+                            <td class="mono usage-ts" x-text="formatTimestamp(entry.timestamp)" :title="timestampTitle(entry.timestamp)"></td>
+                            <td class="mono font-size-md" x-text="entry.model"></td>
+                            <td>
+                                <span class="provider-badge" x-text="providerDisplayValue(entry) || '-'"></span>
+                            </td>
+                            <td class="mono font-size-md" x-text="entry.user_path || '-'"></td>
+                            <td class="col-price"
+                                x-text="usageMode === 'costs' ? formatCost(entry.input_cost) : formatNumber(entry.input_tokens)"
+                                :title="usageMode === 'costs' ? formatNumber(entry.input_tokens) + ' tokens' : ''"></td>
+                            <td class="col-price"
+                                x-text="usageMode === 'costs' ? formatCost(entry.output_cost) : formatNumber(entry.output_tokens)"
+                                :title="usageMode === 'costs' ? formatNumber(entry.output_tokens) + ' tokens' : ''"></td>
+                            <td class="col-price">
+                                <span x-text="usageMode === 'costs' ? formatCost(entry.total_cost) : formatNumber(entry.total_tokens)"
+                                      :title="usageMode === 'costs' ? formatNumber(entry.total_tokens) + ' tokens\n' + formatCostTooltip(entry) : ''"></span>
+                                <span class="caveat-icon" x-show="usageMode === 'costs' && entry.costs_calculation_caveat" :title="entry.costs_calculation_caveat">&#9888;</span>
+                            </td>
+                            <td class="col-price" x-show="usageMode === 'tokens'"
+                                :title="formatCostTooltip(entry)">
+                                <span x-text="formatCost(entry.total_cost)"></span>
+                                <span class="caveat-icon" x-show="entry.costs_calculation_caveat" :title="entry.costs_calculation_caveat">&#9888;</span>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+        <p class="empty-state" x-show="usageLog.entries.length === 0 && !loading && !authError">No usage log entries found.</p>
+        <!-- Pagination -->
+        {{template "pagination" "usageLog"}}
+    </div>
+</div>
+</template>
+{{end}}
