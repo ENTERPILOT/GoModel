@@ -105,7 +105,6 @@ Full reference: `.env.template` and `config/config.yaml`
   - `BODY_SIZE_LIMIT` ("10M")
   - `ENABLE_PASSTHROUGH_ROUTES` (true: Enable provider-native passthrough routes under /p/{provider}/...)
   - `ALLOW_PASSTHROUGH_V1_ALIAS` (true: Allow /p/{provider}/v1/... aliases while keeping /p/{provider}/... canonical)
-  - `ENABLED_PASSTHROUGH_PROVIDERS` (openai,anthropic,openrouter,zai: Comma-separated list of enabled passthrough providers)
 - **Storage:** `STORAGE_TYPE` (sqlite), `SQLITE_PATH` (data/gomodel.db), `POSTGRES_URL`, `MONGODB_URL`
 - **Models:** `MODELS_ENABLED_BY_DEFAULT` (true), `MODEL_OVERRIDES_ENABLED` (false), `KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT` (false); persisted overrides restrict/allow selectors with `user_paths`. When alias-only models listing is enabled, `GET /v1/models` returns only model aliases, not full concrete model specs, to operators.
 - **Audit logging:** `LOGGING_ENABLED` (false), `LOGGING_LOG_BODIES` (false), `LOGGING_LOG_HEADERS` (false), `LOGGING_RETENTION_DAYS` (30)

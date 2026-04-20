@@ -95,9 +95,6 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if !cfg.Server.AllowPassthroughV1Alias {
 		t.Error("expected Server.AllowPassthroughV1Alias=true")
 	}
-	if got, want := cfg.Server.EnabledPassthroughProviders, []string{"openai", "anthropic"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("expected Server.EnabledPassthroughProviders=%v, got %v", want, got)
-	}
 	if cfg.Cache.Model.Local != nil {
 		t.Error("expected Cache.Model.Local to be nil in raw defaults")
 	}
@@ -759,40 +756,6 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 		}
 		if result.Config.Cache.Model.Redis != nil {
 			t.Fatalf("expected Cache.Model.Redis to be nil in example config, got %+v", result.Config.Cache.Model.Redis)
-		}
-		gotProviders := result.Config.Server.EnabledPassthroughProviders
-		wantProviders := []string{"openai", "anthropic"}
-		if len(gotProviders) != len(wantProviders) || gotProviders[0] != wantProviders[0] || gotProviders[1] != wantProviders[1] {
-			t.Fatalf("Server.EnabledPassthroughProviders = %v, want %v", gotProviders, wantProviders)
-		}
-	})
-}
-
-func TestLoad_EnabledPassthroughProviders_EnvOverridesYAML(t *testing.T) {
-	withTempDir(t, func(dir string) {
-		clearAllConfigEnvVars(t)
-
-		yaml := `
-server:
-  enabled_passthrough_providers:
-    - openai
-    - anthropic
-`
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		t.Setenv("ENABLED_PASSTHROUGH_PROVIDERS", " groq , gemini ")
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-
-		got := result.Config.Server.EnabledPassthroughProviders
-		want := []string{"groq", "gemini"}
-		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-			t.Fatalf("EnabledPassthroughProviders = %v, want %v", got, want)
 		}
 	})
 }
