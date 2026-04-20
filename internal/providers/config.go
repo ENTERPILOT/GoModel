@@ -44,6 +44,7 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 
 		apiKey := os.Getenv(envNames.APIKey)
 		explicitBaseURL := normalizeResolvedBaseURL(os.Getenv(envNames.BaseURL))
+		models := parseCSVEnvList(os.Getenv(envNames.Models))
 		apiVersion := ""
 		if spec.SupportsAPIVersion {
 			apiVersion = os.Getenv(envNames.APIVersion)
@@ -53,7 +54,7 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 			baseURL = spec.DefaultBaseURL
 		}
 
-		if apiKey == "" && baseURL == "" && apiVersion == "" {
+		if apiKey == "" && baseURL == "" && apiVersion == "" && len(models) == 0 {
 			continue
 		}
 
@@ -71,6 +72,9 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 			if apiVersion != "" {
 				existing.APIVersion = apiVersion
 			}
+			if len(models) > 0 {
+				existing.Models = models
+			}
 			result[targetKey] = existing
 		} else if ambiguous {
 			continue
@@ -83,6 +87,7 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 				APIKey:     apiKey,
 				BaseURL:    baseURL,
 				APIVersion: apiVersion,
+				Models:     models,
 			}
 		}
 	}
@@ -122,6 +127,7 @@ type providerEnvNames struct {
 	APIKey     string
 	BaseURL    string
 	APIVersion string
+	Models     string
 }
 
 func derivedEnvNames(providerType string) providerEnvNames {
@@ -130,6 +136,7 @@ func derivedEnvNames(providerType string) providerEnvNames {
 		APIKey:     prefix + "_API_KEY",
 		BaseURL:    prefix + "_BASE_URL",
 		APIVersion: prefix + "_API_VERSION",
+		Models:     prefix + "_MODELS",
 	}
 }
 
@@ -165,6 +172,26 @@ func normalizeResolvedBaseURL(value string) string {
 		return ""
 	}
 	return trimmed
+}
+
+func parseCSVEnvList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+
+	items := strings.Split(value, ",")
+	values := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		values = append(values, trimmed)
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
 }
 
 func isUnresolvedEnvPlaceholder(value string) bool {

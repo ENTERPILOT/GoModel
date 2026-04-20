@@ -6,13 +6,12 @@ import (
 
 	"gomodel/internal/batchrewrite"
 	"gomodel/internal/core"
+	"gomodel/internal/gateway"
 )
 
 // BatchRequestPreparer rewrites a native batch request before provider
 // submission. This keeps batch-specific policy out of provider decorators.
-type BatchRequestPreparer interface {
-	PrepareBatchRequest(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchRewriteResult, error)
-}
+type BatchRequestPreparer = gateway.BatchRequestPreparer
 
 type batchRequestPreparerChain struct {
 	fileTransport core.NativeFileRoutableProvider

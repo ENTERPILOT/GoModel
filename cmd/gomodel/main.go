@@ -26,6 +26,7 @@ import (
 	"gomodel/internal/providers/openrouter"
 	"gomodel/internal/providers/oracle"
 	"gomodel/internal/providers/xai"
+	"gomodel/internal/providers/zai"
 	"gomodel/internal/version"
 
 	"github.com/joho/godotenv"
@@ -71,7 +72,7 @@ func startApplication(application lifecycleApp, addr string) error {
 
 // @title          GoModel API
 // @version        1.0
-// @description    High-performance AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, xAI, Oracle, Ollama). Drop-in OpenAI-compatible API.
+// @description    High-performance AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, Z.ai, xAI, Oracle, Ollama). Drop-in OpenAI-compatible API.
 // @BasePath       /
 // @schemes        http
 // @securityDefinitions.apikey BearerAuth
@@ -120,6 +121,7 @@ func main() {
 	factory.Add(groq.Registration)
 	factory.Add(ollama.Registration)
 	factory.Add(xai.Registration)
+	factory.Add(zai.Registration)
 
 	application, err := app.New(context.Background(), app.Config{
 		AppConfig: result,

@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 
-	batchstore "gomodel/internal/batch"
 	"gomodel/internal/core"
 )
 
@@ -45,24 +44,4 @@ func requestContextWithRequestID(req *http.Request) (context.Context, string) {
 	}
 
 	return ctx, requestID
-}
-
-func sanitizePublicBatchMetadata(metadata map[string]string) map[string]string {
-	if len(metadata) == 0 {
-		return nil
-	}
-
-	publicMetadata := make(map[string]string, len(metadata))
-	for key, value := range metadata {
-		switch key {
-		case batchstore.RequestIDMetadataKey, batchstore.UsageLoggedAtMetadataKey:
-			continue
-		default:
-			publicMetadata[key] = value
-		}
-	}
-	if len(publicMetadata) == 0 {
-		return nil
-	}
-	return publicMetadata
 }

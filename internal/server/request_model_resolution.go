@@ -2,62 +2,28 @@ package server
 
 import (
 	"context"
-	"strings"
 
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
+	"gomodel/internal/gateway"
 )
 
 // RequestModelResolver resolves raw request selectors into concrete model
 // selectors before provider execution.
-type RequestModelResolver interface {
-	ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
-}
+type RequestModelResolver = gateway.ModelResolver
 
 // RequestFallbackResolver resolves alternate concrete model selectors for a
 // translated request after the primary selector has already been resolved.
-type RequestFallbackResolver interface {
-	ResolveFallbacks(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector
-}
-
-func resolvedProviderName(provider core.RoutableProvider, selector core.ModelSelector, fallback string) string {
-	fallback = strings.TrimSpace(fallback)
-	if provider == nil {
-		return fallback
-	}
-	if named, ok := provider.(core.ProviderNameResolver); ok {
-		if providerName := strings.TrimSpace(named.GetProviderName(selector.QualifiedModel())); providerName != "" {
-			return providerName
-		}
-	}
-	return fallback
-}
-
-func resolvedWorkflowProviderName(resolution *core.RequestModelResolution) string {
-	if resolution == nil {
-		return ""
-	}
-	if providerName := strings.TrimSpace(resolution.ProviderName); providerName != "" {
-		return providerName
-	}
-	return strings.TrimSpace(resolution.ResolvedSelector.Provider)
-}
+type RequestFallbackResolver = gateway.FallbackResolver
 
 func workflowProviderNameForType(provider core.RoutableProvider, providerType string) string {
-	providerType = strings.TrimSpace(providerType)
-	if providerType == "" || provider == nil {
-		return ""
-	}
-	if named, ok := provider.(core.ProviderTypeNameResolver); ok {
-		return strings.TrimSpace(named.GetProviderNameForType(providerType))
-	}
-	return ""
+	return gateway.WorkflowProviderNameForType(provider, providerType)
 }
 
 func resolveRequestModel(provider core.RoutableProvider, resolver RequestModelResolver, requested core.RequestedModelSelector) (*core.RequestModelResolution, error) {
-	return resolveRequestModelWithAuthorizer(context.Background(), provider, resolver, nil, requested)
+	return gateway.ResolveRequestModel(provider, resolver, requested)
 }
 
 func resolveRequestModelWithAuthorizer(
@@ -67,77 +33,7 @@ func resolveRequestModelWithAuthorizer(
 	authorizer RequestModelAuthorizer,
 	requested core.RequestedModelSelector,
 ) (*core.RequestModelResolution, error) {
-	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
-
-	resolvedSelector, aliasApplied, err := resolveExecutionSelector(provider, resolver, requested)
-	if err != nil {
-		return nil, core.NewInvalidRequestError(err.Error(), err)
-	}
-	if resolvedSelector == (core.ModelSelector{}) {
-		resolvedSelector, err = requested.Normalize()
-		if err != nil {
-			return nil, core.NewInvalidRequestError(err.Error(), err)
-		}
-	}
-
-	resolvedModel := resolvedSelector.QualifiedModel()
-	if counted, ok := provider.(modelCountProvider); ok && counted.ModelCount() == 0 {
-		return nil, core.NewProviderError("", 0, "model registry not initialized", nil)
-	}
-	if !provider.Supports(resolvedModel) {
-		return nil, core.NewInvalidRequestError("unsupported model: "+resolvedModel, nil)
-	}
-	if authorizer != nil {
-		if err := authorizer.ValidateModelAccess(ctx, resolvedSelector); err != nil {
-			return nil, err
-		}
-	}
-
-	return &core.RequestModelResolution{
-		Requested:        requested,
-		ResolvedSelector: resolvedSelector,
-		ProviderType:     strings.TrimSpace(provider.GetProviderType(resolvedModel)),
-		ProviderName:     resolvedProviderName(provider, resolvedSelector, ""),
-		AliasApplied:     aliasApplied,
-	}, nil
-}
-
-func resolveExecutionSelector(
-	provider core.RoutableProvider,
-	resolver RequestModelResolver,
-	requested core.RequestedModelSelector,
-) (core.ModelSelector, bool, error) {
-	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
-
-	var (
-		resolvedSelector core.ModelSelector
-		aliasApplied     bool
-		err              error
-	)
-
-	if resolver != nil {
-		resolvedSelector, aliasApplied, err = resolver.ResolveModel(requested)
-		if err != nil {
-			return core.ModelSelector{}, false, err
-		}
-		requested = core.NewRequestedModelSelector(resolvedSelector.QualifiedModel(), "")
-	}
-
-	if providerResolver, ok := provider.(RequestModelResolver); ok {
-		var providerChanged bool
-		resolvedSelector, providerChanged, err = providerResolver.ResolveModel(requested)
-		if err != nil {
-			return core.ModelSelector{}, false, err
-		}
-		return resolvedSelector, aliasApplied || providerChanged, nil
-	}
-
-	if resolvedSelector != (core.ModelSelector{}) {
-		return resolvedSelector, aliasApplied, nil
-	}
-
-	resolvedSelector, err = requested.Normalize()
-	return resolvedSelector, aliasApplied, err
+	return gateway.ResolveRequestModelWithAuthorizer(ctx, provider, resolver, authorizer, requested)
 }
 
 func storeRequestModelResolution(c *echo.Context, resolution *core.RequestModelResolution) {

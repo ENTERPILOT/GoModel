@@ -13,9 +13,12 @@ import (
 	"gomodel/internal/core"
 )
 
-// RequestSnapshotCapture captures immutable transport-level request data for model-facing endpoints.
-// Small request bodies are captured once and shared through context; oversized bodies are left
-// on the live request stream so snapshot capture does not defeat audit-log body limits.
+const requestSnapshotInlineBodyLimit int64 = 64 * 1024
+
+// RequestSnapshotCapture captures immutable transport-level request data for
+// model-facing endpoints. Known-small JSON bodies are captured once for the
+// hot path; larger or unknown-size bodies only get a bounded selector peek and
+// stay on the live request stream until the handler actually decodes them.
 func RequestSnapshotCapture() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
@@ -27,16 +30,17 @@ func RequestSnapshotCapture() echo.MiddlewareFunc {
 				return next(c)
 			}
 
-			bodyBytes, bodyTooLarge, err := captureRequestBodyForSnapshot(req, desc.BodyMode)
-			if err != nil {
-				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
-			}
 			userPath, err := core.NormalizeUserPath(req.Header.Get(core.UserPathHeader))
 			if err != nil {
 				return handleError(c, core.NewInvalidRequestError("invalid X-GoModel-User-Path header", err))
 			}
 			if userPath != "" {
 				req.Header.Set(core.UserPathHeader, userPath)
+			}
+
+			bodyBytes, bodyNotCaptured, bodyCaptured, err := captureSmallRequestBodyForSnapshot(req, desc.BodyMode)
+			if err != nil {
+				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
 			}
 
 			snapshot := core.NewRequestSnapshotWithOwnedBody(
@@ -47,7 +51,7 @@ func RequestSnapshotCapture() echo.MiddlewareFunc {
 				req.Header,
 				req.Header.Get("Content-Type"),
 				bodyBytes,
-				bodyTooLarge,
+				bodyNotCaptured,
 				requestID,
 				extractTraceMetadata(req.Header),
 				userPath,
@@ -55,6 +59,9 @@ func RequestSnapshotCapture() echo.MiddlewareFunc {
 
 			ctx := core.WithRequestSnapshot(req.Context(), snapshot)
 			if semantics := core.DeriveWhiteBoxPrompt(snapshot); semantics != nil {
+				if !bodyCaptured {
+					seedRequestBodySelectorHints(req, desc.BodyMode, semantics)
+				}
 				ctx = core.WithWhiteBoxPrompt(ctx, semantics)
 			}
 			c.SetRequest(req.WithContext(ctx))
@@ -115,36 +122,54 @@ func extractTraceMetadata(headers map[string][]string) map[string]string {
 	return metadata
 }
 
-func captureRequestBodyForSnapshot(req *http.Request, bodyMode core.BodyMode) ([]byte, bool, error) {
-	if req.Body == nil {
-		return []byte{}, false, nil
-	}
-	if bodyMode == core.BodyModeMultipart {
-		return nil, false, nil
-	}
-	if req.ContentLength > auditlog.MaxBodyCapture {
-		return nil, true, nil
+func captureSmallRequestBodyForSnapshot(req *http.Request, bodyMode core.BodyMode) ([]byte, bool, bool, error) {
+	if !shouldCaptureSmallRequestBody(req, bodyMode) {
+		return nil, snapshotBodyNotCaptured(req, bodyMode), false, nil
 	}
 
-	limitedReader := io.LimitReader(req.Body, auditlog.MaxBodyCapture+1)
+	originalBody := req.Body
+	limitedReader := io.LimitReader(originalBody, requestSnapshotInlineBodyLimit+1)
 	bodyBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
-	if int64(len(bodyBytes)) > auditlog.MaxBodyCapture {
-		origBody := req.Body
+	if int64(len(bodyBytes)) > requestSnapshotInlineBodyLimit {
 		req.Body = &combinedReadCloser{
-			Reader: io.MultiReader(bytes.NewReader(bodyBytes), origBody),
-			rc:     origBody,
+			Reader: io.MultiReader(bytes.NewReader(bodyBytes), originalBody),
+			rc:     originalBody,
 		}
-		return nil, true, nil
+		return nil, snapshotBodyNotCaptured(req, bodyMode), false, nil
 	}
 
 	if bodyBytes == nil {
 		bodyBytes = []byte{}
 	}
 	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	return bodyBytes, false, nil
+	return bodyBytes, false, true, nil
+}
+
+func shouldCaptureSmallRequestBody(req *http.Request, bodyMode core.BodyMode) bool {
+	if req == nil || req.Body == nil {
+		return false
+	}
+	switch bodyMode {
+	case core.BodyModeJSON, core.BodyModeOpaque:
+	default:
+		return false
+	}
+	return req.ContentLength >= 0 && req.ContentLength <= requestSnapshotInlineBodyLimit
+}
+
+func snapshotBodyNotCaptured(req *http.Request, bodyMode core.BodyMode) bool {
+	if req == nil {
+		return false
+	}
+	switch bodyMode {
+	case core.BodyModeJSON, core.BodyModeOpaque:
+		return req.ContentLength > auditlog.MaxBodyCapture
+	default:
+		return false
+	}
 }
 
 type combinedReadCloser struct {
@@ -176,5 +201,34 @@ func requestBodyBytes(c *echo.Context) ([]byte, error) {
 		bodyBytes = []byte{}
 	}
 	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	storeRequestBodySnapshot(c, bodyBytes)
 	return bodyBytes, nil
+}
+
+func storeRequestBodySnapshot(c *echo.Context, bodyBytes []byte) {
+	if c == nil {
+		return
+	}
+	req := c.Request()
+	snapshot := core.GetRequestSnapshot(req.Context())
+	if snapshot == nil {
+		return
+	}
+
+	bodyNotCaptured := int64(len(bodyBytes)) > auditlog.MaxBodyCapture
+	capturedBody := bodyBytes
+	if bodyNotCaptured {
+		capturedBody = nil
+	}
+
+	updated := snapshot.WithOwnedCapturedBody(capturedBody, bodyNotCaptured)
+	ctx := core.WithRequestSnapshot(req.Context(), updated)
+	semanticSnapshot := updated
+	if bodyNotCaptured {
+		semanticSnapshot = snapshot.WithOwnedCapturedBody(bodyBytes, false)
+	}
+	if semantics := core.DeriveWhiteBoxPrompt(semanticSnapshot); semantics != nil {
+		ctx = core.WithWhiteBoxPrompt(ctx, semantics)
+	}
+	c.SetRequest(req.WithContext(ctx))
 }

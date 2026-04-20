@@ -38,6 +38,9 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	if err != nil {
 		return nil, fmt.Errorf("failed to create model_overrides table: %w", err)
 	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE model_overrides ADD COLUMN IF NOT EXISTS user_paths JSONB NOT NULL DEFAULT '[]'::jsonb`); err != nil {
+		return nil, fmt.Errorf("failed to migrate model_overrides user_paths column: %w", err)
+	}
 	if _, err := pool.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_model_overrides_provider_name ON model_overrides(provider_name)`); err != nil {
 		return nil, fmt.Errorf("failed to create model_overrides provider_name index: %w", err)
 	}

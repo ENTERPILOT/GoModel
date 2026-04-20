@@ -522,6 +522,55 @@ func TestClient_DoPassthrough_ReturnsLastRetryableResponseAfterRetries(t *testin
 	}
 }
 
+func TestClient_DoPassthrough_HTTPTimeoutDoesNotRetry(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		time.Sleep(200 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	config := DefaultConfig("test", server.URL)
+	config.Retry.MaxRetries = 3
+	config.Retry.InitialBackoff = time.Millisecond
+	config.Retry.MaxBackoff = time.Millisecond
+	config.Retry.BackoffFactor = 1
+	config.Retry.JitterFactor = 0
+	config.CircuitBreaker = goconfig.CircuitBreakerConfig{
+		FailureThreshold: 2,
+		SuccessThreshold: 1,
+		Timeout:          time.Second,
+	}
+	client := NewWithHTTPClient(&http.Client{Timeout: 30 * time.Millisecond}, config, nil)
+
+	resp, err := client.DoPassthrough(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	})
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("upstream attempts = %d, want 1 for client-side timeout", got)
+	}
+	if state := client.circuitBreaker.State(); state != "closed" {
+		t.Fatalf("circuit state = %q, want closed after one logical timeout", state)
+	}
+}
+
 func TestClient_DoPassthrough_DoesNotRetryNonReplaySafeMethod(t *testing.T) {
 	var attempts int32
 
@@ -1207,6 +1256,187 @@ func TestClient_ContextCancellation(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("expected context cancellation error")
+	}
+}
+
+func TestClient_Do_HTTPTimeoutReturnsGatewayTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	cfg := DefaultConfig("test", server.URL)
+	cfg.Retry.MaxRetries = 0
+	client := NewWithHTTPClient(&http.Client{Timeout: 50 * time.Millisecond}, cfg, nil)
+
+	err := client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, nil)
+
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+
+	gatewayErr, ok := err.(*core.GatewayError)
+	if !ok {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
+	}
+	if !strings.Contains(gatewayErr.Message, "failed to send request") {
+		t.Fatalf("Message = %q, want send-request timeout context", gatewayErr.Message)
+	}
+}
+
+func TestClient_Do_HTTPTimeoutDoesNotRetry(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		time.Sleep(200 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	cfg := DefaultConfig("test", server.URL)
+	cfg.Retry.MaxRetries = 3
+	cfg.Retry.InitialBackoff = time.Millisecond
+	cfg.Retry.MaxBackoff = time.Millisecond
+	cfg.Retry.BackoffFactor = 1
+	cfg.Retry.JitterFactor = 0
+	cfg.CircuitBreaker = goconfig.CircuitBreakerConfig{
+		FailureThreshold: 2,
+		SuccessThreshold: 1,
+		Timeout:          time.Second,
+	}
+	client := NewWithHTTPClient(&http.Client{Timeout: 30 * time.Millisecond}, cfg, nil)
+
+	err := client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, nil)
+
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("upstream attempts = %d, want 1 for client-side timeout", got)
+	}
+	if state := client.circuitBreaker.State(); state != "closed" {
+		t.Fatalf("circuit state = %q, want closed after one logical timeout", state)
+	}
+}
+
+func TestCircuitBreakerCountsRetriedRequestOnce(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"temporary failure"}}`))
+	}))
+	defer server.Close()
+
+	cfg := DefaultConfig("test", server.URL)
+	cfg.Retry.MaxRetries = 3
+	cfg.Retry.InitialBackoff = time.Millisecond
+	cfg.Retry.MaxBackoff = time.Millisecond
+	cfg.Retry.BackoffFactor = 1
+	cfg.Retry.JitterFactor = 0
+	cfg.CircuitBreaker = goconfig.CircuitBreakerConfig{
+		FailureThreshold: 2,
+		SuccessThreshold: 1,
+		Timeout:          time.Second,
+	}
+	client := New(cfg, nil)
+
+	for i := range 2 {
+		err := client.Do(context.Background(), Request{
+			Method:   http.MethodGet,
+			Endpoint: "/test",
+		}, nil)
+		if err == nil {
+			t.Fatalf("request %d: expected provider error", i+1)
+		}
+		var gatewayErr *core.GatewayError
+		if !errors.As(err, &gatewayErr) {
+			t.Fatalf("request %d: expected GatewayError, got %T", i+1, err)
+		}
+		if gatewayErr.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("request %d: status = %d, want %d", i+1, gatewayErr.StatusCode, http.StatusServiceUnavailable)
+		}
+
+		wantAttempts := int32((i + 1) * (cfg.Retry.MaxRetries + 1))
+		if got := atomic.LoadInt32(&attempts); got != wantAttempts {
+			t.Fatalf("request %d: upstream attempts = %d, want %d", i+1, got, wantAttempts)
+		}
+	}
+
+	err := client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected circuit breaker rejection")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if !strings.Contains(gatewayErr.Message, "circuit breaker is open") {
+		t.Fatalf("expected circuit breaker error, got %s", gatewayErr.Message)
+	}
+	if got, want := atomic.LoadInt32(&attempts), int32(2*(cfg.Retry.MaxRetries+1)); got != want {
+		t.Fatalf("upstream attempts after circuit rejection = %d, want %d", got, want)
+	}
+}
+
+func TestClient_Do_BodyReadTimeoutReturnsGatewayTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"partial":"`))
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write([]byte(`done"}`))
+	}))
+	defer server.Close()
+
+	cfg := DefaultConfig("test", server.URL)
+	cfg.Retry.MaxRetries = 0
+	client := NewWithHTTPClient(&http.Client{Timeout: 50 * time.Millisecond}, cfg, nil)
+
+	err := client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, nil)
+
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+
+	gatewayErr, ok := err.(*core.GatewayError)
+	if !ok {
+		t.Fatalf("expected GatewayError, got %T", err)
+	}
+	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
+	}
+	if !strings.Contains(gatewayErr.Message, "failed to read response") {
+		t.Fatalf("Message = %q, want read-response timeout context", gatewayErr.Message)
 	}
 }
 

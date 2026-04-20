@@ -46,20 +46,9 @@ func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	var input any
-	trimmed := bytes.TrimSpace(raw.Input)
-	if len(trimmed) != 0 && !bytes.Equal(trimmed, []byte("null")) {
-		if trimmed[0] == '[' {
-			var elements []ResponsesInputElement
-			if err := json.Unmarshal(trimmed, &elements); err != nil {
-				return err
-			}
-			input = elements
-		} else {
-			if err := json.Unmarshal(trimmed, &input); err != nil {
-				return err
-			}
-		}
+	input, err := decodeResponsesInput(raw.Input)
+	if err != nil {
+		return err
 	}
 
 	r.Model = raw.Model
@@ -77,6 +66,26 @@ func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 	r.Reasoning = raw.Reasoning
 	r.ExtraFields = extraFields
 	return nil
+}
+
+func decodeResponsesInput(raw json.RawMessage) (any, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	if trimmed[0] == '[' {
+		var elements []ResponsesInputElement
+		if err := json.Unmarshal(trimmed, &elements); err != nil {
+			return nil, err
+		}
+		return elements, nil
+	}
+
+	var input any
+	if err := json.Unmarshal(trimmed, &input); err != nil {
+		return nil, err
+	}
+	return input, nil
 }
 
 // MarshalJSON preserves dynamic input payloads while supporting Swagger-only schema fields.
@@ -110,6 +119,109 @@ func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
 		Metadata:          r.Metadata,
 		Reasoning:         r.Reasoning,
 	}, r.ExtraFields)
+}
+
+type responseUtilityRequestJSON struct {
+	Model        string
+	Provider     string
+	Input        any
+	Instructions string
+	Metadata     map[string]string
+	Reasoning    *Reasoning
+}
+
+func decodeResponseUtilityRequestJSON(data []byte) (responseUtilityRequestJSON, error) {
+	var raw struct {
+		Model        string            `json:"model,omitempty"`
+		Provider     string            `json:"provider,omitempty"`
+		Input        json.RawMessage   `json:"input,omitempty"`
+		Instructions string            `json:"instructions,omitempty"`
+		Metadata     map[string]string `json:"metadata,omitempty"`
+		Reasoning    *Reasoning        `json:"reasoning,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return responseUtilityRequestJSON{}, err
+	}
+	input, err := decodeResponsesInput(raw.Input)
+	if err != nil {
+		return responseUtilityRequestJSON{}, err
+	}
+	return responseUtilityRequestJSON{
+		Model:        raw.Model,
+		Provider:     raw.Provider,
+		Input:        input,
+		Instructions: raw.Instructions,
+		Metadata:     raw.Metadata,
+		Reasoning:    raw.Reasoning,
+	}, nil
+}
+
+// UnmarshalJSON preserves the dynamic input payload for gateway utility requests.
+func (r *ResponseInputTokensRequest) UnmarshalJSON(data []byte) error {
+	raw, err := decodeResponseUtilityRequestJSON(data)
+	if err != nil {
+		return err
+	}
+	r.Model = raw.Model
+	r.Provider = raw.Provider
+	r.Input = raw.Input
+	r.Instructions = raw.Instructions
+	r.Metadata = raw.Metadata
+	r.Reasoning = raw.Reasoning
+	return nil
+}
+
+// MarshalJSON preserves the dynamic input payload while omitting Swagger-only schema fields.
+func (r ResponseInputTokensRequest) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Model        string            `json:"model,omitempty"`
+		Provider     string            `json:"provider,omitempty"`
+		Input        any               `json:"input,omitempty"`
+		Instructions string            `json:"instructions,omitempty"`
+		Metadata     map[string]string `json:"metadata,omitempty"`
+		Reasoning    *Reasoning        `json:"reasoning,omitempty"`
+	}{
+		Model:        r.Model,
+		Provider:     r.Provider,
+		Input:        r.Input,
+		Instructions: r.Instructions,
+		Metadata:     r.Metadata,
+		Reasoning:    r.Reasoning,
+	})
+}
+
+// UnmarshalJSON preserves the dynamic input payload for gateway utility requests.
+func (r *ResponseCompactRequest) UnmarshalJSON(data []byte) error {
+	raw, err := decodeResponseUtilityRequestJSON(data)
+	if err != nil {
+		return err
+	}
+	r.Model = raw.Model
+	r.Provider = raw.Provider
+	r.Input = raw.Input
+	r.Instructions = raw.Instructions
+	r.Metadata = raw.Metadata
+	r.Reasoning = raw.Reasoning
+	return nil
+}
+
+// MarshalJSON preserves the dynamic input payload while omitting Swagger-only schema fields.
+func (r ResponseCompactRequest) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Model        string            `json:"model,omitempty"`
+		Provider     string            `json:"provider,omitempty"`
+		Input        any               `json:"input,omitempty"`
+		Instructions string            `json:"instructions,omitempty"`
+		Metadata     map[string]string `json:"metadata,omitempty"`
+		Reasoning    *Reasoning        `json:"reasoning,omitempty"`
+	}{
+		Model:        r.Model,
+		Provider:     r.Provider,
+		Input:        r.Input,
+		Instructions: r.Instructions,
+		Metadata:     r.Metadata,
+		Reasoning:    r.Reasoning,
+	})
 }
 
 // UnmarshalJSON deserializes a ResponsesInputElement, switching on the "type"

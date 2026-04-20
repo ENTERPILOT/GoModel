@@ -421,6 +421,9 @@ data: {"type":"message_stop"}
 				if !strings.Contains(responseStr, "data:") {
 					t.Error("response should contain SSE data")
 				}
+				if !strings.Contains(responseStr, `"role":"assistant"`) {
+					t.Error("response should include assistant role delta")
+				}
 				if !strings.Contains(responseStr, "[DONE]") {
 					t.Error("response should end with [DONE]")
 				}
@@ -789,6 +792,7 @@ data: {"type":"message_stop"}
 		t.Fatal("expected at least one SSE event")
 	}
 
+	foundTerminalChunk := false
 	for _, event := range events {
 		if event.Done {
 			continue
@@ -802,18 +806,23 @@ data: {"type":"message_stop"}
 		if !ok {
 			continue
 		}
-		if choice["finish_reason"] != "tool_use" {
-			t.Fatalf("finish_reason = %#v, want %q", choice["finish_reason"], "tool_use")
-		}
 
 		delta, _ := choice["delta"].(map[string]any)
 		if _, ok := delta["tool_calls"]; ok {
 			t.Fatalf("did not expect tool_calls in malformed stream fallback, got %#v", delta["tool_calls"])
 		}
-		return
+		if choice["finish_reason"] == nil {
+			continue
+		}
+		foundTerminalChunk = true
+		if choice["finish_reason"] != "tool_use" {
+			t.Fatalf("finish_reason = %#v, want %q", choice["finish_reason"], "tool_use")
+		}
 	}
 
-	t.Fatal("expected a chat completion chunk")
+	if !foundTerminalChunk {
+		t.Fatal("expected a terminal chat completion chunk")
+	}
 }
 
 func TestStreamChatCompletion_MalformedEventReturnsError(t *testing.T) {

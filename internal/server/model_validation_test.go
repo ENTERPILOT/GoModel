@@ -766,7 +766,7 @@ func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t
 	assert.Equal(t, "invalid_request_error", entry.ErrorType)
 }
 
-func TestModelValidation_ResolvesProviderTypeFromOversizedLiveBody(t *testing.T) {
+func TestModelValidation_DefersOversizedLiveBodyResolutionToHandler(t *testing.T) {
 	provider := &mockProvider{
 		supportedModels: []string{"gpt-4o-mini"},
 		providerTypes: map[string]string{
@@ -805,11 +805,24 @@ func TestModelValidation_ResolvesProviderTypeFromOversizedLiveBody(t *testing.T)
 	require.NoError(t, err)
 	require.NotNil(t, capturedEnv)
 	assert.Equal(t, "openai", capturedProviderType)
-	canonicalReq := capturedEnv.CachedChatRequest()
-	require.NotNil(t, canonicalReq)
-	assert.Equal(t, "gpt-4o-mini", canonicalReq.Model)
-	assert.Equal(t, "openai", canonicalReq.Provider)
+	assert.Nil(t, capturedEnv.CachedChatRequest())
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestSelectorHintsForValidationFallsBackWhenPeekFindsModelOnly(t *testing.T) {
+	e := echo.New()
+	largeContent := strings.Repeat("x", int(requestSelectorPeekLimit))
+	reqBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"` + largeContent + `"}],"provider":"openai"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	model, provider, parsed, err := selectorHintsForValidation(c)
+	require.NoError(t, err)
+	assert.True(t, parsed)
+	assert.Equal(t, "gpt-4o-mini", model)
+	assert.Equal(t, "openai", provider)
 }
 
 func TestModelValidation_DoesNotCacheCanonicalChatRequestWhenRouteHintsAlreadyExist(t *testing.T) {

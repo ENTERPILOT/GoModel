@@ -39,6 +39,7 @@ To get the application URL:
 {{- if or .Values.providers.gemini.enabled .Values.providers.gemini.apiKey }}{{ $enabledProviders = append $enabledProviders "gemini" }}{{ end }}
 {{- if or .Values.providers.groq.enabled .Values.providers.groq.apiKey }}{{ $enabledProviders = append $enabledProviders "groq" }}{{ end }}
 {{- if or .Values.providers.xai.enabled .Values.providers.xai.apiKey }}{{ $enabledProviders = append $enabledProviders "xai" }}{{ end }}
+{{- if or .Values.providers.zai.enabled .Values.providers.zai.apiKey }}{{ $enabledProviders = append $enabledProviders "zai" }}{{ end }}
 {{- if and .Values.providers.oracle.baseUrl (or .Values.providers.oracle.enabled .Values.providers.oracle.apiKey) }}{{ $enabledProviders = append $enabledProviders "oracle" }}{{ end }}
 
 {{- if eq (len $enabledProviders) 0 }}

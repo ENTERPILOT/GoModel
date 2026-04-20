@@ -86,11 +86,49 @@ type NativeFileRoutableProvider interface {
 	GetFileContent(ctx context.Context, providerType, id string) (*FileContentResponse, error)
 }
 
+// NativeResponseLifecycleProvider is implemented by providers that support
+// OpenAI-compatible Responses lifecycle operations.
+type NativeResponseLifecycleProvider interface {
+	GetResponse(ctx context.Context, id string, params ResponseRetrieveParams) (*ResponsesResponse, error)
+	ListResponseInputItems(ctx context.Context, id string, params ResponseInputItemsParams) (*ResponseInputItemListResponse, error)
+	CancelResponse(ctx context.Context, id string) (*ResponsesResponse, error)
+	DeleteResponse(ctx context.Context, id string) (*ResponseDeleteResponse, error)
+}
+
+// NativeResponseUtilityProvider is implemented by providers that support
+// OpenAI-compatible Responses utility operations.
+type NativeResponseUtilityProvider interface {
+	CountResponseInputTokens(ctx context.Context, req *ResponsesRequest) (*ResponseInputTokensResponse, error)
+	CompactResponse(ctx context.Context, req *ResponsesRequest) (*ResponseCompactResponse, error)
+}
+
+// NativeResponseLifecycleRoutableProvider extends routing with provider-native
+// Responses lifecycle operations.
+type NativeResponseLifecycleRoutableProvider interface {
+	GetResponse(ctx context.Context, providerType, id string, params ResponseRetrieveParams) (*ResponsesResponse, error)
+	ListResponseInputItems(ctx context.Context, providerType, id string, params ResponseInputItemsParams) (*ResponseInputItemListResponse, error)
+	CancelResponse(ctx context.Context, providerType, id string) (*ResponsesResponse, error)
+	DeleteResponse(ctx context.Context, providerType, id string) (*ResponseDeleteResponse, error)
+}
+
+// NativeResponseUtilityRoutableProvider extends routing with provider-native
+// Responses utility operations.
+type NativeResponseUtilityRoutableProvider interface {
+	CountResponseInputTokens(ctx context.Context, providerType string, req *ResponsesRequest) (*ResponseInputTokensResponse, error)
+	CompactResponse(ctx context.Context, providerType string, req *ResponsesRequest) (*ResponseCompactResponse, error)
+}
+
 // NativeFileProviderTypeLister exposes registered provider types that support
 // native file operations. This is an internal capability inventory and must not
 // depend on the public model catalog.
 type NativeFileProviderTypeLister interface {
 	NativeFileProviderTypes() []string
+}
+
+// NativeResponseProviderTypeLister exposes registered provider types that
+// support native Responses lifecycle operations.
+type NativeResponseProviderTypeLister interface {
+	NativeResponseProviderTypes() []string
 }
 
 // RoutableProvider extends Provider with routing capability.

@@ -861,6 +861,7 @@ func (r *ModelRegistry) ProviderByType(providerType string) core.Provider {
 	return nil
 }
 
+
 // ProviderTypes returns the unique registered provider types in sorted order.
 // This inventory is independent of discovered models.
 func (r *ModelRegistry) ProviderTypes() []string {

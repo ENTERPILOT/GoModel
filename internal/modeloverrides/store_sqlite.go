@@ -33,6 +33,9 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create model_overrides table: %w", err)
 	}
+	if _, err := db.Exec(`ALTER TABLE model_overrides ADD COLUMN user_paths TEXT NOT NULL DEFAULT '[]'`); err != nil && !isSQLiteDuplicateColumnError(err) {
+		return nil, fmt.Errorf("failed to migrate model_overrides user_paths column: %w", err)
+	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_model_overrides_provider_name ON model_overrides(provider_name)`); err != nil {
 		return nil, fmt.Errorf("failed to create model_overrides provider_name index: %w", err)
 	}
@@ -111,6 +114,14 @@ func (s *SQLiteStore) Delete(ctx context.Context, selector string) error {
 
 func (s *SQLiteStore) Close() error {
 	return nil
+}
+
+func isSQLiteDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "duplicate column") || strings.Contains(message, "already exists")
 }
 
 func scanSQLiteOverride(scanner interface{ Scan(dest ...any) error }) (Override, error) {

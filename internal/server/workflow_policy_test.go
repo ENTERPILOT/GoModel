@@ -5,10 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
-
-	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/core"
 )
@@ -88,36 +85,5 @@ func TestDetermineBatchExecutionSelection_UsesSingleResolutionPass(t *testing.T)
 	}
 	if resolver.calls != len(req.Requests) {
 		t.Fatalf("resolver calls = %d, want %d", resolver.calls, len(req.Requests))
-	}
-}
-
-func TestNativeBatchService_StoreWorkflowForBatch_NormalizesPolicyErrors(t *testing.T) {
-	t.Parallel()
-
-	svc := &nativeBatchService{
-		workflowPolicyResolver: requestWorkflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
-			return nil, errors.New("resolver backend unavailable")
-		}),
-	}
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	_, err := svc.storeWorkflowForBatch(c, batchExecutionSelection{
-		providerType: "openai",
-		selector:     core.NewWorkflowSelector("openai", "gpt-4o-mini"),
-	})
-	if err == nil {
-		t.Fatal("storeWorkflowForBatch() error = nil, want gateway error")
-	}
-
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("storeWorkflowForBatch() error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeProvider {
-		t.Fatalf("gateway error type = %q, want %q", gatewayErr.Type, core.ErrorTypeProvider)
 	}
 }

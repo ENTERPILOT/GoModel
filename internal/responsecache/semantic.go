@@ -116,25 +116,16 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 		slog.Warn("semantic cache replay failed", "path", path, "err", replayErr)
 	}
 
-	capture := &responseCapture{
-		ResponseWriter: c.Response(),
-		body:           &bytes.Buffer{},
-	}
-	c.SetResponse(capture)
-
-	if err := next(); err != nil {
+	data, ok, err := captureResponseForCache(
+		c,
+		path,
+		"semantic cache: failed to capture cacheable response body",
+		next,
+	)
+	if err != nil {
 		return err
 	}
-
-	if capture.status != http.StatusOK || capture.body.Len() == 0 {
-		return nil
-	}
-	if core.GetFallbackUsed(c.Request().Context()) {
-		return nil
-	}
-	data, ok := capture.cachedBody(c.Response().Header().Get("Content-Type"))
 	if !ok {
-		slog.Warn("semantic cache: failed to capture cacheable response body", "path", path)
 		return nil
 	}
 	ttlSec := 0

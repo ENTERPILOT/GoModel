@@ -38,7 +38,7 @@ auth:
 # LLM Provider configuration
 providers:
   # -- Use an existing secret for all provider API keys
-  # Secret should contain keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, XAI_API_KEY, ORACLE_API_KEY
+  # Secret should contain keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, XAI_API_KEY, ZAI_API_KEY, ORACLE_API_KEY
   existingSecret: ""
 
   openai:
@@ -79,6 +79,14 @@ providers:
     # -- xAI API key (ignored if providers.existingSecret is set)
     apiKey: ""
     # -- Optional: Override xAI base URL
+    baseUrl: ""
+
+  zai:
+    # -- Enable Z.ai provider (auto-enabled if apiKey is set)
+    enabled: false
+    # -- Z.ai API key (ignored if providers.existingSecret is set)
+    apiKey: ""
+    # -- Optional: Override Z.ai base URL; use https://api.z.ai/api/coding/paas/v4 for GLM Coding Plan
     baseUrl: ""
 
   oracle:
@@ -133,6 +141,11 @@ metrics:
     interval: "15s"
     # -- Additional labels for the ServiceMonitor
     labels: {}
+
+# Logging configuration
+logging:
+  # -- Log format; leave empty to auto-detect, or set to "json" or "text"
+  format: ""
 
 # Kubernetes Service configuration
 service:

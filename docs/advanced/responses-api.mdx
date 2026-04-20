@@ -1,0 +1,128 @@
+---
+title: "Responses API"
+description: "Use OpenAI-compatible response creation, lifecycle, input items, and utility endpoints through GoModel."
+icon: "messages-square"
+tag: "Beta"
+---
+
+## Overview
+
+GoModel exposes OpenAI-compatible Responses API endpoints under `/v1/responses`.
+
+Create requests use the translated model routing pipeline, so aliases,
+workflows, guardrails, failover, usage logging, and response caching continue to
+apply. Lifecycle and utility endpoints use native provider capabilities when
+available, and return explicit compatibility errors when the selected provider
+does not support the requested operation.
+
+## Supported endpoints
+
+| Endpoint | Behavior |
+| --- | --- |
+| `POST /v1/responses` | Creates a response through translated model routing. Non-streaming responses are stored for later retrieval. |
+| `GET /v1/responses/{id}` | Returns a stored gateway response when available. Otherwise, proxies to a native provider lookup when supported. |
+| `GET /v1/responses/{id}/input_items` | Returns normalized input items captured from the original create request when available. Otherwise, proxies to a native provider lookup when supported. |
+| `POST /v1/responses/{id}/cancel` | Cancels the response through the native provider when supported. |
+| `DELETE /v1/responses/{id}` | Deletes the stored gateway response. When the provider supports native deletion, GoModel also forwards the delete request upstream. |
+| `POST /v1/responses/input_tokens` | Counts input tokens through the native provider utility endpoint when supported. |
+| `POST /v1/responses/compact` | Compacts a response input through the native provider utility endpoint when supported. |
+
+## Stored responses
+
+For non-streaming `POST /v1/responses` calls, GoModel stores the normalized
+response body and the normalized input items from the request.
+
+This enables:
+
+- `GET /v1/responses/{id}` for responses created through GoModel.
+- `GET /v1/responses/{id}/input_items` for the original normalized input.
+- `DELETE /v1/responses/{id}` even when the provider does not expose native
+  response deletion.
+
+Streaming responses are not stored as response snapshots.
+
+## Native provider lookup
+
+When a response was not created through the current GoModel process or response
+store, lifecycle endpoints can still use a native provider lookup.
+
+Specify the provider when the response ID is not stored locally:
+
+```http
+GET /v1/responses/resp_abc123?provider=openai
+```
+
+Without a stored response or provider hint, GoModel checks providers that expose
+native Responses lifecycle support. If lifecycle routing is unavailable,
+GoModel returns a compatibility error. If lifecycle routing is available but no
+provider can serve the response, GoModel returns a normal not-found error.
+
+## Input items
+
+GoModel normalizes stored input into OpenAI-compatible response input items.
+String input becomes a user message with an `input_text` content item:
+
+```json
+{
+  "type": "message",
+  "role": "user",
+  "content": [
+    {
+      "type": "input_text",
+      "text": "hello"
+    }
+  ]
+}
+```
+
+Structured input arrays preserve message, function call, and function call
+output items where possible.
+
+## Compatibility errors
+
+Some providers do not support every Responses lifecycle or utility endpoint.
+When the selected provider cannot perform an operation, GoModel returns an
+OpenAI-compatible error with:
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "message": "response compaction is not supported by this provider",
+    "param": null,
+    "code": "unsupported_response_operation"
+  }
+}
+```
+
+GoModel uses OpenAI's `invalid_request_error` type for unsupported operations
+so the public error type set stays closed. The `unsupported_response_operation`
+code identifies the unsupported operation, returned with HTTP `501 Not Implemented`.
+
+## Example
+
+Create a response:
+
+```bash
+curl http://localhost:8080/v1/responses \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5-mini",
+    "input": "Write one short sentence about reliable gateways."
+  }'
+```
+
+Retrieve it later:
+
+```bash
+curl http://localhost:8080/v1/responses/resp_abc123 \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+List its stored input items:
+
+```bash
+curl http://localhost:8080/v1/responses/resp_abc123/input_items \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```

@@ -101,6 +101,19 @@ func (s *RequestSnapshot) WithUserPath(userPath string) *RequestSnapshot {
 	return &cloned
 }
 
+// WithOwnedCapturedBody returns a shallow-cloned snapshot with request body
+// capture state replaced. capturedBody is taken as owned by the snapshot and
+// must not be mutated after this call.
+func (s *RequestSnapshot) WithOwnedCapturedBody(capturedBody []byte, bodyNotCaptured bool) *RequestSnapshot {
+	if s == nil {
+		return nil
+	}
+	cloned := *s
+	cloned.capturedBody = capturedBody
+	cloned.BodyNotCaptured = bodyNotCaptured
+	return &cloned
+}
+
 // CapturedBody returns a defensive copy of the captured request body bytes.
 func (s *RequestSnapshot) CapturedBody() []byte {
 	if s == nil {

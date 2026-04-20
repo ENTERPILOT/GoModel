@@ -30,6 +30,11 @@ type streamResponseBuilder struct {
 
 // buildChatCompletionResponse constructs a ChatCompletion response from accumulated data
 func (b *streamResponseBuilder) buildChatCompletionResponse() map[string]any {
+	role := strings.TrimSpace(b.Role)
+	if role == "" {
+		role = "assistant"
+	}
+
 	return map[string]any{
 		"id":      b.ID,
 		"object":  "chat.completion",
@@ -39,7 +44,7 @@ func (b *streamResponseBuilder) buildChatCompletionResponse() map[string]any {
 			{
 				"index": 0,
 				"message": map[string]any{
-					"role":    b.Role,
+					"role":    role,
 					"content": b.Content.String(),
 				},
 				"finish_reason": b.FinishReason,
@@ -116,6 +121,10 @@ func CreateStreamEntry(baseEntry *LogEntry) *LogEntry {
 		if baseEntry.Data.WorkflowFeatures != nil {
 			snapshot := *baseEntry.Data.WorkflowFeatures
 			entryCopy.Data.WorkflowFeatures = &snapshot
+		}
+		if baseEntry.Data.Failover != nil {
+			snapshot := *baseEntry.Data.Failover
+			entryCopy.Data.Failover = &snapshot
 		}
 	}
 

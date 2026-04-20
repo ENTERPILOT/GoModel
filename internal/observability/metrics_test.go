@@ -374,4 +374,8 @@ func TestGetMetrics(t *testing.T) {
 	if metrics.InFlightRequests == nil {
 		t.Error("InFlightRequests metric is nil")
 	}
+
+	if metrics.ResponseSnapshotStoreFailures == nil {
+		t.Error("ResponseSnapshotStoreFailures metric is nil")
+	}
 }

@@ -151,6 +151,17 @@
       "properties": {
         "providers": {
           "properties": {
+            "zai": {
+              "properties": { "apiKey": { "minLength": 1 } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "providers": {
+          "properties": {
             "oracle": {
               "properties": {
                 "apiKey": { "minLength": 1 },
@@ -222,6 +233,14 @@
             "baseUrl": { "type": "string" }
           }
         },
+        "zai": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "apiKey": { "type": "string" },
+            "baseUrl": { "type": "string" }
+          }
+        },
         "oracle": {
           "type": "object",
           "properties": {
@@ -278,6 +297,15 @@
             "interval": { "type": "string" },
             "labels": { "type": "object" }
           }
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["", "json", "text"]
         }
       }
     },

@@ -1,0 +1,150 @@
+---
+title: "Passthrough API"
+description: "Use provider-native APIs through GoModel, including Anthropic SDK requests routed through the passthrough endpoint."
+icon: "route"
+tag: "Beta"
+---
+
+## Overview
+
+<Warning>
+  The passthrough API is in beta. Use it when you need a provider-native API
+  shape, and prefer the OpenAI-compatible `/v1` routes when you need the most
+  stable GoModel interface.
+</Warning>
+
+The passthrough API proxies provider-native requests through GoModel without
+translating the request or response body.
+
+Use it when a client library expects a provider's native API instead of the
+OpenAI-compatible API. For example, the Anthropic SDK sends requests to
+`/v1/messages`, so you can point it at GoModel's Anthropic passthrough base URL:
+
+```text
+http://localhost:8080/p/anthropic
+```
+
+The SDK sends:
+
+```text
+POST /p/anthropic/v1/messages
+```
+
+GoModel normalizes the optional `v1` segment and forwards the request upstream
+as Anthropic's native:
+
+```text
+POST /messages
+```
+
+## How it works
+
+Passthrough routes use this shape:
+
+```text
+/p/{provider}/{endpoint}
+```
+
+For Anthropic, these two paths map to the same upstream endpoint when
+`ALLOW_PASSTHROUGH_V1_ALIAS=true`, which is the default:
+
+```text
+/p/anthropic/messages
+/p/anthropic/v1/messages
+```
+
+GoModel handles gateway authentication first. If `GOMODEL_MASTER_KEY` or
+managed auth keys are enabled, the client must send a GoModel bearer token:
+
+```http
+Authorization: Bearer change-me
+```
+
+GoModel strips client `Authorization` and `X-Api-Key` headers before forwarding
+the request, then applies the upstream provider credential configured on the
+server. For Anthropic, GoModel uses its configured `ANTHROPIC_API_KEY`.
+
+Because passthrough is provider-native, the response is also provider-native.
+For Anthropic messages, the response uses Anthropic's message schema, not an
+OpenAI chat completion schema.
+
+## Anthropic SDK example
+
+Set the Anthropic SDK base URL to GoModel's Anthropic passthrough route. Use the
+GoModel token as Anthropic SDK bearer auth.
+
+<CodeGroup>
+
+```python Python
+import os
+from anthropic import Anthropic
+
+client = Anthropic(
+    base_url="http://localhost:8080/p/anthropic",
+    auth_token=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+message = client.messages.create(
+    model="claude-3-haiku-20240307",
+    max_tokens=16,
+    messages=[
+        {
+            "role": "user",
+            "content": "Reply with exactly ok",
+        }
+    ],
+)
+
+print(message.content[0].text)
+```
+
+```javascript JavaScript
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({
+  baseURL: "http://localhost:8080/p/anthropic",
+  authToken: process.env.GOMODEL_MASTER_KEY,
+});
+
+const message = await client.messages.create({
+  model: "claude-3-haiku-20240307",
+  max_tokens: 16,
+  messages: [
+    {
+      role: "user",
+      content: "Reply with exactly ok",
+    },
+  ],
+});
+
+console.log(message.content[0].text);
+```
+
+</CodeGroup>
+
+If your gateway does not require authentication, use a dummy SDK API key such as
+`not-needed` instead of `auth_token` or `authToken`. GoModel strips `X-Api-Key`
+from passthrough requests before forwarding them upstream.
+
+## Current limitations
+
+Passthrough is intentionally narrow while the API is in beta.
+
+- `openai`, `anthropic`, `openrouter`, and `zai` are enabled by default.
+- GoModel does not translate passthrough request bodies or response bodies.
+- Provider-native error bodies and status codes are proxied instead of converted
+  into OpenAI-compatible responses.
+- Features that depend on OpenAI-compatible request or response shapes may not
+  apply to passthrough traffic in the same way as `/v1` traffic.
+
+## Related environment variables
+
+Passthrough routes are enabled by default:
+
+```env
+ENABLE_PASSTHROUGH_ROUTES=true
+ALLOW_PASSTHROUGH_V1_ALIAS=true
+ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,zai
+```
+
+Set `ENABLED_PASSTHROUGH_PROVIDERS` to the provider types you want to expose.

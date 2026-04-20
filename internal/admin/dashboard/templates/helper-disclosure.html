@@ -1,7 +1,7 @@
 {{define "helper-disclosure"}}
 <div class="inline-help-section" x-data="{{.}}">
     <div class="inline-help-title-row">
-        <h3 x-text="heading"></h3>
+        <h3 x-show="heading" x-text="heading"></h3>
         <button type="button"
                 class="inline-help-toggle"
                 :class="{ 'is-open': open }"

@@ -22,6 +22,7 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
 	"gomodel/internal/providers"
+	"gomodel/internal/streaming"
 )
 
 // Registration provides factory registration for the Anthropic provider.
@@ -504,7 +505,7 @@ type streamConverter struct {
 	thinkingBlocks    map[int]bool // tracks which content block indices are thinking blocks
 	usage             anthropicUsage
 	hasUsage          bool
-	buffer            []byte
+	buffer            streaming.StreamBuffer
 	closed            bool
 	emittedToolCalls  bool
 }
@@ -525,7 +526,7 @@ func newStreamConverter(body io.ReadCloser, model string) *streamConverter {
 		model:          model,
 		toolCalls:      make(map[int]*streamToolCallState),
 		thinkingBlocks: make(map[int]bool),
-		buffer:         make([]byte, 0, 1024),
+		buffer:         streaming.NewStreamBuffer(1024),
 	}
 }
 
@@ -533,7 +534,7 @@ func malformedAnthropicStreamError(err error) error {
 	return core.NewProviderError("anthropic", http.StatusBadGateway, "failed to decode anthropic stream event: "+err.Error(), err)
 }
 
-func consumeAnthropicSSELine(p []byte, line []byte, body io.ReadCloser, buffer *[]byte, convert func(*anthropicStreamEvent) string) (n int, handled bool, err error) {
+func consumeAnthropicSSELine(p []byte, line []byte, body io.ReadCloser, buffer *streaming.StreamBuffer, convert func(*anthropicStreamEvent) string) (n int, handled bool, err error) {
 	line = bytes.TrimSpace(line)
 	if len(line) == 0 || bytes.HasPrefix(line, []byte("event:")) {
 		return 0, false, nil
@@ -555,10 +556,8 @@ func consumeAnthropicSSELine(p []byte, line []byte, body io.ReadCloser, buffer *
 		return 0, false, nil
 	}
 
-	*buffer = append(*buffer, []byte(chunk)...)
-	n = copy(p, *buffer)
-	*buffer = (*buffer)[n:]
-	return n, true, nil
+	buffer.AppendString(chunk)
+	return buffer.Read(p), true, nil
 }
 
 func mergeAnthropicUsage(dst *anthropicUsage, src *anthropicUsage) bool {
@@ -613,13 +612,12 @@ func anthropicResponsesUsagePayload(usage *anthropicUsage) map[string]any {
 
 func (sc *streamConverter) Read(p []byte) (n int, err error) {
 	// If we have buffered data, return it first
-	if len(sc.buffer) > 0 {
-		n = copy(p, sc.buffer)
-		sc.buffer = sc.buffer[n:]
-		return n, nil
+	if sc.buffer.Len() > 0 {
+		return sc.buffer.Read(p), nil
 	}
 
 	if sc.closed {
+		sc.releaseBuffer()
 		return 0, io.EOF
 	}
 
@@ -629,11 +627,8 @@ func (sc *streamConverter) Read(p []byte) (n int, err error) {
 		if err != nil {
 			if err == io.EOF {
 				// Send final [DONE] message
-				doneMsg := "data: [DONE]\n\n"
-				n = copy(p, doneMsg)
-				if n < len(doneMsg) {
-					sc.buffer = append(sc.buffer, []byte(doneMsg)[n:]...)
-				}
+				sc.buffer.AppendString("data: [DONE]\n\n")
+				n = sc.buffer.Read(p)
 				sc.closed = true
 				_ = sc.body.Close() //nolint:errcheck
 				return n, nil
@@ -644,6 +639,7 @@ func (sc *streamConverter) Read(p []byte) (n int, err error) {
 		n, handled, err := consumeAnthropicSSELine(p, line, sc.body, &sc.buffer, sc.convertEvent)
 		if err != nil {
 			sc.closed = true
+			sc.releaseBuffer()
 			return 0, err
 		}
 		if handled {
@@ -656,8 +652,17 @@ func (sc *streamConverter) Read(p []byte) (n int, err error) {
 }
 
 func (sc *streamConverter) Close() error {
+	if sc.closed {
+		sc.releaseBuffer()
+		return nil
+	}
 	sc.closed = true
+	sc.releaseBuffer()
 	return sc.body.Close()
+}
+
+func (sc *streamConverter) releaseBuffer() {
+	sc.buffer.Release()
 }
 
 func (sc *streamConverter) mapStreamStopReason(reason string) string {
@@ -737,14 +742,24 @@ func (sc *streamConverter) formatChatChunk(delta map[string]any, finishReason an
 func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 	switch event.Type {
 	case "message_start":
+		role := ""
 		if event.Message != nil {
 			sc.msgID = event.Message.ID
 			if mergeAnthropicUsage(&sc.usage, &event.Message.Usage) {
 				sc.hasUsage = true
 			}
+			role = strings.TrimSpace(event.Message.Role)
 		}
 		if mergeAnthropicUsage(&sc.usage, event.Usage) {
 			sc.hasUsage = true
+		}
+		if event.Message != nil {
+			if role == "" {
+				role = "assistant"
+			}
+			return sc.formatChatChunk(map[string]any{
+				"role": role,
+			}, nil, nil)
 		}
 		return ""
 
@@ -1476,7 +1491,7 @@ type responsesStreamConverter struct {
 	nextOutputIndex int
 	toolCalls       map[int]*providers.ResponsesOutputToolCallState
 	thinkingBlocks  map[int]bool // tracks which content block indices are thinking blocks
-	buffer          []byte
+	buffer          streaming.StreamBuffer
 	closed          bool
 	sentDone        bool
 	usage           anthropicUsage
@@ -1493,20 +1508,19 @@ func newResponsesStreamConverter(body io.ReadCloser, model string) *responsesStr
 		output:         providers.NewResponsesOutputEventState(responseID),
 		toolCalls:      make(map[int]*providers.ResponsesOutputToolCallState),
 		thinkingBlocks: make(map[int]bool),
-		buffer:         make([]byte, 0, 1024),
+		buffer:         streaming.NewStreamBuffer(1024),
 	}
 }
 
 func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 	if sc.closed {
+		sc.releaseBuffer()
 		return 0, io.EOF
 	}
 
 	// If we have buffered data, return it first
-	if len(sc.buffer) > 0 {
-		n = copy(p, sc.buffer)
-		sc.buffer = sc.buffer[n:]
-		return n, nil
+	if sc.buffer.Len() > 0 {
+		return sc.buffer.Read(p), nil
 	}
 
 	// Read the next SSE event from Anthropic
@@ -1538,17 +1552,18 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 					if marshalErr != nil {
 						slog.Error("failed to marshal response.completed event", "error", marshalErr, "response_id", sc.responseID)
 						sc.closed = true
+						sc.releaseBuffer()
 						_ = sc.body.Close() //nolint:errcheck
 						return 0, io.EOF
 					}
-					doneMsg := prefix + fmt.Sprintf("event: response.completed\ndata: %s\n\ndata: [DONE]\n\n", jsonData)
-					n = copy(p, doneMsg)
-					if n < len(doneMsg) {
-						sc.buffer = append(sc.buffer, []byte(doneMsg)[n:]...)
-					}
-					return n, nil
+					sc.buffer.AppendString(prefix)
+					sc.buffer.AppendString("event: response.completed\ndata: ")
+					sc.buffer.AppendBytes(jsonData)
+					sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
+					return sc.buffer.Read(p), nil
 				}
 				sc.closed = true
+				sc.releaseBuffer()
 				_ = sc.body.Close() //nolint:errcheck
 				return 0, io.EOF
 			}
@@ -1558,6 +1573,7 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 		n, handled, err := consumeAnthropicSSELine(p, line, sc.body, &sc.buffer, sc.convertEvent)
 		if err != nil {
 			sc.closed = true
+			sc.releaseBuffer()
 			return 0, err
 		}
 		if handled {
@@ -1570,8 +1586,17 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 }
 
 func (sc *responsesStreamConverter) Close() error {
+	if sc.closed {
+		sc.releaseBuffer()
+		return nil
+	}
 	sc.closed = true
+	sc.releaseBuffer()
 	return sc.body.Close()
+}
+
+func (sc *responsesStreamConverter) releaseBuffer() {
+	sc.buffer.Release()
 }
 
 func (sc *responsesStreamConverter) reserveAssistantMessageOutput() {

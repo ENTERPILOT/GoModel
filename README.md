@@ -6,7 +6,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/enterpilot/gomodel)](https://hub.docker.com/r/enterpilot/gomodel)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/ENTERPILOT/GoModel)](https://github.com/ENTERPILOT/GoModel/blob/main/go.mod)
 
-A high-performance AI gateway written in Go, providing a unified OpenAI-compatible API for OpenAI, Anthropic, Gemini, xAI, Groq, OpenRouter, Azure OpenAI, Oracle, Ollama, and more.
+A high-performance AI gateway written in Go, providing a unified OpenAI-compatible API for OpenAI, Anthropic, Gemini, xAI, Groq, OpenRouter, Z.ai, Azure OpenAI, Oracle, Ollama, and more.
 
 <a href="docs/dashboard.gif">
   <img src="docs/dashboard.gif" alt="Animated GoModel AI gateway dashboard showing usage analytics, token tracking, and estimated cost monitoring" width="100%">
@@ -35,12 +35,14 @@ docker run --rm -p 8080:8080 \
   -e GEMINI_API_KEY="your-gemini-key" \
   -e GROQ_API_KEY="your-groq-key" \
   -e OPENROUTER_API_KEY="your-openrouter-key" \
+  -e ZAI_API_KEY="your-zai-key" \
   -e XAI_API_KEY="your-xai-key" \
   -e AZURE_API_KEY="your-azure-key" \
   -e AZURE_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment" \
   -e AZURE_API_VERSION="2024-10-21" \
   -e ORACLE_API_KEY="your-oracle-key" \
   -e ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1" \
+  -e ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" \
   -e OLLAMA_BASE_URL="http://host.docker.internal:11434/v1" \
   enterpilot/gomodel
 ```
@@ -71,12 +73,17 @@ Example model identifiers are illustrative and subject to change; consult provid
 | Google Gemini | `GEMINI_API_KEY`                                                  | `gemini-2.5-flash`         |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
 | Groq          | `GROQ_API_KEY`                                                    | `llama-3.3-70b-versatile`  |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
 | OpenRouter    | `OPENROUTER_API_KEY`                                              | `google/gemini-2.5-flash`  |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
+| Z.ai          | `ZAI_API_KEY` (`ZAI_BASE_URL` optional)                           | `glm-5.1`                  |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ✅    |
 | xAI (Grok)    | `XAI_API_KEY`                                                     | `grok-2`                   |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
 | Azure OpenAI  | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | `gpt-4o`                   |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
 | Oracle        | `ORACLE_API_KEY` + `ORACLE_BASE_URL`                              | `openai.gpt-oss-120b`      |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ❌    |
 | Ollama        | `OLLAMA_BASE_URL`                                                 | `llama3.2`                 |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ❌    |
 
 ✅ Supported ❌ Unsupported
+
+For Z.ai's GLM Coding Plan, set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
+For Oracle, set `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3` when the
+upstream `/models` endpoint is unavailable.
 
 ---
 
@@ -102,7 +109,7 @@ Example model identifiers are illustrative and subject to change; consult provid
 
 ### Docker Compose
 
-**Infrastructure only** (Redis, PostgreSQL, MongoDB, Adminer — no image build):
+**Infrastructure only** (Redis, PostgreSQL, MongoDB, Adminer - no image build):
 
 ```bash
 docker compose up -d
@@ -173,17 +180,17 @@ GoModel is configured through environment variables and an optional `config.yaml
 
 Key settings:
 
-| Variable                        | Default            | Description                                                                      |
-| ------------------------------- | ------------------ | -------------------------------------------------------------------------------- |
-| `PORT`                          | `8080`             | Server port                                                                      |
-| `GOMODEL_MASTER_KEY`            | (none)             | API key for authentication                                                       |
-| `ENABLE_PASSTHROUGH_ROUTES`     | `true`             | Enable provider-native passthrough routes under `/p/{provider}/...`              |
-| `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`             | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |
-| `ENABLED_PASSTHROUGH_PROVIDERS` | `openai,anthropic` | Comma-separated list of enabled passthrough providers                            |
-| `STORAGE_TYPE`                  | `sqlite`           | Storage backend (`sqlite`, `postgresql`, `mongodb`)                              |
-| `METRICS_ENABLED`               | `false`            | Enable Prometheus metrics                                                        |
-| `LOGGING_ENABLED`               | `false`            | Enable audit logging                                                             |
-| `GUARDRAILS_ENABLED`            | `false`            | Enable the configured guardrails pipeline                                        |
+| Variable                        | Default                           | Description                                                                      |
+| ------------------------------- | --------------------------------- | -------------------------------------------------------------------------------- |
+| `PORT`                          | `8080`                            | Server port                                                                      |
+| `GOMODEL_MASTER_KEY`            | (none)                            | API key for authentication                                                       |
+| `ENABLE_PASSTHROUGH_ROUTES`     | `true`                            | Enable provider-native passthrough routes under `/p/{provider}/...`              |
+| `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                            | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |
+| `ENABLED_PASSTHROUGH_PROVIDERS` | `openai,anthropic,openrouter,zai` | Comma-separated list of enabled passthrough providers                            |
+| `STORAGE_TYPE`                  | `sqlite`                          | Storage backend (`sqlite`, `postgresql`, `mongodb`)                              |
+| `METRICS_ENABLED`               | `false`                           | Enable Prometheus metrics                                                        |
+| `LOGGING_ENABLED`               | `false`                           | Enable audit logging                                                             |
+| `GUARDRAILS_ENABLED`            | `false`                           | Enable the configured guardrails pipeline                                        |
 
 **Quick Start - Authentication:** By default `GOMODEL_MASTER_KEY` is unset. Without this key, API endpoints are unprotected and anyone can call them. This is insecure for production. **Strongly recommend** setting a strong secret before exposing the service. Add `GOMODEL_MASTER_KEY` to your `.env` or environment for production deployments.
 
@@ -193,27 +200,15 @@ Key settings:
 
 GoModel has a two-layer response cache that reduces LLM API costs and latency for repeated or semantically similar requests.
 
-### Layer 1 — Exact-match cache
+### Layer 1 - Exact-match cache
 
-Hashes the full request body (path + `Workflow` + body) and returns a stored response on byte-identical requests. Sub-millisecond lookup. Activate by pointing it at Redis:
-
-```yaml
-# config/config.yaml
-cache:
-  response:
-    simple:
-      redis:
-        url: redis://localhost:6379
-        ttl: 3600 # seconds; default 3600
-```
-
-Or via environment variables: `REDIS_URL`, `REDIS_KEY_RESPONSES`, `REDIS_TTL_RESPONSES`.
+Hashes the full request body (path + `Workflow` + body) and returns a stored response on byte-identical requests. Sub-millisecond lookup. Activate by environment variables: `RESPONSE_CACHE_SIMPLE_ENABLED` and `REDIS_URL`.
 
 Responses served from this layer carry `X-Cache: HIT (exact)`.
 
-### Layer 2 — Semantic cache
+### Layer 2 - Semantic cache
 
-Embeds the last user message via your configured provider’s OpenAI-compatible `/v1/embeddings` API (`cache.response.semantic.embedder.provider` must name a key in the top-level `providers` map) and performs a KNN vector search. Semantically equivalent queries — e.g. _"What's the capital of France?"_ vs _"Which city is France's capital?"_ — can return the same cached response without an upstream LLM call.
+Embeds the last user message via your configured provider’s OpenAI-compatible `/v1/embeddings` API (`cache.response.semantic.embedder.provider` must name a key in the top-level `providers` map) and performs a KNN vector search. Semantically equivalent queries - e.g. _"What's the capital of France?"_ vs _"Which city is France's capital?"_ - can return the same cached response without an upstream LLM call.
 
 Expected hit rates: ~60–70% in high-repetition workloads vs. ~18% for exact-match alone.
 

@@ -1,4 +1,119 @@
 (function(global) {
+    function tryParseJSON(value) {
+        try {
+            return JSON.parse(value);
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function normalizeAuditErrorText(value, depth) {
+        const text = String(value || '').trim();
+        if (!text) return '';
+        if (depth > 6) return text;
+
+        const parsed = tryParseJSON(text);
+        if (parsed == null) return text;
+        return findNestedAuditErrorMessage(parsed, depth + 1) || text;
+    }
+
+    function auditErrorMessageFromField(value) {
+        if (value == null) return '';
+        if (typeof value === 'string') return normalizeAuditErrorText(value, 0);
+        return findNestedAuditErrorMessage(value, 0);
+    }
+
+    function findNestedAuditErrorMessage(value, depth) {
+        if (value == null || depth > 6) return '';
+
+        if (typeof value === 'string') {
+            const parsed = tryParseJSON(value.trim());
+            return parsed == null ? '' : findNestedAuditErrorMessage(parsed, depth + 1);
+        }
+
+        if (Array.isArray(value)) {
+            for (let i = 0; i < value.length; i++) {
+                const message = findNestedAuditErrorMessage(value[i], depth + 1);
+                if (message) return message;
+            }
+            return '';
+        }
+
+        if (typeof value !== 'object') return '';
+
+        if (value.error !== undefined) {
+            if (typeof value.error === 'string') {
+                return normalizeAuditErrorText(value.error, depth + 1);
+            }
+            if (value.error && typeof value.error.message === 'string' && value.error.message.trim()) {
+                return normalizeAuditErrorText(value.error.message, depth + 1);
+            }
+            const nestedError = findNestedAuditErrorMessage(value.error, depth + 1);
+            if (nestedError) return nestedError;
+        }
+
+        if (
+            typeof value.message === 'string' &&
+            value.message.trim() &&
+            (value.error !== undefined || value.code !== undefined || value.status !== undefined || value.type !== undefined)
+        ) {
+            return normalizeAuditErrorText(value.message, depth + 1);
+        }
+
+        const keys = Object.keys(value);
+        for (let i = 0; i < keys.length; i++) {
+            if (keys[i] === 'error') continue;
+            const message = findNestedAuditErrorMessage(value[keys[i]], depth + 1);
+            if (message) return message;
+        }
+        return '';
+    }
+
+    function auditEntryStatusCode(entry, data) {
+        const candidates = [
+            entry && entry.status_code,
+            entry && entry.status,
+            data && data.status_code,
+            data.status
+        ];
+
+        for (let i = 0; i < candidates.length; i++) {
+            const parsed = Number(candidates[i]);
+            if (Number.isFinite(parsed)) return parsed;
+        }
+
+        return null;
+    }
+
+    function hasTopLevelAuditErrorShape(value) {
+        if (value == null) return false;
+
+        let candidate = value;
+        if (typeof candidate === 'string') {
+            const parsed = tryParseJSON(candidate.trim());
+            if (parsed == null) return false;
+            candidate = parsed;
+        }
+
+        if (Array.isArray(candidate) || typeof candidate !== 'object') return false;
+        if (candidate.error !== undefined) return true;
+        if (typeof candidate.message === 'string' && candidate.message.trim()) return true;
+
+        const topLevelErrorFields = ['detail', 'error_message', 'error_msg', 'title'];
+        for (let i = 0; i < topLevelErrorFields.length; i++) {
+            const field = topLevelErrorFields[i];
+            if (typeof candidate[field] === 'string' && candidate[field].trim()) return true;
+        }
+
+        return false;
+    }
+
+    function shouldInspectAuditResponseBody(entry, data) {
+        const statusCode = auditEntryStatusCode(entry, data);
+        if (statusCode !== null && statusCode >= 400) return true;
+        return hasTopLevelAuditErrorShape(data && data.response_body);
+    }
+
     function dashboardAuditListModule() {
         const clipboardModuleFactory = typeof global.dashboardClipboardModule === 'function'
             ? global.dashboardClipboardModule
@@ -146,6 +261,15 @@
                 return 'status-success';
             },
 
+            auditEntryErrorMessage(entry) {
+                const data = entry && entry.data ? entry.data : null;
+                if (!data) return '';
+                const fieldMessage = auditErrorMessageFromField(data.error_message);
+                if (fieldMessage) return fieldMessage;
+                if (!shouldInspectAuditResponseBody(entry, data)) return '';
+                return findNestedAuditErrorMessage(data.response_body, 0);
+            },
+
             formatJSON(v) {
                 if (v == null || v === undefined || v === '') return 'Not captured';
 
@@ -174,6 +298,7 @@
                 return {
                     title: 'Request',
                     entry,
+                    copyHeaders: data && data.request_headers,
                     copyBody: data && data.request_body,
                     showErrorMessage: false,
                     errorMessage: null,
@@ -190,18 +315,20 @@
 
             auditResponsePane(entry) {
                 const data = entry && entry.data ? entry.data : null;
+                const errorMessage = this.auditEntryErrorMessage(entry);
 
                 return {
                     title: 'Response',
                     entry,
+                    copyHeaders: data && data.response_headers,
                     copyBody: data && data.response_body,
-                    showErrorMessage: !!(data && data.error_message),
-                    errorMessage: data && data.error_message,
+                    showErrorMessage: !!errorMessage,
+                    errorMessage,
                     showHeaders: !!(data && data.response_headers),
                     headers: data && data.response_headers,
                     showBody: !!(data && data.response_body),
                     body: data && data.response_body,
-                    showEmpty: !data || (!data.error_message && !data.response_headers && !data.response_body),
+                    showEmpty: !data || (!errorMessage && !data.response_headers && !data.response_body),
                     emptyMessage: 'Response details were not captured.',
                     showTooLarge: !!(data && data.response_body_too_big_to_handle),
                     tooLargeMessage: 'Response body was too large to capture.'
@@ -213,25 +340,34 @@
                 const renderBody = typeof this.renderBodyWithConversationHighlights === 'function'
                     ? this.renderBodyWithConversationHighlights.bind(this)
                     : (_entry, body) => formatJSON(body);
+                const createCopyState = () => clipboard
+                    ? clipboard.createClipboardButtonState({
+                        logPrefix: 'Failed to copy audit payload:'
+                    })
+                    : {
+                        copied: false,
+                        error: false,
+                        copy() {
+                            return Promise.resolve();
+                        }
+                    };
+                const copyBodyState = createCopyState();
+                const copyHeadersState = createCopyState();
 
                 return {
                     pane,
                     formattedHeaders: pane && pane.showHeaders ? formatJSON(pane.headers) : '',
                     renderedBody: pane && pane.showBody ? renderBody(pane.entry, pane.body) : '',
-                    copyState: clipboard
-                        ? clipboard.createClipboardButtonState({
-                            logPrefix: 'Failed to copy audit payload:'
-                        })
-                        : {
-                            copied: false,
-                            error: false,
-                            copy() {
-                                return Promise.resolve();
-                            }
-                        },
+                    copyBodyState,
+                    copyHeadersState,
+                    copyState: copyBodyState,
 
                     copyBody() {
-                        return this.copyState.copy(this.pane.copyBody, formatJSON);
+                        return this.copyBodyState.copy(this.pane.copyBody, formatJSON);
+                    },
+
+                    copyHeaders() {
+                        return this.copyHeadersState.copy(this.pane.copyHeaders, formatJSON);
                     }
                 };
             }

@@ -434,6 +434,29 @@ func EnrichLogEntryWithResolvedRoute(entry *LogEntry, resolvedModel, providerTyp
 	enrichEntryWithResolvedRoute(entry, resolvedModel, providerType, providerName)
 }
 
+// EnrichEntryWithFailover records the configured failover selector used for the
+// live request when translated execution redirected away from the primary
+// selector.
+func EnrichEntryWithFailover(c *echo.Context, targetModel string) {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return
+	}
+
+	entry, ok := entryVal.(*LogEntry)
+	if !ok || entry == nil {
+		return
+	}
+
+	enrichEntryWithFailover(entry, targetModel)
+}
+
+// EnrichLogEntryWithFailover attaches failover redirect metadata directly to an
+// existing audit log entry.
+func EnrichLogEntryWithFailover(entry *LogEntry, targetModel string) {
+	enrichEntryWithFailover(entry, targetModel)
+}
+
 func enrichEntryWithResolvedRoute(entry *LogEntry, resolvedModel, providerType, providerName string) {
 	if entry == nil {
 		return
@@ -446,6 +469,21 @@ func enrichEntryWithResolvedRoute(entry *LogEntry, resolvedModel, providerType, 
 	}
 	if providerName = strings.TrimSpace(providerName); providerName != "" {
 		entry.ProviderName = providerName
+	}
+}
+
+func enrichEntryWithFailover(entry *LogEntry, targetModel string) {
+	if entry == nil {
+		return
+	}
+
+	targetModel = strings.TrimSpace(targetModel)
+	if targetModel == "" {
+		return
+	}
+
+	ensureLogData(entry).Failover = &FailoverSnapshot{
+		TargetModel: targetModel,
 	}
 }
 

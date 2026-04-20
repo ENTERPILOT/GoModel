@@ -219,6 +219,11 @@ test('workflowChart returns the shared chart contract for workflow sources', () 
             cacheNodeClass: '',
             cacheConnClass: '',
             cacheStatusLabel: null,
+            showFailover: true,
+            failoverNodeClass: '',
+            failoverConnClass: '',
+            failoverStatusLabel: null,
+            failoverTargetLabel: null,
             aiLabel: 'openai',
             aiSublabel: 'gpt-5',
             aiConnClass: '',
@@ -274,6 +279,11 @@ test('workflowChart masks globally disabled workflow features from persisted wor
             cacheNodeClass: '',
             cacheConnClass: '',
             cacheStatusLabel: null,
+            showFailover: true,
+            failoverNodeClass: '',
+            failoverConnClass: '',
+            failoverStatusLabel: null,
+            failoverTargetLabel: null,
             aiLabel: 'openai',
             aiSublabel: 'gpt-5',
             aiConnClass: '',
@@ -418,6 +428,11 @@ test('workflowAuditChart returns the shared chart contract for audit runtime ent
             cacheNodeClass: 'workflow-node-success',
             cacheConnClass: 'workflow-conn-hit',
             cacheStatusLabel: 'Hit (Semantic)',
+            showFailover: true,
+            failoverNodeClass: 'workflow-node-skipped',
+            failoverConnClass: 'workflow-conn-dim',
+            failoverStatusLabel: null,
+            failoverTargetLabel: null,
             aiLabel: 'openai',
             aiSublabel: 'gpt-5',
             aiConnClass: 'workflow-conn-dim',
@@ -454,6 +469,11 @@ test('workflowAuditChart forces audit nodes even when the workflow version canno
             cacheNodeClass: 'workflow-node-success',
             cacheConnClass: 'workflow-conn-hit',
             cacheStatusLabel: 'Hit (Exact)',
+            showFailover: false,
+            failoverNodeClass: '',
+            failoverConnClass: '',
+            failoverStatusLabel: null,
+            failoverTargetLabel: null,
             aiLabel: 'openai',
             aiSublabel: 'gpt-5',
             aiConnClass: 'workflow-conn-dim',
@@ -519,6 +539,11 @@ test('workflowAuditChart prefers request-time workflow features over current wor
             cacheNodeClass: '',
             cacheConnClass: '',
             cacheStatusLabel: null,
+            showFailover: true,
+            failoverNodeClass: '',
+            failoverConnClass: '',
+            failoverStatusLabel: null,
+            failoverTargetLabel: null,
             aiLabel: 'openai',
             aiSublabel: 'gpt-5',
             aiConnClass: '',
@@ -533,6 +558,118 @@ test('workflowAuditChart prefers request-time workflow features over current wor
             showUsage: false,
             showAudit: true,
             workflowID: 'historical-v2'
+        })
+    );
+});
+
+test('workflowAuditChart highlights configured failover redirects and exposes the selected target', () => {
+    const module = createWorkflowsModule();
+    module.workflowVersionsByID = {
+        'historical-v3': {
+            id: 'historical-v3',
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            },
+            workflow_payload: {
+                features: {
+                    cache: false,
+                    audit: true,
+                    usage: true,
+                    guardrails: false,
+                    fallback: true
+                },
+                guardrails: []
+            }
+        }
+    };
+
+    assert.equal(
+        JSON.stringify(module.workflowAuditChart({
+            workflow_version_id: 'historical-v3',
+            provider: 'azure',
+            requested_model: 'gpt-5',
+            status_code: 200,
+            data: {
+                workflow_features: {
+                    cache: false,
+                    audit: true,
+                    usage: true,
+                    guardrails: false,
+                    fallback: true
+                },
+                failover: {
+                    target_model: 'azure/gpt-4o'
+                }
+            }
+        })),
+        JSON.stringify({
+            showGuardrails: false,
+            guardrailLabel: '',
+            showCache: false,
+            cacheNodeClass: '',
+            cacheConnClass: '',
+            cacheStatusLabel: null,
+            showFailover: true,
+            failoverNodeClass: 'workflow-node-success',
+            failoverConnClass: 'workflow-conn-hit',
+            failoverStatusLabel: 'Redirected',
+            failoverTargetLabel: 'azure/gpt-4o',
+            aiLabel: 'openai',
+            aiSublabel: 'gpt-5',
+            aiConnClass: '',
+            aiNodeClass: 'workflow-node-success',
+            responseConnClass: '',
+            responseNodeClass: 'workflow-node-success',
+            authNodeClass: '',
+            authNodeSublabel: null,
+            usageNodeClass: 'workflow-node-success',
+            auditNodeClass: 'workflow-node-success',
+            showAsync: true,
+            showUsage: true,
+            showAudit: true,
+            workflowID: 'historical-v3'
+        })
+    );
+    assert.equal(module.workflowFailoverTarget({
+        data: {
+            failover: {
+                target_model: 'azure/gpt-4o'
+            }
+        }
+    }), 'azure/gpt-4o');
+});
+
+test('workflowRuntimeFromEntry preserves the primary route for cross-provider failover entries', () => {
+    const module = createWorkflowsModule();
+
+    assert.equal(
+        JSON.stringify(module.workflowRuntimeFromEntry({
+            provider: 'azure',
+            requested_model: 'gpt-5',
+            status_code: 200,
+            data: {
+                failover: {
+                    target_model: 'azure/gpt-4o'
+                }
+            }
+        }, {
+            scope: {
+                scope_provider: 'openai',
+                scope_model: 'gpt-5'
+            }
+        })),
+        JSON.stringify({
+            cacheHit: false,
+            cacheType: null,
+            failoverTarget: 'azure/gpt-4o',
+            provider: 'openai',
+            model: 'gpt-5',
+            statusCode: 200,
+            responseSuccess: true,
+            aiSuccess: true,
+            authError: false,
+            authMethod: null
         })
     );
 });
@@ -1608,6 +1745,7 @@ test('workflowRuntimeFromEntry derives cache hit state from cache_type without r
         JSON.stringify({
             cacheHit: true,
             cacheType: 'semantic',
+            failoverTarget: null,
             provider: 'openai',
             model: 'gpt-5',
             statusCode: null,
@@ -1623,6 +1761,7 @@ test('workflowRuntimeFromEntry derives cache hit state from cache_type without r
         JSON.stringify({
             cacheHit: true,
             cacheType: 'exact',
+            failoverTarget: null,
             provider: null,
             model: null,
             statusCode: null,
@@ -1638,6 +1777,7 @@ test('workflowRuntimeFromEntry derives cache hit state from cache_type without r
         JSON.stringify({
             cacheHit: false,
             cacheType: null,
+            failoverTarget: null,
             provider: null,
             model: null,
             statusCode: null,
@@ -1659,6 +1799,8 @@ test('audit runtime uses explicit cache-hit labels and highlights the uncached 2
     assert.equal(module.workflowCacheNodeClass(semanticHit), 'workflow-node-success');
     assert.equal(module.workflowCacheConnClass(semanticHit), 'workflow-conn-hit');
     assert.equal(module.workflowCacheStatusLabel(semanticHit), 'Hit (Semantic)');
+    assert.equal(module.workflowFailoverNodeClass(semanticHit), 'workflow-node-skipped');
+    assert.equal(module.workflowFailoverConnClass(semanticHit), 'workflow-conn-dim');
     assert.equal(module.workflowAiConnClass(semanticHit), 'workflow-conn-dim');
     assert.equal(module.workflowAiNodeClass(semanticHit), 'workflow-node-skipped');
     assert.equal(module.workflowResponseConnClass(semanticHit), 'workflow-conn-dim');
@@ -1690,6 +1832,7 @@ test('workflowRuntimeFromEntry treats any uncached 2xx status as a successful AI
         JSON.stringify({
             cacheHit: false,
             cacheType: null,
+            failoverTarget: null,
             provider: 'openai',
             model: 'gpt-5',
             statusCode: 204,

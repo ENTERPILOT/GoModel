@@ -10,8 +10,8 @@ make install-tools
 
 This installs:
 
-- [golangci-lint v2](https://golangci-lint.run/welcome/install/) — required for `make lint`
-- [pre-commit](https://pre-commit.com/) — required for git hook setup
+- [golangci-lint v2](https://golangci-lint.run/welcome/install/) - required for `make lint`
+- [pre-commit](https://pre-commit.com/) - required for git hook setup
 
 After installing tools, set up the pre-commit hooks:
 
@@ -77,12 +77,12 @@ Override the auto-detection with `LOG_FORMAT`, and the verbosity with `LOG_LEVEL
 | `text`    | Always text (no colors if not a TTY)            |
 | `json`    | Always JSON, even on a TTY                      |
 
-| `LOG_LEVEL` value | Effect |
-| ----------------- | ------ |
-| `debug`           | Include debug, info, warn, and error logs |
+| `LOG_LEVEL` value | Effect                                       |
+| ----------------- | -------------------------------------------- |
+| `debug`           | Include debug, info, warn, and error logs    |
 | `info`            | Include info, warn, and error logs (default) |
-| `warn`            | Include only warn and error logs |
-| `error`           | Include only error logs |
+| `warn`            | Include only warn and error logs             |
+| `error`           | Include only error logs                      |
 
 ```bash
 LOG_FORMAT=text make run   # force text output

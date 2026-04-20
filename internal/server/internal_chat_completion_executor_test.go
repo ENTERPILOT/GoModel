@@ -365,3 +365,131 @@ func TestInternalChatCompletionExecutor_RoutesThroughResponseCache(t *testing.T)
 		t.Fatalf("responses = %#v / %#v, want identical cached response", resp1, resp2)
 	}
 }
+
+func TestInternalChatCompletionExecutor_CachedNilWorkflowDoesNotPanic(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+
+	rcm := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	provider := &contextCapturingProvider{
+		capturingProvider: capturingProvider{
+			mockProvider: mockProvider{
+				supportedModels: []string{"rewrite-model"},
+				providerTypes: map[string]string{
+					"rewrite-model": "openai",
+				},
+				response: &core.ChatResponse{
+					ID:       "chatcmpl-internal-cache-nil-workflow",
+					Object:   "chat.completion",
+					Model:    "rewrite-model",
+					Provider: "openai",
+					Choices: []core.Choice{
+						{
+							Index:        0,
+							FinishReason: "stop",
+							Message: core.ResponseMessage{
+								Role:    "assistant",
+								Content: "rewritten",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	executor := NewInternalChatCompletionExecutor(provider, InternalChatCompletionExecutorConfig{
+		ResponseCache: rcm,
+	})
+	req := &core.ChatRequest{
+		Model: "rewrite-model",
+		Messages: []core.Message{
+			{Role: "user", Content: "John Smith"},
+		},
+	}
+
+	_, _, _, _, _, cacheType, err := executor.executeChatCompletion(context.Background(), nil, req)
+	if err != nil {
+		t.Fatalf("first executeChatCompletion() error = %v", err)
+	}
+	if cacheType != "" {
+		t.Fatalf("first cacheType = %q, want empty", cacheType)
+	}
+	if err := rcm.Close(); err != nil {
+		t.Fatalf("ResponseCacheMiddleware.Close() error = %v", err)
+	}
+
+	resp, providerType, providerName, _, _, cacheType, err := executor.executeChatCompletion(context.Background(), nil, req)
+	if err != nil {
+		t.Fatalf("cached executeChatCompletion() error = %v", err)
+	}
+	if provider.chatCalls != 1 {
+		t.Fatalf("provider chat calls = %d, want 1 with second response served from cache", provider.chatCalls)
+	}
+	if resp == nil || resp.ID != "chatcmpl-internal-cache-nil-workflow" {
+		t.Fatalf("resp = %#v, want cached provider response", resp)
+	}
+	if providerType != "" {
+		t.Fatalf("providerType = %q, want empty for nil workflow cache hit", providerType)
+	}
+	if providerName != "" {
+		t.Fatalf("providerName = %q, want empty for nil workflow cache hit", providerName)
+	}
+	if cacheType != responsecache.CacheTypeExact {
+		t.Fatalf("cacheType = %q, want %q", cacheType, responsecache.CacheTypeExact)
+	}
+}
+
+func TestInternalChatCompletionExecutor_MarshalFailureFallsBackToNoCacheDispatch(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+
+	rcm := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	provider := &contextCapturingProvider{
+		capturingProvider: capturingProvider{
+			mockProvider: mockProvider{
+				supportedModels: []string{"rewrite-model"},
+				providerTypes: map[string]string{
+					"rewrite-model": "openai",
+				},
+				response: &core.ChatResponse{
+					ID:       "chatcmpl-internal-marshal-fallback",
+					Object:   "chat.completion",
+					Model:    "rewrite-model",
+					Provider: "openai",
+					Choices: []core.Choice{
+						{
+							Index:        0,
+							FinishReason: "stop",
+							Message: core.ResponseMessage{
+								Role:    "assistant",
+								Content: "rewritten",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	executor := NewInternalChatCompletionExecutor(provider, InternalChatCompletionExecutorConfig{
+		ResponseCache: rcm,
+	})
+
+	resp, err := executor.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "rewrite-model",
+		Messages: []core.Message{
+			{Role: "user", Content: "John Smith"},
+		},
+		Tools: []map[string]any{{"unsupported": func() {}}},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if resp == nil || resp.ID != "chatcmpl-internal-marshal-fallback" {
+		t.Fatalf("resp = %#v, want provider response", resp)
+	}
+	if provider.chatCalls != 1 {
+		t.Fatalf("provider chat calls = %d, want one no-cache dispatch", provider.chatCalls)
+	}
+}

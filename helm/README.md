@@ -1,6 +1,6 @@
 # GoModel Helm Chart
 
-High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, xAI, Oracle).
+High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, Z.ai, xAI, Oracle).
 
 ## Prerequisites
 
@@ -59,12 +59,15 @@ helm install gomodel ./helm \
 | `providers.gemini.enabled`       | Enable Gemini                                                                                  | `false`                |
 | `providers.groq.enabled`         | Enable Groq                                                                                    | `false`                |
 | `providers.xai.enabled`          | Enable xAI                                                                                     | `false`                |
+| `providers.zai.enabled`          | Enable Z.ai                                                                                    | `false`                |
+| `providers.zai.baseUrl`          | Optional Z.ai base URL mapped to `ZAI_BASE_URL`; use Coding Plan endpoint when needed          | `""`                   |
 | `providers.oracle.enabled`       | Enable Oracle                                                                                  | `false`                |
 | `providers.oracle.baseUrl`       | Oracle OpenAI-compatible base URL mapped to `ORACLE_BASE_URL`; required when Oracle is enabled | `""`                   |
 | `cache.type`                     | Cache type (local/redis)                                                                       | `"redis"`              |
 | `redis.enabled`                  | Deploy Redis subchart                                                                          | `true`                 |
 | `metrics.enabled`                | Enable Prometheus metrics                                                                      | `true`                 |
 | `metrics.serviceMonitor.enabled` | Create ServiceMonitor                                                                          | `false`                |
+| `logging.format`                 | Log format; empty auto-detects, or set `json`/`text`                                           | `""`                   |
 | `ingress.enabled`                | Enable Ingress                                                                                 | `false`                |
 | `gateway.enabled`                | Enable Gateway API HTTPRoute                                                                   | `false`                |
 | `autoscaling.enabled`            | Enable HPA                                                                                     | `false`                |
@@ -83,6 +86,7 @@ stringData:
   OPENAI_API_KEY: "sk-..."
   ANTHROPIC_API_KEY: "sk-ant-..."
   GEMINI_API_KEY: "..."
+  ZAI_API_KEY: "..."
   ORACLE_API_KEY: "..."
 ```
 

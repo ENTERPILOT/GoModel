@@ -8,18 +8,22 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
+	"gomodel/internal/gateway"
+	"gomodel/internal/observability"
 	"gomodel/internal/responsecache"
+	"gomodel/internal/responsestore"
 	"gomodel/internal/streaming"
 	"gomodel/internal/usage"
 )
 
-// translatedInferenceService owns translated chat/responses/embeddings
-// execution so HTTP handlers can stay focused on transport concerns.
+// translatedInferenceService adapts Echo requests to the transport-independent
+// translated inference orchestrator.
 type translatedInferenceService struct {
 	provider                 core.RoutableProvider
 	modelResolver            RequestModelResolver
@@ -32,140 +36,173 @@ type translatedInferenceService struct {
 	pricingResolver          usage.PricingResolver
 	responseCache            *responsecache.ResponseCacheMiddleware
 	guardrailsHash           string
+	responseStore            responsestore.Store
+	responseStoreMu          sync.RWMutex
 
-	// Pre-built handlers initialized via initHandlers.
+	orchestrator *gateway.InferenceOrchestrator
+
 	chatCompletionHandler echo.HandlerFunc
 	responsesHandler      echo.HandlerFunc
 }
 
 func (s *translatedInferenceService) initHandlers() {
-	s.chatCompletionHandler = newTranslatedHandler(s,
-		core.DecodeChatRequest,
-		func(r *core.ChatRequest) (*string, *string) { return &r.Model, &r.Provider },
-		func(ctx context.Context, r *core.ChatRequest) (*core.ChatRequest, error) {
-			return s.translatedRequestPatcher.PatchChatRequest(ctx, r)
-		},
-		func(r *core.ChatRequest) bool { return r.Stream },
-		s.dispatchChatCompletion,
-	)
-	s.responsesHandler = newTranslatedHandler(s,
-		core.DecodeResponsesRequest,
-		func(r *core.ResponsesRequest) (*string, *string) { return &r.Model, &r.Provider },
-		func(ctx context.Context, r *core.ResponsesRequest) (*core.ResponsesRequest, error) {
-			return s.translatedRequestPatcher.PatchResponsesRequest(ctx, r)
-		},
-		func(r *core.ResponsesRequest) bool { return r.Stream },
-		s.dispatchResponses,
-	)
+	s.orchestrator = s.newInferenceOrchestrator()
+	s.chatCompletionHandler = s.handleChatCompletion
+	s.responsesHandler = s.handleResponses
 }
 
-// newTranslatedHandler returns an echo.HandlerFunc that executes the
-// decode→workflow→patch→dispatch pipeline for a translated inference endpoint.
-func newTranslatedHandler[R any](
-	s *translatedInferenceService,
-	decode func([]byte, *core.WhiteBoxPrompt) (R, error),
-	modelProvider func(R) (*string, *string),
-	patch func(context.Context, R) (R, error),
-	isStream func(R) bool,
-	dispatch func(*echo.Context, R, *core.Workflow) error,
-) echo.HandlerFunc {
-	return func(c *echo.Context) error {
-		return handleTranslatedInference(s, c, decode, modelProvider, patch, isStream, dispatch)
-	}
+func (s *translatedInferenceService) inference() *gateway.InferenceOrchestrator {
+	return s.orchestrator
+}
+
+func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.InferenceOrchestrator {
+	return gateway.NewInferenceOrchestrator(gateway.InferenceConfig{
+		Provider:                 s.provider,
+		ModelResolver:            s.modelResolver,
+		ModelAuthorizer:          s.modelAuthorizer,
+		WorkflowPolicyResolver:   s.workflowPolicyResolver,
+		FallbackResolver:         s.fallbackResolver,
+		TranslatedRequestPatcher: s.translatedRequestPatcher,
+		UsageLogger:              s.usageLogger,
+		PricingResolver:          s.pricingResolver,
+		GuardrailsHash:           s.guardrailsHash,
+	})
 }
 
 func (s *translatedInferenceService) ChatCompletion(c *echo.Context) error {
 	return s.chatCompletionHandler(c)
 }
 
+func (s *translatedInferenceService) handleChatCompletion(c *echo.Context) error {
+	return handleTranslatedJSON(s, c, core.DecodeChatRequest, prepareChatCompletionRequest, s.dispatchChatCompletion)
+}
+
 func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req *core.ChatRequest, workflow *core.Workflow) error {
 	ctx := c.Request().Context()
-	streamReq, providerType, providerName, usageModel := s.resolveProviderAndModelFromWorkflow(c, workflow, req.Model, req)
 	requestID := requestIDFromContextOrHeader(c.Request())
 
 	if req.Stream {
-		if len(s.fallbackSelectors(workflow)) == 0 {
+		if len(s.inference().FallbackSelectors(workflow)) == 0 {
 			if handled, err := s.tryFastPathStreamingChatPassthrough(c, workflow, req); handled {
 				return err
 			}
 		}
-		stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, usedFallback, err := s.streamChatCompletion(ctx, workflow, streamReq, providerType, providerName, usageModel)
+		result, err := s.inference().StreamChatCompletion(ctx, workflow, req)
 		if err != nil {
 			return handleError(c, err)
 		}
-		if usedFallback {
+		if result.Meta.UsedFallback {
 			markRequestFallbackUsed(c)
 		}
-		return s.handleStreamingReadCloser(c, workflow, resolvedUsageModel, resolvedProviderType, resolvedProviderName, stream)
+		return s.handleStreamingReadCloser(
+			c,
+			workflow,
+			result.Meta.Model,
+			result.Meta.ProviderType,
+			result.Meta.ProviderName,
+			result.Meta.FailoverModel,
+			result.Stream,
+		)
 	}
 
-	resp, providerType, providerName, usedFallback, err := s.executeChatCompletion(ctx, workflow, req)
+	result, err := s.inference().ExecuteChatCompletion(ctx, workflow, req, requestID, "/v1/chat/completions")
 	if err != nil {
 		return handleError(c, err)
 	}
-	if usedFallback {
+	if result.Meta.UsedFallback {
 		markRequestFallbackUsed(c)
+		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
 	}
-	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, resp.Model, providerName), providerType, providerName)
+	auditlog.EnrichEntryWithResolvedRoute(
+		c,
+		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
+		result.Meta.ProviderType,
+		result.Meta.ProviderName,
+	)
 
-	s.logUsage(ctx, workflow, resp.Model, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
-		return usage.ExtractFromChatResponse(resp, requestID, providerType, "/v1/chat/completions", pricing)
-	})
-
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, result.Response)
 }
 
 func (s *translatedInferenceService) Responses(c *echo.Context) error {
 	return s.responsesHandler(c)
 }
 
-// handleTranslatedInference is the shared decode→workflow→patch→dispatch pipeline
-// for ChatCompletion and Responses, parameterised over the request type.
-func handleTranslatedInference[R any](
+func (s *translatedInferenceService) handleResponses(c *echo.Context) error {
+	return handleTranslatedJSON(s, c, core.DecodeResponsesRequest, prepareResponsesRequest, s.dispatchResponses)
+}
+
+func handleTranslatedJSON[Req any](
 	s *translatedInferenceService,
 	c *echo.Context,
-	decode func([]byte, *core.WhiteBoxPrompt) (R, error),
-	modelProvider func(R) (*string, *string),
-	patch func(context.Context, R) (R, error),
-	isStream func(R) bool,
-	dispatch func(*echo.Context, R, *core.Workflow) error,
+	decode func([]byte, *core.WhiteBoxPrompt) (Req, error),
+	prepare func(*translatedInferenceService, context.Context, Req, gateway.RequestMeta) (context.Context, Req, *core.Workflow, error),
+	dispatch func(*echo.Context, Req, *core.Workflow) error,
 ) error {
-	req, err := canonicalJSONRequestFromSemantics(c, decode)
+	req, err := canonicalJSONRequestFromSemantics[Req](c, decode)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	modelPtr, providerPtr := modelProvider(req)
-	workflow, err := ensureTranslatedRequestWorkflowWithAuthorizer(c, s.provider, s.modelResolver, s.modelAuthorizer, s.workflowPolicyResolver, modelPtr, providerPtr)
+
+	ctx, preparedReq, workflow, err := prepare(s, c.Request().Context(), req, translatedRequestMeta(c))
 	if err != nil {
 		return handleError(c, err)
 	}
+	attachPreparedWorkflow(c, ctx, workflow)
 
-	if s.translatedRequestPatcher != nil {
-		ctx := c.Request().Context()
-		req, err = patch(ctx, req)
-		if err != nil {
-			return handleError(c, err)
-		}
-	}
-
-	return handleWithCache(s, c, req, isStream(req), workflow, dispatch)
+	return handleWithCache(s, c, preparedReq, workflow, dispatch)
 }
 
-// handleWithCache injects the guardrails hash into context, then routes the
-// request through the dual-layer response cache when caching is enabled.
-// Streaming requests are stored as full responses and replayed as SSE on hits.
-// R is the post-patch request type.
+func prepareChatCompletionRequest(
+	s *translatedInferenceService,
+	ctx context.Context,
+	req *core.ChatRequest,
+	meta gateway.RequestMeta,
+) (context.Context, *core.ChatRequest, *core.Workflow, error) {
+	prepared, err := s.inference().PrepareChatRequest(ctx, req, meta)
+	return unpackPrepared(ctx, prepared, err, chatPreparedFields)
+}
+
+func prepareResponsesRequest(
+	s *translatedInferenceService,
+	ctx context.Context,
+	req *core.ResponsesRequest,
+	meta gateway.RequestMeta,
+) (context.Context, *core.ResponsesRequest, *core.Workflow, error) {
+	prepared, err := s.inference().PrepareResponsesRequest(ctx, req, meta)
+	return unpackPrepared(ctx, prepared, err, responsesPreparedFields)
+}
+
+func unpackPrepared[Prepared any, Req any](
+	fallback context.Context,
+	prepared Prepared,
+	err error,
+	fields func(Prepared) (context.Context, Req, *core.Workflow),
+) (context.Context, Req, *core.Workflow, error) {
+	if err != nil {
+		var zero Req
+		return fallback, zero, nil, err
+	}
+	ctx, req, workflow := fields(prepared)
+	return ctx, req, workflow, nil
+}
+
+func chatPreparedFields(prepared *gateway.PreparedChatRequest) (context.Context, *core.ChatRequest, *core.Workflow) {
+	return prepared.Context, prepared.Request, prepared.Workflow
+}
+
+func responsesPreparedFields(prepared *gateway.PreparedResponsesRequest) (context.Context, *core.ResponsesRequest, *core.Workflow) {
+	return prepared.Context, prepared.Request, prepared.Workflow
+}
+
+// handleWithCache routes translated requests through the response cache when
+// enabled. The request has already been resolved and patched by the orchestrator.
 func handleWithCache[R any](
 	s *translatedInferenceService,
 	c *echo.Context,
 	req R,
-	stream bool,
 	workflow *core.Workflow,
 	dispatch func(*echo.Context, R, *core.Workflow) error,
 ) error {
-	ctx := s.withCacheRequestContext(c.Request().Context(), workflow)
-	c.SetRequest(c.Request().WithContext(ctx))
-
 	if s.responseCache != nil && (workflow == nil || workflow.CacheEnabled()) {
 		body, marshalErr := marshalRequestBody(req)
 		if marshalErr != nil {
@@ -180,59 +217,115 @@ func handleWithCache[R any](
 	return dispatch(c, req, workflow)
 }
 
-func (s *translatedInferenceService) withCacheRequestContext(ctx context.Context, workflow *core.Workflow) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if workflow != nil {
-		ctx = core.WithWorkflow(ctx, workflow)
-	}
-	if workflow != nil && workflow.Policy != nil {
-		return core.WithGuardrailsHash(ctx, workflow.GuardrailsHash())
-	}
-	if s.guardrailsHash != "" {
-		return core.WithGuardrailsHash(ctx, s.guardrailsHash)
-	}
-	return ctx
-}
-
 func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *core.ResponsesRequest, workflow *core.Workflow) error {
 	ctx := c.Request().Context()
-	_, providerType, providerName, usageModel := s.resolveProviderAndModelFromWorkflow(c, workflow, req.Model, nil)
 	requestID := requestIDFromContextOrHeader(c.Request())
 
 	if req.Stream {
-		if (workflow == nil || workflow.UsageEnabled()) && s.shouldEnforceReturningUsageData() {
-			ctx = core.WithEnforceReturningUsageData(ctx, true)
-		}
-		stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, usedFallback, err := s.streamResponses(ctx, workflow, req, providerType, providerName, usageModel)
+		result, err := s.inference().StreamResponses(ctx, workflow, req)
 		if err != nil {
 			return handleError(c, err)
 		}
-		if usedFallback {
+		if result.Meta.UsedFallback {
 			markRequestFallbackUsed(c)
 		}
-		return s.handleStreamingReadCloser(c, workflow, resolvedUsageModel, resolvedProviderType, resolvedProviderName, stream)
+		return s.handleStreamingReadCloser(
+			c,
+			workflow,
+			result.Meta.Model,
+			result.Meta.ProviderType,
+			result.Meta.ProviderName,
+			result.Meta.FailoverModel,
+			result.Stream,
+		)
 	}
 
-	resp, providerType, providerName, usedFallback, err := s.executeResponses(ctx, workflow, req)
+	result, err := s.inference().ExecuteResponses(ctx, workflow, req, requestID, "/v1/responses")
 	if err != nil {
 		return handleError(c, err)
 	}
-	if usedFallback {
+	if result.Meta.UsedFallback {
 		markRequestFallbackUsed(c)
+		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
 	}
-	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, resp.Model, providerName), providerType, providerName)
+	auditlog.EnrichEntryWithResolvedRoute(
+		c,
+		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
+		result.Meta.ProviderType,
+		result.Meta.ProviderName,
+	)
 
-	s.logUsage(ctx, workflow, resp.Model, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
-		return usage.ExtractFromResponsesResponse(resp, requestID, providerType, "/v1/responses", pricing)
-	})
+	if err := s.storeResponseSnapshot(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID); err != nil {
+		s.recordResponseSnapshotStoreFailure(workflow, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID, err)
+	}
 
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, result.Response)
+}
+
+func (s *translatedInferenceService) storeResponseSnapshot(ctx context.Context, workflow *core.Workflow, req *core.ResponsesRequest, resp *core.ResponsesResponse, providerType, providerName, requestID string) error {
+	store := s.currentResponseStore()
+	if store == nil || resp == nil || resp.ID == "" {
+		return nil
+	}
+
+	stored := &responsestore.StoredResponse{
+		Response:           resp,
+		InputItems:         normalizedResponseInputItems(resp.ID, req),
+		Provider:           strings.TrimSpace(providerType),
+		ProviderName:       strings.TrimSpace(providerName),
+		ProviderResponseID: resp.ID,
+		RequestID:          requestID,
+		UserPath:           core.UserPathFromContext(ctx),
+		WorkflowVersionID:  workflow.WorkflowVersionID(),
+	}
+	if createErr := store.Create(ctx, stored); createErr != nil {
+		updateErr := store.Update(ctx, stored)
+		if updateErr == nil {
+			return nil
+		}
+		return core.NewProviderError("response_store", http.StatusInternalServerError, "failed to persist response", errors.Join(createErr, updateErr))
+	}
+	return nil
+}
+
+func (s *translatedInferenceService) currentResponseStore() responsestore.Store {
+	s.responseStoreMu.RLock()
+	defer s.responseStoreMu.RUnlock()
+	return s.responseStore
+}
+
+func (s *translatedInferenceService) setResponseStore(store responsestore.Store) {
+	s.responseStoreMu.Lock()
+	defer s.responseStoreMu.Unlock()
+	s.responseStore = store
+}
+
+func (s *translatedInferenceService) recordResponseSnapshotStoreFailure(workflow *core.Workflow, resp *core.ResponsesResponse, providerType, providerName, requestID string, err error) {
+	observability.ResponseSnapshotStoreFailures.WithLabelValues(
+		strings.TrimSpace(providerType),
+		strings.TrimSpace(providerName),
+		"store",
+	).Inc()
+
+	slog.Warn("response snapshot store failed",
+		"request_id", requestID,
+		"provider_type", providerType,
+		"provider_name", providerName,
+		"workflow_version_id", workflow.WorkflowVersionID(),
+		"response_id", responseIDForLog(resp),
+		"error", err,
+	)
+}
+
+func responseIDForLog(resp *core.ResponsesResponse) string {
+	if resp == nil {
+		return ""
+	}
+	return strings.TrimSpace(resp.ID)
 }
 
 func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo.Context, workflow *core.Workflow, req *core.ChatRequest) (bool, error) {
-	if !s.canFastPathStreamingChatPassthrough(workflow, req) {
+	if !s.inference().CanFastPathStreamingChatPassthrough(workflow, req) {
 		return false, nil
 	}
 
@@ -264,61 +357,7 @@ func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo
 	copyPassthroughResponseHeaders(c.Response().Header(), resp.Headers)
 	model := resolvedModelFromWorkflow(workflow, req.Model)
 	providerName := providerNameFromWorkflow(workflow)
-	return true, s.handleStreamingReadCloser(c, workflow, model, providerType, providerName, resp.Body)
-}
-
-func (s *translatedInferenceService) canFastPathStreamingChatPassthrough(workflow *core.Workflow, req *core.ChatRequest) bool {
-	if req == nil || !req.Stream {
-		return false
-	}
-	if s.translatedRequestPatcher != nil || s.shouldEnforceReturningUsageData() {
-		return false
-	}
-	if workflow == nil || workflow.Resolution == nil {
-		return false
-	}
-
-	providerType := strings.ToLower(strings.TrimSpace(workflow.ProviderType))
-	switch providerType {
-	case "openai", "azure", "openrouter":
-	default:
-		return false
-	}
-
-	if translatedStreamingSelectorRewriteRequired(workflow.Resolution) {
-		return false
-	}
-	if translatedStreamingChatBodyRewriteRequired(req) {
-		return false
-	}
-
-	return true
-}
-
-func translatedStreamingSelectorRewriteRequired(resolution *core.RequestModelResolution) bool {
-	if resolution == nil {
-		return true
-	}
-
-	requestedModel := strings.TrimSpace(resolution.Requested.Model)
-	requestedProvider := strings.TrimSpace(resolution.Requested.ProviderHint)
-	resolvedModel := strings.TrimSpace(resolution.ResolvedSelector.Model)
-	resolvedProvider := strings.TrimSpace(resolution.ResolvedSelector.Provider)
-
-	return requestedModel != resolvedModel || requestedProvider != resolvedProvider
-}
-
-func translatedStreamingChatBodyRewriteRequired(req *core.ChatRequest) bool {
-	if req == nil {
-		return true
-	}
-	if strings.TrimSpace(req.Provider) != "" {
-		return true
-	}
-
-	model := strings.ToLower(strings.TrimSpace(req.Model))
-	oSeries := len(model) >= 2 && model[0] == 'o' && model[1] >= '0' && model[1] <= '9'
-	return oSeries && (req.MaxTokens != nil || req.Temperature != nil)
+	return true, s.handleStreamingReadCloser(c, workflow, model, providerType, providerName, "", resp.Body)
 }
 
 func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
@@ -326,35 +365,64 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	workflow, err := ensureTranslatedRequestWorkflowWithAuthorizer(c, s.provider, s.modelResolver, s.modelAuthorizer, s.workflowPolicyResolver, &req.Model, &req.Provider)
+
+	prepared, err := s.inference().PrepareEmbeddingRequest(c.Request().Context(), req, translatedRequestMeta(c))
 	if err != nil {
 		return handleError(c, err)
 	}
+	attachPreparedWorkflow(c, prepared.Context, prepared.Workflow)
 
-	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
-
-	resp, providerType, providerName, err := s.executeEmbeddings(ctx, workflow, req)
+	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), prepared.Workflow, prepared.Request, requestID, "/v1/embeddings")
 	if err != nil {
 		return handleError(c, err)
 	}
-	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, resp.Model, providerName), providerType, providerName)
+	auditlog.EnrichEntryWithResolvedRoute(
+		c,
+		qualifyExecutedModel(prepared.Workflow, result.Response.Model, result.Meta.ProviderName),
+		result.Meta.ProviderType,
+		result.Meta.ProviderName,
+	)
 
-	s.logUsage(ctx, workflow, resp.Model, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
-		return usage.ExtractFromEmbeddingResponse(resp, requestID, providerType, "/v1/embeddings", pricing)
-	})
+	return c.JSON(http.StatusOK, result.Response)
+}
 
-	return c.JSON(http.StatusOK, resp)
+func translatedRequestMeta(c *echo.Context) gateway.RequestMeta {
+	return gateway.RequestMeta{
+		RequestID: requestIDFromContextOrHeader(c.Request()),
+		Endpoint:  core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path),
+		Workflow:  core.GetWorkflow(c.Request().Context()),
+	}
+}
+
+func attachPreparedWorkflow(c *echo.Context, ctx context.Context, workflow *core.Workflow) {
+	if ctx != nil {
+		c.SetRequest(c.Request().WithContext(ctx))
+	}
+	cacheWorkflowResolutionHints(c, workflow)
+	storeWorkflow(c, workflow)
+}
+
+func cacheWorkflowResolutionHints(c *echo.Context, workflow *core.Workflow) {
+	if c == nil || workflow == nil || workflow.Resolution == nil {
+		return
+	}
+	if env := core.GetWhiteBoxPrompt(c.Request().Context()); env != nil {
+		env.RouteHints.Model = workflow.Resolution.ResolvedSelector.Model
+		env.RouteHints.Provider = workflow.Resolution.ResolvedSelector.Provider
+	}
 }
 
 func (s *translatedInferenceService) handleStreamingReadCloser(
 	c *echo.Context,
 	workflow *core.Workflow,
 	model, provider, providerName string,
+	failoverModel string,
 	stream io.ReadCloser,
 ) error {
 	auditlog.MarkEntryAsStreaming(c, true)
 	auditlog.EnrichEntryWithStream(c, true)
+	auditlog.EnrichEntryWithFailover(c, failoverModel)
 	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, model, providerName), provider, providerName)
 
 	entry := auditlog.GetStreamEntryFromContext(c)
@@ -411,194 +479,7 @@ func (s *translatedInferenceService) handleStreamingResponse(
 	if err != nil {
 		return handleError(c, err)
 	}
-	return s.handleStreamingReadCloser(c, workflow, model, provider, providerName, stream)
-}
-
-//nolint:dupl // typed wrapper over the shared translated fallback executor
-func (s *translatedInferenceService) executeChatCompletion(
-	ctx context.Context,
-	workflow *core.Workflow,
-	req *core.ChatRequest,
-) (*core.ChatResponse, string, string, bool, error) {
-	return executeTranslatedWithFallback(ctx, s, workflow, req, req.Model, req.Provider, cloneChatRequestForSelector,
-		func(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, string, error) {
-			resp, err := s.provider.ChatCompletion(ctx, req)
-			if err != nil {
-				return nil, "", err
-			}
-			return resp, resp.Provider, nil
-		},
-	)
-}
-
-func (s *translatedInferenceService) streamChatCompletion(
-	ctx context.Context,
-	workflow *core.Workflow,
-	req *core.ChatRequest,
-	providerType, providerName, usageModel string,
-) (io.ReadCloser, string, string, string, bool, error) {
-	stream, err := s.provider.StreamChatCompletion(ctx, req)
-	if err == nil {
-		return stream, providerType, providerName, usageModel, false, nil
-	}
-
-	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, err := tryFallbackStream(ctx, s, workflow, req.Model, req.Provider, err,
-		func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error) {
-			stream, err := s.provider.StreamChatCompletion(ctx, cloneChatRequestForSelector(req, selector))
-			if err != nil {
-				return nil, "", "", err
-			}
-			return stream, providerType, selector.Model, nil
-		},
-	)
-	if err != nil {
-		return nil, "", "", "", false, err
-	}
-	return stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, true, nil
-}
-
-//nolint:dupl // typed wrapper over the shared translated fallback executor
-func (s *translatedInferenceService) executeResponses(
-	ctx context.Context,
-	workflow *core.Workflow,
-	req *core.ResponsesRequest,
-) (*core.ResponsesResponse, string, string, bool, error) {
-	return executeTranslatedWithFallback(ctx, s, workflow, req, req.Model, req.Provider, cloneResponsesRequestForSelector,
-		func(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, string, error) {
-			resp, err := s.provider.Responses(ctx, req)
-			if err != nil {
-				return nil, "", err
-			}
-			return resp, resp.Provider, nil
-		},
-	)
-}
-
-func (s *translatedInferenceService) streamResponses(
-	ctx context.Context,
-	workflow *core.Workflow,
-	req *core.ResponsesRequest,
-	providerType, providerName, usageModel string,
-) (io.ReadCloser, string, string, string, bool, error) {
-	stream, err := s.provider.StreamResponses(ctx, req)
-	if err == nil {
-		return stream, providerType, providerName, usageModel, false, nil
-	}
-
-	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, err := tryFallbackStream(ctx, s, workflow, req.Model, req.Provider, err,
-		func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error) {
-			stream, err := s.provider.StreamResponses(ctx, cloneResponsesRequestForSelector(req, selector))
-			if err != nil {
-				return nil, "", "", err
-			}
-			return stream, providerType, selector.Model, nil
-		},
-	)
-	if err != nil {
-		return nil, "", "", "", false, err
-	}
-	return stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, true, nil
-}
-
-func (s *translatedInferenceService) executeEmbeddings(
-	ctx context.Context,
-	workflow *core.Workflow,
-	req *core.EmbeddingRequest,
-) (*core.EmbeddingResponse, string, string, error) {
-	providerType := providerTypeFromWorkflow(workflow)
-	providerName := providerNameFromWorkflow(workflow)
-	resp, err := s.provider.Embeddings(ctx, req)
-	if err == nil {
-		return resp, responseProviderType(providerType, resp.Provider), providerName, nil
-	}
-
-	return s.tryFallbackEmbeddings(ctx, workflow, req, err)
-}
-
-func (s *translatedInferenceService) tryFallbackEmbeddings(
-	ctx context.Context,
-	workflow *core.Workflow,
-	req *core.EmbeddingRequest,
-	primaryErr error,
-) (*core.EmbeddingResponse, string, string, error) {
-	// Embeddings fallback is intentionally disabled until the shared model
-	// contract can prove vector-size compatibility for alternates.
-	return nil, "", "", primaryErr
-}
-
-func (s *translatedInferenceService) logUsage(
-	ctx context.Context,
-	workflow *core.Workflow,
-	model, providerType, providerName string,
-	extractFn func(*core.ModelPricing) *usage.UsageEntry,
-) {
-	if s.usageLogger == nil || !s.usageLogger.Config().Enabled || (workflow != nil && !workflow.UsageEnabled()) {
-		return
-	}
-	var pricing *core.ModelPricing
-	if s.pricingResolver != nil {
-		pricing = s.pricingResolver.ResolvePricing(model, providerType)
-	}
-	if entry := extractFn(pricing); entry != nil {
-		entry.ProviderName = strings.TrimSpace(providerName)
-		entry.UserPath = core.UserPathFromContext(ctx)
-		s.usageLogger.Write(entry)
-	}
-}
-
-func (s *translatedInferenceService) shouldEnforceReturningUsageData() bool {
-	return s.usageLogger != nil && s.usageLogger.Config().EnforceReturningUsageData
-}
-
-func (s *translatedInferenceService) fallbackSelectors(workflow *core.Workflow) []core.ModelSelector {
-	if s.fallbackResolver == nil || workflow == nil || workflow.Resolution == nil || !workflow.FallbackEnabled() {
-		return nil
-	}
-	return s.fallbackResolver.ResolveFallbacks(workflow.Resolution, workflow.Endpoint.Operation)
-}
-
-func (s *translatedInferenceService) providerTypeForSelector(selector core.ModelSelector, fallback string) string {
-	fallback = strings.TrimSpace(fallback)
-	if s.provider == nil {
-		if provider := strings.TrimSpace(selector.Provider); provider != "" {
-			return provider
-		}
-		return fallback
-	}
-	if providerType := strings.TrimSpace(s.provider.GetProviderType(selector.QualifiedModel())); providerType != "" {
-		return providerType
-	}
-	if provider := strings.TrimSpace(selector.Provider); provider != "" {
-		return provider
-	}
-	return fallback
-}
-
-func (s *translatedInferenceService) resolveProviderAndModelFromWorkflow(
-	c *echo.Context,
-	workflow *core.Workflow,
-	fallbackModel string,
-	req *core.ChatRequest,
-) (*core.ChatRequest, string, string, string) {
-	providerType := GetProviderType(c)
-	providerName := providerNameFromWorkflow(workflow)
-	if workflow != nil {
-		if workflowProviderType := strings.TrimSpace(workflow.ProviderType); workflowProviderType != "" {
-			providerType = workflowProviderType
-		}
-	}
-
-	model := resolvedModelFromWorkflow(workflow, fallbackModel)
-	if req == nil || !req.Stream || (workflow != nil && !workflow.UsageEnabled()) || !s.shouldEnforceReturningUsageData() {
-		return req, providerType, providerName, model
-	}
-
-	streamReq := cloneChatRequestForStreamUsage(req)
-	if streamReq.StreamOptions == nil {
-		streamReq.StreamOptions = &core.StreamOptions{}
-	}
-	streamReq.StreamOptions.IncludeUsage = true
-	return streamReq, providerType, providerName, model
+	return s.handleStreamingReadCloser(c, workflow, model, provider, providerName, "", stream)
 }
 
 func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, err error) {
@@ -619,80 +500,12 @@ func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path,
 	)
 }
 
-func cloneChatRequestForStreamUsage(req *core.ChatRequest) *core.ChatRequest {
-	if req == nil {
-		return nil
-	}
-	cloned := *req
-	if req.StreamOptions != nil {
-		streamOptions := *req.StreamOptions
-		cloned.StreamOptions = &streamOptions
-	}
-	return &cloned
-}
-
-func cloneChatRequestForSelector(req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
-	if req == nil {
-		return nil
-	}
-	cloned := *req
-	cloned.Model = selector.Model
-	cloned.Provider = selector.Provider
-	if req.StreamOptions != nil {
-		streamOptions := *req.StreamOptions
-		cloned.StreamOptions = &streamOptions
-	}
-	return &cloned
-}
-
-func cloneResponsesRequestForSelector(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
-	if req == nil {
-		return nil
-	}
-	cloned := *req
-	cloned.Model = selector.Model
-	cloned.Provider = selector.Provider
-	if req.StreamOptions != nil {
-		streamOptions := *req.StreamOptions
-		cloned.StreamOptions = &streamOptions
-	}
-	return &cloned
-}
-
 func providerNameFromWorkflow(workflow *core.Workflow) string {
-	if workflow == nil || workflow.Resolution == nil {
-		return ""
-	}
-	return strings.TrimSpace(workflow.Resolution.ProviderName)
-}
-
-func resolvedModelPrefix(workflow *core.Workflow, providerName string) string {
-	if providerName = strings.TrimSpace(providerName); providerName != "" {
-		return providerName
-	}
-	if workflow == nil || workflow.Resolution == nil {
-		return ""
-	}
-	if providerName = strings.TrimSpace(workflow.Resolution.ProviderName); providerName != "" {
-		return providerName
-	}
-	return strings.TrimSpace(workflow.Resolution.ResolvedSelector.Provider)
-}
-
-func qualifyModelWithProvider(model, providerName string) string {
-	model = strings.TrimSpace(model)
-	providerName = strings.TrimSpace(providerName)
-	if model == "" {
-		return ""
-	}
-	if providerName == "" || strings.HasPrefix(model, providerName+"/") {
-		return model
-	}
-	return providerName + "/" + model
+	return gateway.ProviderNameFromWorkflow(workflow)
 }
 
 func qualifyExecutedModel(workflow *core.Workflow, model, providerName string) string {
-	return qualifyModelWithProvider(model, resolvedModelPrefix(workflow, providerName))
+	return gateway.QualifyExecutedModel(workflow, model, providerName)
 }
 
 func markRequestFallbackUsed(c *echo.Context) {
@@ -703,229 +516,9 @@ func markRequestFallbackUsed(c *echo.Context) {
 }
 
 func resolvedModelFromWorkflow(workflow *core.Workflow, fallback string) string {
-	fallback = strings.TrimSpace(fallback)
-	if workflow == nil || workflow.Resolution == nil {
-		return fallback
-	}
-	if resolvedModel := strings.TrimSpace(workflow.Resolution.ResolvedSelector.Model); resolvedModel != "" {
-		return resolvedModel
-	}
-	return fallback
+	return gateway.ResolvedModelFromWorkflow(workflow, fallback)
 }
 
-// marshalRequestBody serializes a patched request struct to JSON bytes for cache key computation.
-// Returns an error only on marshalling failure; callers bypass cache on error.
 func marshalRequestBody(req any) ([]byte, error) {
 	return json.Marshal(req)
-}
-
-func providerTypeFromWorkflow(workflow *core.Workflow) string {
-	if workflow == nil {
-		return ""
-	}
-	return strings.TrimSpace(workflow.ProviderType)
-}
-
-func currentSelectorForWorkflow(workflow *core.Workflow, model, provider string) string {
-	if workflow != nil && workflow.Resolution != nil {
-		if resolved := strings.TrimSpace(workflow.Resolution.ResolvedQualifiedModel()); resolved != "" {
-			return resolved
-		}
-	}
-	selector, err := core.ParseModelSelector(model, provider)
-	if err != nil {
-		return strings.TrimSpace(model)
-	}
-	return selector.QualifiedModel()
-}
-
-func responseProviderType(fallback, responseProvider string) string {
-	responseProvider = strings.TrimSpace(responseProvider)
-	if responseProvider != "" {
-		return responseProvider
-	}
-	return strings.TrimSpace(fallback)
-}
-
-func tryFallbackResponse[T any](
-	ctx context.Context,
-	s *translatedInferenceService,
-	workflow *core.Workflow,
-	model, provider string,
-	primaryErr error,
-	call func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
-) (T, string, string, bool, error) {
-	var zero T
-
-	fallbacks := s.fallbackSelectors(workflow)
-	if len(fallbacks) == 0 || !shouldAttemptFallback(primaryErr) {
-		return zero, "", "", false, primaryErr
-	}
-
-	requestID := strings.TrimSpace(core.GetRequestID(ctx))
-	primaryModel := currentSelectorForWorkflow(workflow, model, provider)
-	lastErr := primaryErr
-	for _, selector := range fallbacks {
-		if s.modelAuthorizer != nil && !s.modelAuthorizer.AllowsModel(ctx, selector) {
-			continue
-		}
-		qualified := selector.QualifiedModel()
-		providerType := s.providerTypeForSelector(selector, providerTypeFromWorkflow(workflow))
-		providerName := resolvedProviderName(s.provider, selector, providerNameFromWorkflow(workflow))
-		slog.Warn("primary model attempt failed, trying fallback",
-			"request_id", requestID,
-			"from", primaryModel,
-			"to", qualified,
-			"provider_type", providerType,
-			"error", lastErr,
-		)
-
-		resp, resolvedProviderType, err := call(selector, providerType, providerName)
-		if err == nil {
-			slog.Info("fallback model attempt succeeded",
-				"request_id", requestID,
-				"from", primaryModel,
-				"to", qualified,
-				"provider_type", resolvedProviderType,
-			)
-			return resp, resolvedProviderType, providerName, true, nil
-		}
-		lastErr = err
-	}
-
-	return zero, "", "", false, lastErr
-}
-
-func executeWithFallbackResponse[T any](
-	ctx context.Context,
-	s *translatedInferenceService,
-	workflow *core.Workflow,
-	model, provider string,
-	primary func() (T, string, string, error),
-	fallback func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
-) (T, string, string, bool, error) {
-	resp, resolvedProviderType, resolvedProviderName, err := primary()
-	if err == nil {
-		return resp, resolvedProviderType, resolvedProviderName, false, nil
-	}
-	return tryFallbackResponse(ctx, s, workflow, model, provider, err, fallback)
-}
-
-func executeTranslatedWithFallback[Req any, Resp any](
-	ctx context.Context,
-	s *translatedInferenceService,
-	workflow *core.Workflow,
-	req Req,
-	model, provider string,
-	cloneForSelector func(Req, core.ModelSelector) Req,
-	call func(context.Context, Req) (Resp, string, error),
-) (Resp, string, string, bool, error) {
-	return executeWithFallbackResponse(ctx, s, workflow, model, provider,
-		func() (Resp, string, string, error) {
-			resp, responseProvider, err := call(ctx, req)
-			if err != nil {
-				var zero Resp
-				return zero, "", "", err
-			}
-			return resp, responseProviderType(providerTypeFromWorkflow(workflow), responseProvider), providerNameFromWorkflow(workflow), nil
-		},
-		func(selector core.ModelSelector, providerType, providerName string) (Resp, string, error) {
-			resp, responseProvider, err := call(ctx, cloneForSelector(req, selector))
-			if err != nil {
-				var zero Resp
-				return zero, "", err
-			}
-			return resp, responseProviderType(providerType, responseProvider), nil
-		},
-	)
-}
-
-func tryFallbackStream(
-	ctx context.Context,
-	s *translatedInferenceService,
-	workflow *core.Workflow,
-	model, provider string,
-	primaryErr error,
-	call func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error),
-) (io.ReadCloser, string, string, string, error) {
-	fallbacks := s.fallbackSelectors(workflow)
-	if len(fallbacks) == 0 || !shouldAttemptFallback(primaryErr) {
-		return nil, "", "", "", primaryErr
-	}
-
-	requestID := strings.TrimSpace(core.GetRequestID(ctx))
-	primaryModel := currentSelectorForWorkflow(workflow, model, provider)
-	lastErr := primaryErr
-	for _, selector := range fallbacks {
-		if s.modelAuthorizer != nil && !s.modelAuthorizer.AllowsModel(ctx, selector) {
-			continue
-		}
-		qualified := selector.QualifiedModel()
-		providerType := s.providerTypeForSelector(selector, providerTypeFromWorkflow(workflow))
-		providerName := resolvedProviderName(s.provider, selector, providerNameFromWorkflow(workflow))
-		slog.Warn("primary model attempt failed, trying fallback stream",
-			"request_id", requestID,
-			"from", primaryModel,
-			"to", qualified,
-			"provider_type", providerType,
-			"error", lastErr,
-		)
-
-		stream, resolvedProviderType, usageModel, err := call(selector, providerType, providerName)
-		if err == nil {
-			slog.Info("fallback stream attempt succeeded",
-				"request_id", requestID,
-				"from", primaryModel,
-				"to", qualified,
-				"provider_type", resolvedProviderType,
-			)
-			return stream, resolvedProviderType, providerName, usageModel, nil
-		}
-		lastErr = err
-	}
-
-	return nil, "", "", "", lastErr
-}
-
-func shouldAttemptFallback(err error) bool {
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) || gatewayErr == nil {
-		return false
-	}
-
-	status := gatewayErr.HTTPStatusCode()
-	if status >= http.StatusInternalServerError || status == http.StatusTooManyRequests {
-		return true
-	}
-
-	code := ""
-	if gatewayErr.Code != nil {
-		code = strings.ToLower(strings.TrimSpace(*gatewayErr.Code))
-	}
-	if code != "" && strings.Contains(code, "model") &&
-		(strings.Contains(code, "not_found") || strings.Contains(code, "unsupported") || strings.Contains(code, "unavailable")) {
-		return true
-	}
-
-	message := strings.ToLower(strings.TrimSpace(gatewayErr.Message))
-	if !strings.Contains(message, "model") {
-		return false
-	}
-
-	for _, fragment := range []string{
-		"not found",
-		"does not exist",
-		"unsupported",
-		"unavailable",
-		"not available",
-		"deprecated",
-		"retired",
-		"disabled",
-	} {
-		if strings.Contains(message, fragment) {
-			return true
-		}
-	}
-
-	return false
 }

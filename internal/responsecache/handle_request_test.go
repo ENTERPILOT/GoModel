@@ -37,6 +37,25 @@ func (l *recordingUsageLogger) Close() error {
 	return nil
 }
 
+type recordingAuditLogger struct {
+	config  auditlog.Config
+	entries []*auditlog.LogEntry
+}
+
+func (l *recordingAuditLogger) Write(entry *auditlog.LogEntry) {
+	if entry != nil {
+		l.entries = append(l.entries, entry)
+	}
+}
+
+func (l *recordingAuditLogger) Config() auditlog.Config {
+	return l.config
+}
+
+func (l *recordingAuditLogger) Close() error {
+	return nil
+}
+
 func TestHandleRequest_SemanticMissPopulatesExactCache(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()
@@ -435,6 +454,169 @@ func TestHandleRequest_ExactHitWritesSyntheticUsageEntry(t *testing.T) {
 	}
 }
 
+func TestHandleRequest_AuditMiddlewarePreservesCommittedErrorStatus(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+
+	m := &ResponseCacheMiddleware{
+		simple: newSimpleCacheMiddleware(store, time.Hour, nil),
+	}
+	logger := &recordingAuditLogger{
+		config: auditlog.Config{
+			Enabled:   true,
+			LogBodies: true,
+		},
+	}
+
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"cache-audit-error-status"}]}`)
+	e := echo.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
+		return m.HandleRequest(c, body, func() error {
+			return c.JSON(http.StatusGatewayTimeout, map[string]any{
+				"error": map[string]any{
+					"message": "provider timeout",
+				},
+			})
+		})
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("response status = %d, want %d", rec.Code, http.StatusGatewayTimeout)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("expected 1 audit log entry, got %d", len(logger.entries))
+	}
+	if got := logger.entries[0].StatusCode; got != http.StatusGatewayTimeout {
+		t.Fatalf("audit status = %d, want %d", got, http.StatusGatewayTimeout)
+	}
+}
+
+func TestHandleRequest_GatewayTimeoutDoesNotPopulateExactCache(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+
+	m := &ResponseCacheMiddleware{
+		simple: newSimpleCacheMiddleware(store, time.Hour, nil),
+	}
+
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"do-not-cache-timeout"}]}`)
+	e := echo.New()
+	handlerCalls := 0
+
+	run := func() *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		if err := m.HandleRequest(c, body, func() error {
+			handlerCalls++
+			return c.JSON(http.StatusGatewayTimeout, map[string]any{
+				"error": map[string]any{
+					"message": "timeout awaiting response headers",
+				},
+			})
+		}); err != nil {
+			t.Fatalf("HandleRequest: %v", err)
+		}
+		return rec
+	}
+
+	rec1 := run()
+	if rec1.Code != http.StatusGatewayTimeout {
+		t.Fatalf("first response status = %d, want %d", rec1.Code, http.StatusGatewayTimeout)
+	}
+	if got := rec1.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("first timeout response should not be cached, got X-Cache=%q", got)
+	}
+
+	m.simple.wg.Wait()
+
+	rec2 := run()
+	if rec2.Code != http.StatusGatewayTimeout {
+		t.Fatalf("second response status = %d, want %d", rec2.Code, http.StatusGatewayTimeout)
+	}
+	if got := rec2.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("timeout response should not become an exact cache hit, got X-Cache=%q", got)
+	}
+	if handlerCalls != 2 {
+		t.Fatalf("timeout response should execute handler twice, got %d calls", handlerCalls)
+	}
+}
+
+func TestHandleRequest_GatewayTimeoutDoesNotPopulateSemanticCache(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+
+	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
+	vecStore := NewMapVecStore()
+	semCfg := config.SemanticCacheConfig{
+		Enabled:                 boolPtr(true),
+		SimilarityThreshold:     0.90,
+		TTL:                     intPtr(3600),
+		MaxConversationMessages: intPtr(10),
+	}
+	m := &ResponseCacheMiddleware{
+		simple:   newSimpleCacheMiddleware(store, time.Hour, nil),
+		semantic: newSemanticCacheMiddleware(emb, vecStore, semCfg, nil),
+	}
+
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"do-not-semantic-cache-timeout"}]}`)
+	e := echo.New()
+	handlerCalls := 0
+
+	run := func() *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Cache-Type", CacheTypeSemantic)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		if err := m.HandleRequest(c, body, func() error {
+			handlerCalls++
+			return c.JSON(http.StatusGatewayTimeout, map[string]any{
+				"error": map[string]any{
+					"message": "timeout awaiting response headers",
+				},
+			})
+		}); err != nil {
+			t.Fatalf("HandleRequest: %v", err)
+		}
+		return rec
+	}
+
+	rec1 := run()
+	if rec1.Code != http.StatusGatewayTimeout {
+		t.Fatalf("first response status = %d, want %d", rec1.Code, http.StatusGatewayTimeout)
+	}
+	if got := rec1.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("first timeout response should not be cached semantically, got X-Cache=%q", got)
+	}
+
+	m.simple.wg.Wait()
+	m.semantic.wg.Wait()
+
+	rec2 := run()
+	if rec2.Code != http.StatusGatewayTimeout {
+		t.Fatalf("second response status = %d, want %d", rec2.Code, http.StatusGatewayTimeout)
+	}
+	if got := rec2.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("timeout response should not become a semantic cache hit, got X-Cache=%q", got)
+	}
+	if handlerCalls != 2 {
+		t.Fatalf("timeout response should execute handler twice, got %d calls", handlerCalls)
+	}
+}
+
 func TestHandleRequest_CacheControlNoCacheBypassesAllLayers(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()
@@ -676,6 +858,106 @@ func TestHandleRequest_StreamingExactHitWritesSyntheticUsageEntry(t *testing.T) 
 	}
 	if entry.ProviderID != "chatcmpl-cache-hit" {
 		t.Fatalf("ProviderID = %q, want chatcmpl-cache-hit", entry.ProviderID)
+	}
+}
+
+func TestHandleRequest_StreamingExactHitAuditLogsCachedResponseBody(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+
+	m := &ResponseCacheMiddleware{
+		simple: newSimpleCacheMiddleware(store, time.Hour, nil),
+	}
+	logger := &recordingAuditLogger{
+		config: auditlog.Config{
+			Enabled:    true,
+			LogBodies:  true,
+			LogHeaders: true,
+		},
+	}
+
+	body := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"cache-stream-audit-hit"}]}`)
+	rawStream := []byte(
+		"data: {\"id\":\"chatcmpl-cache-audit\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-cache-audit\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" cached audit\"},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: [DONE]\n\n",
+	)
+	e := echo.New()
+
+	run := func() *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Request-ID", "req-cache-audit")
+		plan := &core.Workflow{
+			Mode:         core.ExecutionModeTranslated,
+			ProviderType: "openai",
+			Resolution: &core.RequestModelResolution{
+				ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-4"},
+			},
+		}
+		req = req.WithContext(core.WithWorkflow(req.Context(), plan))
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
+			return m.HandleRequest(c, body, func() error {
+				auditlog.MarkEntryAsStreaming(c, true)
+				auditlog.EnrichEntryWithStream(c, true)
+				c.Response().Header().Set("Content-Type", "text/event-stream")
+				c.Response().WriteHeader(http.StatusOK)
+				_, _ = c.Response().Write(rawStream)
+				return nil
+			})
+		})
+		if err := handler(c); err != nil {
+			t.Fatalf("handler: %v", err)
+		}
+		return rec
+	}
+
+	rec1 := run()
+	if got := rec1.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("first request should miss exact cache, got X-Cache=%q", got)
+	}
+	m.simple.wg.Wait()
+	if len(logger.entries) != 0 {
+		t.Fatalf("streaming miss test path should be handled by stream observer, got %d middleware entries", len(logger.entries))
+	}
+
+	rec2 := run()
+	if got := rec2.Header().Get("X-Cache"); got != "HIT (exact)" {
+		t.Fatalf("second request should be exact hit, got X-Cache=%q", got)
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("expected 1 audit log entry for cached stream hit, got %d", len(logger.entries))
+	}
+	entry := logger.entries[0]
+	if !entry.Stream {
+		t.Fatal("expected cached stream hit audit entry to be marked as streaming")
+	}
+	if entry.CacheType != auditlog.CacheTypeExact {
+		t.Fatalf("CacheType = %q, want %q", entry.CacheType, auditlog.CacheTypeExact)
+	}
+	if entry.Data == nil || entry.Data.ResponseBody == nil {
+		t.Fatalf("expected cached stream hit response body to be logged, got %#v", entry.Data)
+	}
+	response, ok := entry.Data.ResponseBody.(map[string]any)
+	if !ok {
+		t.Fatalf("response body type = %T, want map[string]any", entry.Data.ResponseBody)
+	}
+	choices, ok := response["choices"].([]map[string]any)
+	if !ok || len(choices) != 1 {
+		t.Fatalf("choices = %#v, want one choice", response["choices"])
+	}
+	message, ok := choices[0]["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("message = %#v, want map[string]any", choices[0]["message"])
+	}
+	if got := message["content"]; got != "Hello cached audit" {
+		t.Fatalf("logged response content = %#v, want %q", got, "Hello cached audit")
+	}
+	if got := entry.Data.ResponseHeaders["X-Cache"]; got != "HIT (exact)" {
+		t.Fatalf("logged X-Cache header = %q, want HIT (exact)", got)
 	}
 }
 

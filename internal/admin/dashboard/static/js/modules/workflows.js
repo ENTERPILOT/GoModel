@@ -441,6 +441,27 @@
                 return this.workflowNormalizedFeatures(raw);
             },
 
+            workflowEntryFailover(entry) {
+                const raw = entry && entry.data && entry.data.failover;
+                if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+                    return null;
+                }
+
+                const targetModel = String(raw.target_model || raw.targetModel || '').trim() || null;
+                if (!targetModel) {
+                    return null;
+                }
+
+                return {
+                    targetModel
+                };
+            },
+
+            workflowFailoverTarget(entry) {
+                const failover = this.workflowEntryFailover(entry);
+                return failover && failover.targetModel ? failover.targetModel : null;
+            },
+
             workflowSourceGuardrails(source) {
                 const raw = Array.isArray(source && source.workflow_payload && source.workflow_payload.guardrails)
                     ? source.workflow_payload.guardrails
@@ -1175,41 +1196,47 @@
                 };
             },
 
-	            workflowChartModel(source, runtime, options) {
-	                const config = options || {};
-	                const features = config.features && typeof config.features === 'object' && !Array.isArray(config.features)
+            workflowChartModel(source, runtime, options) {
+                const config = options || {};
+                const features = config.features && typeof config.features === 'object' && !Array.isArray(config.features)
                     ? this.workflowNormalizedFeatures(config.features)
                     : this.workflowSourceFeatures(source);
-	                const forceAudit = !!config.forceAudit;
-                    const highlightAsyncPresent = !!config.highlightAsyncPresent;
-	                const showGuardrails = !!features.guardrails;
-	                const showUsage = !!features.usage;
-	                const showAudit = forceAudit || !!features.audit;
-	                const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
-                    const workflowID = this.workflowChartWorkflowID(source, config.entry);
-	                return {
-	                    showGuardrails,
-	                    guardrailLabel: showGuardrails ? this.workflowGuardrailLabel(source) : '',
-	                    showCache: !!config.forceCache || !!features.cache || this.workflowRuntimeHasCache(runtime),
+                const forceAudit = !!config.forceAudit;
+                const highlightAsyncPresent = !!config.highlightAsyncPresent;
+                const showGuardrails = !!features.guardrails;
+                const showUsage = !!features.usage;
+                const showAudit = forceAudit || !!features.audit;
+                const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
+                const showFailover = !!features.fallback || this.workflowRuntimeUsedFailover(runtime);
+                const workflowID = this.workflowChartWorkflowID(source, config.entry);
+                return {
+                    showGuardrails,
+                    guardrailLabel: showGuardrails ? this.workflowGuardrailLabel(source) : '',
+                    showCache: !!config.forceCache || !!features.cache || this.workflowRuntimeHasCache(runtime),
                     cacheNodeClass: this.workflowCacheNodeClass(runtime),
                     cacheConnClass: this.workflowCacheConnClass(runtime),
                     cacheStatusLabel: this.workflowCacheStatusLabel(runtime),
+                    showFailover,
+                    failoverNodeClass: showFailover ? this.workflowFailoverNodeClass(runtime) : '',
+                    failoverConnClass: showFailover ? this.workflowFailoverConnClass(runtime) : '',
+                    failoverStatusLabel: showFailover ? this.workflowFailoverStatusLabel(runtime) : null,
+                    failoverTargetLabel: showFailover ? this.workflowFailoverTargetLabel(runtime) : null,
                     aiLabel: this.workflowAiLabel(source, runtime),
                     aiSublabel: this.workflowAiSublabel(source, runtime),
-	                    aiConnClass: this.workflowAiConnClass(runtime),
-	                    aiNodeClass: this.workflowAiNodeClass(runtime),
-	                    responseConnClass: this.workflowResponseConnClass(runtime),
-	                    responseNodeClass: this.workflowResponseNodeClass(runtime),
-				    authNodeClass: this.workflowAuthNodeClass(runtime),
-				    authNodeSublabel: this.workflowAuthNodeSublabel(runtime),
-                        usageNodeClass: this.workflowAsyncNodeClass(showUsage, highlightAsyncPresent),
-                        auditNodeClass: this.workflowAsyncNodeClass(showAudit, highlightAsyncPresent),
-	                    showAsync,
-	                    showUsage,
-	                    showAudit,
-                        workflowID
-	                };
-	            },
+                    aiConnClass: this.workflowAiConnClass(runtime),
+                    aiNodeClass: this.workflowAiNodeClass(runtime),
+                    responseConnClass: this.workflowResponseConnClass(runtime),
+                    responseNodeClass: this.workflowResponseNodeClass(runtime),
+                    authNodeClass: this.workflowAuthNodeClass(runtime),
+                    authNodeSublabel: this.workflowAuthNodeSublabel(runtime),
+                    usageNodeClass: this.workflowAsyncNodeClass(showUsage, highlightAsyncPresent),
+                    auditNodeClass: this.workflowAsyncNodeClass(showAudit, highlightAsyncPresent),
+                    showAsync,
+                    showUsage,
+                    showAudit,
+                    workflowID
+                };
+            },
 
             workflowChart(source) {
                 return this.workflowChartModel(source, null, { forceCache: false });
@@ -1217,8 +1244,17 @@
 
             workflowAuditChart(entry) {
                 const source = this.auditEntryWorkflow(entry);
-                const runtime = this.workflowRuntimeFromEntry(entry);
-                const features = this.workflowEntryFeatures(entry) || this.workflowSourceFeatures(source);
+                const runtime = this.workflowRuntimeFromEntry(entry, source);
+                const features = this.workflowEntryFeatures(entry)
+                    || (source
+                        ? this.workflowSourceFeatures(source)
+                        : {
+                            cache: false,
+                            audit: false,
+                            usage: false,
+                            guardrails: false,
+                            fallback: false
+                        });
                 return this.workflowChartModel(source, runtime, {
                     entry,
                     features,
@@ -1231,6 +1267,7 @@
             // runtime shape: {
             //   cacheHit: bool,
             //   cacheType: 'exact'|'semantic'|null,
+            //   failoverTarget: string|null,
             //   provider,
             //   model,
             //   statusCode: number|null,
@@ -1239,6 +1276,10 @@
             // }
             workflowRuntimeHasCache(runtime) {
                 return !!(runtime && runtime.cacheHit);
+            },
+
+            workflowRuntimeUsedFailover(runtime) {
+                return !!(runtime && runtime.failoverTarget);
             },
 
             workflowShowCacheStep(source, runtime) {
@@ -1257,6 +1298,24 @@
                 if (!runtime || !runtime.cacheHit) return null;
                 if (runtime.cacheType === 'semantic') return 'Hit (Semantic)';
                 return 'Hit (Exact)';
+            },
+
+            workflowFailoverNodeClass(runtime) {
+                if (runtime && runtime.cacheHit) return 'workflow-node-skipped';
+                return runtime && runtime.failoverTarget ? 'workflow-node-success' : '';
+            },
+
+            workflowFailoverConnClass(runtime) {
+                if (runtime && runtime.cacheHit) return 'workflow-conn-dim';
+                return runtime && runtime.failoverTarget ? 'workflow-conn-hit' : '';
+            },
+
+            workflowFailoverStatusLabel(runtime) {
+                return runtime && runtime.failoverTarget ? 'Redirected' : null;
+            },
+
+            workflowFailoverTargetLabel(runtime) {
+                return runtime && runtime.failoverTarget ? runtime.failoverTarget : null;
             },
 
             workflowAiConnClass(runtime) {
@@ -1298,7 +1357,52 @@
                 return visible && highlightPresent ? 'workflow-node-success' : '';
             },
 
-            workflowRuntimeFromEntry(entry) {
+            workflowQualifiedSelectorParts(selector) {
+                const raw = String(selector || '').trim();
+                if (!raw) return null;
+                const slashIndex = raw.indexOf('/');
+                if (slashIndex <= 0 || slashIndex >= raw.length - 1) {
+                    return null;
+                }
+                return {
+                    provider: raw.slice(0, slashIndex),
+                    model: raw.slice(slashIndex + 1)
+                };
+            },
+
+            workflowPrimaryRouteFromEntry(entry, source) {
+                const requestedModel = String(entry && (entry.requested_model || entry.model) || '').trim();
+                const failover = this.workflowEntryFailover(entry);
+                if (!(failover && failover.targetModel)) {
+                    return {
+                        provider: String(entry && entry.provider || '').trim() || null,
+                        model: requestedModel || null
+                    };
+                }
+
+                const qualifiedRequested = this.workflowQualifiedSelectorParts(requestedModel);
+                if (qualifiedRequested) {
+                    return qualifiedRequested;
+                }
+
+                const scopeProvider = this.workflowScopeProviderValue(source && source.scope);
+                const scopeModel = scopeProvider
+                    ? String(source && source.scope && source.scope.scope_model || '').trim()
+                    : '';
+                if (scopeProvider || scopeModel) {
+                    return {
+                        provider: scopeProvider || null,
+                        model: scopeModel || requestedModel || null
+                    };
+                }
+
+                return {
+                    provider: null,
+                    model: requestedModel || null
+                };
+            },
+
+            workflowRuntimeFromEntry(entry, source) {
                 if (!entry) return null;
                 const normalizedCacheType = (() => {
                     const value = String(entry.cache_type || '').trim().toLowerCase();
@@ -1313,18 +1417,21 @@
                     return Number.isFinite(value) ? value : null;
                 })();
                 const cacheHit = normalizedCacheType
-                    ? true
-                    : (entry.cache_hit !== undefined && entry.cache_hit !== null)
-                        ? !!entry.cache_hit
-                        : false;
+                        ? true
+                        : (entry.cache_hit !== undefined && entry.cache_hit !== null)
+                            ? !!entry.cache_hit
+                            : false;
+                const failover = this.workflowEntryFailover(entry);
+                const primaryRoute = this.workflowPrimaryRouteFromEntry(entry, source);
                 const responseSuccess = Number.isFinite(statusCode) && statusCode >= 200 && statusCode < 300;
                 const authError = String(entry.error_type || '').trim().toLowerCase() === 'authentication_error';
                 const authMethod = String(entry.auth_method || '').trim().toLowerCase() || null;
                 return {
                     cacheHit,
                     cacheType: normalizedCacheType || null,
-                    provider: entry.provider || null,
-                    model: entry.requested_model || entry.model || null,
+                    failoverTarget: failover && failover.targetModel ? failover.targetModel : null,
+                    provider: primaryRoute.provider,
+                    model: primaryRoute.model,
                     statusCode,
                     responseSuccess,
                     aiSuccess: responseSuccess && !cacheHit,

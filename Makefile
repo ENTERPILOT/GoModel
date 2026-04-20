@@ -6,7 +6,7 @@ all: build
 VERSION ?= $(shell git describe --tags --always --dirty)
 COMMIT ?= $(shell git rev-parse --short HEAD)
 DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-DOCS_API_SERVERS ?= http://localhost:8080
+DOCS_API_SERVERS ?= https://gomodel.example.com,http://localhost:8080
 
 # Linker flags to inject version info
 LDFLAGS := -X "gomodel/internal/version.Version=$(VERSION)" \
@@ -103,7 +103,7 @@ docs-openapi:
 		--outputTypes json \
 		--parseDependency; \
 	npx -y swagger2openapi@7.0.8 --patch -o docs/openapi.json "$$tmp_dir/swagger.json"; \
-	DOCS_API_SERVERS="$(DOCS_API_SERVERS)" node -e 'const fs = require("fs"); const file = "docs/openapi.json"; const urls = (process.env.DOCS_API_SERVERS || "").split(",").map((url) => url.trim()).filter(Boolean); if (!urls.length) throw new Error("DOCS_API_SERVERS must include at least one URL"); const spec = JSON.parse(fs.readFileSync(file, "utf8")); spec.servers = urls.map((url) => ({ url, description: /(^https?:\/\/)?(localhost|127\.0\.0\.1)(:|\/|$$)/.test(url) ? "Local GoModel" : "GoModel" })); fs.writeFileSync(file, JSON.stringify(spec, null, 2) + "\n");'
+	DOCS_API_SERVERS="$(DOCS_API_SERVERS)" node tools/openapi-postprocess.mjs docs/openapi.json
 
 # Run linter
 lint:

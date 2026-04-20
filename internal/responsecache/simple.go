@@ -125,7 +125,8 @@ func (m *simpleCacheMiddleware) TryHit(c *echo.Context, body []byte) (bool, erro
 	return false, nil
 }
 
-// StoreAfter calls next, captures the response, and asynchronously stores it on 200 OK.
+// StoreAfter calls next, captures the response, and asynchronously stores it on
+// a cacheable success response.
 func (m *simpleCacheMiddleware) StoreAfter(c *echo.Context, body []byte, next func() error) error {
 	if m == nil || m.store == nil {
 		return next()
@@ -134,25 +135,19 @@ func (m *simpleCacheMiddleware) StoreAfter(c *echo.Context, body []byte, next fu
 	plan := core.GetWorkflow(c.Request().Context())
 	key := hashRequest(path, body, plan)
 
-	capture := &responseCapture{
-		ResponseWriter: c.Response(),
-		body:           &bytes.Buffer{},
-	}
-	c.SetResponse(capture)
-	if err := next(); err != nil {
+	data, ok, err := captureResponseForCache(
+		c,
+		path,
+		"response cache: failed to capture cacheable response body",
+		next,
+	)
+	if err != nil {
 		return err
 	}
-	if capture.status == http.StatusOK && capture.body.Len() > 0 {
-		if core.GetFallbackUsed(c.Request().Context()) {
-			return nil
-		}
-		data, ok := capture.cachedBody(c.Response().Header().Get("Content-Type"))
-		if !ok {
-			slog.Warn("response cache: failed to capture cacheable response body", "path", path)
-			return nil
-		}
-		m.enqueueWrite(cacheWriteJob{key: key, data: data})
+	if !ok {
+		return nil
 	}
+	m.enqueueWrite(cacheWriteJob{key: key, data: data})
 	return nil
 }
 
@@ -323,13 +318,60 @@ func (r *responseCapture) Flush() {
 	}
 }
 
+func (r *responseCapture) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
+func shouldStoreCapturedResponse(status int) bool {
+	return status == http.StatusOK
+}
+
+func captureResponseForCache(c *echo.Context, path, warnMessage string, next func() error) ([]byte, bool, error) {
+	capture := &responseCapture{
+		ResponseWriter: c.Response(),
+		body:           &bytes.Buffer{},
+	}
+	c.SetResponse(capture)
+	if err := next(); err != nil {
+		return nil, false, err
+	}
+	if !shouldStoreCapturedResponse(capture.effectiveStatusCode()) || capture.body.Len() == 0 {
+		return nil, false, nil
+	}
+	if core.GetFallbackUsed(c.Request().Context()) {
+		return nil, false, nil
+	}
+	data, ok := capture.cachedBody(c.Response().Header().Get("Content-Type"))
+	if !ok {
+		slog.Warn(warnMessage, "path", path)
+		return nil, false, nil
+	}
+	return data, true, nil
+}
+
+func (r *responseCapture) effectiveStatusCode() int {
+	if r == nil {
+		return 0
+	}
+	if r.status != 0 {
+		return r.status
+	}
+	if resp, err := echo.UnwrapResponse(r); err == nil && resp != nil {
+		return resp.Status
+	}
+	return 0
+}
+
 func (r *responseCapture) Write(b []byte) (int, error) {
 	// Write to the underlying ResponseWriter first so the client always receives
 	// the response. Buffer a copy separately for cache storage only.
 	// Note: b originates from upstream LLM API responses (JSON), not from
 	// client-controlled input, so there is no XSS risk here.
 	if r.status == 0 {
-		r.status = http.StatusOK
+		r.status = r.effectiveStatusCode()
+		if r.status == 0 {
+			r.status = http.StatusOK
+		}
 	}
 	n, err := r.ResponseWriter.Write(b)
 	if n > 0 {

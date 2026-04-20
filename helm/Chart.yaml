@@ -1,6 +1,6 @@
 apiVersion: v2
 name: gomodel
-description: High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, xAI)
+description: High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, Z.ai, xAI)
 type: application
 version: 0.1.0
 appVersion: "1.0.0"

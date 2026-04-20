@@ -252,8 +252,19 @@ func DeriveWhiteBoxPrompt(snapshot *RequestSnapshot) *WhiteBoxPrompt {
 	if !parsed {
 		return env
 	}
-	env.JSONBodyParsed = true
+	ApplyBodySelectorHints(env, model, provider, stream)
 
+	return env
+}
+
+// ApplyBodySelectorHints records selector hints parsed from a request body.
+// The hints are intentionally sparse and best-effort; canonical request decode
+// remains authoritative for translated JSON requests.
+func ApplyBodySelectorHints(env *WhiteBoxPrompt, model, provider string, stream bool) {
+	if env == nil {
+		return
+	}
+	env.JSONBodyParsed = true
 	env.RouteHints.Model = model
 	if env.RouteHints.Provider == "" {
 		env.RouteHints.Provider = provider
@@ -269,8 +280,6 @@ func DeriveWhiteBoxPrompt(snapshot *RequestSnapshot) *WhiteBoxPrompt {
 		}
 		CachePassthroughRouteInfo(env, &cloned)
 	}
-
-	return env
 }
 
 func derivePassthroughRouteInfoFromTransport(snapshot *RequestSnapshot) *PassthroughRouteInfo {

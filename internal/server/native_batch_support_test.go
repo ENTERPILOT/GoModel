@@ -50,10 +50,11 @@ func TestHandlerLogBatchUsageFromBatchResultsUsesStoredUserPath(t *testing.T) {
 	if !logged {
 		t.Fatal("logBatchUsageFromBatchResults() = false, want true")
 	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
+	entries := logger.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(entries))
 	}
-	if got := logger.entries[0].UserPath; got != "/team/alpha" {
+	if got := entries[0].UserPath; got != "/team/alpha" {
 		t.Fatalf("UserPath = %q, want /team/alpha", got)
 	}
 }

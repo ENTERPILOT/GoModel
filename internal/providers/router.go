@@ -219,19 +219,7 @@ func (r *Router) resolveProvider(model, providerHint string) (core.Provider, cor
 }
 
 func (r *Router) resolveProviderType(providerType string) (core.Provider, error) {
-	if initialized, ok := r.lookup.(initializedLookup); ok {
-		if !initialized.IsInitialized() {
-			if err := r.checkReady(); err != nil {
-				if errors.Is(err, ErrRegistryNotInitialized) {
-					return nil, registryUnavailableError(err)
-				}
-				return nil, err
-			}
-		}
-	} else if err := r.checkReady(); err != nil {
-		if errors.Is(err, ErrRegistryNotInitialized) {
-			return nil, registryUnavailableError(err)
-		}
+	if err := r.ensureProviderInventoryReady(); err != nil {
 		return nil, err
 	}
 	if providerType == "" {
@@ -242,6 +230,46 @@ func (r *Router) resolveProviderType(providerType string) (core.Provider, error)
 		return nil, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider type: %s", providerType), nil)
 	}
 	return provider, nil
+}
+
+func (r *Router) resolveProviderSelector(providerSelector string) (core.Provider, string, error) {
+	if err := r.ensureProviderInventoryReady(); err != nil {
+		return nil, "", err
+	}
+	providerSelector = strings.TrimSpace(providerSelector)
+	if providerSelector == "" {
+		return nil, "", core.NewInvalidRequestError("provider is required", nil)
+	}
+	if provider := r.providerByTypeRegistry(providerSelector); provider != nil {
+		return provider, providerSelector, nil
+	}
+	if provider := r.providerByNameRegistry(providerSelector); provider != nil {
+		providerType := strings.TrimSpace(r.GetProviderTypeForName(providerSelector))
+		if providerType == "" {
+			providerType = providerSelector
+		}
+		return provider, providerType, nil
+	}
+	return nil, "", core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider: %s", providerSelector), nil)
+}
+
+func (r *Router) ensureProviderInventoryReady() error {
+	if initialized, ok := r.lookup.(initializedLookup); ok {
+		if !initialized.IsInitialized() {
+			if err := r.checkReady(); err != nil {
+				if errors.Is(err, ErrRegistryNotInitialized) {
+					return registryUnavailableError(err)
+				}
+				return err
+			}
+		}
+	} else if err := r.checkReady(); err != nil {
+		if errors.Is(err, ErrRegistryNotInitialized) {
+			return registryUnavailableError(err)
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *Router) resolveNativeBatchProvider(providerType string) (core.NativeBatchProvider, error) {
@@ -266,6 +294,34 @@ func (r *Router) resolveNativeFileProvider(providerType string) (core.NativeFile
 		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native file operations", providerType), nil)
 	}
 	return fp, nil
+}
+
+func (r *Router) resolveNativeResponseLifecycleProvider(providerType string) (core.NativeResponseLifecycleProvider, string, error) {
+	provider, resolvedProviderType, err := r.resolveProviderSelector(providerType)
+	if err != nil {
+		return nil, "", err
+	}
+	rp, ok := provider.(core.NativeResponseLifecycleProvider)
+	if !ok {
+		return nil, "", unsupportedNativeResponseOperation(fmt.Sprintf("%s does not support native response lifecycle operations", providerType))
+	}
+	return rp, resolvedProviderType, nil
+}
+
+func (r *Router) resolveNativeResponseUtilityProvider(providerType string) (core.NativeResponseUtilityProvider, string, error) {
+	provider, resolvedProviderType, err := r.resolveProviderSelector(providerType)
+	if err != nil {
+		return nil, "", err
+	}
+	rp, ok := provider.(core.NativeResponseUtilityProvider)
+	if !ok {
+		return nil, "", unsupportedNativeResponseOperation(fmt.Sprintf("%s does not support native response utility operations", providerType))
+	}
+	return rp, resolvedProviderType, nil
+}
+
+func unsupportedNativeResponseOperation(message string) *core.GatewayError {
+	return core.NewInvalidRequestErrorWithStatus(http.StatusNotImplemented, message, nil).WithCode("unsupported_response_operation")
 }
 
 func (r *Router) resolvePassthroughProvider(providerType string) (core.PassthroughProvider, error) {
@@ -332,6 +388,26 @@ func routeNativeFileCall[T any](r *Router, ctx context.Context, providerType str
 	return call(ctx, fp)
 }
 
+func routeNativeResponseLifecycleCall[T any](r *Router, ctx context.Context, providerType string, call func(context.Context, core.NativeResponseLifecycleProvider) (T, error)) (T, string, error) {
+	rp, resolvedProviderType, err := r.resolveNativeResponseLifecycleProvider(providerType)
+	if err != nil {
+		var zero T
+		return zero, "", err
+	}
+	resp, err := call(ctx, rp)
+	return resp, resolvedProviderType, err
+}
+
+func routeNativeResponseUtilityCall[T any](r *Router, ctx context.Context, providerType string, call func(context.Context, core.NativeResponseUtilityProvider) (T, error)) (T, string, error) {
+	rp, resolvedProviderType, err := r.resolveNativeResponseUtilityProvider(providerType)
+	if err != nil {
+		var zero T
+		return zero, "", err
+	}
+	resp, err := call(ctx, rp)
+	return resp, resolvedProviderType, err
+}
+
 func stampProvider[T any](resp T, providerType string) T {
 	switch typed := any(resp).(type) {
 	case *core.ChatResponse:
@@ -351,6 +427,10 @@ func stampProvider[T any](resp T, providerType string) T {
 			typed.Provider = providerType
 		}
 	case *core.FileObject:
+		if typed != nil {
+			typed.Provider = providerType
+		}
+	case *core.ResponseCompactResponse:
 		if typed != nil {
 			typed.Provider = providerType
 		}
@@ -593,6 +673,39 @@ func (r *Router) providerByTypeRegistry(providerType string) core.Provider {
 	return r.providerByType(providerType)
 }
 
+func (r *Router) providerByNameRegistry(providerName string) core.Provider {
+	if registry, ok := r.lookup.(providerNameRegistry); ok {
+		if provider := registry.ProviderByName(providerName); provider != nil {
+			return provider
+		}
+	}
+	return r.providerByName(providerName)
+}
+
+func (r *Router) providerByName(providerName string) core.Provider {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return nil
+	}
+	models, ok := r.lookup.(modelWithProviderLister)
+	if !ok {
+		return nil
+	}
+	for _, entry := range models.ListModelsWithProvider() {
+		if strings.TrimSpace(entry.ProviderName) != providerName {
+			continue
+		}
+		modelID := strings.TrimSpace(entry.Model.ID)
+		if modelID == "" {
+			continue
+		}
+		if provider := r.lookup.GetProvider(core.ModelSelector{Provider: providerName, Model: modelID}.QualifiedModel()); provider != nil {
+			return provider
+		}
+	}
+	return nil
+}
+
 func (r *Router) providerTypes() []string {
 	if typed, ok := r.lookup.(providerTypeLister); ok {
 		return typed.ProviderTypes()
@@ -627,6 +740,24 @@ func (r *Router) NativeFileProviderTypes() []string {
 			continue
 		}
 		if _, ok := provider.(core.NativeFileProvider); !ok {
+			continue
+		}
+		result = append(result, providerType)
+	}
+	return result
+}
+
+// NativeResponseProviderTypes returns the registered provider types that
+// support native Responses lifecycle operations.
+func (r *Router) NativeResponseProviderTypes() []string {
+	providerTypes := r.providerTypes()
+	result := make([]string, 0, len(providerTypes))
+	for _, providerType := range providerTypes {
+		provider := r.providerByTypeRegistry(providerType)
+		if provider == nil {
+			continue
+		}
+		if _, ok := provider.(core.NativeResponseLifecycleProvider); !ok {
 			continue
 		}
 		result = append(result, providerType)
@@ -823,4 +954,61 @@ func (r *Router) GetFileContent(ctx context.Context, providerType, id string) (*
 	return routeNativeFileCall(r, ctx, providerType, func(ctx context.Context, fp core.NativeFileProvider) (*core.FileContentResponse, error) {
 		return fp.GetFileContent(ctx, id)
 	})
+}
+
+// GetResponse routes native response retrieval to a provider type.
+func (r *Router) GetResponse(ctx context.Context, providerType, id string, params core.ResponseRetrieveParams) (*core.ResponsesResponse, error) {
+	resp, resolvedProviderType, err := routeNativeResponseLifecycleCall(r, ctx, providerType, func(ctx context.Context, rp core.NativeResponseLifecycleProvider) (*core.ResponsesResponse, error) {
+		return rp.GetResponse(ctx, id, params)
+	})
+	return stampProvider(resp, resolvedProviderType), err
+}
+
+// ListResponseInputItems routes native response input item listing to a provider type.
+func (r *Router) ListResponseInputItems(ctx context.Context, providerType, id string, params core.ResponseInputItemsParams) (*core.ResponseInputItemListResponse, error) {
+	resp, _, err := routeNativeResponseLifecycleCall(r, ctx, providerType, func(ctx context.Context, rp core.NativeResponseLifecycleProvider) (*core.ResponseInputItemListResponse, error) {
+		return rp.ListResponseInputItems(ctx, id, params)
+	})
+	return resp, err
+}
+
+// CancelResponse routes native response cancellation to a provider type.
+func (r *Router) CancelResponse(ctx context.Context, providerType, id string) (*core.ResponsesResponse, error) {
+	resp, resolvedProviderType, err := routeNativeResponseLifecycleCall(r, ctx, providerType, func(ctx context.Context, rp core.NativeResponseLifecycleProvider) (*core.ResponsesResponse, error) {
+		return rp.CancelResponse(ctx, id)
+	})
+	return stampProvider(resp, resolvedProviderType), err
+}
+
+// DeleteResponse routes native response deletion to a provider type.
+func (r *Router) DeleteResponse(ctx context.Context, providerType, id string) (*core.ResponseDeleteResponse, error) {
+	resp, _, err := routeNativeResponseLifecycleCall(r, ctx, providerType, func(ctx context.Context, rp core.NativeResponseLifecycleProvider) (*core.ResponseDeleteResponse, error) {
+		return rp.DeleteResponse(ctx, id)
+	})
+	return resp, err
+}
+
+// CountResponseInputTokens routes native response input token counting to a provider type.
+func (r *Router) CountResponseInputTokens(ctx context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseInputTokensResponse, error) {
+	resp, _, err := routeNativeResponseUtilityCall(r, ctx, providerType, func(ctx context.Context, rp core.NativeResponseUtilityProvider) (*core.ResponseInputTokensResponse, error) {
+		return rp.CountResponseInputTokens(ctx, forwardNativeResponseUtilityRequest(req))
+	})
+	return resp, err
+}
+
+// CompactResponse routes native response compaction to a provider type.
+func (r *Router) CompactResponse(ctx context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseCompactResponse, error) {
+	resp, resolvedProviderType, err := routeNativeResponseUtilityCall(r, ctx, providerType, func(ctx context.Context, rp core.NativeResponseUtilityProvider) (*core.ResponseCompactResponse, error) {
+		return rp.CompactResponse(ctx, forwardNativeResponseUtilityRequest(req))
+	})
+	return stampProvider(resp, resolvedProviderType), err
+}
+
+func forwardNativeResponseUtilityRequest(req *core.ResponsesRequest) *core.ResponsesRequest {
+	if req == nil {
+		return nil
+	}
+	forwardReq := *req
+	forwardReq.Provider = ""
+	return &forwardReq
 }

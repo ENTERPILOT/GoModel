@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/core"
+	"gomodel/internal/gateway"
 )
 
 func ensureTranslatedRequestWorkflow(
@@ -103,11 +104,7 @@ func translatedWorkflowResolution(workflow *core.Workflow) *core.RequestModelRes
 }
 
 func applyResolvedSelector(model, providerHint *string, resolution *core.RequestModelResolution) {
-	if model == nil || providerHint == nil || resolution == nil {
-		return
-	}
-	*model = resolution.ResolvedSelector.Model
-	*providerHint = resolution.ResolvedSelector.Provider
+	gateway.ApplyResolvedSelector(model, providerHint, resolution)
 }
 
 func translatedWorkflowForRequest(
@@ -142,27 +139,5 @@ func translatedWorkflow(
 	resolution *core.RequestModelResolution,
 	policyResolver RequestWorkflowPolicyResolver,
 ) (*core.Workflow, error) {
-	workflow := &core.Workflow{
-		RequestID:    strings.TrimSpace(requestID),
-		Endpoint:     endpoint,
-		Mode:         core.ExecutionModeTranslated,
-		Capabilities: core.CapabilitiesForEndpoint(endpoint),
-	}
-	if resolution != nil {
-		workflow.ProviderType = strings.TrimSpace(resolution.ProviderType)
-		workflow.Resolution = resolution
-	}
-
-	selector := core.WorkflowSelector{}
-	if resolution != nil {
-		selector = core.NewWorkflowSelector(
-			resolvedWorkflowProviderName(resolution),
-			resolution.ResolvedSelector.Model,
-			core.UserPathFromContext(ctx),
-		)
-	}
-	if err := applyWorkflowPolicy(ctx, workflow, policyResolver, selector); err != nil {
-		return nil, err
-	}
-	return workflow, nil
+	return gateway.TranslatedWorkflow(ctx, strings.TrimSpace(requestID), endpoint, resolution, policyResolver)
 }

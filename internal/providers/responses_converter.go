@@ -3,7 +3,6 @@ package providers
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"slices"
@@ -11,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"gomodel/internal/streaming"
 )
 
 // OpenAIResponsesStreamConverter wraps an OpenAI-compatible SSE stream
@@ -23,8 +24,8 @@ type OpenAIResponsesStreamConverter struct {
 	responseID  string
 	output      *ResponsesOutputEventState
 	toolCalls   map[int]*ResponsesOutputToolCallState
-	buffer      []byte
-	lineBuffer  []byte
+	buffer      streaming.StreamBuffer
+	lineBuffer  streaming.StreamBuffer
 	closed      bool
 	sentCreate  bool
 	sentDone    bool
@@ -42,8 +43,8 @@ func NewOpenAIResponsesStreamConverter(reader io.ReadCloser, model, provider str
 		responseID: responseID,
 		output:     NewResponsesOutputEventState(responseID),
 		toolCalls:  make(map[int]*ResponsesOutputToolCallState),
-		buffer:     make([]byte, 0, 4096),
-		lineBuffer: make([]byte, 0, 1024),
+		buffer:     streaming.NewStreamBuffer(4096),
+		lineBuffer: streaming.NewStreamBuffer(1024),
 	}
 }
 
@@ -177,10 +178,8 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 	}
 
 	// If we have buffered data, return it first
-	if len(sc.buffer) > 0 {
-		n = copy(p, sc.buffer)
-		sc.buffer = sc.buffer[n:]
-		return n, nil
+	if sc.buffer.Len() > 0 {
+		return sc.buffer.Read(p), nil
 	}
 
 	// Send response.created event first
@@ -202,28 +201,28 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 			slog.Error("failed to marshal response.created event", "error", err, "response_id", sc.responseID)
 			return 0, nil
 		}
-		created := fmt.Sprintf("event: response.created\ndata: %s\n\n", jsonData)
-		sc.buffer = append(sc.buffer, []byte(created)...)
-		n = copy(p, sc.buffer)
-		sc.buffer = sc.buffer[n:]
-		return n, nil
+		sc.buffer.AppendString("event: response.created\ndata: ")
+		sc.buffer.AppendBytes(jsonData)
+		sc.buffer.AppendString("\n\n")
+		return sc.buffer.Read(p), nil
 	}
 
 	// Read from the underlying stream
 	tempBuf := make([]byte, 1024)
 	nr, readErr := sc.reader.Read(tempBuf)
 	if nr > 0 {
-		sc.lineBuffer = append(sc.lineBuffer, tempBuf[:nr]...)
+		sc.lineBuffer.AppendBytes(tempBuf[:nr])
 
 		// Process complete lines
 		for {
-			idx := bytes.Index(sc.lineBuffer, []byte("\n"))
+			unread := sc.lineBuffer.Unread()
+			idx := bytes.IndexByte(unread, '\n')
 			if idx == -1 {
 				break
 			}
 
-			line := sc.lineBuffer[:idx]
-			sc.lineBuffer = sc.lineBuffer[idx+1:]
+			line := unread[:idx]
+			sc.lineBuffer.Consume(idx + 1)
 
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {
@@ -236,8 +235,8 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 					// Send done event
 					if !sc.sentDone {
 						sc.sentDone = true
-						sc.buffer = append(sc.buffer, []byte(sc.output.CompleteAssistantOutput(0))...)
-						sc.buffer = append(sc.buffer, []byte(sc.completePendingToolCalls())...)
+						sc.buffer.AppendString(sc.output.CompleteAssistantOutput(0))
+						sc.buffer.AppendString(sc.completePendingToolCalls())
 						responseData := map[string]any{
 							"id":         sc.responseID,
 							"object":     "response",
@@ -259,8 +258,9 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 							slog.Error("failed to marshal response.completed event", "error", err, "response_id", sc.responseID)
 							continue
 						}
-						doneMsg := fmt.Sprintf("event: response.completed\ndata: %s\n\ndata: [DONE]\n\n", jsonData)
-						sc.buffer = append(sc.buffer, []byte(doneMsg)...)
+						sc.buffer.AppendString("event: response.completed\ndata: ")
+						sc.buffer.AppendBytes(jsonData)
+						sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
 					}
 					continue
 				}
@@ -282,7 +282,7 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 						if delta, ok := choice["delta"].(map[string]any); ok {
 							if content, ok := delta["content"].(string); ok && content != "" {
 								sc.reserveAssistantOutput()
-								sc.buffer = append(sc.buffer, []byte(sc.output.StartAssistantOutput(0))...)
+								sc.buffer.AppendString(sc.output.StartAssistantOutput(0))
 								sc.output.AppendAssistantText(content)
 								deltaEvent := map[string]any{
 									"type":  "response.output_text.delta",
@@ -293,14 +293,16 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 									slog.Error("failed to marshal content delta event", "error", err, "response_id", sc.responseID)
 									continue
 								}
-								sc.buffer = append(sc.buffer, fmt.Appendf(nil, "event: response.output_text.delta\ndata: %s\n\n", jsonData)...)
+								sc.buffer.AppendString("event: response.output_text.delta\ndata: ")
+								sc.buffer.AppendBytes(jsonData)
+								sc.buffer.AppendString("\n\n")
 							}
 							if toolCalls, ok := delta["tool_calls"].([]any); ok && len(toolCalls) > 0 {
-								sc.buffer = append(sc.buffer, []byte(sc.handleToolCallDeltas(toolCalls))...)
+								sc.buffer.AppendString(sc.handleToolCallDeltas(toolCalls))
 							}
 						}
 						if finishReason, _ := choice["finish_reason"].(string); finishReason == "tool_calls" {
-							sc.buffer = append(sc.buffer, []byte(sc.completePendingToolCalls())...)
+							sc.buffer.AppendString(sc.completePendingToolCalls())
 						}
 					}
 				}
@@ -313,8 +315,8 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 			// Send final done event if we haven't already
 			if !sc.sentDone {
 				sc.sentDone = true
-				sc.buffer = append(sc.buffer, []byte(sc.output.CompleteAssistantOutput(0))...)
-				sc.buffer = append(sc.buffer, []byte(sc.completePendingToolCalls())...)
+				sc.buffer.AppendString(sc.output.CompleteAssistantOutput(0))
+				sc.buffer.AppendString(sc.completePendingToolCalls())
 				responseData := map[string]any{
 					"id":         sc.responseID,
 					"object":     "response",
@@ -335,28 +337,26 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 				if err != nil {
 					slog.Error("failed to marshal final response.completed event", "error", err, "response_id", sc.responseID)
 				} else {
-					doneMsg := fmt.Sprintf("event: response.completed\ndata: %s\n\ndata: [DONE]\n\n", jsonData)
-					sc.buffer = append(sc.buffer, []byte(doneMsg)...)
+					sc.buffer.AppendString("event: response.completed\ndata: ")
+					sc.buffer.AppendBytes(jsonData)
+					sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
 				}
 			}
 
-			if len(sc.buffer) > 0 {
-				n = copy(p, sc.buffer)
-				sc.buffer = sc.buffer[n:]
-				return n, nil
+			if sc.buffer.Len() > 0 {
+				return sc.buffer.Read(p), nil
 			}
 
 			sc.closed = true
+			sc.releaseBuffers()
 			_ = sc.reader.Close()
 			return 0, io.EOF
 		}
 		return 0, readErr
 	}
 
-	if len(sc.buffer) > 0 {
-		n = copy(p, sc.buffer)
-		sc.buffer = sc.buffer[n:]
-		return n, nil
+	if sc.buffer.Len() > 0 {
+		return sc.buffer.Read(p), nil
 	}
 
 	// No data yet, try again
@@ -364,6 +364,16 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 }
 
 func (sc *OpenAIResponsesStreamConverter) Close() error {
+	if sc.closed {
+		sc.releaseBuffers()
+		return nil
+	}
 	sc.closed = true
+	sc.releaseBuffers()
 	return sc.reader.Close()
+}
+
+func (sc *OpenAIResponsesStreamConverter) releaseBuffers() {
+	sc.buffer.Release()
+	sc.lineBuffer.Release()
 }

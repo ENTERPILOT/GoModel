@@ -9,22 +9,42 @@ import "encoding/json"
 // can round-trip extensions; Swagger ignores ExtraFields, and typed fields
 // should be preferred when available.
 type ResponsesRequest struct {
-	Model    string `json:"model"`
-	Provider string `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
-	Input    any    `json:"input"`              // string or []ResponsesInputElement — see docs for array form
-	//nolint:govet // Intentional duplicate json tag for Swagger docs: input is string OR []ResponsesInputElement.
-	InputSchema       []ResponsesInputElement `json:"input,omitempty" extensions:"x-oneOf=[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/core.ResponsesInputElement\"}}]"`
-	Instructions      string                  `json:"instructions,omitempty"`
-	Tools             []map[string]any        `json:"tools,omitempty"`
-	ToolChoice        any                     `json:"tool_choice,omitempty"` // string or object
-	ParallelToolCalls *bool                   `json:"parallel_tool_calls,omitempty"`
-	Temperature       *float64                `json:"temperature,omitempty"`
-	MaxOutputTokens   *int                    `json:"max_output_tokens,omitempty"`
-	Stream            bool                    `json:"stream,omitempty"`
-	StreamOptions     *StreamOptions          `json:"stream_options,omitempty"`
-	Metadata          map[string]string       `json:"metadata,omitempty"`
-	Reasoning         *Reasoning              `json:"reasoning,omitempty"`
-	ExtraFields       UnknownJSONFields       `json:"-" swaggerignore:"true"`
+	Model             string            `json:"model"`
+	Provider          string            `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
+	Input             any               `json:"input"`              // string or []ResponsesInputElement — see docs for array form
+	Instructions      string            `json:"instructions,omitempty"`
+	Tools             []map[string]any  `json:"tools,omitempty"`
+	ToolChoice        any               `json:"tool_choice,omitempty"` // string or object
+	ParallelToolCalls *bool             `json:"parallel_tool_calls,omitempty"`
+	Temperature       *float64          `json:"temperature,omitempty"`
+	MaxOutputTokens   *int              `json:"max_output_tokens,omitempty"`
+	Stream            bool              `json:"stream,omitempty"`
+	StreamOptions     *StreamOptions    `json:"stream_options,omitempty"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
+	Reasoning         *Reasoning        `json:"reasoning,omitempty"`
+	ExtraFields       UnknownJSONFields `json:"-" swaggerignore:"true"`
+}
+
+// ResponseInputTokensRequest documents the request body accepted by
+// POST /v1/responses/input_tokens.
+type ResponseInputTokensRequest struct {
+	Model        string            `json:"model,omitempty"`
+	Provider     string            `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
+	Input        any               `json:"input,omitempty"`    // string or []ResponsesInputElement — see docs for array form
+	Instructions string            `json:"instructions,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+	Reasoning    *Reasoning        `json:"reasoning,omitempty"`
+}
+
+// ResponseCompactRequest documents the request body accepted by
+// POST /v1/responses/compact.
+type ResponseCompactRequest struct {
+	Model        string            `json:"model,omitempty"`
+	Provider     string            `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
+	Input        any               `json:"input,omitempty"`    // string or []ResponsesInputElement — see docs for array form
+	Instructions string            `json:"instructions,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+	Reasoning    *Reasoning        `json:"reasoning,omitempty"`
 }
 
 func (r *ResponsesRequest) semanticSelector() (string, string) {
@@ -122,4 +142,57 @@ type ResponsesUsage struct {
 type ResponsesError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// ResponseRetrieveParams contains query parameters accepted by
+// GET /v1/responses/{id}.
+type ResponseRetrieveParams struct {
+	Include            []string
+	IncludeObfuscation *bool
+	StartingAfter      *int
+	Stream             bool
+}
+
+// ResponseInputItemsParams contains query parameters accepted by
+// GET /v1/responses/{id}/input_items.
+type ResponseInputItemsParams struct {
+	After   string
+	Include []string
+	Limit   int
+	Order   string
+}
+
+// ResponseInputItemListResponse is returned by
+// GET /v1/responses/{id}/input_items.
+type ResponseInputItemListResponse struct {
+	Object  string            `json:"object"`
+	Data    []json.RawMessage `json:"data" swaggertype:"array,object"`
+	FirstID string            `json:"first_id,omitempty"`
+	LastID  string            `json:"last_id,omitempty"`
+	HasMore bool              `json:"has_more"`
+}
+
+// ResponseInputTokensResponse is returned by POST /v1/responses/input_tokens.
+type ResponseInputTokensResponse struct {
+	Object      string `json:"object"`
+	InputTokens int    `json:"input_tokens"`
+}
+
+// ResponseCompactResponse is returned by POST /v1/responses/compact.
+type ResponseCompactResponse struct {
+	ID        string                `json:"id"`
+	Object    string                `json:"object"`
+	CreatedAt int64                 `json:"created_at"`
+	Output    []ResponsesOutputItem `json:"output"`
+	Usage     *ResponsesUsage       `json:"usage,omitempty"`
+	Error     *ResponsesError       `json:"error,omitempty"`
+	Metadata  map[string]string     `json:"metadata,omitempty"`
+	Provider  string                `json:"provider,omitempty"`
+}
+
+// ResponseDeleteResponse is returned by DELETE /v1/responses/{id}.
+type ResponseDeleteResponse struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Deleted bool   `json:"deleted"`
 }

@@ -32,6 +32,9 @@ func semanticJSONBody(c *echo.Context) ([]byte, *core.WhiteBoxPrompt, error) {
 	if err != nil {
 		return nil, env, err
 	}
+	if refreshed := core.GetWhiteBoxPrompt(c.Request().Context()); refreshed != nil {
+		env = refreshed
+	}
 	return bodyBytes, env, nil
 }
 

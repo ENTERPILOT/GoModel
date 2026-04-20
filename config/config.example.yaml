@@ -191,6 +191,12 @@ providers:
     type: groq
     api_key: "gsk_..."
 
+  zai:
+    type: zai
+    api_key: "..."
+    # Optional: use GLM Coding Plan endpoint instead of the general endpoint.
+    # base_url: "https://api.z.ai/api/coding/paas/v4"
+
   ollama:
     type: ollama
     base_url: "http://localhost:11434/v1"
@@ -225,6 +231,7 @@ providers:
   #   type: "oracle"
   #   base_url: "${ORACLE_BASE_URL}"
   #   api_key: "${ORACLE_API_KEY}"
+  #   # Optional when ORACLE_MODELS is set as a comma-separated env var instead.
   #   models:
   #     - openai.gpt-oss-120b
   #     - xai.grok-3

@@ -178,6 +178,15 @@ func (p *Provider) NativeFileProviderTypes() []string {
 	return nil
 }
 
+// NativeResponseProviderTypes delegates provider capability inventory to the
+// inner provider when available.
+func (p *Provider) NativeResponseProviderTypes() []string {
+	if typed, ok := p.inner.(core.NativeResponseProviderTypeLister); ok {
+		return typed.NativeResponseProviderTypes()
+	}
+	return nil
+}
+
 func (p *Provider) CreateBatch(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, error) {
 	native, err := p.nativeBatchRouter()
 	if err != nil {
@@ -318,6 +327,54 @@ func (p *Provider) Passthrough(ctx context.Context, providerType string, req *co
 	return passthrough.Passthrough(ctx, providerType, req)
 }
 
+func (p *Provider) GetResponse(ctx context.Context, providerType, id string, params core.ResponseRetrieveParams) (*core.ResponsesResponse, error) {
+	responses, err := p.nativeResponseLifecycleRouter()
+	if err != nil {
+		return nil, err
+	}
+	return responses.GetResponse(ctx, providerType, id, params)
+}
+
+func (p *Provider) ListResponseInputItems(ctx context.Context, providerType, id string, params core.ResponseInputItemsParams) (*core.ResponseInputItemListResponse, error) {
+	responses, err := p.nativeResponseLifecycleRouter()
+	if err != nil {
+		return nil, err
+	}
+	return responses.ListResponseInputItems(ctx, providerType, id, params)
+}
+
+func (p *Provider) CancelResponse(ctx context.Context, providerType, id string) (*core.ResponsesResponse, error) {
+	responses, err := p.nativeResponseLifecycleRouter()
+	if err != nil {
+		return nil, err
+	}
+	return responses.CancelResponse(ctx, providerType, id)
+}
+
+func (p *Provider) DeleteResponse(ctx context.Context, providerType, id string) (*core.ResponseDeleteResponse, error) {
+	responses, err := p.nativeResponseLifecycleRouter()
+	if err != nil {
+		return nil, err
+	}
+	return responses.DeleteResponse(ctx, providerType, id)
+}
+
+func (p *Provider) CountResponseInputTokens(ctx context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseInputTokensResponse, error) {
+	responses, err := p.nativeResponseUtilityRouter()
+	if err != nil {
+		return nil, err
+	}
+	return responses.CountResponseInputTokens(ctx, providerType, req)
+}
+
+func (p *Provider) CompactResponse(ctx context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseCompactResponse, error) {
+	responses, err := p.nativeResponseUtilityRouter()
+	if err != nil {
+		return nil, err
+	}
+	return responses.CompactResponse(ctx, providerType, req)
+}
+
 // PrepareBatchRequest resolves aliases for batch subrequests without
 // submitting the native batch to the wrapped provider.
 func (p *Provider) PrepareBatchRequest(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchRewriteResult, error) {
@@ -356,6 +413,22 @@ func (p *Provider) nativeFileRouter() (core.NativeFileRoutableProvider, error) {
 		return nil, core.NewInvalidRequestError("file routing is not supported by the current provider router", nil)
 	}
 	return files, nil
+}
+
+func (p *Provider) nativeResponseLifecycleRouter() (core.NativeResponseLifecycleRoutableProvider, error) {
+	responses, ok := p.inner.(core.NativeResponseLifecycleRoutableProvider)
+	if !ok {
+		return nil, core.NewInvalidRequestError("response lifecycle routing is not supported by the current provider router", nil)
+	}
+	return responses, nil
+}
+
+func (p *Provider) nativeResponseUtilityRouter() (core.NativeResponseUtilityRoutableProvider, error) {
+	responses, ok := p.inner.(core.NativeResponseUtilityRoutableProvider)
+	if !ok {
+		return nil, core.NewInvalidRequestError("response utility routing is not supported by the current provider router", nil)
+	}
+	return responses, nil
 }
 
 func (p *Provider) batchFileTransport() core.BatchFileTransport {

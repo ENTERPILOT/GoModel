@@ -9,10 +9,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -318,6 +320,7 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 
 	var lastErr error
 	var lastStatusCode int
+	lastErrFromTransport := false
 	maxAttempts := c.maxAttempts()
 	if req.RawBodyReader != nil {
 		maxAttempts = 1
@@ -333,9 +336,11 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 		if err != nil {
 			lastErr = err
 			lastStatusCode = extractStatusCode(err)
-			// Only retry on network errors
-			c.recordCircuitBreakerCompletion(lastStatusCode, lastErr)
-			if scope.halfOpenProbe {
+			lastErrFromTransport = true
+			// Client-side timeouts are already the caller's latency budget. Do
+			// not retry them, or the logical request can outlive HTTP_TIMEOUT.
+			if scope.halfOpenProbe || isClientTimeoutGatewayError(lastErr) {
+				c.recordCircuitBreakerCompletion(lastStatusCode, lastErr)
 				c.finishRequest(scope, lastStatusCode, lastErr)
 				return nil, lastErr
 			}
@@ -346,8 +351,9 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 		if c.isRetryable(resp.StatusCode) {
 			lastErr = core.ParseProviderError(c.config.ProviderName, resp.StatusCode, resp.Body, nil)
 			lastStatusCode = resp.StatusCode
-			c.recordCircuitBreakerCompletion(lastStatusCode, nil)
+			lastErrFromTransport = false
 			if scope.halfOpenProbe {
+				c.recordCircuitBreakerCompletion(lastStatusCode, nil)
 				c.finishRequest(scope, lastStatusCode, lastErr)
 				return nil, lastErr
 			}
@@ -370,10 +376,16 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 
 	// All retries exhausted
 	if lastErr != nil {
+		var circuitErr error
+		if lastErrFromTransport {
+			circuitErr = lastErr
+		}
+		c.recordCircuitBreakerCompletion(lastStatusCode, circuitErr)
 		c.finishRequest(scope, lastStatusCode, lastErr)
 		return nil, lastErr
 	}
 	err = core.NewProviderError(c.config.ProviderName, http.StatusBadGateway, "request failed after retries", nil)
+	c.recordCircuitBreakerCompletion(http.StatusBadGateway, err)
 	c.finishRequest(scope, http.StatusBadGateway, err)
 	return nil, err
 }
@@ -464,18 +476,19 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 
 		resp, err := c.doHTTPRequest(ctx, req)
 		if err != nil {
-			c.recordCircuitBreakerCompletion(extractStatusCode(err), err)
-			if scope.halfOpenProbe || attempt == maxAttempts-1 {
-				c.finishRequest(scope, extractStatusCode(err), err)
+			statusCode := extractStatusCode(err)
+			if scope.halfOpenProbe || isClientTimeoutGatewayError(err) || attempt == maxAttempts-1 {
+				c.recordCircuitBreakerCompletion(statusCode, err)
+				c.finishRequest(scope, statusCode, err)
 				return nil, err
 			}
 			continue
 		}
 
 		retryable := c.isRetryable(resp.StatusCode)
-		c.recordCircuitBreakerCompletion(resp.StatusCode, nil)
 		if retryable {
 			if scope.halfOpenProbe || attempt == maxAttempts-1 {
+				c.recordCircuitBreakerCompletion(resp.StatusCode, nil)
 				c.finishRequest(scope, resp.StatusCode, nil)
 				return resp, nil
 			}
@@ -483,11 +496,13 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 			continue
 		}
 
+		c.recordCircuitBreakerCompletion(resp.StatusCode, nil)
 		c.finishRequest(scope, resp.StatusCode, nil)
 		return resp, nil
 	}
 
 	err = core.NewProviderError(c.config.ProviderName, http.StatusBadGateway, "request failed after retries", nil)
+	c.recordCircuitBreakerCompletion(http.StatusBadGateway, err)
 	c.finishRequest(scope, http.StatusBadGateway, err)
 	return nil, err
 }
@@ -538,7 +553,7 @@ func (c *Client) doHTTPRequest(ctx context.Context, req Request) (*http.Response
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, core.NewProviderError(c.config.ProviderName, http.StatusBadGateway, "failed to send request: "+err.Error(), err)
+		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), "failed to send request: "+err.Error(), err)
 	}
 	return resp, nil
 }
@@ -557,7 +572,7 @@ func (c *Client) doRequest(ctx context.Context, req Request) (*Response, error) 
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, core.NewProviderError(c.config.ProviderName, http.StatusBadGateway, "failed to read response: "+err.Error(), err)
+		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), "failed to read response: "+err.Error(), err)
 	}
 
 	return &Response{
@@ -662,6 +677,45 @@ func (c *Client) isRetryable(statusCode int) bool {
 		statusCode == http.StatusServiceUnavailable ||
 		statusCode == http.StatusBadGateway ||
 		statusCode == http.StatusGatewayTimeout
+}
+
+func providerErrorStatusCode(err error) int {
+	if isTimeoutError(err) {
+		return http.StatusGatewayTimeout
+	}
+	return http.StatusBadGateway
+}
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "client.timeout exceeded") ||
+		strings.Contains(message, "timeout awaiting response headers")
+}
+
+func isClientTimeoutGatewayError(err error) bool {
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) || gatewayErr == nil {
+		return isTimeoutError(err)
+	}
+	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
+		return false
+	}
+	if isTimeoutError(gatewayErr.Err) {
+		return true
+	}
+	return isTimeoutError(gatewayErr)
 }
 
 // circuitBreaker implements a circuit breaker pattern with half-open state protection

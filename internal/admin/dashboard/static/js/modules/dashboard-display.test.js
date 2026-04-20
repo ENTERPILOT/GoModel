@@ -205,7 +205,7 @@ test('stale unauthorized category responses preserve existing categories', async
     assert.equal(app.authDialogOpen, false);
 });
 
-test('init clears legacy stored API key instead of restoring it', () => {
+test('init restores a persisted API key from browser storage', () => {
     const storage = createLocalStorage({
         gomodel_api_key: 'existing-token',
         gomodel_theme: 'dark'
@@ -222,12 +222,12 @@ test('init clears legacy stored API key instead of restoring it', () => {
 
     app.init();
 
-    assert.equal(app.apiKey, '');
-    assert.equal(storage.getItem('gomodel_api_key'), null);
+    assert.equal(app.apiKey, 'existing-token');
+    assert.equal(storage.getItem('gomodel_api_key'), 'existing-token');
     assert.equal(app.theme, 'dark');
 });
 
-test('submitApiKey trims bearer input and keeps the key in memory before refreshing dashboard data', () => {
+test('submitApiKey trims bearer input, persists it, and refreshes dashboard data', () => {
     const storage = createLocalStorage();
     const app = loadDashboardApp({
         window: { localStorage: storage }
@@ -243,7 +243,7 @@ test('submitApiKey trims bearer input and keeps the key in memory before refresh
 
     assert.equal(app.apiKey, 'secret-token');
     assert.equal(app.authRequestGeneration, 1);
-    assert.equal(storage.getItem('gomodel_api_key'), null);
+    assert.equal(storage.getItem('gomodel_api_key'), 'secret-token');
     assert.equal(app.authDialogOpen, false);
     assert.equal(fetches, 1);
 });
