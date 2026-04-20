@@ -61,7 +61,7 @@
                         <h3 x-text="guardrailFormMode === 'edit' ? 'Edit Guardrail' : 'Create Guardrail'"></h3>
                         <p class="form-hint">Workflows reference these names directly, so renames are intentionally avoided after creation.</p>
                     </div>
-                    <button type="button" class="table-action-btn alias-close-btn table-icon-btn" aria-label="Close guardrail editor" @click="closeGuardrailForm()">
+                    <button type="button" class="dialog-close-btn" aria-label="Close guardrail editor" @click="closeGuardrailForm()">
                         {{template "x-icon"}}
                     </button>
                 </div>

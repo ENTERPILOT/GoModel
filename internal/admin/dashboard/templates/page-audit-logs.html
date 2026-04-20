@@ -131,7 +131,9 @@
            @keydown.escape.window="conversationOpen && closeConversation()">
         <div class="conversation-drawer-header">
             <h3 id="interactions-drawer-title">Interactions</h3>
-            <button type="button" class="pagination-btn" x-ref="conversationCloseBtn" aria-label="Close interactions" @click="closeConversation()">Close</button>
+            <button type="button" class="dialog-close-btn" x-ref="conversationCloseBtn" aria-label="Close interactions" @click="closeConversation()">
+                {{template "x-icon"}}
+            </button>
         </div>
 
         <div id="interactions-drawer-content">

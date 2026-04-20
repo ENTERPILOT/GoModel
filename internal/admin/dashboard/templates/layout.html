@@ -38,7 +38,9 @@
                     <div>
                         <h2 id="authDialogTitle" x-text="needsAuth ? 'Dashboard locked' : 'Change API key'">Dashboard locked</h2>
                     </div>
-                    <button type="button" class="auth-dialog-close" aria-label="Close authentication dialog" @click="closeAuthDialog()">&#x2715;</button>
+                    <button type="button" class="auth-dialog-close dialog-close-btn" aria-label="Close authentication dialog" @click="closeAuthDialog()">
+                        {{template "x-icon"}}
+                    </button>
                 </div>
                 <form class="auth-dialog-form" @submit.prevent="submitApiKey()">
                     <div class="auth-dialog-input-shell">

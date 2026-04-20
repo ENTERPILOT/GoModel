@@ -357,6 +357,10 @@ test("dashboard auth uses a root-level dialog instead of a hidden sidebar input"
   );
   assert.match(
     template,
+    /class="auth-dialog-close dialog-close-btn"[\s\S]*aria-label="Close authentication dialog"[\s\S]*{{template "x-icon"}}/,
+  );
+  assert.match(
+    template,
     /class="pagination-btn pagination-btn-primary pagination-btn-with-icon auth-dialog-submit-btn"[\s\S]*class="auth-dialog-submit-icon"[\s\S]*x-text="needsAuth \? 'Unlock dashboard' : 'Save API key'"/,
   );
   assert.match(template, /placeholder="Master key or bearer token"/);
@@ -455,7 +459,7 @@ test("auth key expirations render as a UTC date with the full UTC timestamp in t
   );
   assert.match(
     authKeyForm,
-    /<h3>Create API Key<\/h3>[\s\S]*class="table-action-btn alias-close-btn table-icon-btn"[\s\S]*@click="closeAuthKeyForm\(\)"[\s\S]*{{template "x-icon"}}/,
+    /<h3>Create API Key<\/h3>[\s\S]*class="dialog-close-btn"[\s\S]*@click="closeAuthKeyForm\(\)"[\s\S]*{{template "x-icon"}}/,
   );
   assert.match(indexTemplate, /class="model-editor auth-key-editor"/);
   assert.match(
@@ -853,7 +857,7 @@ test("mobile modal editor headers keep the close action beside the title", () =>
 
   assert.match(
     indexTemplate,
-    /<h3>Create API Key<\/h3>[\s\S]*class="table-action-btn alias-close-btn[^"]*"[\s\S]*@click="closeAuthKeyForm\(\)"/,
+    /<h3>Create API Key<\/h3>[\s\S]*class="dialog-close-btn"[\s\S]*@click="closeAuthKeyForm\(\)"/,
   );
 
   const modalHeaderRule = readCSSRule(css, ".model-editor .editor-header");
@@ -869,11 +873,36 @@ test("mobile modal editor headers keep the close action beside the title", () =>
 
   const modalCloseRule = readCSSRule(
     css,
-    ".model-editor .editor-header .alias-close-btn",
+    ".model-editor .editor-header .dialog-close-btn",
   );
-  assert.match(modalCloseRule, /flex:\s*0 0 36px/);
-  assert.match(modalCloseRule, /width:\s*36px/);
-  assert.match(modalCloseRule, /min-width:\s*36px/);
+  assert.match(modalCloseRule, /flex:\s*0 0 32px/);
+  assert.match(modalCloseRule, /width:\s*32px/);
+  assert.match(modalCloseRule, /min-width:\s*32px/);
+});
+
+test("modal and conversation close controls use the shared dialog close style", () => {
+  const shellTemplate = readDashboardShellTemplate();
+  const indexTemplate = readDashboardTemplateSource();
+  const css = readFixture("../../css/dashboard.css");
+
+  assert.match(
+    shellTemplate,
+    /class="auth-dialog-close dialog-close-btn"[\s\S]*@click="closeAuthDialog\(\)"[\s\S]*{{template "x-icon"}}/,
+  );
+  assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close alias editor"[\s\S]*{{template "x-icon"}}/);
+  assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close model access editor"[\s\S]*{{template "x-icon"}}/);
+  assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close workflow editor"[\s\S]*{{template "x-icon"}}/);
+  assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close guardrail editor"[\s\S]*{{template "x-icon"}}/);
+  assert.match(indexTemplate, /class="dialog-close-btn"[\s\S]*@click="closeAuthKeyForm\(\)"[\s\S]*{{template "x-icon"}}/);
+  assert.match(indexTemplate, /class="dialog-close-btn" x-ref="conversationCloseBtn" aria-label="Close interactions"[\s\S]*{{template "x-icon"}}/);
+  assert.doesNotMatch(indexTemplate, /alias-close-btn/);
+  assert.doesNotMatch(indexTemplate, /x-ref="conversationCloseBtn"[\s\S]*>Close<\/button>/);
+
+  const closeRule = readCSSRule(css, ".dialog-close-btn");
+  assert.match(closeRule, /width:\s*32px/);
+  assert.match(closeRule, /height:\s*32px/);
+  assert.match(closeRule, /border-radius:\s*6px/);
+  assert.match(closeRule, /color:\s*var\(--text-muted\)/);
 });
 
 test("modal escape handlers do not close editors behind the auth dialog", () => {

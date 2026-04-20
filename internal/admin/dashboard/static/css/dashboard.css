@@ -354,12 +354,16 @@ body.dashboard-modal-open {
   margin-top: 2px;
 }
 
-.auth-dialog-close {
+.auth-dialog-close,
+.dialog-close-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 32px;
   width: 32px;
+  min-width: 32px;
   height: 32px;
+  padding: 0;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -367,11 +371,19 @@ body.dashboard-modal-open {
   cursor: pointer;
   font: inherit;
   line-height: 1;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
-.auth-dialog-close:hover {
+.auth-dialog-close:hover,
+.dialog-close-btn:hover {
   color: var(--text);
   background: var(--bg-surface-hover);
+}
+
+.auth-dialog-close:focus-visible,
+.dialog-close-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+  outline-offset: 2px;
 }
 
 .auth-dialog-hint {
@@ -1769,16 +1781,6 @@ td.col-price {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 20px;
-}
-
-.alias-close-btn {
-  width: 36px;
-  min-width: 36px;
-  height: 36px;
-  padding: 0;
-  border-radius: 999px;
-  font-size: 14px;
-  font-weight: 700;
 }
 
 .form {
@@ -3736,10 +3738,10 @@ body.conversation-drawer-open {
     flex: 1;
     min-width: 0;
   }
-  .model-editor .editor-header .alias-close-btn {
-    flex: 0 0 36px;
-    width: 36px;
-    min-width: 36px;
+  .model-editor .editor-header .dialog-close-btn {
+    flex: 0 0 32px;
+    width: 32px;
+    min-width: 32px;
     align-self: flex-start;
   }
 
