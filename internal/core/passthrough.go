@@ -49,11 +49,3 @@ type NamedPassthrough interface {
 type PassthroughProviderResolver interface {
 	ResolvePassthroughByName(instanceName string) (PassthroughProvider, string, error)
 }
-
-// PassthroughSemanticEnricher derives provider-specific passthrough metadata
-// from ingress transport and best-effort prompt state before execution
-// workflow resolution runs.
-type PassthroughSemanticEnricher interface {
-	ProviderType() string
-	Enrich(snapshot *RequestSnapshot, prompt *WhiteBoxPrompt, info *PassthroughRouteInfo) *PassthroughRouteInfo
-}

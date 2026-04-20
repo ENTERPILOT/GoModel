@@ -16,9 +16,8 @@ import (
 const defaultAPIVersion = "2024-10-21"
 
 var Registration = providers.Registration{
-	Type:                        "azure",
-	New:                         New,
-	PassthroughSemanticEnricher: openai.Registration.PassthroughSemanticEnricher,
+	Type: "azure",
+	New:  New,
 	Discovery: providers.DiscoveryConfig{
 		RequireBaseURL:     true,
 		SupportsAPIVersion: true,

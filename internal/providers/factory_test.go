@@ -162,44 +162,6 @@ func TestProviderFactory_RegisteredTypes(t *testing.T) {
 	}
 }
 
-func TestProviderFactory_PassthroughSemanticEnrichers(t *testing.T) {
-	factory := NewProviderFactory()
-
-	factory.Add(Registration{
-		Type:                        "provider-b",
-		New:                         func(cfg ProviderConfig, opts ProviderOptions) core.Provider { return &factoryMockProvider{} },
-		PassthroughSemanticEnricher: passthroughEnricherStub{providerType: "provider-b"},
-	})
-	factory.Add(Registration{
-		Type:                        "provider-a",
-		New:                         func(cfg ProviderConfig, opts ProviderOptions) core.Provider { return &factoryMockProvider{} },
-		PassthroughSemanticEnricher: passthroughEnricherStub{providerType: "provider-a"},
-	})
-
-	enrichers := factory.PassthroughSemanticEnrichers()
-	if len(enrichers) != 2 {
-		t.Fatalf("expected 2 passthrough enrichers, got %d", len(enrichers))
-	}
-	if got := enrichers[0].ProviderType(); got != "provider-a" {
-		t.Fatalf("enrichers[0].ProviderType() = %q, want provider-a", got)
-	}
-	if got := enrichers[1].ProviderType(); got != "provider-b" {
-		t.Fatalf("enrichers[1].ProviderType() = %q, want provider-b", got)
-	}
-}
-
-type passthroughEnricherStub struct {
-	providerType string
-}
-
-func (p passthroughEnricherStub) ProviderType() string {
-	return p.providerType
-}
-
-func (passthroughEnricherStub) Enrich(_ *core.RequestSnapshot, _ *core.WhiteBoxPrompt, info *core.PassthroughRouteInfo) *core.PassthroughRouteInfo {
-	return info
-}
-
 func TestProviderFactory_Create_PassesResolvedProviderConfig(t *testing.T) {
 	factory := NewProviderFactory()
 
