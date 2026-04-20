@@ -229,8 +229,9 @@ test("guardrails authoring moved to a top-level page while settings keeps the ge
   );
   assert.match(
     template,
-    /class="pagination-btn pagination-btn-primary pagination-btn-with-icon guardrail-submit-btn"[\s\S]*@click="submitGuardrailForm\(\)"[\s\S]*data-lucide="save" class="form-action-icon"[\s\S]*<span>Save Guardrail<\/span>/,
+    /<form class="form" @submit\.prevent="submitGuardrailForm\(\)">[\s\S]*type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon guardrail-submit-btn"[\s\S]*data-lucide="save" class="form-action-icon"[\s\S]*<span>Save Guardrail<\/span>/,
   );
+  assert.doesNotMatch(template, /guardrail-submit-btn"[\s\S]*@click="submitGuardrailForm\(\)"/);
   assert.match(
     template,
     /x-show="!authError && guardrailError && !guardrailFormOpen"/,

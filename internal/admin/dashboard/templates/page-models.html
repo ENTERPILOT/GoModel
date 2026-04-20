@@ -60,7 +60,7 @@
          x-show="aliasFormOpen"
          x-transition.opacity.duration.160ms
          @click="closeAliasForm()"
-         @keydown.escape.window="aliasFormOpen && closeAliasForm()">
+         @keydown.escape.window="aliasFormOpen && !authDialogOpen && closeAliasForm()">
         <div class="model-editor" x-show="aliasFormOpen" x-ref="aliasEditor" role="dialog" aria-modal="true" aria-label="Alias editor" @click.stop>
             <form class="form" @submit.prevent="submitAliasForm()">
                 <div class="editor-header">
@@ -131,7 +131,7 @@
          x-show="modelOverrideFormOpen"
          x-transition.opacity.duration.160ms
          @click="closeModelOverrideForm()"
-         @keydown.escape.window="modelOverrideFormOpen && closeModelOverrideForm()">
+         @keydown.escape.window="modelOverrideFormOpen && !authDialogOpen && closeModelOverrideForm()">
         <div class="model-editor" x-show="modelOverrideFormOpen" x-ref="modelOverrideEditor" role="dialog" aria-modal="true" aria-label="Model access editor" @click.stop>
             <form class="form" @submit.prevent="submitModelOverrideForm()">
                     <div class="editor-header">

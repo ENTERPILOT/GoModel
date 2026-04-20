@@ -53,9 +53,9 @@
          x-show="guardrailFormOpen"
          x-transition.opacity.duration.160ms
          @click="closeGuardrailForm()"
-         @keydown.escape.window="guardrailFormOpen && closeGuardrailForm()">
+         @keydown.escape.window="guardrailFormOpen && !authDialogOpen && closeGuardrailForm()">
         <div class="model-editor settings-guardrails-editor" x-show="guardrailFormOpen" x-ref="guardrailEditor" role="dialog" aria-modal="true" aria-label="Guardrail editor" @click.stop>
-            <div class="form">
+            <form class="form" @submit.prevent="submitGuardrailForm()">
                 <div class="editor-header">
                     <div>
                         <h3 x-text="guardrailFormMode === 'edit' ? 'Edit Guardrail' : 'Create Guardrail'"></h3>
@@ -147,12 +147,12 @@
 
                 <div class="form-actions">
                     <button type="button" class="pagination-btn" @click="closeGuardrailForm()">Cancel</button>
-                    <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon guardrail-submit-btn" :disabled="guardrailFormSubmitting" @click="submitGuardrailForm()">
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon guardrail-submit-btn" :disabled="guardrailFormSubmitting">
                         <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
                         <span>Save Guardrail</span>
                     </button>
                 </div>
-            </div>
+            </form>
         </div>
     </div>
 

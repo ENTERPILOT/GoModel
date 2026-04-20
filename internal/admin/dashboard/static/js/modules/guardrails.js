@@ -199,7 +199,7 @@
                     if (!editor || typeof editor.querySelector !== 'function') {
                         return;
                     }
-                    const field = editor.querySelector('[data-modal-autofocus], input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])');
+                    const field = editor.querySelector('[data-modal-autofocus]:not([disabled]), input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])');
                     if (!field || typeof field.focus !== 'function') {
                         return;
                     }
@@ -375,23 +375,42 @@
                 };
 
                 try {
-                    const res = await fetch('/admin/api/v1/guardrails/' + encodeURIComponent(name), {
-                        method: 'PUT',
-                        headers: this.headers(),
-                        body: JSON.stringify(payload)
-                    });
+                    const request = typeof this.requestOptions === 'function'
+                        ? this.requestOptions({
+                            method: 'PUT',
+                            body: JSON.stringify(payload)
+                        })
+                        : {
+                            method: 'PUT',
+                            headers: this.headers(),
+                            body: JSON.stringify(payload)
+                        };
+                    const res = await fetch('/admin/api/v1/guardrails/' + encodeURIComponent(name), request);
                     if (res.status === 503) {
                         this.guardrailsAvailable = false;
                         this.guardrailError = 'Guardrails feature is unavailable.';
                         return;
                     }
-                    if (res.status === 401) {
+                    if (typeof this.handleFetchResponse === 'function') {
+                        const handled = this.handleFetchResponse(res, 'save guardrail', request);
+                        if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                            return;
+                        }
+                        if (!handled) {
+                            if (res.status === 401) {
+                                this.guardrailError = 'Authentication required.';
+                                return;
+                            }
+                            this.guardrailError = await this.guardrailResponseMessage(res, 'Failed to save guardrail.');
+                            console.error('Failed to save guardrail:', res.status, res.statusText, this.guardrailError);
+                            return;
+                        }
+                    } else if (res.status === 401) {
                         this.authError = true;
                         this.needsAuth = true;
                         this.guardrailError = 'Authentication required.';
                         return;
-                    }
-                    if (res.status !== 200) {
+                    } else if (res.status !== 200) {
                         this.guardrailError = await this.guardrailResponseMessage(res, 'Failed to save guardrail.');
                         console.error('Failed to save guardrail:', res.status, res.statusText, this.guardrailError);
                         return;
@@ -425,22 +444,40 @@
                 this.guardrailNotice = '';
 
                 try {
-                    const res = await fetch('/admin/api/v1/guardrails/' + encodeURIComponent(name), {
-                        method: 'DELETE',
-                        headers: this.headers()
-                    });
+                    const request = typeof this.requestOptions === 'function'
+                        ? this.requestOptions({
+                            method: 'DELETE'
+                        })
+                        : {
+                            method: 'DELETE',
+                            headers: this.headers()
+                        };
+                    const res = await fetch('/admin/api/v1/guardrails/' + encodeURIComponent(name), request);
                     if (res.status === 503) {
                         this.guardrailsAvailable = false;
                         this.guardrailError = 'Guardrails feature is unavailable.';
                         return;
                     }
-                    if (res.status === 401) {
+                    if (typeof this.handleFetchResponse === 'function') {
+                        const handled = this.handleFetchResponse(res, 'delete guardrail', request);
+                        if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                            return;
+                        }
+                        if (!handled) {
+                            if (res.status === 401) {
+                                this.guardrailError = 'Authentication required.';
+                                return;
+                            }
+                            this.guardrailError = await this.guardrailResponseMessage(res, 'Failed to delete guardrail.');
+                            console.error('Failed to delete guardrail:', res.status, res.statusText, this.guardrailError);
+                            return;
+                        }
+                    } else if (res.status === 401) {
                         this.authError = true;
                         this.needsAuth = true;
                         this.guardrailError = 'Authentication required.';
                         return;
-                    }
-                    if (res.status !== 204) {
+                    } else if (res.status !== 204) {
                         this.guardrailError = await this.guardrailResponseMessage(res, 'Failed to delete guardrail.');
                         console.error('Failed to delete guardrail:', res.status, res.statusText, this.guardrailError);
                         return;

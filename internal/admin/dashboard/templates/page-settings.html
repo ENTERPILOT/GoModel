@@ -24,7 +24,7 @@
         <div class="settings-form-grid">
             <div class="form-field">
                 <label class="form-field-label" for="timezone-override-select">Timezone Override</label>
-                <select id="timezone-override-select" class="usage-log-select settings-select" x-ref="timezoneOverrideSelect" x-model="timezoneOverride" x-effect="timezoneOptions.length; timezoneOverride; $nextTick(() => syncTimezoneOverrideSelectValue())" @focus="ensureTimezoneOptions()" @change="saveTimezoneOverride()">
+                <select id="timezone-override-select" class="usage-log-select settings-select" x-ref="timezoneOverrideSelect" x-model="timezoneOverride" x-effect="timezoneOptions.length; timezoneOverride; $nextTick(() => syncTimezoneOverrideSelectValue())" aria-describedby="timezone-help-copy" @focus="ensureTimezoneOptions()" @change="saveTimezoneOverride()">
                     <option value="" :selected="!timezoneOverride" x-text="'Automatic (' + detectedTimeZoneLabel() + ')'"></option>
                     <template x-for="timeZone in timezoneOptions" :key="timeZone.value">
                         <option :value="timeZone.value" :selected="timeZone.value === timezoneOverride" x-text="timeZone.label"></option>
@@ -50,6 +50,7 @@
                         :class="{ 'is-refreshing': runtimeRefreshLoading }"
                         :disabled="runtimeRefreshLoading"
                         :aria-busy="runtimeRefreshLoading ? 'true' : 'false'"
+                        aria-describedby="runtime-refresh-help-copy"
                         @click="refreshRuntime()">
                     <i data-lucide="refresh-cw" class="settings-refresh-icon" aria-hidden="true"></i>
                     <span>Refresh</span>

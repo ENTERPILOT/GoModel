@@ -6,10 +6,10 @@
         <h2>Usage Overview</h2>
         <div class="page-header-controls">
             <div class="interval-picker">
-                <button class="interval-btn" :class="{active: interval==='daily'}" @click="setInterval('daily')">Daily</button>
-                <button class="interval-btn" :class="{active: interval==='weekly'}" @click="setInterval('weekly')">Weekly</button>
-                <button class="interval-btn" :class="{active: interval==='monthly'}" @click="setInterval('monthly')">Monthly</button>
-                <button class="interval-btn" :class="{active: interval==='yearly'}" @click="setInterval('yearly')">Yearly</button>
+                <button type="button" class="interval-btn" :class="{active: interval==='daily'}" @click="setInterval('daily')">Daily</button>
+                <button type="button" class="interval-btn" :class="{active: interval==='weekly'}" @click="setInterval('weekly')">Weekly</button>
+                <button type="button" class="interval-btn" :class="{active: interval==='monthly'}" @click="setInterval('monthly')">Monthly</button>
+                <button type="button" class="interval-btn" :class="{active: interval==='yearly'}" @click="setInterval('yearly')">Yearly</button>
             </div>
             {{template "date-picker" .}}
         </div>

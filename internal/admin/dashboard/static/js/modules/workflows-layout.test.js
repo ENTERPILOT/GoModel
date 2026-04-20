@@ -191,7 +191,7 @@ test("workflow editor renders inside the shared modal overlay", () => {
 
   assert.match(
     template,
-    /<div class="editor-modal-backdrop"[\s\S]*x-show="workflowFormOpen"[\s\S]*aria-hidden="true"><\/div>\s*<div class="editor-modal-shell editor-modal-shell-wide"[\s\S]*x-show="workflowFormOpen"[\s\S]*@click="closeWorkflowForm\(\)"[\s\S]*@keydown\.escape\.window="workflowFormOpen && closeWorkflowForm\(\)"[\s\S]*<section class="model-editor workflow-editor" x-show="workflowFormOpen" x-ref="workflowEditor" role="dialog" aria-modal="true" aria-label="Workflow editor" @click\.stop>/,
+    /<div class="editor-modal-backdrop"[\s\S]*x-show="workflowFormOpen"[\s\S]*aria-hidden="true"><\/div>\s*<div class="editor-modal-shell editor-modal-shell-wide"[\s\S]*x-show="workflowFormOpen"[\s\S]*@click="closeWorkflowForm\(\)"[\s\S]*@keydown\.escape\.window="workflowFormOpen && !authDialogOpen && closeWorkflowForm\(\)"[\s\S]*<section class="model-editor workflow-editor" x-show="workflowFormOpen" x-ref="workflowEditor" role="dialog" aria-modal="true" aria-label="Workflow editor" @click\.stop>/,
   );
   assert.match(
     template,

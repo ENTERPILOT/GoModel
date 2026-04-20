@@ -42,7 +42,7 @@
          x-cloak
          x-show="workflowFormOpen"
          @click="closeWorkflowForm()"
-         @keydown.escape.window="workflowFormOpen && closeWorkflowForm()">
+         @keydown.escape.window="workflowFormOpen && !authDialogOpen && closeWorkflowForm()">
         <section class="model-editor workflow-editor" x-show="workflowFormOpen" x-ref="workflowEditor" role="dialog" aria-modal="true" aria-label="Workflow editor" @click.stop>
             <form class="form" @submit.prevent="submitWorkflowForm()">
                 <div class="editor-header">

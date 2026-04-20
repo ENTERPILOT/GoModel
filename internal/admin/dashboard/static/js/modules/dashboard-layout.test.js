@@ -453,6 +453,10 @@ test("auth key expirations render as a UTC date with the full UTC timestamp in t
     indexTemplate,
     /id="auth-key-user-path"[^>]*x-model="authKeyForm\.user_path"[^>]*aria-describedby="auth-key-user-path-help-copy"/,
   );
+  assert.match(
+    authKeyForm,
+    /<h3>Create API Key<\/h3>[\s\S]*class="table-action-btn alias-close-btn table-icon-btn"[\s\S]*@click="closeAuthKeyForm\(\)"[\s\S]*{{template "x-icon"}}/,
+  );
   assert.match(indexTemplate, /class="model-editor auth-key-editor"/);
   assert.match(
     plusIconTemplate,
@@ -564,7 +568,7 @@ test("usage request log toolbar puts search above the remaining filters", () => 
 
   assert.match(
     indexTemplate,
-    /<div class="usage-log-toolbar">\s*<div class="usage-filter-row usage-filter-row-search">[\s\S]*x-model="usageLogSearch"[\s\S]*<\/div>\s*<\/div>\s*<div class="usage-filter-row usage-filter-row-controls">[\s\S]*x-model="usageLogModel"[\s\S]*x-model="usageLogProvider"[\s\S]*x-model="usageLogUserPath"/,
+    /<div class="usage-log-toolbar">\s*<div class="usage-filter-row usage-filter-row-search">[\s\S]*aria-label="Search by request ID, model, provider"[\s\S]*x-model="usageLogSearch"[\s\S]*<\/div>\s*<\/div>\s*<div class="usage-filter-row usage-filter-row-controls">[\s\S]*x-model="usageLogModel"[\s\S]*x-model="usageLogProvider"[\s\S]*x-model="usageLogUserPath"/,
   );
   assert.match(
     indexTemplate,
@@ -849,7 +853,7 @@ test("mobile modal editor headers keep the close action beside the title", () =>
 
   assert.match(
     indexTemplate,
-    /<h3>Create API Key<\/h3>[\s\S]*class="table-action-btn alias-close-btn"[\s\S]*@click="closeAuthKeyForm\(\)"/,
+    /<h3>Create API Key<\/h3>[\s\S]*class="table-action-btn alias-close-btn[^"]*"[\s\S]*@click="closeAuthKeyForm\(\)"/,
   );
 
   const modalHeaderRule = readCSSRule(css, ".model-editor .editor-header");
@@ -870,6 +874,38 @@ test("mobile modal editor headers keep the close action beside the title", () =>
   assert.match(modalCloseRule, /flex:\s*0 0 36px/);
   assert.match(modalCloseRule, /width:\s*36px/);
   assert.match(modalCloseRule, /min-width:\s*36px/);
+});
+
+test("modal escape handlers do not close editors behind the auth dialog", () => {
+  const indexTemplate = readDashboardTemplateSource();
+
+  assert.match(indexTemplate, /@keydown\.escape\.window="aliasFormOpen && !authDialogOpen && closeAliasForm\(\)"/);
+  assert.match(indexTemplate, /@keydown\.escape\.window="modelOverrideFormOpen && !authDialogOpen && closeModelOverrideForm\(\)"/);
+  assert.match(indexTemplate, /@keydown\.escape\.window="workflowFormOpen && !authDialogOpen && closeWorkflowForm\(\)"/);
+  assert.match(indexTemplate, /@keydown\.escape\.window="guardrailFormOpen && !authDialogOpen && closeGuardrailForm\(\)"/);
+  assert.match(indexTemplate, /@keydown\.escape\.window="authKeyFormOpen && !authDialogOpen && closeAuthKeyForm\(\)"/);
+});
+
+test("overview interval controls are explicit non-submit buttons", () => {
+  const indexTemplate = readDashboardTemplateSource();
+
+  assert.match(indexTemplate, /<button type="button" class="interval-btn"[^>]*@click="setInterval\('daily'\)">Daily<\/button>/);
+  assert.match(indexTemplate, /<button type="button" class="interval-btn"[^>]*@click="setInterval\('weekly'\)">Weekly<\/button>/);
+  assert.match(indexTemplate, /<button type="button" class="interval-btn"[^>]*@click="setInterval\('monthly'\)">Monthly<\/button>/);
+  assert.match(indexTemplate, /<button type="button" class="interval-btn"[^>]*@click="setInterval\('yearly'\)">Yearly<\/button>/);
+});
+
+test("settings controls describe their inline helper copy", () => {
+  const indexTemplate = readDashboardTemplateSource();
+
+  assert.match(
+    indexTemplate,
+    /id="timezone-override-select"[\s\S]*aria-describedby="timezone-help-copy"/,
+  );
+  assert.match(
+    indexTemplate,
+    /class="pagination-btn pagination-btn-primary pagination-btn-with-icon settings-refresh-btn"[\s\S]*aria-describedby="runtime-refresh-help-copy"/,
+  );
 });
 
 test("usage and audit pages reuse a shared pagination template", () => {

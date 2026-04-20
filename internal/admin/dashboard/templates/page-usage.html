@@ -132,7 +132,7 @@
             <div class="usage-filter-row usage-filter-row-search">
                 <div class="filter-input-wrap">
                     <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
-                    <input type="text" placeholder="Search by request ID, model, provider..." x-model="usageLogSearch" @input.debounce.300ms="fetchUsageLog(true)" class="filter-input">
+                    <input type="text" placeholder="Search by request ID, model, provider..." aria-label="Search by request ID, model, provider" x-model="usageLogSearch" @input.debounce.300ms="fetchUsageLog(true)" class="filter-input">
                 </div>
             </div>
             <div class="usage-filter-row usage-filter-row-controls">

@@ -37,15 +37,17 @@
          x-show="authKeyFormOpen"
          x-transition.opacity.duration.160ms
          @click="closeAuthKeyForm()"
-         @keydown.escape.window="authKeyFormOpen && closeAuthKeyForm()">
+         @keydown.escape.window="authKeyFormOpen && !authDialogOpen && closeAuthKeyForm()">
         <div class="model-editor auth-key-editor" x-show="authKeyFormOpen" role="dialog" aria-modal="true" aria-label="API key editor" @click.stop>
             <form class="form" @submit.prevent="submitAuthKeyForm()">
                 <div class="editor-header">
                     <div>
                         <h3>Create API Key</h3>
                     </div>
-                    <button type="button" class="table-action-btn alias-close-btn"
-                        aria-label="Close" @click="closeAuthKeyForm()">&#x2715;</button>
+                    <button type="button" class="table-action-btn alias-close-btn table-icon-btn"
+                        aria-label="Close" @click="closeAuthKeyForm()">
+                        {{template "x-icon"}}
+                    </button>
                 </div>
 
                 <div class="auth-key-issued-banner" x-show="authKeyIssuedValue">
