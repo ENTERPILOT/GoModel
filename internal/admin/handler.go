@@ -365,6 +365,7 @@ func dashboardTimeZone(c *echo.Context) (string, *time.Location) {
 // format used by the main API handlers in the server package.
 func handleError(c *echo.Context, err error) error {
 	if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
+		logHandledAdminError(c, gatewayErr)
 		return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 	}
 
@@ -374,7 +375,58 @@ func handleError(c *echo.Context, err error) error {
 		StatusCode: http.StatusInternalServerError,
 		Err:        err,
 	}
+	logHandledAdminError(c, fallback)
 	return c.JSON(fallback.HTTPStatusCode(), fallback.ToJSON())
+}
+
+func logHandledAdminError(c *echo.Context, gatewayErr *core.GatewayError) {
+	if gatewayErr == nil {
+		return
+	}
+
+	attrs := []any{
+		"type", gatewayErr.Type,
+		"status", gatewayErr.HTTPStatusCode(),
+		"message", gatewayErr.Message,
+	}
+	if gatewayErr.Provider != "" {
+		attrs = append(attrs, "provider", gatewayErr.Provider)
+	}
+	if gatewayErr.Param != nil {
+		attrs = append(attrs, "param", *gatewayErr.Param)
+	}
+	if gatewayErr.Code != nil {
+		attrs = append(attrs, "code", *gatewayErr.Code)
+	}
+	if gatewayErr.Err != nil {
+		attrs = append(attrs, "error", gatewayErr.Err)
+	}
+	if c != nil && c.Request() != nil {
+		req := c.Request()
+		attrs = append(attrs,
+			"method", req.Method,
+			"path", req.URL.Path,
+		)
+		if requestID := requestIDFromAdminContextOrHeader(req); requestID != "" {
+			attrs = append(attrs, "request_id", requestID)
+		}
+	}
+
+	if gatewayErr.HTTPStatusCode() >= http.StatusInternalServerError {
+		slog.Error("admin request failed", attrs...)
+		return
+	}
+	slog.Warn("admin request failed", attrs...)
+}
+
+func requestIDFromAdminContextOrHeader(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	if requestID := strings.TrimSpace(core.GetRequestID(req.Context())); requestID != "" {
+		return requestID
+	}
+	return strings.TrimSpace(req.Header.Get("X-Request-ID"))
 }
 
 // UsageSummary handles GET /admin/api/v1/usage/summary

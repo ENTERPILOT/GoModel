@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"html/template"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -54,11 +55,15 @@ func New() (*Handler, error) {
 func (h *Handler) Index(c *echo.Context) error {
 	var buf bytes.Buffer
 	if err := h.indexTmpl.ExecuteTemplate(&buf, "layout", nil); err != nil {
+		slog.Error("failed to render admin dashboard", "path", c.Request().URL.Path, "error", err)
 		return err
 	}
 	c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
 	c.Response().WriteHeader(http.StatusOK)
 	_, err := buf.WriteTo(c.Response())
+	if err != nil {
+		slog.Error("failed to write admin dashboard response", "path", c.Request().URL.Path, "error", err)
+	}
 	return err
 }
 
