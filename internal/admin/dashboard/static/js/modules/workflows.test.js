@@ -811,7 +811,7 @@ test('openWorkflowCreate hydrates features and guardrails via shared normalizers
     module.workflowSourceGuardrails = () => ([
         { ref: 'policy-system', step: 30 }
     ]);
-    module.scrollWorkflowFormIntoView = () => {};
+    module.focusWorkflowForm = () => {};
 
     module.openWorkflowCreate({
         scope: {
@@ -854,7 +854,7 @@ test('openWorkflowCreate hydrates features and guardrails via shared normalizers
 
 test('openWorkflowCreate drops blank guardrail steps instead of hydrating them as step zero', () => {
     const module = createWorkflowsModule();
-    module.scrollWorkflowFormIntoView = () => {};
+    module.focusWorkflowForm = () => {};
 
     module.openWorkflowCreate({
         scope: {
@@ -909,7 +909,7 @@ test('editing a cloned workflow preserves retired provider and model options', (
     module.models = [
         { provider_type: 'openai', model: { id: 'gpt-5' } }
     ];
-    module.scrollWorkflowFormIntoView = () => {};
+    module.focusWorkflowForm = () => {};
 
     module.openWorkflowCreate({
         scope: {
@@ -946,6 +946,53 @@ test('editing a cloned workflow preserves retired provider and model options', (
         module.validateWorkflowRequest(invalidPayload),
         'Choose a registered model for the selected provider name.'
     );
+});
+
+test('openWorkflowCreate focuses the workflow editor after opening', () => {
+    let querySelectorCalls = 0;
+    let nextTickCallback = null;
+    let animationFrameCallback = null;
+    const calls = [];
+    const module = createWorkflowsModule({
+        window: {
+            requestAnimationFrame(callback) {
+                animationFrameCallback = callback;
+            }
+        }
+    });
+    module.$refs = {
+        workflowEditor: {
+            querySelector() {
+                querySelectorCalls++;
+                return {
+                    focus(options) {
+                        calls.push(options);
+                    }
+                };
+            }
+        }
+    };
+    module.$nextTick = (callback) => {
+        nextTickCallback = callback;
+    };
+
+    module.openWorkflowCreate();
+
+    assert.equal(module.workflowFormOpen, true);
+    assert.deepEqual(calls, []);
+    assert.equal(typeof nextTickCallback, 'function');
+
+    nextTickCallback();
+
+    assert.equal(typeof animationFrameCallback, 'function');
+    assert.deepEqual(calls, []);
+
+    animationFrameCallback();
+
+    assert.equal(querySelectorCalls, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+        { preventScroll: true }
+    ]);
 });
 
 test('buildWorkflowRequest preserves blank guardrail steps as invalid so validation rejects them', () => {
@@ -1735,6 +1782,54 @@ test('submitWorkflowForm ignores duplicate submissions while a request is alread
 
     assert.equal(fetchCalled, false);
     assert.equal(module.workflowSubmitting, true);
+});
+
+test('submitWorkflowForm logs non-auth HTTP failures before surfacing the UI error', async () => {
+    const errors = [];
+    const module = createWorkflowsModule({
+        console: {
+            error(...args) {
+                errors.push(args.join(' '));
+            }
+        },
+        fetch() {
+            return Promise.resolve({
+                ok: false,
+                status: 500,
+                statusText: 'Internal Server Error',
+                json: async() => ({
+                    error: {
+                        message: 'guardrail catalog refresh failed'
+                    }
+                })
+            });
+        }
+    });
+    module.models = [
+        { provider_type: 'openai', model: { id: 'gpt-5' } }
+    ];
+    module.workflowForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        name: 'OpenAI GPT-5',
+        description: 'Primary translated requests',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false
+        },
+        guardrails: []
+    };
+    module.headers = () => ({});
+    module.closeWorkflowForm = () => {};
+    module.fetchWorkflowsPage = async () => {};
+
+    await module.submitWorkflowForm();
+
+    assert.equal(module.workflowFormError, 'guardrail catalog refresh failed');
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Failed to create workflow: 500 Internal Server Error guardrail catalog refresh failed/);
 });
 
 test('workflowRuntimeFromEntry derives cache hit state from cache_type without relying on headers', () => {

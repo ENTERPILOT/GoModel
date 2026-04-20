@@ -4,19 +4,23 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadGuardrailsModuleFactory() {
+function loadGuardrailsModuleFactory(overrides = {}) {
     const source = fs.readFileSync(path.join(__dirname, 'guardrails.js'), 'utf8');
+    const window = {
+        ...(overrides.window || {})
+    };
     const context = {
-        window: {},
-        console
+        window,
+        console,
+        ...overrides
     };
     vm.createContext(context);
     vm.runInContext(source, context);
     return context.window.dashboardGuardrailsModule;
 }
 
-function createGuardrailsModule() {
-    const factory = loadGuardrailsModuleFactory();
+function createGuardrailsModule(overrides) {
+    const factory = loadGuardrailsModuleFactory(overrides);
     return factory();
 }
 
@@ -197,4 +201,41 @@ test('syncGuardrailTypeSelectValue reapplies the current type after options rend
     module.syncGuardrailTypeSelectValue();
 
     assert.equal(select.value, 'llm_based_altering');
+});
+
+test('submitGuardrailForm logs non-auth HTTP failures before surfacing the UI error', async () => {
+    const errors = [];
+    const module = createGuardrailsModule({
+        console: {
+            error(...args) {
+                errors.push(args.join(' '));
+            }
+        },
+        fetch: async () => ({
+            status: 400,
+            statusText: 'Bad Request',
+            async json() {
+                return {
+                    error: {
+                        message: 'system_prompt content is required'
+                    }
+                };
+            }
+        })
+    });
+
+    module.headers = () => ({ 'Content-Type': 'application/json' });
+    module.guardrailForm = {
+        name: 'privacy',
+        type: 'system_prompt',
+        description: '',
+        user_path: '',
+        config: {}
+    };
+
+    await module.submitGuardrailForm();
+
+    assert.equal(module.guardrailError, 'system_prompt content is required');
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Failed to save guardrail: 400 Bad Request system_prompt content is required/);
 });

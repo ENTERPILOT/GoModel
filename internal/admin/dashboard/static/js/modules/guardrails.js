@@ -192,6 +192,35 @@
                 return true;
             },
 
+            focusGuardrailForm() {
+                const focus = () => {
+                    const refs = this.$refs || {};
+                    const editor = refs.guardrailEditor || null;
+                    if (!editor || typeof editor.querySelector !== 'function') {
+                        return;
+                    }
+                    const field = editor.querySelector('[data-modal-autofocus], input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])');
+                    if (!field || typeof field.focus !== 'function') {
+                        return;
+                    }
+                    field.focus({ preventScroll: true });
+                };
+
+                const focusAfterPaint = () => {
+                    if (typeof global.requestAnimationFrame === 'function') {
+                        global.requestAnimationFrame(focus);
+                        return;
+                    }
+                    focus();
+                };
+
+                if (typeof this.$nextTick === 'function') {
+                    this.$nextTick(focusAfterPaint);
+                    return;
+                }
+                focusAfterPaint();
+            },
+
             openGuardrailCreate() {
                 this.guardrailFormMode = 'create';
                 this.guardrailFormOriginalName = '';
@@ -199,6 +228,7 @@
                 this.guardrailNotice = '';
                 this.guardrailForm = this.defaultGuardrailForm(this.defaultGuardrailType());
                 this.guardrailFormOpen = true;
+                this.focusGuardrailForm();
             },
 
             openGuardrailEdit(guardrail) {
@@ -215,6 +245,7 @@
                     config: this.normalizeGuardrailConfig(guardrail && guardrail.config, resolvedType)
                 };
                 this.guardrailFormOpen = true;
+                this.focusGuardrailForm();
             },
 
             closeGuardrailForm() {
@@ -362,6 +393,7 @@
                     }
                     if (res.status !== 200) {
                         this.guardrailError = await this.guardrailResponseMessage(res, 'Failed to save guardrail.');
+                        console.error('Failed to save guardrail:', res.status, res.statusText, this.guardrailError);
                         return;
                     }
 
@@ -410,6 +442,7 @@
                     }
                     if (res.status !== 204) {
                         this.guardrailError = await this.guardrailResponseMessage(res, 'Failed to delete guardrail.');
+                        console.error('Failed to delete guardrail:', res.status, res.statusText, this.guardrailError);
                         return;
                     }
 

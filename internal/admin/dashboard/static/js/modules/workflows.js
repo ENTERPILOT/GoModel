@@ -480,25 +480,31 @@
                 return String(workflow && workflow.scope_type || '').trim() !== 'global';
             },
 
-            workflowEditorScrollTarget() {
-                if (!global.document || typeof global.document.querySelector !== 'function') {
-                    return null;
-                }
-                return global.document.querySelector('.workflow-editor');
-            },
-
-            scrollWorkflowFormIntoView() {
-                const scroll = () => {
-                    const editor = this.workflowEditorScrollTarget();
-                    if (editor && typeof editor.scrollIntoView === 'function') {
-                        editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            focusWorkflowForm() {
+                const focus = () => {
+                    const refs = this.$refs || {};
+                    const editor = refs.workflowEditor || null;
+                    if (!editor || typeof editor.querySelector !== 'function') {
+                        return;
                     }
+                    const field = editor.querySelector('[data-modal-autofocus], input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])');
+                    if (!field || typeof field.focus !== 'function') {
+                        return;
+                    }
+                    field.focus({ preventScroll: true });
                 };
-                if (typeof global.requestAnimationFrame === 'function') {
-                    global.requestAnimationFrame(scroll);
+                const focusAfterPaint = () => {
+                    if (typeof global.requestAnimationFrame === 'function') {
+                        global.requestAnimationFrame(focus);
+                        return;
+                    }
+                    focus();
+                };
+                if (typeof this.$nextTick === 'function') {
+                    this.$nextTick(focusAfterPaint);
                     return;
                 }
-                scroll();
+                focusAfterPaint();
             },
 
 	            workflowGuardrails(workflow) {
@@ -531,7 +537,7 @@
                         scope_user_path: ''
                     };
                     this.workflowForm = this.defaultWorkflowForm();
-                    this.scrollWorkflowFormIntoView();
+                    this.focusWorkflowForm();
                     return;
                 }
 
@@ -561,7 +567,7 @@
                         step: Number.isFinite(step && step.step) ? step.step : 10
                     }))
                 };
-                this.scrollWorkflowFormIntoView();
+                this.focusWorkflowForm();
             },
 
             closeWorkflowForm() {
@@ -1093,6 +1099,7 @@
                     }
                     if (!res.ok) {
                         this.workflowFormError = await this.workflowResponseMessage(res, 'Unable to create workflow.');
+                        console.error('Failed to create workflow:', res.status, res.statusText, this.workflowFormError);
                         return;
                     }
 
@@ -1472,6 +1479,7 @@
                     }
                     if (!res.ok) {
                         this.workflowError = await this.workflowResponseMessage(res, 'Unable to deactivate workflow.');
+                        console.error('Failed to deactivate workflow:', res.status, res.statusText, this.workflowError);
                         return;
                     }
 

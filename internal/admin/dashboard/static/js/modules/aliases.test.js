@@ -248,14 +248,20 @@ test('openProviderOverrideEdit opens the access editor with provider_name slash 
     assert.equal(module.modelOverrideFormDisplayName, 'All models in openai-primary');
 });
 
-test('openModelOverrideEdit scrolls to the access editor after opening', () => {
+test('openModelOverrideEdit focuses the access editor after opening', () => {
+    let querySelectorCalls = 0;
     const module = createAliasesModule();
     const calls = [];
     let nextTickCallback = null;
     module.$refs = {
         modelOverrideEditor: {
-            scrollIntoView(options) {
-                calls.push(options);
+            querySelector() {
+                querySelectorCalls++;
+                return {
+                    focus(options) {
+                        calls.push(options);
+                    }
+                };
             }
         }
     };
@@ -282,8 +288,50 @@ test('openModelOverrideEdit scrolls to the access editor after opening', () => {
 
     nextTickCallback();
 
+    assert.equal(querySelectorCalls, 1);
     assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
-        { behavior: 'smooth', block: 'start' }
+        { preventScroll: true }
+    ]);
+});
+
+test('openAliasEdit focuses the alias editor after opening', () => {
+    let querySelectorCalls = 0;
+    const module = createAliasesModule();
+    const calls = [];
+    let nextTickCallback = null;
+    module.$refs = {
+        aliasEditor: {
+            querySelector() {
+                querySelectorCalls++;
+                return {
+                    focus(options) {
+                        calls.push(options);
+                    }
+                };
+            }
+        }
+    };
+    module.$nextTick = (callback) => {
+        nextTickCallback = callback;
+    };
+
+    module.openAliasEdit({
+        name: 'smart',
+        target_provider: 'openai',
+        target_model: 'gpt-4o',
+        description: 'Primary chat alias',
+        enabled: true
+    });
+
+    assert.equal(module.aliasFormOpen, true);
+    assert.equal(module.aliasFormMode, 'edit');
+    assert.deepEqual(calls, []);
+
+    nextTickCallback();
+
+    assert.equal(querySelectorCalls, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+        { preventScroll: true }
     ]);
 });
 
@@ -440,5 +488,94 @@ test('alias write paths use generation-aware request handling for stale auth res
         assert.equal(module.needsAuth, false, scenario.name);
         assert.equal(module.authError, false, scenario.name);
         assert.equal(module[scenario.errorKey], '', scenario.name);
+    }
+});
+
+test('alias and model override forms surface nested HTTP error payloads', async() => {
+    const scenarios = [
+        {
+            name: 'submitAliasForm',
+            message: 'alias target model is required',
+            errorKey: 'aliasFormError',
+            setup(module) {
+                module.aliasForm = {
+                    name: 'short',
+                    target_model: 'openai/gpt-4o',
+                    description: '',
+                    enabled: true
+                };
+            },
+            run(module) {
+                return module.submitAliasForm();
+            }
+        },
+        {
+            name: 'submitModelOverrideForm',
+            message: 'user path is outside allowed scope',
+            errorKey: 'modelOverrideError',
+            setup(module) {
+                module.modelOverrideForm = {
+                    selector: 'openai/gpt-4o',
+                    user_paths: '/team/alpha'
+                };
+            },
+            run(module) {
+                return module.submitModelOverrideForm();
+            }
+        }
+    ];
+
+    for (const scenario of scenarios) {
+        const module = createAliasesModule({
+            context: {
+                fetch: async() => ({
+                    ok: false,
+                    status: 400,
+                    statusText: 'Bad Request',
+                    json: async() => ({
+                        error: {
+                            message: scenario.message
+                        }
+                    })
+                })
+            }
+        });
+
+        Object.assign(module, {
+            aliases: [],
+            models: [],
+            modelOverrideViews: [],
+            aliasesAvailable: true,
+            modelOverridesAvailable: true,
+            requestOptions(options) {
+                return {
+                    ...(options || {}),
+                    headers: {}
+                };
+            },
+            headers() {
+                return {};
+            },
+            handleFetchResponse() {
+                return false;
+            },
+            isStaleAuthFetchResult() {
+                return false;
+            },
+            fetchAliases() {
+                throw new Error('fetchAliases should not run for ' + scenario.name);
+            },
+            fetchModels() {
+                throw new Error('fetchModels should not run for ' + scenario.name);
+            },
+            fetchModelOverrides() {
+                throw new Error('fetchModelOverrides should not run for ' + scenario.name);
+            }
+        });
+
+        scenario.setup(module);
+        await scenario.run(module);
+
+        assert.equal(module[scenario.errorKey], scenario.message, scenario.name);
     }
 });

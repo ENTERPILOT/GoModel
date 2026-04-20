@@ -129,6 +129,15 @@
                 if (!this.authKeyIssuedValue) {
                     this.authKeyCopyState.resetFeedback();
                     this.authKeyForm = this.defaultAuthKeyForm();
+                    if (typeof this.$nextTick === 'function') {
+                        this.$nextTick(() => {
+                            const refs = this.$refs || {};
+                            const input = refs.authKeyNameInput || null;
+                            if (input && typeof input.focus === 'function') {
+                                input.focus({ preventScroll: true });
+                            }
+                        });
+                    }
                 }
             },
 
@@ -211,6 +220,7 @@
                     }
                     if (res.status !== 201) {
                         this.authKeyError = await this._authKeyResponseMessage(res, 'Failed to create API key.');
+                        console.error('Failed to create API key:', res.status, res.statusText, this.authKeyError);
                         return;
                     }
                     const issued = await res.json();
@@ -257,6 +267,7 @@
                     }
                     if (res.status !== 204) {
                         this.authKeyError = await this._authKeyResponseMessage(res, 'Failed to deactivate key.');
+                        console.error('Failed to deactivate auth key:', res.status, res.statusText, this.authKeyError);
                         return;
                     }
                     await this.fetchAuthKeys();

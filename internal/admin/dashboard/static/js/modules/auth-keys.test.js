@@ -312,6 +312,42 @@ test('fetchAuthKeys preserves existing rows on authentication failures handled b
     assert.equal(module.needsAuth, true);
 });
 
+test('submitAuthKeyForm logs non-auth HTTP failures before surfacing the UI error', async () => {
+    const errors = [];
+    const module = createAuthKeysModule({
+        console: {
+            error(...args) {
+                errors.push(args.join(' '));
+            }
+        },
+        fetch: async () => ({
+            status: 500,
+            statusText: 'Internal Server Error',
+            async json() {
+                return {
+                    error: {
+                        message: 'storage unavailable'
+                    }
+                };
+            }
+        })
+    });
+
+    module.headers = () => ({ 'Content-Type': 'application/json' });
+    module.authKeyForm = {
+        name: 'ci-deploy',
+        description: '',
+        user_path: '',
+        expires_at: ''
+    };
+
+    await module.submitAuthKeyForm();
+
+    assert.equal(module.authKeyError, 'storage unavailable');
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Failed to create API key: 500 Internal Server Error storage unavailable/);
+});
+
 test('openAuthKeyForm and closeAuthKeyForm preserve an issued key instead of clearing it', () => {
     const module = createAuthKeysModule();
     module.authKeyIssuedValue = 'sk_gom_once';
