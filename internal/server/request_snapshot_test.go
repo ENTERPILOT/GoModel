@@ -48,7 +48,7 @@ func TestRequestSnapshotCapture_SetsSnapshotAndSemantics(t *testing.T) {
 	reqBody := `{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema"}}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions?foo=bar", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "req-123")
+	req.Header.Set(core.RequestIDHeader, "req-123")
 	req.Header.Set("Traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -264,7 +264,7 @@ func TestRequestSnapshotCapture_GeneratesRequestIDWhenMissing(t *testing.T) {
 	if _, parseErr := uuid.Parse(capturedFrame.RequestID); parseErr != nil {
 		t.Fatalf("generated request id is not a valid UUID: %v", parseErr)
 	}
-	if got := rec.Result().Header.Get("X-Request-ID"); got != capturedFrame.RequestID {
+	if got := rec.Result().Header.Get(core.RequestIDHeader); got != capturedFrame.RequestID {
 		t.Fatalf("response X-Request-ID = %q, want %q", got, capturedFrame.RequestID)
 	}
 	if got := core.GetRequestID(c.Request().Context()); got != capturedFrame.RequestID {
@@ -290,7 +290,7 @@ func TestModelValidation_UsesSemanticEnvelopeWithoutReadingBody(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "req-123")
+	req.Header.Set(core.RequestIDHeader, "req-123")
 	req.Body = &explodingReadCloser{}
 
 	frame := core.NewRequestSnapshot(

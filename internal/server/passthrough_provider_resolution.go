@@ -21,7 +21,6 @@ const (
 	passthroughInstanceNameKey passthroughContextKey = "passthrough-instance-name"
 	passthroughProviderTypeKey passthroughContextKey = "passthrough-provider-type"
 	passthroughProviderKey     passthroughContextKey = "passthrough-provider"
-	passthroughRequestIDKey    passthroughContextKey = "passthrough-request-id"
 )
 
 func setPassthroughResolution(c *echo.Context, instanceName, providerType string, provider core.PassthroughProvider) {
@@ -42,15 +41,6 @@ func getPassthroughProviderType(c *echo.Context) string {
 
 func getPassthroughProvider(c *echo.Context) core.PassthroughProvider {
 	v, _ := c.Get(string(passthroughProviderKey)).(core.PassthroughProvider)
-	return v
-}
-
-func setPassthroughRequestID(c *echo.Context, id string) {
-	c.Set(string(passthroughRequestIDKey), id)
-}
-
-func getPassthroughRequestID(c *echo.Context) string {
-	v, _ := c.Get(string(passthroughRequestIDKey)).(string)
 	return v
 }
 

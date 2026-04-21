@@ -7,31 +7,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
+	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 )
-
-const goModelRequestIDHeader = "X-GoModel-Request-ID"
-
-// GoModelRequestIDMiddleware assigns a unique X-GoModel-Request-ID to every
-// passthrough request. It reads a client-supplied value first; if absent it
-// generates a UUID. The value is stamped on both the inbound context (via
-// setPassthroughRequestID) and the outbound response header.
-func GoModelRequestIDMiddleware() echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c *echo.Context) error {
-			id := strings.TrimSpace(c.Request().Header.Get(goModelRequestIDHeader))
-			if id == "" {
-				id = uuid.NewString()
-			}
-			setPassthroughRequestID(c, id)
-			c.Response().Header().Set(goModelRequestIDHeader, id)
-			return next(c)
-		}
-	}
-}
 
 // PassthroughProviderResolutionMiddleware resolves the :provider URL parameter
 // (the YAML instance name) to a concrete PassthroughProvider and stores the
@@ -53,6 +33,9 @@ func PassthroughProviderResolutionMiddleware(provider core.RoutableProvider, dis
 				return handleError(c, core.NewInvalidRequestError("passthrough provider instance name is required", nil))
 			}
 
+			// Best-effort model extraction for audit before any body consumption.
+			bestModel := passthroughBestEffortModel(c)
+
 			if _, disabled := disabledInstances[instanceName]; disabled {
 				return handleError(c, core.NewInvalidRequestError(
 					"passthrough is disabled for provider "+instanceName, nil,
@@ -69,10 +52,20 @@ func PassthroughProviderResolutionMiddleware(provider core.RoutableProvider, dis
 				return handleError(c, err)
 			}
 
+			auditlog.EnrichEntry(c, bestModel, providerType)
+			auditlog.EnrichEntryWithResolvedRoute(c, bestModel, providerType, instanceName)
+
 			setPassthroughResolution(c, instanceName, providerType, pp)
 			return next(c)
 		}
 	}
+}
+
+// passthroughBestEffortModel does a non-destructive body peek to extract the
+// "model" field for audit enrichment before the body has been formally read.
+func passthroughBestEffortModel(c *echo.Context) string {
+	body, _ := readAndRestoreBody(c.Request())
+	return bestEffortModel(body)
 }
 
 // PassthroughGuardrailsMiddleware optionally runs request-side guardrails

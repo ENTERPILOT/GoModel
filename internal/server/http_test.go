@@ -29,7 +29,7 @@ func TestRequestIDMiddleware(t *testing.T) {
 
 		srv.ServeHTTP(rec, req)
 
-		got := rec.Header().Get("X-Request-ID")
+		got := rec.Header().Get(core.RequestIDHeader)
 		if got == "" {
 			t.Fatal("expected X-Request-ID in response header, got empty")
 		}
@@ -41,19 +41,19 @@ func TestRequestIDMiddleware(t *testing.T) {
 
 	t.Run("preserves existing request ID", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)
-		req.Header.Set("X-Request-ID", "my-custom-id")
+		req.Header.Set(core.RequestIDHeader, "my-custom-id")
 		rec := httptest.NewRecorder()
 
 		srv.ServeHTTP(rec, req)
 
 		// Request header must not be overwritten
-		got := req.Header.Get("X-Request-ID")
+		got := req.Header.Get(core.RequestIDHeader)
 		if got != "my-custom-id" {
 			t.Errorf("expected request header to be preserved as %q, got %q", "my-custom-id", got)
 		}
 
 		// Response header must echo the client-provided ID back
-		respID := rec.Header().Get("X-Request-ID")
+		respID := rec.Header().Get(core.RequestIDHeader)
 		if respID != "my-custom-id" {
 			t.Errorf("expected response header X-Request-ID to be %q, got %q", "my-custom-id", respID)
 		}

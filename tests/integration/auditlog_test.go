@@ -29,7 +29,7 @@ func TestAuditLog_CapturesAllFields_PostgreSQL(t *testing.T) {
 	// Make HTTP request with custom request ID header
 	payload := newChatRequest("gpt-4", "Hello, world!")
 	resp := sendChatRequestWithHeaders(t, fixture.ServerURL, payload, map[string]string{
-		"X-Request-ID": requestID,
+		core.RequestIDHeader: requestID,
 	})
 	require.Equal(t, 200, resp.StatusCode)
 	closeBody(resp)
@@ -83,7 +83,7 @@ func TestAuditLog_CapturesAllFields_MongoDB(t *testing.T) {
 	// Make HTTP request
 	payload := newChatRequest("gpt-4", "Hello, world!")
 	resp := sendChatRequestWithHeaders(t, fixture.ServerURL, payload, map[string]string{
-		"X-Request-ID": requestID,
+		core.RequestIDHeader: requestID,
 	})
 	require.Equal(t, 200, resp.StatusCode)
 	closeBody(resp)
@@ -126,7 +126,7 @@ func TestAuditLog_OnlyModelInteractions_PostgreSQL(t *testing.T) {
 	// Make a model request (should be logged)
 	payload := newChatRequest("gpt-4", "Hello!")
 	resp := sendChatRequestWithHeaders(t, fixture.ServerURL, payload, map[string]string{
-		"X-Request-ID": requestID,
+		core.RequestIDHeader: requestID,
 	})
 	require.Equal(t, 200, resp.StatusCode)
 	closeBody(resp)
@@ -157,7 +157,7 @@ func TestAuditLog_WithoutBodies_PostgreSQL(t *testing.T) {
 
 	payload := newChatRequest("gpt-4", "Hello!")
 	resp := sendChatRequestWithHeaders(t, fixture.ServerURL, payload, map[string]string{
-		"X-Request-ID": requestID,
+		core.RequestIDHeader: requestID,
 	})
 	require.Equal(t, 200, resp.StatusCode)
 	closeBody(resp)
@@ -191,7 +191,7 @@ func TestAuditLog_ResponsesEndpoint_PostgreSQL(t *testing.T) {
 
 	payload := newResponsesRequest("gpt-4", "Hello!")
 	resp := sendResponsesRequestWithHeaders(t, fixture.ServerURL, payload, map[string]string{
-		"X-Request-ID": requestID,
+		core.RequestIDHeader: requestID,
 	})
 	require.Equal(t, 200, resp.StatusCode)
 	closeBody(resp)
@@ -224,7 +224,7 @@ func TestAuditLog_MultipleRequests_PostgreSQL(t *testing.T) {
 		requestIDs[i] = uuid.New().String()
 		payload := newChatRequest("gpt-4", "Hello!")
 		resp := sendChatRequestWithHeaders(t, fixture.ServerURL, payload, map[string]string{
-			"X-Request-ID": requestIDs[i],
+			core.RequestIDHeader: requestIDs[i],
 		})
 		require.Equal(t, 200, resp.StatusCode)
 		closeBody(resp)
@@ -259,7 +259,7 @@ func TestAuditLog_DifferentModels_PostgreSQL(t *testing.T) {
 
 		payload := newChatRequest(model, "Hello!")
 		resp := sendChatRequestWithHeaders(t, fixture.ServerURL, payload, map[string]string{
-			"X-Request-ID": reqID,
+			core.RequestIDHeader: reqID,
 		})
 		require.Equal(t, 200, resp.StatusCode)
 		closeBody(resp)
@@ -290,7 +290,7 @@ func TestAuditLog_StreamingChatCompletion_PostgreSQL(t *testing.T) {
 	// Make streaming request
 	payload := newStreamingChatRequest("gpt-4", "Hello, world!")
 	resp := sendChatRequestWithHeaders(t, fixture.ServerURL, payload, map[string]string{
-		"X-Request-ID": requestID,
+		core.RequestIDHeader: requestID,
 	})
 	require.Equal(t, 200, resp.StatusCode)
 	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
@@ -336,7 +336,7 @@ func TestAuditLog_StreamingChatCompletion_MongoDB(t *testing.T) {
 	// Make streaming request
 	payload := newStreamingChatRequest("gpt-4", "Hello, world!")
 	resp := sendChatRequestWithHeaders(t, fixture.ServerURL, payload, map[string]string{
-		"X-Request-ID": requestID,
+		core.RequestIDHeader: requestID,
 	})
 	require.Equal(t, 200, resp.StatusCode)
 	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
@@ -378,7 +378,7 @@ func TestAuditLog_StreamingResponses_PostgreSQL(t *testing.T) {
 	// Make streaming responses request
 	payload := newStreamingResponsesRequest("gpt-4", "Hello!")
 	resp := sendResponsesRequestWithHeaders(t, fixture.ServerURL, payload, map[string]string{
-		"X-Request-ID": requestID,
+		core.RequestIDHeader: requestID,
 	})
 	require.Equal(t, 200, resp.StatusCode)
 	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))

@@ -133,7 +133,6 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	passthroughSvc := &passthroughService{
-		logger:            auditLogger,
 		responseHandler:   newRawPassthroughResponseHandler(),
 		normalizeV1Prefix: passthroughV1PrefixNormalizationEnabled(cfg),
 	}
@@ -232,27 +231,26 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	e.Use(middleware.BodyLimit(parseBodySizeLimitBytes(bodySizeLimit)))
 
-	// Request ID middleware for non-passthrough routes. Passthrough routes use
-	// X-GoModel-Request-ID via the dedicated group middleware instead.
-	e.Use(skipForPassthrough(func(next echo.HandlerFunc) echo.HandlerFunc {
+	// Stamp X-GoModel-Request-ID on every inbound request. Clients may supply
+	// their own value; if absent a UUID is generated and echoed in the response.
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			req, id := ensureRequestID(c.Request())
 			c.SetRequest(req)
-			c.Response().Header().Set("X-Request-ID", id)
+			c.Response().Header().Set(core.RequestIDHeader, id)
 			return next(c)
 		}
-	}))
+	})
 	e.Use(modelInteractionWriteDeadlineMiddleware())
 
 	// Ingress capture (before auth/audit/model validation so they can consume shared raw request state).
-	// Skipped for passthrough routes — no snapshot semantics needed there.
+	// Skipped for passthrough routes — snapshot semantics are not applicable there.
 	e.Use(skipForPassthrough(RequestSnapshotCapture()))
 
-	// Audit logging runs before workflow resolution so early workflow resolution/validation
-	// failures are still logged. Skipped for passthrough routes which use their own
-	// lean audit path via recordPassthroughAudit.
+	// Audit logging runs before workflow resolution so early validation failures
+	// are still captured. Runs on all routes including passthrough.
 	if cfg != nil && cfg.AuditLogger != nil && cfg.AuditLogger.Config().Enabled {
-		e.Use(skipForPassthrough(auditlog.Middleware(cfg.AuditLogger)))
+		e.Use(auditlog.Middleware(cfg.AuditLogger))
 	}
 
 	// Authentication (skips public paths)
@@ -287,12 +285,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		})
 	}
 
-	// Passthrough route group — dedicated middleware chain, independent of the
-	// global stack above. The global middlewares above skip passthrough paths
-	// (via skipForPassthrough); this group handles observability and resolution.
+	// Passthrough route group — dedicated middleware chain for provider resolution
+	// and guardrails. Request ID and audit are handled by the global stack above.
 	if cfg == nil || !cfg.DisablePassthroughRoutes {
 		pg := e.Group("/p/:provider")
-		pg.Use(GoModelRequestIDMiddleware())
 		pg.Use(PassthroughProviderResolutionMiddleware(provider, passthroughDisabled))
 		pg.Use(PassthroughGuardrailsMiddleware(passthroughGuardrailPatcher))
 		pg.Any("/*", passthroughSvc.ProviderPassthrough)

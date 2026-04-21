@@ -177,7 +177,7 @@ func TestInternalRequestHeaders_AllowlistsSafeSnapshotHeaders(t *testing.T) {
 	if got := headers.Get("Content-Type"); got != "application/json" {
 		t.Fatalf("Content-Type = %q, want application/json default", got)
 	}
-	if got := headers.Get("X-Request-ID"); got != "req_123" {
+	if got := headers.Get(core.RequestIDHeader); got != "req_123" {
 		t.Fatalf("X-Request-ID = %q, want req_123", got)
 	}
 	if got := headers.Get("Authorization"); got != "" {
@@ -888,7 +888,7 @@ func TestHandleRequest_StreamingExactHitAuditLogsCachedResponseBody(t *testing.T
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Request-ID", "req-cache-audit")
+		req.Header.Set(core.RequestIDHeader, "req-cache-audit")
 		plan := &core.Workflow{
 			Mode:         core.ExecutionModeTranslated,
 			ProviderType: "openai",

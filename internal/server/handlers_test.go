@@ -613,16 +613,24 @@ func (p *mockDirectPassthroughProvider) Passthrough(_ context.Context, req *core
 // newPassthroughTestEcho creates an Echo instance with the passthrough route
 // registered and pre-wired with inline middleware that injects the resolved
 // provider into context — simulating what PassthroughProviderResolutionMiddleware
-// and GoModelRequestIDMiddleware do in production.
+// and the global request ID middleware do in production.
 func newPassthroughTestEcho(h *Handler, pp core.PassthroughProvider, instanceName, providerType string) *echo.Echo {
+	return newPassthroughTestEchoWithLogger(h, pp, instanceName, providerType, nil)
+}
+
+func newPassthroughTestEchoWithLogger(h *Handler, pp core.PassthroughProvider, instanceName, providerType string, logger auditlog.LoggerInterface) *echo.Echo {
 	e := echo.New()
+	if logger != nil {
+		e.Use(auditlog.Middleware(logger))
+	}
 	e.Any("/p/:provider/*", func(c *echo.Context) error {
-		id := strings.TrimSpace(c.Request().Header.Get(goModelRequestIDHeader))
-		if id == "" {
-			id = "test-request-id"
-		}
+		httpReq, _ := ensureRequestID(c.Request())
+		c.SetRequest(httpReq)
+		body, _ := readAndRestoreBody(c.Request())
+		model := bestEffortModel(body)
+		auditlog.EnrichEntry(c, model, providerType)
+		auditlog.EnrichEntryWithResolvedRoute(c, model, providerType, instanceName)
 		setPassthroughResolution(c, instanceName, providerType, pp)
-		setPassthroughRequestID(c, id)
 		return h.ProviderPassthrough(c)
 	})
 	return e
@@ -1363,7 +1371,7 @@ func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "req-ingress-1")
+	req.Header.Set(core.RequestIDHeader, "req-ingress-1")
 	req.Body = &explodingReadCloser{}
 
 	frame := core.NewRequestSnapshot(
@@ -2572,7 +2580,7 @@ func TestFlushStream_ReturnsWriteError(t *testing.T) {
 func TestRequestIDFromContextOrHeader(t *testing.T) {
 	t.Run("prefers context request id", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-		req.Header.Set("X-Request-ID", "header-id")
+		req.Header.Set(core.RequestIDHeader, "header-id")
 		req = req.WithContext(core.WithRequestID(req.Context(), "context-id"))
 
 		if got := requestIDFromContextOrHeader(req); got != "context-id" {
@@ -2582,7 +2590,7 @@ func TestRequestIDFromContextOrHeader(t *testing.T) {
 
 	t.Run("falls back to header request id", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-		req.Header.Set("X-Request-ID", "  header-id  ")
+		req.Header.Set(core.RequestIDHeader, "  header-id  ")
 
 		if got := requestIDFromContextOrHeader(req); got != "header-id" {
 			t.Fatalf("requestIDFromContextOrHeader() = %q, want header-id", got)
@@ -2606,7 +2614,7 @@ func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 	handler := NewHandler(&mockProvider{}, logger, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("X-Request-ID", "req-stream-1")
+	req.Header.Set(core.RequestIDHeader, "req-stream-1")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{
@@ -3414,7 +3422,7 @@ func TestEmbeddings_WithUsageTracking(t *testing.T) {
 	reqBody := `{"model": "text-embedding-3-small", "input": "hello world"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "test-req-embed-usage")
+	req.Header.Set(core.RequestIDHeader, "test-req-embed-usage")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -4515,7 +4523,7 @@ func TestBatchResults_LogsUsageOnce(t *testing.T) {
 	}`
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
-	createReq.Header.Set("X-Request-ID", "batch-usage-request-id")
+	createReq.Header.Set(core.RequestIDHeader, "batch-usage-request-id")
 	createRec := httptest.NewRecorder()
 	createCtx := e.NewContext(createReq, createRec)
 	if err := handler.Batches(createCtx); err != nil {
@@ -5222,7 +5230,7 @@ func TestStreamingResponses_ChatBackedProviderWritesExactlyOneUsageEntry(t *test
 	reqBody := `{"model":"gemini-2.0-flash","input":"Hello","stream":true}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "req-stream-responses-1")
+	req.Header.Set(core.RequestIDHeader, "req-stream-responses-1")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -6183,11 +6191,8 @@ func TestProviderPassthrough_OpenAI(t *testing.T) {
 	if got := pp.lastReq.Headers.Get("OpenAI-Beta"); got != "responses=v1" {
 		t.Fatalf("OpenAI-Beta = %q, want responses=v1", got)
 	}
-	if got := pp.lastReq.Headers.Get("X-Request-ID"); got != "" {
-		t.Fatalf("X-Request-ID should not be forwarded to upstream; got %q", got)
-	}
-	if got := pp.lastReq.Headers.Get(goModelRequestIDHeader); got == "" {
-		t.Fatalf("%s should be set on upstream request", goModelRequestIDHeader)
+	if got := pp.lastReq.Headers.Get(core.RequestIDHeader); got == "" {
+		t.Fatalf("%s should be set on upstream request", core.RequestIDHeader)
 	}
 	if got := pp.lastReq.Headers.Get(core.UserPathHeader); got != "" {
 		t.Fatalf("%s should not be forwarded, got %q", core.UserPathHeader, got)
@@ -6304,7 +6309,7 @@ func TestProviderPassthrough_AuditRecordsModelFromBody(t *testing.T) {
 
 	handler := NewHandler(provider, logger, nil, nil)
 	pp := &mockDirectPassthroughProvider{inner: provider}
-	e := newPassthroughTestEcho(handler, pp, "openai1", "openai")
+	e := newPassthroughTestEchoWithLogger(handler, pp, "openai1", "openai", logger)
 
 	req := httptest.NewRequest(http.MethodPost, "/p/openai1/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
 	req.Header.Set("Content-Type", "application/json")

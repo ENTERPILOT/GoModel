@@ -38,7 +38,7 @@ func (h *rawPassthroughResponseHandler) Handle(c *echo.Context, requestID string
 	copyPassthroughResponseHeaders(c.Response().Header(), resp.Headers)
 
 	if requestID != "" {
-		c.Response().Header().Set(goModelRequestIDHeader, requestID)
+		c.Response().Header().Set(core.RequestIDHeader, requestID)
 	}
 
 	c.Response().WriteHeader(resp.StatusCode)

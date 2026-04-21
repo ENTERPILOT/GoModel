@@ -28,7 +28,7 @@ func buildPassthroughHeaders(_ context.Context, src http.Header, goModelRequestI
 		dst[canonicalKey] = clonedValues
 	}
 	if id := strings.TrimSpace(goModelRequestID); id != "" {
-		dst.Set(goModelRequestIDHeader, id)
+		dst.Set(core.RequestIDHeader, id)
 	}
 	if len(dst) == 0 {
 		return nil
@@ -51,8 +51,7 @@ func skipPassthroughHeader(key string) bool {
 func skipPassthroughRequestHeader(key string) bool {
 	canonicalKey := http.CanonicalHeaderKey(strings.TrimSpace(key))
 	switch canonicalKey {
-	case http.CanonicalHeaderKey("X-Request-ID"),
-		http.CanonicalHeaderKey(goModelRequestIDHeader),
+	case http.CanonicalHeaderKey(core.RequestIDHeader),
 		http.CanonicalHeaderKey(core.UserPathHeader):
 		return true
 	}

@@ -528,7 +528,7 @@ func TestMiddleware_UsesWorkflowRequestID(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-nano"}`))
-	req.Header.Set("X-Request-ID", "header-req-id")
+	req.Header.Set(core.RequestIDHeader, "header-req-id")
 	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
 		RequestID:    "workflow-req-id",
 		ProviderType: "openai",

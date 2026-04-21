@@ -426,7 +426,7 @@ func requestIDFromAdminContextOrHeader(req *http.Request) string {
 	if requestID := strings.TrimSpace(core.GetRequestID(req.Context())); requestID != "" {
 		return requestID
 	}
-	return strings.TrimSpace(req.Header.Get("X-Request-ID"))
+	return strings.TrimSpace(req.Header.Get(core.RequestIDHeader))
 }
 
 // UsageSummary handles GET /admin/api/v1/usage/summary

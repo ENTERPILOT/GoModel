@@ -31,8 +31,10 @@ func TestPassthroughRoute_ProviderPassthrough_ForwardsResponse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
+	req.Header.Set(core.RequestIDHeader, "req-123")
+	req, _ = ensureRequestID(req)
+	c.SetRequest(req)
 	setPassthroughResolution(c, "openai", "openai", pp)
-	setPassthroughRequestID(c, "req-123")
 
 	svc := &passthroughService{
 		responseHandler:   newRawPassthroughResponseHandler(),
@@ -43,7 +45,7 @@ func TestPassthroughRoute_ProviderPassthrough_ForwardsResponse(t *testing.T) {
 
 	assert.Equal(t, 200, rec.Code)
 	assert.Equal(t, `{"result":"ok"}`, rec.Body.String())
-	assert.Equal(t, "req-123", rec.Header().Get("X-GoModel-Request-ID"))
+	assert.Equal(t, "req-123", rec.Header().Get(core.RequestIDHeader))
 }
 
 func TestPassthroughRoute_GuardrailsMiddleware_RestoresBody(t *testing.T) {
@@ -93,48 +95,26 @@ func TestPassthroughRoute_ProviderResolutionMiddleware_RejectsDisabledInstance(t
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestPassthroughRoute_RequestIDMiddleware_GeneratesUUID(t *testing.T) {
-	e := echo.New()
+func TestPassthroughRoute_RequestID_GeneratesUUID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/p/openai/v1/models", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	var capturedID string
-	handler := GoModelRequestIDMiddleware()(func(c *echo.Context) error {
-		capturedID = getPassthroughRequestID(c)
-		return c.String(200, "ok")
-	})
-
-	err := handler(c)
-	require.NoError(t, err)
-	assert.NotEmpty(t, capturedID)
-	assert.Equal(t, capturedID, rec.Header().Get("X-GoModel-Request-ID"))
+	req, id := ensureRequestID(req)
+	assert.NotEmpty(t, id)
+	assert.Equal(t, id, req.Header.Get(core.RequestIDHeader))
 }
 
-func TestPassthroughRoute_RequestIDMiddleware_EchoesClientID(t *testing.T) {
-	e := echo.New()
+func TestPassthroughRoute_RequestID_EchoesClientID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/p/openai/v1/models", nil)
-	req.Header.Set("X-GoModel-Request-ID", "client-123")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	var capturedID string
-	handler := GoModelRequestIDMiddleware()(func(c *echo.Context) error {
-		capturedID = getPassthroughRequestID(c)
-		return c.String(200, "ok")
-	})
-
-	err := handler(c)
-	require.NoError(t, err)
-	assert.Equal(t, "client-123", capturedID)
-	assert.Equal(t, "client-123", rec.Header().Get("X-GoModel-Request-ID"))
+	req.Header.Set(core.RequestIDHeader, "client-123")
+	req, id := ensureRequestID(req)
+	assert.Equal(t, "client-123", id)
+	assert.Equal(t, "client-123", req.Header.Get(core.RequestIDHeader))
 }
 
 func TestPassthroughRoute_HeaderFiltering_StripsSensitiveHeaders(t *testing.T) {
 	req := &http.Request{
 		Header: http.Header{
 			"Authorization":       {"Bearer token"},
-			"X-Request-ID":        {"internal-id"},
+			core.RequestIDHeader:        {"internal-id"},
 			"X-Api-Key":           {"api-key"},
 			"Content-Type":        {"application/json"},
 			"User-Agent":          {"test-client"},
@@ -146,7 +126,6 @@ func TestPassthroughRoute_HeaderFiltering_StripsSensitiveHeaders(t *testing.T) {
 
 	// Sensitive headers should be stripped
 	assert.Empty(t, headers.Get("Authorization"))
-	assert.Empty(t, headers.Get("X-Request-ID"))
 	assert.Empty(t, headers.Get("X-Api-Key"))
 	assert.Empty(t, headers.Get("X-Forwarded-For"))
 
@@ -154,8 +133,8 @@ func TestPassthroughRoute_HeaderFiltering_StripsSensitiveHeaders(t *testing.T) {
 	assert.Equal(t, "application/json", headers.Get("Content-Type"))
 	assert.Equal(t, "test-client", headers.Get("User-Agent"))
 
-	// GoModel request ID should be injected
-	assert.Equal(t, "req-123", headers.Get("X-GoModel-Request-ID"))
+	// Client-supplied request ID is replaced by the gateway-generated one
+	assert.Equal(t, "req-123", headers.Get(core.RequestIDHeader))
 }
 
 type mockPatcher struct {

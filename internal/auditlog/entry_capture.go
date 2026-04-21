@@ -190,7 +190,7 @@ func internalJSONAuditHeaders(ctx context.Context, requestID string) http.Header
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	if requestID != "" {
-		headers.Set("X-Request-ID", requestID)
+		headers.Set(core.RequestIDHeader, requestID)
 	}
 	if userPath := strings.TrimSpace(core.UserPathFromContext(ctx)); userPath != "" {
 		headers.Set(core.UserPathHeader, userPath)

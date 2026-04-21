@@ -56,7 +56,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			req := c.Request()
 
 			// Read request ID (always set by the request ID middleware in http.go)
-			requestID := req.Header.Get("X-Request-ID")
+			requestID := req.Header.Get(core.RequestIDHeader)
 			userPath := core.UserPathFromContext(req.Context())
 			if userPath == "" {
 				userPath = "/"

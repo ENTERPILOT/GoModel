@@ -357,7 +357,7 @@ func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo
 
 	copyPassthroughResponseHeaders(c.Response().Header(), resp.Headers)
 	if requestID != "" {
-		c.Response().Header().Set(goModelRequestIDHeader, requestID)
+		c.Response().Header().Set(core.RequestIDHeader, requestID)
 	}
 	model := resolvedModelFromWorkflow(workflow, req.Model)
 	providerName := providerNameFromWorkflow(workflow)
