@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -34,7 +36,9 @@ func TestPassthroughRoute_ProviderPassthrough_ForwardsResponse(t *testing.T) {
 	req.Header.Set(core.RequestIDHeader, "req-123")
 	req, _ = ensureRequestID(req)
 	c.SetRequest(req)
-	setPassthroughResolution(c, "openai", "openai", pp)
+	setPassthroughResolution(c, "openai", pp)
+	assert.Equal(t, "openai", getPassthroughProviderType(c))
+	assert.Equal(t, pp, getPassthroughProvider(c))
 
 	svc := &passthroughService{
 		responseHandler:   newRawPassthroughResponseHandler(),
@@ -71,6 +75,39 @@ func TestPassthroughRoute_GuardrailsMiddleware_RestoresBody(t *testing.T) {
 	require.NoError(t, err)
 	// Body should be readable again in the handler
 	assert.Equal(t, bodyContent, string(bodyReadByHandler))
+}
+
+func TestPassthroughRoute_ProviderResolutionMiddleware_RequestBodyReadError(t *testing.T) {
+	provider := &mockProvider{}
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", nil)
+	req.Body = io.NopCloser(failingReader{err: errors.New("read failed")})
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	var reachedHandler bool
+	handler := PassthroughProviderResolutionMiddleware(provider, nil)(func(c *echo.Context) error {
+		reachedHandler = true
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.False(t, reachedHandler)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var env core.OpenAIErrorEnvelope
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	assert.Equal(t, core.ErrorTypeInvalidRequest, env.Error.Type)
+	assert.Contains(t, env.Error.Message, "failed to read request body")
+}
+
+type failingReader struct {
+	err error
+}
+
+func (r failingReader) Read(p []byte) (int, error) {
+	return 0, r.err
 }
 
 func TestPassthroughRoute_ProviderResolutionMiddleware_RejectsDisabledInstance(t *testing.T) {

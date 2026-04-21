@@ -14,28 +14,23 @@ type passthroughProviderResolution struct {
 	ProviderName  string
 }
 
-// passthroughContextKey is a private type for passthrough-specific context values.
-type passthroughContextKey string
-
 const (
-	passthroughInstanceNameKey passthroughContextKey = "passthrough-instance-name"
-	passthroughProviderTypeKey passthroughContextKey = "passthrough-provider-type"
-	passthroughProviderKey     passthroughContextKey = "passthrough-provider"
+	passthroughProviderTypeKey = "passthrough-provider-type"
+	passthroughProviderKey     = "passthrough-provider"
 )
 
-func setPassthroughResolution(c *echo.Context, instanceName, providerType string, provider core.PassthroughProvider) {
-	c.Set(string(passthroughInstanceNameKey), instanceName)
-	c.Set(string(passthroughProviderTypeKey), providerType)
-	c.Set(string(passthroughProviderKey), provider)
+func setPassthroughResolution(c *echo.Context, providerType string, provider core.PassthroughProvider) {
+	c.Set(passthroughProviderTypeKey, providerType)
+	c.Set(passthroughProviderKey, provider)
 }
 
 func getPassthroughProviderType(c *echo.Context) string {
-	v, _ := c.Get(string(passthroughProviderTypeKey)).(string)
+	v, _ := c.Get(passthroughProviderTypeKey).(string)
 	return v
 }
 
 func getPassthroughProvider(c *echo.Context) core.PassthroughProvider {
-	v, _ := c.Get(string(passthroughProviderKey)).(core.PassthroughProvider)
+	v, _ := c.Get(passthroughProviderKey).(core.PassthroughProvider)
 	return v
 }
 

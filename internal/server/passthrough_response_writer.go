@@ -2,6 +2,7 @@ package server
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -44,9 +45,32 @@ func (h *rawPassthroughResponseHandler) Handle(c *echo.Context, requestID string
 	c.Response().WriteHeader(resp.StatusCode)
 
 	if isSSEContentType(resp.Headers) {
-		return flushStream(c.Response(), resp.Body)
+		if streamErr := flushStream(c.Response(), resp.Body); streamErr != nil {
+			logPassthroughResponseStreamError(c, requestID, resp.StatusCode, streamErr)
+		}
+		return nil
 	}
 
-	_, err := io.Copy(c.Response(), resp.Body)
-	return err
+	if _, copyErr := io.Copy(c.Response(), resp.Body); copyErr != nil {
+		logPassthroughResponseStreamError(c, requestID, resp.StatusCode, copyErr)
+	}
+	return nil
+}
+
+func logPassthroughResponseStreamError(c *echo.Context, requestID string, statusCode int, streamErr error) {
+	if streamErr == nil {
+		return
+	}
+	attrs := []any{
+		"status", statusCode,
+		"error", streamErr,
+	}
+	if requestID != "" {
+		attrs = append(attrs, "request_id", requestID)
+	}
+	if c != nil && c.Request() != nil {
+		req := c.Request()
+		attrs = append(attrs, "method", req.Method, "path", req.URL.Path)
+	}
+	slog.Warn("passthrough response stream failed", attrs...)
 }

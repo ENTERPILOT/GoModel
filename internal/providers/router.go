@@ -795,10 +795,7 @@ func (r *Router) ResolvePassthroughByName(instanceName string) (core.Passthrough
 		return nil, "", core.NewInvalidRequestError("passthrough instance name is required", nil)
 	}
 
-	var provider core.Provider
-	if named, ok := r.lookup.(providerNameRegistry); ok {
-		provider = named.ProviderByName(instanceName)
-	}
+	provider := r.providerByNameRegistry(instanceName)
 	if provider == nil {
 		return nil, "", core.NewInvalidRequestError(fmt.Sprintf("no provider configured for instance %q", instanceName), nil)
 	}
@@ -808,10 +805,7 @@ func (r *Router) ResolvePassthroughByName(instanceName string) (core.Passthrough
 		return nil, "", core.NewInvalidRequestError(fmt.Sprintf("provider %q does not support passthrough", instanceName), nil)
 	}
 
-	providerType := ""
-	if resolver, ok := r.lookup.(core.ProviderNameTypeResolver); ok {
-		providerType = strings.TrimSpace(resolver.GetProviderTypeForName(instanceName))
-	}
+	providerType := strings.TrimSpace(r.GetProviderTypeForName(instanceName))
 
 	return pp, providerType, nil
 }

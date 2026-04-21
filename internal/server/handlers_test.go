@@ -630,7 +630,7 @@ func newPassthroughTestEchoWithLogger(h *Handler, pp core.PassthroughProvider, i
 		model := bestEffortModel(body)
 		auditlog.EnrichEntry(c, model, providerType)
 		auditlog.EnrichEntryWithResolvedRoute(c, model, providerType, instanceName)
-		setPassthroughResolution(c, instanceName, providerType, pp)
+		setPassthroughResolution(c, providerType, pp)
 		return h.ProviderPassthrough(c)
 	})
 	return e
@@ -783,8 +783,9 @@ func (m *mockProvider) Passthrough(_ context.Context, providerType string, req *
 }
 
 func (m *mockProvider) ResolvePassthroughByName(instanceName string) (core.PassthroughProvider, string, error) {
-	m.lastPassthroughProvider = instanceName
-	return &mockDirectPassthroughProvider{inner: m}, instanceName, nil
+	providerType := strings.TrimSpace(m.GetProviderTypeForName(instanceName))
+	m.lastPassthroughProvider = providerType
+	return &mockDirectPassthroughProvider{inner: m}, providerType, nil
 }
 
 func (m *mockProvider) GetResponse(_ context.Context, providerType, id string, _ core.ResponseRetrieveParams) (*core.ResponsesResponse, error) {

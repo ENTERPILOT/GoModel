@@ -637,6 +637,31 @@ func TestMiddleware_PassthroughWorkflowUsesPassthroughModel(t *testing.T) {
 	if entry.ResolvedModel != "" {
 		t.Fatalf("ResolvedModel = %q, want empty", entry.ResolvedModel)
 	}
+	if entry.Data == nil || entry.Data.PassthroughEndpoint != "/v1/chat/completions" {
+		got := ""
+		if entry.Data != nil {
+			got = entry.Data.PassthroughEndpoint
+		}
+		t.Fatalf("PassthroughEndpoint = %q, want /v1/chat/completions", got)
+	}
+}
+
+func TestEnrichLogEntryWithPassthroughEndpoint_PrefersNormalizedEndpoint(t *testing.T) {
+	entry := &LogEntry{
+		Path: "/p/openai/some/raw",
+		Data: &LogData{},
+	}
+	wf := &core.Workflow{
+		Mode: core.ExecutionModePassthrough,
+		Passthrough: &core.PassthroughRouteInfo{
+			RawEndpoint:        "some/raw",
+			NormalizedEndpoint: "responses",
+		},
+	}
+	EnrichLogEntryWithPassthroughEndpoint(entry, wf)
+	if entry.Data.PassthroughEndpoint != "/responses" {
+		t.Fatalf("PassthroughEndpoint = %q, want /responses", entry.Data.PassthroughEndpoint)
+	}
 }
 
 func TestMiddleware_StoresWorkflowVersionID(t *testing.T) {

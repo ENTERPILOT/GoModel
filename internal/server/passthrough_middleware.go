@@ -33,8 +33,10 @@ func PassthroughProviderResolutionMiddleware(provider core.RoutableProvider, dis
 				return handleError(c, core.NewInvalidRequestError("passthrough provider instance name is required", nil))
 			}
 
-			// Best-effort model extraction for audit before any body consumption.
-			bestModel := passthroughBestEffortModel(c)
+			bestModel, peekErr := passthroughBestEffortModel(c)
+			if peekErr != nil {
+				return handleError(c, peekErr)
+			}
 
 			if _, disabled := disabledInstances[instanceName]; disabled {
 				return handleError(c, core.NewInvalidRequestError(
@@ -55,7 +57,7 @@ func PassthroughProviderResolutionMiddleware(provider core.RoutableProvider, dis
 			auditlog.EnrichEntry(c, bestModel, providerType)
 			auditlog.EnrichEntryWithResolvedRoute(c, bestModel, providerType, instanceName)
 
-			setPassthroughResolution(c, instanceName, providerType, pp)
+			setPassthroughResolution(c, providerType, pp)
 			return next(c)
 		}
 	}
@@ -63,9 +65,12 @@ func PassthroughProviderResolutionMiddleware(provider core.RoutableProvider, dis
 
 // passthroughBestEffortModel does a non-destructive body peek to extract the
 // "model" field for audit enrichment before the body has been formally read.
-func passthroughBestEffortModel(c *echo.Context) string {
-	body, _ := readAndRestoreBody(c.Request())
-	return bestEffortModel(body)
+func passthroughBestEffortModel(c *echo.Context) (string, error) {
+	body, err := readAndRestoreBody(c.Request())
+	if err != nil {
+		return "", core.NewInvalidRequestError("failed to read request body", err)
+	}
+	return bestEffortModel(body), nil
 }
 
 // PassthroughGuardrailsMiddleware optionally runs request-side guardrails

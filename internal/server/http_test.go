@@ -826,6 +826,12 @@ func TestServerWithMasterKeyAndPprof(t *testing.T) {
 
 func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
 	mock := &mockProvider{
+		providerNames: map[string]string{
+			"passthrough/openai": "openai",
+		},
+		providerTypes: map[string]string{
+			"passthrough/openai": "openai",
+		},
 		passthroughResponse: &core.PassthroughResponse{
 			StatusCode: http.StatusOK,
 			Headers: map[string][]string{
