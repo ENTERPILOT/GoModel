@@ -781,10 +781,13 @@ func (r *Router) Passthrough(ctx context.Context, providerType string, req *core
 func (r *Router) PassthroughByName(ctx context.Context, instanceName string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
 	pp, providerType, err := r.ResolvePassthroughByName(instanceName)
 	if err != nil {
+func (r *Router) PassthroughByName(ctx context.Context, instanceName string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+	pp, _, err := r.ResolvePassthroughByName(instanceName)
+	if err != nil {
 		return nil, err
 	}
-	_ = providerType
 	return pp.Passthrough(ctx, req)
+}
 }
 
 // ResolvePassthroughByName resolves the concrete PassthroughProvider and its
