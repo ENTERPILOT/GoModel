@@ -125,11 +125,17 @@ func TestPassthroughRoute_ProviderResolutionMiddleware_RejectsDisabledInstance(t
 		return c.String(200, "should not reach")
 	})
 
-	_ = handler(c)
-	// Handler should not be reached due to disabled instance
+	err := handler(c)
+	require.NoError(t, err, "Echo returns nil after successfully writing the JSON error body")
 	assert.False(t, reachedHandler)
-	// Response should indicate error
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var env core.OpenAIErrorEnvelope
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	assert.Equal(t, core.ErrorTypeInvalidRequest, env.Error.Type)
+	assert.Equal(t, "passthrough is disabled for provider disabled-provider", env.Error.Message)
+	assert.Nil(t, env.Error.Param)
+	assert.Nil(t, env.Error.Code)
 }
 
 func TestPassthroughRoute_RequestID_GeneratesUUID(t *testing.T) {
@@ -175,17 +181,16 @@ func TestPassthroughRoute_HeaderFiltering_StripsSensitiveHeaders(t *testing.T) {
 }
 
 type mockPatcher struct {
-	err error
-	fn  func(context.Context, *core.ChatRequest) (*core.ChatRequest, error)
+	fn func(context.Context, *core.ChatRequest) (*core.ChatRequest, error)
 }
 
 func (m *mockPatcher) PatchChatRequest(ctx context.Context, req *core.ChatRequest) (*core.ChatRequest, error) {
 	if m.fn != nil {
 		return m.fn(ctx, req)
 	}
-	return req, m.err
+	return req, nil
 }
 
 func (m *mockPatcher) PatchResponsesRequest(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
-	return req, m.err
+	return req, nil
 }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -36,23 +37,30 @@ func (h *rawPassthroughResponseHandler) Handle(c *echo.Context, requestID string
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	sc := resp.StatusCode
+	if sc < 100 || sc > 599 {
+		provider := strings.TrimSpace(getPassthroughProviderType(c))
+		return core.NewProviderError(provider, http.StatusBadGateway,
+			fmt.Sprintf("upstream returned invalid HTTP status code: %d", sc), nil)
+	}
+
 	copyPassthroughResponseHeaders(c.Response().Header(), resp.Headers)
 
 	if requestID != "" {
 		c.Response().Header().Set(core.RequestIDHeader, requestID)
 	}
 
-	c.Response().WriteHeader(resp.StatusCode)
+	c.Response().WriteHeader(sc)
 
 	if isSSEContentType(resp.Headers) {
 		if streamErr := flushStream(c.Response(), resp.Body); streamErr != nil {
-			logPassthroughResponseStreamError(c, requestID, resp.StatusCode, streamErr)
+			logPassthroughResponseStreamError(c, requestID, sc, streamErr)
 		}
 		return nil
 	}
 
 	if _, copyErr := io.Copy(c.Response(), resp.Body); copyErr != nil {
-		logPassthroughResponseStreamError(c, requestID, resp.StatusCode, copyErr)
+		logPassthroughResponseStreamError(c, requestID, sc, copyErr)
 	}
 	return nil
 }
