@@ -1234,6 +1234,7 @@
                     aiNodeClass: this.workflowAiNodeClass(runtime),
                     responseConnClass: this.workflowResponseConnClass(runtime),
                     responseNodeClass: this.workflowResponseNodeClass(runtime),
+                    responseNodeSublabel: this.workflowResponseNodeSublabel(runtime),
                     authNodeClass: this.workflowAuthNodeClass(runtime),
                     authNodeSublabel: this.workflowAuthNodeSublabel(runtime),
                     usageNodeClass: this.workflowAsyncNodeClass(showUsage, highlightAsyncPresent),
@@ -1345,7 +1346,18 @@
 
             workflowResponseNodeClass(runtime) {
                 if (!runtime) return '';
-                return runtime.responseSuccess ? 'workflow-node-success' : '';
+                const statusCode = runtime.statusCode;
+                if (!Number.isFinite(statusCode)) return '';
+                if (statusCode >= 500) return 'workflow-node-error';
+                if (statusCode >= 400) return 'workflow-node-warning';
+                if (statusCode >= 300) return 'workflow-node-neutral';
+                if (statusCode >= 200) return 'workflow-node-success';
+                return '';
+            },
+
+            workflowResponseNodeSublabel(runtime) {
+                if (!runtime || !Number.isFinite(runtime.statusCode)) return null;
+                return String(runtime.statusCode);
             },
 
             workflowAuthNodeClass(runtime) {
