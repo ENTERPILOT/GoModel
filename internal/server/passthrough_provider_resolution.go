@@ -29,11 +29,6 @@ func setPassthroughResolution(c *echo.Context, instanceName, providerType string
 	c.Set(string(passthroughProviderKey), provider)
 }
 
-func getPassthroughInstanceName(c *echo.Context) string {
-	v, _ := c.Get(string(passthroughInstanceNameKey)).(string)
-	return v
-}
-
 func getPassthroughProviderType(c *echo.Context) string {
 	v, _ := c.Get(string(passthroughProviderTypeKey)).(string)
 	return v
