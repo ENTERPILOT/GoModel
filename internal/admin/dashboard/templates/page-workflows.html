@@ -37,10 +37,12 @@
     <div class="editor-modal-backdrop"
          x-cloak
          x-show="workflowFormOpen"
+         x-transition.opacity.duration.160ms
          aria-hidden="true"></div>
     <div class="editor-modal-shell editor-modal-shell-wide"
          x-cloak
          x-show="workflowFormOpen"
+         x-transition.opacity.duration.160ms
          @click="closeWorkflowForm()"
          @keydown.escape.window="workflowFormOpen && !authDialogOpen && closeWorkflowForm()">
         <section class="model-editor workflow-editor" x-show="workflowFormOpen" x-ref="workflowEditor" role="dialog" aria-modal="true" aria-label="Workflow editor" @click.stop>

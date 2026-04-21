@@ -6,8 +6,8 @@
         <h2>Usage Analytics</h2>
         <div class="page-header-controls">
             <div class="usage-mode-toggle">
-                <button class="usage-mode-btn" :class="{active: usageMode==='tokens'}" @click="toggleUsageMode('tokens')">Tokens</button>
-                <button class="usage-mode-btn" :class="{active: usageMode==='costs'}" @click="toggleUsageMode('costs')">Costs</button>
+                <button type="button" class="usage-mode-btn" :class="{active: usageMode==='tokens'}" @click="toggleUsageMode('tokens')">Tokens</button>
+                <button type="button" class="usage-mode-btn" :class="{active: usageMode==='costs'}" @click="toggleUsageMode('costs')">Costs</button>
             </div>
             {{template "date-picker" .}}
         </div>

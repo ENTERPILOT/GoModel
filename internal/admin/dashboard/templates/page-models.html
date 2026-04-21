@@ -22,7 +22,7 @@
     <!-- Category Tabs -->
     <div class="category-tabs" x-show="categories.length > 0">
         <template x-for="cat in categories" :key="cat.category">
-            <button class="category-tab" :class="{ active: activeCategory === cat.category }" @click="selectCategory(cat.category)">
+            <button type="button" class="category-tab" :class="{ active: activeCategory === cat.category }" @click="selectCategory(cat.category)">
                 <span x-text="cat.display_name"></span>
                 <span class="tab-count" x-text="cat.count"></span>
             </button>

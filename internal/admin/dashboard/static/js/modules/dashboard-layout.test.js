@@ -924,6 +924,19 @@ test("overview interval controls are explicit non-submit buttons", () => {
   assert.match(indexTemplate, /<button type="button" class="interval-btn"[^>]*@click="setInterval\('yearly'\)">Yearly<\/button>/);
 });
 
+test("usage mode controls are explicit non-submit buttons", () => {
+  const indexTemplate = readDashboardTemplateSource();
+
+  assert.match(indexTemplate, /<button type="button" class="usage-mode-btn"[^>]*@click="toggleUsageMode\('tokens'\)">Tokens<\/button>/);
+  assert.match(indexTemplate, /<button type="button" class="usage-mode-btn"[^>]*@click="toggleUsageMode\('costs'\)">Costs<\/button>/);
+});
+
+test("model category tabs are explicit non-submit buttons", () => {
+  const indexTemplate = readDashboardTemplateSource();
+
+  assert.match(indexTemplate, /<button type="button" class="category-tab"[^>]*@click="selectCategory\(cat\.category\)">/);
+});
+
 test("settings controls describe their inline helper copy", () => {
   const indexTemplate = readDashboardTemplateSource();
 
