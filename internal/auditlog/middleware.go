@@ -249,9 +249,9 @@ func EnrichLogEntryWithPassthroughEndpoint(entry *LogEntry, workflow *core.Workf
 				ep = seg
 			}
 		}
-		if ep == "" && path != "" {
-			ep = path
-		}
+		// Intentionally leave PassthroughEndpoint unset if we cannot derive
+		// a normalized endpoint; storing the raw `/p/{provider}/...` path
+		// would conflate gateway routing with upstream endpoint semantics.
 	}
 	if ep == "" {
 		return
