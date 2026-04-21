@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,6 +51,9 @@ type TestServerConfig struct {
 
 	// AdminUIEnabled enables admin dashboard UI
 	AdminUIEnabled bool
+
+	// GuardrailsEnabled enables reusable guardrail definitions and workflow execution.
+	GuardrailsEnabled bool
 
 	// MasterKey sets the authentication master key (empty = unsafe mode)
 	MasterKey string
@@ -168,6 +172,9 @@ func resetPostgreSQLStorage(t *testing.T) {
 		"audit_logs",
 		"usage",
 		"workflow_versions",
+		"guardrail_definitions",
+		"auth_keys",
+		"model_overrides",
 		"aliases",
 		"batches",
 	}
@@ -190,6 +197,9 @@ func resetMongoDBStorage(t *testing.T) {
 		"audit_logs",
 		"usage",
 		"workflow_versions",
+		"guardrail_definitions",
+		"auth_keys",
+		"model_overrides",
 		"aliases",
 		"batches",
 	}
@@ -257,6 +267,9 @@ func buildAppConfig(t *testing.T, cfg TestServerConfig, mockLLMURL string, port 
 		Admin: config.AdminConfig{
 			EndpointsEnabled: cfg.AdminEndpointsEnabled,
 			UIEnabled:        cfg.AdminUIEnabled,
+		},
+		Guardrails: config.GuardrailsConfig{
+			Enabled: cfg.GuardrailsEnabled,
 		},
 		Cache: config.CacheConfig{
 			Model: config.ModelCacheConfig{
@@ -336,15 +349,38 @@ func waitForServer(healthURL string) error {
 
 // MockLLMServer is a mock LLM server for testing.
 type MockLLMServer struct {
-	server *httptest.Server
+	server   *httptest.Server
+	mu       sync.Mutex
+	requests []RecordedRequest
+}
+
+// RecordedRequest stores one upstream request observed by the integration mock.
+type RecordedRequest struct {
+	Method  string
+	Path    string
+	Headers http.Header
+	Body    []byte
 }
 
 // NewMockLLMServer creates a new mock LLM server.
 func NewMockLLMServer() *MockLLMServer {
+	mock := &MockLLMServer{
+		requests: make([]RecordedRequest, 0),
+	}
+
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Read body for stream detection
 		body, _ := io.ReadAll(r.Body)
 		r.Body = io.NopCloser(bytes.NewReader(body))
+
+		mock.mu.Lock()
+		mock.requests = append(mock.requests, RecordedRequest{
+			Method:  r.Method,
+			Path:    r.URL.Path,
+			Headers: r.Header.Clone(),
+			Body:    append([]byte(nil), body...),
+		})
+		mock.mu.Unlock()
 
 		switch r.URL.Path {
 		case "/v1/chat/completions":
@@ -359,7 +395,8 @@ func NewMockLLMServer() *MockLLMServer {
 	})
 
 	server := httptest.NewServer(handler)
-	return &MockLLMServer{server: server}
+	mock.server = server
+	return mock
 }
 
 // URL returns the server URL.
@@ -370,6 +407,30 @@ func (m *MockLLMServer) URL() string {
 // Close shuts down the server.
 func (m *MockLLMServer) Close() {
 	m.server.Close()
+}
+
+// Requests returns a safe snapshot of requests recorded by the mock server.
+func (m *MockLLMServer) Requests() []RecordedRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	out := make([]RecordedRequest, len(m.requests))
+	for i, req := range m.requests {
+		out[i] = RecordedRequest{
+			Method:  req.Method,
+			Path:    req.Path,
+			Headers: req.Headers.Clone(),
+			Body:    append([]byte(nil), req.Body...),
+		}
+	}
+	return out
+}
+
+// ResetRequests clears the recorded request history.
+func (m *MockLLMServer) ResetRequests() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requests = m.requests[:0]
 }
 
 func handleChatCompletion(w http.ResponseWriter, _ *http.Request, body []byte) {
