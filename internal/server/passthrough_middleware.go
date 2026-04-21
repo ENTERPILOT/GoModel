@@ -51,6 +51,8 @@ func PassthroughProviderResolutionMiddleware(provider core.RoutableProvider, dis
 
 			pp, providerType, err := resolver.ResolvePassthroughByName(instanceName)
 			if err != nil {
+				auditlog.EnrichEntry(c, bestModel, instanceName)
+				auditlog.EnrichEntryWithResolvedRoute(c, bestModel, instanceName, instanceName)
 				return handleError(c, err)
 			}
 
