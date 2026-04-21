@@ -6,7 +6,7 @@ require (
 	github.com/andybalholm/brotli v1.2.1
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.9.1
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v5 v5.1.0
 	github.com/lmittmann/tint v1.1.3
@@ -16,11 +16,11 @@ require (
 	github.com/swaggo/echo-swagger v1.5.0
 	github.com/swaggo/swag v1.16.6
 	github.com/tidwall/gjson v1.18.0
-	go.mongodb.org/mongo-driver/v2 v2.5.0
+	go.mongodb.org/mongo-driver/v2 v2.5.1
 	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.48.2
+	modernc.org/sqlite v1.49.1
 )
 
 require (
@@ -77,7 +77,7 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	modernc.org/libc v1.70.0 // indirect
+	modernc.org/libc v1.72.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect

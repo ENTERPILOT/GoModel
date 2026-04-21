@@ -21,21 +21,24 @@ import (
 // AuditLogEntry mirrors auditlog.LogEntry for test assertions.
 // We use a separate type to avoid coupling tests to internal implementation details.
 type AuditLogEntry struct {
-	ID         string
-	Timestamp  time.Time
-	DurationNs int64
-	Model      string
-	Provider   string
-	StatusCode int
-	RequestID  string
-	AuthKeyID  string
-	ClientIP   string
-	Method     string
-	Path       string
-	UserPath   string
-	Stream     bool
-	ErrorType  string
-	Data       *auditlog.LogData
+	ID                string
+	Timestamp         time.Time
+	DurationNs        int64
+	Model             string
+	Provider          string
+	WorkflowVersionID string
+	CacheType         string
+	StatusCode        int
+	RequestID         string
+	AuthKeyID         string
+	AuthMethod        string
+	ClientIP          string
+	Method            string
+	Path              string
+	UserPath          string
+	Stream            bool
+	ErrorType         string
+	Data              *auditlog.LogData
 }
 
 // QueryAuditLogsByRequestID queries audit logs by request ID from PostgreSQL.
@@ -45,8 +48,8 @@ func QueryAuditLogsByRequestID(t *testing.T, pool *pgxpool.Pool, requestID strin
 	defer cancel()
 
 	query := `
-		SELECT id, timestamp, duration_ns, requested_model, provider, status_code,
-		       request_id, auth_key_id, client_ip, method, path, user_path, stream, error_type, data
+		SELECT id, timestamp, duration_ns, requested_model, provider, workflow_version_id, cache_type, status_code,
+		       request_id, auth_key_id, auth_method, client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs
 		WHERE request_id = $1
 		ORDER BY timestamp ASC
@@ -59,19 +62,31 @@ func QueryAuditLogsByRequestID(t *testing.T, pool *pgxpool.Pool, requestID strin
 	var entries []AuditLogEntry
 	for rows.Next() {
 		var entry AuditLogEntry
+		var workflowVersionID sql.NullString
+		var cacheType sql.NullString
 		var authKeyID sql.NullString
+		var authMethod sql.NullString
 		var userPathNull sql.NullString
 		var dataJSON []byte
 		err := rows.Scan(
 			&entry.ID, &entry.Timestamp, &entry.DurationNs,
-			&entry.Model, &entry.Provider, &entry.StatusCode,
-			&entry.RequestID, &authKeyID, &entry.ClientIP, &entry.Method,
+			&entry.Model, &entry.Provider, &workflowVersionID, &cacheType, &entry.StatusCode,
+			&entry.RequestID, &authKeyID, &authMethod, &entry.ClientIP, &entry.Method,
 			&entry.Path, &userPathNull, &entry.Stream, &entry.ErrorType, &dataJSON,
 		)
 		require.NoError(t, err, "failed to scan audit log row")
 
+		if workflowVersionID.Valid {
+			entry.WorkflowVersionID = workflowVersionID.String
+		}
+		if cacheType.Valid {
+			entry.CacheType = cacheType.String
+		}
 		if authKeyID.Valid {
 			entry.AuthKeyID = authKeyID.String
+		}
+		if authMethod.Valid {
+			entry.AuthMethod = authMethod.String
 		}
 		if userPathNull.Valid {
 			entry.UserPath = userPathNull.String
@@ -149,6 +164,12 @@ func bsonToAuditLogEntry(t *testing.T, doc bson.M) AuditLogEntry {
 	if v, ok := doc["provider"].(string); ok {
 		entry.Provider = v
 	}
+	if v, ok := doc["workflow_version_id"].(string); ok {
+		entry.WorkflowVersionID = v
+	}
+	if v, ok := doc["cache_type"].(string); ok {
+		entry.CacheType = v
+	}
 	if v, ok := doc["status_code"].(int32); ok {
 		entry.StatusCode = int(v)
 	} else if v, ok := doc["status_code"].(int64); ok {
@@ -159,6 +180,9 @@ func bsonToAuditLogEntry(t *testing.T, doc bson.M) AuditLogEntry {
 	}
 	if v, ok := doc["auth_key_id"].(string); ok {
 		entry.AuthKeyID = v
+	}
+	if v, ok := doc["auth_method"].(string); ok {
+		entry.AuthMethod = v
 	}
 	if v, ok := doc["client_ip"].(string); ok {
 		entry.ClientIP = v

@@ -230,6 +230,7 @@ test('workflowChart returns the shared chart contract for workflow sources', () 
             aiNodeClass: '',
             responseConnClass: '',
             responseNodeClass: '',
+            responseNodeSublabel: null,
             authNodeClass: '',
             authNodeSublabel: null,
             usageNodeClass: '',
@@ -290,6 +291,7 @@ test('workflowChart masks globally disabled workflow features from persisted wor
             aiNodeClass: '',
             responseConnClass: '',
             responseNodeClass: '',
+            responseNodeSublabel: null,
             authNodeClass: '',
             authNodeSublabel: null,
             usageNodeClass: '',
@@ -439,6 +441,7 @@ test('workflowAuditChart returns the shared chart contract for audit runtime ent
             aiNodeClass: 'workflow-node-skipped',
             responseConnClass: 'workflow-conn-dim',
             responseNodeClass: 'workflow-node-success',
+            responseNodeSublabel: '200',
             authNodeClass: '',
             authNodeSublabel: null,
             usageNodeClass: 'workflow-node-success',
@@ -480,6 +483,7 @@ test('workflowAuditChart forces audit nodes even when the workflow version canno
             aiNodeClass: 'workflow-node-skipped',
             responseConnClass: 'workflow-conn-dim',
             responseNodeClass: 'workflow-node-success',
+            responseNodeSublabel: '200',
             authNodeClass: '',
             authNodeSublabel: null,
             usageNodeClass: '',
@@ -550,6 +554,7 @@ test('workflowAuditChart prefers request-time workflow features over current wor
             aiNodeClass: 'workflow-node-success',
             responseConnClass: '',
             responseNodeClass: 'workflow-node-success',
+            responseNodeSublabel: '200',
             authNodeClass: '',
             authNodeSublabel: null,
             usageNodeClass: '',
@@ -621,6 +626,7 @@ test('workflowAuditChart highlights configured failover redirects and exposes th
             aiNodeClass: 'workflow-node-success',
             responseConnClass: '',
             responseNodeClass: 'workflow-node-success',
+            responseNodeSublabel: '200',
             authNodeClass: '',
             authNodeSublabel: null,
             usageNodeClass: 'workflow-node-success',
@@ -811,7 +817,7 @@ test('openWorkflowCreate hydrates features and guardrails via shared normalizers
     module.workflowSourceGuardrails = () => ([
         { ref: 'policy-system', step: 30 }
     ]);
-    module.scrollWorkflowFormIntoView = () => {};
+    module.focusWorkflowForm = () => {};
 
     module.openWorkflowCreate({
         scope: {
@@ -854,7 +860,7 @@ test('openWorkflowCreate hydrates features and guardrails via shared normalizers
 
 test('openWorkflowCreate drops blank guardrail steps instead of hydrating them as step zero', () => {
     const module = createWorkflowsModule();
-    module.scrollWorkflowFormIntoView = () => {};
+    module.focusWorkflowForm = () => {};
 
     module.openWorkflowCreate({
         scope: {
@@ -909,7 +915,7 @@ test('editing a cloned workflow preserves retired provider and model options', (
     module.models = [
         { provider_type: 'openai', model: { id: 'gpt-5' } }
     ];
-    module.scrollWorkflowFormIntoView = () => {};
+    module.focusWorkflowForm = () => {};
 
     module.openWorkflowCreate({
         scope: {
@@ -946,6 +952,53 @@ test('editing a cloned workflow preserves retired provider and model options', (
         module.validateWorkflowRequest(invalidPayload),
         'Choose a registered model for the selected provider name.'
     );
+});
+
+test('openWorkflowCreate focuses the workflow editor after opening', () => {
+    let querySelectorCalls = 0;
+    let nextTickCallback = null;
+    let animationFrameCallback = null;
+    const calls = [];
+    const module = createWorkflowsModule({
+        window: {
+            requestAnimationFrame(callback) {
+                animationFrameCallback = callback;
+            }
+        }
+    });
+    module.$refs = {
+        workflowEditor: {
+            querySelector() {
+                querySelectorCalls++;
+                return {
+                    focus(options) {
+                        calls.push(options);
+                    }
+                };
+            }
+        }
+    };
+    module.$nextTick = (callback) => {
+        nextTickCallback = callback;
+    };
+
+    module.openWorkflowCreate();
+
+    assert.equal(module.workflowFormOpen, true);
+    assert.deepEqual(calls, []);
+    assert.equal(typeof nextTickCallback, 'function');
+
+    nextTickCallback();
+
+    assert.equal(typeof animationFrameCallback, 'function');
+    assert.deepEqual(calls, []);
+
+    animationFrameCallback();
+
+    assert.equal(querySelectorCalls, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+        { preventScroll: true }
+    ]);
 });
 
 test('buildWorkflowRequest preserves blank guardrail steps as invalid so validation rejects them', () => {
@@ -1737,6 +1790,54 @@ test('submitWorkflowForm ignores duplicate submissions while a request is alread
     assert.equal(module.workflowSubmitting, true);
 });
 
+test('submitWorkflowForm logs non-auth HTTP failures before surfacing the UI error', async () => {
+    const errors = [];
+    const module = createWorkflowsModule({
+        console: {
+            error(...args) {
+                errors.push(args.join(' '));
+            }
+        },
+        fetch() {
+            return Promise.resolve({
+                ok: false,
+                status: 500,
+                statusText: 'Internal Server Error',
+                json: async() => ({
+                    error: {
+                        message: 'guardrail catalog refresh failed'
+                    }
+                })
+            });
+        }
+    });
+    module.models = [
+        { provider_type: 'openai', model: { id: 'gpt-5' } }
+    ];
+    module.workflowForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        name: 'OpenAI GPT-5',
+        description: 'Primary translated requests',
+        features: {
+            cache: true,
+            audit: true,
+            usage: true,
+            guardrails: false
+        },
+        guardrails: []
+    };
+    module.headers = () => ({});
+    module.closeWorkflowForm = () => {};
+    module.fetchWorkflowsPage = async () => {};
+
+    await module.submitWorkflowForm();
+
+    assert.equal(module.workflowFormError, 'guardrail catalog refresh failed');
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Failed to create workflow: 500 Internal Server Error guardrail catalog refresh failed/);
+});
+
 test('workflowRuntimeFromEntry derives cache hit state from cache_type without relying on headers', () => {
     const module = createWorkflowsModule();
 
@@ -1805,6 +1906,7 @@ test('audit runtime uses explicit cache-hit labels and highlights the uncached 2
     assert.equal(module.workflowAiNodeClass(semanticHit), 'workflow-node-skipped');
     assert.equal(module.workflowResponseConnClass(semanticHit), 'workflow-conn-dim');
     assert.equal(module.workflowResponseNodeClass(semanticHit), 'workflow-node-success');
+    assert.equal(module.workflowResponseNodeSublabel(semanticHit), '200');
 
     const uncachedSuccess = module.workflowRuntimeFromEntry({
         provider: 'openai',
@@ -1818,6 +1920,39 @@ test('audit runtime uses explicit cache-hit labels and highlights the uncached 2
     assert.equal(module.workflowAiNodeClass(uncachedSuccess), 'workflow-node-success');
     assert.equal(module.workflowResponseConnClass(uncachedSuccess), '');
     assert.equal(module.workflowResponseNodeClass(uncachedSuccess), 'workflow-node-success');
+    assert.equal(module.workflowResponseNodeSublabel(uncachedSuccess), '200');
+});
+
+test('response runtime maps 3xx and 4xx statuses to neutral and warning chart colors', () => {
+    const module = createWorkflowsModule();
+
+    const redirect = module.workflowRuntimeFromEntry({
+        provider: 'openai',
+        model: 'gpt-5',
+        status_code: 304
+    });
+    assert.equal(module.workflowResponseNodeClass(redirect), 'workflow-node-neutral');
+    assert.equal(module.workflowResponseNodeSublabel(redirect), '304');
+
+    const clientError = module.workflowRuntimeFromEntry({
+        provider: 'openai',
+        model: 'gpt-5',
+        status_code: 429
+    });
+    assert.equal(module.workflowResponseNodeClass(clientError), 'workflow-node-warning');
+    assert.equal(module.workflowResponseNodeSublabel(clientError), '429');
+});
+
+test('response runtime maps 5xx statuses to the error chart color', () => {
+    const module = createWorkflowsModule();
+
+    const serverError = module.workflowRuntimeFromEntry({
+        provider: 'openai',
+        model: 'gpt-5',
+        status_code: 503
+    });
+    assert.equal(module.workflowResponseNodeClass(serverError), 'workflow-node-error');
+    assert.equal(module.workflowResponseNodeSublabel(serverError), '503');
 });
 
 test('workflowRuntimeFromEntry treats any uncached 2xx status as a successful AI and response path', () => {

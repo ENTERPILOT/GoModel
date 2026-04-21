@@ -31,8 +31,7 @@ RUN mkdir -p /app/.cache /app/data && touch /app/.cache/.keep /app/data/.keep
 # Runtime stage
 FROM gcr.io/distroless/static-debian12:nonroot
 
-# Copy binary and ca-certificates
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+# Copy binary and runtime config
 COPY --from=builder /gomodel /gomodel
 COPY --from=builder /app/config/*.yaml /app/config/
 

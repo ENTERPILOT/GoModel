@@ -46,7 +46,6 @@ function dashboard() {
     authRequestGeneration: 0,
     theme: "system",
     sidebarCollapsed: false,
-    settingsSubpage: "general",
     runtimeRefreshLoading: false,
     runtimeRefreshNotice: "",
     runtimeRefreshError: "",
@@ -173,18 +172,8 @@ function dashboard() {
       return { page, sub };
     },
 
-    _normalizeSettingsSubpage(subpage) {
-      return "general";
-    },
-
-    _settingsPath(subpage) {
-      return "/admin/dashboard/settings";
-    },
-
     _applyRoute(page, sub) {
       this.page = page;
-      this.settingsSubpage =
-        page === "settings" ? this._normalizeSettingsSubpage(sub) : "general";
 
       if (page === "usage" && sub === "costs") this.usageMode = "costs";
       if (page === "usage" && sub !== "costs") this.usageMode = "tokens";
@@ -256,19 +245,8 @@ function dashboard() {
     },
 
     navigate(page) {
-      if (page === "settings") {
-        this.navigateSettings("general");
-        return;
-      }
-
       history.pushState(null, "", "/admin/dashboard/" + page);
       this._applyRoute(page, null);
-    },
-
-    navigateSettings(subpage) {
-      const normalized = this._normalizeSettingsSubpage(subpage);
-      history.pushState(null, "", this._settingsPath(normalized));
-      this._applyRoute("settings", normalized);
     },
 
     guardrailsPageVisible() {
@@ -368,6 +346,17 @@ function dashboard() {
 
     closeAuthDialog() {
       this.authDialogOpen = false;
+    },
+
+    overlayDialogOpen() {
+      return (
+        this.authDialogOpen ||
+        (this.page === "models" &&
+          (this.aliasFormOpen || this.modelOverrideFormOpen)) ||
+        (this.page === "workflows" && this.workflowFormOpen) ||
+        (this.page === "guardrails" && this.guardrailFormOpen) ||
+        (this.page === "auth-keys" && this.authKeyFormOpen)
+      );
     },
 
     submitApiKey() {

@@ -4,19 +4,23 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadGuardrailsModuleFactory() {
+function loadGuardrailsModuleFactory(overrides = {}) {
     const source = fs.readFileSync(path.join(__dirname, 'guardrails.js'), 'utf8');
+    const window = {
+        ...(overrides.window || {})
+    };
     const context = {
-        window: {},
-        console
+        window,
+        console,
+        ...overrides
     };
     vm.createContext(context);
     vm.runInContext(source, context);
     return context.window.dashboardGuardrailsModule;
 }
 
-function createGuardrailsModule() {
-    const factory = loadGuardrailsModuleFactory();
+function createGuardrailsModule(overrides) {
+    const factory = loadGuardrailsModuleFactory(overrides);
     return factory();
 }
 
@@ -197,4 +201,146 @@ test('syncGuardrailTypeSelectValue reapplies the current type after options rend
     module.syncGuardrailTypeSelectValue();
 
     assert.equal(select.value, 'llm_based_altering');
+});
+
+test('focusGuardrailForm skips disabled autofocus targets', () => {
+    const module = createGuardrailsModule();
+    const focusCalls = [];
+    let selector = '';
+    module.$refs = {
+        guardrailEditor: {
+            querySelector(value) {
+                selector = value;
+                return {
+                    focus(options) {
+                        focusCalls.push(options);
+                    }
+                };
+            }
+        }
+    };
+
+    module.focusGuardrailForm();
+
+    assert.match(selector, /\[data-modal-autofocus\]:not\(\[disabled\]\)/);
+    assert.deepEqual(JSON.parse(JSON.stringify(focusCalls)), [
+        { preventScroll: true }
+    ]);
+});
+
+test('submitGuardrailForm logs non-auth HTTP failures before surfacing the UI error', async () => {
+    const errors = [];
+    const module = createGuardrailsModule({
+        console: {
+            error(...args) {
+                errors.push(args.join(' '));
+            }
+        },
+        fetch: async () => ({
+            status: 400,
+            statusText: 'Bad Request',
+            async json() {
+                return {
+                    error: {
+                        message: 'system_prompt content is required'
+                    }
+                };
+            }
+        })
+    });
+
+    module.headers = () => ({ 'Content-Type': 'application/json' });
+    module.guardrailForm = {
+        name: 'privacy',
+        type: 'system_prompt',
+        description: '',
+        user_path: '',
+        config: {}
+    };
+
+    await module.submitGuardrailForm();
+
+    assert.equal(module.guardrailError, 'system_prompt content is required');
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Failed to save guardrail: 400 Bad Request system_prompt content is required/);
+});
+
+test('guardrail write paths use generation-aware request handling for stale auth responses', async () => {
+    const scenarios = [
+        {
+            name: 'submitGuardrailForm',
+            setup(module) {
+                module.guardrailForm = {
+                    name: 'privacy',
+                    type: 'system_prompt',
+                    description: '',
+                    user_path: '',
+                    config: {}
+                };
+            },
+            run(module) {
+                return module.submitGuardrailForm();
+            }
+        },
+        {
+            name: 'deleteGuardrail',
+            run(module) {
+                return module.deleteGuardrail({ name: 'privacy' });
+            }
+        }
+    ];
+
+    for (const scenario of scenarios) {
+        const fetchCalls = [];
+        const handledCalls = [];
+        const module = createGuardrailsModule({
+            fetch: async (url, request) => {
+                fetchCalls.push({ url, request });
+                return {
+                    status: 401,
+                    statusText: 'Unauthorized'
+                };
+            },
+            window: {
+                confirm: () => true
+            }
+        });
+        Object.assign(module, {
+            authError: false,
+            needsAuth: false,
+            requestOptions(options) {
+                return {
+                    ...(options || {}),
+                    headers: { Authorization: 'Bearer current-token' },
+                    authGeneration: 3
+                };
+            },
+            handleFetchResponse(res, label, request) {
+                handledCalls.push({ res, label, request });
+                return 'STALE_AUTH';
+            },
+            isStaleAuthFetchResult(result) {
+                return result === 'STALE_AUTH';
+            },
+            fetchGuardrails() {
+                throw new Error('fetchGuardrails should not run for stale auth in ' + scenario.name);
+            },
+            fetchWorkflowGuardrails() {
+                throw new Error('fetchWorkflowGuardrails should not run for stale auth in ' + scenario.name);
+            }
+        });
+        if (scenario.setup) {
+            scenario.setup(module);
+        }
+
+        await scenario.run(module);
+
+        assert.equal(fetchCalls.length, 1, scenario.name);
+        assert.equal(handledCalls.length, 1, scenario.name);
+        assert.strictEqual(handledCalls[0].request, fetchCalls[0].request, scenario.name);
+        assert.equal(fetchCalls[0].request.authGeneration, 3, scenario.name);
+        assert.equal(module.authError, false, scenario.name);
+        assert.equal(module.needsAuth, false, scenario.name);
+        assert.equal(module.guardrailError, '', scenario.name);
+    }
 });

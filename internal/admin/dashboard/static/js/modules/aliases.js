@@ -472,6 +472,36 @@
                 if (model && model.model && model.model.id) {
                     this.aliasForm.target_model = this.qualifiedModelName(model);
                 }
+                this.focusEditorField('aliasEditor');
+            },
+
+            focusEditorField(refName) {
+                const focus = () => {
+                    const refs = this.$refs || {};
+                    const editor = refs[refName] || null;
+                    if (!editor || typeof editor.querySelector !== 'function') {
+                        return;
+                    }
+                    const field = editor.querySelector('[data-modal-autofocus], input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])');
+                    if (!field || typeof field.focus !== 'function') {
+                        return;
+                    }
+                    field.focus({ preventScroll: true });
+                };
+
+                const focusAfterPaint = () => {
+                    if (typeof global.requestAnimationFrame === 'function') {
+                        global.requestAnimationFrame(focus);
+                        return;
+                    }
+                    focus();
+                };
+
+                if (typeof this.$nextTick === 'function') {
+                    this.$nextTick(focusAfterPaint);
+                    return;
+                }
+                focusAfterPaint();
             },
 
             openAliasEdit(alias) {
@@ -486,6 +516,7 @@
                     description: alias.description || '',
                     enabled: alias.enabled !== false
                 };
+                this.focusEditorField('aliasEditor');
             },
 
             closeAliasForm() {
@@ -510,31 +541,6 @@
                     .filter(Boolean);
             },
 
-            scrollToModelOverrideForm() {
-                const scroll = () => {
-                    const refs = this.$refs || {};
-                    const editor = refs.modelOverrideEditor || null;
-                    if (!editor || typeof editor.scrollIntoView !== 'function') {
-                        return;
-                    }
-                    editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                };
-
-                const scrollAfterPaint = () => {
-                    if (typeof global.requestAnimationFrame === 'function') {
-                        global.requestAnimationFrame(scroll);
-                        return;
-                    }
-                    scroll();
-                };
-
-                if (typeof this.$nextTick === 'function') {
-                    this.$nextTick(scrollAfterPaint);
-                    return;
-                }
-                scrollAfterPaint();
-            },
-
             openModelOverrideEdit(row) {
                 if (!row || row.is_alias) {
                     return;
@@ -557,7 +563,7 @@
                     selector: this.rowAccessSelector(row),
                     user_paths: userPaths.join('\n')
                 };
-                this.scrollToModelOverrideForm();
+                this.focusEditorField('modelOverrideEditor');
             },
 
             openGlobalModelOverrideEdit() {
@@ -579,7 +585,7 @@
                     selector,
                     user_paths: userPaths.join('\n')
                 };
-                this.scrollToModelOverrideForm();
+                this.focusEditorField('modelOverrideEditor');
             },
 
             openProviderOverrideEdit(group) {

@@ -1,10 +1,12 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1926,6 +1928,84 @@ func TestHandleError_UnexpectedError(t *testing.T) {
 	}
 	if containsString(body, "something broke") {
 		t.Errorf("original error should be hidden, got: %s", body)
+	}
+}
+
+func TestHandleError_LogsClientErrorsAtWarnLevel(t *testing.T) {
+	var buf bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() {
+		slog.SetDefault(original)
+	})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", nil)
+	req = req.WithContext(core.WithRequestID(req.Context(), "admin-warn-req-123"))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handleError(c, core.NewInvalidRequestError("unknown provider name: missing", nil)); err != nil {
+		t.Fatalf("handleError() error = %v", err)
+	}
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, `"level":"WARN"`) {
+		t.Fatalf("expected WARN log, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, `"msg":"admin request failed"`) {
+		t.Fatalf("expected admin request failed log, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, `"path":"/admin/api/v1/workflows"`) {
+		t.Fatalf("expected admin path in log, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, `"request_id":"admin-warn-req-123"`) {
+		t.Fatalf("expected request_id in log, got %q", logOutput)
+	}
+}
+
+func TestHandleError_LogsServerErrorsAtErrorLevel(t *testing.T) {
+	var buf bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() {
+		slog.SetDefault(original)
+	})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails/privacy", nil)
+	req = req.WithContext(core.WithRequestID(req.Context(), "admin-error-req-456"))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	upstreamErr := errors.New("storage unavailable")
+	if err := handleError(c, core.NewProviderError("guardrails", http.StatusInternalServerError, "failed to refresh guardrails", upstreamErr)); err != nil {
+		t.Fatalf("handleError() error = %v", err)
+	}
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, `"level":"ERROR"`) {
+		t.Fatalf("expected ERROR log, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, `"msg":"admin request failed"`) {
+		t.Fatalf("expected admin request failed log, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, `"provider":"guardrails"`) {
+		t.Fatalf("expected provider in log, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, `"request_id":"admin-error-req-456"`) {
+		t.Fatalf("expected request_id in log, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, `"message":"failed to refresh guardrails"`) {
+		t.Fatalf("expected error message in log, got %q", logOutput)
 	}
 }
 

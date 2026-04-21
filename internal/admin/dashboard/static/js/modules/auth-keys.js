@@ -129,6 +129,15 @@
                 if (!this.authKeyIssuedValue) {
                     this.authKeyCopyState.resetFeedback();
                     this.authKeyForm = this.defaultAuthKeyForm();
+                    if (typeof this.$nextTick === 'function') {
+                        this.$nextTick(() => {
+                            const refs = this.$refs || {};
+                            const input = refs.authKeyNameInput || null;
+                            if (input && typeof input.focus === 'function') {
+                                input.focus({ preventScroll: true });
+                            }
+                        });
+                    }
                 }
             },
 
@@ -193,24 +202,44 @@
                 }
 
                 try {
-                    const res = await fetch('/admin/api/v1/auth-keys', {
-                        method: 'POST',
-                        headers: this.headers(),
-                        body: JSON.stringify(payload)
-                    });
+                    const request = typeof this.requestOptions === 'function'
+                        ? this.requestOptions({
+                            method: 'POST',
+                            body: JSON.stringify(payload)
+                        })
+                        : {
+                            method: 'POST',
+                            headers: this.headers(),
+                            body: JSON.stringify(payload)
+                        };
+                    const res = await fetch('/admin/api/v1/auth-keys', request);
                     if (res.status === 503) {
                         this.authKeysAvailable = false;
                         this.authKeyError = 'Auth keys feature is unavailable.';
                         return;
                     }
-                    if (res.status === 401) {
+                    if (typeof this.handleFetchResponse === 'function') {
+                        const handled = this.handleFetchResponse(res, 'create API key', request);
+                        if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                            return;
+                        }
+                        if (!handled) {
+                            if (res.status === 401) {
+                                this.authKeyError = 'Authentication required.';
+                                return;
+                            }
+                            this.authKeyError = await this._authKeyResponseMessage(res, 'Failed to create API key.');
+                            console.error('Failed to create API key:', res.status, res.statusText, this.authKeyError);
+                            return;
+                        }
+                    } else if (res.status === 401) {
                         this.authError = true;
                         this.needsAuth = true;
                         this.authKeyError = 'Authentication required.';
                         return;
-                    }
-                    if (res.status !== 201) {
+                    } else if (res.status !== 201) {
                         this.authKeyError = await this._authKeyResponseMessage(res, 'Failed to create API key.');
+                        console.error('Failed to create API key:', res.status, res.statusText, this.authKeyError);
                         return;
                     }
                     const issued = await res.json();
@@ -240,23 +269,42 @@
                 this.authKeyNotice = '';
 
                 try {
-                    const res = await fetch('/admin/api/v1/auth-keys/' + encodeURIComponent(key.id) + '/deactivate', {
-                        method: 'POST',
-                        headers: this.headers()
-                    });
+                    const request = typeof this.requestOptions === 'function'
+                        ? this.requestOptions({
+                            method: 'POST'
+                        })
+                        : {
+                            method: 'POST',
+                            headers: this.headers()
+                        };
+                    const res = await fetch('/admin/api/v1/auth-keys/' + encodeURIComponent(key.id) + '/deactivate', request);
                     if (res.status === 503) {
                         this.authKeysAvailable = false;
                         this.authKeyError = 'Auth keys feature is unavailable.';
                         return;
                     }
-                    if (res.status === 401) {
+                    if (typeof this.handleFetchResponse === 'function') {
+                        const handled = this.handleFetchResponse(res, 'deactivate API key', request);
+                        if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                            return;
+                        }
+                        if (!handled) {
+                            if (res.status === 401) {
+                                this.authKeyError = 'Authentication required.';
+                                return;
+                            }
+                            this.authKeyError = await this._authKeyResponseMessage(res, 'Failed to deactivate key.');
+                            console.error('Failed to deactivate auth key:', res.status, res.statusText, this.authKeyError);
+                            return;
+                        }
+                    } else if (res.status === 401) {
                         this.authError = true;
                         this.needsAuth = true;
                         this.authKeyError = 'Authentication required.';
                         return;
-                    }
-                    if (res.status !== 204) {
+                    } else if (res.status !== 204) {
                         this.authKeyError = await this._authKeyResponseMessage(res, 'Failed to deactivate key.');
+                        console.error('Failed to deactivate auth key:', res.status, res.statusText, this.authKeyError);
                         return;
                     }
                     await this.fetchAuthKeys();

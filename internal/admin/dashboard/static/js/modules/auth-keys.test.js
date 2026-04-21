@@ -312,6 +312,122 @@ test('fetchAuthKeys preserves existing rows on authentication failures handled b
     assert.equal(module.needsAuth, true);
 });
 
+test('submitAuthKeyForm logs non-auth HTTP failures before surfacing the UI error', async () => {
+    const errors = [];
+    const module = createAuthKeysModule({
+        console: {
+            error(...args) {
+                errors.push(args.join(' '));
+            }
+        },
+        fetch: async () => ({
+            status: 500,
+            statusText: 'Internal Server Error',
+            async json() {
+                return {
+                    error: {
+                        message: 'storage unavailable'
+                    }
+                };
+            }
+        })
+    });
+
+    module.headers = () => ({ 'Content-Type': 'application/json' });
+    module.authKeyForm = {
+        name: 'ci-deploy',
+        description: '',
+        user_path: '',
+        expires_at: ''
+    };
+
+    await module.submitAuthKeyForm();
+
+    assert.equal(module.authKeyError, 'storage unavailable');
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Failed to create API key: 500 Internal Server Error storage unavailable/);
+});
+
+test('auth key write paths use generation-aware request handling for stale auth responses', async () => {
+    const scenarios = [
+        {
+            name: 'submitAuthKeyForm',
+            setup(module) {
+                module.authKeyForm = {
+                    name: 'ci-deploy',
+                    description: '',
+                    user_path: '',
+                    expires_at: ''
+                };
+            },
+            run(module) {
+                return module.submitAuthKeyForm();
+            }
+        },
+        {
+            name: 'deactivateAuthKey',
+            run(module) {
+                return module.deactivateAuthKey({
+                    id: 'key_123',
+                    name: 'ci-deploy',
+                    active: true
+                });
+            }
+        }
+    ];
+
+    for (const scenario of scenarios) {
+        const fetchCalls = [];
+        const handledCalls = [];
+        const module = createAuthKeysModule({
+            fetch: async (url, request) => {
+                fetchCalls.push({ url, request });
+                return {
+                    status: 401,
+                    statusText: 'Unauthorized'
+                };
+            },
+            window: {
+                confirm: () => true
+            }
+        });
+        Object.assign(module, {
+            authError: false,
+            needsAuth: false,
+            requestOptions(options) {
+                return {
+                    ...(options || {}),
+                    headers: { Authorization: 'Bearer current-token' },
+                    authGeneration: 3
+                };
+            },
+            handleFetchResponse(res, label, request) {
+                handledCalls.push({ res, label, request });
+                return 'STALE_AUTH';
+            },
+            isStaleAuthFetchResult(result) {
+                return result === 'STALE_AUTH';
+            },
+            fetchAuthKeys() {
+                throw new Error('fetchAuthKeys should not run for stale auth in ' + scenario.name);
+            }
+        });
+        if (scenario.setup) {
+            scenario.setup(module);
+        }
+
+        await scenario.run(module);
+
+        assert.equal(fetchCalls.length, 1, scenario.name);
+        assert.equal(handledCalls.length, 1, scenario.name);
+        assert.strictEqual(handledCalls[0].request, fetchCalls[0].request, scenario.name);
+        assert.equal(fetchCalls[0].request.authGeneration, 3, scenario.name);
+        assert.equal(module.authError, false, scenario.name);
+        assert.equal(module.needsAuth, false, scenario.name);
+        assert.equal(module.authKeyError, '', scenario.name);
+    }
+});
+
 test('openAuthKeyForm and closeAuthKeyForm preserve an issued key instead of clearing it', () => {
     const module = createAuthKeysModule();
     module.authKeyIssuedValue = 'sk_gom_once';

@@ -1,0 +1,85 @@
+{{define "dashboard-page-settings"}}
+<!-- Settings Page -->
+<template x-if="page==='settings'">
+<div>
+    <div class="page-header">
+        <div>
+            <h2>Settings</h2>
+        </div>
+    </div>
+
+    {{template "auth-banner" .}}
+
+    <div class="settings-panel">
+        <div class="settings-panel-header">
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'timezone-help-copy', showLabel: 'Show timezone help', hideLabel: 'Hide timezone help', text: 'Day-based analytics, charts, and date filters use your effective timezone. Usage and audit logs keep UTC in the hover title while rendering row timestamps in your effective timezone.' }">
+                <div class="inline-help-title-row">
+                    <h3>Timezone</h3>
+                    {{template "inline-help-toggle" .}}
+                </div>
+                <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+            </div>
+        </div>
+
+        <div class="settings-form-grid">
+            <div class="form-field">
+                <label class="form-field-label" for="timezone-override-select">Timezone Override</label>
+                <select id="timezone-override-select" class="usage-log-select settings-select" x-ref="timezoneOverrideSelect" x-model="timezoneOverride" x-effect="timezoneOptions.length; timezoneOverride; $nextTick(() => syncTimezoneOverrideSelectValue())" aria-describedby="timezone-help-copy" @focus="ensureTimezoneOptions()" @change="saveTimezoneOverride()">
+                    <option value="" :selected="!timezoneOverride" x-text="'Automatic (' + detectedTimeZoneLabel() + ')'"></option>
+                    <template x-for="timeZone in timezoneOptions" :key="timeZone.value">
+                        <option :value="timeZone.value" :selected="timeZone.value === timezoneOverride" x-text="timeZone.label"></option>
+                    </template>
+                </select>
+            </div>
+        </div>
+        <div class="form-actions">
+            <button type="button" class="pagination-btn" x-show="timezoneOverride" @click="clearTimezoneOverride()">Use Browser Timezone</button>
+        </div>
+
+        <div class="settings-refresh-section">
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'runtime-refresh-help-copy', showLabel: 'Show runtime refresh help', hideLabel: 'Hide runtime refresh help', text: 'Pull the latest model metadata, provider inventory, API keys, aliases, model access rules, guardrails, and workflows.' }">
+                <div class="inline-help-title-row">
+                    <h3>Runtime Refresh</h3>
+                    {{template "inline-help-toggle" .}}
+                </div>
+                <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+            </div>
+            <div class="settings-refresh-actions">
+                <button type="button"
+                        class="pagination-btn pagination-btn-primary pagination-btn-with-icon settings-refresh-btn"
+                        :class="{ 'is-refreshing': runtimeRefreshLoading }"
+                        :disabled="runtimeRefreshLoading"
+                        :aria-busy="runtimeRefreshLoading ? 'true' : 'false'"
+                        aria-describedby="runtime-refresh-help-copy"
+                        @click="refreshRuntime()">
+                    <i data-lucide="refresh-cw" class="settings-refresh-icon" aria-hidden="true"></i>
+                    <span>Refresh</span>
+                </button>
+            </div>
+        </div>
+        <div>
+            <div class="alert alert-success settings-refresh-alert"
+                 role="status"
+                 aria-live="polite"
+                 aria-atomic="true"
+                 x-show="runtimeRefreshNotice && runtimeRefreshSucceeded()"
+                 x-text="runtimeRefreshNotice"></div>
+            <div class="alert alert-warning settings-refresh-alert"
+                 role="alert"
+                 aria-live="assertive"
+                 aria-atomic="true"
+                 x-show="runtimeRefreshError || (runtimeRefreshNotice && runtimeRefreshWarnings())"
+                 x-text="runtimeRefreshError || runtimeRefreshNotice"></div>
+            <ul class="runtime-refresh-steps"
+                role="status"
+                aria-live="polite"
+                x-show="runtimeRefreshReport && runtimeRefreshReport.steps && runtimeRefreshReport.steps.length > 0">
+                <template x-for="step in runtimeRefreshSteps()" :key="step.name">
+                    <li :class="'runtime-refresh-step is-' + step.status" x-text="runtimeRefreshStepLabel(step)"></li>
+                </template>
+            </ul>
+        </div>
+    </div>
+</div>
+</template>
+{{end}}
