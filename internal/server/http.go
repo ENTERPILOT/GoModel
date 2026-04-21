@@ -143,6 +143,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil {
 		passthroughDisabled = cfg.PassthroughDisabledInstances
 		passthroughGuardrailPatcher = cfg.PassthroughGuardrailPatcher
+		if passthroughGuardrailPatcher == nil {
+			passthroughGuardrailPatcher = translatedRequestPatcher
+		}
 	}
 
 	// Build list of paths that skip authentication
