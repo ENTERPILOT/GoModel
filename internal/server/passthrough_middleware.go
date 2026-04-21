@@ -44,7 +44,10 @@ func GoModelRequestIDMiddleware() echo.MiddlewareFunc {
 func PassthroughProviderResolutionMiddleware(provider core.RoutableProvider, disabledInstances map[string]struct{}) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			instanceName, _, _ := core.ParseProviderPassthroughPath(c.Request().URL.Path)
+			instanceName, _, ok := core.ParseProviderPassthroughPath(c.Request().URL.Path)
+			if !ok {
+				return handleError(c, core.NewInvalidRequestError("invalid provider passthrough path", nil))
+			}
 			instanceName = strings.TrimSpace(instanceName)
 			if instanceName == "" {
 				return handleError(c, core.NewInvalidRequestError("passthrough provider instance name is required", nil))
