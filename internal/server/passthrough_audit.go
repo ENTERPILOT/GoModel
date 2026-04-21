@@ -35,17 +35,24 @@ func recordPassthroughAudit(logger auditlog.LoggerInterface, entry PassthroughAu
 		return
 	}
 
+	forwarded := strings.TrimSpace(entry.Endpoint)
+	var data *auditlog.LogData
+	if forwarded != "" {
+		data = &auditlog.LogData{PassthroughEndpoint: forwarded}
+	}
+
 	logEntry := &auditlog.LogEntry{
-		ID:            uuid.NewString(),
-		Timestamp:     entry.Timestamp,
-		RequestID:     strings.TrimSpace(entry.RequestID),
-		ClientIP:      strings.TrimSpace(entry.ClientIP),
-		Method:        strings.TrimSpace(entry.Method),
-		Path:          strings.TrimSpace(entry.Path),
-		Provider:      strings.TrimSpace(entry.ProviderType),
-		ProviderName:  strings.TrimSpace(entry.InstanceName),
+		ID:             uuid.NewString(),
+		Timestamp:      entry.Timestamp,
+		RequestID:      strings.TrimSpace(entry.RequestID),
+		ClientIP:       strings.TrimSpace(entry.ClientIP),
+		Method:         strings.TrimSpace(entry.Method),
+		Path:           strings.TrimSpace(entry.Path),
+		Provider:       strings.TrimSpace(entry.ProviderType),
+		ProviderName:   strings.TrimSpace(entry.InstanceName),
 		RequestedModel: strings.TrimSpace(entry.Model),
-		StatusCode:    entry.StatusCode,
+		StatusCode:     entry.StatusCode,
+		Data:           data,
 	}
 
 	logger.Write(logEntry)

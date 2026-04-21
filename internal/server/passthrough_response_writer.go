@@ -2,6 +2,8 @@ package server
 
 import (
 	"io"
+	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -28,7 +30,8 @@ func newRawPassthroughResponseHandler() PassthroughResponseHandler {
 
 func (h *rawPassthroughResponseHandler) Handle(c *echo.Context, requestID string, resp *core.PassthroughResponse) error {
 	if resp == nil || resp.Body == nil {
-		return core.NewInvalidRequestError("upstream returned empty passthrough response", nil)
+		provider := strings.TrimSpace(getPassthroughProviderType(c))
+		return core.NewProviderError(provider, http.StatusBadGateway, "upstream returned empty passthrough response", nil)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

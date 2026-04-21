@@ -202,7 +202,7 @@ GoModel exposes provider-native endpoints via `/p/{provider}/...` routes, allowi
 ### How It Works
 
 Request flow:
-1. Client sends `POST /p/openai/v1/chat/completions` (for OpenAI) or `POST /p/anthropic1/messages` (for a named Anthropic instance)
+1. Client sends `POST /p/openai/v1/chat/completions` (for OpenAI) or `POST /p/anthropic1/v1/messages` (for a named Anthropic instance)
 2. GoModel validates the instance name and optional guardrails
 3. Request body is forwarded **verbatim** (no normalization, no semantic enrichment)
 4. Upstream response is proxied **as-is** (including SSE streams, errors, and status codes)

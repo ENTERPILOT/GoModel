@@ -2,6 +2,8 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -45,6 +47,18 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 		Headers:  upstreamHeaders,
 	})
 	if err != nil {
+		recordPassthroughAudit(s.logger, PassthroughAuditEntry{
+			InstanceName: instanceName,
+			ProviderType: providerType,
+			Method:       c.Request().Method,
+			Path:         c.Request().URL.Path,
+			Endpoint:     endpoint,
+			RequestID:    requestID,
+			StatusCode:   passthroughAuditHTTPStatus(err),
+			Timestamp:    time.Now().UTC(),
+			Model:        bestEffortModel(body),
+			ClientIP:     c.RealIP(),
+		})
 		return handleError(c, err)
 	}
 
@@ -67,6 +81,14 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	})
 
 	return s.responseHandler.Handle(c, requestID, resp)
+}
+
+func passthroughAuditHTTPStatus(err error) int {
+	var gw *core.GatewayError
+	if errors.As(err, &gw) && gw != nil {
+		return gw.HTTPStatusCode()
+	}
+	return http.StatusBadGateway
 }
 
 // bestEffortModel attempts to extract the "model" field from a raw JSON request

@@ -88,6 +88,8 @@ type LogData struct {
 	// moved from the primary selector to a configured failover target.
 	Failover *FailoverSnapshot `json:"failover,omitempty" bson:"failover,omitempty"`
 
+	PassthroughEndpoint string `json:"passthrough_endpoint,omitempty" bson:"passthrough_endpoint,omitempty"`
+
 	// Request parameters
 	Temperature *float64 `json:"temperature,omitempty" bson:"temperature,omitempty"`
 	MaxTokens   *int     `json:"max_tokens,omitempty" bson:"max_tokens,omitempty"`

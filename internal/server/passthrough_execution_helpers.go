@@ -8,6 +8,17 @@ import (
 	"gomodel/internal/core"
 )
 
+func finalizePassthroughEndpoint(endpoint string, rawQuery string) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return "", core.NewInvalidRequestError("provider passthrough endpoint is required", nil)
+	}
+	if q := strings.TrimSpace(rawQuery); q != "" {
+		endpoint += "?" + q
+	}
+	return endpoint, nil
+}
+
 // extractPassthroughEndpoint derives the provider-relative endpoint from the
 // request URL path, normalizing an optional v1/ prefix when allowed. The
 // returned value includes a query string suffix when present.
@@ -23,13 +34,7 @@ func extractPassthroughEndpoint(c *echo.Context, allowV1Alias bool) (string, err
 	if err != nil {
 		return "", err
 	}
-	if endpoint == "" {
-		return "", core.NewInvalidRequestError("provider passthrough endpoint is required", nil)
-	}
-	if rawQuery := strings.TrimSpace(c.Request().URL.RawQuery); rawQuery != "" {
-		endpoint += "?" + rawQuery
-	}
-	return endpoint, nil
+	return finalizePassthroughEndpoint(endpoint, c.Request().URL.RawQuery)
 }
 
 func passthroughExecutionTarget(c *echo.Context, provider core.RoutableProvider, allowPassthroughV1Alias bool) (string, string, *core.PassthroughRouteInfo, error) {
@@ -61,11 +66,9 @@ func passthroughExecutionTarget(c *echo.Context, provider core.RoutableProvider,
 		}
 		info.NormalizedEndpoint = endpoint
 	}
-	if endpoint == "" {
-		return "", "", nil, core.NewInvalidRequestError("provider passthrough endpoint is required", nil)
-	}
-	if rawQuery := strings.TrimSpace(c.Request().URL.RawQuery); rawQuery != "" {
-		endpoint += "?" + rawQuery
+	endpoint, err := finalizePassthroughEndpoint(endpoint, c.Request().URL.RawQuery)
+	if err != nil {
+		return "", "", nil, err
 	}
 
 	info.Provider = providerType

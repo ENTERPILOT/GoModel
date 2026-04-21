@@ -349,12 +349,16 @@ func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo
 		return true, handleError(c, err)
 	}
 
-	if resp == nil || resp.StatusCode >= http.StatusBadRequest {
-		requestID := requestIDFromContextOrHeader(c.Request())
+	requestID := requestIDFromContextOrHeader(c.Request())
+
+	if resp == nil || resp.Body == nil || resp.StatusCode >= http.StatusBadRequest {
 		return true, newRawPassthroughResponseHandler().Handle(c, requestID, resp)
 	}
 
 	copyPassthroughResponseHeaders(c.Response().Header(), resp.Headers)
+	if requestID != "" {
+		c.Response().Header().Set(goModelRequestIDHeader, requestID)
+	}
 	model := resolvedModelFromWorkflow(workflow, req.Model)
 	providerName := providerNameFromWorkflow(workflow)
 	return true, s.handleStreamingReadCloser(c, workflow, model, providerType, providerName, "", resp.Body)

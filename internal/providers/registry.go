@@ -854,13 +854,12 @@ func (r *ModelRegistry) ProviderByType(providerType string) core.Provider {
 		return nil
 	}
 	for _, provider := range r.providers {
-		if r.providerTypes[provider] == providerType {
+		if strings.TrimSpace(r.providerTypes[provider]) == providerType {
 			return provider
 		}
 	}
 	return nil
 }
-
 
 // ProviderTypes returns the unique registered provider types in sorted order.
 // This inventory is independent of discovered models.
