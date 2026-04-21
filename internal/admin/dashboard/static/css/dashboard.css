@@ -4202,6 +4202,34 @@ body.conversation-drawer-open {
   color: var(--success);
 }
 
+.workflow-node-warning {
+  border-color: color-mix(in srgb, var(--warning) 52%, var(--border));
+  background: color-mix(in srgb, var(--warning) 9%, var(--bg-surface));
+}
+
+.workflow-node-warning .workflow-node-icon {
+  background: color-mix(in srgb, var(--warning) 14%, var(--bg));
+  color: var(--warning);
+}
+
+.workflow-node-warning .workflow-node-icon-endpoint {
+  color: var(--warning);
+}
+
+.workflow-node-warning .workflow-node-label {
+  color: color-mix(in srgb, var(--warning) 85%, var(--text));
+}
+
+.workflow-node-warning .workflow-node-sub {
+  color: color-mix(in srgb, var(--warning) 72%, var(--text-muted));
+}
+
+.workflow-node-warning .workflow-node-badge {
+  background: color-mix(in srgb, var(--warning) 14%, var(--bg));
+  border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
+  color: var(--warning);
+}
+
 .workflow-node-error {
   border-color: color-mix(in srgb, var(--danger) 52%, var(--border));
   background: color-mix(in srgb, var(--danger) 9%, var(--bg-surface));
@@ -4222,6 +4250,34 @@ body.conversation-drawer-open {
 
 .workflow-node-error .workflow-node-sub {
   color: color-mix(in srgb, var(--danger) 72%, var(--text-muted));
+}
+
+.workflow-node-neutral {
+  border-color: color-mix(in srgb, var(--text-muted) 40%, var(--border));
+  background: color-mix(in srgb, var(--text-muted) 8%, var(--bg-surface));
+}
+
+.workflow-node-neutral .workflow-node-icon {
+  background: color-mix(in srgb, var(--text-muted) 12%, var(--bg));
+  color: var(--text-muted);
+}
+
+.workflow-node-neutral .workflow-node-icon-endpoint {
+  color: var(--text-muted);
+}
+
+.workflow-node-neutral .workflow-node-label {
+  color: var(--text-muted);
+}
+
+.workflow-node-neutral .workflow-node-sub {
+  color: color-mix(in srgb, var(--text-muted) 84%, var(--border));
+}
+
+.workflow-node-neutral .workflow-node-badge {
+  background: color-mix(in srgb, var(--text-muted) 10%, var(--bg));
+  border-color: color-mix(in srgb, var(--text-muted) 28%, var(--border));
+  color: var(--text-muted);
 }
 
 .workflow-node-skipped {
