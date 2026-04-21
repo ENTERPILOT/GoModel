@@ -242,7 +242,7 @@ providers:
 
 Passthrough support depends on provider implementation. Currently supported: **OpenAI, Anthropic, OpenRouter, Z.ai, Azure OpenAI**.
 
-Providers without native passthrough (Gemini, Groq, xAI, Oracle, Ollama) can use the `/v1/chat/completions` fast path, which bypasses workflow resolution and semantic enrichment.
+Providers without native passthrough (Gemini, Groq, xAI, Oracle, Ollama) can use the `/v1/chat/completions` fast path, which skips the translated-response adapter and streams upstream bytes directly for supported streaming chat requests.
 
 ---
 
