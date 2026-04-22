@@ -85,7 +85,7 @@ func (s *MapVecStore) DeleteExpired(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().Unix()
-	filtered := s.entries[:0]
+	filtered := make([]mapVecEntry, 0, len(s.entries))
 	for _, e := range s.entries {
 		if e.expiresAt <= 0 || e.expiresAt >= now {
 			filtered = append(filtered, e)
