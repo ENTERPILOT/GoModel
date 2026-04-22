@@ -4,6 +4,7 @@ package dbassert
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ type UsageEntry struct {
 	Provider     string
 	Endpoint     string
 	UserPath     string
+	CacheType    string
 	InputTokens  int
 	OutputTokens int
 	TotalTokens  int
@@ -36,7 +38,7 @@ func QueryUsageByRequestID(t *testing.T, pool *pgxpool.Pool, requestID string) [
 	defer cancel()
 
 	query := `
-		SELECT id, request_id, provider_id, timestamp, model, provider, endpoint, user_path,
+		SELECT id, request_id, provider_id, timestamp, model, provider, endpoint, user_path, cache_type,
 		       input_tokens, output_tokens, total_tokens, raw_data
 		FROM usage
 		WHERE request_id = $1
@@ -50,14 +52,18 @@ func QueryUsageByRequestID(t *testing.T, pool *pgxpool.Pool, requestID string) [
 	var entries []UsageEntry
 	for rows.Next() {
 		var entry UsageEntry
+		var cacheType sql.NullString
 		var rawDataJSON []byte
 		err := rows.Scan(
 			&entry.ID, &entry.RequestID, &entry.ProviderID,
-			&entry.Timestamp, &entry.Model, &entry.Provider, &entry.Endpoint, &entry.UserPath,
+			&entry.Timestamp, &entry.Model, &entry.Provider, &entry.Endpoint, &entry.UserPath, &cacheType,
 			&entry.InputTokens, &entry.OutputTokens, &entry.TotalTokens, &rawDataJSON,
 		)
 		require.NoError(t, err, "failed to scan usage row")
 
+		if cacheType.Valid {
+			entry.CacheType = cacheType.String
+		}
 		if rawDataJSON != nil {
 			entry.RawData = unmarshalRawData(t, rawDataJSON)
 		}
@@ -195,6 +201,9 @@ func bsonToUsageEntry(t *testing.T, doc bson.M) UsageEntry {
 	}
 	if v, ok := doc["user_path"].(string); ok {
 		entry.UserPath = v
+	}
+	if v, ok := doc["cache_type"].(string); ok {
+		entry.CacheType = v
 	}
 	if v, ok := doc["input_tokens"].(int32); ok {
 		entry.InputTokens = int(v)

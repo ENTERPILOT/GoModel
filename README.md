@@ -88,6 +88,10 @@ For Oracle, set `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3` when the
 upstream `/models` endpoint is unavailable.
 For vLLM, set `VLLM_API_KEY` only if the upstream server was started with
 `--api-key`.
+To register multiple instances of the same provider type without `config.yaml`,
+use suffixed env vars such as `OPENAI_EAST_API_KEY` and
+`OPENAI_EAST_BASE_URL`; this registers provider `openai-east` with type
+`openai`.
 
 ---
 

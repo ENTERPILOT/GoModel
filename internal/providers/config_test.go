@@ -463,6 +463,82 @@ func TestApplyProviderEnvVars_IgnoresVLLMModelsEnv(t *testing.T) {
 	}
 }
 
+func TestApplyProviderEnvVars_DiscoversMultipleSuffixedOpenAIProviders(t *testing.T) {
+	t.Setenv("OPENAI_EAST_API_KEY", "sk-east")
+	t.Setenv("OPENAI_EAST_BASE_URL", "https://east.example.com/v1")
+	t.Setenv("OPENAI_WEST_API_KEY", "sk-west")
+	t.Setenv("OPENAI_WEST_BASE_URL", "")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	east, exists := got["openai-east"]
+	if !exists {
+		t.Fatal("expected openai-east to be discovered from suffixed env vars")
+	}
+	if east.Type != "openai" {
+		t.Errorf("openai-east Type = %q, want openai", east.Type)
+	}
+	if east.APIKey != "sk-east" {
+		t.Errorf("openai-east APIKey = %q, want sk-east", east.APIKey)
+	}
+	if east.BaseURL != "https://east.example.com/v1" {
+		t.Errorf("openai-east BaseURL = %q, want https://east.example.com/v1", east.BaseURL)
+	}
+
+	west, exists := got["openai-west"]
+	if !exists {
+		t.Fatal("expected openai-west to be discovered from suffixed env vars")
+	}
+	if west.Type != "openai" {
+		t.Errorf("openai-west Type = %q, want openai", west.Type)
+	}
+	if west.APIKey != "sk-west" {
+		t.Errorf("openai-west APIKey = %q, want sk-west", west.APIKey)
+	}
+	if west.BaseURL != testDiscoveryConfigs["openai"].DefaultBaseURL {
+		t.Errorf("openai-west BaseURL = %q, want %q", west.BaseURL, testDiscoveryConfigs["openai"].DefaultBaseURL)
+	}
+	if _, exists := got["openai"]; exists {
+		t.Fatal("expected suffixed OpenAI env vars not to create unsuffixed openai provider")
+	}
+}
+
+func TestApplyProviderEnvVars_DiscoversSuffixedProvidersForEveryRegisteredType(t *testing.T) {
+	for providerType, spec := range testDiscoveryConfigs {
+		prefix := envPrefix(providerType)
+		t.Setenv(prefix+"_EAST_API_KEY", "key-"+providerType)
+		if spec.RequireBaseURL {
+			t.Setenv(prefix+"_EAST_BASE_URL", "https://"+providerType+".example.com/v1")
+		} else {
+			t.Setenv(prefix+"_EAST_BASE_URL", "")
+		}
+	}
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	for providerType, spec := range testDiscoveryConfigs {
+		name := providerType + "-east"
+		p, exists := got[name]
+		if !exists {
+			t.Fatalf("expected %s to be discovered from suffixed env vars", name)
+		}
+		if p.Type != providerType {
+			t.Errorf("%s Type = %q, want %q", name, p.Type, providerType)
+		}
+		if p.APIKey != "key-"+providerType {
+			t.Errorf("%s APIKey = %q, want %q", name, p.APIKey, "key-"+providerType)
+		}
+		if spec.RequireBaseURL {
+			wantBaseURL := "https://" + providerType + ".example.com/v1"
+			if p.BaseURL != wantBaseURL {
+				t.Errorf("%s BaseURL = %q, want %q", name, p.BaseURL, wantBaseURL)
+			}
+		} else if spec.DefaultBaseURL != "" && p.BaseURL != spec.DefaultBaseURL {
+			t.Errorf("%s BaseURL = %q, want %q", name, p.BaseURL, spec.DefaultBaseURL)
+		}
+	}
+}
+
 func TestApplyProviderEnvVars_DiscoversAzureFromExplicitEnvVars(t *testing.T) {
 	t.Setenv("AZURE_API_KEY", "sk-azure")
 	t.Setenv("AZURE_BASE_URL", "https://example-resource.openai.azure.com/openai/deployments/gpt-4o")
@@ -529,6 +605,41 @@ func TestApplyProviderEnvVars_DoesNotDiscoverAzureWithoutBaseURL(t *testing.T) {
 	}
 }
 
+func TestApplyProviderEnvVars_DiscoversSuffixedAzureWithAPIVersion(t *testing.T) {
+	t.Setenv("AZURE_GPT4O_API_KEY", "sk-azure")
+	t.Setenv("AZURE_GPT4O_BASE_URL", "https://example-resource.openai.azure.com/openai/deployments/gpt-4o")
+	t.Setenv("AZURE_GPT4O_API_VERSION", "2025-04-01-preview")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["azure-gpt4o"]
+	if !exists {
+		t.Fatal("expected azure-gpt4o to be discovered from suffixed env vars")
+	}
+	if p.Type != "azure" {
+		t.Errorf("Type = %q, want azure", p.Type)
+	}
+	if p.APIKey != "sk-azure" {
+		t.Errorf("APIKey = %q, want sk-azure", p.APIKey)
+	}
+	if p.BaseURL != "https://example-resource.openai.azure.com/openai/deployments/gpt-4o" {
+		t.Errorf("BaseURL = %q, want Azure API base", p.BaseURL)
+	}
+	if p.APIVersion != "2025-04-01-preview" {
+		t.Errorf("APIVersion = %q, want 2025-04-01-preview", p.APIVersion)
+	}
+}
+
+func TestApplyProviderEnvVars_DoesNotDiscoverSuffixedAzureWithoutBaseURL(t *testing.T) {
+	t.Setenv("AZURE_EAST_API_KEY", "sk-azure")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	if _, exists := got["azure-east"]; exists {
+		t.Fatal("expected azure-east not to be discovered without AZURE_EAST_BASE_URL")
+	}
+}
+
 func TestApplyProviderEnvVars_DiscoversOracleFromExplicitEnvVars(t *testing.T) {
 	t.Setenv("ORACLE_API_KEY", "oracle-key")
 	t.Setenv("ORACLE_BASE_URL", "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1")
@@ -548,6 +659,31 @@ func TestApplyProviderEnvVars_DiscoversOracleFromExplicitEnvVars(t *testing.T) {
 	}
 	if p.BaseURL != "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1" {
 		t.Errorf("BaseURL = %q, want Oracle base URL", p.BaseURL)
+	}
+	if len(p.Models) != 2 || p.Models[0] != "openai.gpt-oss-120b" || p.Models[1] != "xai.grok-3" {
+		t.Errorf("Models = %v, want [openai.gpt-oss-120b xai.grok-3]", p.Models)
+	}
+}
+
+func TestApplyProviderEnvVars_DiscoversSuffixedOracleModels(t *testing.T) {
+	t.Setenv("ORACLE_REGION_API_KEY", "oracle-key")
+	t.Setenv("ORACLE_REGION_BASE_URL", "https://oracle.example.com/v1")
+	t.Setenv("ORACLE_REGION_MODELS", " openai.gpt-oss-120b, xai.grok-3 ,, ")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["oracle-region"]
+	if !exists {
+		t.Fatal("expected oracle-region to be discovered from suffixed env vars")
+	}
+	if p.Type != "oracle" {
+		t.Errorf("Type = %q, want oracle", p.Type)
+	}
+	if p.APIKey != "oracle-key" {
+		t.Errorf("APIKey = %q, want oracle-key", p.APIKey)
+	}
+	if p.BaseURL != "https://oracle.example.com/v1" {
+		t.Errorf("BaseURL = %q, want https://oracle.example.com/v1", p.BaseURL)
 	}
 	if len(p.Models) != 2 || p.Models[0] != "openai.gpt-oss-120b" || p.Models[1] != "xai.grok-3" {
 		t.Errorf("Models = %v, want [openai.gpt-oss-120b xai.grok-3]", p.Models)
@@ -717,6 +853,39 @@ func TestApplyProviderEnvVars_PreservesYAMLResilience(t *testing.T) {
 	}
 	if *got["openai"].Resilience.Retry.MaxRetries != 10 {
 		t.Errorf("MaxRetries = %d, want 10", *got["openai"].Resilience.Retry.MaxRetries)
+	}
+}
+
+func TestApplyProviderEnvVars_SuffixedEnvOverlaysMatchingYAMLProvider(t *testing.T) {
+	t.Setenv("OPENAI_EAST_API_KEY", "sk-env-key")
+	t.Setenv("OPENAI_EAST_BASE_URL", "https://env.example.com/v1")
+
+	maxRetries := 10
+	raw := map[string]config.RawProviderConfig{
+		"openai-east": {
+			Type:    "openai",
+			APIKey:  "sk-yaml-key",
+			BaseURL: "https://yaml.example.com/v1",
+			Resilience: &config.RawResilienceConfig{
+				Retry: &config.RawRetryConfig{MaxRetries: &maxRetries},
+			},
+		},
+	}
+
+	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
+
+	p := got["openai-east"]
+	if p.APIKey != "sk-env-key" {
+		t.Errorf("APIKey = %q, want sk-env-key", p.APIKey)
+	}
+	if p.BaseURL != "https://env.example.com/v1" {
+		t.Errorf("BaseURL = %q, want https://env.example.com/v1", p.BaseURL)
+	}
+	if p.Resilience == nil || p.Resilience.Retry == nil {
+		t.Fatal("expected YAML resilience to be preserved after suffixed env var overlay")
+	}
+	if *p.Resilience.Retry.MaxRetries != 10 {
+		t.Errorf("MaxRetries = %d, want 10", *p.Resilience.Retry.MaxRetries)
 	}
 }
 
@@ -917,6 +1086,52 @@ func TestResolveProviders_EmptyRaw_OnlyEnvVars(t *testing.T) {
 	}
 	if filteredRaw["groq"].APIKey != "sk-groq" {
 		t.Errorf("filteredRaw groq APIKey = %q, want sk-groq", filteredRaw["groq"].APIKey)
+	}
+}
+
+func TestResolveProviders_EmptyRaw_SuffixedEnvVars(t *testing.T) {
+	t.Setenv("OPENAI_EAST_API_KEY", "sk-east")
+	t.Setenv("OPENAI_WEST_API_KEY", "sk-west")
+	t.Setenv("OPENAI_WEST_BASE_URL", "https://west.example.com/v1")
+
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+
+	east, exists := got["openai-east"]
+	if !exists {
+		t.Fatal("expected openai-east in resolved providers")
+	}
+	if east.Type != "openai" {
+		t.Errorf("openai-east Type = %q, want openai", east.Type)
+	}
+	if east.APIKey != "sk-east" {
+		t.Errorf("openai-east APIKey = %q, want sk-east", east.APIKey)
+	}
+	if east.BaseURL != testDiscoveryConfigs["openai"].DefaultBaseURL {
+		t.Errorf("openai-east BaseURL = %q, want %q", east.BaseURL, testDiscoveryConfigs["openai"].DefaultBaseURL)
+	}
+
+	west, exists := got["openai-west"]
+	if !exists {
+		t.Fatal("expected openai-west in resolved providers")
+	}
+	if west.Type != "openai" {
+		t.Errorf("openai-west Type = %q, want openai", west.Type)
+	}
+	if west.APIKey != "sk-west" {
+		t.Errorf("openai-west APIKey = %q, want sk-west", west.APIKey)
+	}
+	if west.BaseURL != "https://west.example.com/v1" {
+		t.Errorf("openai-west BaseURL = %q, want https://west.example.com/v1", west.BaseURL)
+	}
+
+	if filteredRaw["openai-east"].APIKey != "sk-east" {
+		t.Errorf("filteredRaw openai-east APIKey = %q, want sk-east", filteredRaw["openai-east"].APIKey)
+	}
+	if filteredRaw["openai-west"].BaseURL != "https://west.example.com/v1" {
+		t.Errorf("filteredRaw openai-west BaseURL = %q, want https://west.example.com/v1", filteredRaw["openai-west"].BaseURL)
+	}
+	if _, exists := got["openai"]; exists {
+		t.Fatal("expected no unsuffixed openai provider from suffixed env vars")
 	}
 }
 
