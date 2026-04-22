@@ -201,6 +201,8 @@ Provider credentials:
 | `ORACLE_BASE_URL`     | Oracle OpenAI-compatible base URL                                                     |
 | `ORACLE_MODELS`       | Oracle fallback model inventory (comma-separated, used when `/models` is unavailable) |
 | `OLLAMA_BASE_URL`     | Ollama (default: `http://localhost:11434/v1`)                                         |
+| `VLLM_BASE_URL`       | vLLM OpenAI-compatible server (default: `http://localhost:8000/v1`)                   |
+| `VLLM_API_KEY`        | vLLM bearer token, only when upstream vLLM was started with `--api-key`               |
 
 See `.env.template` for the full list of all configurable environment variables.
 
@@ -235,6 +237,12 @@ When the `openrouter` provider is used, the gateway adds `HTTP-Referer` and `X-O
 
 **Z.ai Coding Plan uses a different endpoint.**
 `ZAI_API_KEY` uses `https://api.z.ai/api/paas/v4` by default. For GLM Coding Plan, set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
+
+**vLLM uses its `/models` endpoint.**
+Set `VLLM_BASE_URL` to register a keyless vLLM server. Set `VLLM_API_KEY` only
+when upstream vLLM requires bearer authentication. GoModel uses the model IDs
+returned by vLLM, including slash-shaped Hugging Face IDs such as
+`meta-llama/Llama-3.1-8B-Instruct`.
 
 **Partial YAML fields leave the rest at defaults.**
 YAML is unmarshalled onto the struct that was already populated by built-in defaults. Only fields that appear in the file are written. Omitting `max_backoff` from `resilience.retry` leaves it at `30s`; you do not need to repeat defaults you are happy with.

@@ -1,0 +1,124 @@
+---
+title: "GoModel & vLLM"
+description: "Route OpenAI-compatible GoModel requests to one or more vLLM servers, including slash-shaped Hugging Face model IDs."
+icon: "server"
+---
+
+GoModel can use vLLM through vLLM's OpenAI-compatible HTTP server.
+
+Flow:
+
+`Client -> GoModel -> vLLM`
+
+## Before you start
+
+- Start vLLM with its OpenAI-compatible server.
+- Note the vLLM base URL, including `/v1`.
+- Decide whether vLLM should require an upstream API key.
+
+For a local vLLM server:
+
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct
+```
+
+If you want vLLM itself to require bearer auth:
+
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct --api-key token-abc123
+```
+
+## 1. Configure GoModel
+
+For a single keyless vLLM server, env-only configuration is enough:
+
+```bash
+export VLLM_BASE_URL="http://localhost:8000/v1"
+```
+
+Set `VLLM_API_KEY` only when the upstream vLLM server was started with
+`--api-key`:
+
+```bash
+export VLLM_API_KEY="token-abc123"
+```
+
+Use YAML when you want multiple vLLM backends or custom provider names:
+
+```yaml
+providers:
+  qwen-vllm:
+    type: vllm
+    base_url: "http://qwen-vllm:8000/v1"
+
+  llama-vllm:
+    type: vllm
+    base_url: "http://llama-vllm:8000/v1"
+    api_key: "${VLLM_API_KEY}"
+```
+
+## 2. Verify the model registry
+
+```bash
+curl -s http://localhost:8080/v1/models \
+  -H "Authorization: Bearer change-me"
+```
+
+GoModel uses the model IDs returned by vLLM's `/models` endpoint. Hugging Face
+model IDs can contain slashes. With a provider named `llama-vllm`, a vLLM model
+such as `meta-llama/Llama-3.1-8B-Instruct` is exposed through GoModel as:
+
+```text
+llama-vllm/meta-llama/Llama-3.1-8B-Instruct
+```
+
+GoModel splits provider-qualified selectors on the first slash only, so
+`llama-vllm` is the provider and `meta-llama/Llama-3.1-8B-Instruct` remains the
+upstream model ID.
+
+## 3. Send a chat request
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama-vllm/meta-llama/Llama-3.1-8B-Instruct",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+## 4. Use vLLM passthrough
+
+vLLM passthrough is enabled by default. Use it for vLLM-specific endpoints such
+as `/tokenize`, `/detokenize`, `/pooling`, and `/rerank`:
+
+```bash
+curl -s http://localhost:8080/p/vllm/tokenize \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "meta-llama/Llama-3.1-8B-Instruct",
+    "prompt": "Hello"
+  }'
+```
+
+GoModel handles gateway authentication, strips client auth headers before
+forwarding, and applies `VLLM_API_KEY` to upstream requests when configured.
+
+## Current support
+
+Integrated:
+
+- chat completions
+- streaming chat completions
+- Responses API
+- streaming Responses API
+- embeddings
+- provider-native passthrough
+
+Not exposed as first-class GoModel capabilities yet:
+
+- native vLLM batch APIs
+- OpenAI-compatible files lifecycle
+- Responses lifecycle utility endpoints

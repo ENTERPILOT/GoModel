@@ -28,6 +28,7 @@ type DiscoveryConfig struct {
 	RequireBaseURL     bool
 	AllowAPIKeyless    bool
 	SupportsAPIVersion bool
+	SupportsModelsEnv  bool
 }
 
 // Registration contains metadata for registering a provider with the factory.

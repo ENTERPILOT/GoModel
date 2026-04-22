@@ -19,7 +19,8 @@ var Registration = providers.Registration{
 	Type: "oracle",
 	New:  New,
 	Discovery: providers.DiscoveryConfig{
-		RequireBaseURL: true,
+		RequireBaseURL:    true,
+		SupportsModelsEnv: true,
 	},
 }
 

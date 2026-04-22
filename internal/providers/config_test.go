@@ -39,12 +39,17 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"zai": {
 		DefaultBaseURL: "https://api.z.ai/api/paas/v4",
 	},
+	"vllm": {
+		DefaultBaseURL:  "http://localhost:8000/v1",
+		AllowAPIKeyless: true,
+	},
 	"azure": {
 		RequireBaseURL:     true,
 		SupportsAPIVersion: true,
 	},
 	"oracle": {
-		RequireBaseURL: true,
+		RequireBaseURL:    true,
+		SupportsModelsEnv: true,
 	},
 	"ollama": {
 		DefaultBaseURL:  "http://localhost:11434/v1",
@@ -276,6 +281,15 @@ func TestFilterEmptyProviders_OllamaAlwaysKept(t *testing.T) {
 	}
 }
 
+func TestFilterEmptyProviders_VLLMAllowsKeylessConfig(t *testing.T) {
+	got := filterEmptyProviders(map[string]config.RawProviderConfig{
+		"vllm": {Type: "vllm", BaseURL: "http://localhost:8000/v1"},
+	}, testDiscoveryConfigs)
+	if _, exists := got["vllm"]; !exists {
+		t.Fatal("expected vllm to be kept without an API key")
+	}
+}
+
 func TestFilterEmptyProviders_EmptyMap(t *testing.T) {
 	got := filterEmptyProviders(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 	if len(got) != 0 {
@@ -399,6 +413,53 @@ func TestApplyProviderEnvVars_DiscoversZAIWithExplicitBaseURL(t *testing.T) {
 	}
 	if p.BaseURL != explicitBaseURL {
 		t.Errorf("BaseURL = %q, want %q", p.BaseURL, explicitBaseURL)
+	}
+}
+
+func TestApplyProviderEnvVars_DiscoversVLLMFromBaseURLWithoutAPIKey(t *testing.T) {
+	t.Setenv("VLLM_BASE_URL", "http://localhost:8000/v1")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["vllm"]
+	if !exists {
+		t.Fatal("expected vllm to be discovered from base URL env var")
+	}
+	if p.APIKey != "" {
+		t.Errorf("APIKey = %q, want empty", p.APIKey)
+	}
+	if p.Type != "vllm" {
+		t.Errorf("Type = %q, want vllm", p.Type)
+	}
+	if p.BaseURL != "http://localhost:8000/v1" {
+		t.Errorf("BaseURL = %q, want http://localhost:8000/v1", p.BaseURL)
+	}
+}
+
+func TestApplyProviderEnvVars_DiscoversVLLMFromAPIKeyWithDefaultBaseURL(t *testing.T) {
+	t.Setenv("VLLM_API_KEY", "vllm-key")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["vllm"]
+	if !exists {
+		t.Fatal("expected vllm to be discovered from API key env var")
+	}
+	if p.APIKey != "vllm-key" {
+		t.Errorf("APIKey = %q, want vllm-key", p.APIKey)
+	}
+	if p.BaseURL != testDiscoveryConfigs["vllm"].DefaultBaseURL {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["vllm"].DefaultBaseURL)
+	}
+}
+
+func TestApplyProviderEnvVars_IgnoresVLLMModelsEnv(t *testing.T) {
+	t.Setenv("VLLM_MODELS", "meta-llama/Llama-3.1-8B-Instruct")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	if _, exists := got["vllm"]; exists {
+		t.Fatal("expected VLLM_MODELS not to discover vllm provider")
 	}
 }
 

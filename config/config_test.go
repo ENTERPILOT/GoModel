@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -23,6 +24,7 @@ func clearProviderEnvVars(t *testing.T) {
 		"ZAI_API_KEY", "ZAI_BASE_URL",
 		"AZURE_API_KEY", "AZURE_BASE_URL", "AZURE_API_VERSION",
 		"ORACLE_API_KEY", "ORACLE_BASE_URL",
+		"VLLM_API_KEY", "VLLM_BASE_URL", "VLLM_MODELS",
 		"OLLAMA_API_KEY", "OLLAMA_BASE_URL",
 	} {
 		t.Setenv(key, "")
@@ -95,7 +97,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if !cfg.Server.AllowPassthroughV1Alias {
 		t.Error("expected Server.AllowPassthroughV1Alias=true")
 	}
-	if got, want := cfg.Server.EnabledPassthroughProviders, []string{"openai", "anthropic"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+	if got, want := cfg.Server.EnabledPassthroughProviders, []string{"openai", "anthropic", "openrouter", "zai", "vllm"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("expected Server.EnabledPassthroughProviders=%v, got %v", want, got)
 	}
 	if cfg.Cache.Model.Local != nil {
@@ -761,8 +763,8 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 			t.Fatalf("expected Cache.Model.Redis to be nil in example config, got %+v", result.Config.Cache.Model.Redis)
 		}
 		gotProviders := result.Config.Server.EnabledPassthroughProviders
-		wantProviders := []string{"openai", "anthropic"}
-		if len(gotProviders) != len(wantProviders) || gotProviders[0] != wantProviders[0] || gotProviders[1] != wantProviders[1] {
+		wantProviders := []string{"openai", "anthropic", "openrouter", "zai", "vllm"}
+		if !reflect.DeepEqual(gotProviders, wantProviders) {
 			t.Fatalf("Server.EnabledPassthroughProviders = %v, want %v", gotProviders, wantProviders)
 		}
 	})

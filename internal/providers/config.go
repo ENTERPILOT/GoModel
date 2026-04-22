@@ -44,7 +44,10 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 
 		apiKey := os.Getenv(envNames.APIKey)
 		explicitBaseURL := normalizeResolvedBaseURL(os.Getenv(envNames.BaseURL))
-		models := parseCSVEnvList(os.Getenv(envNames.Models))
+		var models []string
+		if spec.SupportsModelsEnv {
+			models = parseCSVEnvList(os.Getenv(envNames.Models))
+		}
 		apiVersion := ""
 		if spec.SupportsAPIVersion {
 			apiVersion = os.Getenv(envNames.APIVersion)

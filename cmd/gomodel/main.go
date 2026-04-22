@@ -25,6 +25,7 @@ import (
 	"gomodel/internal/providers/openai"
 	"gomodel/internal/providers/openrouter"
 	"gomodel/internal/providers/oracle"
+	"gomodel/internal/providers/vllm"
 	"gomodel/internal/providers/xai"
 	"gomodel/internal/providers/zai"
 	"gomodel/internal/version"
@@ -120,6 +121,7 @@ func main() {
 	factory.Add(gemini.Registration)
 	factory.Add(groq.Registration)
 	factory.Add(ollama.Registration)
+	factory.Add(vllm.Registration)
 	factory.Add(xai.Registration)
 	factory.Add(zai.Registration)
 

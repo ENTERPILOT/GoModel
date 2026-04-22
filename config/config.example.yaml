@@ -10,7 +10,7 @@ server:
   pprof_enabled: false # expose /debug/pprof/* for local profiling only
   enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
-  enabled_passthrough_providers: ["openai", "anthropic"] # providers enabled on /p/{provider}/...
+  enabled_passthrough_providers: ["openai", "anthropic", "openrouter", "zai", "vllm"] # providers enabled on /p/{provider}/...
 
 models:
   enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an override allows one or more user paths
@@ -200,6 +200,12 @@ providers:
   ollama:
     type: ollama
     base_url: "http://localhost:11434/v1"
+
+  vllm:
+    type: vllm
+    base_url: "http://localhost:8000/v1"
+    # Optional: set this only when vllm serve was started with --api-key.
+    # api_key: "token-abc123"
 
   # Custom OpenAI-compatible provider
   # my-provider:

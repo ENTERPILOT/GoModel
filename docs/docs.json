@@ -75,6 +75,7 @@
                 "pages": [
                     "guides/openclaw",
                     "guides/oracle",
+                    "guides/vllm",
                     "guides/multiple-ollama",
                     "guides/claude-code",
                     "guides/codex",

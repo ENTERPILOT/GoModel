@@ -809,7 +809,8 @@ type ServerConfig struct {
 	// while keeping /p/{provider}/... as the canonical form. Default: true.
 	AllowPassthroughV1Alias bool `yaml:"allow_passthrough_v1_alias" env:"ALLOW_PASSTHROUGH_V1_ALIAS"`
 	// EnabledPassthroughProviders lists the provider types enabled on
-	// /p/{provider}/... passthrough routes. Default: ["openai", "anthropic"].
+	// /p/{provider}/... passthrough routes. Default:
+	// ["openai", "anthropic", "openrouter", "zai", "vllm"].
 	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
 }
 
@@ -880,6 +881,9 @@ func buildDefaultConfig() *Config {
 			EnabledPassthroughProviders: []string{
 				"openai",
 				"anthropic",
+				"openrouter",
+				"zai",
+				"vllm",
 			},
 		},
 		Models: ModelsConfig{
