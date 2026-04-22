@@ -25,6 +25,8 @@
       "reasoning_tokens": 375,
       "rejected_prediction_tokens": 0
     },
+    "cost_in_usd_ticks": 2073250,
+    "num_sources_used": 0,
     "prompt_tokens": 10,
     "prompt_tokens_details": {
       "audio_tokens": 0,

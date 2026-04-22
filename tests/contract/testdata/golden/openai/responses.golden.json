@@ -21,7 +21,19 @@
   "status": "completed",
   "usage": {
     "input_tokens": 17,
+    "input_tokens_details": {
+      "audio_tokens": 0,
+      "cached_tokens": 0,
+      "image_tokens": 0,
+      "text_tokens": 0
+    },
     "output_tokens": 5,
+    "output_tokens_details": {
+      "accepted_prediction_tokens": 0,
+      "audio_tokens": 0,
+      "reasoning_tokens": 0,
+      "rejected_prediction_tokens": 0
+    },
     "total_tokens": 22
   }
 }

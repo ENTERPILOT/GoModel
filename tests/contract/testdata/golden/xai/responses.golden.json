@@ -31,8 +31,23 @@
   "provider": "",
   "status": "completed",
   "usage": {
+    "cost_in_usd_ticks": 1424250,
     "input_tokens": 17,
+    "input_tokens_details": {
+      "audio_tokens": 0,
+      "cached_tokens": 3,
+      "image_tokens": 0,
+      "text_tokens": 0
+    },
+    "num_server_side_tools_used": 0,
+    "num_sources_used": 0,
     "output_tokens": 276,
+    "output_tokens_details": {
+      "accepted_prediction_tokens": 0,
+      "audio_tokens": 0,
+      "reasoning_tokens": 272,
+      "rejected_prediction_tokens": 0
+    },
     "total_tokens": 293
   }
 }
