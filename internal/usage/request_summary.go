@@ -61,7 +61,7 @@ func requestInputSegments(entry UsageLogEntry) (uncachedInput, cachedInput, cach
 	cachedInput = maxInt64(cacheReadTopLevel, cacheReadNormalized, cacheReadGeneric)
 	baseInput := int64(entry.InputTokens)
 
-	if requestUsesSplitCacheAccounting(entry, cacheReadTopLevel, cacheWriteInput) {
+	if requestUsesSplitPromptCacheAccounting(entry, cacheReadTopLevel, cacheWriteInput) {
 		return baseInput, cachedInput, cacheWriteInput
 	}
 
@@ -72,10 +72,12 @@ func requestInputSegments(entry UsageLogEntry) (uncachedInput, cachedInput, cach
 	return uncachedInput, cachedInput, cacheWriteInput
 }
 
-func requestUsesSplitCacheAccounting(entry UsageLogEntry, cacheReadInput, cacheWriteInput int64) bool {
+func requestUsesSplitPromptCacheAccounting(entry UsageLogEntry, cacheReadInput, cacheWriteInput int64) bool {
 	if cacheReadInput > 0 || cacheWriteInput > 0 {
 		return true
 	}
+	// Anthropic reports input_tokens as uncached prompt input; prompt-cache
+	// reads and writes are separate fields when present.
 	return strings.EqualFold(strings.TrimSpace(entry.Provider), "anthropic")
 }
 

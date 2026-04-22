@@ -65,6 +65,34 @@ func TestSummarizeRequestUsage_AnthropicSplitCacheAccounting(t *testing.T) {
 	}
 }
 
+func TestSummarizeRequestUsage_AnthropicSplitCacheAccountingWithoutCacheFields(t *testing.T) {
+	summary := SummarizeRequestUsage([]UsageLogEntry{
+		{
+			Provider:     "anthropic",
+			InputTokens:  50,
+			OutputTokens: 20,
+		},
+	})
+	if summary == nil {
+		t.Fatal("expected non-nil summary")
+	}
+	if summary.InputTokens != 50 {
+		t.Fatalf("InputTokens = %d, want 50", summary.InputTokens)
+	}
+	if summary.UncachedInputTokens != 50 {
+		t.Fatalf("UncachedInputTokens = %d, want 50", summary.UncachedInputTokens)
+	}
+	if summary.CachedInputTokens != 0 {
+		t.Fatalf("CachedInputTokens = %d, want 0", summary.CachedInputTokens)
+	}
+	if summary.CacheWriteInputTokens != 0 {
+		t.Fatalf("CacheWriteInputTokens = %d, want 0", summary.CacheWriteInputTokens)
+	}
+	if summary.TotalTokens != 70 {
+		t.Fatalf("TotalTokens = %d, want 70", summary.TotalTokens)
+	}
+}
+
 func TestSummarizeUsageByRequestID(t *testing.T) {
 	summaries := SummarizeUsageByRequestID(map[string][]UsageLogEntry{
 		"req-1": {
