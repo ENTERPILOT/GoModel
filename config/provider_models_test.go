@@ -115,6 +115,39 @@ func TestRawProviderModel_UnmarshalYAML_RejectsEmptyScalar(t *testing.T) {
 	}
 }
 
+func TestRawProviderModel_UnmarshalYAML_RejectsWhitespaceOnlyScalar(t *testing.T) {
+	const data = `- "   "`
+	var models []RawProviderModel
+	err := yaml.Unmarshal([]byte(data), &models)
+	if err == nil {
+		t.Fatal("expected error for whitespace-only scalar id, got nil")
+	}
+}
+
+func TestRawProviderModel_UnmarshalYAML_RejectsWhitespaceOnlyMappingID(t *testing.T) {
+	const data = `
+- id: "   "
+  metadata:
+    context_window: 1024
+`
+	var models []RawProviderModel
+	err := yaml.Unmarshal([]byte(data), &models)
+	if err == nil {
+		t.Fatal("expected error for whitespace-only mapping id, got nil")
+	}
+}
+
+func TestRawProviderModel_UnmarshalYAML_TrimsScalar(t *testing.T) {
+	const data = `- "  some-model  "`
+	var models []RawProviderModel
+	if err := yaml.Unmarshal([]byte(data), &models); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if models[0].ID != "some-model" {
+		t.Errorf("ID = %q, want some-model (trimmed)", models[0].ID)
+	}
+}
+
 func TestProviderModelIDs(t *testing.T) {
 	models := []RawProviderModel{
 		{ID: "a"},

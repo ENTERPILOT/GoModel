@@ -162,6 +162,44 @@ func TestMergeMetadata_MergedResultDoesNotAliasBase(t *testing.T) {
 	}
 }
 
+func TestMergeMetadata_OverrideRankingsDoNotAlias(t *testing.T) {
+	baseElo := 1500.0
+	baseRank := 3
+	base := &core.ModelMetadata{
+		Rankings: map[string]core.ModelRanking{
+			"base-only": {Elo: &baseElo, Rank: &baseRank, AsOf: "2025-01-01"},
+		},
+	}
+	overElo := 2000.0
+	overRank := 1
+	override := &core.ModelMetadata{
+		Rankings: map[string]core.ModelRanking{
+			"overridden": {Elo: &overElo, Rank: &overRank, AsOf: "2025-06-01"},
+		},
+	}
+
+	got := MergeMetadata(base, override)
+
+	// Mutate through the merged result.
+	*got.Rankings["overridden"].Elo = 0
+	*got.Rankings["overridden"].Rank = 0
+	*got.Rankings["base-only"].Elo = 0
+	*got.Rankings["base-only"].Rank = 0
+
+	if *override.Rankings["overridden"].Elo != 2000.0 {
+		t.Errorf("override.Rankings.Elo mutated: %v", *override.Rankings["overridden"].Elo)
+	}
+	if *override.Rankings["overridden"].Rank != 1 {
+		t.Errorf("override.Rankings.Rank mutated: %v", *override.Rankings["overridden"].Rank)
+	}
+	if *base.Rankings["base-only"].Elo != 1500.0 {
+		t.Errorf("base.Rankings.Elo mutated: %v", *base.Rankings["base-only"].Elo)
+	}
+	if *base.Rankings["base-only"].Rank != 3 {
+		t.Errorf("base.Rankings.Rank mutated: %v", *base.Rankings["base-only"].Rank)
+	}
+}
+
 func TestMergeMetadata_OverridePricingReplaces(t *testing.T) {
 	basePrice := 1.0
 	base := &core.ModelMetadata{

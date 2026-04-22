@@ -281,6 +281,16 @@ func cloneIntPtr(v *int) *int {
 	return &out
 }
 
+// CloneModelRanking returns a deep copy so the caller can mutate pointer
+// fields (Elo, Rank) without affecting the original.
+func CloneModelRanking(r ModelRanking) ModelRanking {
+	return ModelRanking{
+		Elo:  cloneFloatPtr(r.Elo),
+		Rank: cloneIntPtr(r.Rank),
+		AsOf: r.AsOf,
+	}
+}
+
 // Clone returns a deep copy so callers can safely mutate the result without
 // affecting the original. Pointer fields and Tiers are re-allocated.
 func (p *ModelPricing) Clone() *ModelPricing {
@@ -354,7 +364,7 @@ func (m *ModelMetadata) Clone() *ModelMetadata {
 	if len(m.Rankings) > 0 {
 		ranks := make(map[string]ModelRanking, len(m.Rankings))
 		for k, v := range m.Rankings {
-			ranks[k] = v
+			ranks[k] = CloneModelRanking(v)
 		}
 		out.Rankings = ranks
 	} else {

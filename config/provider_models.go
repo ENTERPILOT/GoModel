@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -37,6 +38,7 @@ func (m *RawProviderModel) UnmarshalYAML(node *yaml.Node) error {
 		if err := node.Decode(&id); err != nil {
 			return fmt.Errorf("provider model: %w", err)
 		}
+		id = strings.TrimSpace(id)
 		if id == "" {
 			return fmt.Errorf("provider model: id is required")
 		}
@@ -49,6 +51,7 @@ func (m *RawProviderModel) UnmarshalYAML(node *yaml.Node) error {
 			return fmt.Errorf("provider model: %w", err)
 		}
 		*m = RawProviderModel(alias)
+		m.ID = strings.TrimSpace(m.ID)
 		if m.ID == "" {
 			return fmt.Errorf("provider model: id is required")
 		}

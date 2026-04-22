@@ -578,3 +578,26 @@ func TestAllCategories_Order(t *testing.T) {
 		}
 	}
 }
+
+func TestModelMetadataClone_DeepClonesRankingPointers(t *testing.T) {
+	elo := 1800.0
+	rank := 5
+	m := &ModelMetadata{
+		Rankings: map[string]ModelRanking{
+			"bench": {Elo: &elo, Rank: &rank, AsOf: "2026-01-01"},
+		},
+	}
+
+	clone := m.Clone()
+
+	// Mutate through the clone.
+	*clone.Rankings["bench"].Elo = 0
+	*clone.Rankings["bench"].Rank = 0
+
+	if *m.Rankings["bench"].Elo != 1800.0 {
+		t.Errorf("original Elo mutated: %v", *m.Rankings["bench"].Elo)
+	}
+	if *m.Rankings["bench"].Rank != 5 {
+		t.Errorf("original Rank mutated: %v", *m.Rankings["bench"].Rank)
+	}
+}

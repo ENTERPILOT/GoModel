@@ -1352,6 +1352,58 @@ func (r *ModelRegistry) snapshotConfigOverrides() map[string]map[string]*core.Mo
 	return out
 }
 
+// metadataOverrideEmpty reports whether an override has no effective content.
+// An empty override (either nil or zero-valued on every field) would turn a
+// nil current metadata into a non-nil empty struct after MergeMetadata, so
+// callers should short-circuit on it.
+func metadataOverrideEmpty(m *core.ModelMetadata) bool {
+	if m == nil {
+		return true
+	}
+	if m.DisplayName != "" || m.Description != "" || m.Family != "" {
+		return false
+	}
+	if len(m.Modes) > 0 || len(m.Categories) > 0 || len(m.Tags) > 0 {
+		return false
+	}
+	if len(m.Capabilities) > 0 || len(m.Rankings) > 0 {
+		return false
+	}
+	if m.ContextWindow != nil || m.MaxOutputTokens != nil {
+		return false
+	}
+	if !pricingOverrideEmpty(m.Pricing) {
+		return false
+	}
+	return true
+}
+
+// pricingOverrideEmpty reports whether a pricing override has no effective
+// content — nil or all fields zero/nil and no tiers.
+func pricingOverrideEmpty(p *core.ModelPricing) bool {
+	if p == nil {
+		return true
+	}
+	if p.Currency != "" {
+		return false
+	}
+	if p.InputPerMtok != nil || p.OutputPerMtok != nil ||
+		p.CachedInputPerMtok != nil || p.CacheWritePerMtok != nil ||
+		p.ReasoningOutputPerMtok != nil ||
+		p.BatchInputPerMtok != nil || p.BatchOutputPerMtok != nil ||
+		p.AudioInputPerMtok != nil || p.AudioOutputPerMtok != nil ||
+		p.PerImage != nil || p.InputPerImage != nil ||
+		p.PerSecondInput != nil || p.PerSecondOutput != nil ||
+		p.PerCharacterInput != nil ||
+		p.PerRequest != nil || p.PerPage != nil {
+		return false
+	}
+	if len(p.Tiers) > 0 {
+		return false
+	}
+	return true
+}
+
 // applyConfigMetadataOverrides layers operator-declared metadata onto already-
 // enriched models. Call it after enrichProviderModelMaps with the same
 // replacements map (pass nil replacements for fresh, unpublished maps).
@@ -1366,9 +1418,11 @@ func applyConfigMetadataOverrides(
 	}
 	// reverse lets us find the pre-enrichment pointer when an entry has
 	// already been replaced by enrichProviderModelMaps, so our replacement
-	// chain stays consistent from the caller's perspective.
+	// chain stays consistent from the caller's perspective. Always allocated
+	// when replacements is non-nil so the else-branch write below cannot hit
+	// a nil map when enrichment made no replacements.
 	var reverse map[*ModelInfo]*ModelInfo
-	if len(replacements) > 0 {
+	if replacements != nil {
 		reverse = make(map[*ModelInfo]*ModelInfo, len(replacements))
 		for orig, repl := range replacements {
 			reverse[repl] = orig
@@ -1381,7 +1435,11 @@ func applyConfigMetadataOverrides(
 			continue
 		}
 		for modelID, override := range modelOverrides {
-			if override == nil {
+			if metadataOverrideEmpty(override) {
+				// A nil or effectively-empty override has nothing to
+				// contribute. Skipping avoids turning a nil current metadata
+				// into a non-nil empty struct, which the DeepEqual check
+				// below would not catch.
 				continue
 			}
 			current, ok := providerModels[modelID]

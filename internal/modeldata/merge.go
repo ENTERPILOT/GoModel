@@ -61,11 +61,14 @@ func MergeMetadata(base, override *core.ModelMetadata) *core.ModelMetadata {
 	}
 	if len(override.Rankings) > 0 {
 		out := make(map[string]core.ModelRanking, len(merged.Rankings)+len(override.Rankings))
+		// merged.Rankings is already a deep clone from base.Clone(), so we can
+		// reuse its values directly; override values must be deep-cloned so the
+		// result does not share Elo/Rank pointers with the caller's input.
 		for k, v := range merged.Rankings {
 			out[k] = v
 		}
 		for k, v := range override.Rankings {
-			out[k] = v
+			out[k] = core.CloneModelRanking(v)
 		}
 		merged.Rankings = out
 	}

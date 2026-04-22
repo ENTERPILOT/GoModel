@@ -168,6 +168,57 @@ func TestApplyConfigMetadataOverrides_NoOpPreservesPointerIdentity(t *testing.T)
 	}
 }
 
+// TestApplyConfigMetadataOverrides_NonNilEmptyReplacementsDoesNotPanic covers
+// the case where a non-nil but empty replacements map is passed in (as
+// enrichModelsLocked does when the model list produced no replacements); the
+// override path must initialise reverse so the else-branch write does not
+// panic on a nil map.
+func TestApplyConfigMetadataOverrides_NonNilEmptyReplacementsDoesNotPanic(t *testing.T) {
+	existing := &ModelInfo{
+		Model: core.Model{ID: "m", Metadata: &core.ModelMetadata{DisplayName: "Old"}},
+	}
+	modelsByProvider := map[string]map[string]*ModelInfo{
+		"p": {"m": existing},
+	}
+	overrides := map[string]map[string]*core.ModelMetadata{
+		"p": {"m": {DisplayName: "New"}},
+	}
+	replacements := make(map[*ModelInfo]*ModelInfo) // non-nil, empty
+	applied := applyConfigMetadataOverrides(overrides, modelsByProvider, replacements)
+	if applied != 1 {
+		t.Errorf("applied = %d, want 1", applied)
+	}
+	next := modelsByProvider["p"]["m"]
+	if next == existing {
+		t.Error("expected a replacement ModelInfo pointer, got original")
+	}
+	if replacements[existing] != next {
+		t.Errorf("replacements[existing] = %p, want %p", replacements[existing], next)
+	}
+}
+
+// TestApplyConfigMetadataOverrides_EmptyOverrideLeavesNilMetadataNil verifies
+// that an override whose fields are all zero does not publish any change,
+// most importantly does not turn nil current metadata into an empty &struct.
+func TestApplyConfigMetadataOverrides_EmptyOverrideLeavesNilMetadataNil(t *testing.T) {
+	existing := &ModelInfo{
+		Model: core.Model{ID: "m", Metadata: nil},
+	}
+	modelsByProvider := map[string]map[string]*ModelInfo{
+		"p": {"m": existing},
+	}
+	overrides := map[string]map[string]*core.ModelMetadata{
+		"p": {"m": {}}, // non-nil, all fields zero
+	}
+	applied := applyConfigMetadataOverrides(overrides, modelsByProvider, nil)
+	if applied != 0 {
+		t.Errorf("applied = %d, want 0 for empty override", applied)
+	}
+	if existing.Model.Metadata != nil {
+		t.Errorf("Metadata = %+v, want nil (empty override should not publish)", existing.Model.Metadata)
+	}
+}
+
 // TestSetProviderMetadataOverrides_DeepClonesExternalInput verifies that
 // mutating the caller's override map/slices/pointers after handing them to
 // the registry does not leak into registry state.
