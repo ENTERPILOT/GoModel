@@ -305,5 +305,8 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 	if _, err := io.Copy(c.Response(), resp.Body); err != nil {
 		return err
 	}
+	if f, ok := c.Response().(http.Flusher); ok {
+		f.Flush()
+	}
 	return nil
 }
