@@ -37,6 +37,9 @@ func (m *RawProviderModel) UnmarshalYAML(node *yaml.Node) error {
 		if err := node.Decode(&id); err != nil {
 			return fmt.Errorf("provider model: %w", err)
 		}
+		if id == "" {
+			return fmt.Errorf("provider model: id is required")
+		}
 		m.ID = id
 		return nil
 	case yaml.MappingNode:

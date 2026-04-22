@@ -95,6 +95,73 @@ func TestMergeMetadata_DoesNotMutateInputs(t *testing.T) {
 	}
 }
 
+func TestMergeMetadata_PassthroughDoesNotAlias(t *testing.T) {
+	baseCW := 4096
+	base := &core.ModelMetadata{
+		DisplayName:   "Base",
+		Modes:         []string{"chat"},
+		Capabilities:  map[string]bool{"tools": true},
+		ContextWindow: &baseCW,
+		Pricing:       &core.ModelPricing{Currency: "USD"},
+	}
+
+	got := MergeMetadata(base, nil)
+	if got == base {
+		t.Fatal("expected a clone, got same pointer")
+	}
+
+	got.Modes[0] = "mutated"
+	got.Capabilities["tools"] = false
+	*got.ContextWindow = 0
+	got.Pricing.Currency = "EUR"
+
+	if base.Modes[0] != "chat" {
+		t.Errorf("base.Modes mutated through clone: %v", base.Modes)
+	}
+	if !base.Capabilities["tools"] {
+		t.Error("base.Capabilities mutated through clone")
+	}
+	if *base.ContextWindow != 4096 {
+		t.Errorf("base.ContextWindow mutated through clone: %d", *base.ContextWindow)
+	}
+	if base.Pricing.Currency != "USD" {
+		t.Errorf("base.Pricing mutated through clone: %q", base.Pricing.Currency)
+	}
+}
+
+func TestMergeMetadata_MergedResultDoesNotAliasBase(t *testing.T) {
+	baseCW := 4096
+	base := &core.ModelMetadata{
+		Modes:         []string{"chat"},
+		Capabilities:  map[string]bool{"tools": true},
+		ContextWindow: &baseCW,
+		Pricing:       &core.ModelPricing{Currency: "USD"},
+	}
+	// Override only a field the base doesn't touch so merged's Modes/Pricing/etc
+	// come from base and must still be independent.
+	override := &core.ModelMetadata{DisplayName: "Overridden"}
+
+	got := MergeMetadata(base, override)
+
+	got.Modes[0] = "mutated"
+	got.Capabilities["tools"] = false
+	*got.ContextWindow = 0
+	got.Pricing.Currency = "EUR"
+
+	if base.Modes[0] != "chat" {
+		t.Errorf("base.Modes aliased: %v", base.Modes)
+	}
+	if !base.Capabilities["tools"] {
+		t.Error("base.Capabilities aliased")
+	}
+	if *base.ContextWindow != 4096 {
+		t.Errorf("base.ContextWindow aliased: %d", *base.ContextWindow)
+	}
+	if base.Pricing.Currency != "USD" {
+		t.Errorf("base.Pricing aliased: %q", base.Pricing.Currency)
+	}
+}
+
 func TestMergeMetadata_OverridePricingReplaces(t *testing.T) {
 	basePrice := 1.0
 	base := &core.ModelMetadata{

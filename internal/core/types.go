@@ -265,6 +265,107 @@ type ModelPricingTier struct {
 	OutputPerMtok *float64 `json:"output_per_mtok,omitempty" yaml:"output_per_mtok,omitempty"`
 }
 
+func cloneFloatPtr(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+func cloneIntPtr(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+// Clone returns a deep copy so callers can safely mutate the result without
+// affecting the original. Pointer fields and Tiers are re-allocated.
+func (p *ModelPricing) Clone() *ModelPricing {
+	if p == nil {
+		return nil
+	}
+	out := *p
+	out.InputPerMtok = cloneFloatPtr(p.InputPerMtok)
+	out.OutputPerMtok = cloneFloatPtr(p.OutputPerMtok)
+	out.CachedInputPerMtok = cloneFloatPtr(p.CachedInputPerMtok)
+	out.CacheWritePerMtok = cloneFloatPtr(p.CacheWritePerMtok)
+	out.ReasoningOutputPerMtok = cloneFloatPtr(p.ReasoningOutputPerMtok)
+	out.BatchInputPerMtok = cloneFloatPtr(p.BatchInputPerMtok)
+	out.BatchOutputPerMtok = cloneFloatPtr(p.BatchOutputPerMtok)
+	out.AudioInputPerMtok = cloneFloatPtr(p.AudioInputPerMtok)
+	out.AudioOutputPerMtok = cloneFloatPtr(p.AudioOutputPerMtok)
+	out.PerImage = cloneFloatPtr(p.PerImage)
+	out.InputPerImage = cloneFloatPtr(p.InputPerImage)
+	out.PerSecondInput = cloneFloatPtr(p.PerSecondInput)
+	out.PerSecondOutput = cloneFloatPtr(p.PerSecondOutput)
+	out.PerCharacterInput = cloneFloatPtr(p.PerCharacterInput)
+	out.PerRequest = cloneFloatPtr(p.PerRequest)
+	out.PerPage = cloneFloatPtr(p.PerPage)
+	if len(p.Tiers) > 0 {
+		tiers := make([]ModelPricingTier, len(p.Tiers))
+		for i, t := range p.Tiers {
+			tiers[i] = ModelPricingTier{
+				UpToMtok:      cloneFloatPtr(t.UpToMtok),
+				InputPerMtok:  cloneFloatPtr(t.InputPerMtok),
+				OutputPerMtok: cloneFloatPtr(t.OutputPerMtok),
+			}
+		}
+		out.Tiers = tiers
+	} else {
+		out.Tiers = nil
+	}
+	return &out
+}
+
+// Clone returns a deep copy so callers can safely mutate the result without
+// affecting the original. Slices, maps, and pointer fields are re-allocated.
+func (m *ModelMetadata) Clone() *ModelMetadata {
+	if m == nil {
+		return nil
+	}
+	out := *m
+	if len(m.Modes) > 0 {
+		out.Modes = append([]string(nil), m.Modes...)
+	} else {
+		out.Modes = nil
+	}
+	if len(m.Categories) > 0 {
+		out.Categories = append([]ModelCategory(nil), m.Categories...)
+	} else {
+		out.Categories = nil
+	}
+	if len(m.Tags) > 0 {
+		out.Tags = append([]string(nil), m.Tags...)
+	} else {
+		out.Tags = nil
+	}
+	if len(m.Capabilities) > 0 {
+		caps := make(map[string]bool, len(m.Capabilities))
+		for k, v := range m.Capabilities {
+			caps[k] = v
+		}
+		out.Capabilities = caps
+	} else {
+		out.Capabilities = nil
+	}
+	if len(m.Rankings) > 0 {
+		ranks := make(map[string]ModelRanking, len(m.Rankings))
+		for k, v := range m.Rankings {
+			ranks[k] = v
+		}
+		out.Rankings = ranks
+	} else {
+		out.Rankings = nil
+	}
+	out.ContextWindow = cloneIntPtr(m.ContextWindow)
+	out.MaxOutputTokens = cloneIntPtr(m.MaxOutputTokens)
+	out.Pricing = m.Pricing.Clone()
+	return &out
+}
+
 // ModelsResponse represents the response from the /v1/models endpoint
 type ModelsResponse struct {
 	Object string  `json:"object"`

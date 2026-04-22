@@ -106,6 +106,15 @@ func TestRawProviderModel_UnmarshalYAML_RejectsMappingWithoutID(t *testing.T) {
 	}
 }
 
+func TestRawProviderModel_UnmarshalYAML_RejectsEmptyScalar(t *testing.T) {
+	const data = `- ""`
+	var models []RawProviderModel
+	err := yaml.Unmarshal([]byte(data), &models)
+	if err == nil {
+		t.Fatal("expected error for empty scalar id, got nil")
+	}
+}
+
 func TestProviderModelIDs(t *testing.T) {
 	models := []RawProviderModel{
 		{ID: "a"},

@@ -7,25 +7,21 @@ import (
 // MergeMetadata merges override onto base field-wise. Non-zero override fields
 // win; zero override fields preserve the base value. Capabilities and Rankings
 // are merged key-by-key (override keys replace base keys). Returns a new
-// *ModelMetadata; inputs are not mutated.
+// *ModelMetadata; inputs are not mutated and the returned value never shares
+// slice, map, or pointer backing storage with base or override.
 //
 // This supports config-driven overrides layered on top of remote-registry
 // enrichment: operators can specify just the fields they care about (e.g.
 // context_window for a local Ollama model) without clobbering unrelated fields.
 func MergeMetadata(base, override *core.ModelMetadata) *core.ModelMetadata {
 	if override == nil {
-		if base == nil {
-			return nil
-		}
-		clone := *base
-		return &clone
+		return base.Clone()
 	}
 	if base == nil {
-		clone := *override
-		return &clone
+		return override.Clone()
 	}
 
-	merged := *base
+	merged := base.Clone()
 
 	if override.DisplayName != "" {
 		merged.DisplayName = override.DisplayName
@@ -46,10 +42,12 @@ func MergeMetadata(base, override *core.ModelMetadata) *core.ModelMetadata {
 		merged.Tags = append([]string(nil), override.Tags...)
 	}
 	if override.ContextWindow != nil {
-		merged.ContextWindow = override.ContextWindow
+		v := *override.ContextWindow
+		merged.ContextWindow = &v
 	}
 	if override.MaxOutputTokens != nil {
-		merged.MaxOutputTokens = override.MaxOutputTokens
+		v := *override.MaxOutputTokens
+		merged.MaxOutputTokens = &v
 	}
 	if len(override.Capabilities) > 0 {
 		out := make(map[string]bool, len(merged.Capabilities)+len(override.Capabilities))
@@ -72,9 +70,8 @@ func MergeMetadata(base, override *core.ModelMetadata) *core.ModelMetadata {
 		merged.Rankings = out
 	}
 	if override.Pricing != nil {
-		pricing := *override.Pricing
-		merged.Pricing = &pricing
+		merged.Pricing = override.Pricing.Clone()
 	}
 
-	return &merged
+	return merged
 }

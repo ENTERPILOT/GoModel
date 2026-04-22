@@ -124,3 +124,87 @@ func TestInitialize_OverrideMergesOnRemoteEnrichment(t *testing.T) {
 		t.Errorf("ContextWindow = %v, want 262144 (override wins)", info.Model.Metadata.ContextWindow)
 	}
 }
+
+// TestApplyConfigMetadataOverrides_NoOpPreservesPointerIdentity verifies that
+// an override whose fields already match the current metadata does not
+// replace the ModelInfo pointer — a concurrent reader that captured the
+// pointer before re-enrichment keeps a consistent view.
+func TestApplyConfigMetadataOverrides_NoOpPreservesPointerIdentity(t *testing.T) {
+	existing := &ModelInfo{
+		Model: core.Model{
+			ID: "same-model",
+			Metadata: &core.ModelMetadata{
+				DisplayName:   "Same Display",
+				ContextWindow: ctxWindow(131072),
+				Capabilities:  map[string]bool{"tools": true},
+			},
+		},
+		ProviderName: "nippur",
+		ProviderType: "ollama",
+	}
+	modelsByProvider := map[string]map[string]*ModelInfo{
+		"nippur": {"same-model": existing},
+	}
+	// Override is byte-equal to existing metadata — nothing to do.
+	overrides := map[string]map[string]*core.ModelMetadata{
+		"nippur": {
+			"same-model": {
+				DisplayName:   "Same Display",
+				ContextWindow: ctxWindow(131072),
+				Capabilities:  map[string]bool{"tools": true},
+			},
+		},
+	}
+	replacements := make(map[*ModelInfo]*ModelInfo)
+	applied := applyConfigMetadataOverrides(overrides, modelsByProvider, replacements)
+	if applied != 0 {
+		t.Errorf("applied = %d, want 0 for no-op merge", applied)
+	}
+	if got := modelsByProvider["nippur"]["same-model"]; got != existing {
+		t.Errorf("ModelInfo pointer changed on no-op merge: got %p, want %p", got, existing)
+	}
+	if len(replacements) != 0 {
+		t.Errorf("replacements = %v, want empty on no-op", replacements)
+	}
+}
+
+// TestSetProviderMetadataOverrides_DeepClonesExternalInput verifies that
+// mutating the caller's override map/slices/pointers after handing them to
+// the registry does not leak into registry state.
+func TestSetProviderMetadataOverrides_DeepClonesExternalInput(t *testing.T) {
+	registry := NewModelRegistry()
+
+	external := map[string]*core.ModelMetadata{
+		"m": {
+			Modes:         []string{"chat"},
+			Capabilities:  map[string]bool{"tools": true},
+			ContextWindow: ctxWindow(4096),
+			Pricing:       &core.ModelPricing{Currency: "USD"},
+		},
+	}
+	registry.SetProviderMetadataOverrides("p", external)
+
+	// Mutate the caller's copy in every aliasable way.
+	external["m"].Modes[0] = "mutated"
+	external["m"].Capabilities["tools"] = false
+	*external["m"].ContextWindow = 0
+	external["m"].Pricing.Currency = "EUR"
+
+	snap := registry.snapshotConfigOverrides()
+	stored := snap["p"]["m"]
+	if stored == nil {
+		t.Fatal("expected stored override for p/m")
+	}
+	if stored.Modes[0] != "chat" {
+		t.Errorf("stored Modes mutated via caller: %v", stored.Modes)
+	}
+	if !stored.Capabilities["tools"] {
+		t.Error("stored Capabilities mutated via caller")
+	}
+	if stored.ContextWindow == nil || *stored.ContextWindow != 4096 {
+		t.Errorf("stored ContextWindow mutated via caller: %v", stored.ContextWindow)
+	}
+	if stored.Pricing == nil || stored.Pricing.Currency != "USD" {
+		t.Errorf("stored Pricing mutated via caller: %+v", stored.Pricing)
+	}
+}

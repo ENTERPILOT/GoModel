@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -132,7 +133,7 @@ func (r *ModelRegistry) SetProviderMetadataOverrides(providerName string, overri
 	}
 	clone := make(map[string]*core.ModelMetadata, len(overrides))
 	for k, v := range overrides {
-		clone[k] = v
+		clone[k] = v.Clone()
 	}
 	r.configMetadataOverrides[providerName] = clone
 }
@@ -297,8 +298,8 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 	// Enrich models with metadata from the model list (if loaded)
 	r.mu.RLock()
 	list := r.modelList
-	configOverrides := r.configMetadataOverrides
 	r.mu.RUnlock()
+	configOverrides := r.snapshotConfigOverrides()
 	metadataStats := metadataEnrichmentStats{}
 	if list != nil {
 		metadataStats = enrichProviderModelMaps(list, providerTypes, newModelsByProvider, nil)
@@ -475,9 +476,7 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	if list != nil {
 		metadataStats = enrichProviderModelMaps(list, r.snapshotProviderTypes(), newModelsByProvider, nil)
 	}
-	r.mu.RLock()
-	configOverrides := r.configMetadataOverrides
-	r.mu.RUnlock()
+	configOverrides := r.snapshotConfigOverrides()
 	applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
 
 	r.mu.Lock()
@@ -1332,6 +1331,27 @@ func (r *ModelRegistry) snapshotProviderTypes() map[core.Provider]string {
 	return m
 }
 
+// snapshotConfigOverrides returns a copy of the configMetadataOverrides outer
+// and inner maps for use outside the lock. The inner *core.ModelMetadata
+// pointers are shared, which is safe because SetProviderMetadataOverrides
+// deep-clones on insertion and the registry never hands those values back out.
+func (r *ModelRegistry) snapshotConfigOverrides() map[string]map[string]*core.ModelMetadata {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.configMetadataOverrides) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]*core.ModelMetadata, len(r.configMetadataOverrides))
+	for provider, inner := range r.configMetadataOverrides {
+		innerCopy := make(map[string]*core.ModelMetadata, len(inner))
+		for modelID, meta := range inner {
+			innerCopy[modelID] = meta
+		}
+		out[provider] = innerCopy
+	}
+	return out
+}
+
 // applyConfigMetadataOverrides layers operator-declared metadata onto already-
 // enriched models. Call it after enrichProviderModelMaps with the same
 // replacements map (pass nil replacements for fresh, unpublished maps).
@@ -1369,6 +1389,11 @@ func applyConfigMetadataOverrides(
 				continue
 			}
 			merged := modeldata.MergeMetadata(current.Model.Metadata, override)
+			// Skip no-op merges so concurrent readers holding the current
+			// pointer keep a stable view when the override adds no new info.
+			if reflect.DeepEqual(current.Model.Metadata, merged) {
+				continue
+			}
 			if replacements == nil {
 				current.Model.Metadata = merged
 				applied++
