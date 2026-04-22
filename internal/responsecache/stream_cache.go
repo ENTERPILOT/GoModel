@@ -142,14 +142,18 @@ func writeCachedResponse(c *echo.Context, path string, requestBody, cached []byt
 		c.Response().Header().Set("Connection", "keep-alive")
 		c.Response().Header().Set("X-Cache", cacheHeader)
 		c.Response().WriteHeader(http.StatusOK)
-		_, _ = c.Response().Write(cached)
+		if _, err := c.Response().Write(cached); err != nil {
+			return err
+		}
 		return nil
 	}
 
 	c.Response().Header().Set("Content-Type", "application/json")
 	c.Response().Header().Set("X-Cache", cacheHeader)
 	c.Response().WriteHeader(http.StatusOK)
-	_, _ = c.Response().Write(cached)
+	if _, err := c.Response().Write(cached); err != nil {
+		return err
+	}
 	return nil
 }
 
