@@ -151,25 +151,27 @@ type Model struct {
 }
 
 // ModelMetadata holds enriched metadata from the external model registry.
+// YAML tags mirror the JSON field names so operators can declare metadata
+// overrides in config.yaml in the same shape that appears in /v1/models output.
 type ModelMetadata struct {
-	DisplayName     string                  `json:"display_name,omitempty"`
-	Description     string                  `json:"description,omitempty"`
-	Family          string                  `json:"family,omitempty"`
-	Modes           []string                `json:"modes,omitempty"`
-	Categories      []ModelCategory         `json:"categories,omitempty"`
-	Tags            []string                `json:"tags,omitempty"`
-	ContextWindow   *int                    `json:"context_window,omitempty"`
-	MaxOutputTokens *int                    `json:"max_output_tokens,omitempty"`
-	Capabilities    map[string]bool         `json:"capabilities,omitempty"`
-	Rankings        map[string]ModelRanking `json:"rankings,omitempty"`
-	Pricing         *ModelPricing           `json:"pricing,omitempty"`
+	DisplayName     string                  `json:"display_name,omitempty" yaml:"display_name,omitempty"`
+	Description     string                  `json:"description,omitempty" yaml:"description,omitempty"`
+	Family          string                  `json:"family,omitempty" yaml:"family,omitempty"`
+	Modes           []string                `json:"modes,omitempty" yaml:"modes,omitempty"`
+	Categories      []ModelCategory         `json:"categories,omitempty" yaml:"categories,omitempty"`
+	Tags            []string                `json:"tags,omitempty" yaml:"tags,omitempty"`
+	ContextWindow   *int                    `json:"context_window,omitempty" yaml:"context_window,omitempty"`
+	MaxOutputTokens *int                    `json:"max_output_tokens,omitempty" yaml:"max_output_tokens,omitempty"`
+	Capabilities    map[string]bool         `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+	Rankings        map[string]ModelRanking `json:"rankings,omitempty" yaml:"rankings,omitempty"`
+	Pricing         *ModelPricing           `json:"pricing,omitempty" yaml:"pricing,omitempty"`
 }
 
 // ModelRanking holds one benchmark or leaderboard entry for a model.
 type ModelRanking struct {
-	Elo  *float64 `json:"elo,omitempty"`
-	Rank *int     `json:"rank,omitempty"`
-	AsOf string   `json:"as_of,omitempty"`
+	Elo  *float64 `json:"elo,omitempty" yaml:"elo,omitempty"`
+	Rank *int     `json:"rank,omitempty" yaml:"rank,omitempty"`
+	AsOf string   `json:"as_of,omitempty" yaml:"as_of,omitempty"`
 }
 
 // ModelCategory represents a model's functional category for UI grouping.
@@ -236,31 +238,31 @@ func AllCategories() []ModelCategory {
 
 // ModelPricing holds pricing information for cost calculation.
 type ModelPricing struct {
-	Currency               string             `json:"currency"`
-	InputPerMtok           *float64           `json:"input_per_mtok,omitempty"`
-	OutputPerMtok          *float64           `json:"output_per_mtok,omitempty"`
-	CachedInputPerMtok     *float64           `json:"cached_input_per_mtok,omitempty"`
-	CacheWritePerMtok      *float64           `json:"cache_write_per_mtok,omitempty"`
-	ReasoningOutputPerMtok *float64           `json:"reasoning_output_per_mtok,omitempty"`
-	BatchInputPerMtok      *float64           `json:"batch_input_per_mtok,omitempty"`
-	BatchOutputPerMtok     *float64           `json:"batch_output_per_mtok,omitempty"`
-	AudioInputPerMtok      *float64           `json:"audio_input_per_mtok,omitempty"`
-	AudioOutputPerMtok     *float64           `json:"audio_output_per_mtok,omitempty"`
-	PerImage               *float64           `json:"per_image,omitempty"`
-	InputPerImage          *float64           `json:"input_per_image,omitempty"`
-	PerSecondInput         *float64           `json:"per_second_input,omitempty"`
-	PerSecondOutput        *float64           `json:"per_second_output,omitempty"`
-	PerCharacterInput      *float64           `json:"per_character_input,omitempty"`
-	PerRequest             *float64           `json:"per_request,omitempty"`
-	PerPage                *float64           `json:"per_page,omitempty"`
-	Tiers                  []ModelPricingTier `json:"tiers,omitempty"`
+	Currency               string             `json:"currency" yaml:"currency"`
+	InputPerMtok           *float64           `json:"input_per_mtok,omitempty" yaml:"input_per_mtok,omitempty"`
+	OutputPerMtok          *float64           `json:"output_per_mtok,omitempty" yaml:"output_per_mtok,omitempty"`
+	CachedInputPerMtok     *float64           `json:"cached_input_per_mtok,omitempty" yaml:"cached_input_per_mtok,omitempty"`
+	CacheWritePerMtok      *float64           `json:"cache_write_per_mtok,omitempty" yaml:"cache_write_per_mtok,omitempty"`
+	ReasoningOutputPerMtok *float64           `json:"reasoning_output_per_mtok,omitempty" yaml:"reasoning_output_per_mtok,omitempty"`
+	BatchInputPerMtok      *float64           `json:"batch_input_per_mtok,omitempty" yaml:"batch_input_per_mtok,omitempty"`
+	BatchOutputPerMtok     *float64           `json:"batch_output_per_mtok,omitempty" yaml:"batch_output_per_mtok,omitempty"`
+	AudioInputPerMtok      *float64           `json:"audio_input_per_mtok,omitempty" yaml:"audio_input_per_mtok,omitempty"`
+	AudioOutputPerMtok     *float64           `json:"audio_output_per_mtok,omitempty" yaml:"audio_output_per_mtok,omitempty"`
+	PerImage               *float64           `json:"per_image,omitempty" yaml:"per_image,omitempty"`
+	InputPerImage          *float64           `json:"input_per_image,omitempty" yaml:"input_per_image,omitempty"`
+	PerSecondInput         *float64           `json:"per_second_input,omitempty" yaml:"per_second_input,omitempty"`
+	PerSecondOutput        *float64           `json:"per_second_output,omitempty" yaml:"per_second_output,omitempty"`
+	PerCharacterInput      *float64           `json:"per_character_input,omitempty" yaml:"per_character_input,omitempty"`
+	PerRequest             *float64           `json:"per_request,omitempty" yaml:"per_request,omitempty"`
+	PerPage                *float64           `json:"per_page,omitempty" yaml:"per_page,omitempty"`
+	Tiers                  []ModelPricingTier `json:"tiers,omitempty" yaml:"tiers,omitempty"`
 }
 
 // ModelPricingTier represents a volume-based pricing tier.
 type ModelPricingTier struct {
-	UpToMtok      *float64 `json:"up_to_mtok,omitempty"`
-	InputPerMtok  *float64 `json:"input_per_mtok,omitempty"`
-	OutputPerMtok *float64 `json:"output_per_mtok,omitempty"`
+	UpToMtok      *float64 `json:"up_to_mtok,omitempty" yaml:"up_to_mtok,omitempty"`
+	InputPerMtok  *float64 `json:"input_per_mtok,omitempty" yaml:"input_per_mtok,omitempty"`
+	OutputPerMtok *float64 `json:"output_per_mtok,omitempty" yaml:"output_per_mtok,omitempty"`
 }
 
 // ModelsResponse represents the response from the /v1/models endpoint

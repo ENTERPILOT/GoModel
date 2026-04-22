@@ -46,6 +46,10 @@ type ModelRegistry struct {
 	refreshOnce      sync.Once            // initializes refreshCh for zero-value safety
 	modelList        *modeldata.ModelList // parsed model list (nil = not loaded)
 	modelListRaw     json.RawMessage      // raw bytes for cache persistence
+	// configMetadataOverrides holds operator-supplied metadata keyed by provider
+	// instance name -> raw model ID. Applied after remote-registry enrichment as
+	// a higher-priority layer. nil if no overrides declared.
+	configMetadataOverrides map[string]map[string]*core.ModelMetadata
 
 	// Cached sorted slices, rebuilt lazily after models change.
 	// nil means cache needs rebuilding. Protected by mu.
@@ -105,6 +109,32 @@ func (r *ModelRegistry) RegisterProvider(provider core.Provider) {
 // The type is used for cache persistence to re-associate models with providers on startup.
 func (r *ModelRegistry) RegisterProviderWithType(provider core.Provider, providerType string) {
 	r.RegisterProviderWithNameAndType(provider, "", providerType)
+}
+
+// SetProviderMetadataOverrides records per-model metadata overrides declared in
+// config.yaml for the given provider instance name. Overrides are merged onto
+// remote-registry enrichment each time the registry re-enriches its models.
+//
+// Call with an empty/nil map to clear any prior overrides for that provider.
+func (r *ModelRegistry) SetProviderMetadataOverrides(providerName string, overrides map[string]*core.ModelMetadata) {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(overrides) == 0 {
+		delete(r.configMetadataOverrides, providerName)
+		return
+	}
+	if r.configMetadataOverrides == nil {
+		r.configMetadataOverrides = make(map[string]map[string]*core.ModelMetadata)
+	}
+	clone := make(map[string]*core.ModelMetadata, len(overrides))
+	for k, v := range overrides {
+		clone[k] = v
+	}
+	r.configMetadataOverrides[providerName] = clone
 }
 
 // RegisterProviderWithNameAndType adds a provider with a configured provider instance name and type.
@@ -267,11 +297,13 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 	// Enrich models with metadata from the model list (if loaded)
 	r.mu.RLock()
 	list := r.modelList
+	configOverrides := r.configMetadataOverrides
 	r.mu.RUnlock()
 	metadataStats := metadataEnrichmentStats{}
 	if list != nil {
 		metadataStats = enrichProviderModelMaps(list, providerTypes, newModelsByProvider, nil)
 	}
+	applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
 
 	// Atomically swap the models map and invalidate sorted caches
 	r.mu.Lock()
@@ -443,6 +475,10 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	if list != nil {
 		metadataStats = enrichProviderModelMaps(list, r.snapshotProviderTypes(), newModelsByProvider, nil)
 	}
+	r.mu.RLock()
+	configOverrides := r.configMetadataOverrides
+	r.mu.RUnlock()
+	applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
 
 	r.mu.Lock()
 	r.models = newModels
@@ -1214,7 +1250,10 @@ func (r *ModelRegistry) enrichModels() metadataEnrichmentStats {
 }
 
 func (r *ModelRegistry) enrichModelsLocked() metadataEnrichmentStats {
-	if r.modelList == nil || len(r.models) == 0 {
+	if len(r.models) == 0 {
+		return metadataEnrichmentStats{}
+	}
+	if r.modelList == nil && len(r.configMetadataOverrides) == 0 {
 		return metadataEnrichmentStats{}
 	}
 
@@ -1222,7 +1261,11 @@ func (r *ModelRegistry) enrichModelsLocked() metadataEnrichmentStats {
 	maps.Copy(providerTypes, r.providerTypes)
 
 	replacements := make(map[*ModelInfo]*ModelInfo, len(r.models))
-	stats := enrichProviderModelMaps(r.modelList, providerTypes, r.modelsByProvider, replacements)
+	stats := metadataEnrichmentStats{}
+	if r.modelList != nil {
+		stats = enrichProviderModelMaps(r.modelList, providerTypes, r.modelsByProvider, replacements)
+	}
+	applyConfigMetadataOverrides(r.configMetadataOverrides, r.modelsByProvider, replacements)
 	for modelID, info := range r.models {
 		if replacement, ok := replacements[info]; ok {
 			r.models[modelID] = replacement
@@ -1287,6 +1330,65 @@ func (r *ModelRegistry) snapshotProviderTypes() map[core.Provider]string {
 	m := make(map[core.Provider]string, len(r.providerTypes))
 	maps.Copy(m, r.providerTypes)
 	return m
+}
+
+// applyConfigMetadataOverrides layers operator-declared metadata onto already-
+// enriched models. Call it after enrichProviderModelMaps with the same
+// replacements map (pass nil replacements for fresh, unpublished maps).
+// Returns the number of models whose metadata was updated.
+func applyConfigMetadataOverrides(
+	overrides map[string]map[string]*core.ModelMetadata,
+	modelsByProvider map[string]map[string]*ModelInfo,
+	replacements map[*ModelInfo]*ModelInfo,
+) int {
+	if len(overrides) == 0 {
+		return 0
+	}
+	// reverse lets us find the pre-enrichment pointer when an entry has
+	// already been replaced by enrichProviderModelMaps, so our replacement
+	// chain stays consistent from the caller's perspective.
+	var reverse map[*ModelInfo]*ModelInfo
+	if len(replacements) > 0 {
+		reverse = make(map[*ModelInfo]*ModelInfo, len(replacements))
+		for orig, repl := range replacements {
+			reverse[repl] = orig
+		}
+	}
+	applied := 0
+	for providerName, modelOverrides := range overrides {
+		providerModels, ok := modelsByProvider[providerName]
+		if !ok {
+			continue
+		}
+		for modelID, override := range modelOverrides {
+			if override == nil {
+				continue
+			}
+			current, ok := providerModels[modelID]
+			if !ok {
+				continue
+			}
+			merged := modeldata.MergeMetadata(current.Model.Metadata, override)
+			if replacements == nil {
+				current.Model.Metadata = merged
+				applied++
+				continue
+			}
+			cloned := *current
+			cloned.Model.Metadata = merged
+			next := &cloned
+			providerModels[modelID] = next
+			if orig, hasOrig := reverse[current]; hasOrig {
+				replacements[orig] = next
+				reverse[next] = orig
+			} else {
+				replacements[current] = next
+				reverse[next] = current
+			}
+			applied++
+		}
+	}
+	return applied
 }
 
 func enrichProviderModelMaps(

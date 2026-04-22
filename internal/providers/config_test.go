@@ -172,7 +172,7 @@ func TestBuildProviderConfig_PreservesFields(t *testing.T) {
 		Type:    "openai",
 		APIKey:  "sk-key",
 		BaseURL: "https://custom.endpoint.com",
-		Models:  []string{"gpt-4", "gpt-3.5-turbo"},
+		Models:  []config.RawProviderModel{{ID: "gpt-4"}, {ID: "gpt-3.5-turbo"}},
 	}
 	got := buildProviderConfig(raw, globalResilience)
 
@@ -718,7 +718,7 @@ func TestApplyProviderEnvVars_DiscoversOracleFromExplicitEnvVars(t *testing.T) {
 	if p.BaseURL != "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1" {
 		t.Errorf("BaseURL = %q, want Oracle base URL", p.BaseURL)
 	}
-	if len(p.Models) != 2 || p.Models[0] != "openai.gpt-oss-120b" || p.Models[1] != "xai.grok-3" {
+	if len(p.Models) != 2 || p.Models[0].ID != "openai.gpt-oss-120b" || p.Models[1].ID != "xai.grok-3" {
 		t.Errorf("Models = %v, want [openai.gpt-oss-120b xai.grok-3]", p.Models)
 	}
 }
@@ -743,7 +743,7 @@ func TestApplyProviderEnvVars_DiscoversSuffixedOracleModels(t *testing.T) {
 	if p.BaseURL != "https://oracle.example.com/v1" {
 		t.Errorf("BaseURL = %q, want https://oracle.example.com/v1", p.BaseURL)
 	}
-	if len(p.Models) != 2 || p.Models[0] != "openai.gpt-oss-120b" || p.Models[1] != "xai.grok-3" {
+	if len(p.Models) != 2 || p.Models[0].ID != "openai.gpt-oss-120b" || p.Models[1].ID != "xai.grok-3" {
 		t.Errorf("Models = %v, want [openai.gpt-oss-120b xai.grok-3]", p.Models)
 	}
 }
@@ -764,7 +764,7 @@ func TestApplyProviderEnvVars_OracleModelsEnvWinsOverYAMLWithoutOtherOracleEnvVa
 			Type:    "oracle",
 			APIKey:  "oracle-key",
 			BaseURL: "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1",
-			Models:  []string{"yaml-model"},
+			Models:  []config.RawProviderModel{{ID: "yaml-model"}},
 		},
 	}
 	t.Setenv("ORACLE_MODELS", "openai.gpt-oss-120b, xai.grok-3")
@@ -778,7 +778,7 @@ func TestApplyProviderEnvVars_OracleModelsEnvWinsOverYAMLWithoutOtherOracleEnvVa
 	if p.BaseURL != "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1" {
 		t.Fatalf("BaseURL = %q, want Oracle base URL", p.BaseURL)
 	}
-	if len(p.Models) != 2 || p.Models[0] != "openai.gpt-oss-120b" || p.Models[1] != "xai.grok-3" {
+	if len(p.Models) != 2 || p.Models[0].ID != "openai.gpt-oss-120b" || p.Models[1].ID != "xai.grok-3" {
 		t.Fatalf("Models = %v, want [openai.gpt-oss-120b xai.grok-3]", p.Models)
 	}
 }

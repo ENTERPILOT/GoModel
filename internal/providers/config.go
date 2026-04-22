@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"gomodel/config"
+	"gomodel/internal/core"
 )
 
 // ProviderConfig holds the fully resolved provider configuration after merging
@@ -18,7 +19,12 @@ type ProviderConfig struct {
 	BaseURL    string
 	APIVersion string
 	Models     []string
-	Resilience config.ResilienceConfig
+	// ModelMetadataOverrides holds operator-supplied metadata keyed by raw model
+	// ID (as it appears in the provider's /models response). The registry merges
+	// these onto remote-registry metadata after enrichment; non-zero fields here
+	// win. Empty/nil when no per-model metadata is declared in YAML.
+	ModelMetadataOverrides map[string]*core.ModelMetadata
+	Resilience             config.ResilienceConfig
 }
 
 // resolveProviders applies env var overrides to the raw YAML provider map, filters
@@ -240,7 +246,7 @@ func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) 
 		APIKey:     v.APIKey,
 		BaseURL:    v.resolvedBaseURL(spec),
 		APIVersion: v.APIVersion,
-		Models:     v.Models,
+		Models:     rawProviderModelsFromIDs(v.Models),
 	}
 }
 
@@ -265,7 +271,7 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 		existing.APIVersion = values.APIVersion
 	}
 	if len(values.Models) > 0 {
-		existing.Models = values.Models
+		existing.Models = rawProviderModelsFromIDs(values.Models)
 	}
 	return existing
 }
@@ -438,12 +444,13 @@ func buildProviderConfigs(raw map[string]config.RawProviderConfig, global config
 // Non-nil fields in the raw config override the global defaults.
 func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceConfig) ProviderConfig {
 	resolved := ProviderConfig{
-		Type:       raw.Type,
-		APIKey:     raw.APIKey,
-		BaseURL:    raw.BaseURL,
-		APIVersion: raw.APIVersion,
-		Models:     raw.Models,
-		Resilience: global,
+		Type:                   raw.Type,
+		APIKey:                 raw.APIKey,
+		BaseURL:                raw.BaseURL,
+		APIVersion:             raw.APIVersion,
+		Models:                 config.ProviderModelIDs(raw.Models),
+		ModelMetadataOverrides: config.ProviderModelMetadataOverrides(raw.Models),
+		Resilience:             global,
 	}
 
 	if raw.Resilience == nil {
@@ -481,4 +488,20 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 	}
 
 	return resolved
+}
+
+// rawProviderModelsFromIDs wraps a plain string slice into RawProviderModel
+// entries. Used for env-var-sourced model lists where metadata is never present.
+func rawProviderModelsFromIDs(ids []string) []config.RawProviderModel {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]config.RawProviderModel, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		out = append(out, config.RawProviderModel{ID: id})
+	}
+	return out
 }

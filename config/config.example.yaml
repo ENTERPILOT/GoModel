@@ -247,3 +247,27 @@ providers:
   #   type: "openai"
   #   base_url: "https://api.deepseek.com/v1"
   #   api_key: "${DEEPSEEK_API_KEY}"
+
+  # Example: local Ollama server with explicit per-model metadata.
+  # Use the rich entry form to declare context_window, pricing, capabilities,
+  # etc. for models that aren't in the upstream ai-model-list registry. Plain
+  # string entries still work and produce unenriched models as before.
+  # Declared fields are merged onto any remote-registry entry; operator values
+  # win per-field.
+  # nippur:
+  #   type: "ollama"
+  #   base_url: "http://127.0.0.1:8080/v1"
+  #   models:
+  #     - id: GLM-4.7-Flash
+  #       metadata:
+  #         display_name: "GLM 4.7 Flash (local)"
+  #         context_window: 131072
+  #         max_output_tokens: 8192
+  #         modes: ["chat"]
+  #         capabilities:
+  #           tools: true
+  #         pricing:
+  #           currency: USD
+  #           input_per_mtok: 0
+  #           output_per_mtok: 0
+  #     - Gemma4-31B
