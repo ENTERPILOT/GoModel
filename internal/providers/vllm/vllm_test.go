@@ -145,3 +145,67 @@ func TestPassthrough_ForwardsProviderNativeEndpoint(t *testing.T) {
 		t.Fatalf("authorization = %q, want Bearer vllm-key", gotAuth)
 	}
 }
+
+func TestPassthrough_UsesRootForNativeEndpointsWhenBaseURLIncludesV1(t *testing.T) {
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tokens":[1,2,3]}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+
+	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodPost,
+		Endpoint: "tokenize",
+		Body:     io.NopCloser(strings.NewReader("{}")),
+		Headers:  http.Header{"Content-Type": []string{"application/json"}},
+	})
+	if err != nil {
+		t.Fatalf("Passthrough() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotPath != "/tokenize" {
+		t.Fatalf("path = %q, want /tokenize", gotPath)
+	}
+}
+
+func TestPassthrough_UsesV1ForOpenAICompatibleEndpointsWhenBaseURLIncludesV1(t *testing.T) {
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-vllm",
+			"created":1677652288,
+			"model":"Qwen/Qwen2.5-0.5B-Instruct",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+
+	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodPost,
+		Endpoint: "chat/completions",
+		Body: io.NopCloser(strings.NewReader(`{
+			"model":"Qwen/Qwen2.5-0.5B-Instruct",
+			"messages":[{"role":"user","content":"hi"}]
+		}`)),
+		Headers: http.Header{"Content-Type": []string{"application/json"}},
+	})
+	if err != nil {
+		t.Fatalf("Passthrough() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotPath != "/v1/chat/completions" {
+		t.Fatalf("path = %q, want /v1/chat/completions", gotPath)
+	}
+}
