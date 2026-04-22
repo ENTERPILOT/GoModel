@@ -104,19 +104,22 @@ func (s *MemoryStore) Create(_ context.Context, response *StoredResponse) error 
 // Get retrieves one response snapshot by id.
 func (s *MemoryStore) Get(_ context.Context, id string) (*StoredResponse, error) {
 	now := time.Now().UTC()
-	s.mu.Lock()
-	s.cleanupExpiredLocked(now)
+	s.mu.RLock()
 	response, ok := s.items[id]
 	if !ok {
-		s.mu.Unlock()
+		s.mu.RUnlock()
 		return nil, ErrNotFound
 	}
 	if responseExpired(response, now) {
+		s.mu.RUnlock()
+		// Upgrade to write lock to remove expired entry and run cleanup.
+		s.mu.Lock()
 		delete(s.items, id)
+		s.cleanupExpiredLocked(now)
 		s.mu.Unlock()
 		return nil, ErrNotFound
 	}
-	s.mu.Unlock()
+	s.mu.RUnlock()
 	return cloneResponse(response)
 }
 
