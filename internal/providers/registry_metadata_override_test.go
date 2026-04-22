@@ -197,6 +197,32 @@ func TestApplyConfigMetadataOverrides_NonNilEmptyReplacementsDoesNotPanic(t *tes
 	}
 }
 
+// TestMetadataOverrideEmpty covers the reflect-based emptiness check so new
+// fields on core.ModelMetadata or core.ModelPricing are picked up by the
+// short-circuit without touching registry.go.
+func TestMetadataOverrideEmpty(t *testing.T) {
+	cases := []struct {
+		name string
+		in   *core.ModelMetadata
+		want bool
+	}{
+		{"nil", nil, true},
+		{"zero struct", &core.ModelMetadata{}, true},
+		{"empty pricing pointer", &core.ModelMetadata{Pricing: &core.ModelPricing{}}, true},
+		{"display name set", &core.ModelMetadata{DisplayName: "X"}, false},
+		{"context window set", &core.ModelMetadata{ContextWindow: ctxWindow(1024)}, false},
+		{"capabilities set", &core.ModelMetadata{Capabilities: map[string]bool{"tools": true}}, false},
+		{"pricing currency set", &core.ModelMetadata{Pricing: &core.ModelPricing{Currency: "USD"}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := metadataOverrideEmpty(tc.in); got != tc.want {
+				t.Errorf("metadataOverrideEmpty(%+v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestApplyConfigMetadataOverrides_EmptyOverrideLeavesNilMetadataNil verifies
 // that an override whose fields are all zero does not publish any change,
 // most importantly does not turn nil current metadata into an empty &struct.

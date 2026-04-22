@@ -1355,53 +1355,29 @@ func (r *ModelRegistry) snapshotConfigOverrides() map[string]map[string]*core.Mo
 // metadataOverrideEmpty reports whether an override has no effective content.
 // An empty override (either nil or zero-valued on every field) would turn a
 // nil current metadata into a non-nil empty struct after MergeMetadata, so
-// callers should short-circuit on it.
+// callers should short-circuit on it. Uses reflect.Value.IsZero so new fields
+// on core.ModelMetadata are picked up automatically; Pricing is handled
+// separately so a non-nil pointer to an empty pricing block still counts as
+// empty.
 func metadataOverrideEmpty(m *core.ModelMetadata) bool {
 	if m == nil {
 		return true
 	}
-	if m.DisplayName != "" || m.Description != "" || m.Family != "" {
-		return false
-	}
-	if len(m.Modes) > 0 || len(m.Categories) > 0 || len(m.Tags) > 0 {
-		return false
-	}
-	if len(m.Capabilities) > 0 || len(m.Rankings) > 0 {
-		return false
-	}
-	if m.ContextWindow != nil || m.MaxOutputTokens != nil {
-		return false
-	}
 	if !pricingOverrideEmpty(m.Pricing) {
 		return false
 	}
-	return true
+	tmp := *m
+	tmp.Pricing = nil
+	return reflect.ValueOf(tmp).IsZero()
 }
 
 // pricingOverrideEmpty reports whether a pricing override has no effective
-// content — nil or all fields zero/nil and no tiers.
+// content — nil or every field at its zero value.
 func pricingOverrideEmpty(p *core.ModelPricing) bool {
 	if p == nil {
 		return true
 	}
-	if p.Currency != "" {
-		return false
-	}
-	if p.InputPerMtok != nil || p.OutputPerMtok != nil ||
-		p.CachedInputPerMtok != nil || p.CacheWritePerMtok != nil ||
-		p.ReasoningOutputPerMtok != nil ||
-		p.BatchInputPerMtok != nil || p.BatchOutputPerMtok != nil ||
-		p.AudioInputPerMtok != nil || p.AudioOutputPerMtok != nil ||
-		p.PerImage != nil || p.InputPerImage != nil ||
-		p.PerSecondInput != nil || p.PerSecondOutput != nil ||
-		p.PerCharacterInput != nil ||
-		p.PerRequest != nil || p.PerPage != nil {
-		return false
-	}
-	if len(p.Tiers) > 0 {
-		return false
-	}
-	return true
+	return reflect.ValueOf(*p).IsZero()
 }
 
 // applyConfigMetadataOverrides layers operator-declared metadata onto already-
