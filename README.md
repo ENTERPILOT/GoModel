@@ -5,7 +5,7 @@
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/gaEB9BQSPH)
 [![Docker Pulls](https://img.shields.io/docker/pulls/enterpilot/gomodel)](https://hub.docker.com/r/enterpilot/gomodel)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/ENTERPILOT/GoModel)](https://github.com/ENTERPILOT/GoModel/blob/main/go.mod)
-[![Hacker News](https://img.shields.io/badge/Hacker%20News-%234%20front%20page-ff6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/item?id=47849097)
+[![Hacker News](https://img.shields.io/badge/Hacker%20News-Apr%2021%20%2726%20%7C%20%234-ff6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/item?id=47849097)
 
 [![GoModel on Hacker News](https://hackerbadge.vercel.app/api?id=47849097)](https://news.ycombinator.com/item?id=47849097)
 
