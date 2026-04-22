@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -290,11 +291,11 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 
 	for _, msg := range req.Messages {
 		if msg.Role == "system" {
-			systemText, err := textOnlyAnthropicContent(msg.Content)
+			systemContent, err := buildAnthropicSystemContent(msg.Content)
 			if err != nil {
 				return nil, err
 			}
-			anthropicReq.System = appendAnthropicSystemText(anthropicReq.System, systemText)
+			anthropicReq.System = appendAnthropicSystemContent(anthropicReq.System, systemContent)
 			continue
 		}
 
@@ -385,21 +386,115 @@ func appendAnthropicSystemText(existing, next string) string {
 	return existing + "\n\n" + next
 }
 
-func textOnlyAnthropicContent(content any) (string, error) {
+func appendAnthropicSystemContent(existing, next any) any {
+	if isEmptyAnthropicSystemContent(next) {
+		return existing
+	}
+	if isEmptyAnthropicSystemContent(existing) {
+		return next
+	}
+
+	if existingText, ok := existing.(string); ok {
+		if nextText, ok := next.(string); ok {
+			return appendAnthropicSystemText(existingText, nextText)
+		}
+	}
+
+	blocks := make([]anthropicContentBlock, 0)
+	blocks = append(blocks, anthropicSystemBlocks(existing)...)
+	blocks = append(blocks, anthropicSystemBlocks(next)...)
+	if len(blocks) == 0 {
+		return nil
+	}
+	return blocks
+}
+
+func isEmptyAnthropicSystemContent(content any) bool {
+	switch c := content.(type) {
+	case nil:
+		return true
+	case string:
+		return c == ""
+	case []anthropicContentBlock:
+		return len(c) == 0
+	default:
+		return false
+	}
+}
+
+func anthropicSystemBlocks(content any) []anthropicContentBlock {
+	switch c := content.(type) {
+	case string:
+		if c == "" {
+			return nil
+		}
+		return []anthropicContentBlock{{Type: "text", Text: c}}
+	case []anthropicContentBlock:
+		return c
+	default:
+		return nil
+	}
+}
+
+func buildAnthropicSystemContent(content any) (any, error) {
 	if !core.HasStructuredContent(content) {
-		return core.ExtractTextContent(content), nil
+		text := core.ExtractTextContent(content)
+		if text == "" {
+			return nil, nil
+		}
+		return text, nil
 	}
 
 	parts, ok := core.NormalizeContentParts(content)
 	if !ok {
-		return "", core.NewInvalidRequestError("unsupported anthropic chat content format", nil)
+		return nil, core.NewInvalidRequestError("unsupported anthropic chat content format", nil)
 	}
+
+	blocks := make([]anthropicContentBlock, 0, len(parts))
+	hasCacheControl := false
 	for _, part := range parts {
 		if part.Type != "text" {
-			return "", core.NewInvalidRequestError("anthropic system messages only support text content", nil)
+			return nil, core.NewInvalidRequestError("anthropic system messages only support text content", nil)
 		}
+		if part.Text == "" {
+			continue
+		}
+		cacheControl, err := anthropicCacheControlFromExtra(part.ExtraFields)
+		if err != nil {
+			return nil, err
+		}
+		if len(cacheControl) > 0 {
+			hasCacheControl = true
+		}
+		blocks = append(blocks, anthropicContentBlock{
+			Type:         "text",
+			Text:         part.Text,
+			CacheControl: cacheControl,
+		})
 	}
-	return core.ExtractTextContent(parts), nil
+	if len(blocks) == 0 {
+		return nil, nil
+	}
+	if !hasCacheControl {
+		return core.ExtractTextContent(parts), nil
+	}
+	return blocks, nil
+}
+
+func anthropicCacheControlFromExtra(extraFields core.UnknownJSONFields) (json.RawMessage, error) {
+	raw := extraFields.Lookup("cache_control")
+	if len(raw) == 0 {
+		return nil, nil
+	}
+
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	if trimmed[0] != '{' {
+		return nil, core.NewInvalidRequestError("anthropic cache_control must be an object", nil)
+	}
+	return core.CloneRawJSON(trimmed), nil
 }
 
 func convertMessageContentToAnthropic(content any) (any, error) {
@@ -414,14 +509,19 @@ func convertMessageContentToAnthropic(content any) (any, error) {
 
 	blocks := make([]anthropicContentBlock, 0, len(parts))
 	for _, part := range parts {
+		cacheControl, err := anthropicCacheControlFromExtra(part.ExtraFields)
+		if err != nil {
+			return nil, err
+		}
 		switch part.Type {
 		case "text":
 			if part.Text == "" {
 				continue
 			}
 			blocks = append(blocks, anthropicContentBlock{
-				Type: "text",
-				Text: part.Text,
+				Type:         "text",
+				Text:         part.Text,
+				CacheControl: cacheControl,
 			})
 		case "image_url":
 			if part.ImageURL == nil || part.ImageURL.URL == "" {
@@ -432,8 +532,9 @@ func convertMessageContentToAnthropic(content any) (any, error) {
 				return nil, err
 			}
 			blocks = append(blocks, anthropicContentBlock{
-				Type:   "image",
-				Source: source,
+				Type:         "image",
+				Source:       source,
+				CacheControl: cacheControl,
 			})
 		case "input_audio":
 			return nil, core.NewInvalidRequestError("anthropic chat does not support input_audio content", nil)

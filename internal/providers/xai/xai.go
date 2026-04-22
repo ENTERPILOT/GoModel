@@ -3,10 +3,14 @@ package xai
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
@@ -23,7 +27,8 @@ var Registration = providers.Registration{
 }
 
 const (
-	defaultBaseURL = "https://api.x.ai/v1"
+	defaultBaseURL   = "https://api.x.ai/v1"
+	grokConvIDHeader = "X-Grok-Conv-Id"
 )
 
 // Provider implements the core.Provider interface for xAI
@@ -74,6 +79,96 @@ func (p *Provider) setHeaders(req *http.Request) {
 	}
 }
 
+type grokConversationAnchor struct {
+	Model             string           `json:"model,omitempty"`
+	Messages          []core.Message   `json:"messages,omitempty"`
+	Tools             []map[string]any `json:"tools,omitempty"`
+	ToolChoice        any              `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool            `json:"parallel_tool_calls,omitempty"`
+	Reasoning         *core.Reasoning  `json:"reasoning,omitempty"`
+	RequestID         string           `json:"request_id,omitempty"`
+}
+
+func xGrokConversationHeaders(ctx context.Context, req *core.ChatRequest) http.Header {
+	convID := xGrokConversationID(ctx, req)
+	if convID == "" {
+		return nil
+	}
+	headers := make(http.Header, 1)
+	headers.Set(grokConvIDHeader, convID)
+	return headers
+}
+
+func xGrokConversationID(ctx context.Context, req *core.ChatRequest) string {
+	if convID := xGrokConversationIDFromSnapshot(ctx); convID != "" {
+		return convID
+	}
+	return generatedXGrokConversationID(ctx, req)
+}
+
+func xGrokConversationIDFromSnapshot(ctx context.Context) string {
+	snapshot := core.GetRequestSnapshot(ctx)
+	if snapshot == nil {
+		return ""
+	}
+	for key, values := range snapshot.GetHeaders() {
+		if !strings.EqualFold(key, grokConvIDHeader) {
+			continue
+		}
+		for _, value := range values {
+			if convID := cleanXGrokConversationID(value); convID != "" {
+				return convID
+			}
+		}
+	}
+	return ""
+}
+
+func generatedXGrokConversationID(ctx context.Context, req *core.ChatRequest) string {
+	anchor := grokConversationAnchor{
+		RequestID: strings.TrimSpace(core.GetRequestID(ctx)),
+	}
+	if req != nil {
+		anchor.Model = req.Model
+		anchor.Messages = xGrokAnchorMessages(req.Messages)
+		anchor.Tools = req.Tools
+		anchor.ToolChoice = req.ToolChoice
+		anchor.ParallelToolCalls = req.ParallelToolCalls
+		anchor.Reasoning = req.Reasoning
+		anchor.RequestID = ""
+	}
+	if anchor.Model == "" && len(anchor.Messages) == 0 && anchor.RequestID == "" {
+		return ""
+	}
+	body, err := json.Marshal(anchor)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(body)
+	return "gomodel-" + hex.EncodeToString(sum[:16])
+}
+
+func xGrokAnchorMessages(messages []core.Message) []core.Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	limit := 2
+	if len(messages) < limit {
+		limit = len(messages)
+	}
+	anchor := make([]core.Message, limit)
+	copy(anchor, messages[:limit])
+	return anchor
+}
+
+func cleanXGrokConversationID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.ContainsAny(value, "\r\n") {
+		return ""
+	}
+	return value
+}
+
 // ChatCompletion sends a chat completion request to xAI
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
 	var resp core.ChatResponse
@@ -81,6 +176,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 		Method:   http.MethodPost,
 		Endpoint: "/chat/completions",
 		Body:     req,
+		Headers:  xGrokConversationHeaders(ctx, req),
 	}, &resp)
 	if err != nil {
 		return nil, err
@@ -97,6 +193,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 		Method:   http.MethodPost,
 		Endpoint: "/chat/completions",
 		Body:     req.WithStreaming(),
+		Headers:  xGrokConversationHeaders(ctx, req),
 	})
 }
 

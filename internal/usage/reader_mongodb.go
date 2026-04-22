@@ -8,6 +8,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // MongoDBReader implements UsageReader for MongoDB.
@@ -365,6 +366,74 @@ func (r *MongoDBReader) GetUsageLog(ctx context.Context, params UsageLogParams) 
 		Limit:   limit,
 		Offset:  offset,
 	}, nil
+}
+
+// GetUsageByRequestIDs returns usage entries grouped by request ID.
+func (r *MongoDBReader) GetUsageByRequestIDs(ctx context.Context, requestIDs []string) (map[string][]UsageLogEntry, error) {
+	requestIDs = compactNonEmptyStrings(requestIDs)
+	if len(requestIDs) == 0 {
+		return map[string][]UsageLogEntry{}, nil
+	}
+
+	cursor, err := r.collection.Find(ctx,
+		bson.D{{Key: "request_id", Value: bson.D{{Key: "$in", Value: requestIDs}}}},
+		options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}, {Key: "_id", Value: -1}}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query usage by request IDs: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var rows []struct {
+		ID                     string         `bson:"_id"`
+		RequestID              string         `bson:"request_id"`
+		ProviderID             string         `bson:"provider_id"`
+		Timestamp              time.Time      `bson:"timestamp"`
+		Model                  string         `bson:"model"`
+		Provider               string         `bson:"provider"`
+		ProviderName           string         `bson:"provider_name"`
+		Endpoint               string         `bson:"endpoint"`
+		UserPath               string         `bson:"user_path"`
+		CacheType              string         `bson:"cache_type"`
+		InputTokens            int            `bson:"input_tokens"`
+		OutputTokens           int            `bson:"output_tokens"`
+		TotalTokens            int            `bson:"total_tokens"`
+		InputCost              *float64       `bson:"input_cost"`
+		OutputCost             *float64       `bson:"output_cost"`
+		TotalCost              *float64       `bson:"total_cost"`
+		RawData                map[string]any `bson:"raw_data"`
+		CostsCalculationCaveat string         `bson:"costs_calculation_caveat"`
+	}
+	if err := cursor.All(ctx, &rows); err != nil {
+		return nil, fmt.Errorf("failed to decode usage by request ID rows: %w", err)
+	}
+
+	grouped := make(map[string][]UsageLogEntry, len(requestIDs))
+	for _, row := range rows {
+		entry := UsageLogEntry{
+			ID:                     row.ID,
+			RequestID:              row.RequestID,
+			ProviderID:             row.ProviderID,
+			Timestamp:              row.Timestamp,
+			Model:                  row.Model,
+			Provider:               row.Provider,
+			ProviderName:           displayUsageProviderName(row.ProviderName, row.Provider),
+			Endpoint:               row.Endpoint,
+			UserPath:               row.UserPath,
+			CacheType:              normalizeCacheType(row.CacheType),
+			InputTokens:            row.InputTokens,
+			OutputTokens:           row.OutputTokens,
+			TotalTokens:            row.TotalTokens,
+			InputCost:              row.InputCost,
+			OutputCost:             row.OutputCost,
+			TotalCost:              row.TotalCost,
+			RawData:                row.RawData,
+			CostsCalculationCaveat: row.CostsCalculationCaveat,
+		}
+		grouped[entry.RequestID] = append(grouped[entry.RequestID], entry)
+	}
+
+	return grouped, nil
 }
 
 // mongoDateRangeFilter returns a bson.D timestamp filter for the given date range.

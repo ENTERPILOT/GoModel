@@ -26,6 +26,14 @@ function createAuditListModule(overrides) {
     return factory();
 }
 
+function loadConversationHelpers() {
+    const source = fs.readFileSync(path.join(__dirname, 'conversation-helpers.js'), 'utf8');
+    const context = { window: {} };
+    vm.createContext(context);
+    vm.runInContext(source, context);
+    return context.window.DashboardConversationHelpers;
+}
+
 test('auditRequestPane returns the shared request-pane contract', () => {
     const module = createAuditListModule();
     const entry = {
@@ -82,6 +90,84 @@ test('auditResponsePane returns the shared response-pane contract', () => {
     assert.equal(pane.showTooLarge, false);
     assert.equal(pane.tooLargeMessage, 'Response body was too large to capture.');
 });
+
+test('audit cache helpers summarize cached prompt usage and derive a preview from the request body', () => {
+    const module = createAuditListModule({
+        window: {
+            DashboardConversationHelpers: {
+                extractRequestPromptTextSegments(body) {
+                    return [body.instructions, body.messages[0].content];
+                }
+            }
+        }
+    });
+    module.formatNumber = (value) => String(value);
+
+    const entry = {
+        usage: {
+            input_tokens: 200,
+            cached_input_tokens: 150,
+            cache_write_input_tokens: 32,
+            estimated_cached_characters: 600
+        },
+        data: {
+            request_body: {
+                instructions: 'You are a meticulous assistant.',
+                messages: [{ role: 'user', content: 'Summarize the attached policy memo.' }]
+            }
+        }
+    };
+
+    assert.equal(module.auditHasCachedTokens(entry), true);
+    assert.equal(module.auditCacheSharePercent(entry), 75);
+    assert.equal(module.auditCacheRatioLabel(entry), '75.0% cached');
+    assert.equal(module.auditCacheRatioPillLabel(entry), '75.0% cached');
+    assert.equal(JSON.stringify(module.auditPromptCacheHighlight(entry)), JSON.stringify({
+        characters: 600,
+        segments: ['You are a meticulous assistant.', 'Summarize the attached policy memo.']
+    }));
+
+    const pane = module.auditRequestPane(entry);
+    assert.equal(pane.bodyCacheRatioLabel, '75.0% cached');
+    assert.equal(JSON.stringify(pane.promptCacheHighlight), JSON.stringify({
+        characters: 600,
+        segments: ['You are a meticulous assistant.', 'Summarize the attached policy memo.']
+    }));
+});
+
+test('conversation body rendering darkens the estimated cached prompt text in request JSON', () => {
+    const helpers = loadConversationHelpers();
+    const requestBody = {
+        model: 'anthropic/claude-sonnet-4-5',
+        messages: [{
+            role: 'user',
+            content: [
+                {
+                    type: 'text',
+                    text: 'Reusable prefix for Anthropic prompt caching.'
+                },
+                {
+                    type: 'text',
+                    text: 'Fresh question.'
+                }
+            ]
+        }]
+    };
+    const segments = helpers.extractRequestPromptTextSegments(requestBody);
+
+    const rendered = helpers.renderBodyWithConversationHighlights({ path: '/v1/chat/completions' }, requestBody, {
+        formatJSON: (value) => JSON.stringify(value, null, 2),
+        canShowConversation: () => false,
+        promptCacheHighlight: {
+            characters: 18,
+            segments
+        }
+    });
+
+    assert.match(rendered, /<span class="audit-prompt-cache-highlight">Reusable prefix fo<\/span>r Anthropic prompt caching\./);
+    assert.doesNotMatch(rendered, /Fresh question\.<\/span>/);
+});
+
 
 test('auditResponsePane surfaces error message from captured error body', () => {
     const module = createAuditListModule();
@@ -293,9 +379,14 @@ test('auditPaneState formats pane content once for template rendering', () => {
     const module = createAuditListModule();
     const entry = { id: 'audit-1' };
     let renderCalls = 0;
-    module.renderBodyWithConversationHighlights = (renderEntry, body) => {
+    const promptCacheHighlight = {
+        characters: 42,
+        segments: ['cached prompt']
+    };
+    module.renderBodyWithConversationHighlights = (renderEntry, body, options) => {
         renderCalls++;
         assert.equal(renderEntry, entry);
+        assert.equal(JSON.stringify(options), JSON.stringify({ promptCacheHighlight }));
         return 'rendered:' + body.id;
     };
 
@@ -304,7 +395,8 @@ test('auditPaneState formats pane content once for template rendering', () => {
         showHeaders: true,
         headers: { authorization: 'Bearer redacted' },
         showBody: true,
-        body: { id: 'body-1' }
+        body: { id: 'body-1' },
+        promptCacheHighlight
     });
 
     assert.equal(paneState.formattedHeaders, '{\n  "authorization": "Bearer redacted"\n}');

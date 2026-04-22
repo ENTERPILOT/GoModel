@@ -54,6 +54,31 @@ func buildRawUsageFromDetails(ptd *core.PromptTokensDetails, ctd *core.Completio
 	return raw
 }
 
+func mergeRawUsageMaps(base map[string]any, overlays ...map[string]any) map[string]any {
+	var merged map[string]any
+	if len(base) > 0 {
+		merged = cloneRawData(base)
+	}
+	for _, overlay := range overlays {
+		if len(overlay) == 0 {
+			continue
+		}
+		if merged == nil {
+			merged = make(map[string]any, len(overlay))
+		}
+		for key, value := range overlay {
+			if _, exists := merged[key]; exists {
+				continue
+			}
+			merged[key] = value
+		}
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
 // ExtractFromChatResponse extracts usage data from a ChatResponse.
 // It normalizes the usage data into a UsageEntry and preserves raw extended data.
 // If pricing is provided, granular cost fields are calculated.
@@ -77,16 +102,10 @@ func ExtractFromChatResponse(resp *core.ChatResponse, requestID, provider, endpo
 		TotalTokens:  resp.Usage.TotalTokens,
 	}
 
-	// Preserve raw extended usage data if available (defensive copy to avoid races)
-	if len(resp.Usage.RawUsage) > 0 {
-		entry.RawData = cloneRawData(resp.Usage.RawUsage)
-	}
-
-	// Merge typed detail fields into RawData (non-streaming path).
-	// Only fill from details when RawUsage wasn't already set by the provider.
-	if entry.RawData == nil {
-		entry.RawData = buildRawUsageFromDetails(resp.Usage.PromptTokensDetails, resp.Usage.CompletionTokensDetails)
-	}
+	entry.RawData = mergeRawUsageMaps(
+		resp.Usage.RawUsage,
+		buildRawUsageFromDetails(resp.Usage.PromptTokensDetails, resp.Usage.CompletionTokensDetails),
+	)
 
 	// Calculate granular costs if pricing is provided
 	if len(pricing) > 0 && pricing[0] != nil {
@@ -138,15 +157,10 @@ func ExtractFromResponsesResponse(resp *core.ResponsesResponse, requestID, provi
 		entry.OutputTokens = resp.Usage.OutputTokens
 		entry.TotalTokens = resp.Usage.TotalTokens
 
-		// Preserve raw extended usage data if available (defensive copy to avoid races)
-		if len(resp.Usage.RawUsage) > 0 {
-			entry.RawData = cloneRawData(resp.Usage.RawUsage)
-		}
-
-		// Merge typed detail fields into RawData (non-streaming path).
-		if entry.RawData == nil {
-			entry.RawData = buildRawUsageFromDetails(resp.Usage.PromptTokensDetails, resp.Usage.CompletionTokensDetails)
-		}
+		entry.RawData = mergeRawUsageMaps(
+			resp.Usage.RawUsage,
+			buildRawUsageFromDetails(resp.Usage.PromptTokensDetails, resp.Usage.CompletionTokensDetails),
+		)
 	}
 
 	// Calculate granular costs if pricing is provided

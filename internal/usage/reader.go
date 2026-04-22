@@ -104,6 +104,22 @@ type UsageLogResult struct {
 	Offset  int             `json:"offset"`
 }
 
+// RequestUsageSummary aggregates usage records that belong to one request ID.
+// InputTokens and TotalTokens are normalized prompt/total counts across providers:
+// cached prompt reads and cache writes are included even when the upstream provider
+// reports them outside the base input token count.
+type RequestUsageSummary struct {
+	Entries                   int     `json:"entries"`
+	InputTokens               int64   `json:"input_tokens"`
+	UncachedInputTokens       int64   `json:"uncached_input_tokens"`
+	CachedInputTokens         int64   `json:"cached_input_tokens"`
+	CacheWriteInputTokens     int64   `json:"cache_write_input_tokens"`
+	OutputTokens              int64   `json:"output_tokens"`
+	TotalTokens               int64   `json:"total_tokens"`
+	CachedInputRatio          float64 `json:"cached_input_ratio"`
+	EstimatedCachedCharacters int64   `json:"estimated_cached_characters"`
+}
+
 // CacheOverviewSummary holds cached-only aggregate statistics over a time period.
 type CacheOverviewSummary struct {
 	TotalHits      int      `json:"total_hits"`
@@ -152,6 +168,10 @@ type UsageReader interface {
 	// GetUsageLog returns a paginated list of individual usage entries with optional filtering.
 	GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error)
 
+	// GetUsageByRequestIDs returns usage log entries grouped by request_id.
+	// Missing IDs are omitted from the returned map.
+	GetUsageByRequestIDs(ctx context.Context, requestIDs []string) (map[string][]UsageLogEntry, error)
+
 	// GetCacheOverview returns cached-only aggregates for the admin dashboard.
 	GetCacheOverview(ctx context.Context, params UsageQueryParams) (*CacheOverview, error)
 }
@@ -161,4 +181,24 @@ func displayUsageProviderName(providerName, provider string) string {
 		return trimmed
 	}
 	return strings.TrimSpace(provider)
+}
+
+func compactNonEmptyStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	compacted := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		compacted = append(compacted, trimmed)
+	}
+	return compacted
 }

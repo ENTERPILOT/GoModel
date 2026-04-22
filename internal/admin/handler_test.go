@@ -28,14 +28,17 @@ type mockUsageReader struct {
 	modelUsage        []usage.ModelUsage
 	userPathUsage     []usage.UserPathUsage
 	usageLog          *usage.UsageLogResult
+	usageByRequestID  map[string][]usage.UsageLogEntry
 	cacheOverview     *usage.CacheOverview
 	lastUsageLog      usage.UsageLogParams
+	lastRequestIDs    []string
 	lastCacheOverview usage.UsageQueryParams
 	summaryErr        error
 	dailyErr          error
 	modelUsageErr     error
 	userPathUsageErr  error
 	usageLogErr       error
+	usageByRequestErr error
 	cacheErr          error
 }
 
@@ -96,6 +99,14 @@ func (m *mockUsageReader) GetUsageLog(_ context.Context, params usage.UsageLogPa
 		return nil, m.usageLogErr
 	}
 	return m.usageLog, nil
+}
+
+func (m *mockUsageReader) GetUsageByRequestIDs(_ context.Context, requestIDs []string) (map[string][]usage.UsageLogEntry, error) {
+	m.lastRequestIDs = append([]string(nil), requestIDs...)
+	if m.usageByRequestErr != nil {
+		return nil, m.usageByRequestErr
+	}
+	return m.usageByRequestID, nil
 }
 
 func (m *mockUsageReader) GetCacheOverview(_ context.Context, params usage.UsageQueryParams) (*usage.CacheOverview, error) {
@@ -809,6 +820,77 @@ func TestAuditLog_Success(t *testing.T) {
 	}
 	if result.Entries[0].Data == nil || result.Entries[0].Data.RequestBody == nil {
 		t.Errorf("expected request body data to be present")
+	}
+}
+
+func TestAuditLog_EnrichesEntriesWithUsageSummary(t *testing.T) {
+	now := time.Now().UTC()
+	usageReader := &mockUsageReader{
+		usageByRequestID: map[string][]usage.UsageLogEntry{
+			"req-1": {
+				{
+					RequestID:    "req-1",
+					Provider:     "openai",
+					InputTokens:  200,
+					OutputTokens: 40,
+					RawData: map[string]any{
+						"prompt_cached_tokens": 150,
+					},
+				},
+			},
+		},
+	}
+	auditReader := &mockAuditReader{
+		logResult: &auditlog.LogListResult{
+			Entries: []auditlog.LogEntry{
+				{
+					ID:             "log-1",
+					Timestamp:      now,
+					RequestedModel: "gpt-4o",
+					Provider:       "openai",
+					StatusCode:     200,
+					RequestID:      "req-1",
+					Method:         http.MethodPost,
+					Path:           "/v1/chat/completions",
+				},
+			},
+			Total:  1,
+			Limit:  25,
+			Offset: 0,
+		},
+	}
+
+	h := NewHandler(usageReader, nil, WithAuditReader(auditReader))
+	c, rec := newHandlerContext("/admin/api/v1/audit/log?days=7")
+
+	if err := h.AuditLog(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result auditLogListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(result.Entries))
+	}
+	if len(usageReader.lastRequestIDs) != 1 || usageReader.lastRequestIDs[0] != "req-1" {
+		t.Fatalf("lastRequestIDs = %#v, want [req-1]", usageReader.lastRequestIDs)
+	}
+	if result.Entries[0].Usage == nil {
+		t.Fatal("expected usage summary to be attached")
+	}
+	if result.Entries[0].Usage.CachedInputTokens != 150 {
+		t.Fatalf("CachedInputTokens = %d, want 150", result.Entries[0].Usage.CachedInputTokens)
+	}
+	if result.Entries[0].Usage.InputTokens != 200 {
+		t.Fatalf("InputTokens = %d, want 200", result.Entries[0].Usage.InputTokens)
+	}
+	if result.Entries[0].Usage.TotalTokens != 240 {
+		t.Fatalf("TotalTokens = %d, want 240", result.Entries[0].Usage.TotalTokens)
 	}
 }
 

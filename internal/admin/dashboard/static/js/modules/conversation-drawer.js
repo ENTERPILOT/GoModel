@@ -44,14 +44,15 @@
                 this.openConversation(entry, null, false, el);
             },
 
-            renderBodyWithConversationHighlights(entry, value) {
+            renderBodyWithConversationHighlights(entry, value, options) {
                 const h = getHelpers();
                 if (typeof h.renderBodyWithConversationHighlights !== 'function') {
                     return this.formatJSON(value);
                 }
                 return h.renderBodyWithConversationHighlights(entry, value, {
                     formatJSON: (v) => this.formatJSON(v),
-                    canShowConversation: (e) => this.canShowConversation(e)
+                    canShowConversation: (e) => this.canShowConversation(e),
+                    promptCacheHighlight: options && options.promptCacheHighlight
                 });
             },
 

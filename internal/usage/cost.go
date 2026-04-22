@@ -57,7 +57,14 @@ var providerMappings = map[string][]tokenCostMapping{
 	},
 	"gemini": {
 		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
 		{rawDataKey: "thought_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+	},
+	"groq": {
+		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	},
 	"xai": {
 		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
@@ -78,19 +85,6 @@ var informationalFields = map[string]struct{}{
 	"completion_accepted_prediction_tokens": {},
 	"completion_rejected_prediction_tokens": {},
 }
-
-// extendedFieldSet is derived from providerMappings and contains all RawData keys
-// that providers may report. Used by stream_wrapper.go to extract extended fields
-// from SSE usage data without maintaining a separate hard-coded list.
-var extendedFieldSet = func() map[string]struct{} {
-	set := make(map[string]struct{})
-	for _, mappings := range providerMappings {
-		for _, m := range mappings {
-			set[m.rawDataKey] = struct{}{}
-		}
-	}
-	return set
-}()
 
 // CalculateGranularCost computes input, output, and total costs from token counts,
 // raw provider-specific data, and pricing information. It accounts for cached tokens,

@@ -112,6 +112,24 @@ func TestCalculateGranularCost_Gemini_ThoughtTokens(t *testing.T) {
 	assertCostNear(t, "OutputCost", result.OutputCost, 1.375)
 }
 
+func TestCalculateGranularCost_Gemini_PromptCachedTokens(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:       new(0.30),
+		OutputPerMtok:      new(2.5),
+		CachedInputPerMtok: new(0.03),
+	}
+	rawData := map[string]any{
+		"prompt_cached_tokens": 11_240,
+	}
+	result := CalculateGranularCost(11_653, 1, rawData, "gemini", pricing)
+
+	// Input: 11653 * 0.30/1M + 11240 * (0.03-0.30)/1M
+	assertCostNear(t, "InputCost", result.InputCost, 0.0004611)
+	if result.Caveat != "" {
+		t.Fatalf("expected no caveat for gemini prompt_cached_tokens, got %q", result.Caveat)
+	}
+}
+
 func TestCalculateGranularCost_XAI_ImageTokens(t *testing.T) {
 	pricing := &core.ModelPricing{
 		InputPerMtok:  new(2.0),
@@ -311,6 +329,27 @@ func TestCalculateGranularCost_XAI_ReasoningTokensAreAdditionalOutput(t *testing
 	// Output: 1 * 0.5/1M + 270 * 1.5/1M = 0.0000005 + 0.000405 = 0.0004055
 	assertCostNear(t, "OutputCost", result.OutputCost, 0.0004055)
 	assertCostNear(t, "TotalCost", result.TotalCost, 0.0004082)
+}
+
+func TestCalculateGranularCost_Groq_PromptCachedTokensAndReasoningBreakdown(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:       new(0.075),
+		OutputPerMtok:      new(0.30),
+		CachedInputPerMtok: new(0.0375),
+		// ReasoningOutputPerMtok intentionally nil: base output rate covers the model.
+	}
+	rawData := map[string]any{
+		"prompt_cached_tokens":        1280,
+		"completion_reasoning_tokens": 2,
+	}
+	result := CalculateGranularCost(1409, 4, rawData, "groq", pricing)
+
+	// Input: 1409 * 0.075/1M + 1280 * (0.0375-0.075)/1M
+	assertCostNear(t, "InputCost", result.InputCost, 0.000057675)
+	assertCostNear(t, "OutputCost", result.OutputCost, 0.0000012)
+	if result.Caveat != "" {
+		t.Fatalf("expected no caveat for groq prompt_cached_tokens/reasoning breakdown, got %q", result.Caveat)
+	}
 }
 
 func TestCalculateGranularCost_InformationalFieldsNoCaveat(t *testing.T) {
