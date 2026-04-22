@@ -37,10 +37,11 @@ func resolveProviders(raw map[string]config.RawProviderConfig, global config.Res
 func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) map[string]config.RawProviderConfig {
 	result := make(map[string]config.RawProviderConfig, len(raw))
 	maps.Copy(result, raw)
+	environ := os.Environ()
 
 	for _, providerType := range sortedDiscoveryTypes(discovery) {
 		spec := discovery[providerType]
-		envGroups := collectProviderEnvValues(providerType, spec)
+		envGroups := collectProviderEnvValues(providerType, spec, environ)
 
 		if values, ok := envGroups[""]; ok {
 			applyUnsuffixedProviderEnvVars(result, providerType, spec, values)
@@ -80,12 +81,12 @@ func (v providerEnvValues) empty() bool {
 		len(v.Models) == 0
 }
 
-func collectProviderEnvValues(providerType string, spec DiscoveryConfig) map[string]providerEnvValues {
+func collectProviderEnvValues(providerType string, spec DiscoveryConfig, environ []string) map[string]providerEnvValues {
 	groups := make(map[string]providerEnvValues)
 	prefix := envPrefix(providerType)
 	prefixWithSeparator := prefix + "_"
 
-	for _, entry := range os.Environ() {
+	for _, entry := range environ {
 		key, value, ok := strings.Cut(entry, "=")
 		if !ok || value == "" || !strings.HasPrefix(key, prefixWithSeparator) {
 			continue
@@ -125,6 +126,9 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		return "", 0, false
 	}
 
+	// Match field names from the right so suffixes can contain underscores.
+	// Keep longer field tokens before their shorter overlapping forms; for
+	// example, API_VERSION must be checked before a future VERSION-like token.
 	fields := []struct {
 		name  string
 		field providerEnvField
