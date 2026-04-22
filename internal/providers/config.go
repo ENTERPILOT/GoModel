@@ -40,59 +40,255 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 
 	for _, providerType := range sortedDiscoveryTypes(discovery) {
 		spec := discovery[providerType]
-		envNames := derivedEnvNames(providerType)
+		envGroups := collectProviderEnvValues(providerType, spec)
 
-		apiKey := os.Getenv(envNames.APIKey)
-		explicitBaseURL := normalizeResolvedBaseURL(os.Getenv(envNames.BaseURL))
-		models := parseCSVEnvList(os.Getenv(envNames.Models))
-		apiVersion := ""
-		if spec.SupportsAPIVersion {
-			apiVersion = os.Getenv(envNames.APIVersion)
-		}
-		baseURL := explicitBaseURL
-		if baseURL == "" && apiKey != "" && spec.DefaultBaseURL != "" {
-			baseURL = spec.DefaultBaseURL
+		if values, ok := envGroups[""]; ok {
+			applyUnsuffixedProviderEnvVars(result, providerType, spec, values)
 		}
 
-		if apiKey == "" && baseURL == "" && apiVersion == "" && len(models) == 0 {
-			continue
-		}
-
-		targetKey, matched, ambiguous := findEnvOverlayTarget(result, providerType)
-		if matched {
-			existing := result[targetKey]
-			if apiKey != "" {
-				existing.APIKey = apiKey
-			}
-			if explicitBaseURL != "" {
-				existing.BaseURL = baseURL
-			} else if normalizeResolvedBaseURL(existing.BaseURL) == "" && apiKey != "" && spec.DefaultBaseURL != "" {
-				existing.BaseURL = spec.DefaultBaseURL
-			}
-			if apiVersion != "" {
-				existing.APIVersion = apiVersion
-			}
-			if len(models) > 0 {
-				existing.Models = models
-			}
-			result[targetKey] = existing
-		} else if ambiguous {
-			continue
-		} else {
-			if spec.RequireBaseURL && explicitBaseURL == "" {
+		for _, suffix := range sortedProviderEnvSuffixes(envGroups) {
+			if suffix == "" {
 				continue
 			}
-			result[providerType] = config.RawProviderConfig{
-				Type:       providerType,
-				APIKey:     apiKey,
-				BaseURL:    baseURL,
-				APIVersion: apiVersion,
-				Models:     models,
-			}
+			applySuffixedProviderEnvVars(result, providerType, spec, suffix, envGroups[suffix])
 		}
 	}
 
 	return result
+}
+
+type providerEnvField int
+
+const (
+	providerEnvFieldAPIKey providerEnvField = iota
+	providerEnvFieldBaseURL
+	providerEnvFieldAPIVersion
+	providerEnvFieldModels
+)
+
+type providerEnvValues struct {
+	APIKey     string
+	BaseURL    string
+	APIVersion string
+	Models     []string
+}
+
+func (v providerEnvValues) empty() bool {
+	return strings.TrimSpace(v.APIKey) == "" &&
+		strings.TrimSpace(v.BaseURL) == "" &&
+		strings.TrimSpace(v.APIVersion) == "" &&
+		len(v.Models) == 0
+}
+
+func collectProviderEnvValues(providerType string, spec DiscoveryConfig) map[string]providerEnvValues {
+	groups := make(map[string]providerEnvValues)
+	prefix := envPrefix(providerType)
+	prefixWithSeparator := prefix + "_"
+
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || value == "" || !strings.HasPrefix(key, prefixWithSeparator) {
+			continue
+		}
+
+		suffix, field, ok := parseProviderEnvKey(prefix, key, spec)
+		if !ok {
+			continue
+		}
+
+		values := groups[suffix]
+		switch field {
+		case providerEnvFieldAPIKey:
+			values.APIKey = value
+		case providerEnvFieldBaseURL:
+			values.BaseURL = normalizeResolvedBaseURL(value)
+		case providerEnvFieldAPIVersion:
+			values.APIVersion = value
+		case providerEnvFieldModels:
+			values.Models = parseCSVEnvList(value)
+		}
+		groups[suffix] = values
+	}
+
+	for suffix, values := range groups {
+		if values.empty() {
+			delete(groups, suffix)
+		}
+	}
+
+	return groups
+}
+
+func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, providerEnvField, bool) {
+	rest, ok := strings.CutPrefix(key, prefix+"_")
+	if !ok {
+		return "", 0, false
+	}
+
+	fields := []struct {
+		name  string
+		field providerEnvField
+	}{
+		{name: "API_VERSION", field: providerEnvFieldAPIVersion},
+		{name: "BASE_URL", field: providerEnvFieldBaseURL},
+		{name: "API_KEY", field: providerEnvFieldAPIKey},
+		{name: "MODELS", field: providerEnvFieldModels},
+	}
+
+	for _, candidate := range fields {
+		if candidate.field == providerEnvFieldAPIVersion && !spec.SupportsAPIVersion {
+			continue
+		}
+		if rest == candidate.name {
+			return "", candidate.field, true
+		}
+		suffix, found := strings.CutSuffix(rest, "_"+candidate.name)
+		if found && validProviderEnvSuffix(suffix) {
+			return suffix, candidate.field, true
+		}
+	}
+
+	return "", 0, false
+}
+
+func validProviderEnvSuffix(suffix string) bool {
+	suffix = strings.TrimSpace(suffix)
+	if suffix == "" || strings.HasPrefix(suffix, "_") || strings.HasSuffix(suffix, "_") {
+		return false
+	}
+
+	lastUnderscore := false
+	hasAlnum := false
+	for _, r := range suffix {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			hasAlnum = true
+			lastUnderscore = false
+		case r == '_' && !lastUnderscore:
+			lastUnderscore = true
+		default:
+			return false
+		}
+	}
+	return hasAlnum
+}
+
+func sortedProviderEnvSuffixes(groups map[string]providerEnvValues) []string {
+	suffixes := make([]string, 0, len(groups))
+	for suffix := range groups {
+		suffixes = append(suffixes, suffix)
+	}
+	sort.Strings(suffixes)
+	return suffixes
+}
+
+func applyUnsuffixedProviderEnvVars(result map[string]config.RawProviderConfig, providerType string, spec DiscoveryConfig, values providerEnvValues) {
+	if values.empty() {
+		return
+	}
+
+	targetKey, matched, ambiguous := findEnvOverlayTarget(result, providerType)
+	if matched {
+		result[targetKey] = overlayProviderEnvValues(result[targetKey], values, spec)
+		return
+	}
+	if ambiguous {
+		return
+	}
+	if spec.RequireBaseURL && values.BaseURL == "" {
+		return
+	}
+
+	result[providerType] = values.rawConfig(providerType, spec)
+}
+
+func applySuffixedProviderEnvVars(result map[string]config.RawProviderConfig, providerType string, spec DiscoveryConfig, suffix string, values providerEnvValues) {
+	if values.empty() {
+		return
+	}
+
+	targetKey := providerNameForEnvSuffix(providerType, suffix)
+	if targetKey == "" {
+		return
+	}
+
+	if existing, ok := result[targetKey]; ok {
+		if !rawProviderMatchesType(existing, providerType) {
+			return
+		}
+		result[targetKey] = overlayProviderEnvValues(existing, values, spec)
+		return
+	}
+
+	if spec.RequireBaseURL && values.BaseURL == "" {
+		return
+	}
+
+	result[targetKey] = values.rawConfig(providerType, spec)
+}
+
+func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) config.RawProviderConfig {
+	return config.RawProviderConfig{
+		Type:       providerType,
+		APIKey:     v.APIKey,
+		BaseURL:    v.resolvedBaseURL(spec),
+		APIVersion: v.APIVersion,
+		Models:     v.Models,
+	}
+}
+
+func (v providerEnvValues) resolvedBaseURL(spec DiscoveryConfig) string {
+	baseURL := strings.TrimSpace(v.BaseURL)
+	if baseURL == "" && strings.TrimSpace(v.APIKey) != "" && spec.DefaultBaseURL != "" {
+		return spec.DefaultBaseURL
+	}
+	return baseURL
+}
+
+func overlayProviderEnvValues(existing config.RawProviderConfig, values providerEnvValues, spec DiscoveryConfig) config.RawProviderConfig {
+	if values.APIKey != "" {
+		existing.APIKey = values.APIKey
+	}
+	if values.BaseURL != "" {
+		existing.BaseURL = values.BaseURL
+	} else if normalizeResolvedBaseURL(existing.BaseURL) == "" && values.APIKey != "" && spec.DefaultBaseURL != "" {
+		existing.BaseURL = spec.DefaultBaseURL
+	}
+	if values.APIVersion != "" {
+		existing.APIVersion = values.APIVersion
+	}
+	if len(values.Models) > 0 {
+		existing.Models = values.Models
+	}
+	return existing
+}
+
+func providerNameForEnvSuffix(providerType, suffix string) string {
+	providerType = strings.TrimSpace(providerType)
+	suffixName := normalizeEnvSuffixForProviderName(suffix)
+	if suffixName == "" {
+		return providerType
+	}
+	if providerType == "" {
+		return suffixName
+	}
+	return providerType + "-" + suffixName
+}
+
+func normalizeEnvSuffixForProviderName(suffix string) string {
+	var b strings.Builder
+	lastHyphen := false
+	for _, r := range strings.TrimSpace(suffix) {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(unicode.ToLower(r))
+			lastHyphen = false
+		case r == '_' && !lastHyphen:
+			b.WriteByte('-')
+			lastHyphen = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 func findEnvOverlayTarget(raw map[string]config.RawProviderConfig, providerType string) (string, bool, bool) {

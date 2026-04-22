@@ -227,8 +227,9 @@ providers:
 
 <Tip>
   The YAML file is entirely optional. Any setting you can put in YAML can also
-  be set via environment variables. Use YAML when you need to configure custom
-  providers or prefer a structured config file.
+  be set via environment variables. Use YAML when you need per-provider
+  resilience overrides, generated provider names are not enough, or you prefer
+  a structured config file.
 </Tip>
 
 ## Provider Configuration
@@ -254,12 +255,29 @@ export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Optional fallback invent
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registers "ollama" provider
 ```
 
-GoModel also works with additional OpenAI-compatible providers out of the box
-through YAML provider blocks.
+Use suffixed variables to register more than one instance of the same provider
+type without YAML. GoModel normalizes the suffix to lowercase and converts
+underscores to hyphens in the configured provider name:
+
+```bash
+export OPENAI_EAST_API_KEY="sk-..." # Registers "openai-east", type "openai"
+export OPENAI_EAST_BASE_URL="https://east.example.com/v1"
+
+export OPENAI_WEST_API_KEY="sk-..." # Registers "openai-west", type "openai"
+export OPENAI_WEST_BASE_URL="https://west.example.com/v1"
+```
+
+The same pattern works for every registered provider type:
+`<PROVIDER>_<SUFFIX>_API_KEY`, `<PROVIDER>_<SUFFIX>_BASE_URL`, and
+`<PROVIDER>_<SUFFIX>_MODELS`. Azure also supports
+`<PROVIDER>_<SUFFIX>_API_VERSION`. Azure and Oracle still require their
+suffixed `BASE_URL` values because their endpoints are deployment- or
+region-specific.
 
 ### YAML Provider Blocks
 
-For more control (custom base URLs, model restrictions, or custom provider names), use the YAML file:
+For more control (custom names, per-provider resilience, or larger structured
+settings), use the YAML file:
 
 ```yaml
 providers:
@@ -297,7 +315,8 @@ providers:
 <Note>
   For Oracle, give GoModel a fallback inventory with `ORACLE_MODELS` or
   `models:`. `ORACLE_MODELS` is enough for the default single-provider setup;
-  use YAML when you need custom provider names or multiple Oracle providers.
+  use suffixed env vars such as `ORACLE_US_MODELS` for env-only multi-provider
+  setups. Use YAML when you need custom names or larger provider blocks.
   See the [Oracle guide](/guides/oracle) for the required OCI policy and a
   tested configuration. Automatic model discovery is not yet a reliable,
   validated path for this provider: GoModel can try Oracle's OpenAI-compatible

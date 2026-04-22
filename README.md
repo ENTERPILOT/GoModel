@@ -84,6 +84,10 @@ Example model identifiers are illustrative and subject to change; consult provid
 For Z.ai's GLM Coding Plan, set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
 For Oracle, set `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3` when the
 upstream `/models` endpoint is unavailable.
+To register multiple instances of the same provider type without `config.yaml`,
+use suffixed env vars such as `OPENAI_EAST_API_KEY` and
+`OPENAI_EAST_BASE_URL`; this registers provider `openai-east` with type
+`openai`.
 
 ---
 
