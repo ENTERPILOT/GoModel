@@ -354,6 +354,35 @@ func TestApplyProviderEnvVars_DiscoversFromBaseURL(t *testing.T) {
 	}
 }
 
+func TestApplyProviderEnvVars_DiscoversMultipleSuffixedOllamaProvidersFromBaseURLs(t *testing.T) {
+	t.Setenv("OLLAMA_A_BASE_URL", "http://localhost:11434/v1")
+	t.Setenv("OLLAMA_B_BASE_URL", "http://localhost:11435/v1")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	providerA, exists := got["ollama-a"]
+	if !exists {
+		t.Fatal("expected ollama-a to be discovered from OLLAMA_A_BASE_URL")
+	}
+	if providerA.Type != "ollama" {
+		t.Fatalf("ollama-a Type = %q, want ollama", providerA.Type)
+	}
+	if providerA.BaseURL != "http://localhost:11434/v1" {
+		t.Fatalf("ollama-a BaseURL = %q, want http://localhost:11434/v1", providerA.BaseURL)
+	}
+
+	providerB, exists := got["ollama-b"]
+	if !exists {
+		t.Fatal("expected ollama-b to be discovered from OLLAMA_B_BASE_URL")
+	}
+	if providerB.Type != "ollama" {
+		t.Fatalf("ollama-b Type = %q, want ollama", providerB.Type)
+	}
+	if providerB.BaseURL != "http://localhost:11435/v1" {
+		t.Fatalf("ollama-b BaseURL = %q, want http://localhost:11435/v1", providerB.BaseURL)
+	}
+}
+
 func TestApplyProviderEnvVars_DiscoversOpenRouterFromAPIKey(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
 
@@ -433,6 +462,35 @@ func TestApplyProviderEnvVars_DiscoversVLLMFromBaseURLWithoutAPIKey(t *testing.T
 	}
 	if p.BaseURL != "http://localhost:8000/v1" {
 		t.Errorf("BaseURL = %q, want http://localhost:8000/v1", p.BaseURL)
+	}
+}
+
+func TestApplyProviderEnvVars_DiscoversUnsuffixedAndSuffixedVLLMProvidersFromBaseURLs(t *testing.T) {
+	t.Setenv("VLLM_BASE_URL", "http://localhost:8000/v1")
+	t.Setenv("VLLM_TEST_BASE_URL", "http://localhost:8000/v1")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	primary, exists := got["vllm"]
+	if !exists {
+		t.Fatal("expected vllm to be discovered from VLLM_BASE_URL")
+	}
+	if primary.Type != "vllm" {
+		t.Fatalf("vllm Type = %q, want vllm", primary.Type)
+	}
+	if primary.BaseURL != "http://localhost:8000/v1" {
+		t.Fatalf("vllm BaseURL = %q, want http://localhost:8000/v1", primary.BaseURL)
+	}
+
+	suffixed, exists := got["vllm-test"]
+	if !exists {
+		t.Fatal("expected vllm-test to be discovered from VLLM_TEST_BASE_URL")
+	}
+	if suffixed.Type != "vllm" {
+		t.Fatalf("vllm-test Type = %q, want vllm", suffixed.Type)
+	}
+	if suffixed.BaseURL != "http://localhost:8000/v1" {
+		t.Fatalf("vllm-test BaseURL = %q, want http://localhost:8000/v1", suffixed.BaseURL)
 	}
 }
 

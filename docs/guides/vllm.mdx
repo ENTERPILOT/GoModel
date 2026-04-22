@@ -30,32 +30,50 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --api-key token-abc123
 
 ## 1. Configure GoModel
 
-For a single keyless vLLM server, env-only configuration is enough:
+For a single keyless vLLM server, Docker env vars are enough:
 
 ```bash
-export VLLM_BASE_URL="http://localhost:8000/v1"
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  enterpilot/gomodel
 ```
 
 Set `VLLM_API_KEY` only when the upstream vLLM server was started with
 `--api-key`:
 
 ```bash
-export VLLM_API_KEY="token-abc123"
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  -e VLLM_API_KEY="token-abc123" \
+  enterpilot/gomodel
 ```
 
-Use YAML when you want multiple vLLM backends or custom provider names:
+Use suffixed env vars when you want more than one vLLM instance without YAML:
 
-```yaml
-providers:
-  qwen-vllm:
-    type: vllm
-    base_url: "http://qwen-vllm:8000/v1"
-
-  llama-vllm:
-    type: vllm
-    base_url: "http://llama-vllm:8000/v1"
-    api_key: "${VLLM_API_KEY}"
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  -e VLLM_TEST_BASE_URL="http://host.docker.internal:8000/v1" \
+  enterpilot/gomodel
 ```
+
+`VLLM_BASE_URL` registers provider `vllm`. `VLLM_TEST_BASE_URL` registers
+provider `vllm-test`. The suffix is normalized to lowercase and underscores
+become hyphens.
+
+Use YAML only when generated names such as `vllm-test` are not enough or you
+need larger structured provider blocks.
+
+<Note>
+  These examples assume GoModel runs in Docker and your vLLM server is reachable
+  from the host at `localhost:8000`, so GoModel uses
+  `host.docker.internal:8000` to reach it. If both services run in the same
+  Docker network, replace `host.docker.internal` with the vLLM service name.
+  If GoModel runs directly on the host, use `http://localhost:8000/v1`.
+</Note>
 
 ## 2. Verify the model registry
 
@@ -65,15 +83,15 @@ curl -s http://localhost:8080/v1/models \
 ```
 
 GoModel uses the model IDs returned by vLLM's `/models` endpoint. Hugging Face
-model IDs can contain slashes. With a provider named `llama-vllm`, a vLLM model
+model IDs can contain slashes. With a provider named `vllm-test`, a vLLM model
 such as `meta-llama/Llama-3.1-8B-Instruct` is exposed through GoModel as:
 
 ```text
-llama-vllm/meta-llama/Llama-3.1-8B-Instruct
+vllm-test/meta-llama/Llama-3.1-8B-Instruct
 ```
 
 GoModel splits provider-qualified selectors on the first slash only, so
-`llama-vllm` is the provider and `meta-llama/Llama-3.1-8B-Instruct` remains the
+`vllm-test` is the provider and `meta-llama/Llama-3.1-8B-Instruct` remains the
 upstream model ID.
 
 ## 3. Send a chat request
@@ -83,7 +101,7 @@ curl -s http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "llama-vllm/meta-llama/Llama-3.1-8B-Instruct",
+    "model": "vllm-test/meta-llama/Llama-3.1-8B-Instruct",
     "messages": [{"role": "user", "content": "Reply with exactly ok."}]
   }'
 ```
@@ -105,6 +123,13 @@ curl -s http://localhost:8080/p/vllm/tokenize \
 
 GoModel handles gateway authentication, strips client auth headers before
 forwarding, and applies `VLLM_API_KEY` to upstream requests when configured.
+
+<Note>
+  Passthrough routes are provider-type scoped at `/p/vllm/...`. When you need
+  to target one named vLLM instance in a multi-provider setup, use translated
+  `/v1/...` requests with provider-qualified model IDs such as
+  `vllm-test/meta-llama/Llama-3.1-8B-Instruct`.
+</Note>
 
 ## Current support
 
