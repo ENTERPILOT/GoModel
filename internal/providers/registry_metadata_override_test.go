@@ -209,9 +209,16 @@ func TestMetadataOverrideEmpty(t *testing.T) {
 		{"nil", nil, true},
 		{"zero struct", &core.ModelMetadata{}, true},
 		{"empty pricing pointer", &core.ModelMetadata{Pricing: &core.ModelPricing{}}, true},
+		{"empty non-nil modes", &core.ModelMetadata{Modes: []string{}}, true},
+		{"empty non-nil tags", &core.ModelMetadata{Tags: []string{}}, true},
+		{"empty non-nil categories", &core.ModelMetadata{Categories: []core.ModelCategory{}}, true},
+		{"empty non-nil capabilities", &core.ModelMetadata{Capabilities: map[string]bool{}}, true},
+		{"empty non-nil rankings", &core.ModelMetadata{Rankings: map[string]core.ModelRanking{}}, true},
+		{"pricing with empty tiers", &core.ModelMetadata{Pricing: &core.ModelPricing{Tiers: []core.ModelPricingTier{}}}, true},
 		{"display name set", &core.ModelMetadata{DisplayName: "X"}, false},
 		{"context window set", &core.ModelMetadata{ContextWindow: ctxWindow(1024)}, false},
 		{"capabilities set", &core.ModelMetadata{Capabilities: map[string]bool{"tools": true}}, false},
+		{"modes set", &core.ModelMetadata{Modes: []string{"chat"}}, false},
 		{"pricing currency set", &core.ModelMetadata{Pricing: &core.ModelPricing{Currency: "USD"}}, false},
 	}
 	for _, tc := range cases {

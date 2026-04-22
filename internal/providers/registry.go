@@ -304,7 +304,7 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 	if list != nil {
 		metadataStats = enrichProviderModelMaps(list, providerTypes, newModelsByProvider, nil)
 	}
-	applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
+	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
 
 	// Atomically swap the models map and invalidate sorted caches
 	r.mu.Lock()
@@ -477,7 +477,7 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 		metadataStats = enrichProviderModelMaps(list, r.snapshotProviderTypes(), newModelsByProvider, nil)
 	}
 	configOverrides := r.snapshotConfigOverrides()
-	applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
+	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
 
 	r.mu.Lock()
 	r.models = newModels
@@ -1264,7 +1264,7 @@ func (r *ModelRegistry) enrichModelsLocked() metadataEnrichmentStats {
 	if r.modelList != nil {
 		stats = enrichProviderModelMaps(r.modelList, providerTypes, r.modelsByProvider, replacements)
 	}
-	applyConfigMetadataOverrides(r.configMetadataOverrides, r.modelsByProvider, replacements)
+	stats.Enriched += applyConfigMetadataOverrides(r.configMetadataOverrides, r.modelsByProvider, replacements)
 	for modelID, info := range r.models {
 		if replacement, ok := replacements[info]; ok {
 			r.models[modelID] = replacement
@@ -1352,13 +1352,37 @@ func (r *ModelRegistry) snapshotConfigOverrides() map[string]map[string]*core.Mo
 	return out
 }
 
+// collectionEmpty reports whether a reflect.Value representing a slice, array,
+// or map has no elements (covering both nil and non-nil-but-zero-length), and
+// falls back to reflect.Value.IsZero for other kinds. This lets override-
+// emptiness checks treat `modes: []` the same as an omitted field, which
+// IsZero alone would not.
+func collectionEmpty(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Slice, reflect.Map, reflect.Array:
+		return v.Len() == 0
+	}
+	return v.IsZero()
+}
+
+// structFieldsEmpty returns true if every field of the given struct value
+// passes collectionEmpty.
+func structFieldsEmpty(v reflect.Value) bool {
+	for i := 0; i < v.NumField(); i++ {
+		if !collectionEmpty(v.Field(i)) {
+			return false
+		}
+	}
+	return true
+}
+
 // metadataOverrideEmpty reports whether an override has no effective content.
 // An empty override (either nil or zero-valued on every field) would turn a
 // nil current metadata into a non-nil empty struct after MergeMetadata, so
-// callers should short-circuit on it. Uses reflect.Value.IsZero so new fields
-// on core.ModelMetadata are picked up automatically; Pricing is handled
-// separately so a non-nil pointer to an empty pricing block still counts as
-// empty.
+// callers should short-circuit on it. Uses reflect-based field inspection so
+// new fields on core.ModelMetadata are picked up automatically; Pricing is
+// handled separately so a non-nil pointer to an empty pricing block still
+// counts as empty.
 func metadataOverrideEmpty(m *core.ModelMetadata) bool {
 	if m == nil {
 		return true
@@ -1368,16 +1392,17 @@ func metadataOverrideEmpty(m *core.ModelMetadata) bool {
 	}
 	tmp := *m
 	tmp.Pricing = nil
-	return reflect.ValueOf(tmp).IsZero()
+	return structFieldsEmpty(reflect.ValueOf(tmp))
 }
 
 // pricingOverrideEmpty reports whether a pricing override has no effective
-// content — nil or every field at its zero value.
+// content — nil or every field at its zero value (with collections treated as
+// empty when length==0).
 func pricingOverrideEmpty(p *core.ModelPricing) bool {
 	if p == nil {
 		return true
 	}
-	return reflect.ValueOf(*p).IsZero()
+	return structFieldsEmpty(reflect.ValueOf(*p))
 }
 
 // applyConfigMetadataOverrides layers operator-declared metadata onto already-
