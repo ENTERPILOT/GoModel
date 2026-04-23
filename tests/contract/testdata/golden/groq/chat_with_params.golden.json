@@ -17,8 +17,12 @@
   "provider": "",
   "system_fingerprint": "fp_f8b414701e",
   "usage": {
+    "completion_time": 0.023626468,
     "completion_tokens": 12,
+    "prompt_time": 0.002208827,
     "prompt_tokens": 43,
+    "queue_time": 0.04773597,
+    "total_time": 0.025835295,
     "total_tokens": 55
   }
 }

@@ -121,26 +121,11 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 		totalTokens = int(v)
 	}
 
-	for field := range extendedFieldSet {
-		if v, ok := usageMap[field].(float64); ok && v > 0 {
-			rawData[field] = int(v)
-		}
-	}
-
-	if details, ok := usageMap["prompt_tokens_details"].(map[string]any); ok {
-		for k, v := range details {
-			if fv, ok := v.(float64); ok && fv > 0 {
-				rawData["prompt_"+k] = int(fv)
-			}
-		}
-	}
-	if details, ok := usageMap["completion_tokens_details"].(map[string]any); ok {
-		for k, v := range details {
-			if fv, ok := v.(float64); ok && fv > 0 {
-				rawData["completion_"+k] = int(fv)
-			}
-		}
-	}
+	copyExtendedUsageFields(rawData, usageMap)
+	copyUsageDetailsFields(rawData, usageMap["prompt_tokens_details"], "prompt_")
+	copyUsageDetailsFields(rawData, usageMap["input_tokens_details"], "prompt_")
+	copyUsageDetailsFields(rawData, usageMap["completion_tokens_details"], "completion_")
+	copyUsageDetailsFields(rawData, usageMap["output_tokens_details"], "completion_")
 
 	if inputTokens == 0 && outputTokens == 0 && totalTokens == 0 {
 		return nil
@@ -168,4 +153,51 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 		entry.UserPath = o.userPath
 	}
 	return entry
+}
+
+func copyExtendedUsageFields(rawData map[string]any, usageMap map[string]any) {
+	for key, value := range usageMap {
+		switch key {
+		case "prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens",
+			"prompt_tokens_details", "completion_tokens_details", "input_tokens_details", "output_tokens_details":
+			continue
+		}
+		if numericValue, ok := numericUsageValue(value); ok && numericValue > 0 {
+			rawData[key] = numericValue
+		}
+	}
+}
+
+func copyUsageDetailsFields(rawData map[string]any, detailsValue any, prefix string) {
+	details, ok := detailsValue.(map[string]any)
+	if !ok {
+		return
+	}
+
+	for key, value := range details {
+		numericValue, ok := numericUsageValue(value)
+		if !ok || numericValue <= 0 {
+			continue
+		}
+
+		switch key {
+		case "cache_read_input_tokens", "cache_creation_input_tokens":
+			rawData[key] = numericValue
+		default:
+			rawData[prefix+key] = numericValue
+		}
+	}
+}
+
+func numericUsageValue(value any) (int, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return int(typed), true
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	default:
+		return 0, false
+	}
 }

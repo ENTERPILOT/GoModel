@@ -15,6 +15,11 @@ type PostgreSQLReader struct {
 	pool *pgxpool.Pool
 }
 
+type pgxRows interface {
+	Next() bool
+	Scan(dest ...any) error
+}
+
 // NewPostgreSQLReader creates a new PostgreSQL usage reader.
 func NewPostgreSQLReader(pool *pgxpool.Pool) (*PostgreSQLReader, error) {
 	if pool == nil {
@@ -164,6 +169,63 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 	}
 	defer rows.Close()
 
+	entries, err := scanPostgreSQLUsageLogEntries(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage log rows: %w", err)
+	}
+
+	return &UsageLogResult{
+		Entries: entries,
+		Total:   total,
+		Limit:   limit,
+		Offset:  offset,
+	}, nil
+}
+
+// GetUsageByRequestIDs returns usage entries grouped by request ID.
+func (r *PostgreSQLReader) GetUsageByRequestIDs(ctx context.Context, requestIDs []string) (map[string][]UsageLogEntry, error) {
+	requestIDs = compactNonEmptyStrings(requestIDs)
+	if len(requestIDs) == 0 {
+		return map[string][]UsageLogEntry{}, nil
+	}
+
+	args := make([]any, 0, len(requestIDs))
+	placeholders := make([]string, 0, len(requestIDs))
+	for idx, requestID := range requestIDs {
+		args = append(args, requestID)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", idx+1))
+	}
+
+	query := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type,
+		input_tokens, output_tokens, total_tokens, COALESCE(input_cost, 0), COALESCE(output_cost, 0), COALESCE(total_cost, 0), raw_data, COALESCE(costs_calculation_caveat, '')
+		FROM "usage" WHERE request_id IN (%s) ORDER BY timestamp DESC, id DESC`, strings.Join(placeholders, ", "))
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query usage by request IDs: %w", err)
+	}
+	defer rows.Close()
+
+	entries, err := scanPostgreSQLUsageLogEntries(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage by request ID rows: %w", err)
+	}
+
+	grouped := make(map[string][]UsageLogEntry, len(requestIDs))
+	for _, entry := range entries {
+		grouped[entry.RequestID] = append(grouped[entry.RequestID], entry)
+	}
+	return grouped, nil
+}
+
+func scanPostgreSQLUsageLogEntries(rows pgxRows) ([]UsageLogEntry, error) {
 	entries := make([]UsageLogEntry, 0)
 	for rows.Next() {
 		var e UsageLogEntry
@@ -193,17 +255,7 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 		}
 		entries = append(entries, e)
 	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating usage log rows: %w", err)
-	}
-
-	return &UsageLogResult{
-		Entries: entries,
-		Total:   total,
-		Limit:   limit,
-		Offset:  offset,
-	}, nil
+	return entries, nil
 }
 
 // pgDateRangeConditions returns WHERE conditions and args for a date range.

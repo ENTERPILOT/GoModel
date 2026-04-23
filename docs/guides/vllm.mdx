@@ -1,0 +1,149 @@
+---
+title: "GoModel & vLLM"
+description: "Route OpenAI-compatible GoModel requests to one or more vLLM servers, including slash-shaped Hugging Face model IDs."
+icon: "server"
+---
+
+GoModel can use vLLM through vLLM's OpenAI-compatible HTTP server.
+
+Flow:
+
+`Client -> GoModel -> vLLM`
+
+## Before you start
+
+- Start vLLM with its OpenAI-compatible server.
+- Note the vLLM base URL, including `/v1`.
+- Decide whether vLLM should require an upstream API key.
+
+For a local vLLM server:
+
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct
+```
+
+If you want vLLM itself to require bearer auth:
+
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct --api-key token-abc123
+```
+
+## 1. Configure GoModel
+
+For a single keyless vLLM server, Docker env vars are enough:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  enterpilot/gomodel
+```
+
+Set `VLLM_API_KEY` only when the upstream vLLM server was started with
+`--api-key`:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  -e VLLM_API_KEY="token-abc123" \
+  enterpilot/gomodel
+```
+
+Use suffixed env vars when you want more than one vLLM instance without YAML:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  -e VLLM_TEST_BASE_URL="http://host.docker.internal:8000/v1" \
+  enterpilot/gomodel
+```
+
+`VLLM_BASE_URL` registers provider `vllm`. `VLLM_TEST_BASE_URL` registers
+provider `vllm-test`. The suffix is normalized to lowercase and underscores
+become hyphens.
+
+Use YAML only when generated names such as `vllm-test` are not enough or you
+need larger structured provider blocks.
+
+<Note>
+  These examples assume GoModel runs in Docker and your vLLM server is reachable
+  from the host at `localhost:8000`, so GoModel uses
+  `host.docker.internal:8000` to reach it. If both services run in the same
+  Docker network, replace `host.docker.internal` with the vLLM service name.
+  If GoModel runs directly on the host, use `http://localhost:8000/v1`.
+</Note>
+
+## 2. Verify the model registry
+
+```bash
+curl -s http://localhost:8080/v1/models \
+  -H "Authorization: Bearer change-me"
+```
+
+GoModel uses the model IDs returned by vLLM's `/models` endpoint. Hugging Face
+model IDs can contain slashes. With a provider named `vllm-test`, a vLLM model
+such as `meta-llama/Llama-3.1-8B-Instruct` is exposed through GoModel as:
+
+```text
+vllm-test/meta-llama/Llama-3.1-8B-Instruct
+```
+
+GoModel splits provider-qualified selectors on the first slash only, so
+`vllm-test` is the provider and `meta-llama/Llama-3.1-8B-Instruct` remains the
+upstream model ID.
+
+## 3. Send a chat request
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "vllm-test/meta-llama/Llama-3.1-8B-Instruct",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+## 4. Use vLLM passthrough
+
+vLLM passthrough is enabled by default. Use it for vLLM-specific endpoints such
+as `/tokenize`, `/detokenize`, `/pooling`, and `/rerank`:
+
+```bash
+curl -s http://localhost:8080/p/vllm/tokenize \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "meta-llama/Llama-3.1-8B-Instruct",
+    "prompt": "Hello"
+  }'
+```
+
+GoModel handles gateway authentication, strips client auth headers before
+forwarding, and applies `VLLM_API_KEY` to upstream requests when configured.
+
+<Note>
+  Passthrough routes are provider-type scoped at `/p/vllm/...`. When you need
+  to target one named vLLM instance in a multi-provider setup, use translated
+  `/v1/...` requests with provider-qualified model IDs such as
+  `vllm-test/meta-llama/Llama-3.1-8B-Instruct`.
+</Note>
+
+## Current support
+
+Integrated:
+
+- chat completions
+- streaming chat completions
+- Responses API
+- streaming Responses API
+- embeddings
+- provider-native passthrough
+
+Not exposed as first-class GoModel capabilities yet:
+
+- native vLLM batch APIs
+- OpenAI-compatible files lifecycle
+- Responses lifecycle utility endpoints

@@ -26,7 +26,10 @@
     </div>
     <div class="audit-pane-block" x-show="pane.showBody">
         <div class="audit-pane-block-head">
-            <h5>Body</h5>
+            <div class="audit-pane-block-title">
+                <h5>Body</h5>
+                <span class="audit-prompt-cache-pill mono" x-show="pane.bodyCacheRatioLabel" x-text="pane.bodyCacheRatioLabel"></span>
+            </div>
             <button type="button" class="copy-feedback-btn audit-copy-btn"
                 :class="{ 'copy-feedback-btn-copied': copyBodyState.copied }"
                 @click.prevent="copyBody()">

@@ -214,7 +214,7 @@ type anthropicRequest struct {
 	ToolChoice   *anthropicToolChoice   `json:"tool_choice,omitempty"`
 	MaxTokens    int                    `json:"max_tokens"`
 	Temperature  *float64               `json:"temperature,omitempty"`
-	System       string                 `json:"system,omitempty"`
+	System       any                    `json:"system,omitempty"`
 	Stream       bool                   `json:"stream,omitempty"`
 	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
 	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
@@ -253,15 +253,16 @@ type anthropicMessage struct {
 }
 
 type anthropicContentBlock struct {
-	Type      string                  `json:"type"`
-	Text      string                  `json:"text,omitempty"`
-	ID        string                  `json:"id,omitempty"`
-	Name      string                  `json:"name,omitempty"`
-	Input     any                     `json:"input,omitempty"`
-	ToolUseID string                  `json:"tool_use_id,omitempty"`
-	Content   any                     `json:"content,omitempty"`
-	IsError   bool                    `json:"is_error,omitempty"`
-	Source    *anthropicContentSource `json:"source,omitempty"`
+	Type         string                  `json:"type"`
+	Text         string                  `json:"text,omitempty"`
+	ID           string                  `json:"id,omitempty"`
+	Name         string                  `json:"name,omitempty"`
+	Input        any                     `json:"input,omitempty"`
+	ToolUseID    string                  `json:"tool_use_id,omitempty"`
+	Content      any                     `json:"content,omitempty"`
+	IsError      bool                    `json:"is_error,omitempty"`
+	Source       *anthropicContentSource `json:"source,omitempty"`
+	CacheControl json.RawMessage         `json:"cache_control,omitempty"`
 }
 
 type anthropicContentSource struct {
@@ -590,11 +591,18 @@ func anthropicChatUsagePayload(usage *anthropicUsage) map[string]any {
 		return nil
 	}
 
-	return map[string]any{
+	payload := map[string]any{
 		"prompt_tokens":     usage.InputTokens,
 		"completion_tokens": usage.OutputTokens,
 		"total_tokens":      usage.InputTokens + usage.OutputTokens,
 	}
+	if usage.CacheReadInputTokens > 0 {
+		payload["cache_read_input_tokens"] = usage.CacheReadInputTokens
+	}
+	if usage.CacheCreationInputTokens > 0 {
+		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
+	}
+	return payload
 }
 
 func anthropicResponsesUsagePayload(usage *anthropicUsage) map[string]any {
@@ -602,11 +610,18 @@ func anthropicResponsesUsagePayload(usage *anthropicUsage) map[string]any {
 		return nil
 	}
 
-	return map[string]any{
+	payload := map[string]any{
 		"input_tokens":  usage.InputTokens,
 		"output_tokens": usage.OutputTokens,
 		"total_tokens":  usage.InputTokens + usage.OutputTokens,
 	}
+	if usage.CacheReadInputTokens > 0 {
+		payload["cache_read_input_tokens"] = usage.CacheReadInputTokens
+	}
+	if usage.CacheCreationInputTokens > 0 {
+		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
+	}
+	return payload
 }
 
 func (sc *streamConverter) Read(p []byte) (n int, err error) {

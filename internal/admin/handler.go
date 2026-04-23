@@ -94,6 +94,18 @@ type providerStatusResponse struct {
 	Providers []providerStatusItemResponse  `json:"providers"`
 }
 
+type auditLogEntryResponse struct {
+	auditlog.LogEntry
+	Usage *usage.RequestUsageSummary `json:"usage,omitempty"`
+}
+
+type auditLogListResponse struct {
+	Entries []auditLogEntryResponse `json:"entries"`
+	Total   int                     `json:"total"`
+	Limit   int                     `json:"limit"`
+	Offset  int                     `json:"offset"`
+}
+
 const (
 	RuntimeRefreshStatusOK      = "ok"
 	RuntimeRefreshStatusPartial = "partial"
@@ -679,14 +691,14 @@ func (h *Handler) CacheOverview(c *echo.Context) error {
 // @Param        search       query     string  false  "Search across request_id/requested_model/provider/method/path/error_type/error_message"
 // @Param        limit        query     int     false  "Page size (default 25, max 100)"
 // @Param        offset       query     int     false  "Offset for pagination"
-// @Success      200  {object}  auditlog.LogListResult
+// @Success      200  {object}  auditLogListResponse
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
 // @Router       /admin/api/v1/audit/log [get]
 func (h *Handler) AuditLog(c *echo.Context) error {
 	if h.auditReader == nil {
-		return c.JSON(http.StatusOK, auditlog.LogListResult{
-			Entries: []auditlog.LogEntry{},
+		return c.JSON(http.StatusOK, auditLogListResponse{
+			Entries: []auditLogEntryResponse{},
 		})
 	}
 
@@ -754,7 +766,52 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 		result.Entries = []auditlog.LogEntry{}
 	}
 
-	return c.JSON(http.StatusOK, result)
+	response, err := h.auditLogResponse(c.Request().Context(), result)
+	if err != nil {
+		return handleError(c, err)
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) auditLogResponse(ctx context.Context, result *auditlog.LogListResult) (*auditLogListResponse, error) {
+	if result == nil {
+		return &auditLogListResponse{Entries: []auditLogEntryResponse{}}, nil
+	}
+
+	response := &auditLogListResponse{
+		Entries: make([]auditLogEntryResponse, len(result.Entries)),
+		Total:   result.Total,
+		Limit:   result.Limit,
+		Offset:  result.Offset,
+	}
+	for i := range result.Entries {
+		response.Entries[i].LogEntry = result.Entries[i]
+	}
+
+	if h.usageReader == nil || len(result.Entries) == 0 {
+		return response, nil
+	}
+
+	requestIDs := make([]string, 0, len(result.Entries))
+	for _, entry := range result.Entries {
+		requestIDs = append(requestIDs, entry.RequestID)
+	}
+
+	entriesByRequestID, err := h.usageReader.GetUsageByRequestIDs(ctx, requestIDs)
+	if err != nil {
+		slog.Warn("failed to enrich audit log entries with usage", "error", err, "request_count", len(requestIDs))
+		return response, nil
+	}
+
+	summaries := usage.SummarizeUsageByRequestID(entriesByRequestID)
+	for i := range response.Entries {
+		requestID := response.Entries[i].RequestID
+		if summary, ok := summaries[requestID]; ok {
+			response.Entries[i].Usage = summary
+		}
+	}
+
+	return response, nil
 }
 
 // AuditConversation handles GET /admin/api/v1/audit/conversation

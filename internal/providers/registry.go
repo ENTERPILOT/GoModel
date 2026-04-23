@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -46,6 +47,10 @@ type ModelRegistry struct {
 	refreshOnce      sync.Once            // initializes refreshCh for zero-value safety
 	modelList        *modeldata.ModelList // parsed model list (nil = not loaded)
 	modelListRaw     json.RawMessage      // raw bytes for cache persistence
+	// configMetadataOverrides holds operator-supplied metadata keyed by provider
+	// instance name -> raw model ID. Applied after remote-registry enrichment as
+	// a higher-priority layer. nil if no overrides declared.
+	configMetadataOverrides map[string]map[string]*core.ModelMetadata
 
 	// Cached sorted slices, rebuilt lazily after models change.
 	// nil means cache needs rebuilding. Protected by mu.
@@ -105,6 +110,32 @@ func (r *ModelRegistry) RegisterProvider(provider core.Provider) {
 // The type is used for cache persistence to re-associate models with providers on startup.
 func (r *ModelRegistry) RegisterProviderWithType(provider core.Provider, providerType string) {
 	r.RegisterProviderWithNameAndType(provider, "", providerType)
+}
+
+// SetProviderMetadataOverrides records per-model metadata overrides declared in
+// config.yaml for the given provider instance name. Overrides are merged onto
+// remote-registry enrichment each time the registry re-enriches its models.
+//
+// Call with an empty/nil map to clear any prior overrides for that provider.
+func (r *ModelRegistry) SetProviderMetadataOverrides(providerName string, overrides map[string]*core.ModelMetadata) {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(overrides) == 0 {
+		delete(r.configMetadataOverrides, providerName)
+		return
+	}
+	if r.configMetadataOverrides == nil {
+		r.configMetadataOverrides = make(map[string]map[string]*core.ModelMetadata)
+	}
+	clone := make(map[string]*core.ModelMetadata, len(overrides))
+	for k, v := range overrides {
+		clone[k] = v.Clone()
+	}
+	r.configMetadataOverrides[providerName] = clone
 }
 
 // RegisterProviderWithNameAndType adds a provider with a configured provider instance name and type.
@@ -268,10 +299,12 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 	r.mu.RLock()
 	list := r.modelList
 	r.mu.RUnlock()
+	configOverrides := r.snapshotConfigOverrides()
 	metadataStats := metadataEnrichmentStats{}
 	if list != nil {
 		metadataStats = enrichProviderModelMaps(list, providerTypes, newModelsByProvider, nil)
 	}
+	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
 
 	// Atomically swap the models map and invalidate sorted caches
 	r.mu.Lock()
@@ -443,6 +476,8 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	if list != nil {
 		metadataStats = enrichProviderModelMaps(list, r.snapshotProviderTypes(), newModelsByProvider, nil)
 	}
+	configOverrides := r.snapshotConfigOverrides()
+	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
 
 	r.mu.Lock()
 	r.models = newModels
@@ -1214,7 +1249,10 @@ func (r *ModelRegistry) enrichModels() metadataEnrichmentStats {
 }
 
 func (r *ModelRegistry) enrichModelsLocked() metadataEnrichmentStats {
-	if r.modelList == nil || len(r.models) == 0 {
+	if len(r.models) == 0 {
+		return metadataEnrichmentStats{}
+	}
+	if r.modelList == nil && len(r.configMetadataOverrides) == 0 {
 		return metadataEnrichmentStats{}
 	}
 
@@ -1222,7 +1260,11 @@ func (r *ModelRegistry) enrichModelsLocked() metadataEnrichmentStats {
 	maps.Copy(providerTypes, r.providerTypes)
 
 	replacements := make(map[*ModelInfo]*ModelInfo, len(r.models))
-	stats := enrichProviderModelMaps(r.modelList, providerTypes, r.modelsByProvider, replacements)
+	stats := metadataEnrichmentStats{}
+	if r.modelList != nil {
+		stats = enrichProviderModelMaps(r.modelList, providerTypes, r.modelsByProvider, replacements)
+	}
+	stats.Enriched += applyConfigMetadataOverrides(r.configMetadataOverrides, r.modelsByProvider, replacements)
 	for modelID, info := range r.models {
 		if replacement, ok := replacements[info]; ok {
 			r.models[modelID] = replacement
@@ -1287,6 +1329,150 @@ func (r *ModelRegistry) snapshotProviderTypes() map[core.Provider]string {
 	m := make(map[core.Provider]string, len(r.providerTypes))
 	maps.Copy(m, r.providerTypes)
 	return m
+}
+
+// snapshotConfigOverrides returns a copy of the configMetadataOverrides outer
+// and inner maps for use outside the lock. The inner *core.ModelMetadata
+// pointers are shared, which is safe because SetProviderMetadataOverrides
+// deep-clones on insertion and the registry never hands those values back out.
+func (r *ModelRegistry) snapshotConfigOverrides() map[string]map[string]*core.ModelMetadata {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.configMetadataOverrides) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]*core.ModelMetadata, len(r.configMetadataOverrides))
+	for provider, inner := range r.configMetadataOverrides {
+		innerCopy := make(map[string]*core.ModelMetadata, len(inner))
+		for modelID, meta := range inner {
+			innerCopy[modelID] = meta
+		}
+		out[provider] = innerCopy
+	}
+	return out
+}
+
+// collectionEmpty reports whether a reflect.Value representing a slice, array,
+// or map has no elements (covering both nil and non-nil-but-zero-length), and
+// falls back to reflect.Value.IsZero for other kinds. This lets override-
+// emptiness checks treat `modes: []` the same as an omitted field, which
+// IsZero alone would not.
+func collectionEmpty(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Slice, reflect.Map, reflect.Array:
+		return v.Len() == 0
+	}
+	return v.IsZero()
+}
+
+// structFieldsEmpty returns true if every field of the given struct value
+// passes collectionEmpty.
+func structFieldsEmpty(v reflect.Value) bool {
+	for i := 0; i < v.NumField(); i++ {
+		if !collectionEmpty(v.Field(i)) {
+			return false
+		}
+	}
+	return true
+}
+
+// metadataOverrideEmpty reports whether an override has no effective content.
+// An empty override (either nil or zero-valued on every field) would turn a
+// nil current metadata into a non-nil empty struct after MergeMetadata, so
+// callers should short-circuit on it. Uses reflect-based field inspection so
+// new fields on core.ModelMetadata are picked up automatically; Pricing is
+// handled separately so a non-nil pointer to an empty pricing block still
+// counts as empty.
+func metadataOverrideEmpty(m *core.ModelMetadata) bool {
+	if m == nil {
+		return true
+	}
+	if !pricingOverrideEmpty(m.Pricing) {
+		return false
+	}
+	tmp := *m
+	tmp.Pricing = nil
+	return structFieldsEmpty(reflect.ValueOf(tmp))
+}
+
+// pricingOverrideEmpty reports whether a pricing override has no effective
+// content — nil or every field at its zero value (with collections treated as
+// empty when length==0).
+func pricingOverrideEmpty(p *core.ModelPricing) bool {
+	if p == nil {
+		return true
+	}
+	return structFieldsEmpty(reflect.ValueOf(*p))
+}
+
+// applyConfigMetadataOverrides layers operator-declared metadata onto already-
+// enriched models. Call it after enrichProviderModelMaps with the same
+// replacements map (pass nil replacements for fresh, unpublished maps).
+// Returns the number of models whose metadata was updated.
+func applyConfigMetadataOverrides(
+	overrides map[string]map[string]*core.ModelMetadata,
+	modelsByProvider map[string]map[string]*ModelInfo,
+	replacements map[*ModelInfo]*ModelInfo,
+) int {
+	if len(overrides) == 0 {
+		return 0
+	}
+	// reverse lets us find the pre-enrichment pointer when an entry has
+	// already been replaced by enrichProviderModelMaps, so our replacement
+	// chain stays consistent from the caller's perspective. Always allocated
+	// when replacements is non-nil so the else-branch write below cannot hit
+	// a nil map when enrichment made no replacements.
+	var reverse map[*ModelInfo]*ModelInfo
+	if replacements != nil {
+		reverse = make(map[*ModelInfo]*ModelInfo, len(replacements))
+		for orig, repl := range replacements {
+			reverse[repl] = orig
+		}
+	}
+	applied := 0
+	for providerName, modelOverrides := range overrides {
+		providerModels, ok := modelsByProvider[providerName]
+		if !ok {
+			continue
+		}
+		for modelID, override := range modelOverrides {
+			if metadataOverrideEmpty(override) {
+				// A nil or effectively-empty override has nothing to
+				// contribute. Skipping avoids turning a nil current metadata
+				// into a non-nil empty struct, which the DeepEqual check
+				// below would not catch.
+				continue
+			}
+			current, ok := providerModels[modelID]
+			if !ok {
+				continue
+			}
+			merged := modeldata.MergeMetadata(current.Model.Metadata, override)
+			// Skip no-op merges so concurrent readers holding the current
+			// pointer keep a stable view when the override adds no new info.
+			if reflect.DeepEqual(current.Model.Metadata, merged) {
+				continue
+			}
+			if replacements == nil {
+				current.Model.Metadata = merged
+				applied++
+				continue
+			}
+			cloned := *current
+			cloned.Model.Metadata = merged
+			next := &cloned
+			providerModels[modelID] = next
+			if orig, hasOrig := reverse[current]; hasOrig {
+				replacements[orig] = next
+				reverse[next] = orig
+			} else {
+				replacements[current] = next
+				reverse[next] = current
+			}
+			applied++
+		}
+	}
+	return applied
 }
 
 func enrichProviderModelMaps(

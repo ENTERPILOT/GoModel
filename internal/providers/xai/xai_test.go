@@ -127,6 +127,153 @@ func TestNewWithHTTPClient(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_ForwardsXGrokConvIDFromSnapshot(t *testing.T) {
+	var receivedConvID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedConvID = r.Header.Get(grokConvIDHeader)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id": "chatcmpl-123",
+			"object": "chat.completion",
+			"created": 1677652288,
+			"model": "grok-2",
+			"choices": [{
+				"index": 0,
+				"message": {"role": "assistant", "content": "Hello!"},
+				"finish_reason": "stop"
+			}],
+			"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	ctx := core.WithRequestSnapshot(context.Background(), core.NewRequestSnapshot(
+		http.MethodPost,
+		"/v1/chat/completions",
+		nil,
+		nil,
+		map[string][]string{"x-grok-conv-id": {"client-conv-123"}},
+		"application/json",
+		nil,
+		false,
+		"req-123",
+		nil,
+	))
+	_, err := provider.ChatCompletion(ctx, &core.ChatRequest{
+		Model: "grok-2",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if receivedConvID != "client-conv-123" {
+		t.Fatalf("%s = %q, want client-conv-123", grokConvIDHeader, receivedConvID)
+	}
+}
+
+func TestChatCompletion_GeneratesStableXGrokConvIDWhenMissing(t *testing.T) {
+	var receivedConvIDs []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedConvIDs = append(receivedConvIDs, r.Header.Get(grokConvIDHeader))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id": "chatcmpl-123",
+			"object": "chat.completion",
+			"created": 1677652288,
+			"model": "grok-2",
+			"choices": [{
+				"index": 0,
+				"message": {"role": "assistant", "content": "Hello!"},
+				"finish_reason": "stop"
+			}],
+			"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	initialMessages := []core.Message{
+		{Role: "system", Content: "Reply with the requested marker only."},
+		{Role: "user", Content: "Use this fixed reference text for the cache anchor."},
+	}
+	req1 := &core.ChatRequest{
+		Model:    "grok-2",
+		Messages: initialMessages,
+	}
+	req2 := &core.ChatRequest{
+		Model: "grok-2",
+		Messages: append(append([]core.Message{}, initialMessages...),
+			core.Message{Role: "assistant", Content: "marker one"},
+			core.Message{Role: "user", Content: "Now reply with marker two."},
+		),
+	}
+
+	if _, err := provider.ChatCompletion(context.Background(), req1); err != nil {
+		t.Fatalf("first ChatCompletion() error = %v", err)
+	}
+	if _, err := provider.ChatCompletion(context.Background(), req2); err != nil {
+		t.Fatalf("second ChatCompletion() error = %v", err)
+	}
+	if len(receivedConvIDs) != 2 {
+		t.Fatalf("received %d requests, want 2", len(receivedConvIDs))
+	}
+	if receivedConvIDs[0] == "" {
+		t.Fatal("first generated x-grok-conv-id is empty")
+	}
+	if !strings.HasPrefix(receivedConvIDs[0], "gomodel-") {
+		t.Fatalf("generated x-grok-conv-id = %q, want gomodel-*", receivedConvIDs[0])
+	}
+	if receivedConvIDs[1] != receivedConvIDs[0] {
+		t.Fatalf("generated x-grok-conv-id changed across appended conversation: %q then %q", receivedConvIDs[0], receivedConvIDs[1])
+	}
+}
+
+func TestStreamChatCompletion_ForwardsXGrokConvIDFromSnapshot(t *testing.T) {
+	var receivedConvID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedConvID = r.Header.Get(grokConvIDHeader)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	ctx := core.WithRequestSnapshot(context.Background(), core.NewRequestSnapshot(
+		http.MethodPost,
+		"/v1/chat/completions",
+		nil,
+		nil,
+		map[string][]string{"X-Grok-Conv-Id": {"stream-conv-123"}},
+		"application/json",
+		nil,
+		false,
+		"req-123",
+		nil,
+	))
+	body, err := provider.StreamChatCompletion(ctx, &core.ChatRequest{
+		Model: "grok-2",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StreamChatCompletion() error = %v", err)
+	}
+	defer func() { _ = body.Close() }()
+	if receivedConvID != "stream-conv-123" {
+		t.Fatalf("%s = %q, want stream-conv-123", grokConvIDHeader, receivedConvID)
+	}
+}
+
 func TestChatCompletion(t *testing.T) {
 	tests := []struct {
 		name          string

@@ -746,6 +746,42 @@ test("audit entry metadata is rendered as a labeled pill row at the bottom of th
   assert.match(metadataContextRule, /flex-wrap:\s*wrap/);
 });
 
+test("audit entry details show prompt caching inside the request body pane", () => {
+  const indexTemplate = readDashboardTemplateSource();
+  const auditPaneTemplate = readFixture("../../../templates/audit-pane.html");
+  const css = readFixture("../../css/dashboard.css");
+  const detailsStart = indexTemplate.indexOf(
+    '<div class="audit-entry-details">',
+  );
+  const detailsEnd = indexTemplate.indexOf("</template>", detailsStart);
+
+  assert.notEqual(detailsStart, -1, "Expected audit entry details block");
+  assert.notEqual(detailsEnd, -1, "Expected lazy audit entry details wrapper");
+
+  const auditEntry = indexTemplate.slice(detailsStart, detailsEnd);
+  const requestResponseIndex = auditEntry.indexOf(
+    '<div class="audit-request-response">',
+  );
+  const metadataIndex = auditEntry.indexOf(
+    '<div class="audit-entry-metadata">',
+  );
+
+  assert.ok(requestResponseIndex < metadataIndex);
+  assert.doesNotMatch(auditEntry, /audit-cache-panel/);
+  assert.match(
+    auditPaneTemplate,
+    /<h5>Body<\/h5>[\s\S]*<span class="audit-prompt-cache-pill mono" x-show="pane\.bodyCacheRatioLabel" x-text="pane\.bodyCacheRatioLabel"><\/span>/,
+  );
+
+  const pillRule = readCSSRule(css, ".audit-prompt-cache-pill");
+  assert.match(pillRule, /color:\s*var\(--prompt-cache-color\)/);
+  assert.match(pillRule, /border-radius:\s*999px/);
+
+  const highlightRule = readCSSRule(css, ".audit-prompt-cache-highlight");
+  assert.match(highlightRule, /color:\s*var\(--prompt-cache-color\)/);
+  assert.match(highlightRule, /font-weight:\s*700/);
+});
+
 test("model category tables lazy mount only the active table body", () => {
   const indexTemplate = readDashboardTemplateSource();
   const css = readFixture("../../css/dashboard.css");

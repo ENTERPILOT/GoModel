@@ -332,6 +332,80 @@ data: [DONE]
 	}
 }
 
+func TestStreamUsageObserverResponsesAPIWithDetailedUsage(t *testing.T) {
+	logger := &trackingLogger{enabled: true}
+	observer := NewStreamUsageObserver(logger, "gpt-5", "openai", "req-resp-detailed", "/v1/responses", nil)
+	observer.OnJSONEvent(map[string]any{
+		"type": "response.completed",
+		"response": map[string]any{
+			"id":    "resp-456",
+			"model": "gpt-5",
+			"usage": map[string]any{
+				"input_tokens":  float64(125),
+				"output_tokens": float64(48),
+				"total_tokens":  float64(173),
+				"input_tokens_details": map[string]any{
+					"cached_tokens": float64(98),
+				},
+				"output_tokens_details": map[string]any{
+					"reasoning_tokens": float64(7),
+				},
+				"cost_in_usd_ticks": float64(158500),
+			},
+		},
+	})
+	observer.OnStreamClose()
+
+	entries := logger.getEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.RawData == nil {
+		t.Fatal("expected RawData to be set")
+	}
+	if entry.RawData["prompt_cached_tokens"] != 98 {
+		t.Fatalf("RawData[prompt_cached_tokens] = %v, want 98", entry.RawData["prompt_cached_tokens"])
+	}
+	if entry.RawData["completion_reasoning_tokens"] != 7 {
+		t.Fatalf("RawData[completion_reasoning_tokens] = %v, want 7", entry.RawData["completion_reasoning_tokens"])
+	}
+	if entry.RawData["cost_in_usd_ticks"] != 158500 {
+		t.Fatalf("RawData[cost_in_usd_ticks] = %v, want 158500", entry.RawData["cost_in_usd_ticks"])
+	}
+}
+
+func TestStreamUsageObserverAnthropicCacheFields(t *testing.T) {
+	logger := &trackingLogger{enabled: true}
+	observer := NewStreamUsageObserver(logger, "claude-sonnet-4-5", "anthropic", "req-anthropic", "/v1/chat/completions", nil)
+	observer.OnJSONEvent(map[string]any{
+		"id": "msg-123",
+		"usage": map[string]any{
+			"prompt_tokens":               float64(10),
+			"completion_tokens":           float64(2),
+			"total_tokens":                float64(12),
+			"cache_read_input_tokens":     float64(6),
+			"cache_creation_input_tokens": float64(4),
+		},
+	})
+	observer.OnStreamClose()
+
+	entries := logger.getEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.RawData == nil {
+		t.Fatal("expected RawData to be set")
+	}
+	if entry.RawData["cache_read_input_tokens"] != 6 {
+		t.Fatalf("RawData[cache_read_input_tokens] = %v, want 6", entry.RawData["cache_read_input_tokens"])
+	}
+	if entry.RawData["cache_creation_input_tokens"] != 4 {
+		t.Fatalf("RawData[cache_creation_input_tokens] = %v, want 4", entry.RawData["cache_creation_input_tokens"])
+	}
+}
+
 func TestStreamUsageObserverLargeResponsesDone(t *testing.T) {
 	largeText := strings.Repeat("This is a long response from the model. ", 300)
 	streamData := `event: response.created

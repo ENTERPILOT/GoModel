@@ -141,9 +141,10 @@ Set these to automatically register providers. No YAML configuration required.
 | `AZURE_API_KEY`      | Azure OpenAI (`AZURE_BASE_URL` also required)     |
 | `ORACLE_API_KEY`     | Oracle (`ORACLE_BASE_URL` also required)          |
 | `OLLAMA_BASE_URL`    | Ollama (no API key needed)                        |
+| `VLLM_BASE_URL`      | vLLM (no API key needed unless upstream requires) |
 
-Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
-When using Oracle, set `ORACLE_MODELS` to a comma-separated list such as `openai.gpt-oss-120b,xai.grok-3` if the upstream endpoint does not expose a usable `/models` response. YAML `models:` remains available for custom provider names and multi-provider Oracle setups.
+Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. vLLM defaults to `http://localhost:8000/v1` when `VLLM_API_KEY` is set, but keyless deployments should set `VLLM_BASE_URL` explicitly to register the provider. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
+When using Oracle, set `ORACLE_MODELS` to a comma-separated list such as `openai.gpt-oss-120b,xai.grok-3` if the upstream endpoint does not expose a usable `/models` response. YAML `models:` remains available for custom provider names and larger Oracle provider blocks.
 
 For OpenRouter, GoModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
 
@@ -227,8 +228,9 @@ providers:
 
 <Tip>
   The YAML file is entirely optional. Any setting you can put in YAML can also
-  be set via environment variables. Use YAML when you need to configure custom
-  providers or prefer a structured config file.
+  be set via environment variables. Use YAML when you need per-provider
+  resilience overrides, generated provider names are not enough, or you prefer
+  a structured config file.
 </Tip>
 
 ## Provider Configuration
@@ -252,14 +254,33 @@ export ORACLE_API_KEY="..."          # Registers "oracle" provider when paired w
 export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1"
 export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Optional fallback inventory for Oracle
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registers "ollama" provider
+export VLLM_BASE_URL="http://localhost:8000/v1" # Registers keyless "vllm" provider
+# Optional: export VLLM_API_KEY="token-abc123"
 ```
 
-GoModel also works with additional OpenAI-compatible providers out of the box
-through YAML provider blocks.
+Use suffixed variables to register more than one instance of the same provider
+type without YAML. GoModel normalizes the suffix to lowercase and converts
+underscores to hyphens in the configured provider name:
+
+```bash
+export OPENAI_EAST_API_KEY="sk-..." # Registers "openai-east", type "openai"
+export OPENAI_EAST_BASE_URL="https://east.example.com/v1"
+
+export OPENAI_WEST_API_KEY="sk-..." # Registers "openai-west", type "openai"
+export OPENAI_WEST_BASE_URL="https://west.example.com/v1"
+```
+
+The same pattern works for every registered provider type:
+`<PROVIDER>_<SUFFIX>_API_KEY`, `<PROVIDER>_<SUFFIX>_BASE_URL`, and
+`<PROVIDER>_<SUFFIX>_MODELS`. Azure also supports
+`<PROVIDER>_<SUFFIX>_API_VERSION`. Azure and Oracle still require their
+suffixed `BASE_URL` values because their endpoints are deployment- or
+region-specific.
 
 ### YAML Provider Blocks
 
-For more control (custom base URLs, model restrictions, or custom provider names), use the YAML file:
+For more control (custom names, per-provider resilience, or larger structured
+settings), use the YAML file:
 
 ```yaml
 providers:
@@ -285,6 +306,13 @@ providers:
       - openai.gpt-oss-120b
       - xai.grok-3
 
+  # Add a vLLM OpenAI-compatible server
+  vllm:
+    type: vllm
+    base_url: "http://localhost:8000/v1"
+    # api_key is optional; set it only when vllm serve uses --api-key.
+    # api_key: "token-abc123"
+
   # Restrict to specific models
   gemini:
     type: gemini
@@ -297,7 +325,8 @@ providers:
 <Note>
   For Oracle, give GoModel a fallback inventory with `ORACLE_MODELS` or
   `models:`. `ORACLE_MODELS` is enough for the default single-provider setup;
-  use YAML when you need custom provider names or multiple Oracle providers.
+  use suffixed env vars such as `ORACLE_US_MODELS` for env-only multi-provider
+  setups. Use YAML when you need custom names or larger provider blocks.
   See the [Oracle guide](/guides/oracle) for the required OCI policy and a
   tested configuration. Automatic model discovery is not yet a reliable,
   validated path for this provider: GoModel can try Oracle's OpenAI-compatible
@@ -321,3 +350,39 @@ providers:
     type: ollama
     base_url: "http://localhost:11434/v1"
 ```
+
+### vLLM
+
+vLLM uses its OpenAI-compatible `/v1` API. In Docker, set `VLLM_BASE_URL` to
+register a keyless vLLM server:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  enterpilot/gomodel
+```
+
+If the upstream server was started with `vllm serve ... --api-key token-abc123`,
+also set:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  -e VLLM_API_KEY="token-abc123" \
+  enterpilot/gomodel
+```
+
+You can also register more than one vLLM instance without YAML:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
+  -e VLLM_TEST_BASE_URL="http://host.docker.internal:8000/v1" \
+  enterpilot/gomodel
+```
+
+This registers providers `vllm` and `vllm-test`. Use YAML only when the
+generated provider names are not enough or you need a larger structured block.

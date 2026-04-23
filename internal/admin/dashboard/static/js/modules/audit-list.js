@@ -306,6 +306,8 @@
                     headers: data && data.request_headers,
                     showBody: !!(data && data.request_body),
                     body: data && data.request_body,
+                    bodyCacheRatioLabel: this.auditCacheRatioPillLabel(entry),
+                    promptCacheHighlight: this.auditPromptCacheHighlight(entry),
                     showEmpty: !data || (!data.request_headers && !data.request_body),
                     emptyMessage: 'Request details were not captured.',
                     showTooLarge: !!(data && data.request_body_too_big_to_handle),
@@ -335,6 +337,68 @@
                 };
             },
 
+            auditUsage(entry) {
+                const usage = entry && entry.usage;
+                if (!usage || typeof usage !== 'object') return null;
+                return usage;
+            },
+
+            auditHasCachedTokens(entry) {
+                const usage = this.auditUsage(entry);
+                return Number(usage && usage.cached_input_tokens || 0) > 0;
+            },
+
+            auditCacheSharePercent(entry) {
+                const usage = this.auditUsage(entry);
+                const inputTokens = Number(usage && usage.input_tokens || 0);
+                const cachedTokens = Number(usage && usage.cached_input_tokens || 0);
+                if (!Number.isFinite(inputTokens) || inputTokens <= 0 || !Number.isFinite(cachedTokens) || cachedTokens <= 0) {
+                    return 0;
+                }
+                return Math.max(0, Math.min(100, (cachedTokens / inputTokens) * 100));
+            },
+
+            auditCacheRatioLabel(entry) {
+                const usage = this.auditUsage(entry);
+                if (!usage) return '';
+                const inputTokens = Number(usage.input_tokens || 0);
+                const cachedTokens = Number(usage.cached_input_tokens || 0);
+                if (inputTokens <= 0) {
+                    return this.formatNumber(cachedTokens) + ' cached';
+                }
+                return this.auditCacheSharePercent(entry).toFixed(1) + '% cached';
+            },
+
+            auditCacheRatioPillLabel(entry) {
+                if (!this.auditHasCachedTokens(entry)) return '';
+                return this.auditCacheRatioLabel(entry);
+            },
+
+            auditPromptCacheHighlight(entry) {
+                const usage = this.auditUsage(entry);
+                if (!usage || !entry || !entry.data || !entry.data.request_body) return null;
+
+                const estimatedChars = Number(usage.estimated_cached_characters || 0);
+                if (!Number.isFinite(estimatedChars) || estimatedChars <= 0) {
+                    return null;
+                }
+
+                const helper = global.DashboardConversationHelpers;
+                if (!helper || typeof helper.extractRequestPromptTextSegments !== 'function') {
+                    return null;
+                }
+
+                const segments = helper.extractRequestPromptTextSegments(entry.data.request_body);
+                if (!Array.isArray(segments) || segments.length === 0) {
+                    return null;
+                }
+
+                return {
+                    characters: estimatedChars,
+                    segments
+                };
+            },
+
             auditPaneState(pane) {
                 const formatJSON = this.formatJSON.bind(this);
                 const renderBody = typeof this.renderBodyWithConversationHighlights === 'function'
@@ -357,7 +421,7 @@
                 return {
                     pane,
                     formattedHeaders: pane && pane.showHeaders ? formatJSON(pane.headers) : '',
-                    renderedBody: pane && pane.showBody ? renderBody(pane.entry, pane.body) : '',
+                    renderedBody: pane && pane.showBody ? renderBody(pane.entry, pane.body, { promptCacheHighlight: pane.promptCacheHighlight }) : '',
                     copyBodyState,
                     copyHeadersState,
                     copyState: copyBodyState,

@@ -52,8 +52,21 @@ export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3"
 entry and uses the list as the fallback inventory when Oracle's `/models`
 endpoint is unavailable.
 
-Use a YAML provider block when you want a custom provider name, multiple Oracle
-providers, or prefer to keep the model list in `config.yaml`:
+For multiple Oracle providers without YAML, use suffixed env vars such as
+`ORACLE_US_BASE_URL`, `ORACLE_US_API_KEY`, and `ORACLE_US_MODELS`. For
+example:
+
+```bash
+export ORACLE_US_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1"
+export ORACLE_US_API_KEY="..."
+export ORACLE_US_MODELS="openai.gpt-oss-120b"
+```
+
+This registers provider `oracle-us`.
+
+Use a YAML provider block when you want a custom provider name that does not
+fit the generated suffix pattern, per-provider resilience settings, or prefer
+to keep the model list in `config.yaml`:
 
 ```yaml
 providers:

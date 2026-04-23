@@ -305,8 +305,8 @@ func TestExtractFromChatResponse_RawUsageTakesPrecedenceOverDetails(t *testing.T
 	if entry.RawData["cached_tokens"] != 99 {
 		t.Errorf("RawData[cached_tokens] = %v, want 99 (from RawUsage)", entry.RawData["cached_tokens"])
 	}
-	if _, exists := entry.RawData["prompt_cached_tokens"]; exists {
-		t.Error("details should not be merged when RawUsage is already set")
+	if entry.RawData["prompt_cached_tokens"] != 150 {
+		t.Errorf("RawData[prompt_cached_tokens] = %v, want 150 (from PromptTokensDetails)", entry.RawData["prompt_cached_tokens"])
 	}
 }
 

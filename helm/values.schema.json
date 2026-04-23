@@ -82,6 +82,33 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "providers": {
+            "properties": {
+              "vllm": {
+                "properties": { "enabled": { "const": true } }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "providers": {
+            "properties": {
+              "vllm": {
+                "properties": {
+                  "baseUrl": { "minLength": 1 }
+                },
+                "required": ["baseUrl"]
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "anyOf": [
@@ -171,6 +198,20 @@
           }
         }
       }
+    },
+    {
+      "properties": {
+        "providers": {
+          "properties": {
+            "vllm": {
+              "properties": {
+                "enabled": { "const": true },
+                "baseUrl": { "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "properties": {
@@ -242,6 +283,14 @@
           }
         },
         "oracle": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "apiKey": { "type": "string" },
+            "baseUrl": { "type": "string" }
+          }
+        },
+        "vllm": {
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },

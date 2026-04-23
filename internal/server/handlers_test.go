@@ -6444,7 +6444,6 @@ func TestProviderPassthrough_StreamWithoutObserversClosesUpstreamBodyOnce(t *tes
 	}
 }
 
-
 func TestIsNativeBatchResultsPending(t *testing.T) {
 	provider := &mockProvider{
 		batchGetResponse: &core.BatchResponse{ID: "provider-batch-1", Status: "in_progress"},

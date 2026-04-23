@@ -151,25 +151,27 @@ type Model struct {
 }
 
 // ModelMetadata holds enriched metadata from the external model registry.
+// YAML tags mirror the JSON field names so operators can declare metadata
+// overrides in config.yaml in the same shape that appears in /v1/models output.
 type ModelMetadata struct {
-	DisplayName     string                  `json:"display_name,omitempty"`
-	Description     string                  `json:"description,omitempty"`
-	Family          string                  `json:"family,omitempty"`
-	Modes           []string                `json:"modes,omitempty"`
-	Categories      []ModelCategory         `json:"categories,omitempty"`
-	Tags            []string                `json:"tags,omitempty"`
-	ContextWindow   *int                    `json:"context_window,omitempty"`
-	MaxOutputTokens *int                    `json:"max_output_tokens,omitempty"`
-	Capabilities    map[string]bool         `json:"capabilities,omitempty"`
-	Rankings        map[string]ModelRanking `json:"rankings,omitempty"`
-	Pricing         *ModelPricing           `json:"pricing,omitempty"`
+	DisplayName     string                  `json:"display_name,omitempty" yaml:"display_name,omitempty"`
+	Description     string                  `json:"description,omitempty" yaml:"description,omitempty"`
+	Family          string                  `json:"family,omitempty" yaml:"family,omitempty"`
+	Modes           []string                `json:"modes,omitempty" yaml:"modes,omitempty"`
+	Categories      []ModelCategory         `json:"categories,omitempty" yaml:"categories,omitempty"`
+	Tags            []string                `json:"tags,omitempty" yaml:"tags,omitempty"`
+	ContextWindow   *int                    `json:"context_window,omitempty" yaml:"context_window,omitempty"`
+	MaxOutputTokens *int                    `json:"max_output_tokens,omitempty" yaml:"max_output_tokens,omitempty"`
+	Capabilities    map[string]bool         `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+	Rankings        map[string]ModelRanking `json:"rankings,omitempty" yaml:"rankings,omitempty"`
+	Pricing         *ModelPricing           `json:"pricing,omitempty" yaml:"pricing,omitempty"`
 }
 
 // ModelRanking holds one benchmark or leaderboard entry for a model.
 type ModelRanking struct {
-	Elo  *float64 `json:"elo,omitempty"`
-	Rank *int     `json:"rank,omitempty"`
-	AsOf string   `json:"as_of,omitempty"`
+	Elo  *float64 `json:"elo,omitempty" yaml:"elo,omitempty"`
+	Rank *int     `json:"rank,omitempty" yaml:"rank,omitempty"`
+	AsOf string   `json:"as_of,omitempty" yaml:"as_of,omitempty"`
 }
 
 // ModelCategory represents a model's functional category for UI grouping.
@@ -236,31 +238,142 @@ func AllCategories() []ModelCategory {
 
 // ModelPricing holds pricing information for cost calculation.
 type ModelPricing struct {
-	Currency               string             `json:"currency"`
-	InputPerMtok           *float64           `json:"input_per_mtok,omitempty"`
-	OutputPerMtok          *float64           `json:"output_per_mtok,omitempty"`
-	CachedInputPerMtok     *float64           `json:"cached_input_per_mtok,omitempty"`
-	CacheWritePerMtok      *float64           `json:"cache_write_per_mtok,omitempty"`
-	ReasoningOutputPerMtok *float64           `json:"reasoning_output_per_mtok,omitempty"`
-	BatchInputPerMtok      *float64           `json:"batch_input_per_mtok,omitempty"`
-	BatchOutputPerMtok     *float64           `json:"batch_output_per_mtok,omitempty"`
-	AudioInputPerMtok      *float64           `json:"audio_input_per_mtok,omitempty"`
-	AudioOutputPerMtok     *float64           `json:"audio_output_per_mtok,omitempty"`
-	PerImage               *float64           `json:"per_image,omitempty"`
-	InputPerImage          *float64           `json:"input_per_image,omitempty"`
-	PerSecondInput         *float64           `json:"per_second_input,omitempty"`
-	PerSecondOutput        *float64           `json:"per_second_output,omitempty"`
-	PerCharacterInput      *float64           `json:"per_character_input,omitempty"`
-	PerRequest             *float64           `json:"per_request,omitempty"`
-	PerPage                *float64           `json:"per_page,omitempty"`
-	Tiers                  []ModelPricingTier `json:"tiers,omitempty"`
+	Currency               string             `json:"currency" yaml:"currency"`
+	InputPerMtok           *float64           `json:"input_per_mtok,omitempty" yaml:"input_per_mtok,omitempty"`
+	OutputPerMtok          *float64           `json:"output_per_mtok,omitempty" yaml:"output_per_mtok,omitempty"`
+	CachedInputPerMtok     *float64           `json:"cached_input_per_mtok,omitempty" yaml:"cached_input_per_mtok,omitempty"`
+	CacheWritePerMtok      *float64           `json:"cache_write_per_mtok,omitempty" yaml:"cache_write_per_mtok,omitempty"`
+	ReasoningOutputPerMtok *float64           `json:"reasoning_output_per_mtok,omitempty" yaml:"reasoning_output_per_mtok,omitempty"`
+	BatchInputPerMtok      *float64           `json:"batch_input_per_mtok,omitempty" yaml:"batch_input_per_mtok,omitempty"`
+	BatchOutputPerMtok     *float64           `json:"batch_output_per_mtok,omitempty" yaml:"batch_output_per_mtok,omitempty"`
+	AudioInputPerMtok      *float64           `json:"audio_input_per_mtok,omitempty" yaml:"audio_input_per_mtok,omitempty"`
+	AudioOutputPerMtok     *float64           `json:"audio_output_per_mtok,omitempty" yaml:"audio_output_per_mtok,omitempty"`
+	PerImage               *float64           `json:"per_image,omitempty" yaml:"per_image,omitempty"`
+	InputPerImage          *float64           `json:"input_per_image,omitempty" yaml:"input_per_image,omitempty"`
+	PerSecondInput         *float64           `json:"per_second_input,omitempty" yaml:"per_second_input,omitempty"`
+	PerSecondOutput        *float64           `json:"per_second_output,omitempty" yaml:"per_second_output,omitempty"`
+	PerCharacterInput      *float64           `json:"per_character_input,omitempty" yaml:"per_character_input,omitempty"`
+	PerRequest             *float64           `json:"per_request,omitempty" yaml:"per_request,omitempty"`
+	PerPage                *float64           `json:"per_page,omitempty" yaml:"per_page,omitempty"`
+	Tiers                  []ModelPricingTier `json:"tiers,omitempty" yaml:"tiers,omitempty"`
 }
 
 // ModelPricingTier represents a volume-based pricing tier.
 type ModelPricingTier struct {
-	UpToMtok      *float64 `json:"up_to_mtok,omitempty"`
-	InputPerMtok  *float64 `json:"input_per_mtok,omitempty"`
-	OutputPerMtok *float64 `json:"output_per_mtok,omitempty"`
+	UpToMtok      *float64 `json:"up_to_mtok,omitempty" yaml:"up_to_mtok,omitempty"`
+	InputPerMtok  *float64 `json:"input_per_mtok,omitempty" yaml:"input_per_mtok,omitempty"`
+	OutputPerMtok *float64 `json:"output_per_mtok,omitempty" yaml:"output_per_mtok,omitempty"`
+}
+
+func cloneFloatPtr(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+func cloneIntPtr(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+// CloneModelRanking returns a deep copy so the caller can mutate pointer
+// fields (Elo, Rank) without affecting the original.
+func CloneModelRanking(r ModelRanking) ModelRanking {
+	return ModelRanking{
+		Elo:  cloneFloatPtr(r.Elo),
+		Rank: cloneIntPtr(r.Rank),
+		AsOf: r.AsOf,
+	}
+}
+
+// Clone returns a deep copy so callers can safely mutate the result without
+// affecting the original. Pointer fields and Tiers are re-allocated.
+func (p *ModelPricing) Clone() *ModelPricing {
+	if p == nil {
+		return nil
+	}
+	out := *p
+	out.InputPerMtok = cloneFloatPtr(p.InputPerMtok)
+	out.OutputPerMtok = cloneFloatPtr(p.OutputPerMtok)
+	out.CachedInputPerMtok = cloneFloatPtr(p.CachedInputPerMtok)
+	out.CacheWritePerMtok = cloneFloatPtr(p.CacheWritePerMtok)
+	out.ReasoningOutputPerMtok = cloneFloatPtr(p.ReasoningOutputPerMtok)
+	out.BatchInputPerMtok = cloneFloatPtr(p.BatchInputPerMtok)
+	out.BatchOutputPerMtok = cloneFloatPtr(p.BatchOutputPerMtok)
+	out.AudioInputPerMtok = cloneFloatPtr(p.AudioInputPerMtok)
+	out.AudioOutputPerMtok = cloneFloatPtr(p.AudioOutputPerMtok)
+	out.PerImage = cloneFloatPtr(p.PerImage)
+	out.InputPerImage = cloneFloatPtr(p.InputPerImage)
+	out.PerSecondInput = cloneFloatPtr(p.PerSecondInput)
+	out.PerSecondOutput = cloneFloatPtr(p.PerSecondOutput)
+	out.PerCharacterInput = cloneFloatPtr(p.PerCharacterInput)
+	out.PerRequest = cloneFloatPtr(p.PerRequest)
+	out.PerPage = cloneFloatPtr(p.PerPage)
+	if len(p.Tiers) > 0 {
+		tiers := make([]ModelPricingTier, len(p.Tiers))
+		for i, t := range p.Tiers {
+			tiers[i] = ModelPricingTier{
+				UpToMtok:      cloneFloatPtr(t.UpToMtok),
+				InputPerMtok:  cloneFloatPtr(t.InputPerMtok),
+				OutputPerMtok: cloneFloatPtr(t.OutputPerMtok),
+			}
+		}
+		out.Tiers = tiers
+	} else {
+		out.Tiers = nil
+	}
+	return &out
+}
+
+// Clone returns a deep copy so callers can safely mutate the result without
+// affecting the original. Slices, maps, and pointer fields are re-allocated.
+func (m *ModelMetadata) Clone() *ModelMetadata {
+	if m == nil {
+		return nil
+	}
+	out := *m
+	if len(m.Modes) > 0 {
+		out.Modes = append([]string(nil), m.Modes...)
+	} else {
+		out.Modes = nil
+	}
+	if len(m.Categories) > 0 {
+		out.Categories = append([]ModelCategory(nil), m.Categories...)
+	} else {
+		out.Categories = nil
+	}
+	if len(m.Tags) > 0 {
+		out.Tags = append([]string(nil), m.Tags...)
+	} else {
+		out.Tags = nil
+	}
+	if len(m.Capabilities) > 0 {
+		caps := make(map[string]bool, len(m.Capabilities))
+		for k, v := range m.Capabilities {
+			caps[k] = v
+		}
+		out.Capabilities = caps
+	} else {
+		out.Capabilities = nil
+	}
+	if len(m.Rankings) > 0 {
+		ranks := make(map[string]ModelRanking, len(m.Rankings))
+		for k, v := range m.Rankings {
+			ranks[k] = CloneModelRanking(v)
+		}
+		out.Rankings = ranks
+	} else {
+		out.Rankings = nil
+	}
+	out.ContextWindow = cloneIntPtr(m.ContextWindow)
+	out.MaxOutputTokens = cloneIntPtr(m.MaxOutputTokens)
+	out.Pricing = m.Pricing.Clone()
+	return &out
 }
 
 // ModelsResponse represents the response from the /v1/models endpoint

@@ -15,6 +15,8 @@
   --success: #34d399;
   --warning: #f59e0b;
   --danger: #ef4444;
+  --prompt-cache-color: #40a811;
+  --prompt-cache-color-bg: color-mix(in srgb, var(--prompt-cache-color) 14%, var(--bg-surface));
   --sidebar-width: 240px;
   --radius: 8px;
   --chart-grid: #2a2826;
@@ -53,6 +55,8 @@
   --success: #34d399;
   --warning: #d97706;
   --danger: #dc2626;
+  --prompt-cache-color: #40a811;
+  --prompt-cache-color-bg: color-mix(in srgb, var(--prompt-cache-color) 9%, var(--bg-surface));
   --chart-grid: #e8e0d6;
   --chart-text: #7a7068;
   --chart-tooltip-bg: #ffffff;
@@ -90,6 +94,8 @@
     --success: #34d399;
     --warning: #d97706;
     --danger: #dc2626;
+    --prompt-cache-color: #40a811;
+    --prompt-cache-color-bg: color-mix(in srgb, var(--prompt-cache-color) 9%, var(--bg-surface));
     --chart-grid: #e8e0d6;
     --chart-text: #7a7068;
     --chart-tooltip-bg: #ffffff;
@@ -2623,6 +2629,33 @@ textarea:focus {
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 6px;
+}
+
+.audit-pane-block-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.audit-prompt-cache-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--prompt-cache-color) 45%, var(--border));
+  border-radius: 999px;
+  background: var(--prompt-cache-color-bg);
+  color: var(--prompt-cache-color);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.audit-prompt-cache-highlight {
+  color: var(--prompt-cache-color);
+  font-weight: 700;
 }
 
 .audit-copy-btn {

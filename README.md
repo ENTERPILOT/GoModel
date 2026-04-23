@@ -5,6 +5,9 @@
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/gaEB9BQSPH)
 [![Docker Pulls](https://img.shields.io/docker/pulls/enterpilot/gomodel)](https://hub.docker.com/r/enterpilot/gomodel)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/ENTERPILOT/GoModel)](https://github.com/ENTERPILOT/GoModel/blob/main/go.mod)
+[![Hacker News](https://img.shields.io/badge/Hacker%20News-Apr%2021%20%2726%20%7C%20%234-brightgreen?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/item?id=47849097)
+
+[![GoModel on Hacker News](https://hackerbadge.vercel.app/api?id=47849097)](https://news.ycombinator.com/item?id=47849097)
 
 A high-performance AI gateway written in Go, providing a unified OpenAI-compatible API for OpenAI, Anthropic, Gemini, xAI, Groq, OpenRouter, Z.ai, Azure OpenAI, Oracle, Ollama, and more.
 
@@ -44,6 +47,7 @@ docker run --rm -p 8080:8080 \
   -e ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1" \
   -e ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" \
   -e OLLAMA_BASE_URL="http://host.docker.internal:11434/v1" \
+  -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
   enterpilot/gomodel
 ```
 
@@ -78,12 +82,19 @@ Example model identifiers are illustrative and subject to change; consult provid
 | Azure OpenAI  | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | `gpt-4o`                   |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
 | Oracle        | `ORACLE_API_KEY` + `ORACLE_BASE_URL`                              | `openai.gpt-oss-120b`      |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ❌    |
 | Ollama        | `OLLAMA_BASE_URL`                                                 | `llama3.2`                 |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ❌    |
+| vLLM          | `VLLM_BASE_URL` (`VLLM_API_KEY` optional)                         | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
 
 ✅ Supported ❌ Unsupported
 
 For Z.ai's GLM Coding Plan, set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
 For Oracle, set `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3` when the
 upstream `/models` endpoint is unavailable.
+For vLLM, set `VLLM_API_KEY` only if the upstream server was started with
+`--api-key`.
+To register multiple instances of the same provider type without `config.yaml`,
+use suffixed env vars such as `OPENAI_EAST_API_KEY` and
+`OPENAI_EAST_BASE_URL`; this registers provider `openai-east` with type
+`openai`.
 
 ---
 

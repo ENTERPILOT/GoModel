@@ -112,12 +112,15 @@ Generate provider environment variables for the Deployment.
 {{- if kindIs "map" $config }}
 {{- $hasAPIKey := and (hasKey $config "apiKey") $config.apiKey }}
 {{- $enabledWithExistingSecret := and $.Values.providers.existingSecret (hasKey $config "enabled") $config.enabled }}
+{{- $enabledWithBaseURL := and (hasKey $config "enabled") $config.enabled $config.baseUrl }}
 {{- if or $hasAPIKey $enabledWithExistingSecret }}
 - name: {{ upper $name }}_API_KEY
   valueFrom:
     secretKeyRef:
       name: {{ $secretName }}
       key: {{ upper $name }}_API_KEY
+{{- end }}
+{{- if or (or $hasAPIKey $enabledWithExistingSecret) $enabledWithBaseURL }}
 {{- if $config.baseUrl }}
 - name: {{ upper $name }}_BASE_URL
   value: {{ $config.baseUrl | quote }}

@@ -27,8 +27,12 @@
   "provider": "",
   "system_fingerprint": "fp_dae98b5ecb",
   "usage": {
+    "completion_time": 0.055257456,
     "completion_tokens": 14,
+    "prompt_time": 0.019662953,
     "prompt_tokens": 203,
+    "queue_time": 0.092826763,
+    "total_time": 0.074920409,
     "total_tokens": 217
   }
 }

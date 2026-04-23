@@ -551,8 +551,8 @@ data: {"type":"message_stop"}
 	if !strings.Contains(responseStr, `"total_tokens":12`) {
 		t.Fatalf("expected total_tokens in streamed usage, got %q", responseStr)
 	}
-	if strings.Contains(responseStr, `"cache_read_input_tokens":6`) {
-		t.Fatalf("did not expect cache_read_input_tokens in normalized streamed usage, got %q", responseStr)
+	if !strings.Contains(responseStr, `"cache_read_input_tokens":6`) {
+		t.Fatalf("expected cache_read_input_tokens in streamed usage, got %q", responseStr)
 	}
 }
 
@@ -2542,8 +2542,8 @@ data: {"type":"message_stop"}
 	if !strings.Contains(responseStr, `"total_tokens":12`) {
 		t.Fatalf("expected total_tokens in response.completed usage, got %q", responseStr)
 	}
-	if strings.Contains(responseStr, `"cache_creation_input_tokens":4`) {
-		t.Fatalf("did not expect cache_creation_input_tokens in normalized response.completed usage, got %q", responseStr)
+	if !strings.Contains(responseStr, `"cache_creation_input_tokens":4`) {
+		t.Fatalf("expected cache_creation_input_tokens in response.completed usage, got %q", responseStr)
 	}
 }
 
@@ -3915,6 +3915,101 @@ func TestConvertToAnthropicRequest_MultimodalImageContent(t *testing.T) {
 	}
 	if blocks[1].Type != "image" || blocks[1].Source == nil || blocks[1].Source.MediaType != "image/png" || blocks[1].Source.Data != "ZmFrZQ==" {
 		t.Fatalf("unexpected second block: %+v", blocks[1])
+	}
+}
+
+func TestConvertToAnthropicRequest_PreservesCacheControlOnContentBlocks(t *testing.T) {
+	req := &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{
+				Role: "user",
+				Content: []core.ContentPart{
+					{
+						Type: "text",
+						Text: "Reusable prefix.",
+						ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+							"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+						}),
+					},
+					{
+						Type: "image_url",
+						ImageURL: &core.ImageURLContent{
+							URL: "data:image/png;base64,ZmFrZQ==",
+						},
+						ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+							"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+						}),
+					},
+				},
+			},
+		},
+	}
+
+	result, err := convertToAnthropicRequest(req)
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+
+	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
+	if !ok {
+		t.Fatalf("message content type = %T, want []anthropicContentBlock", result.Messages[0].Content)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
+	}
+	for i, block := range blocks {
+		if string(block.CacheControl) != `{"type":"ephemeral"}` {
+			t.Fatalf("blocks[%d].CacheControl = %s, want ephemeral cache_control", i, block.CacheControl)
+		}
+	}
+
+	body, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if got := strings.Count(string(body), `"cache_control":{"type":"ephemeral"}`); got != 2 {
+		t.Fatalf("marshaled request has %d cache_control blocks, want 2: %s", got, body)
+	}
+}
+
+func TestConvertToAnthropicRequest_PreservesCacheControlOnSystemBlocks(t *testing.T) {
+	req := &core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{
+				Role: "system",
+				Content: []core.ContentPart{
+					{
+						Type: "text",
+						Text: "Reusable system prefix.",
+						ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+							"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+						}),
+					},
+				},
+			},
+			{Role: "user", Content: "hello"},
+		},
+	}
+
+	result, err := convertToAnthropicRequest(req)
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+
+	blocks, ok := result.System.([]anthropicContentBlock)
+	if !ok {
+		t.Fatalf("System type = %T, want []anthropicContentBlock", result.System)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("len(System blocks) = %d, want 1", len(blocks))
+	}
+	if blocks[0].Type != "text" || blocks[0].Text != "Reusable system prefix." {
+		t.Fatalf("unexpected system block: %+v", blocks[0])
+	}
+	if string(blocks[0].CacheControl) != `{"type":"ephemeral"}` {
+		t.Fatalf("System[0].CacheControl = %s, want ephemeral cache_control", blocks[0].CacheControl)
 	}
 }
 
