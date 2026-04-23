@@ -125,9 +125,12 @@ GoModel handles gateway authentication, strips client auth headers before
 forwarding, and applies `VLLM_API_KEY` to upstream requests when configured.
 
 <Note>
-  Passthrough routes are provider-type scoped at `/p/vllm/...`. When you need
-  to target one named vLLM instance in a multi-provider setup, use translated
-  `/v1/...` requests with provider-qualified model IDs such as
+  The first path segment is your **provider instance name** in config (e.g. `/p/vllm/...`
+  only if the YAML key is `vllm`). For multiple vLLM backends, add separate keys
+  under `providers:` and call the matching passthrough base for each (e.g.
+  `/p/my-vllm/tokenize` when the key is `my-vllm`). For OpenAI-style
+  routing with a single entrypoint, you can also use translated `/v1/...` requests
+  with provider-qualified model IDs such as
   `vllm-test/meta-llama/Llama-3.1-8B-Instruct`.
 </Note>
 

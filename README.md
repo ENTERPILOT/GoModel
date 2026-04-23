@@ -168,7 +168,7 @@ docker run --rm -p 8080:8080 --env-file .env gomodel
 | `/v1/batches/{id}`                 | GET                                          | Retrieve one stored batch                                                                                    |
 | `/v1/batches/{id}/cancel`          | POST                                         | Cancel a pending batch                                                                                       |
 | `/v1/batches/{id}/results`         | GET                                          | Retrieve native batch results when available                                                                 |
-| `/p/{provider}/...`                | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS | Provider-native passthrough with opaque upstream responses                                                   |
+| `/p/{instance}/...`                | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS | Provider-native passthrough with opaque upstream responses (`instance` = YAML key under `providers:`)          |
 | `/v1/models`                       | GET                                          | List available models                                                                                        |
 | `/health`                          | GET                                          | Health check                                                                                                 |
 | `/metrics`                         | GET                                          | Prometheus metrics (when enabled)                                                                            |
@@ -195,8 +195,8 @@ Key settings:
 | ------------------------------- | --------------------------------- | -------------------------------------------------------------------------------- |
 | `PORT`                          | `8080`                            | Server port                                                                      |
 | `GOMODEL_MASTER_KEY`            | (none)                            | API key for authentication                                                       |
-| `ENABLE_PASSTHROUGH_ROUTES`     | `true`                            | Enable provider-native passthrough routes under `/p/{provider}/...`              |
-| `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                            | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |
+| `ENABLE_PASSTHROUGH_ROUTES`     | `true`                            | Enable provider-native passthrough routes under `/p/{instance}/...`              |
+| `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                            | Allow `/p/{instance}/v1/...` aliases while keeping `/p/{instance}/...` canonical |
 | `STORAGE_TYPE`                  | `sqlite`                          | Storage backend (`sqlite`, `postgresql`, `mongodb`)                              |
 | `METRICS_ENABLED`               | `false`                           | Enable Prometheus metrics                                                        |
 | `LOGGING_ENABLED`               | `false`                           | Enable audit logging                                                             |
@@ -208,7 +208,7 @@ Key settings:
 
 ## Provider-Native Passthrough
 
-GoModel exposes provider-native endpoints via `/p/{provider}/...` routes, allowing direct access to provider APIs with minimal gateway involvement. This is useful when you need raw provider responses or specific provider features not abstracted by the OpenAI-compatible API.
+GoModel exposes provider-native endpoints via `/p/{instance}/...` routes (the first segment is the **instance name**, i.e. the key under `providers:` in config), allowing direct access to provider APIs with minimal gateway involvement. This is useful when you need raw provider responses or specific provider features not abstracted by the OpenAI-compatible API.
 
 ### How It Works
 
@@ -217,7 +217,7 @@ Request flow:
 2. GoModel validates the instance name and optional guardrails
 3. Request body is forwarded **verbatim** (no normalization, no semantic enrichment)
 4. Upstream response is proxied **as-is** (including SSE streams, errors, and status codes)
-5. Lean audit logging records metadata only (no payload bodies)
+5. Audit logging records request metadata (same pipeline as translated routes; bodies are controlled by logging config)
 
 ### Instance-Based Routing
 
@@ -251,7 +251,7 @@ providers:
 
 ### Supported Providers
 
-Passthrough support depends on provider implementation. Currently supported: **OpenAI, Anthropic, OpenRouter, Z.ai, Azure OpenAI**.
+Passthrough support depends on provider implementation. Currently supported: **OpenAI, Anthropic, OpenRouter, Z.ai, Azure OpenAI, vLLM**, and others where the integration exposes native passthrough.
 
 Providers without native passthrough (Gemini, Groq, xAI, Oracle, Ollama) can use the `/v1/chat/completions` fast path, which skips the translated-response adapter and streams upstream bytes directly for supported streaming chat requests.
 
