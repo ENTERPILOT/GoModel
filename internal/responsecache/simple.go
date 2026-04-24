@@ -118,7 +118,7 @@ func (m *simpleCacheMiddleware) TryHit(c *echo.Context, body []byte) (bool, erro
 		}
 		slog.Info("response cache hit (exact)",
 			"path", path,
-			"request_id", c.Request().Header.Get("X-Request-ID"),
+			"request_id", c.Request().Header.Get(core.RequestIDHeader),
 		)
 		return true, nil
 	}

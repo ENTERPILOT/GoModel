@@ -21,6 +21,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/core"
+	"gomodel/internal/providers"
 )
 
 // Note: contextKey type and constants (LogEntryKey, LogEntryStreamingKey,
@@ -56,7 +57,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			req := c.Request()
 
 			// Read request ID (always set by the request ID middleware in http.go)
-			requestID := req.Header.Get("X-Request-ID")
+			requestID := req.Header.Get(core.RequestIDHeader)
 			userPath := core.UserPathFromContext(req.Context())
 			if userPath == "" {
 				userPath = "/"
@@ -199,6 +200,7 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 		if model := strings.TrimSpace(workflow.Passthrough.Model); model != "" {
 			entry.RequestedModel = model
 		}
+		EnrichLogEntryWithPassthroughEndpoint(entry, workflow)
 	}
 	if providerType := strings.TrimSpace(workflow.ProviderType); providerType != "" {
 		entry.Provider = providerType
@@ -223,6 +225,38 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 			Fallback:   workflow.Policy.Features.Fallback,
 		}
 	}
+}
+
+// EnrichLogEntryWithPassthroughEndpoint sets Data.PassthroughEndpoint for passthrough
+// workflows using route metadata, falling back to the request path segment under /p/ when needed.
+func EnrichLogEntryWithPassthroughEndpoint(entry *LogEntry, workflow *core.Workflow) {
+	if entry == nil || workflow == nil {
+		return
+	}
+	if workflow.Mode != core.ExecutionModePassthrough || workflow.Passthrough == nil {
+		return
+	}
+	ep := strings.TrimSpace(providers.PassthroughEndpointPath(workflow.Passthrough))
+	if ep == "" {
+		path := strings.TrimSpace(entry.Path)
+		path, _, _ = strings.Cut(path, "?")
+		if _, seg, ok := core.ParseProviderPassthroughPath(path); ok {
+			seg = strings.TrimSpace(seg)
+			if seg != "" {
+				if !strings.HasPrefix(seg, "/") {
+					seg = "/" + seg
+				}
+				ep = seg
+			}
+		}
+		// Intentionally leave PassthroughEndpoint unset if we cannot derive
+		// a normalized endpoint; storing the raw `/p/{provider}/...` path
+		// would conflate gateway routing with upstream endpoint semantics.
+	}
+	if ep == "" {
+		return
+	}
+	ensureLogData(entry).PassthroughEndpoint = ep
 }
 
 func resolvedModelForAuditLog(workflow *core.Workflow) string {

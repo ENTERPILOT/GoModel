@@ -109,7 +109,7 @@ func (m *semanticCacheMiddleware) Handle(c *echo.Context, body []byte, next func
 			slog.Info("semantic cache hit",
 				"path", path,
 				"score", results[0].Score,
-				"request_id", c.Request().Header.Get("X-Request-ID"),
+				"request_id", c.Request().Header.Get(core.RequestIDHeader),
 			)
 			return nil
 		}

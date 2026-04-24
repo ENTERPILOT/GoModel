@@ -3,7 +3,6 @@ package providers
 
 import (
 	"fmt"
-	"sort"
 	"sync"
 
 	"gomodel/config"
@@ -33,27 +32,24 @@ type DiscoveryConfig struct {
 
 // Registration contains metadata for registering a provider with the factory.
 type Registration struct {
-	Type                        string
-	New                         ProviderConstructor
-	PassthroughSemanticEnricher core.PassthroughSemanticEnricher
-	Discovery                   DiscoveryConfig
+	Type      string
+	New       ProviderConstructor
+	Discovery DiscoveryConfig
 }
 
 // ProviderFactory manages provider registration and creation.
 type ProviderFactory struct {
-	mu                   sync.RWMutex
-	builders             map[string]ProviderConstructor
-	discoveryConfigs     map[string]DiscoveryConfig
-	passthroughEnrichers map[string]core.PassthroughSemanticEnricher
-	hooks                llmclient.Hooks
+	mu               sync.RWMutex
+	builders         map[string]ProviderConstructor
+	discoveryConfigs map[string]DiscoveryConfig
+	hooks            llmclient.Hooks
 }
 
 // NewProviderFactory creates a new provider factory instance.
 func NewProviderFactory() *ProviderFactory {
 	return &ProviderFactory{
-		builders:             make(map[string]ProviderConstructor),
-		discoveryConfigs:     make(map[string]DiscoveryConfig),
-		passthroughEnrichers: make(map[string]core.PassthroughSemanticEnricher),
+		builders:         make(map[string]ProviderConstructor),
+		discoveryConfigs: make(map[string]DiscoveryConfig),
 	}
 }
 
@@ -78,11 +74,6 @@ func (f *ProviderFactory) Add(reg Registration) {
 	defer f.mu.Unlock()
 	f.builders[reg.Type] = reg.New
 	f.discoveryConfigs[reg.Type] = reg.Discovery
-	if reg.PassthroughSemanticEnricher != nil {
-		f.passthroughEnrichers[reg.Type] = reg.PassthroughSemanticEnricher
-	} else {
-		delete(f.passthroughEnrichers, reg.Type)
-	}
 }
 
 // Create instantiates a provider based on its resolved configuration.
@@ -129,30 +120,3 @@ func (f *ProviderFactory) RegisteredTypes() []string {
 	return types
 }
 
-// PassthroughSemanticEnrichers returns registered passthrough semantic
-// enrichers in deterministic provider-type order.
-func (f *ProviderFactory) PassthroughSemanticEnrichers() []core.PassthroughSemanticEnricher {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-
-	if len(f.passthroughEnrichers) == 0 {
-		return nil
-	}
-
-	types := make([]string, 0, len(f.passthroughEnrichers))
-	for providerType := range f.passthroughEnrichers {
-		types = append(types, providerType)
-	}
-	sort.Strings(types)
-
-	enrichers := make([]core.PassthroughSemanticEnricher, 0, len(types))
-	for _, providerType := range types {
-		if enricher := f.passthroughEnrichers[providerType]; enricher != nil {
-			enrichers = append(enrichers, enricher)
-		}
-	}
-	if len(enrichers) == 0 {
-		return nil
-	}
-	return enrichers
-}

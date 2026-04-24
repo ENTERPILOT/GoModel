@@ -6,7 +6,14 @@ import (
 	"strings"
 )
 
-const UserPathHeader = "X-GoModel-User-Path"
+const (
+	// RequestIDHeader is the HTTP header GoModel uses to correlate requests
+	// across the gateway and its upstream calls. Clients may supply their own
+	// value; if absent a UUID is generated and stamped on every response.
+	RequestIDHeader = "X-GoModel-Request-ID"
+
+	UserPathHeader = "X-GoModel-User-Path"
+)
 
 // NormalizeUserPath canonicalizes one user hierarchy path from request ingress.
 func NormalizeUserPath(raw string) (string, error) {

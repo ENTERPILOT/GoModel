@@ -33,7 +33,6 @@ type Handler struct {
 	responseStore                   responsestore.Store
 	responseStoreMu                 sync.RWMutex
 	normalizePassthroughV1Prefix    bool
-	enabledPassthroughProviders     map[string]struct{}
 	responseCache                   *responsecache.ResponseCacheMiddleware
 	guardrailsHash                  string
 
@@ -96,7 +95,6 @@ func newHandlerWithAuthorizer(
 			responsestore.WithMaxEntries(responsestore.DefaultMemoryStoreMaxEntries),
 		),
 		normalizePassthroughV1Prefix: true,
-		enabledPassthroughProviders:  normalizeEnabledPassthroughProviders(defaultEnabledPassthroughProviders),
 	}
 }
 
@@ -188,13 +186,8 @@ func (h *Handler) currentResponseStore() responsestore.Store {
 
 func (h *Handler) passthrough() *passthroughService {
 	return &passthroughService{
-		provider:                     h.provider,
-		modelAuthorizer:              h.modelAuthorizer,
-		logger:                       h.logger,
-		usageLogger:                  h.usageLogger,
-		pricingResolver:              h.pricingResolver,
-		normalizePassthroughV1Prefix: h.normalizePassthroughV1Prefix,
-		enabledPassthroughProviders:  h.enabledPassthroughProviders,
+		responseHandler:   newRawPassthroughResponseHandler(),
+		normalizeV1Prefix: h.normalizePassthroughV1Prefix,
 	}
 }
 
@@ -274,7 +267,7 @@ func (h *Handler) Health(c *echo.Context) error {
 // @Router       /v1/models [get]
 func (h *Handler) ListModels(c *echo.Context) error {
 	// Create context with request ID for provider
-	requestID := c.Request().Header.Get("X-Request-ID")
+	requestID := c.Request().Header.Get(core.RequestIDHeader)
 	ctx := core.WithRequestID(c.Request().Context(), requestID)
 
 	resp, err := h.provider.ListModels(ctx)

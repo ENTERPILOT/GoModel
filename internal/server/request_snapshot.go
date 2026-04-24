@@ -23,7 +23,7 @@ func RequestSnapshotCapture() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			req, requestID := ensureRequestID(c.Request())
-			c.Response().Header().Set("X-Request-ID", requestID)
+			c.Response().Header().Set(core.RequestIDHeader, requestID)
 			desc := core.DescribeEndpoint(req.Method, req.URL.Path)
 			if !desc.IngressManaged {
 				c.SetRequest(req)
@@ -77,13 +77,13 @@ func ensureRequestID(req *http.Request) (*http.Request, string) {
 	}
 	requestID := strings.TrimSpace(core.GetRequestID(req.Context()))
 	if requestID == "" {
-		requestID = strings.TrimSpace(req.Header.Get("X-Request-ID"))
+		requestID = strings.TrimSpace(req.Header.Get(core.RequestIDHeader))
 	}
 	if requestID == "" {
 		requestID = uuid.NewString()
 	}
 
-	req.Header.Set("X-Request-ID", requestID)
+	req.Header.Set(core.RequestIDHeader, requestID)
 	if current := strings.TrimSpace(core.GetRequestID(req.Context())); current != requestID {
 		req = req.WithContext(core.WithRequestID(req.Context(), requestID))
 	}

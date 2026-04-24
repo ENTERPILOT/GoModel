@@ -528,7 +528,7 @@ func TestMiddleware_UsesWorkflowRequestID(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-nano"}`))
-	req.Header.Set("X-Request-ID", "header-req-id")
+	req.Header.Set(core.RequestIDHeader, "header-req-id")
 	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
 		RequestID:    "workflow-req-id",
 		ProviderType: "openai",
@@ -636,6 +636,31 @@ func TestMiddleware_PassthroughWorkflowUsesPassthroughModel(t *testing.T) {
 	}
 	if entry.ResolvedModel != "" {
 		t.Fatalf("ResolvedModel = %q, want empty", entry.ResolvedModel)
+	}
+	if entry.Data == nil || entry.Data.PassthroughEndpoint != "/v1/chat/completions" {
+		got := ""
+		if entry.Data != nil {
+			got = entry.Data.PassthroughEndpoint
+		}
+		t.Fatalf("PassthroughEndpoint = %q, want /v1/chat/completions", got)
+	}
+}
+
+func TestEnrichLogEntryWithPassthroughEndpoint_PrefersNormalizedEndpoint(t *testing.T) {
+	entry := &LogEntry{
+		Path: "/p/openai/some/raw",
+		Data: &LogData{},
+	}
+	wf := &core.Workflow{
+		Mode: core.ExecutionModePassthrough,
+		Passthrough: &core.PassthroughRouteInfo{
+			RawEndpoint:        "some/raw",
+			NormalizedEndpoint: "responses",
+		},
+	}
+	EnrichLogEntryWithPassthroughEndpoint(entry, wf)
+	if entry.Data.PassthroughEndpoint != "/responses" {
+		t.Fatalf("PassthroughEndpoint = %q, want /responses", entry.Data.PassthroughEndpoint)
 	}
 }
 

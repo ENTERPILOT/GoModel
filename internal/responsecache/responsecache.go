@@ -34,7 +34,7 @@ var internalRequestHeaderAllowlist = map[string]struct{}{
 	http.CanonicalHeaderKey("X-Cache-Semantic-Threshold"): {},
 	http.CanonicalHeaderKey("X-Cache-TTL"):                {},
 	http.CanonicalHeaderKey("X-Cache-Type"):               {},
-	http.CanonicalHeaderKey("X-Request-ID"):               {},
+	http.CanonicalHeaderKey(core.RequestIDHeader):               {},
 }
 
 // ResponseCacheMiddleware wraps response cache logic. App and server only see this type.
@@ -255,8 +255,8 @@ func internalRequestHeaders(ctx context.Context) http.Header {
 	if headers.Get("Content-Type") == "" {
 		headers.Set("Content-Type", "application/json")
 	}
-	if requestID := strings.TrimSpace(core.GetRequestID(ctx)); requestID != "" && headers.Get("X-Request-ID") == "" {
-		headers.Set("X-Request-ID", requestID)
+	if requestID := strings.TrimSpace(core.GetRequestID(ctx)); requestID != "" && headers.Get(core.RequestIDHeader) == "" {
+		headers.Set(core.RequestIDHeader, requestID)
 	}
 	return headers
 }

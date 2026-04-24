@@ -80,6 +80,7 @@ func deriveWorkflowWithPolicy(
 		if !ok {
 			return nil, nil
 		}
+		selectorSource := passthrough
 		if passthrough == nil {
 			passthrough = &core.PassthroughRouteInfo{}
 		}
@@ -89,11 +90,15 @@ func deriveWorkflowWithPolicy(
 		workflow.Mode = core.ExecutionModePassthrough
 		workflow.ProviderType = providerType
 		workflow.Passthrough = passthrough
+		policySelector := core.NewWorkflowSelector(providerName, passthrough.Model, userPath)
+		if sel, hasSel := passthroughAccessSelector(provider, selectorSource); hasSel {
+			policySelector = core.NewWorkflowSelector(sel.Provider, sel.Model, userPath)
+		}
 		if err := applyWorkflowPolicy(
 			c.Request().Context(),
 			workflow,
 			policyResolver,
-			core.NewWorkflowSelector(providerName, passthrough.Model, userPath),
+			policySelector,
 		); err != nil {
 			return nil, err
 		}

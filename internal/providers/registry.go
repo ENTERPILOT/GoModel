@@ -859,6 +859,24 @@ func (r *ModelRegistry) GetProviderTypeForName(providerName string) string {
 	return ""
 }
 
+// ProviderByName returns the provider registered under the given configured
+// instance name (the YAML key). This is independent of discovered models.
+func (r *ModelRegistry) ProviderByName(instanceName string) core.Provider {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	instanceName = strings.TrimSpace(instanceName)
+	if instanceName == "" {
+		return nil
+	}
+	for _, provider := range r.providers {
+		if strings.TrimSpace(r.providerNames[provider]) == instanceName {
+			return provider
+		}
+	}
+	return nil
+}
+
 // ProviderByType returns the first registered provider for the given provider type.
 // This lookup is independent of discovered models so provider-typed routes keep
 // working even when a provider currently exposes zero models.
@@ -871,25 +889,7 @@ func (r *ModelRegistry) ProviderByType(providerType string) core.Provider {
 		return nil
 	}
 	for _, provider := range r.providers {
-		if r.providerTypes[provider] == providerType {
-			return provider
-		}
-	}
-	return nil
-}
-
-// ProviderByName returns the registered provider for a configured provider
-// instance name.
-func (r *ModelRegistry) ProviderByName(providerName string) core.Provider {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	providerName = strings.TrimSpace(providerName)
-	if providerName == "" {
-		return nil
-	}
-	for _, provider := range r.providers {
-		if strings.TrimSpace(r.providerNames[provider]) == providerName {
+		if strings.TrimSpace(r.providerTypes[provider]) == providerType {
 			return provider
 		}
 	}

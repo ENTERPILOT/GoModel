@@ -68,7 +68,7 @@ func TestManagedAuthKeyWorkflow_AuditAndUsageValidity_PostgreSQL(t *testing.T) {
 
 	resp := sendChatRequestWithHeaders(t, fixture.ServerURL, req, map[string]string{
 		"Authorization": "Bearer " + issuedKey.Value,
-		"X-Request-ID":  requestID,
+		core.RequestIDHeader:  requestID,
 	})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	closeBody(resp)
@@ -186,7 +186,7 @@ func TestGuardrailWorkflow_RewritesUpstreamRequestAndPreservesAuditUsage_Postgre
 
 	resp := sendChatRequestWithHeaders(t, fixture.ServerURL, req, map[string]string{
 		"Authorization": "Bearer integration-master-key",
-		"X-Request-ID":  requestID,
+		core.RequestIDHeader:  requestID,
 	})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	closeBody(resp)

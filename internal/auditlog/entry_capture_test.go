@@ -39,7 +39,7 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWithoutBodies(t *testing.T)
 	if entry.Data == nil {
 		t.Fatal("Data = nil, want populated log data")
 	}
-	if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_123" {
+	if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.RequestIDHeader)]; got != "req_123" {
 		t.Fatalf("RequestHeaders[X-Request-ID] = %q, want req_123", got)
 	}
 	if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/alpha" {
@@ -48,7 +48,7 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWithoutBodies(t *testing.T)
 	if got := entry.Data.RequestHeaders["Traceparent"]; got == "" {
 		t.Fatal("RequestHeaders[Traceparent] = empty, want propagated trace header")
 	}
-	if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_123" {
+	if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.RequestIDHeader)]; got != "req_123" {
 		t.Fatalf("ResponseHeaders[X-Request-ID] = %q, want req_123", got)
 	}
 	if entry.Data.RequestBody != nil || entry.Data.ResponseBody != nil {
@@ -72,13 +72,13 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 		if entry.Data == nil {
 			t.Fatal("Data = nil, want populated log data")
 		}
-		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456" {
+		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.RequestIDHeader)]; got != "req_456" {
 			t.Fatalf("RequestHeaders[X-Request-ID] = %q, want req_456", got)
 		}
 		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/beta" {
 			t.Fatalf("RequestHeaders[%s] = %q, want /team/beta", core.UserPathHeader, got)
 		}
-		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456" {
+		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.RequestIDHeader)]; got != "req_456" {
 			t.Fatalf("ResponseHeaders[X-Request-ID] = %q, want req_456", got)
 		}
 		if entry.Data.RequestBody != nil || entry.Data.ResponseBody != nil {
@@ -102,13 +102,13 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 		if entry.Data == nil {
 			t.Fatal("Data = nil, want populated log data")
 		}
-		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456_err" {
+		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.RequestIDHeader)]; got != "req_456_err" {
 			t.Fatalf("RequestHeaders[X-Request-ID] = %q, want req_456_err", got)
 		}
 		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/beta" {
 			t.Fatalf("RequestHeaders[%s] = %q, want /team/beta", core.UserPathHeader, got)
 		}
-		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456_err" {
+		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.RequestIDHeader)]; got != "req_456_err" {
 			t.Fatalf("ResponseHeaders[X-Request-ID] = %q, want req_456_err", got)
 		}
 		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/beta" {
@@ -183,10 +183,10 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 		if entry.Data == nil {
 			t.Fatal("Data = nil, want populated log data")
 		}
-		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456_big" {
+		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.RequestIDHeader)]; got != "req_456_big" {
 			t.Fatalf("RequestHeaders[X-Request-ID] = %q, want req_456_big", got)
 		}
-		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456_big" {
+		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.RequestIDHeader)]; got != "req_456_big" {
 			t.Fatalf("ResponseHeaders[X-Request-ID] = %q, want req_456_big", got)
 		}
 		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/beta" {
@@ -250,7 +250,7 @@ func TestCaptureInternalJSONExchange_DoesNotReuseIngressSnapshotOnMarshalFailure
 	if entry.Data.RequestBodyTooBigToHandle {
 		t.Fatal("RequestBodyTooBigToHandle = true, want false for marshal failure")
 	}
-	if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_789" {
+	if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.RequestIDHeader)]; got != "req_789" {
 		t.Fatalf("RequestHeaders[X-Request-ID] = %q, want req_789", got)
 	}
 	if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/internal" {

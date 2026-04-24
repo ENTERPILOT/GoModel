@@ -27,9 +27,8 @@ import (
 
 // Registration provides factory registration for the Anthropic provider.
 var Registration = providers.Registration{
-	Type:                        "anthropic",
-	New:                         New,
-	PassthroughSemanticEnricher: passthroughSemanticEnricher{},
+	Type: "anthropic",
+	New:  New,
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL: defaultBaseURL,
 	},

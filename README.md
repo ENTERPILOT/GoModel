@@ -168,7 +168,7 @@ docker run --rm -p 8080:8080 --env-file .env gomodel
 | `/v1/batches/{id}`                 | GET                                          | Retrieve one stored batch                                                                                    |
 | `/v1/batches/{id}/cancel`          | POST                                         | Cancel a pending batch                                                                                       |
 | `/v1/batches/{id}/results`         | GET                                          | Retrieve native batch results when available                                                                 |
-| `/p/{provider}/...`                | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS | Provider-native passthrough with opaque upstream responses                                                   |
+| `/p/{instance}/...`                | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS | Provider-native passthrough with opaque upstream responses (`instance` = YAML key under `providers:`)          |
 | `/v1/models`                       | GET                                          | List available models                                                                                        |
 | `/health`                          | GET                                          | Health check                                                                                                 |
 | `/metrics`                         | GET                                          | Prometheus metrics (when enabled)                                                                            |
@@ -195,15 +195,65 @@ Key settings:
 | ------------------------------- | --------------------------------- | -------------------------------------------------------------------------------- |
 | `PORT`                          | `8080`                            | Server port                                                                      |
 | `GOMODEL_MASTER_KEY`            | (none)                            | API key for authentication                                                       |
-| `ENABLE_PASSTHROUGH_ROUTES`     | `true`                            | Enable provider-native passthrough routes under `/p/{provider}/...`              |
-| `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                            | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |
-| `ENABLED_PASSTHROUGH_PROVIDERS` | `openai,anthropic,openrouter,zai,vllm` | Comma-separated list of enabled passthrough providers                            |
+| `ENABLE_PASSTHROUGH_ROUTES`     | `true`                            | Enable provider-native passthrough routes under `/p/{instance}/...`              |
+| `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                            | Allow `/p/{instance}/v1/...` aliases while keeping `/p/{instance}/...` canonical |
 | `STORAGE_TYPE`                  | `sqlite`                          | Storage backend (`sqlite`, `postgresql`, `mongodb`)                              |
 | `METRICS_ENABLED`               | `false`                           | Enable Prometheus metrics                                                        |
 | `LOGGING_ENABLED`               | `false`                           | Enable audit logging                                                             |
 | `GUARDRAILS_ENABLED`            | `false`                           | Enable the configured guardrails pipeline                                        |
 
 **Quick Start - Authentication:** By default `GOMODEL_MASTER_KEY` is unset. Without this key, API endpoints are unprotected and anyone can call them. This is insecure for production. **Strongly recommend** setting a strong secret before exposing the service. Add `GOMODEL_MASTER_KEY` to your `.env` or environment for production deployments.
+
+---
+
+## Provider-Native Passthrough
+
+GoModel exposes provider-native endpoints via `/p/{instance}/...` routes (the first segment is the **instance name**, i.e. the key under `providers:` in config), allowing direct access to provider APIs with minimal gateway involvement. This is useful when you need raw provider responses or specific provider features not abstracted by the OpenAI-compatible API.
+
+### How It Works
+
+Request flow:
+1. Client sends `POST /p/openai/v1/chat/completions` (for OpenAI) or `POST /p/anthropic1/v1/messages` (for a named Anthropic instance)
+2. GoModel validates the instance name and optional guardrails
+3. Request body is forwarded **verbatim** (no normalization, no semantic enrichment)
+4. Upstream response is proxied **as-is** (including SSE streams, errors, and status codes)
+5. Audit logging records request metadata (same pipeline as translated routes; bodies are controlled by logging config)
+
+### Instance-Based Routing
+
+Passthrough routes use **instance names** (YAML config keys) not provider types, enabling multiple instances of the same provider with different credentials:
+
+```yaml
+providers:
+  openai1:
+    type: openai
+    api_key: key-for-org-a
+  openai2:
+    type: openai
+    api_key: key-for-org-b
+```
+
+Then use:
+- `POST /p/openai1/v1/chat/completions` → routes to `openai1` credentials
+- `POST /p/openai2/v1/chat/completions` → routes to `openai2` credentials
+
+### Per-Instance Control
+
+By default, passthrough is enabled for all configured providers. Disable it for specific instances:
+
+```yaml
+providers:
+  openai_internal:
+    type: openai
+    api_key: ...
+    passthrough_disabled: true   # This instance cannot receive passthrough traffic
+```
+
+### Supported Providers
+
+Passthrough support depends on provider implementation. Currently supported: **OpenAI, Anthropic, OpenRouter, Z.ai, Azure OpenAI, vLLM**, and others where the integration exposes native passthrough.
+
+Providers without native passthrough (Gemini, Groq, xAI, Oracle, Ollama) can use the `/v1/chat/completions` fast path, which skips the translated-response adapter and streams upstream bytes directly for supported streaming chat requests.
 
 ---
 
@@ -246,7 +296,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for testing, linting, and pre-commit setup.
 - [ ] Full support for the OpenAI `/responses` and `/conversations` lifecycle
 - [ ] Prompt cache visibility showing how much of each prompt was cached by the provider
 - [ ] Guardrails hardening: better UI, simpler architecture, easier custom guardrails, and response-side guardrails before output reaches the client
-- [ ] Passthrough for all providers, beyond the current OpenAI and Anthropic beta
+- [ ] Provider-specific passthrough enhancements: error reshaping, response mutations, semantic enrichment
 - [ ] Fix failover charts in the dashboard
 
 ### Should Have

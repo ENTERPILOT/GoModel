@@ -8,9 +8,8 @@ server:
   master_key: "your-secret-key"
   body_size_limit: "10M"
   pprof_enabled: false # expose /debug/pprof/* for local profiling only
-  enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
-  allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
-  enabled_passthrough_providers: ["openai", "anthropic", "openrouter", "zai", "vllm"] # providers enabled on /p/{provider}/...
+  enable_passthrough_routes: true # /p/{instance}/{...} (instance = key under providers:)
+  allow_passthrough_v1_alias: true # allow /p/{instance}/v1/... while keeping /p/{instance}/... canonical
 
 models:
   enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an override allows one or more user paths
@@ -169,6 +168,7 @@ providers:
   openai:
     type: openai
     api_key: "sk-..."
+    # passthrough_disabled: true  # optional: block /p/openai/... for this instance only
     # Per-provider resilience overrides (optional).
     # Only specified fields override the global defaults above.
     # resilience:

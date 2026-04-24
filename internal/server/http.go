@@ -62,12 +62,12 @@ type Config struct {
 	BatchRequestPreparer            BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
 	ExposedModelLister              ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
 	KeepOnlyAliasesAtModelsEndpoint bool                                   // Whether GET /v1/models should hide concrete provider models
-	PassthroughSemanticEnrichers    []core.PassthroughSemanticEnricher     // Optional: provider-owned passthrough semantic enrichers before workflow resolution
 	BatchStore                      batchstore.Store                       // Optional: Batch lifecycle persistence store
 	ResponseStore                   responsestore.Store                    // Optional: Responses lifecycle persistence store
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
-	EnabledPassthroughProviders     []string                               // Provider types enabled on /p/{provider}/... passthrough routes
+	PassthroughDisabledInstances    map[string]struct{}                    // Instance names for which passthrough is disabled (passthrough_disabled: true in YAML)
+	PassthroughGuardrailPatcher     TranslatedRequestPatcher               // Optional: request-side guardrail patcher for passthrough routes
 	AllowPassthroughV1Alias         *bool                                  // Allow /p/{provider}/v1/... aliases; nil defaults to true
 	AdminEndpointsEnabled           bool                                   // Whether admin API endpoints are enabled
 	AdminUIEnabled                  bool                                   // Whether admin dashboard UI is enabled
@@ -122,9 +122,6 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		handler.responseCache = cfg.ResponseCacheMiddleware
 		handler.guardrailsHash = cfg.GuardrailsHash
 	}
-	if cfg != nil && cfg.EnabledPassthroughProviders != nil {
-		handler.setEnabledPassthroughProviders(cfg.EnabledPassthroughProviders)
-	}
 	if cfg != nil && !passthroughV1PrefixNormalizationEnabled(cfg) {
 		handler.normalizePassthroughV1Prefix = false
 	}
@@ -133,6 +130,21 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	if cfg != nil && cfg.ResponseStore != nil {
 		handler.SetResponseStore(cfg.ResponseStore)
+	}
+
+	passthroughSvc := &passthroughService{
+		responseHandler:   newRawPassthroughResponseHandler(),
+		normalizeV1Prefix: passthroughV1PrefixNormalizationEnabled(cfg),
+	}
+
+	var passthroughDisabled map[string]struct{}
+	var passthroughGuardrailPatcher TranslatedRequestPatcher
+	if cfg != nil {
+		passthroughDisabled = cfg.PassthroughDisabledInstances
+		passthroughGuardrailPatcher = cfg.PassthroughGuardrailPatcher
+		if passthroughGuardrailPatcher == nil {
+			passthroughGuardrailPatcher = translatedRequestPatcher
+		}
 	}
 
 	// Build list of paths that skip authentication
@@ -219,29 +231,24 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	e.Use(middleware.BodyLimit(parseBodySizeLimitBytes(bodySizeLimit)))
 
-	// Request ID middleware (always active — ensures every request has a unique ID
-	// for usage tracking, audit logging, and response correlation)
+	// Stamp X-GoModel-Request-ID on every inbound request. Clients may supply
+	// their own value; if absent a UUID is generated and echoed in the response.
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			req, id := ensureRequestID(c.Request())
 			c.SetRequest(req)
-			c.Response().Header().Set("X-Request-ID", id)
+			c.Response().Header().Set(core.RequestIDHeader, id)
 			return next(c)
 		}
 	})
 	e.Use(modelInteractionWriteDeadlineMiddleware())
 
-	// Ingress capture (before auth/audit/model validation so they can consume shared raw request state)
-	e.Use(RequestSnapshotCapture())
+	// Ingress capture (before auth/audit/model validation so they can consume shared raw request state).
+	// Skipped for passthrough routes — snapshot semantics are not applicable there.
+	e.Use(skipForPassthrough(RequestSnapshotCapture()))
 
-	if cfg != nil && len(cfg.PassthroughSemanticEnrichers) > 0 {
-		e.Use(PassthroughSemanticEnrichment(provider, cfg.PassthroughSemanticEnrichers, passthroughV1PrefixNormalizationEnabled(cfg)))
-	}
-
-	// Audit logging runs before workflow resolution so early workflow resolution/validation
-	// failures are still logged. The middleware defers request capture and
-	// dynamically gates response capture on the final resolved workflow, so
-	// Audit=false still suppresses per-request capture work.
+	// Audit logging runs before workflow resolution so early validation failures
+	// are still captured. Runs on all routes including passthrough.
 	if cfg != nil && cfg.AuditLogger != nil && cfg.AuditLogger.Config().Enabled {
 		e.Use(auditlog.Middleware(cfg.AuditLogger))
 	}
@@ -254,7 +261,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Workflow resolution resolves the request-scoped workflow after auth so
 	// managed auth key user-path overrides are visible to policy resolution while
 	// still keeping workflow resolution failures loggable through the audit middleware.
-	e.Use(WorkflowResolutionWithResolverAndPolicy(provider, modelResolver, workflowPolicyResolver))
+	// Skipped for passthrough routes which bypass workflow-based execution.
+	e.Use(skipForPassthrough(WorkflowResolutionWithResolverAndPolicy(provider, modelResolver, workflowPolicyResolver)))
 
 	// Public routes
 	e.GET("/health", handler.Health)
@@ -277,15 +285,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		})
 	}
 
-	// API routes
+	// Passthrough route group — dedicated middleware chain for provider resolution
+	// and guardrails. Request ID and audit are handled by the global stack above.
 	if cfg == nil || !cfg.DisablePassthroughRoutes {
-		e.GET("/p/:provider/*", handler.ProviderPassthrough)
-		e.POST("/p/:provider/*", handler.ProviderPassthrough)
-		e.PUT("/p/:provider/*", handler.ProviderPassthrough)
-		e.PATCH("/p/:provider/*", handler.ProviderPassthrough)
-		e.DELETE("/p/:provider/*", handler.ProviderPassthrough)
-		e.HEAD("/p/:provider/*", handler.ProviderPassthrough)
-		e.OPTIONS("/p/:provider/*", handler.ProviderPassthrough)
+		pg := e.Group("/p/:provider")
+		pg.Use(PassthroughProviderResolutionMiddleware(provider, passthroughDisabled))
+		pg.Use(PassthroughGuardrailsMiddleware(passthroughGuardrailPatcher))
+		pg.Any("/*", passthroughSvc.ProviderPassthrough)
 	}
 	e.GET("/v1/models", handler.ListModels)
 	e.POST("/v1/chat/completions", handler.ChatCompletion)
@@ -449,6 +455,25 @@ func modelInteractionWriteDeadlineMiddleware() echo.MiddlewareFunc {
 				)
 			}
 			return next(c)
+		}
+	}
+}
+
+// isPassthroughPath reports whether path targets the passthrough route group.
+func isPassthroughPath(p string) bool {
+	return strings.HasPrefix(p, "/p/")
+}
+
+// skipForPassthrough wraps mw so that it is bypassed entirely for passthrough
+// routes. The passthrough route group has its own dedicated middleware chain.
+func skipForPassthrough(mw echo.MiddlewareFunc) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		wrapped := mw(next)
+		return func(c *echo.Context) error {
+			if isPassthroughPath(c.Request().URL.Path) {
+				return next(c)
+			}
+			return wrapped(c)
 		}
 	}
 }

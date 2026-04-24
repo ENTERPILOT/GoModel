@@ -263,7 +263,7 @@ func TestModelValidation_StoresWorkflow(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
 		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "workflow-req-123")
+	req.Header.Set(core.RequestIDHeader, "workflow-req-123")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -405,7 +405,7 @@ func TestWorkflowResolution_StoresPassthroughRouteInfo(t *testing.T) {
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
 	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
 	req = req.WithContext(ctx)
-	req.Header.Set("X-Request-ID", "pass-req-123")
+	req.Header.Set(core.RequestIDHeader, "pass-req-123")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -511,7 +511,7 @@ func TestWorkflowResolution_PopulatesPassthroughProviderFromPathFallback(t *test
 	ctx := core.WithRequestSnapshot(req.Context(), frame)
 	ctx = core.WithWhiteBoxPrompt(ctx, env)
 	req = req.WithContext(ctx)
-	req.Header.Set("X-Request-ID", "pass-req-fallback-123")
+	req.Header.Set(core.RequestIDHeader, "pass-req-fallback-123")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -544,7 +544,7 @@ func TestModelValidation_SetsRequestIDInContext(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
 		strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "test-req-123")
+	req.Header.Set(core.RequestIDHeader, "test-req-123")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -568,7 +568,7 @@ func TestModelValidation_DoesNotTreatPrefixOvermatchAsBatchPath(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/batchesXYZ", strings.NewReader(`{"foo":"bar"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "test-req-123")
+	req.Header.Set(core.RequestIDHeader, "test-req-123")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -791,7 +791,7 @@ func TestModelValidation_DefersOversizedLiveBodyResolutionToHandler(t *testing.T
 		"messages":[{"role":"user","content":"hi"}]
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "oversized-live-body")
+	req.Header.Set(core.RequestIDHeader, "oversized-live-body")
 
 	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", nil, true, "", nil)
 	ctx := core.WithRequestSnapshot(req.Context(), frame)

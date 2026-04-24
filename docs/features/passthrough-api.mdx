@@ -18,7 +18,9 @@ translating the request or response body.
 
 Use it when a client library expects a provider's native API instead of the
 OpenAI-compatible API. For example, the Anthropic SDK sends requests to
-`/v1/messages`, so you can point it at GoModel's Anthropic passthrough base URL:
+`/v1/messages`, so you can point it at GoModel's Anthropic passthrough base URL. The
+first path segment must match a **key** under `providers:` in your config (not the
+string `anthropic` unless your instance is named that):
 
 ```text
 http://localhost:8080/p/anthropic
@@ -39,10 +41,10 @@ POST /messages
 
 ## How it works
 
-Passthrough routes use this shape:
+Passthrough routes use this shape (first segment = YAML instance name / `providers` key):
 
 ```text
-/p/{provider}/{endpoint}
+/p/{instance}/{endpoint}
 ```
 
 For Anthropic, these two paths map to the same upstream endpoint when
@@ -130,8 +132,9 @@ from passthrough requests before forwarding them upstream.
 
 Passthrough is intentionally narrow while the API is in beta.
 
-- `openai`, `anthropic`, `openrouter`, `zai`, and `vllm` are enabled by
-  default.
+- Passthrough is available for any configured **provider instance** that implements
+  it. There is no global allowlist: use `passthrough_disabled: true` on a
+  `providers.<name>` block to block `/p/<name>/...` for that instance.
 - GoModel does not translate passthrough request bodies or response bodies.
 - Provider-native error bodies and status codes are proxied instead of converted
   into OpenAI-compatible responses.
@@ -145,7 +148,7 @@ Passthrough routes are enabled by default:
 ```env
 ENABLE_PASSTHROUGH_ROUTES=true
 ALLOW_PASSTHROUGH_V1_ALIAS=true
-ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,zai,vllm
 ```
 
-Set `ENABLED_PASSTHROUGH_PROVIDERS` to the provider types you want to expose.
+Opt out per **instance** in `config/config.yaml` with `passthrough_disabled: true`
+under the relevant `providers.<name>` block (not via environment allowlist).

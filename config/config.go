@@ -57,12 +57,13 @@ type LoadResult struct {
 // overrides, credential filtering, or resilience merging. Exported so the
 // providers package can resolve it into a fully-configured ProviderConfig.
 type RawProviderConfig struct {
-	Type       string               `yaml:"type"`
-	APIKey     string               `yaml:"api_key"`
-	BaseURL    string               `yaml:"base_url"`
-	APIVersion string               `yaml:"api_version"`
-	Models     []RawProviderModel   `yaml:"models"`
-	Resilience *RawResilienceConfig `yaml:"resilience"`
+	Type                string               `yaml:"type"`
+	APIKey              string               `yaml:"api_key"`
+	BaseURL             string               `yaml:"base_url"`
+	APIVersion          string               `yaml:"api_version"`
+	Models              []RawProviderModel   `yaml:"models"`
+	Resilience          *RawResilienceConfig `yaml:"resilience"`
+	PassthroughDisabled bool                 `yaml:"passthrough_disabled"`
 }
 
 // RawResilienceConfig holds optional per-provider resilience overrides from YAML.
@@ -808,10 +809,6 @@ type ServerConfig struct {
 	// AllowPassthroughV1Alias allows /p/{provider}/v1/... style passthrough routes
 	// while keeping /p/{provider}/... as the canonical form. Default: true.
 	AllowPassthroughV1Alias bool `yaml:"allow_passthrough_v1_alias" env:"ALLOW_PASSTHROUGH_V1_ALIAS"`
-	// EnabledPassthroughProviders lists the provider types enabled on
-	// /p/{provider}/... passthrough routes. Default:
-	// ["openai", "anthropic", "openrouter", "zai", "vllm"].
-	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
 }
 
 // MetricsConfig holds observability configuration for Prometheus metrics
@@ -878,13 +875,6 @@ func buildDefaultConfig() *Config {
 			PprofEnabled:            false,
 			EnablePassthroughRoutes: true,
 			AllowPassthroughV1Alias: true,
-			EnabledPassthroughProviders: []string{
-				"openai",
-				"anthropic",
-				"openrouter",
-				"zai",
-				"vllm",
-			},
 		},
 		Models: ModelsConfig{
 			EnabledByDefault:                true,

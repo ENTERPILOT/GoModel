@@ -3,6 +3,8 @@ package server
 import (
 	"strings"
 
+	"github.com/labstack/echo/v5"
+
 	"gomodel/internal/core"
 )
 
@@ -10,6 +12,26 @@ type passthroughProviderResolution struct {
 	RouteProvider string
 	ProviderType  string
 	ProviderName  string
+}
+
+const (
+	passthroughProviderTypeKey = "passthrough-provider-type"
+	passthroughProviderKey     = "passthrough-provider"
+)
+
+func setPassthroughResolution(c *echo.Context, providerType string, provider core.PassthroughProvider) {
+	c.Set(passthroughProviderTypeKey, providerType)
+	c.Set(passthroughProviderKey, provider)
+}
+
+func getPassthroughProviderType(c *echo.Context) string {
+	v, _ := c.Get(passthroughProviderTypeKey).(string)
+	return v
+}
+
+func getPassthroughProvider(c *echo.Context) core.PassthroughProvider {
+	v, _ := c.Get(passthroughProviderKey).(core.PassthroughProvider)
+	return v
 }
 
 func resolvePassthroughProvider(provider core.RoutableProvider, routeProvider string) passthroughProviderResolution {

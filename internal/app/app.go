@@ -343,11 +343,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		BatchRequestPreparer:            batchRequestPreparer,
 		ExposedModelLister:              app.aliases.Service,
 		KeepOnlyAliasesAtModelsEndpoint: appCfg.Models.KeepOnlyAliasesAtModelsEndpoint,
-		PassthroughSemanticEnrichers:    cfg.Factory.PassthroughSemanticEnrichers(),
 		BatchStore:                      batchResult.Store,
 		LogOnlyModelInteractions:        appCfg.Logging.OnlyModelInteractions,
 		DisablePassthroughRoutes:        !appCfg.Server.EnablePassthroughRoutes,
-		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,
+		PassthroughDisabledInstances:    passthroughDisabledInstances(providerResult.CredentialResolvedProviders),
 		AllowPassthroughV1Alias:         &allowPassthroughV1Alias,
 		SwaggerEnabled:                  appCfg.Server.SwaggerEnabled,
 	}
@@ -1030,6 +1029,24 @@ func fallbackModeEnabled(mode config.FallbackMode) bool {
 	default:
 		return false
 	}
+}
+
+// passthroughDisabledInstances builds the set of provider instance names that
+// have passthrough_disabled: true in their YAML configuration.
+func passthroughDisabledInstances(providers map[string]config.RawProviderConfig) map[string]struct{} {
+	if len(providers) == 0 {
+		return nil
+	}
+	disabled := make(map[string]struct{})
+	for name, cfg := range providers {
+		if cfg.PassthroughDisabled {
+			disabled[name] = struct{}{}
+		}
+	}
+	if len(disabled) == 0 {
+		return nil
+	}
+	return disabled
 }
 
 func firstSharedStorage(candidates ...storage.Storage) storage.Storage {
