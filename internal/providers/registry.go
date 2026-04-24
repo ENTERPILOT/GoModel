@@ -259,8 +259,8 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 			}
 			if err != nil {
 				attrs = append(attrs, "error", err)
-			}
-			if configuredReason == configuredProviderModelsAllowlist {
+				slog.Warn("upstream ListModels failed, using configured provider models", attrs...)
+			} else if configuredReason == configuredProviderModelsAllowlist {
 				slog.Debug("using configured provider models", attrs...)
 			} else {
 				slog.Warn("using configured provider models", attrs...)
