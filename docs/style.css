@@ -1,0 +1,88 @@
+#topbar-cta-button,
+#topbar-cta-button :where(span, p, div),
+#navigation-items .nav-anchor[href="https://discord.gg/gaEB9BQSPH"],
+#navigation-items .nav-anchor[href="https://discord.gg/gaEB9BQSPH"] span {
+  font-weight: 700 !important;
+  font-variation-settings: "wght" 700;
+}
+
+#navigation-items .nav-anchor[href="https://discord.gg/gaEB9BQSPH"] {
+  --discord-nav-light: #755c3d;
+  --discord-nav-dark: #4ade80;
+}
+
+#navigation-items .nav-anchor[href="https://discord.gg/gaEB9BQSPH"] img {
+  display: none;
+}
+
+#navigation-items .nav-anchor[href="https://discord.gg/gaEB9BQSPH"]::before {
+  content: "";
+  display: block;
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0.125rem;
+  box-sizing: border-box;
+  background-color: var(--discord-nav-light);
+  -webkit-mask-image: url("/discord.svg");
+  mask-image: url("/discord.svg");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  transform-origin: center;
+  backface-visibility: hidden;
+  rotate: 0deg;
+  transition: rotate 320ms ease-in-out, background-color 160ms ease-out;
+  will-change: transform, rotate;
+  animation: discord-idle-vibe 6s ease-in-out infinite;
+}
+
+html.dark #navigation-items .nav-anchor[href="https://discord.gg/gaEB9BQSPH"]::before {
+  background-color: var(--discord-nav-dark);
+}
+
+#navigation-items .nav-anchor[href="https://discord.gg/gaEB9BQSPH"]:is(:hover, :focus-visible)::before {
+  rotate: 720deg;
+}
+
+@keyframes discord-idle-vibe {
+  0%,
+  82%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+
+  84% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1.03);
+  }
+
+  87% {
+    transform: translate3d(0, 0, 0) rotate(-20deg) scale(1.04);
+  }
+
+  90% {
+    transform: translate3d(0, 0, 0) rotate(20deg) scale(1.05);
+  }
+
+  93% {
+    transform: translate3d(0, 0, 0) rotate(-12deg) scale(1.03);
+  }
+
+  96% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #navigation-items .nav-anchor[href="https://discord.gg/gaEB9BQSPH"]::before {
+    animation: none;
+    transition: none;
+  }
+
+  #navigation-items .nav-anchor[href="https://discord.gg/gaEB9BQSPH"]:is(:hover, :focus-visible)::before {
+    rotate: 0deg;
+  }
+}

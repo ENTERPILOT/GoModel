@@ -20,6 +20,15 @@
         "url": "full"
     },
     "navigation": {
+        "global": {
+            "anchors": [
+                {
+                    "anchor": "Discord",
+                    "icon": "/discord.svg",
+                    "href": "https://discord.gg/gaEB9BQSPH"
+                }
+            ]
+        },
         "tabs": [
             {
                 "tab": "Documentation",
