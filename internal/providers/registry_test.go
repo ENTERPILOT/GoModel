@@ -204,8 +204,8 @@ func TestModelRegistry(t *testing.T) {
 		if !strings.Contains(snapshots[0].LastModelFetchError, "models unavailable") {
 			t.Fatalf("LastModelFetchError = %q, want upstream error preserved", snapshots[0].LastModelFetchError)
 		}
-		if snapshots[0].LastModelFetchSuccessAt == nil {
-			t.Fatal("expected LastModelFetchSuccessAt to be recorded for configured fallback inventory")
+		if snapshots[0].LastModelFetchSuccessAt != nil {
+			t.Fatalf("LastModelFetchSuccessAt = %v, want nil when configured fallback handles upstream failure", snapshots[0].LastModelFetchSuccessAt)
 		}
 	})
 
@@ -247,8 +247,18 @@ func TestModelRegistry(t *testing.T) {
 		if configured == nil {
 			t.Fatal("expected configured-model to resolve")
 		}
-		if configured.Model.Created <= 0 || configured.Model.OwnedBy != "test-type" {
-			t.Fatalf("configured metadata = %+v, want configured-only metadata", configured.Model)
+		if configured.Model.Created <= 0 {
+			t.Fatalf("configured.Model.Created = %d in configured model %+v, want non-zero timestamp", configured.Model.Created, configured.Model)
+		}
+		if configured.Model.OwnedBy != "test-type" {
+			t.Fatalf("configured.Model.OwnedBy = %q in configured model %+v, want test-type", configured.Model.OwnedBy, configured.Model)
+		}
+		snapshots := registry.ProviderRuntimeSnapshots()
+		if len(snapshots) != 1 {
+			t.Fatalf("expected 1 provider runtime snapshot, got %d", len(snapshots))
+		}
+		if snapshots[0].LastModelFetchSuccessAt != nil {
+			t.Fatalf("LastModelFetchSuccessAt = %v, want nil when allowlist skips upstream ListModels", snapshots[0].LastModelFetchSuccessAt)
 		}
 		missing := registry.GetModel("missing-configured")
 		if missing == nil {
@@ -287,6 +297,13 @@ func TestModelRegistry(t *testing.T) {
 		}
 		if !registry.Supports("upstream-model") {
 			t.Fatal("expected upstream-model to resolve when provider has no configured models")
+		}
+		snapshots := registry.ProviderRuntimeSnapshots()
+		if len(snapshots) != 1 {
+			t.Fatalf("expected 1 provider runtime snapshot, got %d", len(snapshots))
+		}
+		if snapshots[0].LastModelFetchSuccessAt == nil {
+			t.Fatal("expected LastModelFetchSuccessAt when upstream ListModels succeeds")
 		}
 	})
 

@@ -241,36 +241,15 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 			providerName = fmt.Sprintf("%p", provider)
 		}
 
-		fetchAt := time.Now().UTC()
 		configuredModels := configuredProviderModels[providerName]
-		var (
-			resp             *core.ModelsResponse
-			err              error
-			configuredReason configuredProviderModelsApplyReason
+		resp, configuredReason, fetchAt, err := fetchProviderInventory(
+			ctx,
+			provider,
+			providerName,
+			providerTypes[provider],
+			configuredProviderModelsMode,
+			configuredModels,
 		)
-		if configuredProviderModelsMode == config.ConfiguredProviderModelsModeAllowlist && len(configuredModels) > 0 {
-			resp, configuredReason = applyConfiguredProviderModels(
-				providerName,
-				providerTypes[provider],
-				configuredProviderModelsMode,
-				configuredModels,
-				nil,
-				nil,
-				fetchAt.Unix(),
-			)
-		} else {
-			resp, err = provider.ListModels(ctx)
-			fetchAt = time.Now().UTC()
-			resp, configuredReason = applyConfiguredProviderModels(
-				providerName,
-				providerTypes[provider],
-				configuredProviderModelsMode,
-				configuredModels,
-				resp,
-				err,
-				fetchAt.Unix(),
-			)
-		}
 		var configuredUpstreamError string
 		if configuredReason != configuredProviderModelsNotApplied {
 			attrs := []any{
@@ -334,12 +313,15 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 			continue
 		}
 
-		runtimeUpdates[providerName] = providerRuntimeState{
-			registered:              true,
-			lastModelFetchAt:        fetchAt,
-			lastModelFetchSuccessAt: fetchAt,
-			lastModelFetchError:     configuredUpstreamError,
+		runtimeUpdate := providerRuntimeState{
+			registered:          true,
+			lastModelFetchAt:    fetchAt,
+			lastModelFetchError: configuredUpstreamError,
 		}
+		if configuredReason == configuredProviderModelsNotApplied {
+			runtimeUpdate.lastModelFetchSuccessAt = fetchAt
+		}
+		runtimeUpdates[providerName] = runtimeUpdate
 
 		if _, ok := newModelsByProvider[providerName]; !ok {
 			newModelsByProvider[providerName] = make(map[string]*ModelInfo, len(resp.Data))
@@ -411,6 +393,42 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 	slog.Info("model registry initialized", attrs...)
 
 	return nil
+}
+
+func fetchProviderInventory(
+	ctx context.Context,
+	provider core.Provider,
+	providerName string,
+	providerType string,
+	mode config.ConfiguredProviderModelsMode,
+	configuredModels []string,
+) (*core.ModelsResponse, configuredProviderModelsApplyReason, time.Time, error) {
+	fetchAt := time.Now().UTC()
+	if mode == config.ConfiguredProviderModelsModeAllowlist && len(configuredModels) > 0 {
+		resp, reason := applyConfiguredProviderModels(
+			providerName,
+			providerType,
+			mode,
+			configuredModels,
+			nil,
+			nil,
+			fetchAt.Unix(),
+		)
+		return resp, reason, fetchAt, nil
+	}
+
+	resp, err := provider.ListModels(ctx)
+	fetchAt = time.Now().UTC()
+	resp, reason := applyConfiguredProviderModels(
+		providerName,
+		providerType,
+		mode,
+		configuredModels,
+		resp,
+		err,
+		fetchAt.Unix(),
+	)
+	return resp, reason, fetchAt, err
 }
 
 func (r *ModelRegistry) applyProviderRuntimeUpdates(updates map[string]providerRuntimeState) {

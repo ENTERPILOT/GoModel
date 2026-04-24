@@ -114,6 +114,9 @@ func configuredProviderModelsResponse(providerName, providerType string, configu
 			if strings.TrimSpace(model.OwnedBy) == "" {
 				model.OwnedBy = owner
 			}
+			if model.Created == 0 {
+				model.Created = fallbackCreated
+			}
 		}
 		data = append(data, model)
 	}
