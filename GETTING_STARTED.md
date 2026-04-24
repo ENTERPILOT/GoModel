@@ -199,11 +199,18 @@ Provider credentials:
 | `AZURE_API_VERSION`   | Azure OpenAI API version override (default: `2024-10-21`)                             |
 | `ORACLE_API_KEY`      | Oracle                                                                                |
 | `ORACLE_BASE_URL`     | Oracle OpenAI-compatible base URL                                                     |
-| `<PROVIDER>_MODELS`   | Optional configured model list for any provider type (comma-separated)                |
-| `CONFIGURED_PROVIDER_MODELS_MODE` | `fallback` by default; set `allowlist` to expose only configured provider models |
 | `OLLAMA_BASE_URL`     | Ollama (default: `http://localhost:11434/v1`)                                         |
 | `VLLM_BASE_URL`       | vLLM OpenAI-compatible server (default: `http://localhost:8000/v1`)                   |
 | `VLLM_API_KEY`        | vLLM bearer token, only when upstream vLLM was started with `--api-key`               |
+
+Model configuration:
+
+| Variable                          | Description                                                                                  |
+| --------------------------------- | -------------------------------------------------------------------------------------------- |
+| `<PROVIDER>_MODELS`               | Optional configured model list for any provider type, for example `OPENROUTER_MODELS`        |
+| `CONFIGURED_PROVIDER_MODELS_MODE` | `fallback` by default; set `allowlist` to expose only configured models and skip upstream `/models` for configured lists |
+
+Configured model lists work for every provider via YAML `providers.<name>.models` or env vars like `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, or `VLLM_MODELS`. In the default `fallback` mode, the list is used only when upstream `/models` fails, returns nil, or returns an empty list. In `allowlist` mode, providers with configured lists expose only those models and skip their upstream `/models` calls.
 
 See `.env.template` for the full list of all configurable environment variables.
 
@@ -228,7 +235,6 @@ Ollama requires no API key. Even with no YAML and no `OLLAMA_BASE_URL` set, an O
 
 **Oracle requires both key and base URL.**
 `ORACLE_API_KEY` alone is not enough for auto-discovery. Set `ORACLE_BASE_URL` to the Oracle OpenAI-compatible endpoint, otherwise the provider is ignored.
-Configured model lists work for every provider via YAML `providers.<name>.models` or env vars like `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, or `VLLM_MODELS`. By default, `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, so the list is used only when upstream `/models` fails, returns nil, or returns an empty list. Set `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only the configured models for providers that define a list.
 
 **Azure ships with a pinned API version by default.**
 If you do not set `AZURE_API_VERSION`, the gateway sends `api-version=2024-10-21`. Override it only when you need a different Azure API version.

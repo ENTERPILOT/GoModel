@@ -241,23 +241,45 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 			providerName = fmt.Sprintf("%p", provider)
 		}
 
-		resp, err := provider.ListModels(ctx)
 		fetchAt := time.Now().UTC()
-		resp, configuredReason := applyConfiguredProviderModels(
-			providerName,
-			providerTypes[provider],
-			configuredProviderModelsMode,
-			configuredProviderModels[providerName],
-			resp,
-			err,
+		configuredModels := configuredProviderModels[providerName]
+		var (
+			resp             *core.ModelsResponse
+			err              error
+			configuredReason configuredProviderModelsApplyReason
 		)
+		if configuredProviderModelsMode == config.ConfiguredProviderModelsModeAllowlist && len(configuredModels) > 0 {
+			resp, configuredReason = applyConfiguredProviderModels(
+				providerName,
+				providerTypes[provider],
+				configuredProviderModelsMode,
+				configuredModels,
+				nil,
+				nil,
+				fetchAt.Unix(),
+			)
+		} else {
+			resp, err = provider.ListModels(ctx)
+			fetchAt = time.Now().UTC()
+			resp, configuredReason = applyConfiguredProviderModels(
+				providerName,
+				providerTypes[provider],
+				configuredProviderModelsMode,
+				configuredModels,
+				resp,
+				err,
+				fetchAt.Unix(),
+			)
+		}
+		var configuredUpstreamError string
 		if configuredReason != configuredProviderModelsNotApplied {
 			attrs := []any{
 				"provider", providerName,
 				"reason", string(configuredReason),
-				"configured_models", len(configuredProviderModels[providerName]),
+				"configured_models", len(configuredModels),
 			}
 			if err != nil {
+				configuredUpstreamError = err.Error()
 				attrs = append(attrs, "error", err)
 				slog.Warn("upstream ListModels failed, using configured provider models", attrs...)
 			} else if configuredReason == configuredProviderModelsAllowlist {
@@ -316,6 +338,7 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 			registered:              true,
 			lastModelFetchAt:        fetchAt,
 			lastModelFetchSuccessAt: fetchAt,
+			lastModelFetchError:     configuredUpstreamError,
 		}
 
 		if _, ok := newModelsByProvider[providerName]; !ok {
@@ -410,8 +433,11 @@ func (r *ModelRegistry) applyProviderRuntimeUpdatesLocked(updates map[string]pro
 		}
 		if !update.lastModelFetchSuccessAt.IsZero() {
 			current.lastModelFetchSuccessAt = update.lastModelFetchSuccessAt
-			current.lastModelFetchError = ""
-		} else if strings.TrimSpace(update.lastModelFetchError) != "" {
+			if strings.TrimSpace(update.lastModelFetchError) == "" {
+				current.lastModelFetchError = ""
+			}
+		}
+		if strings.TrimSpace(update.lastModelFetchError) != "" {
 			current.lastModelFetchError = update.lastModelFetchError
 		}
 		r.providerRuntime[providerName] = current
@@ -497,12 +523,14 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	// Populate model maps from grouped cache structure. Unqualified lookups keep "first provider wins".
 	newModels := make(map[string]*ModelInfo)
 	newModelsByProvider := make(map[string]map[string]*ModelInfo)
+	cachedProviderTypes := make(map[string]string, len(modelCache.Providers))
 	for providerName, cachedProv := range modelCache.Providers {
 		provider, ok := nameToProvider[providerName]
 		if !ok {
 			// Provider not configured, skip all its models
 			continue
 		}
+		cachedProviderTypes[providerName] = strings.TrimSpace(cachedProv.ProviderType)
 		providerType := strings.TrimSpace(nameToProviderType[providerName])
 		if providerType == "" {
 			providerType = strings.TrimSpace(cachedProv.ProviderType)
@@ -536,16 +564,19 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 				continue
 			}
 			providerType := strings.TrimSpace(nameToProviderType[providerName])
+			if providerType == "" {
+				providerType = strings.TrimSpace(cachedProviderTypes[providerName])
+			}
 			providerModels := newModelsByProvider[providerName]
 			upstream := modelsResponseFromProviderMap(providerModels)
-			resp, reason := applyConfiguredProviderModels(providerName, providerType, configuredProviderModelsMode, configuredModels, upstream, nil)
+			resp, reason := applyConfiguredProviderModels(providerName, providerType, configuredProviderModelsMode, configuredModels, upstream, nil, modelCache.UpdatedAt.Unix())
 			if reason == configuredProviderModelsNotApplied {
 				continue
 			}
 			newModelsByProvider[providerName] = modelInfoMapFromResponse(resp, provider, providerName, providerType)
 		}
-		newModels = rebuildGlobalModelMap(newModelsByProvider, providerOrderNames)
 	}
+	newModels = rebuildGlobalModelMap(newModelsByProvider, providerOrderNames)
 
 	// Load model list data from cache if available
 	var list *modeldata.ModelList

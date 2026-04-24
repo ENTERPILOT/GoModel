@@ -53,7 +53,7 @@ export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3"
 entry. With the default `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, GoModel uses
 the list when Oracle's `/models` endpoint is unavailable, returns nil, or
 returns an empty list. Set `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose
-only the configured Oracle models.
+only the configured Oracle models and skip Oracle's upstream `/models` call.
 
 For multiple Oracle providers without YAML, use suffixed env vars such as
 `ORACLE_US_BASE_URL`, `ORACLE_US_API_KEY`, and `ORACLE_US_MODELS`. For

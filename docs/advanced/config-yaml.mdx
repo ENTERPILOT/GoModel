@@ -28,7 +28,8 @@ Configured provider model lists can stay in env via `<PROVIDER>_MODELS`, for
 example `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, or `VLLM_MODELS`.
 Set `CONFIGURED_PROVIDER_MODELS_MODE=fallback` (default) to use those lists only
 when upstream `/models` fails or is empty, or `allowlist` to expose only the
-configured models for providers that define a list.
+configured models for providers that define a list and skip their upstream
+`/models` calls.
 
 ## Priority Order
 

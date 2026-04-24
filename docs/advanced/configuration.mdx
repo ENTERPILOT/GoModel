@@ -151,8 +151,9 @@ Every provider type also accepts a comma-separated configured model list via
 `CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses configured lists only when
 upstream `/models` fails, returns nil, or returns an empty list. Set
 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models for
-providers that define a list. YAML `providers.<name>.models` provides the same
-model-list input for named provider blocks.
+providers that define a list and skip their upstream `/models` calls. YAML
+`providers.<name>.models` provides the same model-list input for named provider
+blocks.
 
 For OpenRouter, GoModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
 
@@ -295,7 +296,7 @@ settings), use the YAML file:
 ```yaml
 models:
   # fallback is the default. Use allowlist when configured provider model lists
-  # should hide any upstream models that are not explicitly listed.
+  # should hide upstream models and skip upstream /models calls.
   configured_provider_models_mode: fallback
 
 providers:
@@ -340,7 +341,7 @@ providers:
 <Note>
   `models:` works for every provider block. In fallback mode it is a safety net
   when upstream `/models` is unavailable or empty. In allowlist mode it becomes
-  the exposed inventory for that provider. For Oracle, see the [Oracle
+  the exposed inventory for that provider and skips upstream `/models`. For Oracle, see the [Oracle
   guide](/guides/oracle) for the required OCI policy and a tested configuration.
 </Note>
 

@@ -194,18 +194,35 @@ func TestModelRegistry(t *testing.T) {
 		if model.Model.OwnedBy != "test" {
 			t.Fatalf("OwnedBy = %q, want test", model.Model.OwnedBy)
 		}
+		if model.Model.Created <= 0 {
+			t.Fatalf("Created = %d, want non-zero configured fallback timestamp", model.Model.Created)
+		}
+		snapshots := registry.ProviderRuntimeSnapshots()
+		if len(snapshots) != 1 {
+			t.Fatalf("expected 1 provider runtime snapshot, got %d", len(snapshots))
+		}
+		if !strings.Contains(snapshots[0].LastModelFetchError, "models unavailable") {
+			t.Fatalf("LastModelFetchError = %q, want upstream error preserved", snapshots[0].LastModelFetchError)
+		}
+		if snapshots[0].LastModelFetchSuccessAt == nil {
+			t.Fatal("expected LastModelFetchSuccessAt to be recorded for configured fallback inventory")
+		}
 	})
 
-	t.Run("ConfiguredModelsAllowlistModeFiltersAndAddsConfiguredModels", func(t *testing.T) {
+	t.Run("ConfiguredModelsAllowlistModeSkipsUpstreamAndUsesConfiguredModels", func(t *testing.T) {
 		registry := NewModelRegistry()
 		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeAllowlist)
-		mock := &registryMockProvider{
-			name: "test",
-			modelsResponse: &core.ModelsResponse{
-				Object: "list",
-				Data: []core.Model{
-					{ID: "configured-model", Object: "model", OwnedBy: "upstream", Created: 123},
-					{ID: "upstream-extra", Object: "model", OwnedBy: "upstream", Created: 456},
+		var listCount atomic.Int32
+		mock := &countingRegistryMockProvider{
+			listCount: &listCount,
+			registryMockProvider: &registryMockProvider{
+				name: "test",
+				modelsResponse: &core.ModelsResponse{
+					Object: "list",
+					Data: []core.Model{
+						{ID: "configured-model", Object: "model", OwnedBy: "upstream", Created: 123},
+						{ID: "upstream-extra", Object: "model", OwnedBy: "upstream", Created: 456},
+					},
 				},
 			},
 		}
@@ -217,6 +234,9 @@ func TestModelRegistry(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
+		if listCount.Load() != 0 {
+			t.Fatalf("ListModels calls = %d, want 0", listCount.Load())
+		}
 		if registry.ModelCount() != 2 {
 			t.Fatalf("ModelCount() = %d, want 2", registry.ModelCount())
 		}
@@ -227,8 +247,8 @@ func TestModelRegistry(t *testing.T) {
 		if configured == nil {
 			t.Fatal("expected configured-model to resolve")
 		}
-		if configured.Model.Created != 123 || configured.Model.OwnedBy != "upstream" {
-			t.Fatalf("configured metadata = %+v, want upstream metadata preserved", configured.Model)
+		if configured.Model.Created <= 0 || configured.Model.OwnedBy != "test-type" {
+			t.Fatalf("configured metadata = %+v, want configured-only metadata", configured.Model)
 		}
 		missing := registry.GetModel("missing-configured")
 		if missing == nil {
@@ -236,6 +256,37 @@ func TestModelRegistry(t *testing.T) {
 		}
 		if missing.Model.OwnedBy != "test-type" {
 			t.Fatalf("OwnedBy = %q, want test-type", missing.Model.OwnedBy)
+		}
+	})
+
+	t.Run("ConfiguredModelsAllowlistModeUsesUpstreamWhenNoConfiguredModels", func(t *testing.T) {
+		registry := NewModelRegistry()
+		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeAllowlist)
+		var listCount atomic.Int32
+		mock := &countingRegistryMockProvider{
+			listCount: &listCount,
+			registryMockProvider: &registryMockProvider{
+				name: "test",
+				modelsResponse: &core.ModelsResponse{
+					Object: "list",
+					Data: []core.Model{
+						{ID: "upstream-model", Object: "model", OwnedBy: "upstream"},
+					},
+				},
+			},
+		}
+		registry.RegisterProviderWithNameAndType(mock, "test", "test-type")
+
+		err := registry.Initialize(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if listCount.Load() != 1 {
+			t.Fatalf("ListModels calls = %d, want 1", listCount.Load())
+		}
+		if !registry.Supports("upstream-model") {
+			t.Fatal("expected upstream-model to resolve when provider has no configured models")
 		}
 	})
 

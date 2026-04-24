@@ -46,7 +46,6 @@ docker run --rm -p 8080:8080 \
   -e ORACLE_API_KEY="your-oracle-key" \
   -e ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1" \
   -e ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" \
-  -e CONFIGURED_PROVIDER_MODELS_MODE="fallback" \
   -e OLLAMA_BASE_URL="http://host.docker.internal:11434/v1" \
   -e VLLM_BASE_URL="http://host.docker.internal:8000/v1" \
   enterpilot/gomodel
@@ -94,7 +93,8 @@ Configured model lists are available for every provider with
 `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. By default,
 `CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses those lists only when upstream
 `/models` is unavailable or empty. Set `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`
-to expose only configured models for providers that define a list.
+to expose only configured models for providers that define a list, skipping
+their upstream `/models` calls.
 For vLLM, set `VLLM_API_KEY` only if the upstream server was started with
 `--api-key`.
 To register multiple instances of the same provider type without `config.yaml`,

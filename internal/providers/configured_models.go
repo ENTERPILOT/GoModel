@@ -3,6 +3,7 @@ package providers
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"gomodel/config"
 	"gomodel/internal/core"
@@ -49,6 +50,7 @@ func applyConfiguredProviderModels(
 	configuredModels []string,
 	upstream *core.ModelsResponse,
 	upstreamErr error,
+	fallbackCreated int64,
 ) (*core.ModelsResponse, configuredProviderModelsApplyReason) {
 	if len(configuredModels) == 0 {
 		return upstream, configuredProviderModelsNotApplied
@@ -56,22 +58,22 @@ func applyConfiguredProviderModels(
 
 	mode = config.ResolveConfiguredProviderModelsMode(mode)
 	if mode == config.ConfiguredProviderModelsModeAllowlist {
-		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream), configuredProviderModelsAllowlist
+		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsAllowlist
 	}
 
 	if upstreamErr != nil {
-		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream), configuredProviderModelsUpstreamError
+		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsUpstreamError
 	}
 	if upstream == nil {
-		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream), configuredProviderModelsUpstreamNil
+		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsUpstreamNil
 	}
 	if len(upstream.Data) == 0 {
-		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream), configuredProviderModelsUpstreamEmpty
+		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsUpstreamEmpty
 	}
 	return upstream, configuredProviderModelsNotApplied
 }
 
-func configuredProviderModelsResponse(providerName, providerType string, configuredModels []string, upstream *core.ModelsResponse) *core.ModelsResponse {
+func configuredProviderModelsResponse(providerName, providerType string, configuredModels []string, upstream *core.ModelsResponse, fallbackCreated int64) *core.ModelsResponse {
 	byID := make(map[string]core.Model)
 	if upstream != nil {
 		for _, model := range upstream.Data {
@@ -87,6 +89,9 @@ func configuredProviderModelsResponse(providerName, providerType string, configu
 	if owner == "" {
 		owner = strings.TrimSpace(providerName)
 	}
+	if fallbackCreated <= 0 {
+		fallbackCreated = time.Now().Unix()
+	}
 
 	data := make([]core.Model, 0, len(configuredModels))
 	for _, modelID := range configuredModels {
@@ -96,6 +101,7 @@ func configuredProviderModelsResponse(providerName, providerType string, configu
 				ID:      modelID,
 				Object:  "model",
 				OwnedBy: owner,
+				Created: fallbackCreated,
 			}
 		} else {
 			model.ID = strings.TrimSpace(model.ID)
