@@ -1,23 +1,38 @@
-# GoModel - AI Gateway Written in Go
+<p align="center">
+  <img alt="GoModel logo" src="docs/logo.svg" width="96">
+</p>
 
-[![CI](https://github.com/ENTERPILOT/GoModel/actions/workflows/test.yml/badge.svg)](https://github.com/ENTERPILOT/GoModel/actions/workflows/test.yml)
-[![Docs](https://img.shields.io/badge/docs-gomodel-blue)](https://gomodel.enterpilot.io/docs)
-[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/gaEB9BQSPH)
-[![Docker Pulls](https://img.shields.io/docker/pulls/enterpilot/gomodel)](https://hub.docker.com/r/enterpilot/gomodel)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/ENTERPILOT/GoModel)](https://github.com/ENTERPILOT/GoModel/blob/main/go.mod)
-[![Hacker News](https://img.shields.io/badge/Hacker%20News-Apr%2021%20%2726%20%7C%20%234-brightgreen?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/item?id=47849097)
+<h1 align="center">
+  GoModel - AI Gateway in Go
+</h1>
 
-[![GoModel on Hacker News](https://hackerbadge.vercel.app/api?id=47849097)](https://news.ycombinator.com/item?id=47849097)
+<p align="center">
+  <a href="https://github.com/ENTERPILOT/GoModel/actions/workflows/test.yml"><img alt="CI" src="https://github.com/ENTERPILOT/GoModel/actions/workflows/test.yml/badge.svg"></a>
+  <a href="https://github.com/ENTERPILOT/GoModel/blob/main/go.mod"><img alt="GO Version" src="https://img.shields.io/github/go-mod/go-version/ENTERPILOT/GoModel?label=GO"></a>
+  <a href="https://hub.docker.com/r/enterpilot/gomodel"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/enterpilot/gomodel?label=Docker%20Pulls"></a>
+  <a href="https://discord.gg/gaEB9BQSPH"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white"></a>
+</p>
 
-A high-performance AI gateway written in Go, providing a unified OpenAI-compatible API for OpenAI, Anthropic, Gemini, xAI, Groq, OpenRouter, Z.ai, Azure OpenAI, Oracle, Ollama, and more.
+<p align="center">
+  <a href="https://news.ycombinator.com/item?id=47849097"><img alt="Hacker News" src="https://img.shields.io/badge/Hacker%20News-Apr%2021%20%2726%20%7C%20%234-brightgreen?logo=ycombinator&logoColor=white"></a>
+  <a href="https://gomodel.enterpilot.io/docs"><img alt="docs GoModel" src="https://img.shields.io/badge/Docs-GoModel-blue"></a>
+</p>
+
+<p align="center">
+  <a href="https://news.ycombinator.com/item?id=47849097"><img alt="GoModel on Hacker News" src="https://hackerbadge.vercel.app/api?id=47849097"></a>
+</p>
+
+<p align="center">
+  A fast and lightweight AI gateway written in Go, providing a unified OpenAI-compatible API for OpenAI, Anthropic, Gemini, xAI, Groq, OpenRouter, Z.ai, Azure OpenAI, Oracle, Ollama, and more.
+</p>
 
 <a href="docs/dashboard.gif">
-  <img src="docs/dashboard.gif" alt="Animated GoModel AI gateway dashboard showing usage analytics, token tracking, and estimated cost monitoring" width="100%">
+  <img src="docs/dashboard.gif" alt="GoModel AI gateway dashboard showing AI usage analytics, observability panel, token and costs tracking, and estimated cost monitoring" width="100%">
 </a>
 
-## Quick Start - Deploy the AI Gateway
+## Quick Start with Docker
 
-**Step 1:** Start GoModel
+**Step 1:** Start GoModel container
 
 ```bash
 docker run --rm -p 8080:8080 \
@@ -70,19 +85,19 @@ curl http://localhost:8080/v1/chat/completions \
 
 Example model identifiers are illustrative and subject to change; consult provider catalogs for current models. Feature columns reflect gateway API support, not every individual model capability exposed by an upstream provider.
 
-| Provider      | Credential                                                        | Example Model              | Chat | `/responses` | Embed | Files | Batches | Passthru |
-| ------------- | ----------------------------------------------------------------- | -------------------------- | :--: | :----------: | :---: | :---: | :-----: | :------: |
-| OpenAI        | `OPENAI_API_KEY`                                                  | `gpt-4o-mini`              |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
-| Anthropic     | `ANTHROPIC_API_KEY`                                               | `claude-sonnet-4-20250514` |  ✅  |      ✅      |  ❌   |  ❌   |   ✅    |    ✅    |
-| Google Gemini | `GEMINI_API_KEY`                                                  | `gemini-2.5-flash`         |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
-| Groq          | `GROQ_API_KEY`                                                    | `llama-3.3-70b-versatile`  |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
-| OpenRouter    | `OPENROUTER_API_KEY`                                              | `google/gemini-2.5-flash`  |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
-| Z.ai          | `ZAI_API_KEY` (`ZAI_BASE_URL` optional)                           | `glm-5.1`                  |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ✅    |
-| xAI (Grok)    | `XAI_API_KEY`                                                     | `grok-2`                   |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
-| Azure OpenAI  | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | `gpt-4o`                   |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
-| Oracle        | `ORACLE_API_KEY` + `ORACLE_BASE_URL`                              | `openai.gpt-oss-120b`      |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ❌    |
-| Ollama        | `OLLAMA_BASE_URL`                                                 | `llama3.2`                 |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ❌    |
-| vLLM          | `VLLM_BASE_URL` (`VLLM_API_KEY` optional)                         | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Provider      | Credential                                                        | Example Model                      | Chat | `/responses` | Embed | Files | Batches | Passthru |
+| ------------- | ----------------------------------------------------------------- | ---------------------------------- | :--: | :----------: | :---: | :---: | :-----: | :------: |
+| OpenAI        | `OPENAI_API_KEY`                                                  | `gpt-5.5`                          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
+| Anthropic     | `ANTHROPIC_API_KEY`                                               | `claude-sonnet-4-20250514`         |  ✅  |      ✅      |  ❌   |  ❌   |   ✅    |    ✅    |
+| Google Gemini | `GEMINI_API_KEY`                                                  | `gemini-2.5-flash`                 |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
+| Groq          | `GROQ_API_KEY`                                                    | `llama-3.3-70b-versatile`          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
+| OpenRouter    | `OPENROUTER_API_KEY`                                              | `google/gemini-2.5-flash`          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
+| Z.ai          | `ZAI_API_KEY` (`ZAI_BASE_URL` optional)                           | `glm-5.1`                          |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ✅    |
+| xAI (Grok)    | `XAI_API_KEY`                                                     | `grok-4`                           |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
+| Azure OpenAI  | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | `gpt-5`                            |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
+| Oracle        | `ORACLE_API_KEY` + `ORACLE_BASE_URL`                              | `openai.gpt-oss-120b`              |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ❌    |
+| Ollama        | `OLLAMA_BASE_URL`                                                 | `llama3.2`                         |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ❌    |
+| vLLM          | `VLLM_BASE_URL` (`VLLM_API_KEY` optional)                         | `meta-llama/Llama-3.1-8B-Instruct` |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ✅    |
 
 ✅ Supported ❌ Unsupported
 
@@ -157,37 +172,63 @@ docker run --rm -p 8080:8080 --env-file .env gomodel
 
 ---
 
-## OpenAI-Compatible API Endpoints
+## API Endpoints
 
-| Endpoint                           | Method                                       | Description                                                                                                  |
-| ---------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `/v1/chat/completions`             | POST                                         | Chat completions (streaming supported)                                                                       |
-| `/v1/responses`                    | POST                                         | OpenAI Responses API                                                                                         |
-| `/v1/embeddings`                   | POST                                         | Text embeddings                                                                                              |
-| `/v1/files`                        | POST                                         | Upload a file (OpenAI-compatible multipart)                                                                  |
-| `/v1/files`                        | GET                                          | List files                                                                                                   |
-| `/v1/files/{id}`                   | GET                                          | Retrieve file metadata                                                                                       |
-| `/v1/files/{id}`                   | DELETE                                       | Delete a file                                                                                                |
-| `/v1/files/{id}/content`           | GET                                          | Retrieve raw file content                                                                                    |
-| `/v1/batches`                      | POST                                         | Create a native provider batch (OpenAI-compatible schema; inline `requests` supported where provider-native) |
-| `/v1/batches`                      | GET                                          | List stored batches                                                                                          |
-| `/v1/batches/{id}`                 | GET                                          | Retrieve one stored batch                                                                                    |
-| `/v1/batches/{id}/cancel`          | POST                                         | Cancel a pending batch                                                                                       |
-| `/v1/batches/{id}/results`         | GET                                          | Retrieve native batch results when available                                                                 |
-| `/p/{provider}/...`                | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS | Provider-native passthrough with opaque upstream responses                                                   |
-| `/v1/models`                       | GET                                          | List available models                                                                                        |
-| `/health`                          | GET                                          | Health check                                                                                                 |
-| `/metrics`                         | GET                                          | Prometheus metrics (when enabled)                                                                            |
-| `/admin/api/v1/usage/summary`      | GET                                          | Aggregate token usage statistics                                                                             |
-| `/admin/api/v1/usage/daily`        | GET                                          | Per-period token usage breakdown                                                                             |
-| `/admin/api/v1/usage/models`       | GET                                          | Usage breakdown by model                                                                                     |
-| `/admin/api/v1/usage/log`          | GET                                          | Paginated usage log entries                                                                                  |
-| `/admin/api/v1/audit/log`          | GET                                          | Paginated audit log entries                                                                                  |
-| `/admin/api/v1/audit/conversation` | GET                                          | Conversation thread around one audit log entry                                                               |
-| `/admin/api/v1/models`             | GET                                          | List models with provider type                                                                               |
-| `/admin/api/v1/models/categories`  | GET                                          | List model categories                                                                                        |
-| `/admin/dashboard`                 | GET                                          | Admin dashboard UI                                                                                           |
-| `/swagger/index.html`              | GET                                          | Swagger UI (when enabled)                                                                                    |
+### OpenAI-Compatible API
+
+| Endpoint                    | Method | Description                                                                                                  |
+| --------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| `/v1/chat/completions`      | POST   | Chat completions (streaming supported)                                                                       |
+| `/v1/responses`             | POST   | OpenAI Responses API                                                                                         |
+| `/v1/embeddings`            | POST   | Text embeddings                                                                                              |
+| `/v1/models`                | GET    | List available models                                                                                        |
+| `/v1/files`                 | POST   | Upload a file (OpenAI-compatible multipart)                                                                  |
+| `/v1/files`                 | GET    | List files                                                                                                   |
+| `/v1/files/{id}`            | GET    | Retrieve file metadata                                                                                       |
+| `/v1/files/{id}`            | DELETE | Delete a file                                                                                                |
+| `/v1/files/{id}/content`    | GET    | Retrieve raw file content                                                                                    |
+| `/v1/batches`               | POST   | Create a native provider batch (OpenAI-compatible schema; inline `requests` supported where provider-native) |
+| `/v1/batches`               | GET    | List stored batches                                                                                          |
+| `/v1/batches/{id}`          | GET    | Retrieve one stored batch                                                                                    |
+| `/v1/batches/{id}/cancel`   | POST   | Cancel a pending batch                                                                                       |
+| `/v1/batches/{id}/results`  | GET    | Retrieve native batch results when available                                                                 |
+
+### Provider Passthrough
+
+| Endpoint            | Method                                       | Description                                        |
+| ------------------- | -------------------------------------------- | -------------------------------------------------- |
+| `/p/{provider}/...` | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS | Provider-native passthrough with opaque upstream responses |
+
+### Admin Endpoints
+
+| Endpoint                                   | Method | Description                                |
+| ------------------------------------------ | ------ | ------------------------------------------ |
+| `/admin/dashboard`                         | GET    | Admin dashboard UI                         |
+| `/admin/api/v1/dashboard/config`           | GET    | Dashboard configuration                    |
+| `/admin/api/v1/cache/overview`             | GET    | Cache statistics overview                  |
+| `/admin/api/v1/usage/summary`              | GET    | Aggregate token usage statistics           |
+| `/admin/api/v1/usage/daily`                | GET    | Per-period token usage breakdown           |
+| `/admin/api/v1/usage/models`               | GET    | Usage breakdown by model                   |
+| `/admin/api/v1/usage/user-paths`           | GET    | Usage breakdown by user path               |
+| `/admin/api/v1/usage/log`                  | GET    | Paginated usage log entries                |
+| `/admin/api/v1/audit/log`                  | GET    | Paginated audit log entries                |
+| `/admin/api/v1/audit/conversation`         | GET    | Conversation thread around one audit entry |
+| `/admin/api/v1/providers/status`           | GET    | Provider availability status               |
+| `/admin/api/v1/runtime/refresh`            | POST   | Refresh runtime configuration              |
+| `/admin/api/v1/models`                     | GET    | List models with provider type             |
+| `/admin/api/v1/models/categories`          | GET    | List model categories                      |
+| `/admin/api/v1/model-overrides`            | GET    | List model overrides                       |
+| `/admin/api/v1/model-overrides/:selector`  | PUT    | Create/update model override               |
+| `/admin/api/v1/model-overrides/:selector`  | DELETE | Remove model override                      |
+| `/admin/api/v1/auth-keys`                  | GET    | List authentication keys                   |
+
+### Operations Endpoints
+
+| Endpoint              | Method | Description                       |
+| --------------------- | ------ | --------------------------------- |
+| `/health`             | GET    | Health check                      |
+| `/metrics`            | GET    | Prometheus metrics (when enabled) |
+| `/swagger/index.html` | GET    | Swagger UI (when enabled)         |
 
 ---
 
@@ -197,17 +238,17 @@ GoModel is configured through environment variables and an optional `config.yaml
 
 Key settings:
 
-| Variable                        | Default                           | Description                                                                      |
-| ------------------------------- | --------------------------------- | -------------------------------------------------------------------------------- |
-| `PORT`                          | `8080`                            | Server port                                                                      |
-| `GOMODEL_MASTER_KEY`            | (none)                            | API key for authentication                                                       |
-| `ENABLE_PASSTHROUGH_ROUTES`     | `true`                            | Enable provider-native passthrough routes under `/p/{provider}/...`              |
-| `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                            | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |
+| Variable                        | Default                                | Description                                                                      |
+| ------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------- |
+| `PORT`                          | `8080`                                 | Server port                                                                      |
+| `GOMODEL_MASTER_KEY`            | (none)                                 | API key for authentication                                                       |
+| `ENABLE_PASSTHROUGH_ROUTES`     | `true`                                 | Enable provider-native passthrough routes under `/p/{provider}/...`              |
+| `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                                 | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |
 | `ENABLED_PASSTHROUGH_PROVIDERS` | `openai,anthropic,openrouter,zai,vllm` | Comma-separated list of enabled passthrough providers                            |
-| `STORAGE_TYPE`                  | `sqlite`                          | Storage backend (`sqlite`, `postgresql`, `mongodb`)                              |
-| `METRICS_ENABLED`               | `false`                           | Enable Prometheus metrics                                                        |
-| `LOGGING_ENABLED`               | `false`                           | Enable audit logging                                                             |
-| `GUARDRAILS_ENABLED`            | `false`                           | Enable the configured guardrails pipeline                                        |
+| `STORAGE_TYPE`                  | `sqlite`                               | Storage backend (`sqlite`, `postgresql`, `mongodb`)                              |
+| `METRICS_ENABLED`               | `false`                                | Enable Prometheus metrics                                                        |
+| `LOGGING_ENABLED`               | `false`                                | Enable audit logging                                                             |
+| `GUARDRAILS_ENABLED`            | `false`                                | Enable the configured guardrails pipeline                                        |
 
 **Quick Start - Authentication:** By default `GOMODEL_MASTER_KEY` is unset. Without this key, API endpoints are unprotected and anyone can call them. This is insecure for production. **Strongly recommend** setting a strong secret before exposing the service. Add `GOMODEL_MASTER_KEY` to your `.env` or environment for production deployments.
 
