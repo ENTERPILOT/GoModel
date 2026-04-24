@@ -15,17 +15,17 @@ import (
 func clearProviderEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"OPENAI_API_KEY", "OPENAI_BASE_URL",
-		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
-		"GEMINI_API_KEY", "GEMINI_BASE_URL",
-		"XAI_API_KEY", "XAI_BASE_URL",
-		"GROQ_API_KEY", "GROQ_BASE_URL",
-		"OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENROUTER_SITE_URL", "OPENROUTER_APP_NAME",
-		"ZAI_API_KEY", "ZAI_BASE_URL",
-		"AZURE_API_KEY", "AZURE_BASE_URL", "AZURE_API_VERSION",
-		"ORACLE_API_KEY", "ORACLE_BASE_URL",
+		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODELS",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODELS",
+		"GEMINI_API_KEY", "GEMINI_BASE_URL", "GEMINI_MODELS",
+		"XAI_API_KEY", "XAI_BASE_URL", "XAI_MODELS",
+		"GROQ_API_KEY", "GROQ_BASE_URL", "GROQ_MODELS",
+		"OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENROUTER_MODELS", "OPENROUTER_SITE_URL", "OPENROUTER_APP_NAME",
+		"ZAI_API_KEY", "ZAI_BASE_URL", "ZAI_MODELS",
+		"AZURE_API_KEY", "AZURE_BASE_URL", "AZURE_API_VERSION", "AZURE_MODELS",
+		"ORACLE_API_KEY", "ORACLE_BASE_URL", "ORACLE_MODELS",
 		"VLLM_API_KEY", "VLLM_BASE_URL", "VLLM_MODELS",
-		"OLLAMA_API_KEY", "OLLAMA_BASE_URL",
+		"OLLAMA_API_KEY", "OLLAMA_BASE_URL", "OLLAMA_MODELS",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -57,7 +57,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"USAGE_BUFFER_SIZE", "USAGE_FLUSH_INTERVAL", "USAGE_RETENTION_DAYS",
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING",
 		"FEATURE_FALLBACK_MODE", "FALLBACK_MANUAL_RULES_PATH",
-		"MODEL_OVERRIDES_ENABLED", "MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT",
+		"MODEL_OVERRIDES_ENABLED", "MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
 		"WORKFLOW_REFRESH_INTERVAL",
 	} {
@@ -99,6 +99,9 @@ func TestBuildDefaultConfig(t *testing.T) {
 	}
 	if got, want := cfg.Server.EnabledPassthroughProviders, []string{"openai", "anthropic", "openrouter", "zai", "vllm"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("expected Server.EnabledPassthroughProviders=%v, got %v", want, got)
+	}
+	if cfg.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeFallback {
+		t.Errorf("expected Models.ConfiguredProviderModelsMode=fallback, got %q", cfg.Models.ConfiguredProviderModelsMode)
 	}
 	if cfg.Cache.Model.Local != nil {
 		t.Error("expected Cache.Model.Local to be nil in raw defaults")
@@ -232,6 +235,7 @@ models:
   enabled_by_default: false
   overrides_enabled: false
   keep_only_aliases_at_models_endpoint: true
+  configured_provider_models_mode: allowlist
 cache:
   model:
     redis:
@@ -267,6 +271,9 @@ logging:
 		}
 		if !cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
 			t.Error("expected Models.KeepOnlyAliasesAtModelsEndpoint=true from YAML")
+		}
+		if cfg.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeAllowlist {
+			t.Errorf("expected Models.ConfiguredProviderModelsMode=allowlist from YAML, got %q", cfg.Models.ConfiguredProviderModelsMode)
 		}
 		if cfg.Cache.Model.Redis == nil {
 			t.Fatal("expected Cache.Model.Redis to be set")
@@ -370,6 +377,28 @@ fallback:
 
 		if _, err := Load(); err == nil {
 			t.Fatal("expected Load() to fail for invalid fallback mode")
+		}
+	})
+}
+
+func TestLoad_InvalidConfiguredProviderModelsMode(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+models:
+  configured_provider_models_mode: strict
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("expected Load() to fail for invalid configured provider models mode")
+		}
+		if !strings.Contains(err.Error(), "models.configured_provider_models_mode must be one of") {
+			t.Fatalf("Load() error = %v, want configured provider models mode validation error", err)
 		}
 	})
 }
@@ -848,6 +877,7 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 		t.Setenv("MODEL_OVERRIDES_ENABLED", "false")
 		t.Setenv("MODELS_ENABLED_BY_DEFAULT", "false")
 		t.Setenv("KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "true")
+		t.Setenv("CONFIGURED_PROVIDER_MODELS_MODE", "allowlist")
 		t.Setenv("STORAGE_TYPE", "postgresql")
 		t.Setenv("POSTGRES_URL", "postgres://localhost/test")
 		t.Setenv("POSTGRES_MAX_CONNS", "20")
@@ -869,6 +899,9 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 		}
 		if !cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
 			t.Error("expected aliases-only models endpoint from env")
+		}
+		if cfg.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeAllowlist {
+			t.Errorf("expected configured provider models mode allowlist from env, got %q", cfg.Models.ConfiguredProviderModelsMode)
 		}
 		if cfg.Storage.Type != "postgresql" {
 			t.Errorf("expected storage type postgresql, got %s", cfg.Storage.Type)

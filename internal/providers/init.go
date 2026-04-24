@@ -89,6 +89,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 
 	registry := NewModelRegistry()
 	registry.SetCache(modelCache)
+	registry.SetConfiguredProviderModelsMode(result.Config.Models.ConfiguredProviderModelsMode)
 
 	count, err := initializeProviders(ctx, providerMap, factory, registry)
 	if err != nil {
@@ -239,6 +240,9 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 		}
 
 		registry.RegisterProviderWithNameAndType(p, name, pCfg.Type)
+		if len(pCfg.Models) > 0 {
+			registry.SetProviderConfiguredModels(name, pCfg.Models)
+		}
 		if len(pCfg.ModelMetadataOverrides) > 0 {
 			registry.SetProviderMetadataOverrides(name, pCfg.ModelMetadataOverrides)
 		}

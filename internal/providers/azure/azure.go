@@ -2,7 +2,6 @@ package azure
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -31,7 +30,6 @@ type Provider struct {
 	resourceProvider       *openai.CompatibleProvider
 	openAIResourceProvider *openai.CompatibleProvider
 	apiVersion             string
-	configuredModels       []string
 }
 
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
@@ -39,12 +37,10 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	apiVersion := providers.ResolveAPIVersion(providerCfg.APIVersion, defaultAPIVersion)
 	p := &Provider{apiVersion: apiVersion}
 	clientCfg := openai.CompatibleProviderConfig{
-		ProviderName:       "azure",
-		BaseURL:            baseURL,
-		SetHeaders:         setHeaders,
-		ConfiguredModels:   opts.Models,
+		ProviderName: "azure",
+		BaseURL:      baseURL,
+		SetHeaders:   setHeaders,
 	}
-	p.configuredModels = opts.Models
 	p.CompatibleProvider = openai.NewCompatibleProvider(providerCfg.APIKey, opts, clientCfg)
 	p.resourceProvider = openai.NewCompatibleProvider(providerCfg.APIKey, opts, clientCfg)
 	p.openAIResourceProvider = openai.NewCompatibleProvider(providerCfg.APIKey, opts, clientCfg)
@@ -84,31 +80,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		Method:   http.MethodGet,
 		Endpoint: "/openai/models",
 	}, &resp); err != nil {
-		if len(p.configuredModels) == 0 {
-			return nil, err
-		}
-
-		slog.Warn("azure upstream ListModels failed, using configured models fallback",
-			"error", err,
-			"configured_models", len(p.configuredModels),
-		)
-
-		data := make([]core.Model, 0, len(p.configuredModels))
-		for _, modelID := range p.configuredModels {
-			modelID = strings.TrimSpace(modelID)
-			if modelID == "" {
-				continue
-			}
-			data = append(data, core.Model{
-				ID:      modelID,
-				Object:  "model",
-				OwnedBy: "azure",
-			})
-		}
-		return &core.ModelsResponse{
-			Object: "list",
-			Data:   data,
-		}, nil
+		return nil, err
 	}
 	return &resp, nil
 }

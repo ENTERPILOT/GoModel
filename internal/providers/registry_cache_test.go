@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"gomodel/config"
 	"gomodel/internal/cache/modelcache"
 	"gomodel/internal/core"
 )
@@ -200,6 +201,94 @@ func TestCacheFile(t *testing.T) {
 		// Unqualified lookup should resolve to one of the two providers (map iteration order is nondeterministic)
 		if provider := registry.GetProvider("gpt-4o"); provider != east && provider != west {
 			t.Fatal("expected unqualified gpt-4o to map to either openai-east or openai-west provider")
+		}
+	})
+
+	t.Run("LoadFromCacheConfiguredModelsAllowlistFiltersAndAdds", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "models.json")
+
+		modelCache := modelcache.ModelCache{
+			UpdatedAt: time.Now().UTC(),
+			Providers: map[string]modelcache.CachedProvider{
+				"openrouter": {
+					ProviderType: "openrouter",
+					OwnedBy:      "openrouter",
+					Models: []modelcache.CachedModel{
+						{ID: "configured-model", Created: 123},
+						{ID: "cached-extra", Created: 456},
+					},
+				},
+			},
+		}
+		data, _ := json.Marshal(modelCache)
+		if err := os.WriteFile(cacheFile, data, 0o644); err != nil {
+			t.Fatalf("failed to write cache file: %v", err)
+		}
+
+		registry := NewModelRegistry()
+		registry.SetCache(modelcache.NewLocalCache(cacheFile))
+		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeAllowlist)
+		registry.SetProviderConfiguredModels("openrouter", []string{"missing-configured", "configured-model"})
+
+		mock := &registryMockProvider{name: "openrouter"}
+		registry.RegisterProviderWithNameAndType(mock, "openrouter", "openrouter")
+
+		loaded, err := registry.LoadFromCache(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if loaded != 2 {
+			t.Fatalf("expected 2 models loaded, got %d", loaded)
+		}
+		if registry.Supports("cached-extra") {
+			t.Fatal("expected allowlist mode to hide cached-extra")
+		}
+		configured := registry.GetModel("configured-model")
+		if configured == nil {
+			t.Fatal("expected configured-model to resolve")
+		}
+		if configured.Model.Created != 123 || configured.Model.OwnedBy != "openrouter" {
+			t.Fatalf("configured metadata = %+v, want cached metadata preserved", configured.Model)
+		}
+		missing := registry.GetModel("missing-configured")
+		if missing == nil {
+			t.Fatal("expected missing-configured to resolve")
+		}
+		if missing.Model.OwnedBy != "openrouter" {
+			t.Fatalf("OwnedBy = %q, want openrouter", missing.Model.OwnedBy)
+		}
+	})
+
+	t.Run("LoadFromCacheConfiguredModelsFallbackUsesConfiguredWhenCachedProviderMissing", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "models.json")
+
+		modelCache := modelcache.ModelCache{
+			UpdatedAt: time.Now().UTC(),
+			Providers: map[string]modelcache.CachedProvider{},
+		}
+		data, _ := json.Marshal(modelCache)
+		if err := os.WriteFile(cacheFile, data, 0o644); err != nil {
+			t.Fatalf("failed to write cache file: %v", err)
+		}
+
+		registry := NewModelRegistry()
+		registry.SetCache(modelcache.NewLocalCache(cacheFile))
+		registry.SetProviderConfiguredModels("vllm", []string{"meta-llama/Llama-3.1-8B-Instruct"})
+
+		mock := &registryMockProvider{name: "vllm"}
+		registry.RegisterProviderWithNameAndType(mock, "vllm", "vllm")
+
+		loaded, err := registry.LoadFromCache(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if loaded != 1 {
+			t.Fatalf("expected 1 model loaded, got %d", loaded)
+		}
+		if !registry.Supports("meta-llama/Llama-3.1-8B-Instruct") {
+			t.Fatal("expected configured fallback model to be loaded")
 		}
 	})
 

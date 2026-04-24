@@ -1,6 +1,6 @@
 ---
 title: "GoModel & Oracle"
-description: "Configure Oracle's OpenAI-compatible Generative AI endpoint in GoModel, including the required OCI policy and model fallback."
+description: "Configure Oracle's OpenAI-compatible Generative AI endpoint in GoModel, including the required OCI policy and configured model lists."
 icon: "cloud"
 ---
 
@@ -16,7 +16,8 @@ Flow:
 - Create an Oracle Generative AI API key.
 - Add an OCI IAM policy for `generativeaiapikey`.
 - Choose a supported Oracle region and model.
-- Decide whether you want env-only `ORACLE_MODELS` or YAML `models:`.
+- Decide whether you want env-only `ORACLE_MODELS` or YAML `models:`, and
+  whether configured lists should stay in fallback mode or act as an allowlist.
 
 ## 1. Add the OCI policy
 
@@ -49,8 +50,10 @@ export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3"
 ```
 
 `ORACLE_MODELS` is a comma-separated list. GoModel trims whitespace around each
-entry and uses the list as the fallback inventory when Oracle's `/models`
-endpoint is unavailable.
+entry. With the default `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, GoModel uses
+the list when Oracle's `/models` endpoint is unavailable, returns nil, or
+returns an empty list. Set `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose
+only the configured Oracle models and skip Oracle's upstream `/models` call.
 
 For multiple Oracle providers without YAML, use suffixed env vars such as
 `ORACLE_US_BASE_URL`, `ORACLE_US_API_KEY`, and `ORACLE_US_MODELS`. For
@@ -82,11 +85,12 @@ Why `models:` matters:
 
 - Oracle inference works through `chat/completions` and `responses`
 - Oracle's `/models` endpoint may not be available for this API-key flow
-- GoModel can fall back to the configured model list when `/models` is
-  unavailable
+- GoModel can use the configured model list consistently with the global
+  `CONFIGURED_PROVIDER_MODELS_MODE`
 
-If both are set, `ORACLE_MODELS` overrides YAML `models:` for the default
-`oracle` provider.
+If both are set, `ORACLE_MODELS` overrides YAML `models:` for the matching
+Oracle provider. For multiple env-only Oracle instances, use suffixed variables
+such as `ORACLE_US_MODELS`.
 
 ## Current status
 
@@ -94,7 +98,8 @@ What is integrated today:
 
 - Oracle's OpenAI-compatible inference endpoints
 - manual model configuration through `ORACLE_MODELS` or `models:`
-- GoModel `/v1/models` from the configured-model fallback
+- GoModel `/v1/models` from the configured model list in fallback or allowlist
+  mode
 
 What is not yet validated as reliable:
 
@@ -166,7 +171,7 @@ text.
   wrong, or the model is not available to the account.
 - `model registry has no models`
   Set `ORACLE_MODELS` or add `models:` to the Oracle provider config so GoModel
-  can use the fallback.
+  can use the configured model list.
 - OCI CLI works but Oracle bearer requests fail
   These are different auth flows. OCI CLI uses API signing keys; Oracle
   Generative AI inference uses the Generative AI bearer API key.

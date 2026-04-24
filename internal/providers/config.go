@@ -149,9 +149,6 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		if candidate.field == providerEnvFieldAPIVersion && !spec.SupportsAPIVersion {
 			continue
 		}
-		if candidate.field == providerEnvFieldModels && !spec.SupportsModelsEnv {
-			continue
-		}
 		if rest == candidate.name {
 			return "", candidate.field, true
 		}

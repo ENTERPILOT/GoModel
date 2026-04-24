@@ -144,7 +144,16 @@ Set these to automatically register providers. No YAML configuration required.
 | `VLLM_BASE_URL`      | vLLM (no API key needed unless upstream requires) |
 
 Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. vLLM defaults to `http://localhost:8000/v1` when `VLLM_API_KEY` is set, but keyless deployments should set `VLLM_BASE_URL` explicitly to register the provider. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
-When using Oracle, set `ORACLE_MODELS` to a comma-separated list such as `openai.gpt-oss-120b,xai.grok-3` if the upstream endpoint does not expose a usable `/models` response. YAML `models:` remains available for custom provider names and larger Oracle provider blocks.
+
+Every provider type also accepts a comma-separated configured model list via
+`<PROVIDER>_MODELS`, for example `OPENROUTER_MODELS`, `ORACLE_MODELS`,
+`AZURE_MODELS`, or `VLLM_MODELS`. By default,
+`CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses configured lists only when
+upstream `/models` fails, returns nil, or returns an empty list. Set
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models for
+providers that define a list and skip their upstream `/models` calls. YAML
+`providers.<name>.models` provides the same model-list input for named provider
+blocks.
 
 For OpenRouter, GoModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
 
@@ -252,7 +261,9 @@ export AZURE_API_KEY="..."           # Registers "azure" provider when paired wi
 export AZURE_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment"
 export ORACLE_API_KEY="..."          # Registers "oracle" provider when paired with ORACLE_BASE_URL
 export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1"
-export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Optional fallback inventory for Oracle
+export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Optional configured model list
+export OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4"
+export CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback or allowlist
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registers "ollama" provider
 export VLLM_BASE_URL="http://localhost:8000/v1" # Registers keyless "vllm" provider
 # Optional: export VLLM_API_KEY="token-abc123"
@@ -283,6 +294,11 @@ For more control (custom names, per-provider resilience, or larger structured
 settings), use the YAML file:
 
 ```yaml
+models:
+  # fallback is the default. Use allowlist when configured provider model lists
+  # should hide upstream models and skip upstream /models calls.
+  configured_provider_models_mode: fallback
+
 providers:
   # Override OpenAI base URL
   openai:
@@ -313,7 +329,7 @@ providers:
     # api_key is optional; set it only when vllm serve uses --api-key.
     # api_key: "token-abc123"
 
-  # Restrict to specific models
+  # Configure a model list for fallback or allowlist mode
   gemini:
     type: gemini
     api_key: "..."
@@ -323,15 +339,10 @@ providers:
 ```
 
 <Note>
-  For Oracle, give GoModel a fallback inventory with `ORACLE_MODELS` or
-  `models:`. `ORACLE_MODELS` is enough for the default single-provider setup;
-  use suffixed env vars such as `ORACLE_US_MODELS` for env-only multi-provider
-  setups. Use YAML when you need custom names or larger provider blocks.
-  See the [Oracle guide](/guides/oracle) for the required OCI policy and a
-  tested configuration. Automatic model discovery is not yet a reliable,
-  validated path for this provider: GoModel can try Oracle's OpenAI-compatible
-  `/models` endpoint, but Oracle may not return a usable inventory there.
-  OCI-native Oracle model discovery is not integrated yet.
+  `models:` works for every provider block. In fallback mode it is a safety net
+  when upstream `/models` is unavailable or empty. In allowlist mode it becomes
+  the exposed inventory for that provider and skips upstream `/models`. For Oracle, see the [Oracle
+  guide](/guides/oracle) for the required OCI policy and a tested configuration.
 </Note>
 
 ### Ollama (Local Models)

@@ -102,14 +102,20 @@ Example model identifiers are illustrative and subject to change; consult provid
 ✅ Supported ❌ Unsupported
 
 For Z.ai's GLM Coding Plan, set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
-For Oracle, set `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3` when the
-upstream `/models` endpoint is unavailable.
+Configured model lists are available for every provider with
+`<PROVIDER>_MODELS`, for example
+`OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` or
+`ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. By default,
+`CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses those lists only when upstream
+`/models` is unavailable or empty. Set `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`
+to expose only configured models for providers that define a list, skipping
+their upstream `/models` calls.
 For vLLM, set `VLLM_API_KEY` only if the upstream server was started with
 `--api-key`.
 To register multiple instances of the same provider type without `config.yaml`,
 use suffixed env vars such as `OPENAI_EAST_API_KEY` and
-`OPENAI_EAST_BASE_URL`; this registers provider `openai-east` with type
-`openai`.
+`OPENAI_EAST_BASE_URL`; add `OPENAI_EAST_MODELS` to configure that instance's
+model list. This registers provider `openai-east` with type `openai`.
 
 ---
 
