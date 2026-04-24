@@ -22,7 +22,9 @@
   <a href="https://news.ycombinator.com/item?id=47849097"><img alt="GoModel on Hacker News" src="https://hackerbadge.vercel.app/api?id=47849097"></a>
 </p>
 
-A fast and lightweight AI gateway written in Go, providing a unified OpenAI-compatible API for OpenAI, Anthropic, Gemini, xAI, Groq, OpenRouter, Z.ai, Azure OpenAI, Oracle, Ollama, and more.
+<p align="center">
+  A fast and lightweight AI gateway written in Go, providing a unified OpenAI-compatible API for OpenAI, Anthropic, Gemini, xAI, Groq, OpenRouter, Z.ai, Azure OpenAI, Oracle, Ollama, and more.
+</p>
 
 <a href="docs/dashboard.gif">
   <img src="docs/dashboard.gif" alt="GoModel AI gateway dashboard showing AI usage analytics, observability panel, token and costs tracking, and estimated cost monitoring" width="100%">
