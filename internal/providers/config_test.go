@@ -48,8 +48,7 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 		SupportsAPIVersion: true,
 	},
 	"oracle": {
-		RequireBaseURL:    true,
-		SupportsModelsEnv: true,
+		RequireBaseURL: true,
 	},
 	"ollama": {
 		DefaultBaseURL:  "http://localhost:11434/v1",
@@ -511,13 +510,20 @@ func TestApplyProviderEnvVars_DiscoversVLLMFromAPIKeyWithDefaultBaseURL(t *testi
 	}
 }
 
-func TestApplyProviderEnvVars_IgnoresVLLMModelsEnv(t *testing.T) {
+func TestApplyProviderEnvVars_DiscoversVLLMFromModelsEnv(t *testing.T) {
 	t.Setenv("VLLM_MODELS", "meta-llama/Llama-3.1-8B-Instruct")
 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
-	if _, exists := got["vllm"]; exists {
-		t.Fatal("expected VLLM_MODELS not to discover vllm provider")
+	p, exists := got["vllm"]
+	if !exists {
+		t.Fatal("expected VLLM_MODELS to discover keyless vllm provider")
+	}
+	if p.Type != "vllm" {
+		t.Fatalf("Type = %q, want vllm", p.Type)
+	}
+	if len(p.Models) != 1 || p.Models[0].ID != "meta-llama/Llama-3.1-8B-Instruct" {
+		t.Fatalf("Models = %v, want [meta-llama/Llama-3.1-8B-Instruct]", p.Models)
 	}
 }
 
@@ -565,6 +571,7 @@ func TestApplyProviderEnvVars_DiscoversSuffixedProvidersForEveryRegisteredType(t
 	for providerType, spec := range testDiscoveryConfigs {
 		prefix := envPrefix(providerType)
 		t.Setenv(prefix+"_EAST_API_KEY", "key-"+providerType)
+		t.Setenv(prefix+"_EAST_MODELS", "model-a-"+providerType+", model-b-"+providerType)
 		if spec.RequireBaseURL {
 			t.Setenv(prefix+"_EAST_BASE_URL", "https://"+providerType+".example.com/v1")
 		} else {
@@ -593,6 +600,9 @@ func TestApplyProviderEnvVars_DiscoversSuffixedProvidersForEveryRegisteredType(t
 			}
 		} else if spec.DefaultBaseURL != "" && p.BaseURL != spec.DefaultBaseURL {
 			t.Errorf("%s BaseURL = %q, want %q", name, p.BaseURL, spec.DefaultBaseURL)
+		}
+		if len(p.Models) != 2 || p.Models[0].ID != "model-a-"+providerType || p.Models[1].ID != "model-b-"+providerType {
+			t.Errorf("%s Models = %v, want [model-a-%s model-b-%s]", name, p.Models, providerType, providerType)
 		}
 	}
 }

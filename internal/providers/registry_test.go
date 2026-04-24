@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"gomodel/config"
 	"gomodel/internal/core"
 	"gomodel/internal/modeldata"
 )
@@ -132,6 +133,109 @@ func TestModelRegistry(t *testing.T) {
 
 		if registry.ModelCount() != 2 {
 			t.Errorf("expected 2 models, got %d", registry.ModelCount())
+		}
+	})
+
+	t.Run("ConfiguredModelsFallbackModeKeepsUpstreamWhenAvailable", func(t *testing.T) {
+		registry := NewModelRegistry()
+		mock := &registryMockProvider{
+			name: "test",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{ID: "configured-model", Object: "model", OwnedBy: "upstream"},
+					{ID: "upstream-extra", Object: "model", OwnedBy: "upstream"},
+				},
+			},
+		}
+		registry.RegisterProviderWithNameAndType(mock, "test", "test")
+		registry.SetProviderConfiguredModels("test", []string{"configured-model"})
+
+		err := registry.Initialize(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if registry.ModelCount() != 2 {
+			t.Fatalf("ModelCount() = %d, want 2", registry.ModelCount())
+		}
+		if !registry.Supports("upstream-extra") {
+			t.Fatal("expected fallback mode to keep upstream-extra when upstream models are available")
+		}
+	})
+
+	t.Run("ConfiguredModelsFallbackModeUsesConfiguredWhenUpstreamFails", func(t *testing.T) {
+		registry := NewModelRegistry()
+		mock := &registryMockProvider{
+			name: "test",
+			err:  errors.New("models unavailable"),
+		}
+		registry.RegisterProviderWithNameAndType(mock, "test", "test")
+		registry.SetProviderConfiguredModels("test", []string{" configured-model ", "configured-model", "fallback-only"})
+
+		err := registry.Initialize(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if registry.ModelCount() != 2 {
+			t.Fatalf("ModelCount() = %d, want 2", registry.ModelCount())
+		}
+		if !registry.Supports("configured-model") || !registry.Supports("fallback-only") {
+			t.Fatalf("expected configured fallback models to be registered, got %+v", registry.ListModels())
+		}
+		model := registry.GetModel("configured-model")
+		if model == nil {
+			t.Fatal("expected configured-model to resolve")
+		}
+		if model.Model.Object != "model" {
+			t.Fatalf("Object = %q, want model", model.Model.Object)
+		}
+		if model.Model.OwnedBy != "test" {
+			t.Fatalf("OwnedBy = %q, want test", model.Model.OwnedBy)
+		}
+	})
+
+	t.Run("ConfiguredModelsAllowlistModeFiltersAndAddsConfiguredModels", func(t *testing.T) {
+		registry := NewModelRegistry()
+		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeAllowlist)
+		mock := &registryMockProvider{
+			name: "test",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{ID: "configured-model", Object: "model", OwnedBy: "upstream", Created: 123},
+					{ID: "upstream-extra", Object: "model", OwnedBy: "upstream", Created: 456},
+				},
+			},
+		}
+		registry.RegisterProviderWithNameAndType(mock, "test", "test-type")
+		registry.SetProviderConfiguredModels("test", []string{"missing-configured", "configured-model"})
+
+		err := registry.Initialize(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if registry.ModelCount() != 2 {
+			t.Fatalf("ModelCount() = %d, want 2", registry.ModelCount())
+		}
+		if registry.Supports("upstream-extra") {
+			t.Fatal("expected allowlist mode to hide upstream-extra")
+		}
+		configured := registry.GetModel("configured-model")
+		if configured == nil {
+			t.Fatal("expected configured-model to resolve")
+		}
+		if configured.Model.Created != 123 || configured.Model.OwnedBy != "upstream" {
+			t.Fatalf("configured metadata = %+v, want upstream metadata preserved", configured.Model)
+		}
+		missing := registry.GetModel("missing-configured")
+		if missing == nil {
+			t.Fatal("expected missing-configured to be added")
+		}
+		if missing.Model.OwnedBy != "test-type" {
+			t.Fatalf("OwnedBy = %q, want test-type", missing.Model.OwnedBy)
 		}
 	})
 

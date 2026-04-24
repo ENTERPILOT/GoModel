@@ -15,6 +15,7 @@ server:
 models:
   enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an override allows one or more user paths
   overrides_enabled: true # env: MODEL_OVERRIDES_ENABLED; load/enforce persisted model overrides and enable dashboard editing
+  configured_provider_models_mode: "fallback" # env: CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models
 
 cache:
   model:
@@ -219,11 +220,17 @@ providers:
   #   base_url: "https://api.groq.com/openai/v1"
   #   api_key: "${GROQ_API_KEY}"
 
-  # Example: OpenRouter
+  # Example: OpenRouter with an explicit configured model list.
+  # In fallback mode (default), this list is used only if upstream /models is
+  # unavailable or empty. In allowlist mode, only these models are exposed.
+  # You can also set OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4".
   # openrouter:
   #   type: "openrouter"
   #   base_url: "https://openrouter.ai/api/v1"
   #   api_key: "${OPENROUTER_API_KEY}"
+  #   models:
+  #     - openai/gpt-oss-120b
+  #     - anthropic/claude-sonnet-4
 
   # Example: Azure OpenAI
   # azure:

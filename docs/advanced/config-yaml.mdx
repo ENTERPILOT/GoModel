@@ -14,6 +14,7 @@ especially:
 - per-provider resilience overrides
 - custom provider instance names that do not fit the generated
   `<provider-type>-<suffix>` env naming
+- richer reviewable provider model lists, especially when using allowlist mode
 - larger nested config that is easier to review in one file
 
 For multiple provider instances, env vars support
@@ -23,9 +24,11 @@ For multiple provider instances, env vars support
 `OLLAMA_A_BASE_URL` registers `ollama-a`. Azure also supports
 `<PROVIDER>_<SUFFIX>_API_VERSION`.
 
-For Oracle specifically, a single fallback model list can now stay in env via
-`ORACLE_MODELS`. Use suffixed env vars such as `ORACLE_US_MODELS` for multiple
-Oracle instances without YAML.
+Configured provider model lists can stay in env via `<PROVIDER>_MODELS`, for
+example `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, or `VLLM_MODELS`.
+Set `CONFIGURED_PROVIDER_MODELS_MODE=fallback` (default) to use those lists only
+when upstream `/models` fails or is empty, or `allowlist` to expose only the
+configured models for providers that define a list.
 
 ## Priority Order
 

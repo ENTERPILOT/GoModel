@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"gomodel/config"
 	"gomodel/internal/cache/modelcache"
 	"gomodel/internal/core"
 	"gomodel/internal/modeldata"
@@ -51,6 +52,11 @@ type ModelRegistry struct {
 	// instance name -> raw model ID. Applied after remote-registry enrichment as
 	// a higher-priority layer. nil if no overrides declared.
 	configMetadataOverrides map[string]map[string]*core.ModelMetadata
+	// configuredProviderModels holds operator-supplied model inventories keyed by
+	// configured provider instance name. The mode decides whether these entries
+	// are fallback-only or an allowlist over the discovered upstream inventory.
+	configuredProviderModels     map[string][]string
+	configuredProviderModelsMode config.ConfiguredProviderModelsMode
 
 	// Cached sorted slices, rebuilt lazily after models change.
 	// nil means cache needs rebuilding. Protected by mu.
@@ -76,12 +82,13 @@ func (s metadataEnrichmentStats) slogAttrs() []any {
 // NewModelRegistry creates a new model registry
 func NewModelRegistry() *ModelRegistry {
 	return &ModelRegistry{
-		models:           make(map[string]*ModelInfo),
-		modelsByProvider: make(map[string]map[string]*ModelInfo),
-		providerTypes:    make(map[core.Provider]string),
-		providerNames:    make(map[core.Provider]string),
-		providerRuntime:  make(map[string]providerRuntimeState),
-		refreshCh:        make(chan struct{}, 1),
+		models:                       make(map[string]*ModelInfo),
+		modelsByProvider:             make(map[string]map[string]*ModelInfo),
+		providerTypes:                make(map[core.Provider]string),
+		providerNames:                make(map[core.Provider]string),
+		providerRuntime:              make(map[string]providerRuntimeState),
+		refreshCh:                    make(chan struct{}, 1),
+		configuredProviderModelsMode: config.ConfiguredProviderModelsModeFallback,
 	}
 }
 
@@ -136,6 +143,34 @@ func (r *ModelRegistry) SetProviderMetadataOverrides(providerName string, overri
 		clone[k] = v.Clone()
 	}
 	r.configMetadataOverrides[providerName] = clone
+}
+
+// SetConfiguredProviderModelsMode controls how configured provider model lists
+// affect the final registry inventory.
+func (r *ModelRegistry) SetConfiguredProviderModelsMode(mode config.ConfiguredProviderModelsMode) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.configuredProviderModelsMode = config.ResolveConfiguredProviderModelsMode(mode)
+}
+
+// SetProviderConfiguredModels records the explicit model inventory declared for
+// a configured provider instance. Call with an empty/nil slice to clear it.
+func (r *ModelRegistry) SetProviderConfiguredModels(providerName string, models []string) {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return
+	}
+	normalized := normalizeConfiguredProviderModels(models)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(normalized) == 0 {
+		delete(r.configuredProviderModels, providerName)
+		return
+	}
+	if r.configuredProviderModels == nil {
+		r.configuredProviderModels = make(map[string][]string)
+	}
+	r.configuredProviderModels[providerName] = normalized
 }
 
 // RegisterProviderWithNameAndType adds a provider with a configured provider instance name and type.
@@ -195,6 +230,7 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 	maps.Copy(providerTypes, r.providerTypes)
 	maps.Copy(providerNames, r.providerNames)
 	r.mu.RUnlock()
+	configuredProviderModels, configuredProviderModelsMode := r.snapshotConfiguredProviderModels()
 
 	for _, provider := range providers {
 		providerName := providerNames[provider]
@@ -207,6 +243,30 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 
 		resp, err := provider.ListModels(ctx)
 		fetchAt := time.Now().UTC()
+		resp, configuredReason := applyConfiguredProviderModels(
+			providerName,
+			providerTypes[provider],
+			configuredProviderModelsMode,
+			configuredProviderModels[providerName],
+			resp,
+			err,
+		)
+		if configuredReason != configuredProviderModelsNotApplied {
+			attrs := []any{
+				"provider", providerName,
+				"reason", string(configuredReason),
+				"configured_models", len(configuredProviderModels[providerName]),
+			}
+			if err != nil {
+				attrs = append(attrs, "error", err)
+			}
+			if configuredReason == configuredProviderModelsAllowlist {
+				slog.Debug("using configured provider models", attrs...)
+			} else {
+				slog.Warn("using configured provider models", attrs...)
+			}
+			err = nil
+		}
 		if err != nil {
 			slog.Warn("failed to fetch models from provider",
 				"provider", providerName,
@@ -420,6 +480,14 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	r.mu.RLock()
 	nameToProvider := make(map[string]core.Provider, len(r.providerNames))
 	nameToProviderType := make(map[string]string, len(r.providerNames))
+	providerOrderNames := make([]string, 0, len(r.providers))
+	for _, provider := range r.providers {
+		providerName := r.providerNames[provider]
+		if providerName == "" {
+			continue
+		}
+		providerOrderNames = append(providerOrderNames, providerName)
+	}
 	for provider, pName := range r.providerNames {
 		nameToProvider[pName] = provider
 		nameToProviderType[pName] = r.providerTypes[provider]
@@ -458,6 +526,25 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 			}
 		}
 		newModelsByProvider[providerName] = providerModels
+	}
+
+	configuredProviderModels, configuredProviderModelsMode := r.snapshotConfiguredProviderModels()
+	if len(configuredProviderModels) > 0 {
+		for providerName, configuredModels := range configuredProviderModels {
+			provider, ok := nameToProvider[providerName]
+			if !ok {
+				continue
+			}
+			providerType := strings.TrimSpace(nameToProviderType[providerName])
+			providerModels := newModelsByProvider[providerName]
+			upstream := modelsResponseFromProviderMap(providerModels)
+			resp, reason := applyConfiguredProviderModels(providerName, providerType, configuredProviderModelsMode, configuredModels, upstream, nil)
+			if reason == configuredProviderModelsNotApplied {
+				continue
+			}
+			newModelsByProvider[providerName] = modelInfoMapFromResponse(resp, provider, providerName, providerType)
+		}
+		newModels = rebuildGlobalModelMap(newModelsByProvider, providerOrderNames)
 	}
 
 	// Load model list data from cache if available
@@ -1350,6 +1437,20 @@ func (r *ModelRegistry) snapshotConfigOverrides() map[string]map[string]*core.Mo
 		out[provider] = innerCopy
 	}
 	return out
+}
+
+func (r *ModelRegistry) snapshotConfiguredProviderModels() (map[string][]string, config.ConfiguredProviderModelsMode) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	mode := config.ResolveConfiguredProviderModelsMode(r.configuredProviderModelsMode)
+	if len(r.configuredProviderModels) == 0 {
+		return nil, mode
+	}
+	out := make(map[string][]string, len(r.configuredProviderModels))
+	for provider, models := range r.configuredProviderModels {
+		out[provider] = slices.Clone(models)
+	}
+	return out, mode
 }
 
 // collectionEmpty reports whether a reflect.Value representing a slice, array,
