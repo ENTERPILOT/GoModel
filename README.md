@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="https://gomodel.enterpilot.io/docs"><img alt="docs GoModel" src="https://img.shields.io/badge/Docs-GoModel-blue"></a>
   <a href="https://news.ycombinator.com/item?id=47849097"><img alt="Hacker News" src="https://img.shields.io/badge/Hacker%20News-Apr%2021%20%2726%20%7C%20%234-brightgreen?logo=ycombinator&logoColor=white"></a>
+  <a href="https://gomodel.enterpilot.io/docs"><img alt="docs GoModel" src="https://img.shields.io/badge/Docs-GoModel-blue"></a>
 </p>
 
 <p align="center">
