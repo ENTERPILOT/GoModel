@@ -50,3 +50,9 @@ repos:
         language: system
         pass_filenames: false
         files: '^(\.golangci\.yml|Makefile|\.github/workflows/test\.yml|.*\.go)$'
+      - id: mint-validate
+        name: mint validate
+        entry: bash -c 'if command -v mint >/dev/null 2>&1; then cd docs && mint validate; else echo "mint not found; skipping docs validation"; fi'
+        language: system
+        pass_filenames: false
+        files: '^(docs/(docs\.json|openapi\.json|.*\.(mdx|md|jsx|tsx|css|svg|png|jpg|jpeg|webp))|\.pre-commit-config\.yaml)$'
