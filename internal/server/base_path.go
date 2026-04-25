@@ -2,36 +2,22 @@ package server
 
 import (
 	"net/http"
-	"path"
 	"strings"
+
+	"gomodel/config"
 
 	"github.com/labstack/echo/v5"
 )
-
-func normalizeBasePath(value string) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" || trimmed == "/" {
-		return "/"
-	}
-	if !strings.HasPrefix(trimmed, "/") {
-		trimmed = "/" + trimmed
-	}
-	normalized := path.Clean(trimmed)
-	if normalized == "." || normalized == "/" {
-		return "/"
-	}
-	return normalized
-}
 
 func configuredBasePath(cfg *Config) string {
 	if cfg == nil {
 		return "/"
 	}
-	return normalizeBasePath(cfg.BasePath)
+	return config.NormalizeBasePath(cfg.BasePath)
 }
 
 func stripBasePathMiddleware(basePath string) echo.MiddlewareFunc {
-	basePath = normalizeBasePath(basePath)
+	basePath = config.NormalizeBasePath(basePath)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			if basePath == "/" {
@@ -60,7 +46,7 @@ func stripBasePathMiddleware(basePath string) echo.MiddlewareFunc {
 }
 
 func stripBasePath(requestPath, basePath string) (string, bool) {
-	basePath = normalizeBasePath(basePath)
+	basePath = config.NormalizeBasePath(basePath)
 	if basePath == "/" {
 		if requestPath == "" {
 			return "/", true

@@ -381,11 +381,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		} else {
 			serverCfg.AdminEndpointsEnabled = true
 			serverCfg.AdminHandler = adminHandler
-			slog.Info("admin API enabled", "api", appPath(appCfg.Server.BasePath, "/admin/api/v1"))
+			slog.Info("admin API enabled", "api", config.JoinBasePath(appCfg.Server.BasePath, "/admin/api/v1"))
 			if adminCfg.UIEnabled {
 				serverCfg.AdminUIEnabled = true
 				serverCfg.DashboardHandler = dashHandler
-				slog.Info("admin UI enabled", "url", fmt.Sprintf("http://localhost:%s%s", appCfg.Server.Port, appPath(appCfg.Server.BasePath, "/admin/dashboard")))
+				slog.Info("admin UI enabled", "url", fmt.Sprintf("http://localhost:%s%s", appCfg.Server.Port, config.JoinBasePath(appCfg.Server.BasePath, "/admin/dashboard")))
 			}
 		}
 	} else {
@@ -393,13 +393,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	if appCfg.Server.SwaggerEnabled {
-		slog.Info("swagger UI enabled", "path", appPath(appCfg.Server.BasePath, "/swagger/index.html"))
+		slog.Info("swagger UI enabled", "path", config.JoinBasePath(appCfg.Server.BasePath, "/swagger/index.html"))
 	}
 	if appCfg.Server.PprofEnabled {
-		slog.Info("pprof enabled", "path", appPath(appCfg.Server.BasePath, "/debug/pprof/"))
+		slog.Info("pprof enabled", "path", config.JoinBasePath(appCfg.Server.BasePath, "/debug/pprof/"))
 	}
 	if appCfg.Server.EnablePassthroughRoutes {
-		slog.Info("provider passthrough enabled", "path", appPath(appCfg.Server.BasePath, "/p/{provider}/{endpoint}"))
+		slog.Info("provider passthrough enabled", "path", config.JoinBasePath(appCfg.Server.BasePath, "/p/{provider}/{endpoint}"))
 	} else {
 		slog.Info("provider passthrough disabled")
 	}
@@ -809,24 +809,6 @@ func initAdmin(
 	}
 
 	return adminHandler, dashHandler, nil
-}
-
-func appPath(basePath, urlPath string) string {
-	basePath = config.NormalizeBasePath(basePath)
-	trimmedPath := strings.TrimSpace(urlPath)
-	if trimmedPath == "" || trimmedPath == "/" {
-		if basePath == "/" {
-			return "/"
-		}
-		return basePath
-	}
-	if !strings.HasPrefix(trimmedPath, "/") {
-		trimmedPath = "/" + trimmedPath
-	}
-	if basePath == "/" {
-		return trimmedPath
-	}
-	return basePath + trimmedPath
 }
 
 func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Definition, error) {

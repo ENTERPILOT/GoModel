@@ -117,10 +117,18 @@ spec:
           volumeMounts:
             - name: cache
               mountPath: /cache
+          {{- $livenessProbe := deepCopy .Values.livenessProbe }}
+          {{- if and $livenessProbe.httpGet $livenessProbe.httpGet.path }}
+          {{- $_ := set $livenessProbe.httpGet "path" (include "gomodel.pathWithBasePath" (dict "root" . "path" $livenessProbe.httpGet.path)) }}
+          {{- end }}
           livenessProbe:
-            {{- toYaml .Values.livenessProbe | nindent 12 }}
+            {{- toYaml $livenessProbe | nindent 12 }}
+          {{- $readinessProbe := deepCopy .Values.readinessProbe }}
+          {{- if and $readinessProbe.httpGet $readinessProbe.httpGet.path }}
+          {{- $_ := set $readinessProbe.httpGet "path" (include "gomodel.pathWithBasePath" (dict "root" . "path" $readinessProbe.httpGet.path)) }}
+          {{- end }}
           readinessProbe:
-            {{- toYaml .Values.readinessProbe | nindent 12 }}
+            {{- toYaml $readinessProbe | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:

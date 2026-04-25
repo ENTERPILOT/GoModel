@@ -10,8 +10,9 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"path"
 	"strings"
+
+	"gomodel/config"
 
 	"github.com/labstack/echo/v5"
 )
@@ -33,7 +34,7 @@ func New() (*Handler, error) {
 
 // NewWithBasePath creates a dashboard handler for an app mounted under basePath.
 func NewWithBasePath(basePath string) (*Handler, error) {
-	basePath = normalizeBasePath(basePath)
+	basePath = config.NormalizeBasePath(basePath)
 	assetVersions, err := buildAssetVersions("css/dashboard.css")
 	if err != nil {
 		return nil, err
@@ -44,7 +45,7 @@ func NewWithBasePath(basePath string) (*Handler, error) {
 			return assetURL(basePath, path, assetVersions)
 		},
 		"appURL": func(path string) string {
-			return appURL(basePath, path)
+			return config.JoinBasePath(basePath, path)
 		},
 	}).ParseFS(content, "templates/*.html")
 	if err != nil {
@@ -109,44 +110,11 @@ func buildAssetVersions(paths ...string) (map[string]string, error) {
 func assetURL(basePath, assetPath string, versions map[string]string) string {
 	normalizedPath := strings.TrimLeft(strings.TrimSpace(assetPath), "/")
 	if normalizedPath == "" {
-		return appURL(basePath, "/admin/static/")
+		return config.JoinBasePath(basePath, "/admin/static/")
 	}
-	urlPath := appURL(basePath, "/admin/static/"+normalizedPath)
+	urlPath := config.JoinBasePath(basePath, "/admin/static/"+normalizedPath)
 	if version := versions[normalizedPath]; version != "" {
 		return urlPath + "?v=" + version
 	}
 	return urlPath
-}
-
-func appURL(basePath, urlPath string) string {
-	basePath = normalizeBasePath(basePath)
-	trimmedPath := strings.TrimSpace(urlPath)
-	if trimmedPath == "" || trimmedPath == "/" {
-		if basePath == "/" {
-			return "/"
-		}
-		return basePath
-	}
-	if !strings.HasPrefix(trimmedPath, "/") {
-		trimmedPath = "/" + trimmedPath
-	}
-	if basePath == "/" {
-		return trimmedPath
-	}
-	return basePath + trimmedPath
-}
-
-func normalizeBasePath(value string) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" || trimmed == "/" {
-		return "/"
-	}
-	if !strings.HasPrefix(trimmed, "/") {
-		trimmed = "/" + trimmed
-	}
-	normalized := path.Clean(trimmed)
-	if normalized == "." || normalized == "/" {
-		return "/"
-	}
-	return normalized
 }

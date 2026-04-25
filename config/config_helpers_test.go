@@ -185,6 +185,29 @@ func TestNormalizeBasePath(t *testing.T) {
 	}
 }
 
+func TestJoinBasePath(t *testing.T) {
+	tests := []struct {
+		name     string
+		basePath string
+		urlPath  string
+		expected string
+	}{
+		{name: "root leaves absolute path unchanged", basePath: "/", urlPath: "/admin/api/v1", expected: "/admin/api/v1"},
+		{name: "root adds leading slash", basePath: "/", urlPath: "admin/api/v1", expected: "/admin/api/v1"},
+		{name: "prefixes normalized base path", basePath: "g/", urlPath: "/admin/api/v1", expected: "/g/admin/api/v1"},
+		{name: "empty app path resolves to base path", basePath: "/g", urlPath: "", expected: "/g"},
+		{name: "root app path resolves to base path", basePath: "/g", urlPath: "/", expected: "/g"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := JoinBasePath(tt.basePath, tt.urlPath); got != tt.expected {
+				t.Errorf("JoinBasePath(%q, %q) = %q, want %q", tt.basePath, tt.urlPath, got, tt.expected)
+			}
+		})
+	}
+}
+
 // TestApplyEnvOverrides tests the applyEnvOverrides function
 func TestApplyEnvOverrides(t *testing.T) {
 	tests := []struct {
