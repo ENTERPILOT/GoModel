@@ -1942,9 +1942,6 @@ func TestCacheOverview_ReturnsClientClosedWhenRequestIsCanceled(t *testing.T) {
 		CacheEnabled: "on",
 	}))
 	c, rec := newHandlerContext("/admin/api/v1/cache/overview?days=30")
-	ctx, cancel := context.WithCancel(c.Request().Context())
-	cancel()
-	c.SetRequest(c.Request().WithContext(ctx))
 
 	if err := h.CacheOverview(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1972,6 +1969,39 @@ func TestCacheOverview_ReturnsClientClosedWhenRequestIsCanceled(t *testing.T) {
 	}
 	if reader.lastCacheOverview.CacheMode != usage.CacheModeCached {
 		t.Fatalf("CacheMode = %q, want %q", reader.lastCacheOverview.CacheMode, usage.CacheModeCached)
+	}
+}
+
+func TestCacheOverview_ReturnsGatewayTimeoutWhenRequestDeadlineExceeded(t *testing.T) {
+	reader := &mockUsageReader{cacheErr: errors.Join(errors.New("failed to query cache overview summary"), context.DeadlineExceeded)}
+	h := NewHandler(reader, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
+		CacheEnabled: "on",
+	}))
+	c, rec := newHandlerContext("/admin/api/v1/cache/overview?days=30")
+
+	if err := h.CacheOverview(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected %d, got %d", http.StatusGatewayTimeout, rec.Code)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	errorBody, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error payload, got %v", body)
+	}
+	if got, ok := errorBody["type"].(string); !ok || got != string(core.ErrorTypeInvalidRequest) {
+		t.Fatalf("error.type = %#v, want %q", errorBody["type"], core.ErrorTypeInvalidRequest)
+	}
+	if got, ok := errorBody["message"].(string); !ok || got != "request timed out" {
+		t.Fatalf("error.message = %#v, want request timed out", errorBody["message"])
+	}
+	if got, ok := errorBody["code"].(string); !ok || got != "request_timeout" {
+		t.Fatalf("error.code = %#v, want request_timeout", errorBody["code"])
 	}
 }
 

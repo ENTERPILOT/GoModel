@@ -390,6 +390,12 @@ func handleError(c *echo.Context, err error) error {
 		logHandledAdminError(c, gatewayErr)
 		return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		gatewayErr := core.NewInvalidRequestErrorWithStatus(http.StatusGatewayTimeout, "request timed out", err).
+			WithCode("request_timeout")
+		logHandledAdminError(c, gatewayErr)
+		return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
+	}
 
 	fallback := &core.GatewayError{
 		Type:       "internal_error",
