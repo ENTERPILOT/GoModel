@@ -78,11 +78,11 @@ test("async label stays inline on the right side of the branch", () => {
   );
   assert.match(
     template,
-    /<div class="workflow-conn workflow-conn-async" x-show="workflow\.showUsage && workflow\.showAudit"><\/div>\s*<div class="workflow-node workflow-node-feature workflow-node-async workflow-node-async-audit" x-show="workflow\.showAudit" :class="workflow\.auditNodeClass">/,
+    /<div class="workflow-conn workflow-conn-async" x-show="chart\.showUsage && chart\.showAudit"><\/div>\s*<div class="workflow-node workflow-node-feature workflow-node-async workflow-node-async-audit" x-show="chart\.showAudit" :class="chart\.auditNodeClass">/,
   );
   assert.match(
     template,
-    /<div class="workflow-node workflow-node-feature workflow-node-async workflow-node-async-usage" x-show="workflow\.showUsage" :class="workflow\.usageNodeClass">/,
+    /<div class="workflow-node workflow-node-feature workflow-node-async workflow-node-async-usage" x-show="chart\.showUsage" :class="chart\.usageNodeClass">/,
   );
 
   const asyncLabelRule = readCSSRule(css, ".workflow-async-label");
@@ -296,8 +296,9 @@ test("workflow editor renders a live preview card from the draft workflow state"
   );
   assert.match(
     chartTemplate,
-    /{{define "workflow-chart"}}[\s\S]*x-data="\{ workflow: {{\.}} \|\| \{\} \}"[\s\S]*x-effect="workflow = {{\.}} \|\| \{\}"[\s\S]*<span class="workflow-node-label">Auth<\/span>[\s\S]*x-text="workflow\.authNodeSublabel"[\s\S]*x-show="workflow\.showGuardrails"[\s\S]*x-show="workflow\.showCache"[\s\S]*x-text="workflow\.aiLabel"[\s\S]*x-show="workflow\.showFailover"[\s\S]*x-text="workflow\.failoverTargetLabel"/,
+    /{{define "workflow-chart"}}[\s\S]*x-data="\{ chart: {{\.}} \|\| \{\} \}"[\s\S]*x-effect="chart = {{\.}} \|\| \{\}"[\s\S]*<span class="workflow-node-label">Auth<\/span>[\s\S]*x-text="chart\.authNodeSublabel"[\s\S]*x-show="chart\.showGuardrails"[\s\S]*x-show="chart\.showCache"[\s\S]*x-text="chart\.aiLabel"[\s\S]*x-show="chart\.showFailover"[\s\S]*x-text="chart\.failoverTargetLabel"/,
   );
+  assert.doesNotMatch(chartTemplate, /x-data="\{ workflow:/);
 });
 
 test("audit log pipeline binds cache visibility and runtime highlight classes across the full path", () => {
@@ -306,27 +307,27 @@ test("audit log pipeline binds cache visibility and runtime highlight classes ac
 
   assert.match(
     template,
-    /{{template "workflow-chart" "workflowAuditChart\(entry\)"}}[\s\S]*<div class="workflow-conn" x-show="workflow\.showCache" :class="workflow\.cacheConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-cache" x-show="workflow\.showCache" :class="workflow\.cacheNodeClass">[\s\S]*x-text="workflow\.cacheStatusLabel"[\s\S]*<div class="workflow-conn" x-show="workflow\.showFailover" :class="workflow\.failoverConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-failover" x-show="workflow\.showFailover" :class="workflow\.failoverNodeClass">[\s\S]*x-text="workflow\.failoverStatusLabel"[\s\S]*x-text="workflow\.failoverTargetLabel"/,
+    /{{template "workflow-chart" "workflowAuditChart\(entry\)"}}[\s\S]*<div class="workflow-conn" x-show="chart\.showCache" :class="chart\.cacheConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-cache" x-show="chart\.showCache" :class="chart\.cacheNodeClass">[\s\S]*x-text="chart\.cacheStatusLabel"[\s\S]*<div class="workflow-conn" x-show="chart\.showFailover" :class="chart\.failoverConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-failover" x-show="chart\.showFailover" :class="chart\.failoverNodeClass">[\s\S]*x-text="chart\.failoverStatusLabel"[\s\S]*x-text="chart\.failoverTargetLabel"/,
   );
   assert.match(
     template,
-    /:class="workflow\.authNodeClass"[\s\S]*x-show="workflow\.showGuardrails"[\s\S]*x-show="workflow\.showUsage"[\s\S]*x-show="workflow\.showAudit"/,
+    /:class="chart\.authNodeClass"[\s\S]*x-show="chart\.showGuardrails"[\s\S]*x-show="chart\.showUsage"[\s\S]*x-show="chart\.showAudit"/,
   );
   assert.match(
     template,
-    /<div class="workflow-conn" :class="workflow\.aiConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-ai" :class="workflow\.aiNodeClass">/,
+    /<div class="workflow-conn" :class="chart\.aiConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-ai" :class="chart\.aiNodeClass">/,
   );
   assert.match(
     template,
-    /<div class="workflow-pipeline" x-data="\{ workflow: {{\.}} \|\| \{\} \}" x-effect="workflow = {{\.}} \|\| \{\}" :class="\{ 'workflow-pipeline-has-meta': workflow\.workflowID \}">[\s\S]*<button type="button"[\s\S]*class="workflow-pipeline-meta workflow-pipeline-meta-copy mono"[\s\S]*x-show="workflow\.workflowID"[\s\S]*x-data="workflowIDChip\(workflow\.workflowID\)"[\s\S]*x-effect="setWorkflowID\(workflow\.workflowID\)"[\s\S]*@click\.prevent="copyWorkflowID\(\)"[\s\S]*<span class="workflow-pipeline-meta-label">id:<\/span>[\s\S]*<span class="workflow-pipeline-meta-placeholder">\.\.\.<\/span>[\s\S]*x-text="workflowID"/,
+    /<div class="workflow-pipeline" x-data="\{ chart: {{\.}} \|\| \{\} \}" x-effect="chart = {{\.}} \|\| \{\}" :class="\{ 'workflow-pipeline-has-meta': chart\.workflowID \}">[\s\S]*<button type="button"[\s\S]*class="workflow-pipeline-meta workflow-pipeline-meta-copy mono"[\s\S]*x-show="chart\.workflowID"[\s\S]*x-data="workflowIDChip\(chart\.workflowID\)"[\s\S]*x-effect="setWorkflowID\(chart\.workflowID\)"[\s\S]*@click\.prevent="copyWorkflowID\(\)"[\s\S]*<span class="workflow-pipeline-meta-label">id:<\/span>[\s\S]*<span class="workflow-pipeline-meta-placeholder">\.\.\.<\/span>[\s\S]*x-text="workflowID"/,
   );
   assert.match(
     template,
-    /<div class="workflow-conn" :class="workflow\.responseConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-endpoint" :class="workflow\.responseNodeClass">/,
+    /<div class="workflow-conn" :class="chart\.responseConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-endpoint" :class="chart\.responseNodeClass">/,
   );
   assert.doesNotMatch(
     template,
-    /<div class="workflow-pipeline-meta" x-show="workflow\.workflowID">/,
+    /<div class="workflow-pipeline-meta" x-show="chart\.workflowID">/,
   );
 
   const successRule = readCSSRule(css, ".workflow-node-success");
@@ -442,7 +443,7 @@ test("workflow pipeline main row is flattened without workflow-left or workflow-
   assert.doesNotMatch(template, /class="workflow-step"/);
   assert.match(
     template,
-    /<div class="workflow-pipeline-row">[\s\S]*<div class="workflow-node workflow-node-endpoint">[\s\S]*<div class="workflow-conn"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-auth"[\s\S]*<div class="workflow-conn" :class="workflow\.aiConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-ai" :class="workflow\.aiNodeClass">[\s\S]*<div class="workflow-conn" :class="workflow\.responseConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-endpoint" :class="workflow\.responseNodeClass">/,
+    /<div class="workflow-pipeline-row">[\s\S]*<div class="workflow-node workflow-node-endpoint">[\s\S]*<div class="workflow-conn"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-auth"[\s\S]*<div class="workflow-conn" :class="chart\.aiConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-ai" :class="chart\.aiNodeClass">[\s\S]*<div class="workflow-conn" :class="chart\.responseConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-endpoint" :class="chart\.responseNodeClass">/,
   );
   assert.doesNotMatch(css, /\.workflow-left\s*,/);
   assert.doesNotMatch(css, /\.workflow-right\s*\{/);
@@ -477,7 +478,7 @@ test("guardrails node only renders a sublabel when step detail exists", () => {
 
   assert.match(
     template,
-    /<span class="workflow-node-label">Guardrails<\/span>\s*<span class="workflow-node-sub" x-show="workflow\.guardrailLabel" x-text="workflow\.guardrailLabel"><\/span>/,
+    /<span class="workflow-node-label">Guardrails<\/span>\s*<span class="workflow-node-sub" x-show="chart\.guardrailLabel" x-text="chart\.guardrailLabel"><\/span>/,
   );
 });
 

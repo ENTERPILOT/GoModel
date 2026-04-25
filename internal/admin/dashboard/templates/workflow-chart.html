@@ -1,10 +1,10 @@
 {{define "workflow-chart"}}
-<div class="workflow-pipeline" x-data="{ workflow: {{.}} || {} }" x-effect="workflow = {{.}} || {}" :class="{ 'workflow-pipeline-has-meta': workflow.workflowID }">
+<div class="workflow-pipeline" x-data="{ chart: {{.}} || {} }" x-effect="chart = {{.}} || {}" :class="{ 'workflow-pipeline-has-meta': chart.workflowID }">
     <button type="button"
         class="workflow-pipeline-meta workflow-pipeline-meta-copy mono"
-        x-show="workflow.workflowID"
-        x-data="workflowIDChip(workflow.workflowID)"
-        x-effect="setWorkflowID(workflow.workflowID)"
+        x-show="chart.workflowID"
+        x-data="workflowIDChip(chart.workflowID)"
+        x-effect="setWorkflowID(chart.workflowID)"
         :class="{ 'workflow-pipeline-meta-copied': copyState.copied, 'workflow-pipeline-meta-error': copyState.error }"
         :title="copyTitle()"
         :aria-label="copyAriaLabel()"
@@ -25,69 +25,69 @@
         </div>
 
         <div class="workflow-conn"></div>
-        <div class="workflow-node workflow-node-feature workflow-node-auth" :class="workflow.authNodeClass">
+        <div class="workflow-node workflow-node-feature workflow-node-auth" :class="chart.authNodeClass">
             <div class="workflow-node-icon">
                 <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
             </div>
             <span class="workflow-node-label">Auth</span>
-            <span class="workflow-node-sub" x-show="workflow.authNodeSublabel" x-text="workflow.authNodeSublabel"></span>
+            <span class="workflow-node-sub" x-show="chart.authNodeSublabel" x-text="chart.authNodeSublabel"></span>
         </div>
 
-        <div class="workflow-conn" x-show="workflow.showGuardrails"></div>
-        <div class="workflow-node workflow-node-feature workflow-node-guardrails" x-show="workflow.showGuardrails">
+        <div class="workflow-conn" x-show="chart.showGuardrails"></div>
+        <div class="workflow-node workflow-node-feature workflow-node-guardrails" x-show="chart.showGuardrails">
             <div class="workflow-node-icon">
                 <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             </div>
             <span class="workflow-node-label">Guardrails</span>
-            <span class="workflow-node-sub" x-show="workflow.guardrailLabel" x-text="workflow.guardrailLabel"></span>
+            <span class="workflow-node-sub" x-show="chart.guardrailLabel" x-text="chart.guardrailLabel"></span>
         </div>
 
-        <div class="workflow-conn" x-show="workflow.showCache" :class="workflow.cacheConnClass"></div>
-        <div class="workflow-node workflow-node-feature workflow-node-cache" x-show="workflow.showCache" :class="workflow.cacheNodeClass">
+        <div class="workflow-conn" x-show="chart.showCache" :class="chart.cacheConnClass"></div>
+        <div class="workflow-node workflow-node-feature workflow-node-cache" x-show="chart.showCache" :class="chart.cacheNodeClass">
             <div class="workflow-node-icon">
                 <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
             </div>
             <span class="workflow-node-label">Cache</span>
-            <span class="workflow-node-badge" x-show="workflow.cacheStatusLabel" x-text="workflow.cacheStatusLabel"></span>
+            <span class="workflow-node-badge" x-show="chart.cacheStatusLabel" x-text="chart.cacheStatusLabel"></span>
         </div>
 
-        <div class="workflow-conn" :class="workflow.aiConnClass"></div>
+        <div class="workflow-conn" :class="chart.aiConnClass"></div>
 
-        <div class="workflow-node workflow-node-ai" :class="workflow.aiNodeClass">
-            <span class="workflow-node-label" x-text="workflow.aiLabel"></span>
-            <span class="workflow-node-sub" x-show="workflow.aiSublabel" x-text="workflow.aiSublabel"></span>
+        <div class="workflow-node workflow-node-ai" :class="chart.aiNodeClass">
+            <span class="workflow-node-label" x-text="chart.aiLabel"></span>
+            <span class="workflow-node-sub" x-show="chart.aiSublabel" x-text="chart.aiSublabel"></span>
         </div>
 
-        <div class="workflow-conn" x-show="workflow.showFailover" :class="workflow.failoverConnClass"></div>
-        <div class="workflow-node workflow-node-feature workflow-node-failover" x-show="workflow.showFailover" :class="workflow.failoverNodeClass">
+        <div class="workflow-conn" x-show="chart.showFailover" :class="chart.failoverConnClass"></div>
+        <div class="workflow-node workflow-node-feature workflow-node-failover" x-show="chart.showFailover" :class="chart.failoverNodeClass">
             <div class="workflow-node-icon">
                 <svg viewBox="0 0 24 24"><path d="M17 3h4v4"/><path d="M7 21H3v-4"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
             </div>
             <span class="workflow-node-label">Failover</span>
-            <span class="workflow-node-badge" x-show="workflow.failoverStatusLabel" x-text="workflow.failoverStatusLabel"></span>
-            <span class="workflow-node-sub" x-show="workflow.failoverTargetLabel" x-text="workflow.failoverTargetLabel"></span>
+            <span class="workflow-node-badge" x-show="chart.failoverStatusLabel" x-text="chart.failoverStatusLabel"></span>
+            <span class="workflow-node-sub" x-show="chart.failoverTargetLabel" x-text="chart.failoverTargetLabel"></span>
         </div>
 
-        <div class="workflow-conn" :class="workflow.responseConnClass"></div>
-        <div class="workflow-node workflow-node-endpoint" :class="workflow.responseNodeClass">
+        <div class="workflow-conn" :class="chart.responseConnClass"></div>
+        <div class="workflow-node workflow-node-endpoint" :class="chart.responseNodeClass">
             <div class="workflow-node-icon workflow-node-icon-endpoint">
                 <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
             </div>
             <span class="workflow-node-label">Response</span>
-            <span class="workflow-node-sub" x-show="workflow.responseNodeSublabel" x-text="workflow.responseNodeSublabel"></span>
+            <span class="workflow-node-sub" x-show="chart.responseNodeSublabel" x-text="chart.responseNodeSublabel"></span>
         </div>
     </div>
 
-    <div class="workflow-async-section" x-show="workflow.showAsync">
+    <div class="workflow-async-section" x-show="chart.showAsync">
         <div class="workflow-async-row">
-            <div class="workflow-node workflow-node-feature workflow-node-async workflow-node-async-usage" x-show="workflow.showUsage" :class="workflow.usageNodeClass">
+            <div class="workflow-node workflow-node-feature workflow-node-async workflow-node-async-usage" x-show="chart.showUsage" :class="chart.usageNodeClass">
                 <div class="workflow-node-icon">
                     <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
                 </div>
                 <span class="workflow-node-label">Usage</span>
             </div>
-            <div class="workflow-conn workflow-conn-async" x-show="workflow.showUsage && workflow.showAudit"></div>
-            <div class="workflow-node workflow-node-feature workflow-node-async workflow-node-async-audit" x-show="workflow.showAudit" :class="workflow.auditNodeClass">
+            <div class="workflow-conn workflow-conn-async" x-show="chart.showUsage && chart.showAudit"></div>
+            <div class="workflow-node workflow-node-feature workflow-node-async workflow-node-async-audit" x-show="chart.showAudit" :class="chart.auditNodeClass">
                 <div class="workflow-node-icon">
                     <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                 </div>
