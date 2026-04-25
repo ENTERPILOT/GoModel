@@ -823,6 +823,54 @@ func TestAuditLog_Success(t *testing.T) {
 	}
 }
 
+func TestAuditLog_EmitsRequestedModel(t *testing.T) {
+	now := time.Now().UTC()
+	reader := &mockAuditReader{
+		logResult: &auditlog.LogListResult{
+			Entries: []auditlog.LogEntry{
+				{
+					ID:             "log-1",
+					Timestamp:      now,
+					RequestedModel: "does-not-exist-model",
+					StatusCode:     http.StatusBadRequest,
+					RequestID:      "req-1",
+					Method:         http.MethodPost,
+					Path:           "/v1/chat/completions",
+					ErrorType:      string(core.ErrorTypeInvalidRequest),
+				},
+			},
+			Total:  1,
+			Limit:  25,
+			Offset: 0,
+		},
+	}
+
+	h := NewHandler(nil, nil, WithAuditReader(reader))
+	c, rec := newHandlerContext("/admin/api/v1/audit/log?search=req-1")
+
+	if err := h.AuditLog(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result struct {
+		Entries []struct {
+			RequestedModel string `json:"requested_model"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(result.Entries))
+	}
+	if result.Entries[0].RequestedModel != "does-not-exist-model" {
+		t.Fatalf("requested_model = %q, want does-not-exist-model", result.Entries[0].RequestedModel)
+	}
+}
+
 func TestAuditLog_EnrichesEntriesWithUsageSummary(t *testing.T) {
 	now := time.Now().UTC()
 	usageReader := &mockUsageReader{
