@@ -1,16 +1,13 @@
 (function(global) {
-function dashboardUsageModule() {
-    function dashboardModulePath(path) {
-        if (typeof dashboardPath === 'function') {
-            return dashboardPath(path);
+    function dashboardUsageModule() {
+        function dashboardModulePath(path) {
+            if (typeof window !== 'undefined' && typeof window.gomodelPath === 'function') {
+                return window.gomodelPath(path);
+            }
+            return path;
         }
-        if (typeof window !== 'undefined' && typeof window.gomodelPath === 'function') {
-            return window.gomodelPath(path);
-        }
-        return path;
-    }
 
-    return {
+        return {
             emptyUsageSummary() {
                 return {
                     total_requests: 0,

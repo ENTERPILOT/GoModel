@@ -147,7 +147,7 @@ metrics:
   serviceMonitor:
     # -- Create a ServiceMonitor for Prometheus Operator
     enabled: false
-    # If server.basePath is not "/", include the same prefix in metrics.endpoint.
+    # ServiceMonitor path is automatically prefixed with server.basePath.
     # -- Scrape interval
     interval: "15s"
     # -- Additional labels for the ServiceMonitor
@@ -233,7 +233,7 @@ podDisruptionBudget:
   # maxUnavailable: 1
 
 # Liveness probe configuration
-# If server.basePath is not "/", include the same prefix in the probe path.
+# httpGet.path is automatically prefixed with server.basePath.
 livenessProbe:
   httpGet:
     path: /health
@@ -244,7 +244,7 @@ livenessProbe:
   failureThreshold: 3
 
 # Readiness probe configuration
-# If server.basePath is not "/", include the same prefix in the probe path.
+# httpGet.path is automatically prefixed with server.basePath.
 readinessProbe:
   httpGet:
     path: /health

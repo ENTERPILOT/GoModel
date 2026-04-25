@@ -93,6 +93,53 @@ Create the image reference
 {{- end }}
 
 {{/*
+Normalize the public base path used by the application.
+*/}}
+{{- define "gomodel.basePath" -}}
+{{- $basePath := trim (default "/" .Values.server.basePath) -}}
+{{- if or (eq $basePath "") (eq $basePath "/") -}}
+/
+{{- else -}}
+{{- if not (hasPrefix "/" $basePath) -}}
+{{- $basePath = printf "/%s" $basePath -}}
+{{- end -}}
+{{- $basePath = clean $basePath -}}
+{{- if or (eq $basePath ".") (eq $basePath "/") -}}
+/
+{{- else -}}
+{{- $basePath -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Prefix an application path with server.basePath unless it is already prefixed.
+*/}}
+{{- define "gomodel.pathWithBasePath" -}}
+{{- $root := .root -}}
+{{- $path := trim (default "/" .path) -}}
+{{- if or (eq $path "") (eq $path "/") -}}
+{{- $path = "/" -}}
+{{- else if not (hasPrefix "/" $path) -}}
+{{- $path = printf "/%s" $path -}}
+{{- end -}}
+{{- $basePath := include "gomodel.basePath" $root -}}
+{{- if eq $path "/" -}}
+{{- if eq $basePath "/" -}}
+{{- $path -}}
+{{- else -}}
+{{- $basePath -}}
+{{- end -}}
+{{- else if eq $basePath "/" -}}
+{{- $path -}}
+{{- else if or (eq $path $basePath) (hasPrefix (printf "%s/" $basePath) $path) -}}
+{{- $path -}}
+{{- else -}}
+{{- printf "%s%s" $basePath $path -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Generate provider API key entries for the Secret stringData.
 */}}
 {{- define "gomodel.providerSecretData" -}}

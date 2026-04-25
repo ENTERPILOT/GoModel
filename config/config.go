@@ -871,6 +871,25 @@ func NormalizeBasePath(value string) string {
 	return normalized
 }
 
+// JoinBasePath prefixes urlPath with the normalized public mount path.
+func JoinBasePath(basePath, urlPath string) string {
+	basePath = NormalizeBasePath(basePath)
+	trimmedPath := strings.TrimSpace(urlPath)
+	if trimmedPath == "" || trimmedPath == "/" {
+		if basePath == "/" {
+			return "/"
+		}
+		return basePath
+	}
+	if !strings.HasPrefix(trimmedPath, "/") {
+		trimmedPath = "/" + trimmedPath
+	}
+	if basePath == "/" {
+		return trimmedPath
+	}
+	return basePath + trimmedPath
+}
+
 // MetricsConfig holds observability configuration for Prometheus metrics
 type MetricsConfig struct {
 	// Enabled controls whether Prometheus metrics are collected and exposed
