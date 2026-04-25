@@ -280,16 +280,19 @@ func providerErrorMetadataRaw(raw json.RawMessage) string {
 	return jsonString(metadata["raw"])
 }
 
+// shouldPreferProviderRaw handles OpenRouter wrapper errors: OpenRouter can
+// return a generic "Provider returned ..." message while placing the useful
+// upstream provider detail in metadata.raw. Use a tolerant prefix match so
+// small wording or punctuation changes still surface the actionable message.
 func shouldPreferProviderRaw(message, raw string) bool {
 	if strings.TrimSpace(raw) == "" {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(message)) {
-	case "", "provider returned error":
+	normalizedMessage := strings.ToLower(strings.TrimSpace(message))
+	if normalizedMessage == "" || strings.HasPrefix(normalizedMessage, "provider returned") {
 		return true
-	default:
-		return false
 	}
+	return false
 }
 
 func jsonString(raw json.RawMessage) string {

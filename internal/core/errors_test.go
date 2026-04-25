@@ -384,19 +384,72 @@ func TestParseProviderError(t *testing.T) {
 	}
 }
 
-func TestParseProviderError_OpenRouterNumericCodeUsesMetadataRaw(t *testing.T) {
-	body := []byte(`{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly.","provider_name":"Together","is_byok":false,"retry_after_seconds":1}},"user_id":"user_34xtJN3FV8S4Jdq3UNuWa0n9RAh"}`)
-
-	err := ParseProviderError("openrouter", http.StatusTooManyRequests, body, nil)
-
-	if err.Type != ErrorTypeRateLimit {
-		t.Fatalf("Type = %v, want %v", err.Type, ErrorTypeRateLimit)
+func TestParseProviderError_OpenRouter_TableDriven(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        []byte
+		wantType    ErrorType
+		wantMessage string
+		wantCode    *string
+	}{
+		{
+			name:        "numeric code without metadata raw preserves message",
+			body:        []byte(`{"error":{"message":"Provider returned error","code":429,"metadata":{"provider_name":"Together","is_byok":false,"retry_after_seconds":1}},"user_id":"user_test_123"}`),
+			wantType:    ErrorTypeRateLimit,
+			wantMessage: "Provider returned error",
+			wantCode:    stringPointer("429"),
+		},
+		{
+			name:        "metadata raw with non generic message preserves original message",
+			body:        []byte(`{"error":{"message":"The selected provider rejected the request","code":"rate_limit_exceeded","metadata":{"raw":"deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly.","provider_name":"Together"}},"user_id":"user_test_123"}`),
+			wantType:    ErrorTypeRateLimit,
+			wantMessage: "The selected provider rejected the request",
+			wantCode:    stringPointer("rate_limit_exceeded"),
+		},
+		{
+			name:        "empty message with metadata raw uses raw and numeric code",
+			body:        []byte(`{"error":{"message":"","code":429,"metadata":{"raw":"deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly.","provider_name":"Together","is_byok":false,"retry_after_seconds":1}},"user_id":"user_test_123"}`),
+			wantType:    ErrorTypeRateLimit,
+			wantMessage: "deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly.",
+			wantCode:    stringPointer("429"),
+		},
+		{
+			name:        "provider returned prefix with metadata raw uses raw",
+			body:        []byte(`{"error":{"message":"Provider returned an error: upstream rejected the request","code":429,"metadata":{"raw":"deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly.","provider_name":"Together"}},"user_id":"user_test_123"}`),
+			wantType:    ErrorTypeRateLimit,
+			wantMessage: "deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly.",
+			wantCode:    stringPointer("429"),
+		},
+		{
+			name:        "malformed metadata falls back to parsed message and numeric code",
+			body:        []byte(`{"error":{"message":"Provider returned error","code":429,"metadata":"not an object"},"user_id":"user_test_123"}`),
+			wantType:    ErrorTypeRateLimit,
+			wantMessage: "Provider returned error",
+			wantCode:    stringPointer("429"),
+		},
+		{
+			name:        "missing metadata and object code falls back without code",
+			body:        []byte(`{"error":{"message":"Provider returned error","code":{"status":429}},"user_id":"user_test_123"}`),
+			wantType:    ErrorTypeRateLimit,
+			wantMessage: "Provider returned error",
+			wantCode:    nil,
+		},
 	}
-	if err.Message != "deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly." {
-		t.Fatalf("Message = %q", err.Message)
-	}
-	if err.Code == nil || *err.Code != "429" {
-		t.Fatalf("Code = %v, want 429", err.Code)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ParseProviderError("openrouter", http.StatusTooManyRequests, tt.body, nil)
+
+			if err.Type != tt.wantType {
+				t.Fatalf("Type = %v, want %v", err.Type, tt.wantType)
+			}
+			if err.Message != tt.wantMessage {
+				t.Fatalf("Message = %q, want %q", err.Message, tt.wantMessage)
+			}
+			if !equalStringPointers(err.Code, tt.wantCode) {
+				t.Fatalf("Code = %v, want %v", err.Code, tt.wantCode)
+			}
+		})
 	}
 }
 
@@ -409,6 +462,10 @@ func equalStringPointers(a, b *string) bool {
 	default:
 		return *a == *b
 	}
+}
+
+func stringPointer(value string) *string {
+	return &value
 }
 
 func TestGatewayError_AsError(t *testing.T) {
