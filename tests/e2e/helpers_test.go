@@ -145,11 +145,14 @@ type StreamChunk struct {
 	Done    bool
 }
 
+const sseScannerMaxTokenSize = 4 * 1024 * 1024
+
 // readStreamingResponse reads and parses SSE streaming response for chat completions.
 func readStreamingResponse(t *testing.T, body io.Reader) []StreamChunk {
 	t.Helper()
 	chunks := make([]StreamChunk, 0)
 	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), sseScannerMaxTokenSize)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -184,6 +187,7 @@ func readResponsesStream(t *testing.T, body io.Reader) []ResponsesStreamEvent {
 	t.Helper()
 	events := make([]ResponsesStreamEvent, 0)
 	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), sseScannerMaxTokenSize)
 
 	var currentEvent ResponsesStreamEvent
 	for scanner.Scan() {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,8 +30,10 @@ type e2eServerOptions struct {
 }
 
 type e2eUsageFixture struct {
-	reader usage.UsageReader
-	logger *usage.Logger
+	reader    usage.UsageReader
+	logger    *usage.Logger
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // setupAuthServer creates a new server instance with authentication enabled.
@@ -46,22 +49,21 @@ func setupAuthServer(t *testing.T, masterKey string) *server.Server {
 func setupAdminServer(t *testing.T, masterKey string, endpointsEnabled, uiEnabled bool) *httptest.Server {
 	t.Helper()
 
-	srv := setupE2EServer(t, e2eServerOptions{
+	opts := e2eServerOptions{
 		masterKey:             masterKey,
 		adminEndpointsEnabled: endpointsEnabled,
 		adminUIEnabled:        uiEnabled,
-		providerType:          "test",
-	})
-	return httptest.NewServer(srv)
+	}
+	if endpointsEnabled {
+		return setupE2EAdminServer(t, opts)
+	}
+	return httptest.NewServer(setupE2EServer(t, opts))
 }
 
 func setupE2EAdminServer(t *testing.T, opts e2eServerOptions) *httptest.Server {
 	t.Helper()
 
 	opts.adminEndpointsEnabled = true
-	if opts.providerType == "" {
-		opts.providerType = "test"
-	}
 	return httptest.NewServer(setupE2EServer(t, opts))
 }
 
@@ -95,13 +97,13 @@ func setupE2EServer(t *testing.T, opts e2eServerOptions) *server.Server {
 func setupE2ERegistry(t *testing.T, providerType string) *providers.ModelRegistry {
 	t.Helper()
 
+	if providerType == "" {
+		providerType = "test"
+	}
+
 	testProvider := NewTestProvider(mockLLMURL, "sk-test-key-12345")
 	registry := providers.NewModelRegistry()
-	if providerType == "" {
-		registry.RegisterProvider(testProvider)
-	} else {
-		registry.RegisterProviderWithType(testProvider, providerType)
-	}
+	registry.RegisterProviderWithType(testProvider, providerType)
 
 	require.NoError(t, registry.Initialize(context.Background()), "failed to initialize registry")
 	return registry
@@ -128,18 +130,23 @@ func setupSQLiteUsageFixture(t *testing.T) *e2eUsageFixture {
 	cfg.BufferSize = 10
 	cfg.FlushInterval = time.Hour
 	logger := usage.NewLogger(store, cfg)
-	t.Cleanup(func() {
-		require.NoError(t, logger.Close())
-	})
 
-	return &e2eUsageFixture{
+	fixture := &e2eUsageFixture{
 		reader: reader,
 		logger: logger,
 	}
+	t.Cleanup(func() {
+		fixture.flush(t)
+	})
+
+	return fixture
 }
 
 func (f *e2eUsageFixture) flush(t *testing.T) {
 	t.Helper()
 
-	require.NoError(t, f.logger.Close())
+	f.closeOnce.Do(func() {
+		f.closeErr = f.logger.Close()
+	})
+	require.NoError(t, f.closeErr)
 }

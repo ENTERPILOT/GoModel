@@ -179,6 +179,20 @@ func TestAdminAPI_ModelsEndpoint_E2E(t *testing.T) {
 }
 
 func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
+	const (
+		expectedRequests                         = 2
+		mockProviderInputTokensPerRequest  int64 = 10
+		mockProviderOutputTokensPerRequest int64 = 20
+		expectedInputTokens                      = mockProviderInputTokensPerRequest * expectedRequests
+		expectedOutputTokens                     = mockProviderOutputTokensPerRequest * expectedRequests
+		expectedTotalTokens                      = expectedInputTokens + expectedOutputTokens
+	)
+
+	// Mock provider usage is 10 input + 20 output tokens per request, and this test sends 2 requests.
+	requestDate := time.Now().UTC()
+	today := requestDate.Format("2006-01-02")
+	yesterday := requestDate.Add(-24 * time.Hour).Format("2006-01-02")
+
 	usageFixture := setupSQLiteUsageFixture(t)
 	ts := setupE2EAdminServer(t, e2eServerOptions{
 		adminUsageReader: usageFixture.reader,
@@ -186,7 +200,7 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 	})
 	defer ts.Close()
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < expectedRequests; i++ {
 		resp := sendJSONRequest(t, ts.URL+chatCompletionsPath, defaultChatReq("Hello usage"))
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		closeBody(resp)
@@ -202,10 +216,10 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 
 		var summary usage.UsageSummary
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&summary))
-		assert.Equal(t, 2, summary.TotalRequests)
-		assert.Equal(t, int64(20), summary.TotalInput)
-		assert.Equal(t, int64(40), summary.TotalOutput)
-		assert.Equal(t, int64(60), summary.TotalTokens)
+		assert.Equal(t, expectedRequests, summary.TotalRequests)
+		assert.Equal(t, expectedInputTokens, summary.TotalInput)
+		assert.Equal(t, expectedOutputTokens, summary.TotalOutput)
+		assert.Equal(t, expectedTotalTokens, summary.TotalTokens)
 	})
 
 	t.Run("daily includes persisted usage", func(t *testing.T) {
@@ -222,19 +236,18 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 		require.NoError(t, json.Unmarshal(body, &daily))
 		require.NotEmpty(t, daily)
 
-		today := time.Now().UTC().Format("2006-01-02")
 		var todayEntry *usage.DailyUsage
 		for i := range daily {
-			if daily[i].Date == today {
+			if daily[i].Date == today || daily[i].Date == yesterday {
 				todayEntry = &daily[i]
 				break
 			}
 		}
-		require.NotNil(t, todayEntry, "expected daily usage entry for %s", today)
-		assert.Equal(t, 2, todayEntry.Requests)
-		assert.Equal(t, int64(20), todayEntry.InputTokens)
-		assert.Equal(t, int64(40), todayEntry.OutputTokens)
-		assert.Equal(t, int64(60), todayEntry.TotalTokens)
+		require.NotNil(t, todayEntry, "expected daily usage entry for %s or %s", today, yesterday)
+		assert.Equal(t, expectedRequests, todayEntry.Requests)
+		assert.Equal(t, expectedInputTokens, todayEntry.InputTokens)
+		assert.Equal(t, expectedOutputTokens, todayEntry.OutputTokens)
+		assert.Equal(t, expectedTotalTokens, todayEntry.TotalTokens)
 	})
 
 	t.Run("query params accepted", func(t *testing.T) {
