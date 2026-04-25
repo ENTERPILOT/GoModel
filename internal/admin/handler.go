@@ -59,6 +59,9 @@ const (
 	DashboardConfigSemanticCacheEnabled = "SEMANTIC_CACHE_ENABLED"
 )
 
+// statusClientClosedRequest is the de facto status used by proxies for client-aborted requests.
+const statusClientClosedRequest = 499
+
 // DashboardConfigResponse is the allowlisted runtime config contract exposed to the dashboard UI.
 type DashboardConfigResponse struct {
 	FeatureFallbackMode  string `json:"FEATURE_FALLBACK_MODE,omitempty"`
@@ -381,6 +384,13 @@ func handleError(c *echo.Context, err error) error {
 		return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 	}
 
+	if errors.Is(err, context.Canceled) {
+		gatewayErr := core.NewInvalidRequestErrorWithStatus(statusClientClosedRequest, "request canceled", err).
+			WithCode("request_canceled")
+		logHandledAdminError(c, gatewayErr)
+		return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
+	}
+
 	fallback := &core.GatewayError{
 		Type:       "internal_error",
 		Message:    "an unexpected error occurred",
@@ -424,7 +434,12 @@ func logHandledAdminError(c *echo.Context, gatewayErr *core.GatewayError) {
 		}
 	}
 
-	if gatewayErr.HTTPStatusCode() >= http.StatusInternalServerError {
+	status := gatewayErr.HTTPStatusCode()
+	if status == statusClientClosedRequest {
+		slog.Debug("admin request canceled", attrs...)
+		return
+	}
+	if status >= http.StatusInternalServerError {
 		slog.Error("admin request failed", attrs...)
 		return
 	}
