@@ -3,11 +3,9 @@ package openai
 import (
 	"context"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
@@ -17,27 +15,24 @@ import (
 type RequestMutator func(*llmclient.Request)
 
 type CompatibleProviderConfig struct {
-	ProviderName       string
-	BaseURL            string
-	SetHeaders         func(*http.Request, string)
-	RequestMutator     RequestMutator
-	ConfiguredModels   []string
+	ProviderName   string
+	BaseURL        string
+	SetHeaders     func(*http.Request, string)
+	RequestMutator RequestMutator
 }
 
 type CompatibleProvider struct {
-	client             *llmclient.Client
-	apiKey             string
-	providerName       string
-	requestMutator     RequestMutator
-	configuredModels   []string
+	client         *llmclient.Client
+	apiKey         string
+	providerName   string
+	requestMutator RequestMutator
 }
 
 func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg CompatibleProviderConfig) *CompatibleProvider {
 	p := &CompatibleProvider{
-		apiKey:           apiKey,
-		providerName:     cfg.ProviderName,
-		requestMutator:   cfg.RequestMutator,
-		configuredModels: normalizeConfiguredModels(cfg.ConfiguredModels),
+		apiKey:         apiKey,
+		providerName:   cfg.ProviderName,
+		requestMutator: cfg.RequestMutator,
 	}
 	clientCfg := llmclient.Config{
 		ProviderName:   cfg.ProviderName,
@@ -59,10 +54,9 @@ func NewCompatibleProviderWithHTTPClient(apiKey string, httpClient *http.Client,
 		httpClient = http.DefaultClient
 	}
 	p := &CompatibleProvider{
-		apiKey:           apiKey,
-		providerName:     cfg.ProviderName,
-		requestMutator:   cfg.RequestMutator,
-		configuredModels: normalizeConfiguredModels(cfg.ConfiguredModels),
+		apiKey:         apiKey,
+		providerName:   cfg.ProviderName,
+		requestMutator: cfg.RequestMutator,
 	}
 	clientCfg := llmclient.DefaultConfig(cfg.ProviderName, cfg.BaseURL)
 	clientCfg.Hooks = hooks
@@ -133,53 +127,6 @@ func (p *CompatibleProvider) StreamChatCompletion(ctx context.Context, req *core
 }
 
 func (p *CompatibleProvider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	if len(p.configuredModels) == 0 {
-		return p.doListModels(ctx)
-	}
-
-	resp, err := p.doListModels(ctx)
-	if err != nil {
-		slog.Warn("openai-compatible upstream ListModels failed, using configured models fallback",
-			"provider", p.providerName,
-			"error", err,
-			"configured_models", len(p.configuredModels),
-		)
-	}
-
-	byID := make(map[string]core.Model, len(p.configuredModels))
-	if resp != nil {
-		for _, model := range resp.Data {
-			byID[strings.TrimSpace(model.ID)] = model
-		}
-	}
-
-	data := make([]core.Model, 0, len(p.configuredModels))
-	for _, modelID := range p.configuredModels {
-		model, ok := byID[modelID]
-		if !ok {
-			model = core.Model{
-				ID:      modelID,
-				Object:  "model",
-				OwnedBy: p.providerName,
-			}
-		} else {
-			if strings.TrimSpace(model.Object) == "" {
-				model.Object = "model"
-			}
-			if strings.TrimSpace(model.OwnedBy) == "" {
-				model.OwnedBy = p.providerName
-			}
-		}
-		data = append(data, model)
-	}
-
-	return &core.ModelsResponse{
-		Object: "list",
-		Data:   data,
-	}, nil
-}
-
-func (p *CompatibleProvider) doListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	var resp core.ModelsResponse
 	err := p.Do(ctx, llmclient.Request{
 		Method:   http.MethodGet,
@@ -544,29 +491,4 @@ func responseInputItemsEndpoint(id string, params core.ResponseInputItemsParams)
 		endpoint += "?" + encoded
 	}
 	return endpoint
-}
-
-// normalizeConfiguredModels deduplicates and trims model names.
-func normalizeConfiguredModels(models []string) []string {
-	if len(models) == 0 {
-		return nil
-	}
-
-	seen := make(map[string]struct{}, len(models))
-	normalized := make([]string, 0, len(models))
-	for _, model := range models {
-		model = strings.TrimSpace(model)
-		if model == "" {
-			continue
-		}
-		if _, exists := seen[model]; exists {
-			continue
-		}
-		seen[model] = struct{}{}
-		normalized = append(normalized, model)
-	}
-	if len(normalized) == 0 {
-		return nil
-	}
-	return normalized
 }
