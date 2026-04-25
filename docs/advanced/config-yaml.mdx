@@ -74,3 +74,27 @@ services:
   If env vars and YAML both define the same setting, the environment variable
   wins.
 </Tip>
+
+## Gotchas
+
+### Unresolved `${VAR}` placeholders drop the provider
+
+If `${OPENAI_API_KEY}` appears in YAML but the env var is not actually set, the
+literal string `${OPENAI_API_KEY}` ends up as the API key value. The credential
+filter detects the `${` prefix and removes the provider entirely. Always verify
+your env vars are exported before starting the process, or supply a default:
+`${OPENAI_API_KEY:-}`.
+
+### Per-provider resilience can only come from YAML
+
+The env-var override walk skips `map` fields. `RETRY_MAX_RETRIES` changes the
+global default for all providers but cannot target a single provider.
+Per-provider tuning requires a `providers.<name>.resilience:` block in
+`config.yaml`.
+
+### Partial YAML leaves the rest at defaults
+
+YAML is unmarshalled onto a struct that has already been populated with
+built-in defaults. Only fields that appear in the file are written. Omitting
+`max_backoff` from `resilience.retry` leaves it at its built-in default; you do
+not need to repeat defaults you are happy with.

@@ -1,12 +1,24 @@
-# Prometheus Metrics Configuration Guide
+---
+title: "Prometheus Metrics"
+description: "Configure and scrape GoModel's Prometheus metrics endpoint."
+icon: "chart-line"
+---
 
-This guide explains how to configure Prometheus metrics in GoModel.
+<Warning>
+  Prometheus support is **experimental**. The metric names, labels, and
+  configuration surface may change without notice. Pin to a specific GoModel
+  version if you depend on a stable schema.
+</Warning>
+
+This guide explains how to configure the experimental Prometheus metrics
+endpoint in GoModel.
 
 ## Quick Start
 
 ### Disabled by Default
 
-Metrics are **disabled by default**. To enable metrics collection, set `METRICS_ENABLED=true` and start GoModel:
+Metrics are **disabled by default**. To enable metrics collection, set
+`METRICS_ENABLED=true` and start GoModel:
 
 ```bash
 export METRICS_ENABLED=true
@@ -60,7 +72,7 @@ export METRICS_ENDPOINT=/internal/prometheus
 ```yaml
 metrics:
   # Enable or disable Prometheus metrics collection
-  # When disabled, no metrics are collected and endpoint returns 404
+  # When disabled, no metrics are collected and the endpoint returns 404
   enabled: true
 
   # HTTP endpoint path where metrics are exposed
@@ -154,15 +166,18 @@ curl http://localhost:8080/metrics
 
 ### Metrics Disabled
 
-- **Zero overhead**: No hooks registered, no collection
-- Metrics library is still linked but inactive
+- **Zero overhead**: no hooks registered, no collection
+- The metrics library is still linked but inactive
 - Recommended for maximum performance in non-production environments
 
 ## Security Considerations
 
-### Exposing Metrics Endpoint
+### Exposing the Metrics Endpoint
 
-The `/metrics` endpoint is protected by the master key authentication when a master key is configured, just like other HTTP endpoints. If no master key is configured, the endpoint is accessible without authentication, which allows Prometheus to scrape metrics without credentials.
+The `/metrics` endpoint is protected by master key authentication when a master
+key is configured, just like other HTTP endpoints. If no master key is
+configured, the endpoint is accessible without authentication, which allows
+Prometheus to scrape metrics without credentials.
 
 If you need to protect the metrics endpoint further:
 
@@ -174,11 +189,12 @@ If you need to protect the metrics endpoint further:
    ```
 
 2. **Use network-level security:**
-   - Configure firewall rules to allow only Prometheus server
-   - Use private network for metrics collection
+   - Configure firewall rules to allow only the Prometheus server
+   - Use a private network for metrics collection
    - Deploy Prometheus in the same VPC/network
 
 3. **Reverse proxy with authentication:**
+
    ```nginx
    location /metrics {
        auth_basic "Metrics";
@@ -218,13 +234,13 @@ scrape_configs:
 
 ### Metrics Endpoint Returns 404
 
-**Cause:** Metrics are disabled
+**Cause:** metrics are disabled (the default).
 
 **Solution:**
 
 ```bash
 # Check configuration
-echo $METRICS_ENABLED  # Should be "true" or empty (defaults to true)
+echo $METRICS_ENABLED  # "true" enables; empty or "false" disables
 
 # Enable metrics
 export METRICS_ENABLED=true
@@ -233,9 +249,9 @@ export METRICS_ENABLED=true
 
 ### No Metrics Data Appearing
 
-**Cause:** No requests have been made yet
+**Cause:** no requests have been made yet.
 
-**Solution:** Make some requests to generate metrics:
+**Solution:** make some requests to generate metrics:
 
 ```bash
 curl -X POST http://localhost:8080/v1/chat/completions \
@@ -249,7 +265,7 @@ curl http://localhost:8080/metrics | grep gomodel_requests_total
 
 ### Custom Endpoint Not Working
 
-**Cause:** Endpoint must start with `/`
+**Cause:** the endpoint must start with `/`.
 
 **Incorrect:**
 
@@ -272,41 +288,18 @@ export METRICS_ENDPOINT=/metrics  # Has leading slash
 
 ### Staging
 
-- **Enable metrics** to test monitoring setup
-- Use custom endpoint if needed for security
+- **Enable metrics** to test the monitoring setup
+- Use a custom endpoint if needed for security
 
 ### Production
 
 - **Enable metrics** for full observability
 - Set up Prometheus alerting
 - Use Grafana dashboards for visualization
-- Consider custom endpoint for security
+- Consider a custom endpoint for security
 - Monitor metric cardinality to avoid explosion
-
-## Migration Guide
-
-If you're upgrading from a version without configurable metrics:
-
-### Before (Always Enabled)
-
-```bash
-# Metrics were always enabled at /metrics
-./bin/gomodel
-```
-
-### After (Configurable, Default Enabled)
-
-```bash
-# No change needed - metrics still enabled by default
-./bin/gomodel
-
-# But now you can disable if needed
-export METRICS_ENABLED=false
-./bin/gomodel
-```
 
 ## See Also
 
-- [PROMETHEUS_IMPLEMENTATION.md](PROMETHEUS_IMPLEMENTATION.md) - Full implementation details
-- [config/config.yaml](config/config.yaml) - Complete configuration
-- [.env.template](.env.template) - Environment variable template
+- [Configuration](/advanced/configuration) — full environment variable reference
+- [config.yaml](/advanced/config-yaml) — YAML configuration reference

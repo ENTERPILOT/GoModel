@@ -1,0 +1,119 @@
+---
+title: "Resilience"
+description: "Tune retries and the per-provider circuit breaker, and learn when to reach for cross-model failover instead."
+icon: "shield-check"
+---
+
+GoModel wraps every upstream provider call with two resilience layers:
+
+1. **Retry with exponential backoff** — repeats a failed request against the
+   same provider with growing delays.
+2. **Circuit breaker** — short-circuits calls to a provider that has been
+   failing repeatedly, then probes once the timeout elapses.
+
+Both layers apply per provider. They do not switch to a different model or
+provider on failure. For cross-model fallback, see
+[Failover](/features/failover).
+
+## Defaults
+
+The defaults are tuned to be safe for most deployments. Override only what
+you need.
+
+| Setting             | Default | Notes                                          |
+| ------------------- | ------- | ---------------------------------------------- |
+| `max_retries`       | `3`     | Maximum retry attempts per request             |
+| `initial_backoff`   | `1s`    | First retry wait                               |
+| `max_backoff`       | `30s`   | Upper cap on retry wait                        |
+| `backoff_factor`    | `2.0`   | Exponential multiplier between retries         |
+| `jitter_factor`     | `0.1`   | Random jitter as a fraction of the backoff     |
+| `failure_threshold` | `5`     | Consecutive failures before the circuit opens  |
+| `success_threshold` | `2`     | Consecutive successes to close it again        |
+| `timeout`           | `30s`   | How long the circuit stays open before probing |
+
+## Environment Variables
+
+These set the global defaults that apply to every provider unless overridden
+in YAML.
+
+### Retry
+
+| Variable                 | Type     | Default | Description                                |
+| ------------------------ | -------- | ------- | ------------------------------------------ |
+| `RETRY_MAX_RETRIES`      | int      | `3`     | Maximum retry attempts per request         |
+| `RETRY_INITIAL_BACKOFF`  | duration | `1s`    | First retry wait (e.g. `500ms`, `2s`)      |
+| `RETRY_MAX_BACKOFF`      | duration | `30s`   | Upper cap on retry wait                    |
+| `RETRY_BACKOFF_FACTOR`   | float    | `2.0`   | Exponential multiplier between retries     |
+| `RETRY_JITTER_FACTOR`    | float    | `0.1`   | Random jitter as a fraction of the backoff |
+
+### Circuit Breaker
+
+| Variable                            | Type     | Default | Description                                   |
+| ----------------------------------- | -------- | ------- | --------------------------------------------- |
+| `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int      | `5`     | Consecutive failures before opening           |
+| `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | int      | `2`     | Consecutive successes to close again          |
+| `CIRCUIT_BREAKER_TIMEOUT`           | duration | `30s`   | How long the circuit stays open before probing |
+
+## YAML
+
+The same fields are available under the global `resilience:` block, and can
+be overridden per provider:
+
+```yaml
+resilience:
+  retry:
+    max_retries: 2
+    initial_backoff: 500ms
+    max_backoff: 10s
+    backoff_factor: 1.5
+    jitter_factor: 0.05
+  circuit_breaker:
+    failure_threshold: 3
+    success_threshold: 1
+    timeout: 15s
+
+providers:
+  anthropic:
+    type: anthropic
+    api_key: ${ANTHROPIC_API_KEY}
+    resilience:
+      retry:
+        max_retries: 5 # Anthropic supports long requests — allow more retries
+
+  ollama:
+    type: ollama
+    base_url: ${OLLAMA_BASE_URL:-http://localhost:11434/v1}
+    resilience:
+      circuit_breaker:
+        failure_threshold: 10 # local service — tolerate more transient failures
+        timeout: 5s
+```
+
+Only fields explicitly listed under a provider's `resilience:` block are
+overridden. Everything else inherits from the global section, which in turn
+inherits from the built-in defaults.
+
+<Note>
+  Per-provider tuning **must** come from YAML. Environment variables set
+  global defaults only — `RETRY_MAX_RETRIES` cannot target a single provider.
+  See [config.yaml gotchas](/advanced/config-yaml#gotchas).
+</Note>
+
+### Worked example
+
+Given the YAML above, the effective per-provider settings are:
+
+| Provider  | max_retries      | failure_threshold | cb timeout        |
+| --------- | ---------------- | ----------------- | ----------------- |
+| openai    | 2 (global)       | 3 (global)        | 15s (global)      |
+| anthropic | **5** (override) | 3 (global)        | 15s (global)      |
+| ollama    | 2 (global)       | **10** (override) | **5s** (override) |
+
+`anthropic` and `ollama` inherit every field they did not explicitly override.
+
+## Failover vs. Resilience
+
+The retry and circuit breaker layers stay on a single provider. If you also
+want GoModel to try a different model or provider when the primary keeps
+failing, configure manual fallback rules. See
+[Failover](/features/failover).

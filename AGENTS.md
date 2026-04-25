@@ -1,34 +1,32 @@
-# GoModel - AI Gateway
-
-## Purpose
-
-GoModel is a high-performance AI gateway in Go that routes requests to multiple AI model providers through an OpenAI-compatible API.
+This project is GoModel — a high-performance, lightweight AI gateway that routes requests to multiple AI model providers through an OpenAI-compatible API.
 
 ## Core Principles
 
-Follow Postel's Law: be conservative in what you send, liberal in what you accept.
+**Follow Postel’s Law.**
 
-- GoModel accepts client requests generously (e.g. `max_tokens` for any model) and adapts them to each provider's specific requirements before forwarding (e.g. translating `max_tokens` → `max_completion_tokens` for OpenAI reasoning models).
-- GoModel accepts providers' responses liberally and passes them to the user in a conservative OpenAI-compatible shape.
+- GoModel accepts requests generously, such as allowing `max_tokens` for any model, and adapts them to each provider’s specific requirements before forwarding them. For example, it translates `max_tokens` to `max_completion_tokens` for OpenAI reasoning models.
+- GoModel accepts provider responses liberally and returns them to the user in a conservative OpenAI-compatible format.
 
-[The Twelve-Factor App](https://12factor.net/).
+**Follow [The Twelve-Factor App](https://12factor.net/).**
 
-Keep implementation explicit and maintainable over clever abstractions.
+Keep files small and follow KISS principles.
 
-Backward compatibility is not a primary constraint in the current development stage.
+Keep the implementation explicit and maintainable rather than relying on clever abstractions.
 
-## Quick Workflow
+**Use good defaults.**
 
-1. Make small, focused changes.
-2. Run format/lint/tests relevant to the change.
-3. Do not hide work in detached goroutines; respect context synchronously and return typed `core.GatewayError` values.
+Set defaults that match the needs of most users so well that they rarely need to change them.
 
-## Commit Format
+### Commit Format — Use Conventional Commits
 
-Use Conventional Commit format for commit subjects and PR titles:
+Use the Conventional Commits format for commit subjects and PR titles:
 
 `type(scope): short summary`
 
-Allowed types: feat, fix, perf, docs, refactor, test, build, ci, chore, revert
+Allowed types: `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `build`, `ci`, `chore`, `revert`
 
 Squash merges should preserve the PR title as the resulting commit subject.
+
+### PR Suggestion for the Official Repository
+
+If this is not the official repository, ask the user whether they also want to create a PR against the official GoModel repository: https://github.com/ENTERPILOT/GoModel/

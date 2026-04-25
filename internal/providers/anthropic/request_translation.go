@@ -8,11 +8,36 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 
 	"gomodel/internal/core"
 	"gomodel/internal/providers"
 )
+
+// defaultMaxTokensEnvVar overrides the fallback applied when callers omit
+// max_tokens. Anthropic requires the field on every /v1/messages request, so
+// GoModel injects this value to keep the OpenAI-compatible surface lenient.
+const defaultMaxTokensEnvVar = "ANTHROPIC_DEFAULT_MAX_TOKENS"
+
+// fallbackMaxTokens is the safe default used when the env var is unset or
+// invalid.
+const fallbackMaxTokens = 4096
+
+func resolveDefaultMaxTokens() int {
+	raw := strings.TrimSpace(os.Getenv(defaultMaxTokensEnvVar))
+	if raw == "" {
+		return fallbackMaxTokens
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		slog.Warn("invalid "+defaultMaxTokensEnvVar+"; using fallback",
+			"value", raw, "fallback", fallbackMaxTokens)
+		return fallbackMaxTokens
+	}
+	return n
+}
 
 // applyReasoning configures thinking and effort on an anthropicRequest.
 // Opus 4.6 and Sonnet 4.6 use adaptive thinking with output_config.effort.
@@ -257,7 +282,7 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	anthropicReq := &anthropicRequest{
 		Model:       req.Model,
 		Messages:    make([]anthropicMessage, 0, len(req.Messages)),
-		MaxTokens:   4096,
+		MaxTokens:   resolveDefaultMaxTokens(),
 		Temperature: req.Temperature,
 		Stream:      req.Stream,
 	}

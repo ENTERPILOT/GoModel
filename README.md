@@ -171,7 +171,7 @@ docker run --rm -p 8080:8080 --env-file .env gomodel
 | `/p/{provider}/...`                | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS | Provider-native passthrough with opaque upstream responses                                                   |
 | `/v1/models`                       | GET                                          | List available models                                                                                        |
 | `/health`                          | GET                                          | Health check                                                                                                 |
-| `/metrics`                         | GET                                          | Prometheus metrics (when enabled)                                                                            |
+| `/metrics`                         | GET                                          | Prometheus metrics (experimental, when enabled)                                                              |
 | `/admin/api/v1/usage/summary`      | GET                                          | Aggregate token usage statistics                                                                             |
 | `/admin/api/v1/usage/daily`        | GET                                          | Per-period token usage breakdown                                                                             |
 | `/admin/api/v1/usage/models`       | GET                                          | Usage breakdown by model                                                                                     |
@@ -199,7 +199,7 @@ Key settings:
 | `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                            | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |
 | `ENABLED_PASSTHROUGH_PROVIDERS` | `openai,anthropic,openrouter,zai,vllm` | Comma-separated list of enabled passthrough providers                            |
 | `STORAGE_TYPE`                  | `sqlite`                          | Storage backend (`sqlite`, `postgresql`, `mongodb`)                              |
-| `METRICS_ENABLED`               | `false`                           | Enable Prometheus metrics                                                        |
+| `METRICS_ENABLED`               | `false`                           | Enable Prometheus metrics (experimental)                                         |
 | `LOGGING_ENABLED`               | `false`                           | Enable audit logging                                                             |
 | `GUARDRAILS_ENABLED`            | `false`                           | Enable the configured guardrails pipeline                                        |
 

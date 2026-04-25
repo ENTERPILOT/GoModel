@@ -4595,3 +4595,43 @@ func TestPassthrough(t *testing.T) {
 		t.Fatalf("response body = %q", string(body))
 	}
 }
+
+func TestResolveDefaultMaxTokens(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want int
+	}{
+		{name: "unset returns fallback", env: "", want: fallbackMaxTokens},
+		{name: "valid integer is honoured", env: "16384", want: 16384},
+		{name: "whitespace trimmed", env: "  8192  ", want: 8192},
+		{name: "zero falls back", env: "0", want: fallbackMaxTokens},
+		{name: "negative falls back", env: "-1", want: fallbackMaxTokens},
+		{name: "non-numeric falls back", env: "lots", want: fallbackMaxTokens},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(defaultMaxTokensEnvVar, tt.env)
+			if got := resolveDefaultMaxTokens(); got != tt.want {
+				t.Errorf("resolveDefaultMaxTokens() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConvertToAnthropicRequest_HonoursDefaultMaxTokensEnv(t *testing.T) {
+	t.Setenv(defaultMaxTokensEnvVar, "32768")
+	req := &core.ChatRequest{
+		Model: "claude-sonnet-4-6",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	}
+	got, err := convertToAnthropicRequest(req)
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest returned error: %v", err)
+	}
+	if got.MaxTokens != 32768 {
+		t.Errorf("MaxTokens = %d, want 32768", got.MaxTokens)
+	}
+}

@@ -44,6 +44,16 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `GOMODEL_MASTER_KEY` | Authentication key for securing the gateway           | _(empty, unsafe mode)_ |
 | `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`) | _(no limit)_           |
 
+#### Logging
+
+Runtime logger output. For the persisted API audit trail (request/response
+bodies, headers), see [Audit Logging](#audit-logging) below.
+
+| Variable     | Description                                                                                                                                                                       | Default              |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| `LOG_FORMAT` | `text` for colorized human output, `json` for structured logs. Unset auto-detects: text on a TTY, JSON otherwise. Force `json` in production / CloudWatch / Datadog / GCP setups. | _(auto-detect)_      |
+| `LOG_LEVEL`  | Minimum log level: `debug`, `info`, `warn`, `error`. Aliases `dbg`, `inf`, `warning`, `err` are also accepted.                                                                    | `info`               |
+
 #### Cache
 
 | Variable            | Description                       | Default          |
@@ -104,10 +114,15 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 
 #### Metrics
 
-| Variable           | Description               | Default    |
-| ------------------ | ------------------------- | ---------- |
-| `METRICS_ENABLED`  | Enable Prometheus metrics | `false`    |
-| `METRICS_ENDPOINT` | HTTP path for metrics     | `/metrics` |
+<Note>
+  Prometheus support is **experimental**. See the
+  [Prometheus Metrics guide](/guides/prometheus-metrics) for details.
+</Note>
+
+| Variable           | Description                              | Default    |
+| ------------------ | ---------------------------------------- | ---------- |
+| `METRICS_ENABLED`  | Enable Prometheus metrics (experimental) | `false`    |
+| `METRICS_ENDPOINT` | HTTP path for metrics                    | `/metrics` |
 
 #### Admin
 
@@ -386,3 +401,20 @@ docker run --rm -p 8080:8080 \
 
 This registers providers `vllm` and `vllm-test`. Use YAML only when the
 generated provider names are not enough or you need a larger structured block.
+
+## Provider Behavior Notes
+
+### Anthropic `max_tokens` default
+
+Anthropic requires `max_tokens` on every `/v1/messages` request. If a client
+omits it, GoModel injects a fallback so the request still succeeds. OpenAI and
+Gemini treat the field as optional and GoModel does not inject a default for
+them.
+
+| Variable                       | Description                                       | Default |
+| ------------------------------ | ------------------------------------------------- | ------- |
+| `ANTHROPIC_DEFAULT_MAX_TOKENS` | Value injected when the caller omits `max_tokens` | `4096`  |
+
+Raise this for newer models that routinely produce longer outputs (Sonnet 4.6,
+Opus 4.7). Setting `max_tokens` explicitly on a request always wins over the
+env-driven default. Invalid or non-positive values fall back to `4096`.
