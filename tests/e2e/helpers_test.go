@@ -25,6 +25,13 @@ const (
 	healthPath          = "/health"
 )
 
+func defaultChatReq(msg string) core.ChatRequest {
+	return core.ChatRequest{
+		Model:    "gpt-4",
+		Messages: []core.Message{{Role: "user", Content: msg}},
+	}
+}
+
 // sendChatRequest sends a chat completion request and returns the response.
 func sendChatRequest(t *testing.T, payload core.ChatRequest) *http.Response {
 	t.Helper()
@@ -61,6 +68,19 @@ func sendJSONRequest(t *testing.T, url string, payload interface{}) *http.Respon
 	return resp
 }
 
+func requireErrorResponse(t *testing.T, resp *http.Response, status int, errorType core.ErrorType, messageContains string) {
+	t.Helper()
+
+	require.Equal(t, status, resp.StatusCode)
+
+	var envelope core.OpenAIErrorEnvelope
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
+	require.Equal(t, errorType, envelope.Error.Type)
+	if messageContains != "" {
+		require.Contains(t, envelope.Error.Message, messageContains)
+	}
+}
+
 // sendJSONRequestNoT sends a JSON POST request without using testing.T.
 //
 // This is specifically for concurrency tests, where calling t.FailNow / require from
@@ -86,6 +106,33 @@ func closeBody(resp *http.Response) {
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
+}
+
+func requireRecordedRequest(t *testing.T, path string) RecordedRequest {
+	t.Helper()
+
+	requests := mockServer.Requests()
+	require.Len(t, requests, 1)
+	require.Equal(t, path, requests[0].Path)
+	return requests[0]
+}
+
+func requireRecordedChatRequest(t *testing.T) core.ChatRequest {
+	t.Helper()
+
+	recorded := requireRecordedRequest(t, "/chat/completions")
+	var upstream core.ChatRequest
+	require.NoError(t, json.Unmarshal(recorded.Body, &upstream))
+	return upstream
+}
+
+func requireRecordedResponsesRequest(t *testing.T) core.ResponsesRequest {
+	t.Helper()
+
+	recorded := requireRecordedRequest(t, "/responses")
+	var upstream core.ResponsesRequest
+	require.NoError(t, json.Unmarshal(recorded.Body, &upstream))
+	return upstream
 }
 
 // StreamChunk represents a parsed streaming chunk for chat completions.
@@ -117,11 +164,10 @@ func readStreamingResponse(t *testing.T, body io.Reader) []StreamChunk {
 		}
 
 		var chunk StreamChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
-		}
+		require.NoError(t, json.Unmarshal([]byte(data), &chunk))
 		chunks = append(chunks, chunk)
 	}
+	require.NoError(t, scanner.Err())
 
 	return chunks
 }
@@ -156,18 +202,18 @@ func readResponsesStream(t *testing.T, body io.Reader) []ResponsesStreamEvent {
 			}
 
 			var eventData map[string]interface{}
-			if err := json.Unmarshal([]byte(data), &eventData); err == nil {
-				currentEvent.Data = eventData
-				if currentEvent.Type == "" {
-					if typ, ok := eventData["type"].(string); ok {
-						currentEvent.Type = typ
-					}
+			require.NoError(t, json.Unmarshal([]byte(data), &eventData))
+			currentEvent.Data = eventData
+			if currentEvent.Type == "" {
+				if typ, ok := eventData["type"].(string); ok {
+					currentEvent.Type = typ
 				}
 			}
 			events = append(events, currentEvent)
 			currentEvent = ResponsesStreamEvent{}
 		}
 	}
+	require.NoError(t, scanner.Err())
 
 	return events
 }

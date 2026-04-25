@@ -82,14 +82,20 @@ func TestResponses(t *testing.T) {
 
 func TestResponsesParameters(t *testing.T) {
 	tests := []struct {
-		name   string
-		modify func(*core.ResponsesRequest)
+		name           string
+		modify         func(*core.ResponsesRequest)
+		assertUpstream func(t *testing.T, upstream core.ResponsesRequest)
 	}{
 		{
 			name: "with temperature",
 			modify: func(r *core.ResponsesRequest) {
 				temp := 0.5
 				r.Temperature = &temp
+			},
+			assertUpstream: func(t *testing.T, upstream core.ResponsesRequest) {
+				t.Helper()
+				require.NotNil(t, upstream.Temperature)
+				assert.InDelta(t, 0.5, *upstream.Temperature, 0.0001)
 			},
 		},
 		{
@@ -98,11 +104,18 @@ func TestResponsesParameters(t *testing.T) {
 				maxTokens := 100
 				r.MaxOutputTokens = &maxTokens
 			},
+			assertUpstream: func(t *testing.T, upstream core.ResponsesRequest) {
+				t.Helper()
+				require.NotNil(t, upstream.MaxOutputTokens)
+				assert.Equal(t, 100, *upstream.MaxOutputTokens)
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mockServer.ResetRequests()
+
 			payload := core.ResponsesRequest{
 				Model: "gpt-4.1",
 				Input: "Hello",
@@ -117,6 +130,10 @@ func TestResponsesParameters(t *testing.T) {
 			var respBody core.ResponsesResponse
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&respBody))
 			assert.Equal(t, "completed", respBody.Status)
+
+			upstream := requireRecordedResponsesRequest(t)
+			assert.Equal(t, "gpt-4.1", upstream.Model)
+			tt.assertUpstream(t, upstream)
 		})
 	}
 }
@@ -144,6 +161,8 @@ func TestResponsesStreaming(t *testing.T) {
 		// Regression test for GOM-43: streaming Responses API must not include
 		// stream_options.include_usage, which is a Chat Completions-only parameter.
 		// The Responses API returns usage in the response.completed event by default.
+		mockServer.ResetRequests()
+
 		payload := core.ResponsesRequest{
 			Model:  "gpt-4.1",
 			Input:  "Hello",
@@ -159,6 +178,15 @@ func TestResponsesStreaming(t *testing.T) {
 		events := readResponsesStream(t, resp.Body)
 		require.Greater(t, len(events), 0, "Should receive at least one SSE event")
 		assert.True(t, hasDoneEvent(events), "Should receive done event")
+
+		recorded := requireRecordedRequest(t, "/responses")
+		var upstreamRaw map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(recorded.Body, &upstreamRaw))
+		assert.NotContains(t, upstreamRaw, "stream_options")
+
+		var upstream core.ResponsesRequest
+		require.NoError(t, json.Unmarshal(recorded.Body, &upstream))
+		assert.True(t, upstream.Stream)
 	})
 
 	t.Run("streaming content", func(t *testing.T) {
@@ -200,6 +228,8 @@ func TestResponsesTools(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mockServer.ResetRequests()
+
 			payload := core.ResponsesRequest{
 				Model: "gpt-4.1",
 				Input: "Search for information",
@@ -209,9 +239,16 @@ func TestResponsesTools(t *testing.T) {
 			resp := sendResponsesRequest(t, payload)
 			defer closeBody(resp)
 
-			// Tools may or may not be supported
-			assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusBadRequest,
-				"Expected OK or BadRequest, got %d", resp.StatusCode)
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			var respBody core.ResponsesResponse
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&respBody))
+			assert.Equal(t, "completed", respBody.Status)
+
+			upstream := requireRecordedResponsesRequest(t)
+			require.Len(t, upstream.Tools, 1)
+			assert.Equal(t, tt.tools[0]["type"], upstream.Tools[0]["type"])
+			assert.Equal(t, "Search for information", upstream.Input)
 		})
 	}
 }
@@ -223,14 +260,14 @@ func TestResponsesErrors(t *testing.T) {
 		require.NoError(t, err)
 		defer closeBody(resp)
 
-		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		requireErrorResponse(t, resp, http.StatusBadRequest, core.ErrorTypeInvalidRequest, "invalid request body")
 	})
 
 	t.Run("missing model", func(t *testing.T) {
 		resp := sendRawResponsesRequest(t, map[string]interface{}{"input": "Hello"})
 		defer closeBody(resp)
 
-		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		requireErrorResponse(t, resp, http.StatusBadRequest, core.ErrorTypeInvalidRequest, "model is required")
 	})
 
 	t.Run("empty input", func(t *testing.T) {
@@ -239,8 +276,11 @@ func TestResponsesErrors(t *testing.T) {
 		resp := sendResponsesRequest(t, payload)
 		defer closeBody(resp)
 
-		// Empty input should be handled gracefully
-		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusBadRequest)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var respBody core.ResponsesResponse
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&respBody))
+		assert.Equal(t, "completed", respBody.Status)
 	})
 
 	t.Run("invalid model", func(t *testing.T) {
@@ -249,8 +289,7 @@ func TestResponsesErrors(t *testing.T) {
 		resp := sendResponsesRequest(t, payload)
 		defer closeBody(resp)
 
-		// Accept either error or pass-through
-		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusBadRequest)
+		requireErrorResponse(t, resp, http.StatusBadRequest, core.ErrorTypeInvalidRequest, "unsupported model")
 	})
 }
 
@@ -276,6 +315,8 @@ func TestResponsesUsage(t *testing.T) {
 }
 
 func TestResponsesMultimodal(t *testing.T) {
+	mockServer.ResetRequests()
+
 	payload := core.ResponsesRequest{
 		Model: "gpt-4.1",
 		Input: []map[string]interface{}{
@@ -292,8 +333,34 @@ func TestResponsesMultimodal(t *testing.T) {
 	resp := sendResponsesRequest(t, payload)
 	defer closeBody(resp)
 
-	// Multimodal may or may not be supported
-	assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusBadRequest)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var respBody core.ResponsesResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&respBody))
+	assert.Equal(t, "completed", respBody.Status)
+
+	recorded := requireRecordedRequest(t, "/responses")
+	var upstreamRaw struct {
+		Input []struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type     string `json:"type"`
+				Text     string `json:"text,omitempty"`
+				ImageURL *struct {
+					URL string `json:"url"`
+				} `json:"image_url,omitempty"`
+			} `json:"content"`
+		} `json:"input"`
+	}
+	require.NoError(t, json.Unmarshal(recorded.Body, &upstreamRaw))
+	require.Len(t, upstreamRaw.Input, 1)
+	assert.Equal(t, "user", upstreamRaw.Input[0].Role)
+	require.Len(t, upstreamRaw.Input[0].Content, 2)
+	assert.Equal(t, "input_text", upstreamRaw.Input[0].Content[0].Type)
+	assert.Equal(t, "What's in this image?", upstreamRaw.Input[0].Content[0].Text)
+	assert.Equal(t, "input_image", upstreamRaw.Input[0].Content[1].Type)
+	require.NotNil(t, upstreamRaw.Input[0].Content[1].ImageURL)
+	assert.Equal(t, "https://example.com/image.jpg", upstreamRaw.Input[0].Content[1].ImageURL.URL)
 }
 
 func TestResponsesConcurrency(t *testing.T) {

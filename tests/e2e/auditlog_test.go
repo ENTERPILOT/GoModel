@@ -174,10 +174,7 @@ func TestAuditLogMiddleware(t *testing.T) {
 		defer cleanup()
 
 		// Make a request
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Messages: []core.Message{{Role: "user", Content: "Hello"}},
-		}
+		payload := defaultChatReq("Hello")
 		body, _ := json.Marshal(payload)
 		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
 		require.NoError(t, err)
@@ -212,10 +209,7 @@ func TestAuditLogMiddleware(t *testing.T) {
 		defer cleanup()
 
 		// Make a request
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Messages: []core.Message{{Role: "user", Content: "Test message"}},
-		}
+		payload := defaultChatReq("Test message")
 		body, _ := json.Marshal(payload)
 		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
 		require.NoError(t, err)
@@ -250,10 +244,7 @@ func TestAuditLogMiddleware(t *testing.T) {
 		defer cleanup()
 
 		// Make a request with Authorization header
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Messages: []core.Message{{Role: "user", Content: "Hello"}},
-		}
+		payload := defaultChatReq("Hello")
 		body, _ := json.Marshal(payload)
 		req, _ := http.NewRequest("POST", serverURL+"/v1/chat/completions", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -294,10 +285,7 @@ func TestAuditLogMiddleware(t *testing.T) {
 		defer cleanup()
 
 		// Make a request
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Messages: []core.Message{{Role: "user", Content: "Hello"}},
-		}
+		payload := defaultChatReq("Hello")
 		body, _ := json.Marshal(payload)
 		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
 		require.NoError(t, err)
@@ -324,10 +312,7 @@ func TestAuditLogMiddleware(t *testing.T) {
 		defer cleanup()
 
 		// Make a request with Authorization header
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Messages: []core.Message{{Role: "user", Content: "Hello"}},
-		}
+		payload := defaultChatReq("Hello")
 		body, _ := json.Marshal(payload)
 		req, _ := http.NewRequest("POST", serverURL+"/v1/chat/completions", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -366,11 +351,8 @@ func TestAuditLogStreaming(t *testing.T) {
 		defer cleanup()
 
 		// Make a streaming request
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Stream:   true,
-			Messages: []core.Message{{Role: "user", Content: "Count to 3"}},
-		}
+		payload := defaultChatReq("Count to 3")
+		payload.Stream = true
 		body, _ := json.Marshal(payload)
 		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
 		require.NoError(t, err)
@@ -403,11 +385,8 @@ func TestAuditLogStreaming(t *testing.T) {
 		defer cleanup()
 
 		// Make a streaming request
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Stream:   true,
-			Messages: []core.Message{{Role: "user", Content: "Hello"}},
-		}
+		payload := defaultChatReq("Hello")
+		payload.Stream = true
 		body, _ := json.Marshal(payload)
 		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
 		require.NoError(t, err)
@@ -448,11 +427,8 @@ func TestAuditLogStreaming(t *testing.T) {
 		defer cleanup()
 
 		// Make a streaming request
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Stream:   true,
-			Messages: []core.Message{{Role: "user", Content: "Hello"}},
-		}
+		payload := defaultChatReq("Hello")
+		payload.Stream = true
 		body, _ := json.Marshal(payload)
 		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
 		require.NoError(t, err)
@@ -496,10 +472,7 @@ func TestAuditLogConcurrency(t *testing.T) {
 		for i := 0; i < numRequests; i++ {
 			go func(idx int) {
 				defer wg.Done()
-				payload := core.ChatRequest{
-					Model:    "gpt-4",
-					Messages: []core.Message{{Role: "user", Content: fmt.Sprintf("Request %d", idx)}},
-				}
+				payload := defaultChatReq(fmt.Sprintf("Request %d", idx))
 				body, _ := json.Marshal(payload)
 				resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
 				if err != nil {
@@ -551,10 +524,7 @@ func TestAuditLogHeaderRedaction(t *testing.T) {
 			serverURL, cleanup := setupAuditLogTestServer(t, cfg, store)
 			defer cleanup()
 
-			payload := core.ChatRequest{
-				Model:    "gpt-4",
-				Messages: []core.Message{{Role: "user", Content: "Hello"}},
-			}
+			payload := defaultChatReq("Hello")
 			body, _ := json.Marshal(payload)
 			req, _ := http.NewRequest("POST", serverURL+"/v1/chat/completions", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
@@ -725,10 +695,7 @@ func TestAuditLogOnlyModelInteractions(t *testing.T) {
 		defer cleanup()
 
 		// Make a request to a model endpoint
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Messages: []core.Message{{Role: "user", Content: "Hello"}},
-		}
+		payload := defaultChatReq("Hello")
 		body, _ := json.Marshal(payload)
 		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
 		require.NoError(t, err)
@@ -825,10 +792,7 @@ func TestAuditLogOnlyModelInteractions(t *testing.T) {
 		}
 
 		// Make a model request (should be logged)
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Messages: []core.Message{{Role: "user", Content: "Hello"}},
-		}
+		payload := defaultChatReq("Hello")
 		body, _ := json.Marshal(payload)
 		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
 		require.NoError(t, err)

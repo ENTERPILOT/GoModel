@@ -4,7 +4,6 @@ package e2e
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,41 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"gomodel/internal/core"
-	"gomodel/internal/providers"
-	"gomodel/internal/server"
 )
 
 const testMasterKey = "test-secret-key-12345"
-
-// setupAuthServer creates a new server instance with authentication enabled.
-// Uses TestProvider from main_test.go for model support.
-func setupAuthServer(t *testing.T, masterKey string) *server.Server {
-	t.Helper()
-
-	// Create test provider using the shared TestProvider
-	testProvider := NewTestProvider(mockLLMURL, "sk-test-key-12345")
-
-	// Create registry and register mock provider
-	registry := providers.NewModelRegistry()
-	registry.RegisterProvider(testProvider)
-
-	// Initialize registry synchronously for tests
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Failed to initialize registry: %v", err)
-	}
-
-	// Create router
-	router, err := providers.NewRouter(registry)
-	if err != nil {
-		t.Fatalf("Failed to create router: %v", err)
-	}
-
-	// Create server with master key
-	cfg := &server.Config{
-		MasterKey: masterKey,
-	}
-	return server.New(router, cfg)
-}
 
 func TestAuthenticationE2E(t *testing.T) {
 	srv := setupAuthServer(t, testMasterKey)

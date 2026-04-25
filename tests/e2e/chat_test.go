@@ -17,10 +17,7 @@ import (
 
 func TestChatCompletion(t *testing.T) {
 	t.Run("basic request", func(t *testing.T) {
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Messages: []core.Message{{Role: "user", Content: "Hello, how are you?"}},
-		}
+		payload := defaultChatReq("Hello, how are you?")
 
 		resp := sendChatRequest(t, payload)
 		defer closeBody(resp)
@@ -210,14 +207,20 @@ func TestChatCompletion(t *testing.T) {
 
 func TestChatCompletionParameters(t *testing.T) {
 	tests := []struct {
-		name   string
-		modify func(*core.ChatRequest)
+		name           string
+		modify         func(*core.ChatRequest)
+		assertUpstream func(t *testing.T, upstream core.ChatRequest)
 	}{
 		{
 			name: "with temperature",
 			modify: func(r *core.ChatRequest) {
 				temp := 0.7
 				r.Temperature = &temp
+			},
+			assertUpstream: func(t *testing.T, upstream core.ChatRequest) {
+				t.Helper()
+				require.NotNil(t, upstream.Temperature)
+				assert.InDelta(t, 0.7, *upstream.Temperature, 0.0001)
 			},
 		},
 		{
@@ -226,15 +229,19 @@ func TestChatCompletionParameters(t *testing.T) {
 				maxTokens := 100
 				r.MaxTokens = &maxTokens
 			},
+			assertUpstream: func(t *testing.T, upstream core.ChatRequest) {
+				t.Helper()
+				require.NotNil(t, upstream.MaxTokens)
+				assert.Equal(t, 100, *upstream.MaxTokens)
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			payload := core.ChatRequest{
-				Model:    "gpt-4",
-				Messages: []core.Message{{Role: "user", Content: "Hello"}},
-			}
+			mockServer.ResetRequests()
+
+			payload := defaultChatReq("Hello")
 			tt.modify(&payload)
 
 			resp := sendChatRequest(t, payload)
@@ -245,17 +252,18 @@ func TestChatCompletionParameters(t *testing.T) {
 			var chatResp core.ChatResponse
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&chatResp))
 			assert.NotEmpty(t, chatResp.Choices[0].Message.Content)
+
+			upstream := requireRecordedChatRequest(t)
+			assert.Equal(t, "gpt-4", upstream.Model)
+			tt.assertUpstream(t, upstream)
 		})
 	}
 }
 
 func TestChatCompletionStreaming(t *testing.T) {
 	t.Run("basic streaming", func(t *testing.T) {
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Stream:   true,
-			Messages: []core.Message{{Role: "user", Content: "Count from 1 to 5"}},
-		}
+		payload := defaultChatReq("Count from 1 to 5")
+		payload.Stream = true
 
 		resp := sendChatRequest(t, payload)
 		defer closeBody(resp)
@@ -269,11 +277,8 @@ func TestChatCompletionStreaming(t *testing.T) {
 	})
 
 	t.Run("streaming content", func(t *testing.T) {
-		payload := core.ChatRequest{
-			Model:    "gpt-4",
-			Stream:   true,
-			Messages: []core.Message{{Role: "user", Content: "Hello"}},
-		}
+		payload := defaultChatReq("Hello")
+		payload.Stream = true
 
 		resp := sendChatRequest(t, payload)
 		defer closeBody(resp)
@@ -348,18 +353,16 @@ func TestChatCompletionErrors(t *testing.T) {
 		require.NoError(t, err)
 		defer closeBody(resp)
 
-		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		requireErrorResponse(t, resp, http.StatusBadRequest, core.ErrorTypeInvalidRequest, "invalid request body")
 	})
 
-	t.Run("missing model passthrough", func(t *testing.T) {
-		// Test provider accepts all models, so empty model passes through
+	t.Run("missing model", func(t *testing.T) {
 		resp := sendRawChatRequest(t, map[string]interface{}{
 			"messages": []map[string]string{{"role": "user", "content": "Hello"}},
 		})
 		defer closeBody(resp)
 
-		// Accept either OK (test provider) or BadRequest (production)
-		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusBadRequest)
+		requireErrorResponse(t, resp, http.StatusBadRequest, core.ErrorTypeInvalidRequest, "model is required")
 	})
 
 	t.Run("unsupported model", func(t *testing.T) {
@@ -370,7 +373,7 @@ func TestChatCompletionErrors(t *testing.T) {
 		})
 		defer closeBody(resp)
 
-		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		requireErrorResponse(t, resp, http.StatusBadRequest, core.ErrorTypeInvalidRequest, "unsupported model")
 	})
 }
 
@@ -413,10 +416,7 @@ func TestChatCompletionConcurrency(t *testing.T) {
 
 	for i := 0; i < numRequests; i++ {
 		go func(idx int) {
-			payload := core.ChatRequest{
-				Model:    "gpt-4",
-				Messages: []core.Message{{Role: "user", Content: "Hello " + string(rune('A'+idx))}},
-			}
+			payload := defaultChatReq("Hello " + string(rune('A'+idx)))
 
 			resp, err := sendJSONRequestNoT(gatewayURL+chatCompletionsPath, payload)
 			if err != nil {
@@ -453,10 +453,7 @@ func TestChatCompletionConcurrency(t *testing.T) {
 func TestChatCompletionTimeout(t *testing.T) {
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	payload := core.ChatRequest{
-		Model:    "gpt-4",
-		Messages: []core.Message{{Role: "user", Content: "Quick test"}},
-	}
+	payload := defaultChatReq("Quick test")
 
 	body, _ := json.Marshal(payload)
 	start := time.Now()
