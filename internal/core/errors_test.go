@@ -384,6 +384,22 @@ func TestParseProviderError(t *testing.T) {
 	}
 }
 
+func TestParseProviderError_OpenRouterNumericCodeUsesMetadataRaw(t *testing.T) {
+	body := []byte(`{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly.","provider_name":"Together","is_byok":false,"retry_after_seconds":1}},"user_id":"user_34xtJN3FV8S4Jdq3UNuWa0n9RAh"}`)
+
+	err := ParseProviderError("openrouter", http.StatusTooManyRequests, body, nil)
+
+	if err.Type != ErrorTypeRateLimit {
+		t.Fatalf("Type = %v, want %v", err.Type, ErrorTypeRateLimit)
+	}
+	if err.Message != "deepseek/deepseek-v4-pro is temporarily rate-limited upstream. Please retry shortly." {
+		t.Fatalf("Message = %q", err.Message)
+	}
+	if err.Code == nil || *err.Code != "429" {
+		t.Fatalf("Code = %v, want 429", err.Code)
+	}
+}
+
 func equalStringPointers(a, b *string) bool {
 	switch {
 	case a == nil && b == nil:

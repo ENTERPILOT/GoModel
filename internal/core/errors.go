@@ -2,9 +2,11 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // ErrorType represents the type of error that occurred
@@ -174,19 +176,10 @@ func NewNotFoundError(message string) *GatewayError {
 
 // ParseProviderError parses an error response from a provider and returns an appropriate GatewayError
 func ParseProviderError(provider string, statusCode int, body []byte, originalErr error) *GatewayError {
-	// Try to parse the error response as JSON
-	var errorResponse struct {
-		Error struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-			Code    string `json:"code"`
-			Param   string `json:"param"`
-		} `json:"error"`
-	}
-
 	message := string(body)
-	if err := json.Unmarshal(body, &errorResponse); err == nil && errorResponse.Error.Message != "" {
-		message = errorResponse.Error.Message
+	errorResponse := parseProviderErrorBody(body)
+	if errorResponse.Message != "" {
+		message = errorResponse.Message
 	}
 
 	// Determine error type based on status code
@@ -233,12 +226,98 @@ func ParseProviderError(provider string, statusCode int, body []byte, originalEr
 		gatewayErr = NewProviderError(provider, http.StatusBadGateway, message, originalErr)
 	}
 
-	if errorResponse.Error.Param != "" {
-		gatewayErr = gatewayErr.WithParam(errorResponse.Error.Param)
+	if errorResponse.Param != "" {
+		gatewayErr = gatewayErr.WithParam(errorResponse.Param)
 	}
-	if errorResponse.Error.Code != "" {
-		gatewayErr = gatewayErr.WithCode(errorResponse.Error.Code)
+	if errorResponse.Code != "" {
+		gatewayErr = gatewayErr.WithCode(errorResponse.Code)
 	}
 
 	return gatewayErr
+}
+
+type providerErrorDetails struct {
+	Message string
+	Param   string
+	Code    string
+}
+
+func parseProviderErrorBody(body []byte) providerErrorDetails {
+	var payload struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || len(payload.Error) == 0 {
+		return providerErrorDetails{}
+	}
+
+	if message := jsonString(payload.Error); message != "" {
+		return providerErrorDetails{Message: message}
+	}
+
+	var errorFields map[string]json.RawMessage
+	if err := json.Unmarshal(payload.Error, &errorFields); err != nil {
+		return providerErrorDetails{}
+	}
+
+	details := providerErrorDetails{
+		Message: jsonString(errorFields["message"]),
+		Param:   jsonString(errorFields["param"]),
+		Code:    jsonScalarString(errorFields["code"]),
+	}
+
+	if raw := providerErrorMetadataRaw(errorFields["metadata"]); shouldPreferProviderRaw(details.Message, raw) {
+		details.Message = raw
+	}
+
+	return details
+}
+
+func providerErrorMetadataRaw(raw json.RawMessage) string {
+	var metadata map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return ""
+	}
+	return jsonString(metadata["raw"])
+}
+
+func shouldPreferProviderRaw(message, raw string) bool {
+	if strings.TrimSpace(raw) == "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(message)) {
+	case "", "provider returned error":
+		return true
+	default:
+		return false
+	}
+}
+
+func jsonString(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return value
+}
+
+func jsonScalarString(raw json.RawMessage) string {
+	if value := jsonString(raw); value != "" {
+		return value
+	}
+
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return ""
+	}
+	var number json.Number
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&number); err != nil {
+		return ""
+	}
+	return number.String()
 }
