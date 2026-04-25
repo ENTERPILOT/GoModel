@@ -752,25 +752,7 @@
 	                    }
 	                    this.workflowRuntimeConfig = next;
 	                    if (typeof this.fetchCacheOverview === 'function') {
-	                        if (this.workflowCacheVisible()) {
-	                            this.fetchCacheOverview();
-	                        } else {
-	                            this.cacheOverview = {
-	                                summary: {
-	                                    total_hits: 0,
-	                                    exact_hits: 0,
-	                                    semantic_hits: 0,
-	                                    total_input_tokens: 0,
-	                                    total_output_tokens: 0,
-	                                    total_tokens: 0,
-	                                    total_saved_cost: null
-	                                },
-	                                daily: []
-	                            };
-	                            if (typeof this.renderChart === 'function') {
-	                                this.renderChart();
-	                            }
-	                        }
+	                        this.fetchCacheOverview();
 	                    }
 	                } catch (e) {
 	                    console.error('Failed to fetch dashboard config:', e);

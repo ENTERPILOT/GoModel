@@ -34,6 +34,10 @@
                     : false;
             },
 
+            cacheOverviewVisible() {
+                return this.page === 'overview' || this.page === 'usage';
+            },
+
             _usageQueryStr() {
                 if (this.customStartDate && this.customEndDate) {
                     return 'start_date=' + this._formatDate(this.customStartDate) +
@@ -43,6 +47,9 @@
             },
 
             async fetchCacheOverview() {
+                if (!this.cacheOverviewVisible()) {
+                    return;
+                }
                 if (!this.cacheAnalyticsEnabled()) {
                     this.cacheOverview = this.emptyCacheOverview();
                     if (this.page === 'overview') this.renderChart();
@@ -148,9 +155,9 @@
                     this.summary = summary;
                     this.daily = daily;
                     this.renderChart();
-                    if (this.cacheAnalyticsEnabled()) {
+                    if (this.cacheOverviewVisible() && this.cacheAnalyticsEnabled()) {
                         this.fetchCacheOverview();
-                    } else {
+                    } else if (this.cacheOverviewVisible()) {
                         this.cacheOverview = this.emptyCacheOverview();
                     }
                     if (this.page === 'usage') this.fetchUsagePage();

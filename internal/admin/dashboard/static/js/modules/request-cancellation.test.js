@@ -326,6 +326,23 @@ test('fetchUsage clears stale usage data and rerenders on real response failures
     assert.equal(renderChartCalls, 1);
 });
 
+test('fetchUsage skips cache overview requests on pages without cache analytics cards', async() => {
+    const queue = createPendingFetchQueue();
+    const app = loadDashboardApp({ fetch: queue.fetch });
+    app.page = 'workflows';
+    app.workflowRuntimeBooleanFlag = (name) => name === 'CACHE_ENABLED';
+    app.renderChart = () => {};
+
+    const request = app.fetchUsage();
+    assert.equal(queue.requests.length, 2);
+
+    queue.requests[0].resolve(jsonResponse({ total_requests: 7 }));
+    queue.requests[1].resolve(jsonResponse([{ date: '2026-03-29', input_tokens: 3, output_tokens: 4 }]));
+    await request;
+
+    assert.equal(queue.requests.length, 2);
+});
+
 test('fetchModels aborts stale in-flight requests before applying new data', async() => {
     const queue = createPendingFetchQueue();
     const app = loadDashboardApp({ fetch: queue.fetch });

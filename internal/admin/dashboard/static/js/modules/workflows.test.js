@@ -1161,6 +1161,28 @@ test('fetchWorkflowRuntimeConfig loads FEATURE_FALLBACK_MODE from the admin conf
     );
 });
 
+test('fetchWorkflowRuntimeConfig delegates cache overview refresh after loading runtime config', async () => {
+    let cacheOverviewCalls = 0;
+    const module = createWorkflowsModule({
+        fetch() {
+            return Promise.resolve({
+                ok: true,
+                json: async () => ({
+                    CACHE_ENABLED: 'on'
+                })
+            });
+        }
+    });
+    module.handleFetchResponse = () => true;
+    module.headers = () => ({});
+    module.fetchCacheOverview = () => {
+        cacheOverviewCalls++;
+    };
+
+    await module.fetchWorkflowRuntimeConfig();
+    assert.equal(cacheOverviewCalls, 1);
+});
+
 test('fetchWorkflowRuntimeConfig aborts hung requests and clears the timeout', async () => {
     let timeoutCleared = false;
     class AbortControllerStub {
