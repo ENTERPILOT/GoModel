@@ -13,6 +13,7 @@ type passthroughService struct {
 	modelAuthorizer              RequestModelAuthorizer
 	logger                       auditlog.LoggerInterface
 	usageLogger                  usage.LoggerInterface
+	budgetChecker                BudgetChecker
 	pricingResolver              usage.PricingResolver
 	normalizePassthroughV1Prefix bool
 	enabledPassthroughProviders  map[string]struct{}
@@ -37,6 +38,9 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 				return handleError(c, err)
 			}
 		}
+	}
+	if err := enforceBudget(c, s.budgetChecker); err != nil {
+		return handleError(c, err)
 	}
 
 	ctx, _ := requestContextWithRequestID(c.Request())

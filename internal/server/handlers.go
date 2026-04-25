@@ -28,6 +28,7 @@ type Handler struct {
 	keepOnlyAliasesAtModelsEndpoint bool
 	logger                          auditlog.LoggerInterface
 	usageLogger                     usage.LoggerInterface
+	budgetChecker                   BudgetChecker
 	pricingResolver                 usage.PricingResolver
 	batchStore                      batchstore.Store
 	responseStore                   responsestore.Store
@@ -134,6 +135,7 @@ func (h *Handler) translatedInference() *translatedInferenceService {
 			translatedRequestPatcher: h.translatedRequestPatcher,
 			logger:                   h.logger,
 			usageLogger:              h.usageLogger,
+			budgetChecker:            h.budgetChecker,
 			pricingResolver:          h.pricingResolver,
 			responseCache:            h.responseCache,
 			guardrailsHash:           h.guardrailsHash,
@@ -161,6 +163,7 @@ func (h *Handler) nativeBatch() *nativeBatchService {
 		cleanupPreparedBatchInputFile:        h.cleanupPreparedBatchInputFile,
 		cleanupStoredBatchRewrittenInputFile: h.cleanupStoredBatchRewrittenInputFile,
 		usageLogger:                          h.usageLogger,
+		budgetChecker:                        h.budgetChecker,
 		pricingResolver:                      h.pricingResolver,
 	}
 }
@@ -192,6 +195,7 @@ func (h *Handler) passthrough() *passthroughService {
 		modelAuthorizer:              h.modelAuthorizer,
 		logger:                       h.logger,
 		usageLogger:                  h.usageLogger,
+		budgetChecker:                h.budgetChecker,
 		pricingResolver:              h.pricingResolver,
 		normalizePassthroughV1Prefix: h.normalizePassthroughV1Prefix,
 		enabledPassthroughProviders:  h.enabledPassthroughProviders,

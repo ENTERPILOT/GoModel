@@ -20,6 +20,7 @@ import (
 	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
 	"gomodel/internal/authkeys"
+	"gomodel/internal/budget"
 	"gomodel/internal/core"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/modeloverrides"
@@ -37,6 +38,7 @@ type Handler struct {
 	aliases             *aliases.Service
 	modelOverrides      *modeloverrides.Service
 	workflows           *workflows.Service
+	budgets             *budget.Service
 	guardrails          guardrails.Catalog
 	guardrailDefs       *guardrails.Service
 	runtimeConfig       DashboardConfigResponse
@@ -53,6 +55,7 @@ const (
 	DashboardConfigFeatureFallbackMode  = "FEATURE_FALLBACK_MODE"
 	DashboardConfigLoggingEnabled       = "LOGGING_ENABLED"
 	DashboardConfigUsageEnabled         = "USAGE_ENABLED"
+	DashboardConfigBudgetsEnabled       = "BUDGETS_ENABLED"
 	DashboardConfigGuardrailsEnabled    = "GUARDRAILS_ENABLED"
 	DashboardConfigCacheEnabled         = "CACHE_ENABLED"
 	DashboardConfigRedisURL             = "REDIS_URL"
@@ -64,6 +67,7 @@ type DashboardConfigResponse struct {
 	FeatureFallbackMode  string `json:"FEATURE_FALLBACK_MODE,omitempty"`
 	LoggingEnabled       string `json:"LOGGING_ENABLED,omitempty"`
 	UsageEnabled         string `json:"USAGE_ENABLED,omitempty"`
+	BudgetsEnabled       string `json:"BUDGETS_ENABLED,omitempty"`
 	GuardrailsEnabled    string `json:"GUARDRAILS_ENABLED,omitempty"`
 	CacheEnabled         string `json:"CACHE_ENABLED,omitempty"`
 	RedisURL             string `json:"REDIS_URL,omitempty"`
@@ -173,6 +177,13 @@ func WithWorkflows(service *workflows.Service) Option {
 	}
 }
 
+// WithBudgets enables budget administration endpoints.
+func WithBudgets(service *budget.Service) Option {
+	return func(h *Handler) {
+		h.budgets = service
+	}
+}
+
 // WithGuardrailsRegistry enables listing valid guardrail references for workflow authoring.
 func WithGuardrailsRegistry(registry guardrails.Catalog) Option {
 	return func(h *Handler) {
@@ -232,6 +243,7 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		FeatureFallbackMode:  strings.TrimSpace(values.FeatureFallbackMode),
 		LoggingEnabled:       strings.TrimSpace(values.LoggingEnabled),
 		UsageEnabled:         strings.TrimSpace(values.UsageEnabled),
+		BudgetsEnabled:       strings.TrimSpace(values.BudgetsEnabled),
 		GuardrailsEnabled:    strings.TrimSpace(values.GuardrailsEnabled),
 		CacheEnabled:         strings.TrimSpace(values.CacheEnabled),
 		RedisURL:             strings.TrimSpace(values.RedisURL),
@@ -985,6 +997,58 @@ func (h *Handler) DashboardConfig(c *echo.Context) error {
 	return c.JSON(http.StatusOK, cloneDashboardRuntimeConfig(h.runtimeConfig))
 }
 
+// BudgetSettings handles GET /admin/api/v1/budgets/settings.
+func (h *Handler) BudgetSettings(c *echo.Context) error {
+	if h.budgets == nil {
+		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
+	}
+	return c.JSON(http.StatusOK, h.budgets.Settings())
+}
+
+// UpdateBudgetSettings handles PUT /admin/api/v1/budgets/settings.
+func (h *Handler) UpdateBudgetSettings(c *echo.Context) error {
+	if h.budgets == nil {
+		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
+	}
+	var req updateBudgetSettingsRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	settings := budget.Settings{
+		DailyResetHour:     req.DailyResetHour,
+		DailyResetMinute:   req.DailyResetMinute,
+		WeeklyResetWeekday: req.WeeklyResetWeekday,
+		WeeklyResetHour:    req.WeeklyResetHour,
+		WeeklyResetMinute:  req.WeeklyResetMinute,
+		MonthlyResetDay:    req.MonthlyResetDay,
+		MonthlyResetHour:   req.MonthlyResetHour,
+		MonthlyResetMinute: req.MonthlyResetMinute,
+	}
+	saved, err := h.budgets.SaveSettings(c.Request().Context(), settings)
+	if err != nil {
+		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	}
+	return c.JSON(http.StatusOK, saved)
+}
+
+// ResetBudgets handles POST /admin/api/v1/budgets/reset.
+func (h *Handler) ResetBudgets(c *echo.Context) error {
+	if h.budgets == nil {
+		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
+	}
+	var req resetBudgetsRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	if strings.TrimSpace(strings.ToLower(req.Confirmation)) != "reset" {
+		return handleError(c, core.NewInvalidRequestError("confirmation must be reset", nil))
+	}
+	if err := h.budgets.ResetAll(c.Request().Context(), time.Now().UTC()); err != nil {
+		return handleError(c, core.NewProviderError("budgets", http.StatusServiceUnavailable, "failed to reset budgets", err))
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": "ok"})
+}
+
 // ProviderStatus handles GET /admin/api/v1/providers/status
 func (h *Handler) ProviderStatus(c *echo.Context) error {
 	return c.JSON(http.StatusOK, h.buildProviderStatusResponse())
@@ -1175,6 +1239,21 @@ type createAuthKeyRequest struct {
 	Description string     `json:"description,omitempty"`
 	UserPath    string     `json:"user_path,omitempty"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+}
+
+type updateBudgetSettingsRequest struct {
+	DailyResetHour     int `json:"daily_reset_hour"`
+	DailyResetMinute   int `json:"daily_reset_minute"`
+	WeeklyResetWeekday int `json:"weekly_reset_weekday"`
+	WeeklyResetHour    int `json:"weekly_reset_hour"`
+	WeeklyResetMinute  int `json:"weekly_reset_minute"`
+	MonthlyResetDay    int `json:"monthly_reset_day"`
+	MonthlyResetHour   int `json:"monthly_reset_hour"`
+	MonthlyResetMinute int `json:"monthly_reset_minute"`
+}
+
+type resetBudgetsRequest struct {
+	Confirmation string `json:"confirmation"`
 }
 
 func featureUnavailableError(message string) error {

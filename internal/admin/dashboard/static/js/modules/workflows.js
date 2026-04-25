@@ -82,6 +82,7 @@
 	                    'FEATURE_FALLBACK_MODE',
 	                    'LOGGING_ENABLED',
 	                    'USAGE_ENABLED',
+	                    'BUDGETS_ENABLED',
 	                    'GUARDRAILS_ENABLED',
 	                    'CACHE_ENABLED',
 	                    'REDIS_URL',

@@ -86,6 +86,18 @@ usage:
   flush_interval: 5
   retention_days: 90
 
+budgets:
+  enabled: true # env: BUDGETS_ENABLED; with no configured budgets this has no effect
+  user_paths:
+    # Env equivalent:
+    # SET_BUDGET_USER_PATH_EXAMPLE="daily=10,weekly=50"
+    - path: "/user/path/example"
+      limits:
+        - period: "daily" # hourly, daily, weekly, monthly; stored in DB as period_seconds
+          amount: 10.00
+        - period: "weekly"
+          amount: 50.00
+
 metrics:
   enabled: false
   endpoint: "/metrics"

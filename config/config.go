@@ -36,6 +36,7 @@ type Config struct {
 	Storage    StorageConfig    `yaml:"storage"`
 	Logging    LogConfig        `yaml:"logging"`
 	Usage      UsageConfig      `yaml:"usage"`
+	Budgets    BudgetsConfig    `yaml:"budgets"`
 	Metrics    MetricsConfig    `yaml:"metrics"`
 	HTTP       HTTPConfig       `yaml:"http"`
 	Admin      AdminConfig      `yaml:"admin"`
@@ -371,6 +372,36 @@ type UsageConfig struct {
 	// RetentionDays is how long to keep usage data (0 = forever)
 	// Default: 90
 	RetentionDays int `yaml:"retention_days" env:"USAGE_RETENTION_DAYS"`
+}
+
+// BudgetsConfig holds per-user-path spend limits.
+type BudgetsConfig struct {
+	// Enabled controls whether budget checks are active.
+	// Default: true. With no configured budgets, this has no effect.
+	Enabled bool `yaml:"enabled" env:"BUDGETS_ENABLED"`
+
+	// UserPaths declares budget limits by tracked user path.
+	UserPaths []BudgetUserPathConfig `yaml:"user_paths"`
+}
+
+// BudgetUserPathConfig declares one or more budget limits for a user path.
+type BudgetUserPathConfig struct {
+	Path   string              `yaml:"path"`
+	Limits []BudgetLimitConfig `yaml:"limits"`
+}
+
+// BudgetLimitConfig declares one spend limit for a reset period.
+type BudgetLimitConfig struct {
+	// Period accepts hourly, daily, weekly, or monthly. The resolved period is
+	// persisted as PeriodSeconds in the database.
+	Period string `yaml:"period"`
+
+	// PeriodSeconds can be set directly instead of Period. Standard values are
+	// 3600, 86400, 604800, and 2592000.
+	PeriodSeconds int64 `yaml:"period_seconds"`
+
+	// Amount is the maximum allowed tracked provider spend for the period.
+	Amount float64 `yaml:"amount"`
 }
 
 // StorageConfig holds database storage configuration (used by audit logging, usage tracking, future IAM, etc.)
@@ -968,6 +999,9 @@ func buildDefaultConfig() *Config {
 			FlushInterval:             5,
 			RetentionDays:             90,
 		},
+		Budgets: BudgetsConfig{
+			Enabled: true,
+		},
 		Metrics: MetricsConfig{
 			Endpoint: "/metrics",
 		},
@@ -1014,6 +1048,15 @@ func Load() (*LoadResult, error) {
 	mergeSemanticResponseDefaults(cfg.Cache.Response.Semantic)
 
 	if err := applyEnvOverrides(cfg); err != nil {
+		return nil, err
+	}
+	if err := applyBudgetEnv(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateBudgetConfig(&cfg.Budgets); err != nil {
+		return nil, err
+	}
+	if err := validateBudgetDependencies(cfg); err != nil {
 		return nil, err
 	}
 	cfg.Models.ConfiguredProviderModelsMode = ResolveConfiguredProviderModelsMode(cfg.Models.ConfiguredProviderModelsMode)
@@ -1214,6 +1257,155 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 	}
 	cfg.Manual = manual
 	return nil
+}
+
+func applyBudgetEnv(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	if !cfg.Budgets.Enabled {
+		return nil
+	}
+
+	const prefix = "SET_BUDGET_"
+	for _, item := range os.Environ() {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok || !strings.HasPrefix(key, prefix) || strings.TrimSpace(value) == "" {
+			continue
+		}
+		path := budgetEnvPath(key[len(prefix):])
+		limits, err := parseBudgetEnvLimits(value)
+		if err != nil {
+			return fmt.Errorf("invalid value for %s: %w", key, err)
+		}
+		if len(limits) == 0 {
+			continue
+		}
+		cfg.Budgets.UserPaths = append(cfg.Budgets.UserPaths, BudgetUserPathConfig{
+			Path:   path,
+			Limits: limits,
+		})
+	}
+	return nil
+}
+
+func budgetEnvPath(suffix string) string {
+	suffix = strings.Trim(strings.ToLower(strings.TrimSpace(suffix)), "_")
+	if suffix == "" {
+		return "/"
+	}
+	segments := make([]string, 0)
+	for _, part := range strings.Split(suffix, "_") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			segments = append(segments, part)
+		}
+	}
+	if len(segments) == 0 {
+		return "/"
+	}
+	return "/" + strings.Join(segments, "/")
+}
+
+func parseBudgetEnvLimits(raw string) ([]BudgetLimitConfig, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if strings.HasPrefix(raw, "{") {
+		values := map[string]float64{}
+		if err := json.Unmarshal([]byte(raw), &values); err != nil {
+			return nil, err
+		}
+		limits := make([]BudgetLimitConfig, 0, len(values))
+		for period, amount := range values {
+			limits = append(limits, BudgetLimitConfig{Period: period, Amount: amount})
+		}
+		return limits, nil
+	}
+	if strings.HasPrefix(raw, "[") {
+		var limits []BudgetLimitConfig
+		if err := json.Unmarshal([]byte(raw), &limits); err != nil {
+			return nil, err
+		}
+		return limits, nil
+	}
+
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n'
+	})
+	limits := make([]BudgetLimitConfig, 0, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		period, amountText, ok := strings.Cut(field, "=")
+		if !ok {
+			period, amountText, ok = strings.Cut(field, ":")
+		}
+		if !ok {
+			return nil, fmt.Errorf("budget limit %q must use period=amount", field)
+		}
+		amount, err := strconv.ParseFloat(strings.TrimSpace(amountText), 64)
+		if err != nil {
+			return nil, fmt.Errorf("budget amount %q is not a valid number", amountText)
+		}
+		limits = append(limits, BudgetLimitConfig{
+			Period: strings.TrimSpace(period),
+			Amount: amount,
+		})
+	}
+	return limits, nil
+}
+
+func validateBudgetConfig(cfg *BudgetsConfig) error {
+	if cfg == nil {
+		return nil
+	}
+	if !cfg.Enabled {
+		return nil
+	}
+	for pathIdx, entry := range cfg.UserPaths {
+		if strings.TrimSpace(entry.Path) == "" {
+			return fmt.Errorf("budgets.user_paths[%d].path is required", pathIdx)
+		}
+		for limitIdx, limit := range entry.Limits {
+			if limit.Amount <= 0 {
+				return fmt.Errorf("budgets.user_paths[%d].limits[%d].amount must be greater than 0", pathIdx, limitIdx)
+			}
+			if limit.PeriodSeconds <= 0 {
+				seconds, ok := budgetPeriodSeconds(limit.Period)
+				if !ok {
+					return fmt.Errorf("budgets.user_paths[%d].limits[%d].period must be one of hourly, daily, weekly, monthly or period_seconds must be set", pathIdx, limitIdx)
+				}
+				cfg.UserPaths[pathIdx].Limits[limitIdx].PeriodSeconds = seconds
+			}
+		}
+	}
+	return nil
+}
+
+func validateBudgetDependencies(cfg *Config) error {
+	if cfg == nil || !cfg.Budgets.Enabled || len(cfg.Budgets.UserPaths) == 0 || cfg.Usage.Enabled {
+		return nil
+	}
+	return fmt.Errorf("budgets require usage tracking to be enabled because spend limits are evaluated from usage cost records")
+}
+
+func budgetPeriodSeconds(period string) (int64, bool) {
+	switch strings.ToLower(strings.TrimSpace(period)) {
+	case "hour", "hourly", "hours":
+		return 3600, true
+	case "day", "daily", "days":
+		return 86400, true
+	case "week", "weekly", "weeks":
+		return 604800, true
+	case "month", "monthly", "months":
+		return 2592000, true
+	default:
+		return 0, false
+	}
 }
 
 // applyEnvOverrides walks cfg's struct fields and applies env var overrides

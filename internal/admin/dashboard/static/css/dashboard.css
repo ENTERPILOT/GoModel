@@ -1875,6 +1875,23 @@ textarea:focus {
   border-color: var(--accent);
 }
 
+.form-input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.form-input:focus {
+  border-color: var(--accent);
+}
+
 .alias-checkbox {
   display: inline-flex;
   align-items: center;
@@ -3072,6 +3089,19 @@ body.conversation-drawer-open {
   border-color: color-mix(in srgb, var(--danger) 75%, var(--border));
 }
 
+.pagination-btn-danger {
+  color: #fff;
+  border-color: color-mix(in srgb, var(--danger) 76%, #000 12%);
+  background: var(--danger);
+  font-weight: 600;
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--danger) 20%, transparent);
+}
+
+.pagination-btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 90%, #fff 10%);
+  border-color: color-mix(in srgb, var(--danger) 82%, #000 14%);
+}
+
 .pagination-btn-with-icon {
   display: inline-flex;
   align-items: center;
@@ -3382,6 +3412,25 @@ body.conversation-drawer-open {
   color: var(--text-muted);
   font-size: 14px;
   line-height: 1.55;
+}
+
+.budget-settings-section {
+  width: 100%;
+}
+
+.budget-settings-grid {
+  width: min(100%, 780px);
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+}
+
+.budget-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.budget-reset-dialog {
+  max-width: 460px;
 }
 
 .settings-refresh-icon,
@@ -3830,6 +3879,15 @@ body.conversation-drawer-open {
   }
   .settings-form-grid {
     grid-template-columns: 1fr;
+  }
+  .budget-settings-grid {
+    grid-template-columns: 1fr;
+  }
+  .budget-settings-actions {
+    width: 100%;
+  }
+  .budget-settings-actions .pagination-btn {
+    width: 100%;
   }
 
   /* Date picker mobile */

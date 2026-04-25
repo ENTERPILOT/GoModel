@@ -26,6 +26,7 @@ type nativeBatchService struct {
 	cleanupPreparedBatchInputFile        func(context.Context, string, string)
 	cleanupStoredBatchRewrittenInputFile func(context.Context, *batchstore.StoredBatch) bool
 	usageLogger                          usage.LoggerInterface
+	budgetChecker                        BudgetChecker
 	pricingResolver                      usage.PricingResolver
 
 	orchestrator *gateway.BatchOrchestrator
@@ -54,6 +55,9 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 	req, err := canonicalJSONRequestFromSemantics[*core.BatchRequest](c, core.DecodeBatchRequest)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	if err := enforceBudget(c, s.budgetChecker); err != nil {
+		return handleError(c, err)
 	}
 
 	ctx, requestID := requestContextWithRequestID(c.Request())

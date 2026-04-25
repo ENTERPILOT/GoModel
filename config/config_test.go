@@ -55,6 +55,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"LOGGING_FLUSH_INTERVAL", "LOGGING_RETENTION_DAYS",
 		"USAGE_ENABLED", "ENFORCE_RETURNING_USAGE_DATA",
 		"USAGE_BUFFER_SIZE", "USAGE_FLUSH_INTERVAL", "USAGE_RETENTION_DAYS",
+		"BUDGETS_ENABLED",
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING",
 		"FEATURE_FALLBACK_MODE", "FALLBACK_MANUAL_RULES_PATH",
 		"MODEL_OVERRIDES_ENABLED", "MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
@@ -63,6 +64,13 @@ func clearAllConfigEnvVars(t *testing.T) {
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
+	}
+	for _, item := range os.Environ() {
+		key, _, _ := strings.Cut(item, "=")
+		if strings.HasPrefix(key, "SET_BUDGET_") {
+			t.Setenv(key, "")
+			os.Unsetenv(key)
+		}
 	}
 	clearProviderEnvVars(t)
 }
@@ -157,6 +165,9 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Usage.RetentionDays != 90 {
 		t.Errorf("expected Usage.RetentionDays=90, got %d", cfg.Usage.RetentionDays)
 	}
+	if !cfg.Budgets.Enabled {
+		t.Error("expected Budgets.Enabled=true")
+	}
 	if cfg.Metrics.Endpoint != "/metrics" {
 		t.Errorf("expected Metrics.Endpoint=/metrics, got %s", cfg.Metrics.Endpoint)
 	}
@@ -203,6 +214,79 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Resilience.CircuitBreaker != expectedCB {
 		t.Errorf("expected Resilience.CircuitBreaker=%+v, got %+v", expectedCB, cfg.Resilience.CircuitBreaker)
 	}
+}
+
+func TestLoadBudgetEnvUserPath(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(string) {
+		t.Setenv("SET_BUDGET_USER_PATH_EXAMPLE", "daily=12.5,weekly=50")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+
+		entries := result.Config.Budgets.UserPaths
+		if len(entries) != 1 {
+			t.Fatalf("expected 1 budget user path, got %d", len(entries))
+		}
+		if got, want := entries[0].Path, "/user/path/example"; got != want {
+			t.Fatalf("budget env path = %q, want %q", got, want)
+		}
+		if len(entries[0].Limits) != 2 {
+			t.Fatalf("expected 2 budget limits, got %d", len(entries[0].Limits))
+		}
+		if got, want := entries[0].Limits[0].PeriodSeconds, int64(86400); got != want {
+			t.Fatalf("daily period seconds = %d, want %d", got, want)
+		}
+		if got, want := entries[0].Limits[0].Amount, 12.5; got != want {
+			t.Fatalf("daily amount = %v, want %v", got, want)
+		}
+		if got, want := entries[0].Limits[1].PeriodSeconds, int64(604800); got != want {
+			t.Fatalf("weekly period seconds = %d, want %d", got, want)
+		}
+		if got, want := entries[0].Limits[1].Amount, 50.0; got != want {
+			t.Fatalf("weekly amount = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestLoadBudgetEnvRequiresUsageTracking(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(string) {
+		t.Setenv("USAGE_ENABLED", "false")
+		t.Setenv("SET_BUDGET_USER_PATH_EXAMPLE", "daily=12.5")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("expected Load() to fail when budgets are configured while usage tracking is disabled")
+		}
+		if !strings.Contains(err.Error(), "budgets require usage tracking") {
+			t.Fatalf("Load() error = %v, want budget usage dependency error", err)
+		}
+	})
+}
+
+func TestLoadDisabledBudgetsIgnoreMalformedBudgetEnv(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(string) {
+		t.Setenv("BUDGETS_ENABLED", "false")
+		t.Setenv("SET_BUDGET_USER_PATH_EXAMPLE", "not-a-budget-limit")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		if result.Config.Budgets.Enabled {
+			t.Fatal("expected budgets to be disabled")
+		}
+		if len(result.Config.Budgets.UserPaths) != 0 {
+			t.Fatalf("expected disabled budgets to ignore env user paths, got %d", len(result.Config.Budgets.UserPaths))
+		}
+	})
 }
 
 func TestLoad_ZeroConfig(t *testing.T) {

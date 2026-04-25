@@ -36,6 +36,82 @@
             <button type="button" class="pagination-btn" x-show="timezoneOverride" @click="clearTimezoneOverride()">Use Browser Timezone</button>
         </div>
 
+        <div class="settings-refresh-section budget-settings-section" x-show="budgetManagementEnabled()">
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'budget-settings-help-copy', showLabel: 'Show budget help', hideLabel: 'Hide budget help', text: 'Budget reset anchors are stored in the database and evaluated in UTC. Hourly budgets reset at the top of each hour.' }">
+                <div class="inline-help-title-row">
+                    <h3>Budget Resets</h3>
+                    {{template "inline-help-toggle" .}}
+                </div>
+                <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+            </div>
+            <div class="settings-form-grid budget-settings-grid">
+                <div class="form-field">
+                    <label class="form-field-label" for="budget-daily-hour">Daily Reset Hour</label>
+                    <input id="budget-daily-hour" class="form-input" type="number" min="0" max="23" step="1" x-model.number="budgetSettings.daily_reset_hour">
+                </div>
+                <div class="form-field">
+                    <label class="form-field-label" for="budget-daily-minute">Daily Reset Minute</label>
+                    <input id="budget-daily-minute" class="form-input" type="number" min="0" max="59" step="1" x-model.number="budgetSettings.daily_reset_minute">
+                </div>
+                <div class="form-field">
+                    <label class="form-field-label" for="budget-weekly-day">Weekly Reset Day</label>
+                    <select id="budget-weekly-day" class="usage-log-select settings-select" x-model.number="budgetSettings.weekly_reset_weekday">
+                        <template x-for="day in budgetWeekdays()" :key="day.value">
+                            <option :value="day.value" x-text="day.label"></option>
+                        </template>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label class="form-field-label" for="budget-weekly-hour">Weekly Reset Hour</label>
+                    <input id="budget-weekly-hour" class="form-input" type="number" min="0" max="23" step="1" x-model.number="budgetSettings.weekly_reset_hour">
+                </div>
+                <div class="form-field">
+                    <label class="form-field-label" for="budget-weekly-minute">Weekly Reset Minute</label>
+                    <input id="budget-weekly-minute" class="form-input" type="number" min="0" max="59" step="1" x-model.number="budgetSettings.weekly_reset_minute">
+                </div>
+                <div class="form-field">
+                    <label class="form-field-label" for="budget-monthly-day">Monthly Reset Day</label>
+                    <input id="budget-monthly-day" class="form-input" type="number" min="1" max="31" step="1" x-model.number="budgetSettings.monthly_reset_day">
+                </div>
+                <div class="form-field">
+                    <label class="form-field-label" for="budget-monthly-hour">Monthly Reset Hour</label>
+                    <input id="budget-monthly-hour" class="form-input" type="number" min="0" max="23" step="1" x-model.number="budgetSettings.monthly_reset_hour">
+                </div>
+                <div class="form-field">
+                    <label class="form-field-label" for="budget-monthly-minute">Monthly Reset Minute</label>
+                    <input id="budget-monthly-minute" class="form-input" type="number" min="0" max="59" step="1" x-model.number="budgetSettings.monthly_reset_minute">
+                </div>
+            </div>
+            <div class="settings-refresh-actions budget-settings-actions">
+                <button type="button"
+                        class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+                        :disabled="budgetSettingsSaving || budgetSettingsLoading"
+                        :aria-busy="budgetSettingsSaving ? 'true' : 'false'"
+                        aria-describedby="budget-settings-help-copy"
+                        @click="saveBudgetSettings()">
+                    <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                    <span>Save Budget Settings</span>
+                </button>
+                <button type="button"
+                        class="pagination-btn pagination-btn-danger pagination-btn-with-icon"
+                        :disabled="budgetResetLoading"
+                        @click="openBudgetResetDialog()">
+                    <i data-lucide="rotate-ccw" class="form-action-icon" aria-hidden="true"></i>
+                    <span>Reset Budgets</span>
+                </button>
+            </div>
+            <div class="alert alert-success settings-refresh-alert"
+                 role="status"
+                 aria-live="polite"
+                 x-show="budgetSettingsNotice"
+                 x-text="budgetSettingsNotice"></div>
+            <div class="alert alert-warning settings-refresh-alert"
+                 role="alert"
+                 aria-live="assertive"
+                 x-show="budgetSettingsError"
+                 x-text="budgetSettingsError"></div>
+        </div>
+
         <div class="settings-refresh-section">
             <div class="inline-help-section" x-data="{ open: false, copyId: 'runtime-refresh-help-copy', showLabel: 'Show runtime refresh help', hideLabel: 'Hide runtime refresh help', text: 'Pull the latest model metadata, provider inventory, API keys, aliases, model access rules, guardrails, and workflows.' }">
                 <div class="inline-help-title-row">
@@ -79,6 +155,49 @@
                 </template>
             </ul>
         </div>
+    </div>
+    <div class="auth-dialog-backdrop"
+         x-cloak
+         x-show="budgetResetDialogOpen"
+         x-transition.opacity.duration.160ms
+         aria-hidden="true"></div>
+    <div class="auth-dialog-shell"
+         x-cloak
+         x-show="budgetResetDialogOpen"
+         x-transition.opacity.duration.160ms
+         @click="closeBudgetResetDialog()"
+         @keydown.escape.window="budgetResetDialogOpen && closeBudgetResetDialog()">
+        <section class="auth-dialog budget-reset-dialog"
+                 role="dialog"
+                 aria-modal="true"
+                 aria-labelledby="budgetResetDialogTitle"
+                 @click.stop>
+            <div class="auth-dialog-header">
+                <h2 id="budgetResetDialogTitle">Reset Budgets</h2>
+                <button type="button" class="auth-dialog-close dialog-close-btn" aria-label="Close budget reset dialog" @click="closeBudgetResetDialog()">
+                    {{template "x-icon"}}
+                </button>
+            </div>
+            <form class="auth-dialog-form" @submit.prevent="resetBudgets()">
+                <div class="form-field">
+                    <label class="form-field-label" for="budget-reset-confirmation">Type reset to confirm</label>
+                    <input id="budget-reset-confirmation"
+                           class="form-input"
+                           type="text"
+                           autocomplete="off"
+                           x-model="budgetResetConfirmation">
+                </div>
+                <div class="auth-dialog-actions">
+                    <button type="button" class="pagination-btn" @click="closeBudgetResetDialog()">Cancel</button>
+                    <button type="submit"
+                            class="pagination-btn pagination-btn-danger pagination-btn-with-icon"
+                            :disabled="budgetResetLoading || String(budgetResetConfirmation || '').trim().toLowerCase() !== 'reset'">
+                        <i data-lucide="rotate-ccw" class="form-action-icon" aria-hidden="true"></i>
+                        <span>Reset All Budgets</span>
+                    </button>
+                </div>
+            </form>
+        </section>
     </div>
 </div>
 </template>

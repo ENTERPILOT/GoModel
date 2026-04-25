@@ -196,6 +196,9 @@ function dashboard() {
         if (typeof this.ensureTimezoneOptions === "function") {
           this.ensureTimezoneOptions();
         }
+        if (typeof this.fetchBudgetSettings === "function") {
+          this.fetchBudgetSettings();
+        }
       }
       if (page === "overview") this.renderChart();
       if (page === "usage") this.fetchUsagePage();
@@ -356,6 +359,7 @@ function dashboard() {
         (this.page === "workflows" && this.workflowFormOpen) ||
         (this.page === "guardrails" && this.guardrailFormOpen) ||
         (this.page === "auth-keys" && this.authKeyFormOpen)
+        || this.budgetResetDialogOpen
       );
     },
 
@@ -921,6 +925,12 @@ function dashboard() {
         ? dashboardGuardrailsModule
         : null,
       "dashboardGuardrailsModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardBudgetsModule === "function"
+        ? dashboardBudgetsModule
+        : null,
+      "dashboardBudgetsModule",
     ),
     resolveModuleFactory(
       typeof dashboardWorkflowsModule === "function"
