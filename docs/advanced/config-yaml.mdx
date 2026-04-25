@@ -85,9 +85,10 @@ services:
 
 If `${OPENAI_API_KEY}` appears in YAML but the env var is not actually set, the
 literal string `${OPENAI_API_KEY}` ends up as the API key value. The credential
-filter detects the `${` prefix and removes the provider entirely. Always verify
-your env vars are exported before starting the process, or supply a default:
-`${OPENAI_API_KEY:-}`.
+filter detects the `${` substring and removes the provider entirely. This also
+applies if `${VAR}` appears in the middle of the value, such as
+`prefix-${OPENAI_API_KEY}`. Always verify your env vars are exported before
+starting the process, or supply a default: `${OPENAI_API_KEY:-}`.
 
 ### Per-provider resilience can only come from YAML
 

@@ -1111,6 +1111,8 @@ func TestChatCompletionWithContext(t *testing.T) {
 }
 
 func TestConvertToAnthropicRequest(t *testing.T) {
+	t.Setenv(defaultMaxTokensEnvVar, "")
+
 	temp := 0.7
 	maxTokens := 1024
 

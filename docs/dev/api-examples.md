@@ -322,11 +322,13 @@ upstream provider; routing is automatic.
 ### Python
 
 ```python
+import os
+
 from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8080/v1",
-    api_key="not-needed"  # API key is configured on the server side
+    api_key=os.getenv("GOMODEL_MASTER_KEY") or "not-needed",
 )
 
 # Use OpenAI models
@@ -368,7 +370,7 @@ import OpenAI from "openai";
 
 const client = new OpenAI({
   baseURL: "http://localhost:8080/v1",
-  apiKey: "not-needed",
+  apiKey: process.env.GOMODEL_MASTER_KEY || "not-needed",
 });
 
 // Use any supported model - routing is automatic

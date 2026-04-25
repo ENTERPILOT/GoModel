@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"gomodel/internal/core"
 	"gomodel/internal/providers"
@@ -25,6 +26,8 @@ const defaultMaxTokensEnvVar = "ANTHROPIC_DEFAULT_MAX_TOKENS"
 // invalid.
 const fallbackMaxTokens = 4096
 
+var invalidDefaultMaxTokensWarnOnce sync.Once
+
 func resolveDefaultMaxTokens() int {
 	raw := strings.TrimSpace(os.Getenv(defaultMaxTokensEnvVar))
 	if raw == "" {
@@ -32,8 +35,10 @@ func resolveDefaultMaxTokens() int {
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil || n <= 0 {
-		slog.Warn("invalid "+defaultMaxTokensEnvVar+"; using fallback",
-			"value", raw, "fallback", fallbackMaxTokens)
+		invalidDefaultMaxTokensWarnOnce.Do(func() {
+			slog.Warn("invalid "+defaultMaxTokensEnvVar+"; using fallback",
+				"value", raw, "fallback", fallbackMaxTokens)
+		})
 		return fallbackMaxTokens
 	}
 	return n
@@ -282,13 +287,14 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	anthropicReq := &anthropicRequest{
 		Model:       req.Model,
 		Messages:    make([]anthropicMessage, 0, len(req.Messages)),
-		MaxTokens:   resolveDefaultMaxTokens(),
 		Temperature: req.Temperature,
 		Stream:      req.Stream,
 	}
 
 	if req.MaxTokens != nil {
 		anthropicReq.MaxTokens = *req.MaxTokens
+	} else {
+		anthropicReq.MaxTokens = resolveDefaultMaxTokens()
 	}
 
 	if req.Reasoning != nil && req.Reasoning.Effort != "" {
