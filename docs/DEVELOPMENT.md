@@ -46,6 +46,8 @@ Releases are generated automatically from merged PRs, categorized by labels and 
 - Release labels are auto-applied from PR title type (`feat` -> feature, `fix` -> bug fix, etc.)
 - Internal changes (`chore`, `ci`, `build`, `test`, most `refactor`) are excluded from release notes by default
 - Prefer **Squash and merge** so each PR lands as one commit aligned with the PR title
+- Release builds push the Docker image by digest first, promote the digest to semver tags and `latest` for stable releases, then publish the GitHub release
+- If GitHub release publishing fails after Docker tag promotion, rerun the release workflow after fixing the failure or manually reconcile the promoted Docker tags
 - If needed, apply `release:skip` on a PR to force exclusion from release notes
 
 ## Repomix

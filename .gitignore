@@ -11,6 +11,8 @@
 
 # Cache
 /.cache
+/tests/integration/.cache/*
+!/tests/integration/.cache/.gitkeep
 
 # Data (runtime-created by SQLite storage)
 /data/
