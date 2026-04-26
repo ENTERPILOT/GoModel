@@ -96,6 +96,24 @@ func (s *MongoDBStore) UpsertBudgets(ctx context.Context, budgets []Budget) erro
 	return nil
 }
 
+func (s *MongoDBStore) DeleteBudget(ctx context.Context, userPath string, periodSeconds int64) error {
+	userPath, err := NormalizeUserPath(userPath)
+	if err != nil {
+		return err
+	}
+	if periodSeconds <= 0 {
+		return fmt.Errorf("period_seconds must be greater than 0")
+	}
+	result, err := s.budgets.DeleteOne(ctx, bson.D{{Key: "user_path", Value: userPath}, {Key: "period_seconds", Value: periodSeconds}})
+	if err != nil {
+		return fmt.Errorf("delete budget %s/%d: %w", userPath, periodSeconds, err)
+	}
+	if result.DeletedCount == 0 {
+		return fmt.Errorf("budget %s/%d not found", userPath, periodSeconds)
+	}
+	return nil
+}
+
 func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) error {
 	budgets, err := normalizeBudgetsForUpsert(budgets)
 	if err != nil {
@@ -173,6 +191,30 @@ func (s *MongoDBStore) SaveSettings(ctx context.Context, settings Settings) (Set
 		}
 	}
 	return settings, nil
+}
+
+func (s *MongoDBStore) ResetBudget(ctx context.Context, userPath string, periodSeconds int64, at time.Time) error {
+	userPath, err := NormalizeUserPath(userPath)
+	if err != nil {
+		return err
+	}
+	if periodSeconds <= 0 {
+		return fmt.Errorf("period_seconds must be greater than 0")
+	}
+	result, err := s.budgets.UpdateOne(ctx,
+		bson.D{{Key: "user_path", Value: userPath}, {Key: "period_seconds", Value: periodSeconds}},
+		bson.D{{Key: "$set", Value: bson.D{
+			{Key: "last_reset_at", Value: at.UTC()},
+			{Key: "updated_at", Value: at.UTC()},
+		}}},
+	)
+	if err != nil {
+		return fmt.Errorf("reset budget %s/%d: %w", userPath, periodSeconds, err)
+	}
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("budget %s/%d not found", userPath, periodSeconds)
+	}
+	return nil
 }
 
 func (s *MongoDBStore) ResetAllBudgets(ctx context.Context, at time.Time) error {

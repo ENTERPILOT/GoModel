@@ -118,6 +118,10 @@
                         <input type="checkbox" x-model="workflowForm.features.usage">
                         <span>Usage</span>
                     </label>
+                    <label class="workflow-feature-toggle" x-show="workflowBudgetVisible()">
+                        <input type="checkbox" x-model="workflowForm.features.budget">
+                        <span>Budget</span>
+                    </label>
                     <label class="workflow-feature-toggle" x-show="workflowGuardrailsVisible()">
                         <input type="checkbox" x-model="workflowForm.features.guardrails">
                         <span>Guardrails</span>

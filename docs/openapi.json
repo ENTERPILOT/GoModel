@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "description": "High-performance AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, Z.ai, xAI, Oracle, Ollama). Drop-in OpenAI-compatible API.",
+    "description": "High-performance AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, Z.ai, xAI, MiniMax, Oracle, Ollama). Drop-in OpenAI-compatible API.",
     "title": "GoModel API",
     "contact": {},
     "version": "1.0"
@@ -197,7 +197,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/auditlog.LogListResult"
+                  "$ref": "#/components/schemas/admin.auditLogListResponse"
                 }
               }
             }
@@ -214,6 +214,421 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/budgets": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List budgets with current status",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.budgetListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create or update one budget",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.upsertBudgetRequest"
+              }
+            }
+          },
+          "description": "Budget definition",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.budgetListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete one budget",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.deleteBudgetRequest"
+              }
+            }
+          },
+          "description": "Budget key",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.budgetListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/budgets/reset": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Reset all budget periods",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.resetBudgetsRequest"
+              }
+            }
+          },
+          "description": "Reset confirmation",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/budgets/reset-one": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Reset one budget period",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.resetBudgetRequest"
+              }
+            }
+          },
+          "description": "Budget key",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.budgetListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/budgets/settings": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get budget reset settings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/budget.Settings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update budget reset settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.updateBudgetSettingsRequest"
+              }
+            }
+          },
+          "description": "Budget reset settings",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/budget.Settings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -3985,6 +4400,257 @@
       }
     },
     "schemas": {
+      "admin.auditLogEntryResponse": {
+        "type": "object",
+        "properties": {
+          "alias_used": {
+            "type": "boolean"
+          },
+          "auth_key_id": {
+            "type": "string"
+          },
+          "auth_method": {
+            "type": "string"
+          },
+          "cache_type": {
+            "type": "string"
+          },
+          "client_ip": {
+            "type": "string"
+          },
+          "data": {
+            "description": "Data contains flexible request/response information as JSON",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/auditlog.LogData"
+              }
+            ]
+          },
+          "duration_ns": {
+            "description": "DurationNs is the request duration in nanoseconds",
+            "type": "integer"
+          },
+          "error_type": {
+            "type": "string"
+          },
+          "id": {
+            "description": "ID is a unique identifier for this log entry (UUID)",
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "provider": {
+            "description": "canonical provider type used for routing and filters",
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Extracted fields for efficient filtering (indexed in relational DBs)",
+            "type": "string"
+          },
+          "requested_model": {
+            "description": "Core fields (indexed for queries)",
+            "type": "string"
+          },
+          "resolved_model": {
+            "type": "string"
+          },
+          "status_code": {
+            "type": "integer"
+          },
+          "stream": {
+            "type": "boolean"
+          },
+          "timestamp": {
+            "description": "Timestamp is when the request started",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/usage.RequestUsageSummary"
+          },
+          "user_path": {
+            "type": "string"
+          },
+          "workflow_version_id": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.auditLogListResponse": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/admin.auditLogEntryResponse"
+            }
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "admin.budgetListResponse": {
+        "type": "object",
+        "properties": {
+          "budgets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/admin.budgetStatusResponse"
+            }
+          },
+          "server_time": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.budgetStatusResponse": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "has_usage": {
+            "type": "boolean"
+          },
+          "last_reset_at": {
+            "type": "string"
+          },
+          "period_end": {
+            "type": "string"
+          },
+          "period_label": {
+            "type": "string"
+          },
+          "period_ratio": {
+            "type": "number"
+          },
+          "period_seconds": {
+            "type": "integer"
+          },
+          "period_start": {
+            "type": "string"
+          },
+          "remaining": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          },
+          "spent": {
+            "type": "number"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "usage_ratio": {
+            "type": "number"
+          },
+          "user_path": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.deleteBudgetRequest": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string"
+          },
+          "period_seconds": {
+            "type": "integer"
+          },
+          "user_path": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.resetBudgetRequest": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string"
+          },
+          "period_seconds": {
+            "type": "integer"
+          },
+          "user_path": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.resetBudgetsRequest": {
+        "type": "object",
+        "properties": {
+          "confirmation": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.updateBudgetSettingsRequest": {
+        "type": "object",
+        "properties": {
+          "daily_reset_hour": {
+            "type": "integer"
+          },
+          "daily_reset_minute": {
+            "type": "integer"
+          },
+          "monthly_reset_day": {
+            "type": "integer"
+          },
+          "monthly_reset_hour": {
+            "type": "integer"
+          },
+          "monthly_reset_minute": {
+            "type": "integer"
+          },
+          "weekly_reset_hour": {
+            "type": "integer"
+          },
+          "weekly_reset_minute": {
+            "type": "integer"
+          },
+          "weekly_reset_weekday": {
+            "type": "integer"
+          }
+        }
+      },
+      "admin.upsertBudgetRequest": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number"
+          },
+          "period": {
+            "type": "string"
+          },
+          "period_seconds": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          },
+          "user_path": {
+            "type": "string"
+          }
+        }
+      },
       "auditlog.ConversationResult": {
         "type": "object",
         "properties": {
@@ -4011,6 +4677,9 @@
         "type": "object",
         "properties": {
           "api_key_hash": {
+            "type": "string"
+          },
+          "error_code": {
             "type": "string"
           },
           "error_message": {
@@ -4149,30 +4818,13 @@
           }
         }
       },
-      "auditlog.LogListResult": {
-        "type": "object",
-        "properties": {
-          "entries": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/auditlog.LogEntry"
-            }
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "total": {
-            "type": "integer"
-          }
-        }
-      },
       "auditlog.WorkflowFeaturesSnapshot": {
         "type": "object",
         "properties": {
           "audit": {
+            "type": "boolean"
+          },
+          "budget": {
             "type": "boolean"
           },
           "cache": {
@@ -4186,6 +4838,38 @@
           },
           "usage": {
             "type": "boolean"
+          }
+        }
+      },
+      "budget.Settings": {
+        "type": "object",
+        "properties": {
+          "daily_reset_hour": {
+            "type": "integer"
+          },
+          "daily_reset_minute": {
+            "type": "integer"
+          },
+          "monthly_reset_day": {
+            "type": "integer"
+          },
+          "monthly_reset_hour": {
+            "type": "integer"
+          },
+          "monthly_reset_minute": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "weekly_reset_hour": {
+            "type": "integer"
+          },
+          "weekly_reset_minute": {
+            "type": "integer"
+          },
+          "weekly_reset_weekday": {
+            "type": "integer"
           }
         }
       },
@@ -5603,6 +6287,38 @@
           },
           "total_cost": {
             "type": "number"
+          }
+        }
+      },
+      "usage.RequestUsageSummary": {
+        "type": "object",
+        "properties": {
+          "cache_write_input_tokens": {
+            "type": "integer"
+          },
+          "cached_input_ratio": {
+            "type": "number"
+          },
+          "cached_input_tokens": {
+            "type": "integer"
+          },
+          "entries": {
+            "type": "integer"
+          },
+          "estimated_cached_characters": {
+            "type": "integer"
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "total_tokens": {
+            "type": "integer"
+          },
+          "uncached_input_tokens": {
+            "type": "integer"
           }
         }
       },

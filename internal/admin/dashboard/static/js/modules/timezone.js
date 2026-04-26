@@ -340,6 +340,19 @@
                     return '';
                 }
                 return this.formatTimestampUTC(ts);
+            },
+
+            timestampTimeZoneTitle(ts) {
+                if (!ts || typeof this.effectiveTimeZoneLabel !== 'function') {
+                    return '';
+                }
+                const formatted = typeof this.formatTimestamp === 'function'
+                    ? this.formatTimestamp(ts)
+                    : this.formatTimestampInEffectiveTimeZone(ts);
+                if (!formatted || formatted === '-') {
+                    return '';
+                }
+                return formatted + ' ' + this.effectiveTimeZoneLabel();
             }
         };
     }

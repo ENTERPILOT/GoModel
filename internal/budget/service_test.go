@@ -25,6 +25,10 @@ func (s *fakeStore) UpsertBudgets(context.Context, []Budget) error {
 	return nil
 }
 
+func (s *fakeStore) DeleteBudget(context.Context, string, int64) error {
+	return nil
+}
+
 func (s *fakeStore) ReplaceConfigBudgets(context.Context, []Budget) error {
 	return nil
 }
@@ -38,6 +42,11 @@ func (s *fakeStore) GetSettings(context.Context) (Settings, error) {
 
 func (s *fakeStore) SaveSettings(context.Context, Settings) (Settings, error) {
 	return Settings{}, nil
+}
+
+func (s *fakeStore) ResetBudget(_ context.Context, _ string, _ int64, at time.Time) error {
+	s.lastResetAt = at
+	return nil
 }
 
 func (s *fakeStore) ResetAllBudgets(_ context.Context, at time.Time) error {

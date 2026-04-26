@@ -102,6 +102,17 @@ test('timestampTitle keeps the UTC timestamp without a duplicate prefix label', 
     );
 });
 
+test('timestampTimeZoneTitle shows the timestamp in the effective timezone with its offset label', () => {
+    const module = createTimezoneModule();
+    module.detectedTimezone = 'Europe/Warsaw';
+    module.timezoneOverride = '';
+
+    assert.equal(
+        module.timestampTimeZoneTitle('2026-04-27T02:22:00Z'),
+        '2026-04-27 04:22:00 Europe/Warsaw (UTC+02:00)'
+    );
+});
+
 test('formatTimestampInTimeZone accepts a zero epoch timestamp', () => {
     const module = createTimezoneModule();
 

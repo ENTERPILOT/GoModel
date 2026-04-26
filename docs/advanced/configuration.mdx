@@ -112,6 +112,22 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 | `USAGE_FLUSH_INTERVAL`         | Flush interval in seconds                      | `5`     |
 | `USAGE_RETENTION_DAYS`         | Auto-delete after N days (0 = forever)         | `90`    |
 
+#### Budgets
+
+Budgets use tracked usage cost records, so budget limits require
+`USAGE_ENABLED=true`.
+
+| Variable            | Description                                             | Default |
+| ------------------- | ------------------------------------------------------- | ------- |
+| `BUDGETS_ENABLED`   | Enable budget management and workflow budget checks     | `true`  |
+| `SET_BUDGET_<PATH>` | Seed budget limits for a user path, such as `daily=10` | _(empty)_ |
+
+For example, `SET_BUDGET_TEAM_ALPHA="daily=10,weekly=50"` configures limits
+for `/team/alpha`. `SET_BUDGET_="monthly=500"` configures the root path `/`.
+
+See [Budgets](/features/budgets) for YAML examples, periods, matching, and
+workflow enforcement.
+
 #### Metrics
 
 <Note>
@@ -221,6 +237,16 @@ cache:
   model:
     redis:
       url: "redis://my-redis:6379"
+
+budgets:
+  enabled: true
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period: "daily"
+          amount: 10.00
+        - period: "weekly"
+          amount: 50.00
 
 providers:
   openai:

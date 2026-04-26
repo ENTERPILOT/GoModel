@@ -21,6 +21,9 @@ func enforceBudget(c *echo.Context, checker BudgetChecker) error {
 	if checker == nil || c == nil || c.Request() == nil {
 		return nil
 	}
+	if workflow := core.GetWorkflow(c.Request().Context()); workflow != nil && !workflow.BudgetEnabled() {
+		return nil
+	}
 	userPath := core.UserPathFromContext(c.Request().Context())
 	if userPath == "" {
 		userPath = "/"

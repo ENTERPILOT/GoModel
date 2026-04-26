@@ -46,6 +46,7 @@ type CheckResult struct {
 	PeriodStart time.Time `json:"period_start"`
 	PeriodEnd   time.Time `json:"period_end"`
 	Spent       float64   `json:"spent"`
+	HasUsage    bool      `json:"has_usage"`
 	Remaining   float64   `json:"remaining"`
 }
 

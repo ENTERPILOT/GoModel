@@ -898,12 +898,14 @@ func configGuardrailDefinitions(cfg config.GuardrailsConfig) ([]guardrails.Defin
 
 func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, configuredGuardrails []guardrails.Definition) workflows.CreateInput {
 	fallbackEnabled := fallbackFeatureEnabledGlobally(cfg)
+	budgetEnabled := cfg.Budgets.Enabled
 	payload := workflows.Payload{
 		SchemaVersion: 1,
 		Features: workflows.FeatureFlags{
 			Cache:    responseCacheConfigured(cfg.Cache.Response),
 			Audit:    cfg.Logging.Enabled,
 			Usage:    cfg.Usage.Enabled,
+			Budget:   &budgetEnabled,
 			Fallback: &fallbackEnabled,
 		},
 	}
@@ -1005,6 +1007,7 @@ func runtimeWorkflowFeatureCaps(cfg *config.Config) core.WorkflowFeatures {
 		Cache:      responseCacheConfigured(cfg.Cache.Response),
 		Audit:      cfg.Logging.Enabled,
 		Usage:      cfg.Usage.Enabled,
+		Budget:     cfg.Budgets.Enabled,
 		Guardrails: cfg.Guardrails.Enabled,
 		Fallback:   fallbackFeatureEnabledGlobally(cfg),
 	}

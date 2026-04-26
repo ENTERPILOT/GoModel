@@ -1,6 +1,6 @@
 ---
 title: "Admin Endpoints"
-description: "Built-in REST API and dashboard for monitoring usage, models, and gateway health."
+description: "Built-in REST API and dashboard for monitoring usage, budgets, models, and gateway health."
 icon: "server-cog"
 ---
 
@@ -10,7 +10,7 @@ GoModel ships with admin endpoints **enabled by default**. The goal is simple: y
 
 The admin layer is split into two independently controllable pieces:
 
-1. **Admin REST API** (`/admin/api/v1/*`) — machine-readable JSON endpoints for usage data and model inventory. Protected by `GOMODEL_MASTER_KEY` like all other API routes.
+1. **Admin REST API** (`/admin/api/v1/*`) — machine-readable JSON endpoints for usage data, budgets, and model inventory. Protected by `GOMODEL_MASTER_KEY` like all other API routes.
 2. **Admin Dashboard UI** (`/admin/dashboard`) — a lightweight, embedded HTML dashboard that visualizes the same data. No external dependencies, no JavaScript frameworks to install — it's compiled into the binary.
 
 Both are on by default because observability shouldn't be opt-in. If you don't need them, turn them off with a single environment variable.
@@ -121,6 +121,26 @@ The `date` field in the response changes format based on the interval: `YYYY-MM-
 ```
 
 Returns an empty array if usage tracking is disabled or no data exists for the period.
+
+### Budget endpoints
+
+Budgets are managed under `/admin/api/v1/budgets`. These endpoints are
+available when budget management is enabled.
+
+| Method   | Path                                  | Description                          |
+| -------- | ------------------------------------- | ------------------------------------ |
+| `GET`    | `/admin/api/v1/budgets`               | List budgets with current status     |
+| `PUT`    | `/admin/api/v1/budgets`               | Create or update one budget          |
+| `DELETE` | `/admin/api/v1/budgets`               | Delete one budget                    |
+| `GET`    | `/admin/api/v1/budgets/settings`      | Read budget reset settings           |
+| `PUT`    | `/admin/api/v1/budgets/settings`      | Update budget reset settings         |
+| `POST`   | `/admin/api/v1/budgets/reset-one`     | Reset one budget period              |
+| `POST`   | `/admin/api/v1/budgets/reset`         | Reset all budget periods             |
+
+`PUT`, `DELETE`, and `reset-one` identify periods by either `period` (`hourly`,
+`daily`, `weekly`, `monthly`) or `period_seconds`.
+
+See [Budgets](/features/budgets) for request examples and enforcement behavior.
 
 ### GET /admin/api/v1/models
 

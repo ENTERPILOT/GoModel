@@ -28,6 +28,10 @@
             <i data-lucide="chart-column" class="nav-icon" aria-hidden="true"></i>
             <span>Usage</span>
         </a>
+        <a href="/admin/dashboard/budgets" class="nav-item" :class="{ active: page === 'budgets' }" title="Budgets" x-show="budgetManagementEnabled()" @click.prevent="navigate('budgets')">
+            <i data-lucide="wallet" class="nav-icon" aria-hidden="true"></i>
+            <span>Budgets</span>
+        </a>
         <a href="/admin/dashboard/auth-keys" class="nav-item" :class="{ active: page === 'auth-keys' }" title="API Keys" @click.prevent="navigate('auth-keys')">
             <i data-lucide="key-round" class="nav-icon" aria-hidden="true"></i>
             <span>API Keys</span>

@@ -1,0 +1,233 @@
+{{define "dashboard-page-budgets"}}
+<!-- Budgets Page -->
+<template x-if="page==='budgets'">
+<div>
+    <div class="page-header">
+        <div>
+            <div class="inline-help-section" x-data="{ open: false, copyId: 'budgets-help-copy', showLabel: 'Show budgets help', hideLabel: 'Hide budgets help', text: 'Budgets are evaluated from tracked usage cost records for each user path subtree. Enforcement runs only when Budget is enabled for the active workflow.' }">
+                <div class="inline-help-title-row">
+                    <h2>Budgets</h2>
+                    {{template "inline-help-toggle" .}}
+                </div>
+                <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+            </div>
+        </div>
+        <div class="page-header-controls">
+            <button type="button"
+                    class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+                    x-show="budgetManagementEnabled() && budgetsAvailable && !authError"
+                    :disabled="budgetFormSubmitting"
+                    @click="openBudgetForm()">
+                <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                <span>Create Budget</span>
+            </button>
+        </div>
+    </div>
+
+    {{template "auth-banner" .}}
+
+    <div class="alert alert-warning" x-show="(!budgetManagementEnabled() || !budgetsAvailable) && !authError">
+        Budget management is unavailable.
+    </div>
+    <p class="form-error" x-show="budgetError && !authError && !budgetFormOpen" x-text="budgetError" role="alert" aria-live="assertive"></p>
+    <div class="alert alert-success" x-show="budgetNotice && !budgetFormOpen" x-text="budgetNotice" role="status" aria-live="polite"></div>
+    <div class="loading-state" x-show="budgetsLoading && !authError">
+        <div class="loading-spinner"></div>
+        <span>Loading budgets...</span>
+    </div>
+
+    <div class="table-toolbar" x-show="(budgets.length > 0 || budgetFilter) && budgetsAvailable && !authError && !budgetFormOpen">
+        <div class="table-toolbar-main">
+            <div class="filter-input-wrap">
+                <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                <input type="text"
+                       id="budget-filter"
+                       class="filter-input"
+                       placeholder="Filter by user path..."
+                       aria-label="Filter budgets by user path"
+                       x-model="budgetFilter">
+            </div>
+        </div>
+    </div>
+
+    <div class="editor-modal-backdrop"
+         x-cloak
+         x-show="budgetFormOpen"
+         x-transition.opacity.duration.160ms
+         aria-hidden="true"></div>
+    <div class="editor-modal-shell"
+         x-cloak
+         x-show="budgetFormOpen"
+         x-transition.opacity.duration.160ms
+         @click="closeBudgetForm()"
+         @keydown.escape.window="budgetFormOpen && !authDialogOpen && closeBudgetForm()">
+        <div class="model-editor budget-editor" x-show="budgetFormOpen" role="dialog" aria-modal="true" aria-label="Budget editor" @click.stop>
+            <form class="form" @submit.prevent="submitBudgetForm()">
+                <div class="editor-header">
+                    <div>
+                        <h3 x-text="budgetEditing ? 'Edit Budget' : 'Create Budget'">Create Budget</h3>
+                    </div>
+                    <button type="button" class="dialog-close-btn" aria-label="Close budget editor" @click="closeBudgetForm()">
+                        {{template "x-icon"}}
+                    </button>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label class="form-field-label" for="budget-user-path">User Path</label>
+                        <input id="budget-user-path"
+                               class="form-input"
+                               type="text"
+                               placeholder="/team/alpha"
+                               x-ref="budgetUserPathInput"
+                               x-model="budgetForm.user_path"
+                               :disabled="budgetEditing">
+                    </div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="budget-period">Period</label>
+                        <select id="budget-period"
+                                class="usage-log-select settings-select"
+                                x-model="budgetForm.period"
+                                :disabled="budgetEditing"
+                                @change="syncBudgetPeriodSeconds()">
+                            <template x-for="option in budgetPeriodOptions()" :key="option.value">
+                                <option :value="option.value" x-text="option.label"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="form-field" x-show="budgetForm.period === 'custom'">
+                        <label class="form-field-label" for="budget-period-seconds">Period Seconds</label>
+                        <input id="budget-period-seconds"
+                               class="form-input"
+                               type="number"
+                               min="1"
+                               step="1"
+                               x-model.number="budgetForm.period_seconds"
+                               :disabled="budgetEditing">
+                    </div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="budget-amount">Amount</label>
+                        <input id="budget-amount"
+                               class="form-input"
+                               type="number"
+                               min="0"
+                               step="0.0001"
+                               placeholder="10.00"
+                               x-ref="budgetAmountInput"
+                               x-model="budgetForm.amount">
+                    </div>
+                </div>
+                <p class="form-hint" x-show="budgetEditing">
+                    Editing a budget updates its limit only. Use Reset to start a new budget period.
+                </p>
+
+                <p class="form-error" x-show="budgetFormError" x-text="budgetFormError" role="alert" aria-live="assertive"></p>
+                <div class="form-actions">
+                    <button type="button" class="pagination-btn" @click="closeBudgetForm()">Cancel</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" :disabled="budgetFormSubmitting">
+                        <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                        <span x-text="budgetFormSubmitting ? 'Saving...' : 'Save Budget'">Save Budget</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="budget-list" x-show="filteredBudgets().length > 0 && budgetsAvailable && !authError">
+        <template x-for="item in filteredBudgets()" :key="budgetKey(item)">
+            <section class="budget-row">
+                <div class="budget-row-main">
+                    <div class="budget-row-head">
+                        <code class="budget-user-path" x-text="item.user_path"></code>
+                        <span class="budget-period-label" :class="budgetPeriodClass(item)" x-text="budgetPeriodLabel(item)"></span>
+                        <div class="budget-row-meta">
+                            <span class="budget-source" x-text="budgetSourceLabel(item)" :title="budgetSourceTitle(item)"></span>
+                        </div>
+                    </div>
+                    <div class="budget-bars">
+                        <div class="budget-bar-line">
+                            <div class="budget-bar-label">
+                                <span>Usage</span>
+                                <span x-text="budgetUsagePercentLabel(item)"></span>
+                            </div>
+                            <div class="budget-bar-track"
+                                 role="progressbar"
+                                 aria-valuemin="0"
+                                 aria-valuemax="100"
+                                 :aria-valuenow="budgetUsagePercent(item)"
+                                 :aria-label="'Budget usage: ' + formatCost(item.spent) + ' of ' + formatCost(item.amount) + ', ' + budgetRemainingLabel(item)"
+                                 :style="'--budget-progress: ' + budgetUsagePercent(item) + '%'">
+                                <div class="budget-bar-fill budget-bar-fill-usage"
+                                     :class="{ 'budget-bar-fill-danger': budgetUsageRatio(item) >= 1 }"
+                                     style="width: var(--budget-progress)"></div>
+                                <span class="budget-bar-text-row">
+                                    <span class="budget-bar-text budget-bar-text-center" x-text="formatCost(item.spent) + ' of ' + formatCost(item.amount)"></span>
+                                    <span class="budget-bar-text budget-bar-text-end" x-text="budgetRemainingLabel(item)"></span>
+                                </span>
+                                <span class="budget-bar-text-row budget-bar-text-row-on-fill" aria-hidden="true">
+                                    <span class="budget-bar-text budget-bar-text-center" x-text="formatCost(item.spent) + ' of ' + formatCost(item.amount)"></span>
+                                    <span class="budget-bar-text budget-bar-text-end" x-text="budgetRemainingLabel(item)"></span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="budget-bar-line">
+                            <div class="budget-bar-label">
+                                <span>Period</span>
+                                <span x-text="budgetPeriodPercentLabel(item)"></span>
+                            </div>
+                            <div class="budget-bar-track"
+                                 role="progressbar"
+                                 aria-label="Budget period elapsed"
+                                 aria-valuemin="0"
+                                 aria-valuemax="100"
+                                 :aria-valuenow="budgetPeriodPercent(item)"
+                                 :style="'--budget-progress: ' + budgetPeriodPercent(item) + '%'">
+                                <div class="budget-bar-fill budget-bar-fill-period"
+                                     style="width: var(--budget-progress)"></div>
+                                <span class="budget-bar-text-row">
+                                    <span class="budget-bar-text budget-bar-text-start" x-text="formatTimestamp(item.period_start)" :title="timestampTimeZoneTitle(item.period_start)"></span>
+                                    <span class="budget-bar-text budget-bar-text-end" x-text="formatTimestamp(item.period_end)" :title="timestampTimeZoneTitle(item.period_end)"></span>
+                                </span>
+                                <span class="budget-bar-text-row budget-bar-text-row-on-fill" aria-hidden="true">
+                                    <span class="budget-bar-text budget-bar-text-start" x-text="formatTimestamp(item.period_start)"></span>
+                                    <span class="budget-bar-text budget-bar-text-end" x-text="formatTimestamp(item.period_end)"></span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="budget-row-actions">
+                    <button type="button" class="table-action-btn budget-action-btn" @click="openBudgetForm(item)">
+                        <i data-lucide="pencil" class="budget-action-icon" aria-hidden="true"></i>
+                        <span>Edit</span>
+                    </button>
+                    <button type="button"
+                            class="table-action-btn budget-action-btn budget-action-btn-warning"
+                            :disabled="budgetResettingKey === budgetKey(item)"
+                            @click="resetBudget(item)">
+                        <i data-lucide="rotate-ccw" class="budget-action-icon" aria-hidden="true"></i>
+                        <span x-text="budgetResettingKey === budgetKey(item) ? 'Resetting...' : 'Reset'">Reset</span>
+                    </button>
+                    <button type="button"
+                            class="table-action-btn table-action-btn-danger budget-action-btn"
+                            :disabled="budgetDeletingKey === budgetKey(item)"
+                            @click="deleteBudget(item)">
+                        <i data-lucide="trash-2" class="budget-action-icon" aria-hidden="true"></i>
+                        <span x-text="budgetDeletingKey === budgetKey(item) ? 'Deleting...' : 'Delete'">Delete</span>
+                    </button>
+                </div>
+            </section>
+        </template>
+    </div>
+
+    <p class="empty-state"
+       x-show="budgets.length === 0 && !budgetFilter && !budgetsLoading && !authError && !budgetError && budgetsAvailable && budgetManagementEnabled()">
+        No budgets configured yet.
+    </p>
+    <p class="empty-state"
+       x-show="budgets.length > 0 && filteredBudgets().length === 0 && budgetFilter && !budgetsLoading && !authError && !budgetError && budgetsAvailable && budgetManagementEnabled()">
+        No budgets match your filter.
+    </p>
+</div>
+</template>
+{{end}}

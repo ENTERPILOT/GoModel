@@ -66,7 +66,9 @@ test('defaultWorkflowForm starts fallback enabled for new workflows', () => {
     const module = createWorkflowsModule();
 
     assert.equal(module.workflowForm.features.fallback, true);
+    assert.equal(module.workflowForm.features.budget, true);
     assert.equal(module.defaultWorkflowForm().features.fallback, true);
+    assert.equal(module.defaultWorkflowForm().features.budget, true);
 });
 
 test('workflowPreview mirrors the draft workflow card state from the editor form', () => {
@@ -106,6 +108,7 @@ test('workflowPreview mirrors the draft workflow card state from the editor form
                     cache: true,
                     audit: false,
                     usage: true,
+                    budget: true,
                     guardrails: true,
                     fallback: false
                 },
@@ -154,6 +157,7 @@ test('workflowPreview renders path-scoped draft labels using canonical scope dis
                     cache: true,
                     audit: true,
                     usage: true,
+                    budget: true,
                     guardrails: false,
                     fallback: false
                 },
@@ -203,6 +207,7 @@ test('workflowChart returns the shared chart contract for workflow sources', () 
                     cache: true,
                     audit: true,
                     usage: false,
+                    budget: true,
                     guardrails: true,
                     fallback: true
                 },
@@ -213,6 +218,9 @@ test('workflowChart returns the shared chart contract for workflow sources', () 
             }
         })),
         JSON.stringify({
+            showBudget: true,
+            budgetNodeClass: '',
+            budgetStatusLabel: null,
             showGuardrails: true,
             guardrailLabel: '2 steps',
             showCache: true,
@@ -249,6 +257,7 @@ test('workflowChart masks globally disabled workflow features from persisted wor
         FEATURE_FALLBACK_MODE: 'off',
         LOGGING_ENABLED: 'off',
         USAGE_ENABLED: 'off',
+        BUDGETS_ENABLED: 'off',
         GUARDRAILS_ENABLED: 'off',
         REDIS_URL: 'off',
         SEMANTIC_CACHE_ENABLED: 'off'
@@ -265,6 +274,7 @@ test('workflowChart masks globally disabled workflow features from persisted wor
                     cache: true,
                     audit: true,
                     usage: true,
+                    budget: true,
                     guardrails: true,
                     fallback: true
                 },
@@ -274,6 +284,9 @@ test('workflowChart masks globally disabled workflow features from persisted wor
             }
         })),
         JSON.stringify({
+            showBudget: false,
+            budgetNodeClass: '',
+            budgetStatusLabel: null,
             showGuardrails: false,
             guardrailLabel: '',
             showCache: false,
@@ -405,6 +418,7 @@ test('workflowAuditChart returns the shared chart contract for audit runtime ent
                     cache: false,
                     audit: true,
                     usage: true,
+                    budget: true,
                     guardrails: true,
                     fallback: true
                 },
@@ -424,6 +438,9 @@ test('workflowAuditChart returns the shared chart contract for audit runtime ent
             status_code: 200
         })),
         JSON.stringify({
+            showBudget: true,
+            budgetNodeClass: 'workflow-node-success',
+            budgetStatusLabel: null,
             showGuardrails: true,
             guardrailLabel: '1 step',
             showCache: true,
@@ -466,6 +483,9 @@ test('workflowAuditChart forces audit nodes even when the workflow version canno
             status_code: 200
         })),
         JSON.stringify({
+            showBudget: false,
+            budgetNodeClass: '',
+            budgetStatusLabel: null,
             showGuardrails: false,
             guardrailLabel: '',
             showCache: true,
@@ -510,6 +530,7 @@ test('workflowAuditChart prefers request-time workflow features over current wor
                     cache: true,
                     audit: true,
                     usage: true,
+                    budget: true,
                     guardrails: true,
                     fallback: true
                 },
@@ -531,12 +552,16 @@ test('workflowAuditChart prefers request-time workflow features over current wor
                     cache: false,
                     audit: true,
                     usage: false,
+                    budget: false,
                     guardrails: false,
                     fallback: true
                 }
             }
         })),
         JSON.stringify({
+            showBudget: false,
+            budgetNodeClass: '',
+            budgetStatusLabel: null,
             showGuardrails: false,
             guardrailLabel: '',
             showCache: false,
@@ -581,6 +606,7 @@ test('workflowAuditChart highlights configured failover redirects and exposes th
                     cache: false,
                     audit: true,
                     usage: true,
+                    budget: true,
                     guardrails: false,
                     fallback: true
                 },
@@ -600,6 +626,7 @@ test('workflowAuditChart highlights configured failover redirects and exposes th
                     cache: false,
                     audit: true,
                     usage: true,
+                    budget: true,
                     guardrails: false,
                     fallback: true
                 },
@@ -609,6 +636,9 @@ test('workflowAuditChart highlights configured failover redirects and exposes th
             }
         })),
         JSON.stringify({
+            showBudget: true,
+            budgetNodeClass: 'workflow-node-success',
+            budgetStatusLabel: null,
             showGuardrails: false,
             guardrailLabel: '',
             showCache: false,
@@ -675,7 +705,8 @@ test('workflowRuntimeFromEntry preserves the primary route for cross-provider fa
             responseSuccess: true,
             aiSuccess: true,
             authError: false,
-            authMethod: null
+            authMethod: null,
+            budgetExceeded: false
         })
     );
 });
@@ -796,6 +827,7 @@ test('buildWorkflowRequest emits provider-model payload and strips guardrails wh
                     cache: true,
                     audit: true,
                     usage: true,
+                    budget: true,
                     guardrails: false,
                     fallback: false
                 },
@@ -811,6 +843,7 @@ test('openWorkflowCreate hydrates features and guardrails via shared normalizers
         cache: false,
         audit: false,
         usage: true,
+        budget: false,
         guardrails: true,
         fallback: false
     });
@@ -846,6 +879,7 @@ test('openWorkflowCreate hydrates features and guardrails via shared normalizers
             cache: false,
             audit: false,
             usage: true,
+            budget: false,
             guardrails: true,
             fallback: false
         })
@@ -1053,6 +1087,7 @@ test('workflowSourceFeatures defaults fallback to true when omitted', () => {
             cache: true,
             audit: false,
             usage: true,
+            budget: true,
             guardrails: false,
             fallback: true
         })
@@ -1077,6 +1112,7 @@ test('workflowSourceFeatures respects effective runtime features for persisted w
                 cache: false,
                 audit: false,
                 usage: true,
+                budget: true,
                 guardrails: false,
                 fallback: false
             }
@@ -1085,6 +1121,7 @@ test('workflowSourceFeatures respects effective runtime features for persisted w
             cache: false,
             audit: false,
             usage: true,
+            budget: true,
             guardrails: false,
             fallback: true
         })
@@ -1097,6 +1134,7 @@ test('workflowSourceFeatures masks raw workflow features by global runtime confi
         FEATURE_FALLBACK_MODE: 'off',
         LOGGING_ENABLED: 'off',
         USAGE_ENABLED: 'off',
+        BUDGETS_ENABLED: 'off',
         GUARDRAILS_ENABLED: 'off',
         REDIS_URL: 'off',
         SEMANTIC_CACHE_ENABLED: 'off'
@@ -1118,6 +1156,7 @@ test('workflowSourceFeatures masks raw workflow features by global runtime confi
             cache: false,
             audit: false,
             usage: false,
+            budget: false,
             guardrails: false,
             fallback: true
         })
@@ -1135,6 +1174,7 @@ test('fetchWorkflowRuntimeConfig loads FEATURE_FALLBACK_MODE from the admin conf
                     FEATURE_FALLBACK_MODE: 'manual',
                     LOGGING_ENABLED: 'on',
                     USAGE_ENABLED: 'off',
+                    BUDGETS_ENABLED: 'on',
                     GUARDRAILS_ENABLED: 'on',
                     REDIS_URL: 'on',
                     SEMANTIC_CACHE_ENABLED: 'off',
@@ -1154,6 +1194,7 @@ test('fetchWorkflowRuntimeConfig loads FEATURE_FALLBACK_MODE from the admin conf
             FEATURE_FALLBACK_MODE: 'manual',
             LOGGING_ENABLED: 'on',
             USAGE_ENABLED: 'off',
+            BUDGETS_ENABLED: 'on',
             GUARDRAILS_ENABLED: 'on',
             REDIS_URL: 'on',
             SEMANTIC_CACHE_ENABLED: 'off'
@@ -1251,6 +1292,7 @@ test('buildWorkflowRequest omits fallback for new workflows when the control is 
             cache: true,
             audit: true,
             usage: true,
+            budget: true,
             guardrails: false
         })
     );
@@ -1292,6 +1334,7 @@ test('buildWorkflowRequest preserves fallback state for hydrated workflows even 
             cache: true,
             audit: true,
             usage: true,
+            budget: true,
             guardrails: false,
             fallback: false
         })
@@ -1350,6 +1393,7 @@ test('buildWorkflowRequest preserves hidden fallback for fresh save flows that m
             cache: true,
             audit: true,
             usage: true,
+            budget: true,
             guardrails: false,
             fallback: false
         })
@@ -1392,6 +1436,7 @@ test('buildWorkflowRequest omits hidden fallback when a hydrated workflow is ret
             cache: true,
             audit: true,
             usage: true,
+            budget: true,
             guardrails: false
         })
     );
@@ -1403,6 +1448,7 @@ test('buildWorkflowRequest clamps globally disabled workflow features off even w
         FEATURE_FALLBACK_MODE: 'off',
         LOGGING_ENABLED: 'off',
         USAGE_ENABLED: 'off',
+        BUDGETS_ENABLED: 'off',
         GUARDRAILS_ENABLED: 'off',
         REDIS_URL: 'off',
         SEMANTIC_CACHE_ENABLED: 'off'
@@ -1437,6 +1483,7 @@ test('buildWorkflowRequest clamps globally disabled workflow features off even w
                     cache: false,
                     audit: false,
                     usage: false,
+                    budget: false,
                     guardrails: false
                 },
                 guardrails: []
@@ -1875,7 +1922,8 @@ test('workflowRuntimeFromEntry derives cache hit state from cache_type without r
             responseSuccess: false,
             aiSuccess: false,
             authError: false,
-            authMethod: null
+            authMethod: null,
+            budgetExceeded: false
         })
     );
 
@@ -1891,7 +1939,8 @@ test('workflowRuntimeFromEntry derives cache hit state from cache_type without r
             responseSuccess: false,
             aiSuccess: false,
             authError: false,
-            authMethod: null
+            authMethod: null,
+            budgetExceeded: false
         })
     );
 
@@ -1907,7 +1956,8 @@ test('workflowRuntimeFromEntry derives cache hit state from cache_type without r
             responseSuccess: false,
             aiSuccess: false,
             authError: false,
-            authMethod: null
+            authMethod: null,
+            budgetExceeded: false
         })
     );
 });
@@ -1996,7 +2046,8 @@ test('workflowRuntimeFromEntry treats any uncached 2xx status as a successful AI
             responseSuccess: true,
             aiSuccess: true,
             authError: false,
-            authMethod: null
+            authMethod: null,
+            budgetExceeded: false
         })
     );
 });
@@ -2017,6 +2068,45 @@ test('auth runtime highlights auth node state from audit entries', () => {
     });
     assert.equal(module.workflowAuthNodeClass(masterKeyAuth), 'workflow-node-success');
     assert.equal(module.workflowAuthNodeSublabel(masterKeyAuth), 'master_key');
+});
+
+test('budget runtime highlights audit budget node success and exceeded states', () => {
+    const module = createWorkflowsModule();
+
+    const successfulBudget = module.workflowRuntimeFromEntry({
+        status_code: 200,
+        data: {
+            workflow_features: {
+                budget: true
+            }
+        }
+    });
+    assert.equal(module.workflowBudgetNodeClass(true, successfulBudget, true), 'workflow-node-success');
+    assert.equal(module.workflowBudgetStatusLabel(successfulBudget), null);
+
+    const exceededBudget = module.workflowRuntimeFromEntry({
+        status_code: 429,
+        data: {
+            error_code: 'budget_exceeded',
+            workflow_features: {
+                budget: true
+            }
+        }
+    });
+    assert.equal(exceededBudget.budgetExceeded, true);
+    assert.equal(module.workflowBudgetNodeClass(true, exceededBudget, true), 'workflow-node-error');
+    assert.equal(module.workflowBudgetStatusLabel(exceededBudget), 'Exceeded');
+
+    const chart = module.workflowAuditChart({
+        workflow_version_id: 'missing-budget-workflow',
+        status_code: 429,
+        data: {
+            error_code: 'budget_exceeded'
+        }
+    });
+    assert.equal(chart.showBudget, true);
+    assert.equal(chart.budgetNodeClass, 'workflow-node-error');
+    assert.equal(chart.budgetStatusLabel, 'Exceeded');
 });
 
 test('auditEntryWorkflow prefers an exact historical workflow version cache over active workflows', () => {

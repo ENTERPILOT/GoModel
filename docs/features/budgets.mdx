@@ -1,0 +1,203 @@
+---
+title: "Budgets"
+description: "Set spend limits per user path and enforce them through workflow budget controls."
+icon: "wallet"
+keywords: ["budgets", "spend limits", "cost controls", "user path"]
+---
+
+## Overview
+
+Budgets let you set spend limits for a `user_path` subtree. GoModel evaluates
+them from tracked usage cost records and blocks matching requests when a limit
+has already been spent.
+
+Use budgets when you want limits such as:
+
+- `/team/alpha` can spend `$10` per day
+- `/team/alpha` can spend `$50` per week
+- `/` has a global monthly limit
+
+<Info>
+  Budget enforcement runs only when budgets are globally enabled and the active
+  workflow has Budget enabled. The Budget workflow control is enabled by default
+  when the global budget feature is on.
+</Info>
+
+## Enable budgets
+
+Budgets are enabled by default:
+
+```env
+BUDGETS_ENABLED=true
+```
+
+Budgets depend on usage tracking because spend is calculated from usage cost
+records:
+
+```env
+USAGE_ENABLED=true
+```
+
+If you configure budget limits while usage tracking is disabled, GoModel rejects
+the configuration.
+
+## Create budgets
+
+You can create budgets in the dashboard:
+
+```text
+Budgets -> Create Budget
+```
+
+Dashboard-created budgets are marked as `manual`. Budgets loaded from YAML or
+environment variables are marked as `config`.
+
+You can also seed budgets from YAML:
+
+```yaml
+budgets:
+  enabled: true
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period: "daily"
+          amount: 10.00
+        - period: "weekly"
+          amount: 50.00
+    - path: "/"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+```
+
+Or use environment variables:
+
+```env
+SET_BUDGET_TEAM_ALPHA="daily=10,weekly=50"
+SET_BUDGET_="monthly=500"
+```
+
+The suffix after `SET_BUDGET_` becomes a slash-separated user path:
+
+- `SET_BUDGET_TEAM_ALPHA` -> `/team/alpha`
+- `SET_BUDGET_` -> `/`
+
+Supported standard periods are:
+
+| Period    | Seconds   |
+| --------- | --------- |
+| `hourly`  | `3600`    |
+| `daily`   | `86400`   |
+| `weekly`  | `604800`  |
+| `monthly` | `2592000` |
+
+For custom windows, set `period_seconds` in YAML:
+
+```yaml
+budgets:
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period_seconds: 7200
+          amount: 5.00
+```
+
+## How matching works
+
+Budget paths apply to the configured path and its descendants:
+
+- budget path `/team`
+- request path `/team/app`
+- result: budget applies
+
+Sibling paths do not match:
+
+- budget path `/team`
+- request path `/team-alpha`
+- result: budget does not apply
+
+If multiple budgets match a request, GoModel checks all matching limits. The
+request is rejected if any matching limit is exhausted.
+
+## Workflow enforcement
+
+The active workflow controls whether budget checks run for a request.
+
+In a workflow payload:
+
+```json
+{
+  "schema_version": 1,
+  "features": {
+    "budget": true,
+    "cache": true,
+    "audit": true,
+    "usage": true,
+    "guardrails": true,
+    "fallback": true
+  }
+}
+```
+
+Use scoped workflows to turn budget enforcement on or off for a provider, model,
+or `user_path` subtree. See [Workflows](/advanced/workflows) for matching
+precedence.
+
+<Note>
+  Response cache hits can return before budget enforcement. If a cached response
+  exists, GoModel can serve it without spending additional provider cost.
+</Note>
+
+## Reset windows
+
+Budget reset anchors are configured in the dashboard under:
+
+```text
+Settings -> Budget Resets
+```
+
+The reset settings are evaluated in UTC.
+
+For monthly budgets, if the configured day does not exist in a month, the reset
+runs on the last day of that month. For example, a monthly reset day of `31`
+runs on April 30 and on February 28 or 29.
+
+Editing a budget changes the limit but does not reset the current period. Use
+the row-level Reset action to start a new period for one budget, or
+`Settings -> Reset All Budgets` to reset all budgets.
+
+## Admin API
+
+Budget management is also available through the admin API:
+
+```bash
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  http://localhost:8080/admin/api/v1/budgets
+```
+
+Create or update a budget:
+
+```bash
+curl -X PUT http://localhost:8080/admin/api/v1/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_path": "/team/alpha",
+    "period": "daily",
+    "amount": 10.00
+  }'
+```
+
+Delete a budget:
+
+```bash
+curl -X DELETE http://localhost:8080/admin/api/v1/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_path": "/team/alpha",
+    "period": "daily"
+  }'
+```
+
+See [Admin Endpoints](/advanced/admin-endpoints) for the endpoint list.

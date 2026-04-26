@@ -66,6 +66,7 @@ type FeatureFlags struct {
 	Cache      bool  `json:"cache" bson:"cache"`
 	Audit      bool  `json:"audit" bson:"audit"`
 	Usage      bool  `json:"usage" bson:"usage"`
+	Budget     *bool `json:"budget,omitempty" bson:"budget,omitempty"`
 	Guardrails bool  `json:"guardrails" bson:"guardrails"`
 	Fallback   *bool `json:"fallback,omitempty" bson:"fallback,omitempty"`
 }
@@ -85,10 +86,15 @@ func (f FeatureFlags) runtimeFeatures() core.WorkflowFeatures {
 	if f.Fallback != nil {
 		fallback = *f.Fallback
 	}
+	budget := true
+	if f.Budget != nil {
+		budget = *f.Budget
+	}
 	return core.WorkflowFeatures{
 		Cache:      f.Cache,
 		Audit:      f.Audit,
 		Usage:      f.Usage,
+		Budget:     budget,
 		Guardrails: f.Guardrails,
 		Fallback:   fallback,
 	}

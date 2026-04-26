@@ -219,6 +219,7 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 			Cache:      workflow.Policy.Features.Cache,
 			Audit:      workflow.Policy.Features.Audit,
 			Usage:      workflow.Policy.Features.Usage,
+			Budget:     workflow.Policy.Features.Budget,
 			Guardrails: workflow.Policy.Features.Guardrails,
 			Fallback:   workflow.Policy.Features.Fallback,
 		}
@@ -578,7 +579,7 @@ func auditEnabledForContext(ctx context.Context) bool {
 }
 
 // EnrichEntryWithError adds error information to the log entry.
-func EnrichEntryWithError(c *echo.Context, errorType, errorMessage string) {
+func EnrichEntryWithError(c *echo.Context, errorType, errorMessage string, errorCode ...string) {
 	entryVal := c.Get(string(LogEntryKey))
 	if entryVal == nil {
 		return
@@ -592,6 +593,9 @@ func EnrichEntryWithError(c *echo.Context, errorType, errorMessage string) {
 	entry.ErrorType = errorType
 	if entry.Data != nil {
 		entry.Data.ErrorMessage = errorMessage
+		if len(errorCode) > 0 {
+			entry.Data.ErrorCode = strings.TrimSpace(errorCode[0])
+		}
 	}
 }
 

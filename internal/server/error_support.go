@@ -15,7 +15,7 @@ import (
 func handleError(c *echo.Context, err error) error {
 	if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
 		logHandledError(c, gatewayErr)
-		auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message)
+		auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message, gatewayErrorCode(gatewayErr))
 		return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 	}
 
@@ -23,6 +23,13 @@ func handleError(c *echo.Context, err error) error {
 	logHandledError(c, gatewayErr)
 	auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message)
 	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
+}
+
+func gatewayErrorCode(err *core.GatewayError) string {
+	if err == nil || err.Code == nil {
+		return ""
+	}
+	return *err.Code
 }
 
 func logHandledError(c *echo.Context, gatewayErr *core.GatewayError) {

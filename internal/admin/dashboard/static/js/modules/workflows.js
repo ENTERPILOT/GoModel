@@ -53,6 +53,7 @@
                     cache: true,
                     audit: true,
                     usage: true,
+                    budget: true,
                     guardrails: false,
                     fallback: true
                 },
@@ -70,6 +71,7 @@
                         cache: true,
                         audit: true,
                         usage: true,
+                        budget: true,
                         guardrails: false,
                         fallback: true
                     },
@@ -125,6 +127,10 @@
 	                return this.workflowRuntimeBooleanFlag('USAGE_ENABLED', true);
 	            },
 
+	            workflowBudgetVisible() {
+	                return this.workflowRuntimeBooleanFlag('BUDGETS_ENABLED', true);
+	            },
+
 	            workflowGuardrailsVisible() {
 	                return this.workflowRuntimeBooleanFlag('GUARDRAILS_ENABLED', true);
 	            },
@@ -134,6 +140,7 @@
 	                    cache: this.workflowCacheVisible(),
 	                    audit: this.workflowAuditVisible(),
 	                    usage: this.workflowUsageVisible(),
+	                    budget: this.workflowBudgetVisible(),
 	                    guardrails: this.workflowGuardrailsVisible()
 	                };
 	            },
@@ -168,6 +175,7 @@
 	                    cache: !!this.workflowReadFeatureFlag(raw, 'cache', false),
 	                    audit: !!this.workflowReadFeatureFlag(raw, 'audit', false),
 	                    usage: !!this.workflowReadFeatureFlag(raw, 'usage', false),
+	                    budget: this.workflowReadFeatureFlag(raw, 'budget', true) !== false,
 	                    guardrails: !!this.workflowReadFeatureFlag(raw, 'guardrails', false),
 	                    fallback: this.workflowReadFeatureFlag(raw, 'fallback', true) !== false
 	                };
@@ -180,6 +188,7 @@
 	                    cache: features.cache && caps.cache,
 	                    audit: features.audit && caps.audit,
 	                    usage: features.usage && caps.usage,
+	                    budget: features.budget && caps.budget,
 	                    guardrails: features.guardrails && caps.guardrails,
 	                    fallback: features.fallback
 	                };
@@ -410,6 +419,7 @@
                             cache: !!features.cache,
                             audit: !!features.audit,
                             usage: !!features.usage,
+                            budget: !!features.budget,
                             guardrails: guardrailsEnabled,
                             fallback: !!features.fallback
                         },
@@ -560,6 +570,7 @@
                         cache: !!features.cache,
                         audit: !!features.audit,
                         usage: !!features.usage,
+                        budget: !!features.budget,
                         guardrails: !!features.guardrails,
                         fallback: !!features.fallback
                     },
@@ -707,6 +718,7 @@
                             cache: !!features.cache,
                             audit: !!features.audit,
                             usage: !!features.usage,
+                            budget: !!features.budget,
                             guardrails: !!features.guardrails
                         },
                         guardrails
@@ -1193,6 +1205,7 @@
                     : this.workflowSourceFeatures(source);
                 const forceAudit = !!config.forceAudit;
                 const highlightAsyncPresent = !!config.highlightAsyncPresent;
+                const showBudget = !!features.budget || this.workflowRuntimeBudgetExceeded(runtime);
                 const showGuardrails = !!features.guardrails;
                 const showUsage = !!features.usage;
                 const showAudit = forceAudit || !!features.audit;
@@ -1200,6 +1213,9 @@
                 const showFailover = !!features.fallback || this.workflowRuntimeUsedFailover(runtime);
                 const workflowID = this.workflowChartWorkflowID(source, config.entry);
                 return {
+                    showBudget,
+                    budgetNodeClass: this.workflowBudgetNodeClass(showBudget, runtime, highlightAsyncPresent),
+                    budgetStatusLabel: this.workflowBudgetStatusLabel(runtime),
                     showGuardrails,
                     guardrailLabel: showGuardrails ? this.workflowGuardrailLabel(source) : '',
                     showCache: !!config.forceCache || !!features.cache || this.workflowRuntimeHasCache(runtime),
@@ -1243,6 +1259,7 @@
                             cache: false,
                             audit: false,
                             usage: false,
+                            budget: false,
                             guardrails: false,
                             fallback: false
                         });
@@ -1263,7 +1280,8 @@
             //   model,
             //   statusCode: number|null,
             //   responseSuccess: bool,
-            //   aiSuccess: bool
+            //   aiSuccess: bool,
+            //   budgetExceeded: bool
             // }
             workflowRuntimeHasCache(runtime) {
                 return !!(runtime && runtime.cacheHit);
@@ -1271,6 +1289,10 @@
 
             workflowRuntimeUsedFailover(runtime) {
                 return !!(runtime && runtime.failoverTarget);
+            },
+
+            workflowRuntimeBudgetExceeded(runtime) {
+                return !!(runtime && runtime.budgetExceeded);
             },
 
             workflowShowCacheStep(source, runtime) {
@@ -1289,6 +1311,16 @@
                 if (!runtime || !runtime.cacheHit) return null;
                 if (runtime.cacheType === 'semantic') return 'Hit (Semantic)';
                 return 'Hit (Exact)';
+            },
+
+            workflowBudgetNodeClass(visible, runtime, highlightPresent) {
+                if (!visible) return '';
+                if (this.workflowRuntimeBudgetExceeded(runtime)) return 'workflow-node-error';
+                return highlightPresent ? 'workflow-node-success' : '';
+            },
+
+            workflowBudgetStatusLabel(runtime) {
+                return this.workflowRuntimeBudgetExceeded(runtime) ? 'Exceeded' : null;
             },
 
             workflowFailoverNodeClass(runtime) {
@@ -1353,6 +1385,48 @@
             workflowAuthNodeSublabel(runtime) {
                 if (!runtime || !runtime.authMethod) return null;
                 return runtime.authMethod;
+            },
+
+            workflowEntryErrorCode(entry) {
+                const data = entry && entry.data && typeof entry.data === 'object' && !Array.isArray(entry.data)
+                    ? entry.data
+                    : {};
+                const direct = String(data.error_code || data.errorCode || '').trim();
+                if (direct) return direct;
+                return this.workflowNestedErrorCode(data.response_body);
+            },
+
+            workflowNestedErrorCode(value, depth = 0) {
+                if (depth > 4 || value === null || value === undefined) {
+                    return '';
+                }
+                if (typeof value === 'string') {
+                    const trimmed = value.trim();
+                    if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) {
+                        return '';
+                    }
+                    try {
+                        return this.workflowNestedErrorCode(JSON.parse(trimmed), depth + 1);
+                    } catch (_) {
+                        return '';
+                    }
+                }
+                if (Array.isArray(value)) {
+                    for (const item of value) {
+                        const code = this.workflowNestedErrorCode(item, depth + 1);
+                        if (code) return code;
+                    }
+                    return '';
+                }
+                if (typeof value !== 'object') {
+                    return '';
+                }
+                const code = String(value.code || '').trim();
+                if (code) return code;
+                if (value.error !== undefined) {
+                    return this.workflowNestedErrorCode(value.error, depth + 1);
+                }
+                return '';
             },
 
             workflowAsyncNodeClass(visible, highlightPresent) {
@@ -1428,6 +1502,7 @@
                 const responseSuccess = Number.isFinite(statusCode) && statusCode >= 200 && statusCode < 300;
                 const authError = String(entry.error_type || '').trim().toLowerCase() === 'authentication_error';
                 const authMethod = String(entry.auth_method || '').trim().toLowerCase() || null;
+                const budgetExceeded = this.workflowEntryErrorCode(entry).toLowerCase() === 'budget_exceeded';
                 return {
                     cacheHit,
                     cacheType: normalizedCacheType || null,
@@ -1438,7 +1513,8 @@
                     responseSuccess,
                     aiSuccess: responseSuccess && !cacheHit,
                     authError,
-                    authMethod
+                    authMethod,
+                    budgetExceeded
                 };
             },
 

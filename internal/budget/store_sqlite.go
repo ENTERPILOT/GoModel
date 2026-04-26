@@ -143,6 +143,28 @@ func (s *SQLiteStore) UpsertBudgets(ctx context.Context, budgets []Budget) error
 	return nil
 }
 
+func (s *SQLiteStore) DeleteBudget(ctx context.Context, userPath string, periodSeconds int64) error {
+	userPath, err := NormalizeUserPath(userPath)
+	if err != nil {
+		return err
+	}
+	if periodSeconds <= 0 {
+		return fmt.Errorf("period_seconds must be greater than 0")
+	}
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM budgets
+		WHERE user_path = ? AND period_seconds = ?
+	`, userPath, periodSeconds)
+	if err != nil {
+		return fmt.Errorf("delete budget %s/%d: %w", userPath, periodSeconds, err)
+	}
+	affected, err := result.RowsAffected()
+	if err == nil && affected == 0 {
+		return fmt.Errorf("budget %s/%d not found", userPath, periodSeconds)
+	}
+	return nil
+}
+
 func (s *SQLiteStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) error {
 	budgets, err := normalizeBudgetsForUpsert(budgets)
 	if err != nil {
@@ -227,6 +249,29 @@ func (s *SQLiteStore) SaveSettings(ctx context.Context, settings Settings) (Sett
 		return Settings{}, fmt.Errorf("commit budget settings save: %w", err)
 	}
 	return settings, nil
+}
+
+func (s *SQLiteStore) ResetBudget(ctx context.Context, userPath string, periodSeconds int64, at time.Time) error {
+	userPath, err := NormalizeUserPath(userPath)
+	if err != nil {
+		return err
+	}
+	if periodSeconds <= 0 {
+		return fmt.Errorf("period_seconds must be greater than 0")
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE budgets
+		SET last_reset_at = ?, updated_at = ?
+		WHERE user_path = ? AND period_seconds = ?
+	`, at.UTC().Unix(), at.UTC().Unix(), userPath, periodSeconds)
+	if err != nil {
+		return fmt.Errorf("reset budget %s/%d: %w", userPath, periodSeconds, err)
+	}
+	affected, err := result.RowsAffected()
+	if err == nil && affected == 0 {
+		return fmt.Errorf("budget %s/%d not found", userPath, periodSeconds)
+	}
+	return nil
 }
 
 func (s *SQLiteStore) ResetAllBudgets(ctx context.Context, at time.Time) error {

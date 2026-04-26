@@ -9,8 +9,8 @@ icon: "route"
 `user_path` is a normalized hierarchy for the caller, for example
 `/team/alpha` or `/team/alpha/service`.
 
-GoModel uses it to keep model access, workflows, usage, and audit data scoped to
-the right team, tenant, service, or customer.
+GoModel uses it to keep model access, workflows, budgets, usage, and audit data
+scoped to the right team, tenant, service, or customer.
 
 ## API keys
 
@@ -63,7 +63,7 @@ different model access rules.
 ## Workflows
 
 Workflows can also include `scope_user_path`, so different teams or services can
-use different cache, audit, usage, guardrail, and fallback settings.
+use different budget, cache, audit, usage, guardrail, and fallback settings.
 
 You can combine user path with provider and model scope, for example:
 
@@ -72,3 +72,11 @@ You can combine user path with provider and model scope, for example:
 - `openai_primary` + `gpt-5` + `/team/alpha`
 
 See [Workflows](/advanced/workflows) for the full matching order.
+
+## Budgets
+
+Budgets are also scoped by `user_path`. A budget for `/team/alpha` applies to
+`/team/alpha` and descendants such as `/team/alpha/service`, but not to sibling
+paths such as `/team-alpha`.
+
+See [Budgets](/features/budgets) for spend limits and workflow enforcement.

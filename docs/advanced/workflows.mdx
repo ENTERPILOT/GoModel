@@ -11,6 +11,7 @@ Workflows are immutable workflow-policy versions stored in the gateway and match
 They currently control gateway-owned behavior such as:
 
 - cache
+- budgets
 - audit logging
 - usage tracking
 - guardrails
@@ -108,6 +109,7 @@ curl -X POST http://localhost:8080/admin/api/v1/workflows \
       "schema_version": 1,
       "features": {
         "cache": false,
+        "budget": true,
         "audit": true,
         "usage": true,
         "guardrails": false,
@@ -123,3 +125,4 @@ curl -X POST http://localhost:8080/admin/api/v1/workflows \
 - `scope_model` requires `scope_provider_name`
 - `scope_user_path` is normalized to canonical slash form
 - managed API keys can override the request `X-GoModel-User-Path`; workflow matching uses the effective request user path
+- budget enforcement runs only when the global budget feature and the matched workflow's `budget` feature are both enabled; see [Budgets](/features/budgets)

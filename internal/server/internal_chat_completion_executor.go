@@ -252,6 +252,9 @@ func (e *InternalChatCompletionExecutor) finishAuditEntry(
 			entry.StatusCode = gatewayErr.HTTPStatusCode()
 			if entry.Data != nil {
 				entry.Data.ErrorMessage = gatewayErr.Message
+				if gatewayErr.Code != nil {
+					entry.Data.ErrorCode = *gatewayErr.Code
+				}
 			}
 		} else {
 			entry.ErrorType = string(core.ErrorTypeProvider)

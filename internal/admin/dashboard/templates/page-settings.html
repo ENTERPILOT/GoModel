@@ -44,42 +44,62 @@
                 </div>
                 <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
             </div>
-            <div class="settings-form-grid budget-settings-grid">
-                <div class="form-field">
-                    <label class="form-field-label" for="budget-daily-hour">Daily Reset Hour</label>
-                    <input id="budget-daily-hour" class="form-input" type="number" min="0" max="23" step="1" x-model.number="budgetSettings.daily_reset_hour">
+            <div class="budget-settings-grid">
+                <div class="budget-settings-row" x-data="{ open: false, copyId: 'budget-monthly-day-help-copy', showLabel: 'Show day of month help', hideLabel: 'Hide day of month help', text: 'If the selected day does not exist in a month, the reset runs on the last day of that month.' }">
+                    <div class="budget-settings-period">Monthly</div>
+                    <div class="form-field">
+                        <div class="inline-help-section">
+                            <div class="inline-help-title-row">
+                                <label class="form-field-label" for="budget-monthly-day">Day of Month</label>
+                                {{template "inline-help-toggle" .}}
+                            </div>
+                        </div>
+                        <input id="budget-monthly-day" class="form-input" type="number" min="1" max="31" step="1" x-model.number="budgetSettings.monthly_reset_day" aria-describedby="budget-monthly-day-help-copy">
+                    </div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="budget-monthly-hour">Hour</label>
+                        <input id="budget-monthly-hour" class="form-input" type="number" min="0" max="23" step="1" x-model.number="budgetSettings.monthly_reset_hour">
+                    </div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="budget-monthly-minute">Minute</label>
+                        <input id="budget-monthly-minute" class="form-input" type="number" min="0" max="59" step="1" x-model.number="budgetSettings.monthly_reset_minute">
+                    </div>
+                    <div class="budget-settings-help-cell">
+                        <p :id="copyId" class="inline-help-copy" x-show="open" x-transition.opacity.duration.200ms x-text="text"></p>
+                    </div>
                 </div>
-                <div class="form-field">
-                    <label class="form-field-label" for="budget-daily-minute">Daily Reset Minute</label>
-                    <input id="budget-daily-minute" class="form-input" type="number" min="0" max="59" step="1" x-model.number="budgetSettings.daily_reset_minute">
+                <div class="budget-settings-row">
+                    <div class="budget-settings-period">Weekly</div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="budget-weekly-day">Day of Week</label>
+                        <select id="budget-weekly-day" class="usage-log-select settings-select" x-model.number="budgetSettings.weekly_reset_weekday">
+                            <template x-for="day in budgetWeekdays()" :key="day.value">
+                                <option :value="day.value" x-text="day.label"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="budget-weekly-hour">Hour</label>
+                        <input id="budget-weekly-hour" class="form-input" type="number" min="0" max="23" step="1" x-model.number="budgetSettings.weekly_reset_hour">
+                    </div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="budget-weekly-minute">Minute</label>
+                        <input id="budget-weekly-minute" class="form-input" type="number" min="0" max="59" step="1" x-model.number="budgetSettings.weekly_reset_minute">
+                    </div>
+                    <div class="budget-settings-help-cell" aria-hidden="true"></div>
                 </div>
-                <div class="form-field">
-                    <label class="form-field-label" for="budget-weekly-day">Weekly Reset Day</label>
-                    <select id="budget-weekly-day" class="usage-log-select settings-select" x-model.number="budgetSettings.weekly_reset_weekday">
-                        <template x-for="day in budgetWeekdays()" :key="day.value">
-                            <option :value="day.value" x-text="day.label"></option>
-                        </template>
-                    </select>
-                </div>
-                <div class="form-field">
-                    <label class="form-field-label" for="budget-weekly-hour">Weekly Reset Hour</label>
-                    <input id="budget-weekly-hour" class="form-input" type="number" min="0" max="23" step="1" x-model.number="budgetSettings.weekly_reset_hour">
-                </div>
-                <div class="form-field">
-                    <label class="form-field-label" for="budget-weekly-minute">Weekly Reset Minute</label>
-                    <input id="budget-weekly-minute" class="form-input" type="number" min="0" max="59" step="1" x-model.number="budgetSettings.weekly_reset_minute">
-                </div>
-                <div class="form-field">
-                    <label class="form-field-label" for="budget-monthly-day">Monthly Reset Day</label>
-                    <input id="budget-monthly-day" class="form-input" type="number" min="1" max="31" step="1" x-model.number="budgetSettings.monthly_reset_day">
-                </div>
-                <div class="form-field">
-                    <label class="form-field-label" for="budget-monthly-hour">Monthly Reset Hour</label>
-                    <input id="budget-monthly-hour" class="form-input" type="number" min="0" max="23" step="1" x-model.number="budgetSettings.monthly_reset_hour">
-                </div>
-                <div class="form-field">
-                    <label class="form-field-label" for="budget-monthly-minute">Monthly Reset Minute</label>
-                    <input id="budget-monthly-minute" class="form-input" type="number" min="0" max="59" step="1" x-model.number="budgetSettings.monthly_reset_minute">
+                <div class="budget-settings-row">
+                    <div class="budget-settings-period">Daily</div>
+                    <div class="budget-settings-spacer" aria-hidden="true"></div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="budget-daily-hour">Hour</label>
+                        <input id="budget-daily-hour" class="form-input" type="number" min="0" max="23" step="1" x-model.number="budgetSettings.daily_reset_hour">
+                    </div>
+                    <div class="form-field">
+                        <label class="form-field-label" for="budget-daily-minute">Minute</label>
+                        <input id="budget-daily-minute" class="form-input" type="number" min="0" max="59" step="1" x-model.number="budgetSettings.daily_reset_minute">
+                    </div>
+                    <div class="budget-settings-help-cell" aria-hidden="true"></div>
                 </div>
             </div>
             <div class="settings-refresh-actions budget-settings-actions">
@@ -92,6 +112,15 @@
                     <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
                     <span>Save Budget Settings</span>
                 </button>
+            </div>
+        </div>
+
+        <div class="settings-refresh-section budget-reset-all-section" x-show="budgetManagementEnabled()">
+            <div>
+                <h3>Reset All Budgets</h3>
+                <p>Start new budget periods for every configured budget without changing the limits.</p>
+            </div>
+            <div class="settings-refresh-actions budget-settings-actions">
                 <button type="button"
                         class="pagination-btn pagination-btn-danger pagination-btn-with-icon"
                         :disabled="budgetResetLoading"
@@ -100,6 +129,9 @@
                     <span>Reset Budgets</span>
                 </button>
             </div>
+        </div>
+
+        <div x-show="budgetManagementEnabled()">
             <div class="alert alert-success settings-refresh-alert"
                  role="status"
                  aria-live="polite"

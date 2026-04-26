@@ -440,6 +440,9 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 		Usage: config.UsageConfig{
 			Enabled: true,
 		},
+		Budgets: config.BudgetsConfig{
+			Enabled: true,
+		},
 		Guardrails: config.GuardrailsConfig{
 			Enabled: true,
 		},
@@ -461,6 +464,9 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 	}
 	if got := values.UsageEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigUsageEnabled, got)
+	}
+	if got := values.BudgetsEnabled; got != "on" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigBudgetsEnabled, got)
 	}
 	if got := values.GuardrailsEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigGuardrailsEnabled, got)

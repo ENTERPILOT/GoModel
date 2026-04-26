@@ -94,6 +94,7 @@ type LogData struct {
 
 	// Error details (message can be long, so kept in JSON)
 	ErrorMessage string `json:"error_message,omitempty" bson:"error_message,omitempty"`
+	ErrorCode    string `json:"error_code,omitempty" bson:"error_code,omitempty"`
 
 	// Optional headers (when LOGGING_LOG_HEADERS=true)
 	// Sensitive headers are auto-redacted
@@ -118,6 +119,7 @@ type WorkflowFeaturesSnapshot struct {
 	Cache      bool `json:"cache" bson:"cache"`
 	Audit      bool `json:"audit" bson:"audit"`
 	Usage      bool `json:"usage" bson:"usage"`
+	Budget     bool `json:"budget" bson:"budget"`
 	Guardrails bool `json:"guardrails" bson:"guardrails"`
 	Fallback   bool `json:"fallback" bson:"fallback"`
 }

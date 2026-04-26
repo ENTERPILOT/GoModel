@@ -142,6 +142,17 @@ test("auth node uses the cache iconography in workflow charts", () => {
   );
 });
 
+test("budget node uses the same wallet iconography as the budget navigation item", () => {
+  const chartTemplate = readFixture("../../../templates/workflow-chart.html");
+  const sidebarTemplate = readFixture("../../../templates/sidebar.html");
+
+  assert.match(sidebarTemplate, /data-lucide="wallet" class="nav-icon"/);
+  assert.match(
+    chartTemplate,
+    /workflow-node-budget[\s\S]*?<svg viewBox="0 0 24 24"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"\/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"\/><\/svg>/,
+  );
+});
+
 test("workflow authoring inputs expose stable accessible names", () => {
   const template = readDashboardTemplateSource();
 
@@ -270,6 +281,10 @@ test("workflow feature controls and guardrail sections are gated by global runti
   );
   assert.match(
     template,
+    /x-show="workflowBudgetVisible\(\)"[\s\S]*x-model="workflowForm\.features\.budget"/,
+  );
+  assert.match(
+    template,
     /x-show="workflowGuardrailsVisible\(\)"[\s\S]*x-model="workflowForm\.features\.guardrails"/,
   );
   assert.match(
@@ -296,7 +311,7 @@ test("workflow editor renders a live preview card from the draft workflow state"
   );
   assert.match(
     chartTemplate,
-    /{{define "workflow-chart"}}[\s\S]*x-data="\{ chart: {{\.}} \|\| \{\} \}"[\s\S]*x-effect="chart = {{\.}} \|\| \{\}"[\s\S]*<span class="workflow-node-label">Auth<\/span>[\s\S]*x-text="chart\.authNodeSublabel"[\s\S]*x-show="chart\.showGuardrails"[\s\S]*x-show="chart\.showCache"[\s\S]*x-text="chart\.aiLabel"[\s\S]*x-show="chart\.showFailover"[\s\S]*x-text="chart\.failoverTargetLabel"/,
+    /{{define "workflow-chart"}}[\s\S]*x-data="\{ chart: {{\.}} \|\| \{\} \}"[\s\S]*x-effect="chart = {{\.}} \|\| \{\}"[\s\S]*<span class="workflow-node-label">Auth<\/span>[\s\S]*x-text="chart\.authNodeSublabel"[\s\S]*x-show="chart\.showCache"[\s\S]*x-show="chart\.showBudget"[\s\S]*x-show="chart\.showGuardrails"[\s\S]*x-text="chart\.aiLabel"[\s\S]*x-show="chart\.showFailover"[\s\S]*x-text="chart\.failoverTargetLabel"/,
   );
   assert.doesNotMatch(chartTemplate, /x-data="\{ workflow:/);
 });
@@ -443,7 +458,7 @@ test("workflow pipeline main row is flattened without workflow-left or workflow-
   assert.doesNotMatch(template, /class="workflow-step"/);
   assert.match(
     template,
-    /<div class="workflow-pipeline-row">[\s\S]*<div class="workflow-node workflow-node-endpoint">[\s\S]*<div class="workflow-conn"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-auth"[\s\S]*<div class="workflow-conn" :class="chart\.aiConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-ai" :class="chart\.aiNodeClass">[\s\S]*<div class="workflow-conn" :class="chart\.responseConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-endpoint" :class="chart\.responseNodeClass">/,
+    /<div class="workflow-pipeline-row">[\s\S]*<div class="workflow-node workflow-node-endpoint">[\s\S]*<div class="workflow-conn"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-auth"[\s\S]*<div class="workflow-conn" x-show="chart\.showCache" :class="chart\.cacheConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-cache" x-show="chart\.showCache" :class="chart\.cacheNodeClass">[\s\S]*<div class="workflow-conn" x-show="chart\.showBudget"><\/div>[\s\S]*<div class="workflow-node workflow-node-feature workflow-node-budget" x-show="chart\.showBudget" :class="chart\.budgetNodeClass">[\s\S]*<div class="workflow-conn" :class="chart\.aiConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-ai" :class="chart\.aiNodeClass">[\s\S]*<div class="workflow-conn" :class="chart\.responseConnClass"><\/div>[\s\S]*<div class="workflow-node workflow-node-endpoint" :class="chart\.responseNodeClass">/,
   );
   assert.doesNotMatch(css, /\.workflow-left\s*,/);
   assert.doesNotMatch(css, /\.workflow-right\s*\{/);

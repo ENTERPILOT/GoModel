@@ -127,6 +127,27 @@ func (s *PostgreSQLStore) UpsertBudgets(ctx context.Context, budgets []Budget) e
 	return nil
 }
 
+func (s *PostgreSQLStore) DeleteBudget(ctx context.Context, userPath string, periodSeconds int64) error {
+	userPath, err := NormalizeUserPath(userPath)
+	if err != nil {
+		return err
+	}
+	if periodSeconds <= 0 {
+		return fmt.Errorf("period_seconds must be greater than 0")
+	}
+	tag, err := s.pool.Exec(ctx, `
+		DELETE FROM budgets
+		WHERE user_path = $1 AND period_seconds = $2
+	`, userPath, periodSeconds)
+	if err != nil {
+		return fmt.Errorf("delete budget %s/%d: %w", userPath, periodSeconds, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("budget %s/%d not found", userPath, periodSeconds)
+	}
+	return nil
+}
+
 func (s *PostgreSQLStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) error {
 	budgets, err := normalizeBudgetsForUpsert(budgets)
 	if err != nil {
@@ -204,6 +225,28 @@ func (s *PostgreSQLStore) SaveSettings(ctx context.Context, settings Settings) (
 		return Settings{}, fmt.Errorf("commit budget settings save: %w", err)
 	}
 	return settings, nil
+}
+
+func (s *PostgreSQLStore) ResetBudget(ctx context.Context, userPath string, periodSeconds int64, at time.Time) error {
+	userPath, err := NormalizeUserPath(userPath)
+	if err != nil {
+		return err
+	}
+	if periodSeconds <= 0 {
+		return fmt.Errorf("period_seconds must be greater than 0")
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE budgets
+		SET last_reset_at = $1, updated_at = $2
+		WHERE user_path = $3 AND period_seconds = $4
+	`, at.UTC().Unix(), at.UTC().Unix(), userPath, periodSeconds)
+	if err != nil {
+		return fmt.Errorf("reset budget %s/%d: %w", userPath, periodSeconds, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("budget %s/%d not found", userPath, periodSeconds)
+	}
+	return nil
 }
 
 func (s *PostgreSQLStore) ResetAllBudgets(ctx context.Context, at time.Time) error {

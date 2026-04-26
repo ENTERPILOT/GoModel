@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 )
 
@@ -86,5 +87,32 @@ func TestHandleError_LogsServerErrorsAtErrorLevel(t *testing.T) {
 	}
 	if !strings.Contains(logOutput, `"message":"provider timeout"`) {
 		t.Fatalf("expected error message in log, got %q", logOutput)
+	}
+}
+
+func TestHandleError_EnrichesAuditEntryWithGatewayErrorCode(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+
+	err := core.NewRateLimitError("budget", "budget exceeded").WithCode("budget_exceeded")
+	if handleErr := handleError(c, err); handleErr != nil {
+		t.Fatalf("handleError() error = %v", handleErr)
+	}
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+	}
+	if entry.ErrorType != string(core.ErrorTypeRateLimit) {
+		t.Fatalf("entry.ErrorType = %q, want %q", entry.ErrorType, core.ErrorTypeRateLimit)
+	}
+	if entry.Data.ErrorMessage != "budget exceeded" {
+		t.Fatalf("entry.Data.ErrorMessage = %q, want budget exceeded", entry.Data.ErrorMessage)
+	}
+	if entry.Data.ErrorCode != "budget_exceeded" {
+		t.Fatalf("entry.Data.ErrorCode = %q, want budget_exceeded", entry.Data.ErrorCode)
 	}
 }

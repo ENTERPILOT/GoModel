@@ -1665,6 +1665,7 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		FeatureFallbackMode:  "auto",
 		LoggingEnabled:       "on",
 		UsageEnabled:         "off",
+		BudgetsEnabled:       "on",
 		GuardrailsEnabled:    "on",
 		CacheEnabled:         "on",
 		RedisURL:             "on",
@@ -1691,6 +1692,9 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	}
 	if got := body.UsageEnabled; got != "off" {
 		t.Fatalf("USAGE_ENABLED = %q, want off", got)
+	}
+	if got := body.BudgetsEnabled; got != "on" {
+		t.Fatalf("BUDGETS_ENABLED = %q, want on", got)
 	}
 	if got := body.GuardrailsEnabled; got != "on" {
 		t.Fatalf("GUARDRAILS_ENABLED = %q, want on", got)
