@@ -198,7 +198,7 @@
          x-show="budgetResetDialogOpen"
          x-transition.opacity.duration.160ms
          @click="closeBudgetResetDialog()"
-         @keydown.escape.window="budgetResetDialogOpen && closeBudgetResetDialog()">
+         @keydown.escape.window="!authDialogOpen && budgetResetDialogOpen && closeBudgetResetDialog()">
         <section class="auth-dialog budget-reset-dialog"
                  role="dialog"
                  aria-modal="true"

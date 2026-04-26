@@ -63,6 +63,25 @@ test('budgetSettingsPayload normalizes numeric values before saving', () => {
     }));
 });
 
+test('budgetSettingsPayload falls back for blank and fractional values', () => {
+    const module = createBudgetsModule();
+    module.budgetSettings = {
+        daily_reset_hour: '',
+        daily_reset_minute: '15.5',
+        weekly_reset_weekday: '3',
+        weekly_reset_hour: '8',
+        weekly_reset_minute: '45',
+        monthly_reset_day: '31',
+        monthly_reset_hour: '9',
+        monthly_reset_minute: '30'
+    };
+
+    const payload = module.budgetSettingsPayload();
+    assert.equal(payload.daily_reset_hour, 0);
+    assert.equal(payload.daily_reset_minute, 0);
+    assert.equal(payload.weekly_reset_weekday, 3);
+});
+
 test('budgetFormPayload normalizes user path and standard periods', () => {
     const module = createBudgetsModule();
     module.budgetForm = {
@@ -190,13 +209,10 @@ test('confirmBudgetOverride saves the pending create after confirmation', async 
     await module.confirmBudgetOverride();
 
     assert.equal(requests.length, 2);
-    assert.equal(requests[0].url, '/admin/api/v1/budgets');
+    assert.equal(requests[0].url, '/admin/api/v1/budgets/%2Fteam/86400');
     assert.equal(requests[0].request.method, 'PUT');
     assert.equal(requests[0].request.body, JSON.stringify({
-        user_path: '/team',
-        period_seconds: 86400,
-        amount: 12.5,
-        source: 'manual'
+        amount: 12.5
     }));
     assert.equal(requests[1].url, '/admin/api/v1/budgets');
     assert.equal(module.budgetOverrideDialogOpen, false);
@@ -296,7 +312,7 @@ test('budgetPeriodLabel and class distinguish standard and custom periods', () =
     assert.equal(module.budgetPeriodDurationLabel({ period_seconds: 1 }), '1 second');
 });
 
-test('deleteBudget posts the selected budget key and refreshes from the response envelope', async () => {
+test('deleteBudget uses the selected budget key in the URL and refreshes from the response envelope', async () => {
     const requests = [];
     const module = createBudgetsModule({
         confirm(message) {
@@ -322,12 +338,9 @@ test('deleteBudget posts the selected budget key and refreshes from the response
     await module.deleteBudget({ user_path: '/team', period_seconds: 86400, period_label: 'daily' });
 
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].url, '/admin/api/v1/budgets');
+    assert.equal(requests[0].url, '/admin/api/v1/budgets/%2Fteam/86400');
     assert.equal(requests[0].request.method, 'DELETE');
-    assert.equal(requests[0].request.body, JSON.stringify({
-        user_path: '/team',
-        period_seconds: 86400
-    }));
+    assert.equal(requests[0].request.body, undefined);
     assert.equal(module.budgetDeletingKey, '');
     assert.equal(module.budgetNotice, 'Budget deleted.');
     assert.equal(JSON.stringify(module.budgets), JSON.stringify([

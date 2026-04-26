@@ -21,6 +21,7 @@
             budgets: [],
             budgetsAvailable: true,
             budgetsLoading: false,
+            budgetFetchPromise: null,
             budgetFilter: '',
             budgetSortBy: 'user_path',
             budgetError: '',
@@ -181,7 +182,7 @@
 
             filteredBudgets() {
                 const filter = String(this.budgetFilter || '').trim().toLowerCase();
-                let items = this.budgets;
+                let items;
                 if (!filter) {
                     items = this.budgets.slice();
                 } else {
@@ -236,7 +237,13 @@
                     this.budgetError = '';
                     return;
                 }
-                await this.fetchBudgets();
+                if (this.budgetFetchPromise) {
+                    return this.budgetFetchPromise;
+                }
+                this.budgetFetchPromise = this.fetchBudgets().finally(() => {
+                    this.budgetFetchPromise = null;
+                });
+                return this.budgetFetchPromise;
             },
 
             async fetchBudgets() {
@@ -341,6 +348,12 @@
                 };
             },
 
+            budgetAPIPath(userPath, periodSeconds) {
+                const encodedPath = encodeURIComponent(this.normalizeBudgetUserPath(userPath));
+                const encodedPeriod = encodeURIComponent(String(Math.trunc(Number(periodSeconds || 0))));
+                return '/admin/api/v1/budgets/' + encodedPath + '/' + encodedPeriod;
+            },
+
             openBudgetOverrideDialog(existing, payload) {
                 this.budgetOverrideExistingBudget = existing || null;
                 this.budgetOverridePendingPayload = payload || null;
@@ -428,14 +441,14 @@
                     const request = typeof this.requestOptions === 'function'
                         ? this.requestOptions({
                             method: 'PUT',
-                            body: JSON.stringify(payload)
+                            body: JSON.stringify({ amount: payload.amount })
                         })
                         : {
                             method: 'PUT',
                             headers: this.headers(),
-                            body: JSON.stringify(payload)
+                            body: JSON.stringify({ amount: payload.amount })
                         };
-                    const res = await fetch('/admin/api/v1/budgets', request);
+                    const res = await fetch(this.budgetAPIPath(payload.user_path, payload.period_seconds), request);
                     if (res.status === 503) {
                         this.budgetsAvailable = false;
                         this.budgetFormError = 'Budget management is unavailable.';
@@ -534,21 +547,13 @@
                 try {
                     const request = typeof this.requestOptions === 'function'
                         ? this.requestOptions({
-                            method: 'DELETE',
-                            body: JSON.stringify({
-                                user_path: item.user_path,
-                                period_seconds: item.period_seconds
-                            })
+                            method: 'DELETE'
                         })
                         : {
                             method: 'DELETE',
-                            headers: this.headers(),
-                            body: JSON.stringify({
-                                user_path: item.user_path,
-                                period_seconds: item.period_seconds
-                            })
+                            headers: this.headers()
                         };
-                    const res = await fetch('/admin/api/v1/budgets', request);
+                    const res = await fetch(this.budgetAPIPath(item.user_path, item.period_seconds), request);
                     if (res.status === 503) {
                         this.budgetsAvailable = false;
                         this.budgetError = 'Budget management is unavailable.';
@@ -729,19 +734,29 @@
 
             normalizeBudgetSettings(payload) {
                 const current = this.budgetSettings || {};
+                const integerValue = (value, fallback) => {
+                    if (value === '') {
+                        return fallback;
+                    }
+                    const parsed = Number(value);
+                    return Number.isFinite(parsed) && Number.isInteger(parsed) ? Math.trunc(parsed) : fallback;
+                };
+                const currentValue = (key, fallback) => integerValue(current[key], fallback);
                 const numberValue = (key, fallback) => {
-                    const parsed = Number(payload && payload[key]);
-                    return Number.isFinite(parsed) ? parsed : fallback;
+                    if (!payload) {
+                        return fallback;
+                    }
+                    return integerValue(payload[key], fallback);
                 };
                 return {
-                    daily_reset_hour: numberValue('daily_reset_hour', Number(current.daily_reset_hour || 0)),
-                    daily_reset_minute: numberValue('daily_reset_minute', Number(current.daily_reset_minute || 0)),
-                    weekly_reset_weekday: numberValue('weekly_reset_weekday', Number(current.weekly_reset_weekday || 1)),
-                    weekly_reset_hour: numberValue('weekly_reset_hour', Number(current.weekly_reset_hour || 0)),
-                    weekly_reset_minute: numberValue('weekly_reset_minute', Number(current.weekly_reset_minute || 0)),
-                    monthly_reset_day: numberValue('monthly_reset_day', Number(current.monthly_reset_day || 1)),
-                    monthly_reset_hour: numberValue('monthly_reset_hour', Number(current.monthly_reset_hour || 0)),
-                    monthly_reset_minute: numberValue('monthly_reset_minute', Number(current.monthly_reset_minute || 0))
+                    daily_reset_hour: numberValue('daily_reset_hour', currentValue('daily_reset_hour', 0)),
+                    daily_reset_minute: numberValue('daily_reset_minute', currentValue('daily_reset_minute', 0)),
+                    weekly_reset_weekday: numberValue('weekly_reset_weekday', currentValue('weekly_reset_weekday', 1)),
+                    weekly_reset_hour: numberValue('weekly_reset_hour', currentValue('weekly_reset_hour', 0)),
+                    weekly_reset_minute: numberValue('weekly_reset_minute', currentValue('weekly_reset_minute', 0)),
+                    monthly_reset_day: numberValue('monthly_reset_day', currentValue('monthly_reset_day', 1)),
+                    monthly_reset_hour: numberValue('monthly_reset_hour', currentValue('monthly_reset_hour', 0)),
+                    monthly_reset_minute: numberValue('monthly_reset_minute', currentValue('monthly_reset_minute', 0))
                 };
             },
 

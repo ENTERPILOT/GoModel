@@ -115,16 +115,31 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 
 #### Budgets
 
-Budgets use tracked usage cost records, so budget limits require
-`USAGE_ENABLED=true`.
+Budgets use tracked usage cost records. If usage tracking is disabled, GoModel
+starts with budget management disabled and logs a warning.
 
 | Variable            | Description                                             | Default |
 | ------------------- | ------------------------------------------------------- | ------- |
-| `BUDGETS_ENABLED`   | Enable budget management and workflow budget checks     | `true`  |
+| `BUDGETS_ENABLED`   | Enable budget management and workflow budget checks when usage tracking is enabled | `true`  |
 | `SET_BUDGET_<PATH>` | Seed budget limits for a user path, such as `daily=10` | _(empty)_ |
 
-For example, `SET_BUDGET_TEAM_ALPHA="daily=10,weekly=50"` configures limits
-for `/team/alpha`. `SET_BUDGET_="monthly=500"` configures the root path `/`.
+`SET_BUDGET_<PATH>` supports the standard periods `hourly`, `daily`, `weekly`,
+and `monthly`. The `<PATH>` suffix is lowercased; use double underscores
+(`__`) between path segments, while single underscores stay inside a segment.
+For example, `SET_BUDGET_TEAM__ALPHA__SERVICE="daily=10"` configures
+`/team/alpha/service`, and `SET_BUDGET_TEAM_ALPHA="daily=10"` configures
+`/team_alpha`. This differs from provider `<SUFFIX>` variables below, which
+convert underscores to hyphens in provider names.
+
+`SET_BUDGET_="monthly=500"` means a literal environment variable named
+`SET_BUDGET_`, which configures the root path `/`. POSIX permits that name, but
+some shells and orchestrators, including some Kubernetes validators, may reject
+it. Use YAML or the dashboard when your environment cannot set it.
+
+Migration note: budget management depends on usage tracking. If
+`USAGE_ENABLED=false`, GoModel starts with budgets disabled and logs a warning,
+even when `BUDGETS_ENABLED=true`. Set both `USAGE_ENABLED=true` and
+`BUDGETS_ENABLED=true` to enforce budgets.
 
 See [Budgets](/features/budgets) for YAML examples, periods, matching, and
 workflow enforcement.

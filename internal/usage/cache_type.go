@@ -1,6 +1,10 @@
 package usage
 
-import "strings"
+import (
+	"strings"
+
+	"gomodel/internal/core"
+)
 
 const (
 	CacheTypeExact    = "exact"
@@ -47,12 +51,22 @@ func normalizedUsageEntryForStorage(entry *UsageEntry) *UsageEntry {
 
 	normalized := normalizeCacheType(entry.CacheType)
 	providerName := strings.TrimSpace(entry.ProviderName)
-	if normalized == entry.CacheType && providerName == entry.ProviderName {
+	userPath := normalizeUsageEntryUserPath(entry.UserPath)
+	if normalized == entry.CacheType && providerName == entry.ProviderName && userPath == entry.UserPath {
 		return entry
 	}
 
 	cloned := *entry
 	cloned.CacheType = normalized
 	cloned.ProviderName = providerName
+	cloned.UserPath = userPath
 	return &cloned
+}
+
+func normalizeUsageEntryUserPath(value string) string {
+	normalized, err := core.NormalizeUserPath(value)
+	if err != nil || normalized == "" {
+		return "/"
+	}
+	return normalized
 }

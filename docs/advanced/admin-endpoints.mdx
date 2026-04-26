@@ -130,15 +130,18 @@ available when budget management is enabled.
 | Method   | Path                                  | Description                          |
 | -------- | ------------------------------------- | ------------------------------------ |
 | `GET`    | `/admin/api/v1/budgets`               | List budgets with current status     |
-| `PUT`    | `/admin/api/v1/budgets`               | Create or update one budget          |
-| `DELETE` | `/admin/api/v1/budgets`               | Delete one budget                    |
+| `PUT`    | `/admin/api/v1/budgets/{user_path}/{period}` | Create or update one budget          |
+| `DELETE` | `/admin/api/v1/budgets/{user_path}/{period}` | Delete one budget                    |
 | `GET`    | `/admin/api/v1/budgets/settings`      | Read budget reset settings           |
 | `PUT`    | `/admin/api/v1/budgets/settings`      | Update budget reset settings         |
 | `POST`   | `/admin/api/v1/budgets/reset-one`     | Reset one budget period              |
 | `POST`   | `/admin/api/v1/budgets/reset`         | Reset all budget periods             |
 
-`PUT`, `DELETE`, and `reset-one` identify periods by either `period` (`hourly`,
-`daily`, `weekly`, `monthly`) or `period_seconds`.
+`PUT`, `DELETE`, and `reset-one` identify one budget by the composite
+`(user_path, period)` key, or `(user_path, period_seconds)` for custom periods.
+These operations are not global per period. For the path-scoped `PUT` and
+`DELETE` routes, URL-encode `user_path`; see [Budgets](/features/budgets) for
+the request shape.
 
 See [Budgets](/features/budgets) for request examples and enforcement behavior.
 

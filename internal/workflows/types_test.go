@@ -143,7 +143,12 @@ func TestFeatureFlagsRuntimeFeatures_DisablesBudgetWhenUsageDisabled(t *testing.
 			budget: false,
 		},
 		{
-			name:   "usage enabled",
+			name:   "implicit budget with usage enabled",
+			flags:  FeatureFlags{Usage: true},
+			budget: true,
+		},
+		{
+			name:   "explicit budget with usage enabled",
 			flags:  FeatureFlags{Usage: true, Budget: &explicitBudget},
 			budget: true,
 		},
@@ -186,6 +191,7 @@ func TestNormalizePayload_CanonicalizesFallbackForStableWorkflowHash(t *testing.
 			Usage:      true,
 			Guardrails: false,
 			Fallback:   &explicitTrue,
+			Budget:     &explicitTrue,
 		},
 	})
 	if err != nil {
@@ -197,6 +203,12 @@ func TestNormalizePayload_CanonicalizesFallbackForStableWorkflowHash(t *testing.
 	}
 	if explicitPayload.Features.Fallback == nil || !*explicitPayload.Features.Fallback {
 		t.Fatalf("explicit payload fallback = %v, want explicit true", explicitPayload.Features.Fallback)
+	}
+	if implicitPayload.Features.Budget == nil || !*implicitPayload.Features.Budget {
+		t.Fatalf("implicit payload budget = %v, want explicit true", implicitPayload.Features.Budget)
+	}
+	if explicitPayload.Features.Budget == nil || !*explicitPayload.Features.Budget {
+		t.Fatalf("explicit payload budget = %v, want explicit true", explicitPayload.Features.Budget)
 	}
 	if implicitHash != explicitHash {
 		t.Fatalf("workflow hash mismatch: implicit=%q explicit=%q", implicitHash, explicitHash)

@@ -74,6 +74,10 @@ func (s *MongoDBStore) UpsertBudgets(ctx context.Context, budgets []Budget) erro
 	if err != nil {
 		return err
 	}
+	return s.upsertNormalizedBudgets(ctx, budgets)
+}
+
+func (s *MongoDBStore) upsertNormalizedBudgets(ctx context.Context, budgets []Budget) error {
 	if len(budgets) == 0 {
 		return nil
 	}
@@ -123,6 +127,25 @@ func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budge
 		budgets[i].Source = "config"
 	}
 
+	session, err := s.budgets.Database().Client().StartSession()
+	if err != nil {
+		return fmt.Errorf("start config budget replacement transaction: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
+		if err := s.replaceConfigBudgets(txCtx, budgets); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return fmt.Errorf("replace config budgets transaction: %w", err)
+	}
+	return nil
+}
+
+func (s *MongoDBStore) replaceConfigBudgets(ctx context.Context, budgets []Budget) error {
 	filter := bson.D{{Key: "source", Value: "config"}}
 	if len(budgets) > 0 {
 		keep := make(bson.A, 0, len(budgets))
@@ -137,7 +160,7 @@ func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budge
 	if _, err := s.budgets.DeleteMany(ctx, filter); err != nil {
 		return fmt.Errorf("delete old config budgets: %w", err)
 	}
-	return s.UpsertBudgets(ctx, budgets)
+	return s.upsertNormalizedBudgets(ctx, budgets)
 }
 
 func (s *MongoDBStore) GetSettings(ctx context.Context) (Settings, error) {
@@ -179,6 +202,26 @@ func (s *MongoDBStore) SaveSettings(ctx context.Context, settings Settings) (Set
 		return Settings{}, err
 	}
 	settings.UpdatedAt = time.Now().UTC()
+
+	session, err := s.settings.Database().Client().StartSession()
+	if err != nil {
+		return Settings{}, fmt.Errorf("start budget settings transaction: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
+		if err := s.saveSettingsValues(txCtx, settings); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return Settings{}, fmt.Errorf("save budget settings transaction: %w", err)
+	}
+	return settings, nil
+}
+
+func (s *MongoDBStore) saveSettingsValues(ctx context.Context, settings Settings) error {
 	for key, value := range settingsKeyValues(settings) {
 		filter := bson.D{{Key: "key", Value: key}}
 		update := bson.D{{Key: "$set", Value: bson.D{
@@ -187,10 +230,10 @@ func (s *MongoDBStore) SaveSettings(ctx context.Context, settings Settings) (Set
 			{Key: "updated_at", Value: settings.UpdatedAt},
 		}}}
 		if _, err := s.settings.UpdateOne(ctx, filter, update, options.UpdateOne().SetUpsert(true)); err != nil {
-			return Settings{}, fmt.Errorf("save budget setting %s: %w", key, err)
+			return fmt.Errorf("save budget setting %s: %w", key, err)
 		}
 	}
-	return settings, nil
+	return nil
 }
 
 func (s *MongoDBStore) ResetBudget(ctx context.Context, userPath string, periodSeconds int64, at time.Time) error {
@@ -235,16 +278,9 @@ func (s *MongoDBStore) SumUsageCost(ctx context.Context, userPath string, start,
 	}
 	pathPattern := usagePathRegex(userPath)
 	pipeline := bson.A{
-		bson.D{{Key: "$addFields", Value: bson.D{
-			{Key: "_gomodel_budget_user_path", Value: bson.D{{Key: "$cond", Value: bson.A{
-				bson.D{{Key: "$ne", Value: bson.A{bson.D{{Key: "$trim", Value: bson.D{{Key: "input", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$user_path", ""}}}}}}}, ""}}},
-				bson.D{{Key: "$trim", Value: bson.D{{Key: "input", Value: "$user_path"}}}},
-				"/",
-			}}}},
-		}}},
 		bson.D{{Key: "$match", Value: bson.D{
 			{Key: "timestamp", Value: bson.D{{Key: "$gte", Value: start.UTC()}, {Key: "$lt", Value: end.UTC()}}},
-			{Key: "_gomodel_budget_user_path", Value: bson.D{{Key: "$regex", Value: pathPattern}}},
+			{Key: "user_path", Value: bson.D{{Key: "$regex", Value: pathPattern}}},
 			{Key: "$or", Value: bson.A{
 				bson.D{{Key: "cache_type", Value: bson.D{{Key: "$exists", Value: false}}}},
 				bson.D{{Key: "cache_type", Value: ""}},

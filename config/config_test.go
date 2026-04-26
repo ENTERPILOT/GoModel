@@ -226,7 +226,7 @@ func TestLoadBudgetEnvUserPath(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(string) {
-		t.Setenv("SET_BUDGET_USER_PATH_EXAMPLE", "daily=12.5,weekly=50")
+		t.Setenv("SET_BUDGET_USER__PATH__EXAMPLE", "daily=12.5,weekly=50")
 
 		result, err := Load()
 		if err != nil {
@@ -258,35 +258,79 @@ func TestLoadBudgetEnvUserPath(t *testing.T) {
 	})
 }
 
-func TestLoadBudgetEnvRequiresUsageTracking(t *testing.T) {
+func TestBudgetEnvPathUsesDoubleUnderscoreSeparator(t *testing.T) {
+	tests := []struct {
+		name   string
+		suffix string
+		want   string
+	}{
+		{name: "root", suffix: "", want: "/"},
+		{name: "double underscore separator", suffix: "TEAM__ALPHA", want: "/team/alpha"},
+		{name: "single underscore preserved", suffix: "USER_123", want: "/user_123"},
+		{name: "single underscores preserved per segment", suffix: "USER_123__PROJECT_A", want: "/user_123/project_a"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := budgetEnvPath(tt.suffix); got != tt.want {
+				t.Fatalf("budgetEnvPath(%q) = %q, want %q", tt.suffix, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadBudgetEnvJSONLimitsAreSorted(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(string) {
-		t.Setenv("USAGE_ENABLED", "false")
-		t.Setenv("SET_BUDGET_USER_PATH_EXAMPLE", "daily=12.5")
+		t.Setenv("SET_BUDGET_TEAM__ALPHA", `{"weekly":50,"daily":10,"monthly":100}`)
 
-		_, err := Load()
-		if err == nil {
-			t.Fatal("expected Load() to fail when budgets are configured while usage tracking is disabled")
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
 		}
-		if !strings.Contains(err.Error(), "budgets require usage tracking") {
-			t.Fatalf("Load() error = %v, want budget usage dependency error", err)
+
+		limits := result.Config.Budgets.UserPaths[0].Limits
+		got := []string{limits[0].Period, limits[1].Period, limits[2].Period}
+		want := []string{"daily", "monthly", "weekly"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("period order = %v, want %v", got, want)
 		}
 	})
 }
 
-func TestLoadBudgetsEnabledRequiresUsageTrackingWithoutSeedBudgets(t *testing.T) {
+func TestLoadBudgetEnvDisablesBudgetsWhenUsageTrackingDisabled(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(string) {
+		t.Setenv("USAGE_ENABLED", "false")
+		t.Setenv("SET_BUDGET_USER__PATH__EXAMPLE", "daily=12.5")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		if result.Config.Budgets.Enabled {
+			t.Fatal("expected budgets to be disabled when usage tracking is disabled")
+		}
+		if len(result.Config.Budgets.UserPaths) != 0 {
+			t.Fatalf("expected auto-disabled budgets to ignore env user paths, got %d", len(result.Config.Budgets.UserPaths))
+		}
+	})
+}
+
+func TestLoadBudgetsEnabledDisablesBudgetsWhenUsageTrackingDisabledWithoutSeedBudgets(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(string) {
 		t.Setenv("USAGE_ENABLED", "false")
 
-		_, err := Load()
-		if err == nil {
-			t.Fatal("expected Load() to fail when budgets are enabled while usage tracking is disabled")
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
 		}
-		if !strings.Contains(err.Error(), "budgets require usage tracking") {
-			t.Fatalf("Load() error = %v, want budget usage dependency error", err)
+		if result.Config.Budgets.Enabled {
+			t.Fatal("expected budgets to be disabled when usage tracking is disabled")
 		}
 	})
 }
@@ -296,7 +340,7 @@ func TestLoadDisabledBudgetsIgnoreMalformedBudgetEnv(t *testing.T) {
 
 	withTempDir(t, func(string) {
 		t.Setenv("BUDGETS_ENABLED", "false")
-		t.Setenv("SET_BUDGET_USER_PATH_EXAMPLE", "not-a-budget-limit")
+		t.Setenv("SET_BUDGET_USER__PATH__EXAMPLE", "not-a-budget-limit")
 
 		result, err := Load()
 		if err != nil {

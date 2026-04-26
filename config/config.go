@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"path"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1090,13 +1092,11 @@ func Load() (*LoadResult, error) {
 	if err := applyEnvOverrides(cfg); err != nil {
 		return nil, err
 	}
+	applyBudgetDependencies(cfg)
 	if err := applyBudgetEnv(cfg); err != nil {
 		return nil, err
 	}
 	if err := validateBudgetConfig(&cfg.Budgets); err != nil {
-		return nil, err
-	}
-	if err := validateBudgetDependencies(cfg); err != nil {
 		return nil, err
 	}
 	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)
@@ -1331,12 +1331,12 @@ func applyBudgetEnv(cfg *Config) error {
 }
 
 func budgetEnvPath(suffix string) string {
-	suffix = strings.Trim(strings.ToLower(strings.TrimSpace(suffix)), "_")
+	suffix = strings.ToLower(strings.TrimSpace(suffix))
 	if suffix == "" {
 		return "/"
 	}
 	segments := make([]string, 0)
-	for _, part := range strings.Split(suffix, "_") {
+	for _, part := range strings.Split(suffix, "__") {
 		part = strings.TrimSpace(part)
 		if part != "" {
 			segments = append(segments, part)
@@ -1359,8 +1359,13 @@ func parseBudgetEnvLimits(raw string) ([]BudgetLimitConfig, error) {
 			return nil, err
 		}
 		limits := make([]BudgetLimitConfig, 0, len(values))
-		for period, amount := range values {
-			limits = append(limits, BudgetLimitConfig{Period: period, Amount: amount})
+		periods := make([]string, 0, len(values))
+		for period := range values {
+			periods = append(periods, period)
+		}
+		sort.Strings(periods)
+		for _, period := range periods {
+			limits = append(limits, BudgetLimitConfig{Period: period, Amount: values[period]})
 		}
 		return limits, nil
 	}
@@ -1427,11 +1432,16 @@ func validateBudgetConfig(cfg *BudgetsConfig) error {
 	return nil
 }
 
-func validateBudgetDependencies(cfg *Config) error {
+func applyBudgetDependencies(cfg *Config) {
 	if cfg == nil || !cfg.Budgets.Enabled || cfg.Usage.Enabled {
-		return nil
+		return
 	}
-	return fmt.Errorf("budgets require usage tracking to be enabled because spend limits are evaluated from usage cost records")
+	cfg.Budgets.Enabled = false
+	slog.Warn("budget management disabled because usage tracking is disabled",
+		"usage_enabled", false,
+		"budgets_enabled", false,
+		"hint", "enable usage tracking to use budgets, or set BUDGETS_ENABLED=false to silence this warning",
+	)
 }
 
 func budgetPeriodSeconds(period string) (int64, bool) {

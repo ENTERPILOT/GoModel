@@ -16,13 +16,37 @@ func handleError(c *echo.Context, err error) error {
 	if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
 		logHandledError(c, gatewayErr)
 		auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message, gatewayErrorCode(gatewayErr))
+		applyErrorResponseHeaders(c, err)
 		return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 	}
 
 	gatewayErr := core.NewProviderError("", http.StatusInternalServerError, "an unexpected error occurred", err)
 	logHandledError(c, gatewayErr)
-	auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message)
+	auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message, gatewayErrorCode(gatewayErr))
 	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
+}
+
+type responseHeaderError interface {
+	ResponseHeaders() http.Header
+}
+
+func applyErrorResponseHeaders(c *echo.Context, err error) {
+	if c == nil || err == nil {
+		return
+	}
+	var headerErr responseHeaderError
+	if !errors.As(err, &headerErr) {
+		return
+	}
+	for key, values := range headerErr.ResponseHeaders() {
+		for i, value := range values {
+			if i == 0 {
+				c.Response().Header().Set(key, value)
+				continue
+			}
+			c.Response().Header().Add(key, value)
+		}
+	}
 }
 
 func gatewayErrorCode(err *core.GatewayError) string {

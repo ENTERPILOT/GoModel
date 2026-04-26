@@ -582,12 +582,6 @@ function dashboard() {
       ) {
         requests.push(this.fetchGuardrailsPage());
       }
-      if (
-        this.page === "budgets" &&
-        typeof this.fetchBudgetsPage === "function"
-      ) {
-        requests.push(this.fetchBudgetsPage());
-      }
       if (this.page === "usage" && typeof this.fetchUsagePage === "function") {
         requests.push(this.fetchUsagePage());
       }

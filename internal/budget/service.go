@@ -45,7 +45,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 	}
 	sort.SliceStable(budgets, func(i, j int) bool {
 		if budgets[i].UserPath == budgets[j].UserPath {
-			return budgets[i].PeriodSeconds < budgets[j].PeriodSeconds
+			return budgets[i].PeriodSeconds > budgets[j].PeriodSeconds
 		}
 		return budgets[i].UserPath < budgets[j].UserPath
 	})
@@ -222,7 +222,7 @@ func (s *Service) CheckWithResults(ctx context.Context, userPath string, now tim
 			return results, err
 		}
 		results = append(results, result)
-		if result.Spent >= budget.Amount {
+		if result.HasUsage && result.Spent >= budget.Amount {
 			return results, &ExceededError{Result: result}
 		}
 	}

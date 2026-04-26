@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -1042,18 +1043,20 @@ func (h *Handler) ListBudgets(c *echo.Context) error {
 	})
 }
 
-// UpsertBudget handles PUT /admin/api/v1/budgets.
+// UpsertBudget handles PUT /admin/api/v1/budgets/{user_path}/{period}.
 // @Summary      Create or update one budget
 // @Tags         admin
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        budget  body      upsertBudgetRequest  true  "Budget definition"
-// @Success      200     {object}  budgetListResponse
-// @Failure      400     {object}  core.GatewayError
-// @Failure      401     {object}  core.GatewayError
-// @Failure      503     {object}  core.GatewayError
-// @Router       /admin/api/v1/budgets [put]
+// @Param        user_path  path      string               true  "URL-encoded budget user path"
+// @Param        period     path      string               true  "Budget period name or seconds"
+// @Param        budget     body      upsertBudgetRequest  true  "Budget amount"
+// @Success      200        {object}  budgetListResponse
+// @Failure      400        {object}  core.GatewayError
+// @Failure      401        {object}  core.GatewayError
+// @Failure      503        {object}  core.GatewayError
+// @Router       /admin/api/v1/budgets/{user_path}/{period} [put]
 func (h *Handler) UpsertBudget(c *echo.Context) error {
 	if h.budgets == nil {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
@@ -1062,51 +1065,47 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	periodSeconds, err := budgetRequestPeriodSeconds(req.Period, req.PeriodSeconds)
+	userPath, periodSeconds, err := budgetRouteKey(c)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
-	source := strings.TrimSpace(req.Source)
-	if source == "" {
-		source = "manual"
-	}
-	if err := h.budgets.UpsertBudgets(c.Request().Context(), []budget.Budget{{
-		UserPath:      req.UserPath,
+	item, err := budget.NormalizeBudget(budget.Budget{
+		UserPath:      userPath,
 		PeriodSeconds: periodSeconds,
 		Amount:        req.Amount,
-		Source:        source,
-	}}); err != nil {
+		Source:        "manual",
+	})
+	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	}
+	if err := h.budgets.UpsertBudgets(c.Request().Context(), []budget.Budget{item}); err != nil {
+		return handleError(c, budgetServiceError("failed to save budget", err))
 	}
 	return h.ListBudgets(c)
 }
 
-// DeleteBudget handles DELETE /admin/api/v1/budgets.
+// DeleteBudget handles DELETE /admin/api/v1/budgets/{user_path}/{period}.
 // @Summary      Delete one budget
 // @Tags         admin
-// @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        budget  body      deleteBudgetRequest  true  "Budget key"
-// @Success      200     {object}  budgetListResponse
-// @Failure      400     {object}  core.GatewayError
-// @Failure      401     {object}  core.GatewayError
-// @Failure      503     {object}  core.GatewayError
-// @Router       /admin/api/v1/budgets [delete]
+// @Param        user_path  path      string  true  "URL-encoded budget user path"
+// @Param        period     path      string  true  "Budget period name or seconds"
+// @Success      200        {object}  budgetListResponse
+// @Failure      400        {object}  core.GatewayError
+// @Failure      401        {object}  core.GatewayError
+// @Failure      503        {object}  core.GatewayError
+// @Router       /admin/api/v1/budgets/{user_path}/{period} [delete]
 func (h *Handler) DeleteBudget(c *echo.Context) error {
 	if h.budgets == nil {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
 	}
-	var req deleteBudgetRequest
-	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
-	}
-	periodSeconds, err := budgetRequestPeriodSeconds(req.Period, req.PeriodSeconds)
+	userPath, periodSeconds, err := budgetRouteKey(c)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
-	if err := h.budgets.DeleteBudget(c.Request().Context(), req.UserPath, periodSeconds); err != nil {
-		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	if err := h.budgets.DeleteBudget(c.Request().Context(), userPath, periodSeconds); err != nil {
+		return handleError(c, budgetServiceError("failed to delete budget", err))
 	}
 	return h.ListBudgets(c)
 }
@@ -1157,9 +1156,12 @@ func (h *Handler) UpdateBudgetSettings(c *echo.Context) error {
 		MonthlyResetHour:   req.MonthlyResetHour,
 		MonthlyResetMinute: req.MonthlyResetMinute,
 	}
+	if err := budget.ValidateSettings(settings); err != nil {
+		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	}
 	saved, err := h.budgets.SaveSettings(c.Request().Context(), settings)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+		return handleError(c, budgetServiceError("failed to save budget settings", err))
 	}
 	return c.JSON(http.StatusOK, saved)
 }
@@ -1188,8 +1190,12 @@ func (h *Handler) ResetBudget(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
-	if err := h.budgets.ResetBudget(c.Request().Context(), req.UserPath, periodSeconds, time.Now().UTC()); err != nil {
+	userPath, err := budget.NormalizeUserPath(req.UserPath)
+	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	}
+	if err := h.budgets.ResetBudget(c.Request().Context(), userPath, periodSeconds, time.Now().UTC()); err != nil {
+		return handleError(c, budgetServiceError("failed to reset budget", err))
 	}
 	return h.ListBudgets(c)
 }
@@ -1201,7 +1207,7 @@ func (h *Handler) ResetBudget(c *echo.Context) error {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        confirmation  body      resetBudgetsRequest  true  "Reset confirmation"
-// @Success      200           {object}  map[string]interface{}
+// @Success      200           {object}  resetBudgetsResponse
 // @Failure      400           {object}  core.GatewayError
 // @Failure      401           {object}  core.GatewayError
 // @Failure      503           {object}  core.GatewayError
@@ -1214,13 +1220,13 @@ func (h *Handler) ResetBudgets(c *echo.Context) error {
 	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	if strings.TrimSpace(strings.ToLower(req.Confirmation)) != "reset" {
+	if strings.TrimSpace(strings.ToLower(req.confirmationValue())) != "reset" {
 		return handleError(c, core.NewInvalidRequestError("confirmation must be reset", nil))
 	}
 	if err := h.budgets.ResetAll(c.Request().Context(), time.Now().UTC()); err != nil {
 		return handleError(c, core.NewProviderError("budgets", http.StatusServiceUnavailable, "failed to reset budgets", err))
 	}
-	return c.JSON(http.StatusOK, map[string]any{"status": "ok"})
+	return c.JSON(http.StatusOK, resetBudgetsResponse{Status: "ok"})
 }
 
 // ProviderStatus handles GET /admin/api/v1/providers/status
@@ -1439,20 +1445,10 @@ type budgetStatusResponse struct {
 }
 
 type upsertBudgetRequest struct {
-	UserPath      string  `json:"user_path"`
-	Period        string  `json:"period,omitempty"`
-	PeriodSeconds int64   `json:"period_seconds,omitempty"`
-	Amount        float64 `json:"amount"`
-	Source        string  `json:"source,omitempty"`
+	Amount float64 `json:"amount"`
 }
 
 type resetBudgetRequest struct {
-	UserPath      string `json:"user_path"`
-	Period        string `json:"period,omitempty"`
-	PeriodSeconds int64  `json:"period_seconds,omitempty"`
-}
-
-type deleteBudgetRequest struct {
 	UserPath      string `json:"user_path"`
 	Period        string `json:"period,omitempty"`
 	PeriodSeconds int64  `json:"period_seconds,omitempty"`
@@ -1471,6 +1467,18 @@ type updateBudgetSettingsRequest struct {
 
 type resetBudgetsRequest struct {
 	Confirmation string `json:"confirmation"`
+	Confirm      string `json:"confirm,omitempty"`
+}
+
+func (r resetBudgetsRequest) confirmationValue() string {
+	if strings.TrimSpace(r.Confirmation) != "" {
+		return r.Confirmation
+	}
+	return r.Confirm
+}
+
+type resetBudgetsResponse struct {
+	Status string `json:"status"`
 }
 
 func budgetStatusResponses(statuses []budget.CheckResult, now time.Time) []budgetStatusResponse {
@@ -1510,6 +1518,37 @@ func budgetStatusResponses(statuses []budget.CheckResult, now time.Time) []budge
 	return responses
 }
 
+func budgetRouteKey(c *echo.Context) (string, int64, error) {
+	userPathParam := strings.TrimSpace(c.Param("user_path"))
+	if userPathParam == "" {
+		return "", 0, errors.New("user_path path parameter is required")
+	}
+	userPath, err := url.PathUnescape(userPathParam)
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid user_path path parameter: %w", err)
+	}
+	userPath, err = budget.NormalizeUserPath(userPath)
+	if err != nil {
+		return "", 0, err
+	}
+
+	periodParam := strings.TrimSpace(c.Param("period"))
+	if periodParam == "" {
+		return "", 0, errors.New("period path parameter is required")
+	}
+	if seconds, err := strconv.ParseInt(periodParam, 10, 64); err == nil {
+		if seconds <= 0 {
+			return "", 0, errors.New("period_seconds must be greater than 0")
+		}
+		return userPath, seconds, nil
+	}
+	periodSeconds, err := budgetRequestPeriodSeconds(periodParam, 0)
+	if err != nil {
+		return "", 0, err
+	}
+	return userPath, periodSeconds, nil
+}
+
 func budgetRequestPeriodSeconds(period string, periodSeconds int64) (int64, error) {
 	if periodSeconds > 0 {
 		return periodSeconds, nil
@@ -1528,6 +1567,10 @@ func clampBudgetRatio(value float64) float64 {
 		return 1
 	}
 	return value
+}
+
+func budgetServiceError(message string, err error) error {
+	return core.NewProviderError("budgets", http.StatusServiceUnavailable, message, err)
 }
 
 func featureUnavailableError(message string) error {

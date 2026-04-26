@@ -85,6 +85,14 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	appCfg := cfg.AppConfig.Config
+	if appCfg.Budgets.Enabled && !appCfg.Usage.Enabled {
+		appCfg.Budgets.Enabled = false
+		slog.Warn("budget management disabled because usage tracking is disabled",
+			"usage_enabled", false,
+			"budgets_enabled", false,
+			"hint", "enable usage tracking to use budgets, or set BUDGETS_ENABLED=false to silence this warning",
+		)
+	}
 
 	app := &App{
 		config: appCfg,

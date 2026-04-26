@@ -3670,35 +3670,67 @@ body.conversation-drawer-open {
 .budget-period-label-weekly {
   border-color: color-mix(in srgb, #68765c 62%, var(--border));
   background: color-mix(in srgb, #68765c 12%, var(--bg));
-  color: #68765c;
+  color: color-mix(in srgb, #68765c 34%, var(--text) 66%);
 }
 
 .budget-period-label-daily {
   border-color: color-mix(in srgb, #b5652d 62%, var(--border));
   background: color-mix(in srgb, #b5652d 12%, var(--bg));
-  color: #b5652d;
+  color: color-mix(in srgb, #b5652d 34%, var(--text) 66%);
 }
 
 .budget-period-label-hourly {
   border-color: color-mix(in srgb, #783f22 62%, var(--border));
   background: color-mix(in srgb, #783f22 12%, var(--bg));
-  color: #783f22;
+  color: color-mix(in srgb, #783f22 34%, var(--text) 66%);
 }
 
 .budget-period-label-custom {
   border-style: dashed;
   border-color: color-mix(in srgb, #bfa584 68%, var(--border));
   background: color-mix(in srgb, #bfa584 16%, var(--bg));
-  color: #8b6f4f;
+  color: color-mix(in srgb, #8b6f4f 34%, var(--text) 66%);
 }
 
 [data-theme="light"] .budget-period-label-monthly {
   color: #30302c;
 }
 
+[data-theme="light"] .budget-period-label-weekly {
+  color: #68765c;
+}
+
+[data-theme="light"] .budget-period-label-daily {
+  color: #b5652d;
+}
+
+[data-theme="light"] .budget-period-label-hourly {
+  color: #783f22;
+}
+
+[data-theme="light"] .budget-period-label-custom {
+  color: #8b6f4f;
+}
+
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) .budget-period-label-monthly {
     color: #30302c;
+  }
+
+  :root:not([data-theme="dark"]) .budget-period-label-weekly {
+    color: #68765c;
+  }
+
+  :root:not([data-theme="dark"]) .budget-period-label-daily {
+    color: #b5652d;
+  }
+
+  :root:not([data-theme="dark"]) .budget-period-label-hourly {
+    color: #783f22;
+  }
+
+  :root:not([data-theme="dark"]) .budget-period-label-custom {
+    color: #8b6f4f;
   }
 }
 

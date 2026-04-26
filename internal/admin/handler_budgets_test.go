@@ -15,11 +15,13 @@ import (
 )
 
 type adminBudgetStore struct {
-	budgets []budget.Budget
-	sum     float64
+	budgets  []budget.Budget
+	sum      float64
+	settings budget.Settings
 
 	resetUserPath      string
 	resetPeriodSeconds int64
+	resetAllAt         time.Time
 }
 
 func (s *adminBudgetStore) ListBudgets(context.Context) ([]budget.Budget, error) {
@@ -67,10 +69,14 @@ func (s *adminBudgetStore) ReplaceConfigBudgets(ctx context.Context, budgets []b
 }
 
 func (s *adminBudgetStore) GetSettings(context.Context) (budget.Settings, error) {
-	return budget.DefaultSettings(), nil
+	if s.settings == (budget.Settings{}) {
+		return budget.DefaultSettings(), nil
+	}
+	return s.settings, nil
 }
 
 func (s *adminBudgetStore) SaveSettings(_ context.Context, settings budget.Settings) (budget.Settings, error) {
+	s.settings = settings
 	return settings, nil
 }
 
@@ -87,6 +93,7 @@ func (s *adminBudgetStore) ResetBudget(_ context.Context, userPath string, perio
 }
 
 func (s *adminBudgetStore) ResetAllBudgets(_ context.Context, at time.Time) error {
+	s.resetAllAt = at.UTC()
 	for i := range s.budgets {
 		t := at.UTC()
 		s.budgets[i].LastResetAt = &t
@@ -149,12 +156,16 @@ func TestBudgetEndpointsUpsertAndResetOneBudget(t *testing.T) {
 
 	upsertReq := httptest.NewRequest(
 		http.MethodPut,
-		"/admin/api/v1/budgets",
-		strings.NewReader(`{"user_path":"team/beta","period":"weekly","amount":12.5}`),
+		"/admin/api/v1/budgets/%2Fteam%2Fbeta/weekly",
+		strings.NewReader(`{"amount":12.5}`),
 	)
 	upsertReq.Header.Set("Content-Type", "application/json")
 	upsertRec := httptest.NewRecorder()
 	upsertCtx := e.NewContext(upsertReq, upsertRec)
+	upsertCtx.SetPathValues(echo.PathValues{
+		{Name: "user_path", Value: "%2Fteam%2Fbeta"},
+		{Name: "period", Value: "weekly"},
+	})
 	if err := h.UpsertBudget(upsertCtx); err != nil {
 		t.Fatalf("UpsertBudget() failed: %v", err)
 	}
@@ -195,12 +206,15 @@ func TestBudgetEndpointsDeleteBudget(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(
 		http.MethodDelete,
-		"/admin/api/v1/budgets",
-		strings.NewReader(`{"user_path":"/team/beta","period_seconds":604800}`),
+		"/admin/api/v1/budgets/%2Fteam%2Fbeta/604800",
+		nil,
 	)
-	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
+	c.SetPathValues(echo.PathValues{
+		{Name: "user_path", Value: "%2Fteam%2Fbeta"},
+		{Name: "period", Value: "604800"},
+	})
 
 	if err := h.DeleteBudget(c); err != nil {
 		t.Fatalf("DeleteBudget() failed: %v", err)
@@ -210,5 +224,124 @@ func TestBudgetEndpointsDeleteBudget(t *testing.T) {
 	}
 	if len(store.budgets) != 1 || store.budgets[0].PeriodSeconds != budget.PeriodDailySeconds {
 		t.Fatalf("stored budgets after delete = %+v", store.budgets)
+	}
+}
+
+func TestBudgetSettingsEndpoints(t *testing.T) {
+	store := &adminBudgetStore{}
+	h := newBudgetHandler(t, store)
+	e := echo.New()
+
+	getReq := httptest.NewRequest(http.MethodGet, "/admin/api/v1/budgets/settings", nil)
+	getRec := httptest.NewRecorder()
+	getCtx := e.NewContext(getReq, getRec)
+	if err := h.BudgetSettings(getCtx); err != nil {
+		t.Fatalf("BudgetSettings() failed: %v", err)
+	}
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("settings status = %d, want %d body=%s", getRec.Code, http.StatusOK, getRec.Body.String())
+	}
+	var defaults budget.Settings
+	if err := json.Unmarshal(getRec.Body.Bytes(), &defaults); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if defaults.MonthlyResetDay != 1 || defaults.WeeklyResetWeekday != int(time.Monday) {
+		t.Fatalf("default settings = %+v", defaults)
+	}
+
+	updateReq := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/api/v1/budgets/settings",
+		strings.NewReader(`{"daily_reset_hour":6,"daily_reset_minute":30,"weekly_reset_weekday":2,"weekly_reset_hour":9,"weekly_reset_minute":15,"monthly_reset_day":31,"monthly_reset_hour":2,"monthly_reset_minute":45}`),
+	)
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	updateCtx := e.NewContext(updateReq, updateRec)
+	if err := h.UpdateBudgetSettings(updateCtx); err != nil {
+		t.Fatalf("UpdateBudgetSettings() failed: %v", err)
+	}
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update settings status = %d, want %d body=%s", updateRec.Code, http.StatusOK, updateRec.Body.String())
+	}
+	if store.settings.DailyResetHour != 6 || store.settings.MonthlyResetDay != 31 {
+		t.Fatalf("stored settings = %+v", store.settings)
+	}
+
+	invalidReq := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/api/v1/budgets/settings",
+		strings.NewReader(`{"daily_reset_hour":24,"daily_reset_minute":0,"weekly_reset_weekday":1,"weekly_reset_hour":0,"weekly_reset_minute":0,"monthly_reset_day":1,"monthly_reset_hour":0,"monthly_reset_minute":0}`),
+	)
+	invalidReq.Header.Set("Content-Type", "application/json")
+	invalidRec := httptest.NewRecorder()
+	invalidCtx := e.NewContext(invalidReq, invalidRec)
+	if err := h.UpdateBudgetSettings(invalidCtx); err != nil {
+		t.Fatalf("invalid UpdateBudgetSettings() returned handler error: %v", err)
+	}
+	if invalidRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid settings status = %d, want %d body=%s", invalidRec.Code, http.StatusBadRequest, invalidRec.Body.String())
+	}
+
+	malformedReq := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/api/v1/budgets/settings",
+		strings.NewReader(`{"daily_reset_hour":`),
+	)
+	malformedReq.Header.Set("Content-Type", "application/json")
+	malformedRec := httptest.NewRecorder()
+	malformedCtx := e.NewContext(malformedReq, malformedRec)
+	if err := h.UpdateBudgetSettings(malformedCtx); err != nil {
+		t.Fatalf("malformed UpdateBudgetSettings() returned handler error: %v", err)
+	}
+	if malformedRec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed settings status = %d, want %d body=%s", malformedRec.Code, http.StatusBadRequest, malformedRec.Body.String())
+	}
+}
+
+func TestResetBudgetsEndpoint(t *testing.T) {
+	store := &adminBudgetStore{
+		budgets: []budget.Budget{
+			{UserPath: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
+		},
+	}
+	h := newBudgetHandler(t, store)
+	e := echo.New()
+
+	badReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/budgets/reset", strings.NewReader(`{"confirm":"no"}`))
+	badReq.Header.Set("Content-Type", "application/json")
+	badRec := httptest.NewRecorder()
+	badCtx := e.NewContext(badReq, badRec)
+	if err := h.ResetBudgets(badCtx); err != nil {
+		t.Fatalf("invalid ResetBudgets() returned handler error: %v", err)
+	}
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid reset status = %d, want %d body=%s", badRec.Code, http.StatusBadRequest, badRec.Body.String())
+	}
+	if !store.resetAllAt.IsZero() {
+		t.Fatalf("resetAllAt = %s, want zero", store.resetAllAt)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/budgets/reset", strings.NewReader(`{"confirm":"reset"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := h.ResetBudgets(c); err != nil {
+		t.Fatalf("ResetBudgets() failed: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reset all status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if store.resetAllAt.IsZero() {
+		t.Fatal("ResetAllBudgets was not called")
+	}
+	if store.budgets[0].LastResetAt == nil || !store.budgets[0].LastResetAt.Equal(store.resetAllAt) {
+		t.Fatalf("budget reset time = %v, want %s", store.budgets[0].LastResetAt, store.resetAllAt)
+	}
+	var body resetBudgetsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode reset response: %v", err)
+	}
+	if body.Status != "ok" {
+		t.Fatalf("reset status body = %q, want ok", body.Status)
 	}
 }

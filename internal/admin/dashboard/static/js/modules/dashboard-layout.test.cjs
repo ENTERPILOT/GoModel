@@ -774,17 +774,21 @@ test("budget row record actions stack reset under edit", () => {
   assert.match(readCSSRule(css, '[data-theme="light"] .budget-period-label-monthly'), /color:\s*#30302c/);
   const weeklyPeriodRule = readCSSRule(css, ".budget-period-label-weekly");
   assert.match(weeklyPeriodRule, /#68765c/);
-  assert.match(weeklyPeriodRule, /color:\s*#68765c/);
+  assert.match(weeklyPeriodRule, /color:\s*color-mix\(in srgb,\s*#68765c 34%,\s*var\(--text\) 66%\)/);
+  assert.match(readCSSRule(css, '[data-theme="light"] .budget-period-label-weekly'), /color:\s*#68765c/);
   const dailyPeriodRule = readCSSRule(css, ".budget-period-label-daily");
   assert.match(dailyPeriodRule, /#b5652d/);
-  assert.match(dailyPeriodRule, /color:\s*#b5652d/);
+  assert.match(dailyPeriodRule, /color:\s*color-mix\(in srgb,\s*#b5652d 34%,\s*var\(--text\) 66%\)/);
+  assert.match(readCSSRule(css, '[data-theme="light"] .budget-period-label-daily'), /color:\s*#b5652d/);
   const hourlyPeriodRule = readCSSRule(css, ".budget-period-label-hourly");
   assert.match(hourlyPeriodRule, /#783f22/);
-  assert.match(hourlyPeriodRule, /color:\s*#783f22/);
+  assert.match(hourlyPeriodRule, /color:\s*color-mix\(in srgb,\s*#783f22 34%,\s*var\(--text\) 66%\)/);
+  assert.match(readCSSRule(css, '[data-theme="light"] .budget-period-label-hourly'), /color:\s*#783f22/);
   const customPeriodRule = readCSSRule(css, ".budget-period-label-custom");
   assert.match(customPeriodRule, /border-style:\s*dashed/);
   assert.match(customPeriodRule, /#bfa584/);
-  assert.match(customPeriodRule, /color:\s*#8b6f4f/);
+  assert.match(customPeriodRule, /color:\s*color-mix\(in srgb,\s*#8b6f4f 34%,\s*var\(--text\) 66%\)/);
+  assert.match(readCSSRule(css, '[data-theme="light"] .budget-period-label-custom'), /color:\s*#8b6f4f/);
 
   assert.match(readCSSRule(css, ".budget-bar-fill-period-monthly"), /background:\s*#30302c/);
   assert.match(readCSSRule(css, ".budget-bar-fill-period-weekly"), /background:\s*#68765c/);

@@ -72,31 +72,26 @@ type FeatureFlags struct {
 }
 
 func (f FeatureFlags) canonicalize() FeatureFlags {
-	if f.Fallback != nil {
-		return f
+	if f.Budget == nil {
+		budgetEnabled := true
+		f.Budget = &budgetEnabled
 	}
-	fallbackEnabled := true
-	f.Fallback = &fallbackEnabled
+	if f.Fallback == nil {
+		fallbackEnabled := true
+		f.Fallback = &fallbackEnabled
+	}
 	return f
 }
 
 func (f FeatureFlags) runtimeFeatures() core.WorkflowFeatures {
 	f = f.canonicalize()
-	fallback := true
-	if f.Fallback != nil {
-		fallback = *f.Fallback
-	}
-	budget := true
-	if f.Budget != nil {
-		budget = *f.Budget
-	}
 	return core.WorkflowFeatures{
 		Cache:      f.Cache,
 		Audit:      f.Audit,
 		Usage:      f.Usage,
-		Budget:     f.Usage && budget,
+		Budget:     f.Usage && *f.Budget,
 		Guardrails: f.Guardrails,
-		Fallback:   fallback,
+		Fallback:   *f.Fallback,
 	}
 }
 

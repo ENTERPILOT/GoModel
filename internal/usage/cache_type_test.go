@@ -20,3 +20,18 @@ func TestNormalizedUsageEntryForStorageClearsInvalidCacheTypeWithoutMutatingInpu
 		t.Fatalf("input CacheType mutated to %q", entry.CacheType)
 	}
 }
+
+func TestNormalizedUsageEntryForStorageNormalizesUserPath(t *testing.T) {
+	entry := &UsageEntry{
+		ID:       "usage-1",
+		UserPath: " team/alpha ",
+	}
+
+	got := normalizedUsageEntryForStorage(entry)
+	if got.UserPath != "/team/alpha" {
+		t.Fatalf("normalized UserPath = %q, want /team/alpha", got.UserPath)
+	}
+	if entry.UserPath != " team/alpha " {
+		t.Fatalf("input UserPath mutated to %q", entry.UserPath)
+	}
+}

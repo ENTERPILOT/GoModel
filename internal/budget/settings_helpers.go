@@ -30,30 +30,33 @@ func applySettingValue(settings *Settings, key, value string) error {
 	if settings == nil {
 		return nil
 	}
+	key = strings.TrimSpace(key)
+	var target *int
+	switch key {
+	case settingDailyResetHour:
+		target = &settings.DailyResetHour
+	case settingDailyResetMinute:
+		target = &settings.DailyResetMinute
+	case settingWeeklyResetWeekday:
+		target = &settings.WeeklyResetWeekday
+	case settingWeeklyResetHour:
+		target = &settings.WeeklyResetHour
+	case settingWeeklyResetMinute:
+		target = &settings.WeeklyResetMinute
+	case settingMonthlyResetDay:
+		target = &settings.MonthlyResetDay
+	case settingMonthlyResetHour:
+		target = &settings.MonthlyResetHour
+	case settingMonthlyResetMinute:
+		target = &settings.MonthlyResetMinute
+	default:
+		return nil
+	}
 	parsed, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil {
 		return fmt.Errorf("budget setting %s must be an integer", key)
 	}
-	switch strings.TrimSpace(key) {
-	case settingDailyResetHour:
-		settings.DailyResetHour = parsed
-	case settingDailyResetMinute:
-		settings.DailyResetMinute = parsed
-	case settingWeeklyResetWeekday:
-		settings.WeeklyResetWeekday = parsed
-	case settingWeeklyResetHour:
-		settings.WeeklyResetHour = parsed
-	case settingWeeklyResetMinute:
-		settings.WeeklyResetMinute = parsed
-	case settingMonthlyResetDay:
-		settings.MonthlyResetDay = parsed
-	case settingMonthlyResetHour:
-		settings.MonthlyResetHour = parsed
-	case settingMonthlyResetMinute:
-		settings.MonthlyResetMinute = parsed
-	default:
-		return nil
-	}
+	*target = parsed
 	return nil
 }
 

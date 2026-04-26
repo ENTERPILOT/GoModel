@@ -1,9 +1,28 @@
 package budget
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestApplySettingValueIgnoresUnknownNonInteger(t *testing.T) {
+	settings := DefaultSettings()
+	if err := applySettingValue(&settings, "unknown_setting", "not-an-int"); err != nil {
+		t.Fatalf("applySettingValue() error = %v, want nil for unknown setting", err)
+	}
+}
+
+func TestApplySettingValueRejectsKnownNonInteger(t *testing.T) {
+	settings := DefaultSettings()
+	err := applySettingValue(&settings, settingDailyResetHour, "not-an-int")
+	if err == nil {
+		t.Fatal("applySettingValue() error = nil, want parse error")
+	}
+	if !strings.Contains(err.Error(), "must be an integer") {
+		t.Fatalf("applySettingValue() error = %v", err)
+	}
+}
 
 func TestPeriodBoundsUsesConfiguredAnchors(t *testing.T) {
 	settings := Settings{
@@ -16,29 +35,88 @@ func TestPeriodBoundsUsesConfiguredAnchors(t *testing.T) {
 		MonthlyResetHour:   2,
 		MonthlyResetMinute: 45,
 	}
-	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 
-	dailyStart, dailyEnd := PeriodBounds(now, PeriodDailySeconds, settings)
-	if want := time.Date(2026, time.April, 25, 6, 30, 0, 0, time.UTC); !dailyStart.Equal(want) {
-		t.Fatalf("daily start = %s, want %s", dailyStart, want)
-	}
-	if want := time.Date(2026, time.April, 26, 6, 30, 0, 0, time.UTC); !dailyEnd.Equal(want) {
-		t.Fatalf("daily end = %s, want %s", dailyEnd, want)
+	tests := []struct {
+		name      string
+		now       time.Time
+		period    int64
+		wantStart time.Time
+		wantEnd   time.Time
+	}{
+		{
+			name:      "daily exactly at anchor",
+			now:       time.Date(2026, time.April, 25, 6, 30, 0, 0, time.UTC),
+			period:    PeriodDailySeconds,
+			wantStart: time.Date(2026, time.April, 25, 6, 30, 0, 0, time.UTC),
+			wantEnd:   time.Date(2026, time.April, 26, 6, 30, 0, 0, time.UTC),
+		},
+		{
+			name:      "weekly on anchor weekday before anchor",
+			now:       time.Date(2026, time.April, 22, 9, 14, 59, 0, time.UTC),
+			period:    PeriodWeeklySeconds,
+			wantStart: time.Date(2026, time.April, 15, 9, 15, 0, 0, time.UTC),
+			wantEnd:   time.Date(2026, time.April, 22, 9, 15, 0, 0, time.UTC),
+		},
+		{
+			name:      "weekly exactly at anchor",
+			now:       time.Date(2026, time.April, 22, 9, 15, 0, 0, time.UTC),
+			period:    PeriodWeeklySeconds,
+			wantStart: time.Date(2026, time.April, 22, 9, 15, 0, 0, time.UTC),
+			wantEnd:   time.Date(2026, time.April, 29, 9, 15, 0, 0, time.UTC),
+		},
+		{
+			name:      "weekly on anchor weekday after anchor",
+			now:       time.Date(2026, time.April, 22, 9, 15, 1, 0, time.UTC),
+			period:    PeriodWeeklySeconds,
+			wantStart: time.Date(2026, time.April, 22, 9, 15, 0, 0, time.UTC),
+			wantEnd:   time.Date(2026, time.April, 29, 9, 15, 0, 0, time.UTC),
+		},
+		{
+			name:      "monthly day 31 before non-leap February anchor",
+			now:       time.Date(2026, time.February, 28, 2, 44, 59, 0, time.UTC),
+			period:    PeriodMonthlySeconds,
+			wantStart: time.Date(2026, time.January, 31, 2, 45, 0, 0, time.UTC),
+			wantEnd:   time.Date(2026, time.February, 28, 2, 45, 0, 0, time.UTC),
+		},
+		{
+			name:      "monthly day 31 at non-leap February anchor",
+			now:       time.Date(2026, time.February, 28, 2, 45, 0, 0, time.UTC),
+			period:    PeriodMonthlySeconds,
+			wantStart: time.Date(2026, time.February, 28, 2, 45, 0, 0, time.UTC),
+			wantEnd:   time.Date(2026, time.March, 31, 2, 45, 0, 0, time.UTC),
+		},
+		{
+			name:      "monthly day 31 at leap February anchor",
+			now:       time.Date(2024, time.February, 29, 2, 45, 0, 0, time.UTC),
+			period:    PeriodMonthlySeconds,
+			wantStart: time.Date(2024, time.February, 29, 2, 45, 0, 0, time.UTC),
+			wantEnd:   time.Date(2024, time.March, 31, 2, 45, 0, 0, time.UTC),
+		},
+		{
+			name:      "monthly day 31 clamps April",
+			now:       time.Date(2026, time.April, 30, 3, 0, 0, 0, time.UTC),
+			period:    PeriodMonthlySeconds,
+			wantStart: time.Date(2026, time.April, 30, 2, 45, 0, 0, time.UTC),
+			wantEnd:   time.Date(2026, time.May, 31, 2, 45, 0, 0, time.UTC),
+		},
+		{
+			name:      "monthly day 31 clamps June",
+			now:       time.Date(2026, time.June, 30, 3, 0, 0, 0, time.UTC),
+			period:    PeriodMonthlySeconds,
+			wantStart: time.Date(2026, time.June, 30, 2, 45, 0, 0, time.UTC),
+			wantEnd:   time.Date(2026, time.July, 31, 2, 45, 0, 0, time.UTC),
+		},
 	}
 
-	weeklyStart, weeklyEnd := PeriodBounds(now, PeriodWeeklySeconds, settings)
-	if want := time.Date(2026, time.April, 22, 9, 15, 0, 0, time.UTC); !weeklyStart.Equal(want) {
-		t.Fatalf("weekly start = %s, want %s", weeklyStart, want)
-	}
-	if want := time.Date(2026, time.April, 29, 9, 15, 0, 0, time.UTC); !weeklyEnd.Equal(want) {
-		t.Fatalf("weekly end = %s, want %s", weeklyEnd, want)
-	}
-
-	monthlyStart, monthlyEnd := PeriodBounds(now, PeriodMonthlySeconds, settings)
-	if want := time.Date(2026, time.March, 31, 2, 45, 0, 0, time.UTC); !monthlyStart.Equal(want) {
-		t.Fatalf("monthly start = %s, want %s", monthlyStart, want)
-	}
-	if want := time.Date(2026, time.April, 30, 2, 45, 0, 0, time.UTC); !monthlyEnd.Equal(want) {
-		t.Fatalf("monthly end = %s, want %s", monthlyEnd, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start, end := PeriodBounds(tt.now, tt.period, settings)
+			if !start.Equal(tt.wantStart) {
+				t.Fatalf("start = %s, want %s", start, tt.wantStart)
+			}
+			if !end.Equal(tt.wantEnd) {
+				t.Fatalf("end = %s, want %s", end, tt.wantEnd)
+			}
+		})
 	}
 }

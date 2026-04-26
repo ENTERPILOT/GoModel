@@ -201,6 +201,10 @@ func responsesPreparedFields(prepared *gateway.PreparedResponsesRequest) (contex
 
 // handleWithCache routes translated requests through the response cache when
 // enabled. The request has already been resolved and patched by the orchestrator.
+// Cache hits intentionally return before dispatch and budget enforcement because
+// they do not incur provider spend. Cache misses still run dispatch, where
+// dispatchChatCompletion and dispatchResponses call enforceBudget before any
+// provider request.
 func handleWithCache[R any](
 	s *translatedInferenceService,
 	c *echo.Context,

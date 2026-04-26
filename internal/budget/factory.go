@@ -104,7 +104,7 @@ func createStore(ctx context.Context, store storage.Storage) (Store, error) {
 }
 
 func seedConfiguredBudgets(ctx context.Context, service *Service, cfg config.BudgetsConfig) error {
-	if service == nil || len(cfg.UserPaths) == 0 {
+	if service == nil {
 		return nil
 	}
 	budgets := make([]Budget, 0)

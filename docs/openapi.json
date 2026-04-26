@@ -273,12 +273,34 @@
             "BearerAuth": []
           }
         ]
-      },
+      }
+    },
+    "/admin/api/v1/budgets/{user_path}/{period}": {
       "put": {
         "tags": [
           "admin"
         ],
         "summary": "Create or update one budget",
+        "parameters": [
+          {
+            "description": "URL-encoded budget user path",
+            "name": "user_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Budget period name or seconds",
+            "name": "period",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -287,7 +309,7 @@
               }
             }
           },
-          "description": "Budget definition",
+          "description": "Budget amount",
           "required": true
         },
         "responses": {
@@ -343,17 +365,26 @@
           "admin"
         ],
         "summary": "Delete one budget",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/admin.deleteBudgetRequest"
-              }
+        "parameters": [
+          {
+            "description": "URL-encoded budget user path",
+            "name": "user_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           },
-          "description": "Budget key",
-          "required": true
-        },
+          {
+            "description": "Budget period name or seconds",
+            "name": "period",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -426,8 +457,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true
+                  "$ref": "#/components/schemas/admin.resetBudgetsResponse"
                 }
               }
             }
@@ -4394,9 +4424,9 @@
   "components": {
     "securitySchemes": {
       "BearerAuth": {
-        "type": "apiKey",
-        "name": "Authorization",
-        "in": "header"
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
       }
     },
     "schemas": {
@@ -4597,7 +4627,18 @@
       "admin.resetBudgetsRequest": {
         "type": "object",
         "properties": {
+          "confirm": {
+            "type": "string"
+          },
           "confirmation": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.resetBudgetsResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
             "type": "string"
           }
         }
@@ -4636,18 +4677,6 @@
         "properties": {
           "amount": {
             "type": "number"
-          },
-          "period": {
-            "type": "string"
-          },
-          "period_seconds": {
-            "type": "integer"
-          },
-          "source": {
-            "type": "string"
-          },
-          "user_path": {
-            "type": "string"
           }
         }
       },

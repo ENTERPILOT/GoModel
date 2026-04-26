@@ -594,7 +594,9 @@ func EnrichEntryWithError(c *echo.Context, errorType, errorMessage string, error
 	if entry.Data != nil {
 		entry.Data.ErrorMessage = errorMessage
 		if len(errorCode) > 0 {
-			entry.Data.ErrorCode = strings.TrimSpace(errorCode[0])
+			if code := strings.TrimSpace(errorCode[0]); code != "" {
+				entry.Data.ErrorCode = code
+			}
 		}
 	}
 }
