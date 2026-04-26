@@ -126,7 +126,7 @@ func seedConfiguredBudgets(ctx context.Context, service *Service, cfg config.Bud
 				UserPath:      userPath,
 				PeriodSeconds: seconds,
 				Amount:        limit.Amount,
-				Source:        "config",
+				Source:        SourceConfig,
 			})
 		}
 	}

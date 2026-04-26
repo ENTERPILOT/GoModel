@@ -74,6 +74,49 @@ func (s *fakeStore) Close() error {
 	return nil
 }
 
+func TestServiceUnavailableOperationsReturnErrors(t *testing.T) {
+	ctx := context.Background()
+	service := &Service{}
+	var nilService *Service
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+
+	checks := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "nil receiver", run: func() error { return nilService.Refresh(ctx) }},
+		{name: "refresh", run: func() error { return service.Refresh(ctx) }},
+		{name: "upsert", run: func() error {
+			return service.UpsertBudgets(ctx, []Budget{{UserPath: "/", PeriodSeconds: PeriodDailySeconds, Amount: 1}})
+		}},
+		{name: "delete", run: func() error { return service.DeleteBudget(ctx, "/", PeriodDailySeconds) }},
+		{name: "replace config", run: func() error { return service.ReplaceConfigBudgets(ctx, nil) }},
+		{name: "save settings", run: func() error {
+			_, err := service.SaveSettings(ctx, DefaultSettings())
+			return err
+		}},
+		{name: "statuses", run: func() error {
+			_, err := service.Statuses(ctx, now)
+			return err
+		}},
+		{name: "reset one", run: func() error { return service.ResetBudget(ctx, "/", PeriodDailySeconds, now) }},
+		{name: "reset all", run: func() error { return service.ResetAll(ctx, now) }},
+		{name: "check", run: func() error { return service.Check(ctx, "/", now) }},
+		{name: "check with results", run: func() error {
+			_, err := service.CheckWithResults(ctx, "/", now)
+			return err
+		}},
+	}
+
+	for _, tt := range checks {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.run(); !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("error = %v, want ErrUnavailable", err)
+			}
+		})
+	}
+}
+
 func TestServiceRefreshSortsBudgetsByUserPathThenLongestPeriod(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{

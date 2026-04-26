@@ -2,12 +2,16 @@ package budget
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 )
+
+// ErrUnavailable indicates a budget service was used without an initialized store.
+var ErrUnavailable = errors.New("budget service is unavailable")
 
 type Service struct {
 	store Store
@@ -33,7 +37,7 @@ func NewService(ctx context.Context, store Store) (*Service, error) {
 
 func (s *Service) Refresh(ctx context.Context) error {
 	if s == nil || s.store == nil {
-		return nil
+		return ErrUnavailable
 	}
 	budgets, err := s.store.ListBudgets(ctx)
 	if err != nil {
@@ -58,7 +62,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 
 func (s *Service) UpsertBudgets(ctx context.Context, budgets []Budget) error {
 	if s == nil || s.store == nil {
-		return nil
+		return ErrUnavailable
 	}
 	if err := s.store.UpsertBudgets(ctx, budgets); err != nil {
 		return err
@@ -68,7 +72,7 @@ func (s *Service) UpsertBudgets(ctx context.Context, budgets []Budget) error {
 
 func (s *Service) DeleteBudget(ctx context.Context, userPath string, periodSeconds int64) error {
 	if s == nil || s.store == nil {
-		return fmt.Errorf("budget service is unavailable")
+		return ErrUnavailable
 	}
 	userPath, err := NormalizeUserPath(userPath)
 	if err != nil {
@@ -85,7 +89,7 @@ func (s *Service) DeleteBudget(ctx context.Context, userPath string, periodSecon
 
 func (s *Service) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) error {
 	if s == nil || s.store == nil {
-		return nil
+		return ErrUnavailable
 	}
 	if err := s.store.ReplaceConfigBudgets(ctx, budgets); err != nil {
 		return err
@@ -113,7 +117,7 @@ func (s *Service) Settings() Settings {
 
 func (s *Service) SaveSettings(ctx context.Context, settings Settings) (Settings, error) {
 	if s == nil || s.store == nil {
-		return Settings{}, fmt.Errorf("budget service is unavailable")
+		return Settings{}, ErrUnavailable
 	}
 	saved, err := s.store.SaveSettings(ctx, settings)
 	if err != nil {
@@ -127,7 +131,7 @@ func (s *Service) SaveSettings(ctx context.Context, settings Settings) (Settings
 
 func (s *Service) Statuses(ctx context.Context, now time.Time) ([]CheckResult, error) {
 	if s == nil || s.store == nil {
-		return nil, nil
+		return nil, ErrUnavailable
 	}
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -155,7 +159,7 @@ func (s *Service) Statuses(ctx context.Context, now time.Time) ([]CheckResult, e
 
 func (s *Service) ResetBudget(ctx context.Context, userPath string, periodSeconds int64, at time.Time) error {
 	if s == nil || s.store == nil {
-		return fmt.Errorf("budget service is unavailable")
+		return ErrUnavailable
 	}
 	userPath, err := NormalizeUserPath(userPath)
 	if err != nil {
@@ -175,7 +179,7 @@ func (s *Service) ResetBudget(ctx context.Context, userPath string, periodSecond
 
 func (s *Service) ResetAll(ctx context.Context, at time.Time) error {
 	if s == nil || s.store == nil {
-		return fmt.Errorf("budget service is unavailable")
+		return ErrUnavailable
 	}
 	if at.IsZero() {
 		at = time.Now().UTC()
@@ -193,7 +197,7 @@ func (s *Service) Check(ctx context.Context, userPath string, now time.Time) err
 
 func (s *Service) CheckWithResults(ctx context.Context, userPath string, now time.Time) ([]CheckResult, error) {
 	if s == nil || s.store == nil {
-		return nil, nil
+		return nil, ErrUnavailable
 	}
 	userPath, err := NormalizeUserPath(userPath)
 	if err != nil {

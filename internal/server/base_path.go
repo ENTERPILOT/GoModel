@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"gomodel/config"
@@ -73,9 +74,33 @@ func strippedRawPath(rawPath, basePath string) string {
 	}
 	stripped, ok := stripBasePath(rawPath, basePath)
 	if !ok {
-		return ""
+		return stripRawPathByDecodedBase(rawPath, basePath)
 	}
 	return stripped
+}
+
+func stripRawPathByDecodedBase(rawPath, basePath string) string {
+	decoded, err := url.PathUnescape(rawPath)
+	if err != nil {
+		return ""
+	}
+	if _, ok := stripBasePath(decoded, basePath); !ok {
+		return ""
+	}
+	basePath = config.NormalizeBasePath(basePath)
+	if basePath == "/" {
+		return rawPath
+	}
+	rawParts := strings.Split(rawPath, "/")
+	baseParts := strings.Split(strings.Trim(basePath, "/"), "/")
+	if len(rawParts) == 0 || rawParts[0] != "" || len(rawParts) < len(baseParts)+1 {
+		return ""
+	}
+	suffixParts := rawParts[len(baseParts)+1:]
+	if len(suffixParts) == 0 {
+		return "/"
+	}
+	return "/" + strings.Join(suffixParts, "/")
 }
 
 func strippedRequestURI(pathValue, rawPath string) string {

@@ -23,9 +23,9 @@ func TestSQLiteStoreReplaceConfigBudgetsRemovesStaleConfigRowsOnly(t *testing.T)
 	}
 	resetAt := time.Date(2026, time.April, 25, 9, 0, 0, 0, time.UTC)
 	if err := store.UpsertBudgets(ctx, []Budget{
-		{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10, Source: "config"},
-		{UserPath: "/team", PeriodSeconds: PeriodWeeklySeconds, Amount: 50, Source: "config", LastResetAt: &resetAt},
-		{UserPath: "/manual", PeriodSeconds: PeriodDailySeconds, Amount: 5, Source: "manual"},
+		{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10, Source: SourceConfig},
+		{UserPath: "/team", PeriodSeconds: PeriodWeeklySeconds, Amount: 50, Source: SourceConfig, LastResetAt: &resetAt},
+		{UserPath: "/manual", PeriodSeconds: PeriodDailySeconds, Amount: 5, Source: SourceManual},
 	}); err != nil {
 		t.Fatalf("UpsertBudgets() failed: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestSQLiteStoreReplaceConfigBudgetsRemovesStaleConfigRowsOnly(t *testing.T)
 	if weekly.Amount != 75 {
 		t.Fatalf("weekly amount = %v, want 75", weekly.Amount)
 	}
-	if weekly.Source != "config" {
+	if weekly.Source != SourceConfig {
 		t.Fatalf("weekly source = %q, want config", weekly.Source)
 	}
 	if weekly.LastResetAt == nil || !weekly.LastResetAt.Equal(resetAt) {

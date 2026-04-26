@@ -127,7 +127,7 @@ func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budge
 		return err
 	}
 	for i := range budgets {
-		budgets[i].Source = "config"
+		budgets[i].Source = SourceConfig
 	}
 
 	session, err := s.budgets.Database().Client().StartSession()
@@ -162,7 +162,7 @@ func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budge
 }
 
 func (s *MongoDBStore) replaceConfigBudgets(ctx context.Context, budgets []Budget) error {
-	filter := bson.D{{Key: "source", Value: "config"}}
+	filter := bson.D{{Key: "source", Value: SourceConfig}}
 	if len(budgets) > 0 {
 		keep := make(bson.A, 0, len(budgets))
 		for _, budget := range budgets {
@@ -274,6 +274,7 @@ func isMongoTransactionCapabilityError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
+	// TODO: Prefer structured driver labels here and revisit these defensive message matches on mongo-driver upgrades.
 	capabilityPhrases := []string{
 		"transaction numbers are only allowed",
 		"transactions are not supported",

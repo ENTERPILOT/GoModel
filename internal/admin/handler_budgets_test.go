@@ -203,6 +203,41 @@ func TestBudgetEndpointsUpsertAndResetOneBudget(t *testing.T) {
 	}
 }
 
+func TestBudgetEndpointsUpsertMarksConfigBudgetManual(t *testing.T) {
+	store := &adminBudgetStore{
+		budgets: []budget.Budget{
+			{UserPath: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10, Source: budget.SourceConfig},
+		},
+	}
+	h := newBudgetHandler(t, store)
+	e := echo.New()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/api/v1/budgets/%2Fteam/daily",
+		strings.NewReader(`{"amount":12.5}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPathValues(echo.PathValues{
+		{Name: "user_path", Value: "%2Fteam"},
+		{Name: "period", Value: "daily"},
+	})
+
+	if err := h.UpsertBudget(c); err != nil {
+		t.Fatalf("UpsertBudget() failed: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(store.budgets) != 1 {
+		t.Fatalf("stored budgets = %+v, want one budget", store.budgets)
+	}
+	if got := store.budgets[0].Source; got != budget.SourceManual {
+		t.Fatalf("budget source = %q, want %q", got, budget.SourceManual)
+	}
+}
+
 func TestBudgetEndpointsDeleteBudget(t *testing.T) {
 	store := &adminBudgetStore{
 		budgets: []budget.Budget{

@@ -10,10 +10,18 @@ import (
 )
 
 const (
-	PeriodHourlySeconds  int64 = 3600
-	PeriodDailySeconds   int64 = 86400
-	PeriodWeeklySeconds  int64 = 604800
+	PeriodHourlySeconds int64 = 3600
+	PeriodDailySeconds  int64 = 86400
+	PeriodWeeklySeconds int64 = 604800
+	// PeriodMonthlySeconds is a sentinel key for calendar-month windows, not a literal 30-day duration.
 	PeriodMonthlySeconds int64 = 2592000
+)
+
+const (
+	// SourceConfig marks budgets seeded from static configuration.
+	SourceConfig = "config"
+	// SourceManual marks budgets created or changed through admin APIs.
+	SourceManual = "manual"
 )
 
 // Budget stores one spend limit for one user path and reset period.

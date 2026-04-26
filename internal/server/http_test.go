@@ -340,6 +340,7 @@ func TestBasePathPreservesEscapedPathParamsBeforeRouting(t *testing.T) {
 	tests := []struct {
 		name     string
 		path     string
+		rawPath  string
 		expected string
 	}{
 		{
@@ -352,11 +353,20 @@ func TestBasePathPreservesEscapedPathParamsBeforeRouting(t *testing.T) {
 			path:     "/g/admin/api/v1/budgets/%2Fteam%2Fbeta/604800",
 			expected: "%2Fteam%2Fbeta|604800|/admin/api/v1/budgets/%2Fteam%2Fbeta/604800|/admin/api/v1/budgets/%2Fteam%2Fbeta/604800",
 		},
+		{
+			name:     "encoded base path raw prefix",
+			path:     "/g/admin/api/v1/budgets/%2F/86400",
+			rawPath:  "/%67/admin/api/v1/budgets/%2F/86400",
+			expected: "%2F|86400|/admin/api/v1/budgets/%2F/86400|/admin/api/v1/budgets/%2F/86400",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPut, tt.path, nil)
+			if tt.rawPath != "" {
+				req.URL.RawPath = tt.rawPath
+			}
 			rec := httptest.NewRecorder()
 
 			srv.ServeHTTP(rec, req)

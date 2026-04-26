@@ -1073,7 +1073,7 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 		UserPath:      userPath,
 		PeriodSeconds: periodSeconds,
 		Amount:        req.Amount,
-		Source:        "manual",
+		Source:        budget.SourceManual,
 	})
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))

@@ -154,7 +154,7 @@ func (s *PostgreSQLStore) ReplaceConfigBudgets(ctx context.Context, budgets []Bu
 		return err
 	}
 	for i := range budgets {
-		budgets[i].Source = "config"
+		budgets[i].Source = SourceConfig
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -164,18 +164,19 @@ func (s *PostgreSQLStore) ReplaceConfigBudgets(ctx context.Context, budgets []Bu
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	if len(budgets) == 0 {
-		if _, err := tx.Exec(ctx, `DELETE FROM budgets WHERE source = 'config'`); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM budgets WHERE source = $1`, SourceConfig); err != nil {
 			return fmt.Errorf("delete old config budgets: %w", err)
 		}
 	} else {
 		conditions := make([]string, 0, len(budgets))
-		args := make([]any, 0, len(budgets)*2)
-		for i, budget := range budgets {
-			base := i*2 + 1
+		args := make([]any, 0, 1+len(budgets)*2)
+		args = append(args, SourceConfig)
+		for _, budget := range budgets {
+			base := len(args) + 1
 			conditions = append(conditions, fmt.Sprintf(`(user_path = $%d AND period_seconds = $%d)`, base, base+1))
 			args = append(args, budget.UserPath, budget.PeriodSeconds)
 		}
-		query := `DELETE FROM budgets WHERE source = 'config' AND NOT (` + strings.Join(conditions, " OR ") + `)`
+		query := `DELETE FROM budgets WHERE source = $1 AND NOT (` + strings.Join(conditions, " OR ") + `)`
 		if _, err := tx.Exec(ctx, query, args...); err != nil {
 			return fmt.Errorf("delete old config budgets: %w", err)
 		}

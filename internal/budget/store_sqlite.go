@@ -171,7 +171,7 @@ func (s *SQLiteStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budget
 		return err
 	}
 	for i := range budgets {
-		budgets[i].Source = "config"
+		budgets[i].Source = SourceConfig
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -181,17 +181,18 @@ func (s *SQLiteStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budget
 	defer tx.Rollback() //nolint:errcheck
 
 	if len(budgets) == 0 {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM budgets WHERE source = 'config'`); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM budgets WHERE source = ?`, SourceConfig); err != nil {
 			return fmt.Errorf("delete old config budgets: %w", err)
 		}
 	} else {
 		conditions := make([]string, 0, len(budgets))
-		args := make([]any, 0, len(budgets)*2)
+		args := make([]any, 0, 1+len(budgets)*2)
+		args = append(args, SourceConfig)
 		for _, budget := range budgets {
 			conditions = append(conditions, `(user_path = ? AND period_seconds = ?)`)
 			args = append(args, budget.UserPath, budget.PeriodSeconds)
 		}
-		query := `DELETE FROM budgets WHERE source = 'config' AND NOT (` + strings.Join(conditions, " OR ") + `)`
+		query := `DELETE FROM budgets WHERE source = ? AND NOT (` + strings.Join(conditions, " OR ") + `)`
 		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 			return fmt.Errorf("delete old config budgets: %w", err)
 		}
