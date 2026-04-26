@@ -43,10 +43,20 @@
                 <input type="text"
                        id="budget-filter"
                        class="filter-input"
-                       placeholder="Filter by user path..."
-                       aria-label="Filter budgets by user path"
+                       placeholder="Filter by user path or period..."
+                       aria-label="Filter budgets by user path or period"
                        x-model="budgetFilter">
             </div>
+        </div>
+        <div class="table-toolbar-actions budget-sort-control">
+            <label for="budget-sort-by">Sort by</label>
+            <select id="budget-sort-by"
+                    class="usage-log-select budget-sort-select"
+                    aria-label="Sort budgets by"
+                    x-model="budgetSortBy">
+                <option value="user_path">User Path</option>
+                <option value="period">Period</option>
+            </select>
         </div>
     </div>
 
@@ -60,7 +70,7 @@
          x-show="budgetFormOpen"
          x-transition.opacity.duration.160ms
          @click="closeBudgetForm()"
-         @keydown.escape.window="budgetFormOpen && !authDialogOpen && closeBudgetForm()">
+         @keydown.escape.window="budgetFormOpen && !authDialogOpen && !budgetOverrideDialogOpen && closeBudgetForm()">
         <div class="model-editor budget-editor" x-show="budgetFormOpen" role="dialog" aria-modal="true" aria-label="Budget editor" @click.stop>
             <form class="form" @submit.prevent="submitBudgetForm()">
                 <div class="editor-header">
@@ -80,7 +90,8 @@
                                type="text"
                                placeholder="/team/alpha"
                                x-ref="budgetUserPathInput"
-                               x-model="budgetForm.user_path"
+                               :value="budgetForm.user_path"
+                               @input="setBudgetFormUserPath($event.target.value)"
                                :disabled="budgetEditing">
                     </div>
                     <div class="form-field">
@@ -133,22 +144,95 @@
         </div>
     </div>
 
+    <div class="auth-dialog-backdrop budget-override-dialog-backdrop"
+         x-cloak
+         x-show="budgetOverrideDialogOpen"
+         x-transition.opacity.duration.160ms
+         aria-hidden="true"></div>
+    <div class="auth-dialog-shell budget-override-dialog-shell"
+         x-cloak
+         x-show="budgetOverrideDialogOpen"
+         x-transition.opacity.duration.160ms
+         @click="closeBudgetOverrideDialog()"
+         @keydown.escape.window="budgetOverrideDialogOpen && closeBudgetOverrideDialog()">
+        <section class="auth-dialog budget-override-dialog"
+                 role="dialog"
+                 aria-modal="true"
+                 aria-labelledby="budgetOverrideDialogTitle"
+                 aria-describedby="budgetOverrideDialogDescription"
+                 @click.stop>
+            <div class="auth-dialog-header">
+                <h2 id="budgetOverrideDialogTitle">Override Existing Budget</h2>
+                <button type="button" class="auth-dialog-close dialog-close-btn" aria-label="Close budget override dialog" @click="closeBudgetOverrideDialog()">
+                    {{template "x-icon"}}
+                </button>
+            </div>
+            <form class="auth-dialog-form" @submit.prevent="confirmBudgetOverride()">
+                <p id="budgetOverrideDialogDescription" class="auth-dialog-hint" x-text="budgetOverrideDialogMessage()"></p>
+                <div class="auth-dialog-actions">
+                    <button type="button" class="pagination-btn" x-ref="budgetOverrideCancelButton" @click="closeBudgetOverrideDialog()">Cancel</button>
+                    <button type="submit"
+                            class="pagination-btn pagination-btn-danger pagination-btn-with-icon"
+                            :disabled="budgetFormSubmitting">
+                        <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                        <span x-text="budgetFormSubmitting ? 'Saving...' : 'Override Budget'">Override Budget</span>
+                    </button>
+                </div>
+            </form>
+        </section>
+    </div>
+
     <div class="budget-list" x-show="filteredBudgets().length > 0 && budgetsAvailable && !authError">
         <template x-for="item in filteredBudgets()" :key="budgetKey(item)">
             <section class="budget-row">
                 <div class="budget-row-main">
                     <div class="budget-row-head">
-                        <code class="budget-user-path" x-text="item.user_path"></code>
-                        <span class="budget-period-label" :class="budgetPeriodClass(item)" x-text="budgetPeriodLabel(item)"></span>
-                        <div class="budget-row-meta">
-                            <span class="budget-source" x-text="budgetSourceLabel(item)" :title="budgetSourceTitle(item)"></span>
+                        <code class="budget-user-path" :title="'User Path: ' + item.user_path" x-text="item.user_path"></code>
+                        <div class="budget-row-period">
+                            <span class="budget-period-label" :class="budgetPeriodClass(item)">
+                                <i :data-lucide="budgetPeriodIcon(item)" class="budget-period-icon" aria-hidden="true"></i>
+                                <span x-text="budgetPeriodLabel(item)"></span>
+                            </span>
+                        </div>
+                        <div class="budget-row-controls">
+                            <div class="budget-row-meta">
+                                <span class="budget-source" x-text="budgetSourceLabel(item)" :title="budgetSourceTitle(item)"></span>
+                            </div>
+                            <div class="budget-row-actions">
+                                <button type="button"
+                                        class="table-action-btn budget-action-btn"
+                                        title="Edit budget"
+                                        aria-label="Edit budget"
+                                        @click="openBudgetForm(item)">
+                                    <i data-lucide="pencil" class="budget-action-icon" aria-hidden="true"></i>
+                                    <span class="budget-action-label">Edit</span>
+                                </button>
+                                <button type="button"
+                                        class="table-action-btn budget-action-btn budget-action-btn-warning"
+                                        :title="budgetResettingKey === budgetKey(item) ? 'Resetting budget' : 'Reset budget'"
+                                        :aria-label="budgetResettingKey === budgetKey(item) ? 'Resetting budget' : 'Reset budget'"
+                                        :disabled="budgetResettingKey === budgetKey(item)"
+                                        @click="resetBudget(item)">
+                                    <i data-lucide="rotate-ccw" class="budget-action-icon" aria-hidden="true"></i>
+                                    <span class="budget-action-label" x-text="budgetResettingKey === budgetKey(item) ? 'Resetting' : 'Reset'">Reset</span>
+                                </button>
+                                <button type="button"
+                                        class="table-action-btn table-action-btn-danger budget-action-btn"
+                                        :title="budgetDeletingKey === budgetKey(item) ? 'Deleting budget' : 'Delete budget'"
+                                        :aria-label="budgetDeletingKey === budgetKey(item) ? 'Deleting budget' : 'Delete budget'"
+                                        :disabled="budgetDeletingKey === budgetKey(item)"
+                                        @click="deleteBudget(item)">
+                                    <i data-lucide="trash-2" class="budget-action-icon" aria-hidden="true"></i>
+                                    <span class="budget-action-label" x-text="budgetDeletingKey === budgetKey(item) ? 'Deleting' : 'Delete'">Delete</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="budget-bars">
                         <div class="budget-bar-line">
                             <div class="budget-bar-label">
                                 <span>Usage</span>
-                                <span x-text="budgetUsagePercentLabel(item)"></span>
+                                <span class="budget-bar-percent" x-text="budgetUsagePercentLabel(item)"></span>
                             </div>
                             <div class="budget-bar-track"
                                  role="progressbar"
@@ -173,9 +257,10 @@
                         <div class="budget-bar-line">
                             <div class="budget-bar-label">
                                 <span>Period</span>
-                                <span x-text="budgetPeriodPercentLabel(item)"></span>
+                                <span class="budget-bar-percent" x-text="budgetPeriodPercentLabel(item)"></span>
                             </div>
                             <div class="budget-bar-track"
+                                 :class="budgetPeriodTrackClass(item)"
                                  role="progressbar"
                                  aria-label="Budget period elapsed"
                                  aria-valuemin="0"
@@ -183,38 +268,21 @@
                                  :aria-valuenow="budgetPeriodPercent(item)"
                                  :style="'--budget-progress: ' + budgetPeriodPercent(item) + '%'">
                                 <div class="budget-bar-fill budget-bar-fill-period"
+                                     :class="budgetPeriodBarClass(item)"
                                      style="width: var(--budget-progress)"></div>
                                 <span class="budget-bar-text-row">
                                     <span class="budget-bar-text budget-bar-text-start" x-text="formatTimestamp(item.period_start)" :title="timestampTimeZoneTitle(item.period_start)"></span>
+                                    <span class="budget-bar-text budget-bar-text-center" x-text="budgetPeriodDurationLabel(item)"></span>
                                     <span class="budget-bar-text budget-bar-text-end" x-text="formatTimestamp(item.period_end)" :title="timestampTimeZoneTitle(item.period_end)"></span>
                                 </span>
                                 <span class="budget-bar-text-row budget-bar-text-row-on-fill" aria-hidden="true">
                                     <span class="budget-bar-text budget-bar-text-start" x-text="formatTimestamp(item.period_start)"></span>
+                                    <span class="budget-bar-text budget-bar-text-center" x-text="budgetPeriodDurationLabel(item)"></span>
                                     <span class="budget-bar-text budget-bar-text-end" x-text="formatTimestamp(item.period_end)"></span>
                                 </span>
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="budget-row-actions">
-                    <button type="button" class="table-action-btn budget-action-btn" @click="openBudgetForm(item)">
-                        <i data-lucide="pencil" class="budget-action-icon" aria-hidden="true"></i>
-                        <span>Edit</span>
-                    </button>
-                    <button type="button"
-                            class="table-action-btn budget-action-btn budget-action-btn-warning"
-                            :disabled="budgetResettingKey === budgetKey(item)"
-                            @click="resetBudget(item)">
-                        <i data-lucide="rotate-ccw" class="budget-action-icon" aria-hidden="true"></i>
-                        <span x-text="budgetResettingKey === budgetKey(item) ? 'Resetting...' : 'Reset'">Reset</span>
-                    </button>
-                    <button type="button"
-                            class="table-action-btn table-action-btn-danger budget-action-btn"
-                            :disabled="budgetDeletingKey === budgetKey(item)"
-                            @click="deleteBudget(item)">
-                        <i data-lucide="trash-2" class="budget-action-icon" aria-hidden="true"></i>
-                        <span x-text="budgetDeletingKey === budgetKey(item) ? 'Deleting...' : 'Delete'">Delete</span>
-                    </button>
                 </div>
             </section>
         </template>

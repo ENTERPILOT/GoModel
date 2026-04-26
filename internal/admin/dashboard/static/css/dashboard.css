@@ -183,6 +183,7 @@ body.dashboard-modal-open {
   width: 28px;
   height: 28px;
   flex-shrink: 0;
+  color: var(--accent);
 }
 
 .sidebar-logo svg {
@@ -3429,7 +3430,7 @@ body.conversation-drawer-open {
 
 .budget-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 16px;
   padding: 12px 14px;
@@ -3443,7 +3444,8 @@ body.conversation-drawer-open {
 }
 
 .budget-row-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -3452,6 +3454,8 @@ body.conversation-drawer-open {
 .budget-user-path {
   display: inline-flex;
   align-items: center;
+  justify-self: start;
+  width: fit-content;
   max-width: 100%;
   min-height: 24px;
   padding: 2px 8px;
@@ -3484,6 +3488,41 @@ body.conversation-drawer-open {
   font-size: 11px;
 }
 
+.budget-row-period {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.budget-row-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.budget-sort-control {
+  align-items: center;
+  gap: 8px;
+}
+
+.budget-sort-control label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.budget-sort-select {
+  background-color: var(--bg-surface);
+  min-width: 132px;
+}
+
+.budget-sort-select:hover {
+  background-color: var(--bg-surface-hover);
+}
+
 .budget-bars {
   display: grid;
   gap: 6px;
@@ -3507,9 +3546,13 @@ body.conversation-drawer-open {
   line-height: 1;
 }
 
+.budget-bar-percent {
+  font-weight: 700;
+}
+
 .budget-bar-track {
   position: relative;
-  height: 14px;
+  height: 16px;
   overflow: hidden;
   border-radius: 999px;
   background: color-mix(in srgb, var(--border) 75%, var(--bg));
@@ -3526,12 +3569,28 @@ body.conversation-drawer-open {
   background: color-mix(in srgb, var(--success) 82%, var(--accent));
 }
 
-.budget-bar-fill-period {
-  background: color-mix(in srgb, var(--accent) 75%, var(--warning));
-}
-
 .budget-bar-fill-danger {
   background: var(--danger);
+}
+
+.budget-bar-fill-period-monthly {
+  background: #30302c;
+}
+
+.budget-bar-fill-period-weekly {
+  background: #68765c;
+}
+
+.budget-bar-fill-period-daily {
+  background: #b5652d;
+}
+
+.budget-bar-fill-period-hourly {
+  background: #783f22;
+}
+
+.budget-bar-fill-period-custom {
+  background: #bfa584;
 }
 
 .budget-bar-text-row {
@@ -3547,21 +3606,24 @@ body.conversation-drawer-open {
   clip-path: inset(0 calc(100% - var(--budget-progress, 0%)) 0 0);
 }
 
+.budget-bar-track-period-custom .budget-bar-text-row-on-fill {
+  color: #3f332a;
+}
+
 .budget-bar-text {
   position: absolute;
   top: 50%;
   max-width: min(44%, 190px);
   overflow: hidden;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  line-height: 1;
+  line-height: 12px;
   text-overflow: ellipsis;
-  text-shadow: 0 1px 1px color-mix(in srgb, var(--bg) 72%, transparent);
   white-space: nowrap;
 }
 
 .budget-bar-text-start {
-  left: 6px;
+  left: 8px;
   transform: translateY(-50%);
 }
 
@@ -3572,7 +3634,7 @@ body.conversation-drawer-open {
 }
 
 .budget-bar-text-end {
-  right: 6px;
+  right: 8px;
   max-width: min(34%, 180px);
   text-align: right;
   transform: translateY(-50%);
@@ -3587,67 +3649,104 @@ body.conversation-drawer-open {
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--text);
+  font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
 }
 
-.budget-period-label::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  flex: 0 0 6px;
-  border-radius: 999px;
-  background: currentColor;
-}
-
-.budget-period-label-hourly {
-  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
-  color: var(--accent);
-}
-
-.budget-period-label-daily {
-  border-color: color-mix(in srgb, var(--success) 42%, var(--border));
-  background: color-mix(in srgb, var(--success) 9%, var(--bg));
-  color: var(--success);
-}
-
-.budget-period-label-weekly {
-  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
-  background: color-mix(in srgb, var(--warning) 10%, var(--bg));
-  color: var(--warning);
+.budget-period-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  stroke-width: 2.2;
 }
 
 .budget-period-label-monthly {
-  border-color: color-mix(in srgb, var(--accent-hover) 58%, var(--border));
-  background: color-mix(in srgb, var(--accent-hover) 16%, var(--bg));
-  color: var(--accent-hover);
-  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent-hover) 32%, transparent);
+  border-color: color-mix(in srgb, #30302c 62%, var(--border));
+  background: color-mix(in srgb, #30302c 12%, var(--bg));
+  color: color-mix(in srgb, #30302c 34%, var(--text) 66%);
+}
+
+.budget-period-label-weekly {
+  border-color: color-mix(in srgb, #68765c 62%, var(--border));
+  background: color-mix(in srgb, #68765c 12%, var(--bg));
+  color: #68765c;
+}
+
+.budget-period-label-daily {
+  border-color: color-mix(in srgb, #b5652d 62%, var(--border));
+  background: color-mix(in srgb, #b5652d 12%, var(--bg));
+  color: #b5652d;
+}
+
+.budget-period-label-hourly {
+  border-color: color-mix(in srgb, #783f22 62%, var(--border));
+  background: color-mix(in srgb, #783f22 12%, var(--bg));
+  color: #783f22;
 }
 
 .budget-period-label-custom {
   border-style: dashed;
-  border-color: color-mix(in srgb, var(--text-muted) 58%, var(--border));
-  background: color-mix(in srgb, var(--text-muted) 9%, var(--bg));
-  color: var(--text-muted);
+  border-color: color-mix(in srgb, #bfa584 68%, var(--border));
+  background: color-mix(in srgb, #bfa584 16%, var(--bg));
+  color: #8b6f4f;
 }
 
-.budget-period-label-custom::before {
-  background: transparent;
-  border: 1px solid currentColor;
+[data-theme="light"] .budget-period-label-monthly {
+  color: #30302c;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .budget-period-label-monthly {
+    color: #30302c;
+  }
 }
 
 .budget-row-actions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
 }
 
 .budget-action-btn {
-  min-width: 82px;
+  width: 28px;
+  height: 28px;
+  min-width: 0;
+  gap: 0;
+  padding: 0;
   justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    width 0.18s ease,
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+
+.budget-action-btn:hover,
+.budget-action-btn:focus-visible {
+  width: 82px;
+  gap: 6px;
+  padding: 0 9px;
+}
+
+.budget-action-label {
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    max-width 0.18s ease,
+    opacity 0.12s ease;
+}
+
+.budget-action-btn:hover .budget-action-label,
+.budget-action-btn:focus-visible .budget-action-label {
+  max-width: 58px;
+  opacity: 1;
 }
 
 .budget-action-btn-warning {
@@ -3712,6 +3811,18 @@ body.conversation-drawer-open {
 }
 
 .budget-reset-dialog {
+  max-width: 460px;
+}
+
+.budget-override-dialog-backdrop {
+  z-index: 100;
+}
+
+.budget-override-dialog-shell {
+  z-index: 110;
+}
+
+.budget-override-dialog {
   max-width: 460px;
 }
 
@@ -4042,22 +4153,13 @@ body.conversation-drawer-open {
   .budget-row {
     grid-template-columns: 1fr;
   }
-  .budget-row-head {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .budget-row-actions {
-    justify-content: flex-start;
+  .budget-row-controls {
+    flex-wrap: wrap;
   }
   .budget-bar-line {
     grid-template-columns: 1fr;
     gap: 5px;
   }
-  .budget-period-window {
-    flex-direction: column;
-    gap: 4px;
-  }
-
   .form-grid {
     grid-template-columns: 1fr;
   }

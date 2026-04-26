@@ -89,6 +89,9 @@ test("sidebar and main content share the flex layout without manual content offs
 
   const collapsedSidebarRule = readCSSRule(css, ".sidebar.sidebar-collapsed");
   assert.match(collapsedSidebarRule, /flex-basis:\s*60px/);
+
+  const sidebarLogoRule = readCSSRule(css, ".sidebar-logo");
+  assert.match(sidebarLogoRule, /color:\s*var\(--accent\)/);
 });
 
 test("sidebar theme controls and collapse handle stay keyboard accessible", () => {
@@ -625,12 +628,26 @@ test("budget row record actions stack reset under edit", () => {
   );
   assert.match(
     indexTemplate,
-    /id="budget-filter"[\s\S]*placeholder="Filter by user path\.\.\."[\s\S]*aria-label="Filter budgets by user path"[\s\S]*x-model="budgetFilter"/,
+    /id="budget-filter"[\s\S]*placeholder="Filter by user path or period\.\.\."[\s\S]*aria-label="Filter budgets by user path or period"[\s\S]*x-model="budgetFilter"/,
+  );
+  assert.match(
+    indexTemplate,
+    /class="table-toolbar-actions budget-sort-control"[\s\S]*<label for="budget-sort-by">Sort by<\/label>[\s\S]*id="budget-sort-by"[\s\S]*aria-label="Sort budgets by"[\s\S]*x-model="budgetSortBy"[\s\S]*value="user_path">User Path[\s\S]*value="period">Period/,
   );
   assert.match(
     indexTemplate,
     /x-show="budgetEditing"[\s\S]*Editing a budget updates its limit only\. Use Reset to start a new budget period\./,
   );
+  assert.match(
+    indexTemplate,
+    /id="budget-user-path"[\s\S]*class="form-input"[\s\S]*placeholder="\/team\/alpha"[\s\S]*x-ref="budgetUserPathInput"[\s\S]*:value="budgetForm\.user_path"[\s\S]*@input="setBudgetFormUserPath\(\$event\.target\.value\)"[\s\S]*:disabled="budgetEditing"/,
+  );
+  assert.match(
+    indexTemplate,
+    /class="auth-dialog-backdrop budget-override-dialog-backdrop"[\s\S]*x-show="budgetOverrideDialogOpen"[\s\S]*id="budgetOverrideDialogTitle">Override Existing Budget<\/h2>[\s\S]*@submit\.prevent="confirmBudgetOverride\(\)"[\s\S]*id="budgetOverrideDialogDescription"[\s\S]*x-text="budgetOverrideDialogMessage\(\)"[\s\S]*<span x-text="budgetFormSubmitting \? 'Saving\.\.\.' : 'Override Budget'">Override Budget<\/span>/,
+  );
+  assert.match(readCSSRule(css, ".budget-override-dialog-backdrop"), /z-index:\s*100/);
+  assert.match(readCSSRule(css, ".budget-override-dialog-shell"), /z-index:\s*110/);
   assert.match(
     indexTemplate,
     /class="budget-list" x-show="filteredBudgets\(\)\.length > 0[\s\S]*<template x-for="item in filteredBudgets\(\)"[\s\S]*No budgets match your filter\./,
@@ -641,11 +658,7 @@ test("budget row record actions stack reset under edit", () => {
   );
   assert.match(
     indexTemplate,
-    /<div class="budget-row-actions">[\s\S]*class="table-action-btn budget-action-btn budget-action-btn-warning"[\s\S]*@click="resetBudget\(item\)"[\s\S]*Resetting\.\.\.[\s\S]*Reset[\s\S]*class="table-action-btn table-action-btn-danger budget-action-btn"[\s\S]*@click="deleteBudget\(item\)"[\s\S]*Deleting\.\.\.[\s\S]*Delete/,
-  );
-  assert.match(
-    indexTemplate,
-    /class="budget-row-head"[\s\S]*class="budget-user-path" x-text="item\.user_path"[\s\S]*class="budget-period-label" :class="budgetPeriodClass\(item\)" x-text="budgetPeriodLabel\(item\)"[\s\S]*class="budget-row-meta"/,
+    /class="budget-row-head"[\s\S]*class="budget-user-path" :title="'User Path: ' \+ item\.user_path" x-text="item\.user_path"[\s\S]*class="budget-row-period"[\s\S]*class="budget-period-label" :class="budgetPeriodClass\(item\)"[\s\S]*:data-lucide="budgetPeriodIcon\(item\)" class="budget-period-icon"[\s\S]*x-text="budgetPeriodLabel\(item\)"[\s\S]*class="budget-row-controls"[\s\S]*class="budget-row-meta"[\s\S]*<div class="budget-row-actions">[\s\S]*title="Edit budget"[\s\S]*aria-label="Edit budget"[\s\S]*@click="openBudgetForm\(item\)"[\s\S]*class="budget-action-label">Edit<\/span>[\s\S]*class="table-action-btn budget-action-btn budget-action-btn-warning"[\s\S]*:title="budgetResettingKey === budgetKey\(item\) \? 'Resetting budget' : 'Reset budget'"[\s\S]*:aria-label="budgetResettingKey === budgetKey\(item\) \? 'Resetting budget' : 'Reset budget'"[\s\S]*@click="resetBudget\(item\)"[\s\S]*class="budget-action-label" x-text="budgetResettingKey === budgetKey\(item\) \? 'Resetting' : 'Reset'"[\s\S]*class="table-action-btn table-action-btn-danger budget-action-btn"[\s\S]*:title="budgetDeletingKey === budgetKey\(item\) \? 'Deleting budget' : 'Delete budget'"[\s\S]*:aria-label="budgetDeletingKey === budgetKey\(item\) \? 'Deleting budget' : 'Delete budget'"[\s\S]*@click="deleteBudget\(item\)"[\s\S]*class="budget-action-label" x-text="budgetDeletingKey === budgetKey\(item\) \? 'Deleting' : 'Delete'"/,
   );
   assert.match(
     indexTemplate,
@@ -653,18 +666,75 @@ test("budget row record actions stack reset under edit", () => {
   );
   assert.match(
     indexTemplate,
-    /:style="'--budget-progress: ' \+ budgetPeriodPercent\(item\) \+ '%'"[\s\S]*class="budget-bar-text budget-bar-text-start" x-text="formatTimestamp\(item\.period_start\)" :title="timestampTimeZoneTitle\(item\.period_start\)"[\s\S]*class="budget-bar-text budget-bar-text-end" x-text="formatTimestamp\(item\.period_end\)" :title="timestampTimeZoneTitle\(item\.period_end\)"[\s\S]*class="budget-bar-text-row budget-bar-text-row-on-fill"/,
+    /class="budget-bar-percent" x-text="budgetUsagePercentLabel\(item\)"[\s\S]*class="budget-bar-percent" x-text="budgetPeriodPercentLabel\(item\)"/,
+  );
+  assert.match(
+    indexTemplate,
+    /:class="budgetPeriodTrackClass\(item\)"[\s\S]*:style="'--budget-progress: ' \+ budgetPeriodPercent\(item\) \+ '%'"[\s\S]*class="budget-bar-fill budget-bar-fill-period"[\s\S]*:class="budgetPeriodBarClass\(item\)"[\s\S]*class="budget-bar-text budget-bar-text-start" x-text="formatTimestamp\(item\.period_start\)" :title="timestampTimeZoneTitle\(item\.period_start\)"[\s\S]*class="budget-bar-text budget-bar-text-center" x-text="budgetPeriodDurationLabel\(item\)"[\s\S]*class="budget-bar-text budget-bar-text-end" x-text="formatTimestamp\(item\.period_end\)" :title="timestampTimeZoneTitle\(item\.period_end\)"[\s\S]*class="budget-bar-text-row budget-bar-text-row-on-fill"/,
   );
 
   const actionsRule = readCSSRule(css, ".budget-row-actions");
   assert.match(actionsRule, /display:\s*flex/);
-  assert.match(actionsRule, /flex-direction:\s*column/);
+  assert.match(actionsRule, /flex-direction:\s*row/);
+  assert.doesNotMatch(actionsRule, /margin-left:\s*auto/);
+
+  const rowHeadRule = readCSSRule(css, ".budget-row-head");
+  assert.match(rowHeadRule, /display:\s*grid/);
+  assert.match(rowHeadRule, /grid-template-columns:\s*minmax\(0,\s*1fr\) auto minmax\(0,\s*1fr\)/);
+  assert.doesNotMatch(css, /\.budget-row-head\s*\{[^}]*grid-template-columns:\s*1fr/);
+
+  const rowPeriodRule = readCSSRule(css, ".budget-row-period");
+  assert.match(rowPeriodRule, /justify-content:\s*center/);
+
+  const rowControlsRule = readCSSRule(css, ".budget-row-controls");
+  assert.match(rowControlsRule, /display:\s*flex/);
+  assert.match(rowControlsRule, /justify-content:\s*flex-end/);
+
+  const userPathRule = readCSSRule(css, ".budget-user-path");
+  assert.match(userPathRule, /justify-self:\s*start/);
+  assert.match(userPathRule, /width:\s*fit-content/);
+
+  const budgetActionButtonRule = readCSSRule(css, ".budget-action-btn");
+  assert.match(budgetActionButtonRule, /width:\s*28px/);
+  assert.match(budgetActionButtonRule, /height:\s*28px/);
+  assert.match(budgetActionButtonRule, /gap:\s*0/);
+  assert.match(budgetActionButtonRule, /padding:\s*0/);
+  assert.match(budgetActionButtonRule, /overflow:\s*hidden/);
+  assert.match(budgetActionButtonRule, /width 0\.18s ease/);
+
+  const budgetActionButtonHoverRule = readCSSRule(css, ".budget-action-btn:hover,\n.budget-action-btn:focus-visible");
+  assert.match(budgetActionButtonHoverRule, /width:\s*82px/);
+  assert.match(budgetActionButtonHoverRule, /gap:\s*6px/);
+  assert.match(budgetActionButtonHoverRule, /padding:\s*0 9px/);
+
+  const budgetActionLabelRule = readCSSRule(css, ".budget-action-label");
+  assert.match(budgetActionLabelRule, /max-width:\s*0/);
+  assert.match(budgetActionLabelRule, /opacity:\s*0/);
+
+  const budgetActionLabelHoverRule = readCSSRule(css, ".budget-action-btn:hover .budget-action-label,\n.budget-action-btn:focus-visible .budget-action-label");
+  assert.match(budgetActionLabelHoverRule, /max-width:\s*58px/);
+  assert.match(budgetActionLabelHoverRule, /opacity:\s*1/);
 
   const warningActionRule = readCSSRule(css, ".budget-action-btn-warning");
   assert.match(warningActionRule, /color:\s*var\(--warning\)/);
 
+  const budgetSortControlRule = readCSSRule(css, ".budget-sort-control");
+  assert.match(budgetSortControlRule, /align-items:\s*center/);
+  const budgetSortSelectRule = readCSSRule(css, ".budget-sort-select");
+  assert.match(budgetSortSelectRule, /background-color:\s*var\(--bg-surface\)/);
+  assert.match(budgetSortSelectRule, /min-width:\s*132px/);
+  const budgetSortSelectHoverRule = readCSSRule(css, ".budget-sort-select:hover");
+  assert.match(budgetSortSelectHoverRule, /background-color:\s*var\(--bg-surface-hover\)/);
+
+  assert.doesNotMatch(css, /\.budget-user-path-field\s*\{/);
+  assert.doesNotMatch(css, /\.budget-user-path-prefix\s*\{/);
+  assert.doesNotMatch(css, /\.budget-user-path-input\s*\{/);
+
   const budgetBarTrackRule = readCSSRule(css, ".budget-bar-track");
-  assert.match(budgetBarTrackRule, /height:\s*14px/);
+  assert.match(budgetBarTrackRule, /height:\s*16px/);
+
+  const budgetBarPercentRule = readCSSRule(css, ".budget-bar-percent");
+  assert.match(budgetBarPercentRule, /font-weight:\s*700/);
 
   const budgetBarTextRowRule = readCSSRule(css, ".budget-bar-text-row");
   assert.match(budgetBarTextRowRule, /position:\s*absolute/);
@@ -673,31 +743,54 @@ test("budget row record actions stack reset under edit", () => {
   const budgetBarTextOnFillRule = readCSSRule(css, ".budget-bar-text-row-on-fill");
   assert.match(budgetBarTextOnFillRule, /color:\s*#fff/);
   assert.match(budgetBarTextOnFillRule, /clip-path:\s*inset\(0 calc\(100% - var\(--budget-progress, 0%\)\) 0 0\)/);
+  assert.match(readCSSRule(css, ".budget-bar-track-period-custom .budget-bar-text-row-on-fill"), /color:\s*#3f332a/);
 
   const budgetBarTextRule = readCSSRule(css, ".budget-bar-text");
   assert.match(budgetBarTextRule, /position:\s*absolute/);
   assert.match(budgetBarTextRule, /max-width:\s*min\(44%, 190px\)/);
+  assert.match(budgetBarTextRule, /font-size:\s*11px/);
+  assert.match(budgetBarTextRule, /line-height:\s*12px/);
+  assert.doesNotMatch(budgetBarTextRule, /text-shadow/);
+
+  const budgetBarTextStartRule = readCSSRule(css, ".budget-bar-text-start");
+  assert.match(budgetBarTextStartRule, /left:\s*8px/);
+  const budgetBarTextEndRule = readCSSRule(css, ".budget-bar-text-end");
+  assert.match(budgetBarTextEndRule, /right:\s*8px/);
 
   const periodLabelRule = readCSSRule(css, ".budget-period-label");
+  assert.match(periodLabelRule, /padding:\s*2px 7px/);
+  assert.match(periodLabelRule, /font-size:\s*11px/);
   assert.match(periodLabelRule, /font-weight:\s*600/);
   assert.match(periodLabelRule, /display:\s*inline-flex/);
 
-  const periodLabelMarkerRule = readCSSRule(css, ".budget-period-label::before");
-  assert.match(periodLabelMarkerRule, /background:\s*currentColor/);
+  const periodIconRule = readCSSRule(css, ".budget-period-icon");
+  assert.match(periodIconRule, /width:\s*12px/);
+  assert.match(periodIconRule, /height:\s*12px/);
 
-  const hourlyPeriodRule = readCSSRule(css, ".budget-period-label-hourly");
-  assert.match(hourlyPeriodRule, /var\(--accent\)/);
-  assert.match(css, /\.budget-period-label-daily\s*\{/);
-  assert.match(css, /\.budget-period-label-weekly\s*\{/);
   const monthlyPeriodRule = readCSSRule(css, ".budget-period-label-monthly");
-  assert.match(monthlyPeriodRule, /var\(--accent-hover\)/);
-  assert.match(monthlyPeriodRule, /box-shadow:\s*inset 0 -2px 0/);
+  assert.match(monthlyPeriodRule, /#30302c/);
+  assert.match(monthlyPeriodRule, /color:\s*color-mix\(in srgb,\s*#30302c 34%,\s*var\(--text\) 66%\)/);
+  assert.doesNotMatch(monthlyPeriodRule, /box-shadow/);
+  assert.match(readCSSRule(css, '[data-theme="light"] .budget-period-label-monthly'), /color:\s*#30302c/);
+  const weeklyPeriodRule = readCSSRule(css, ".budget-period-label-weekly");
+  assert.match(weeklyPeriodRule, /#68765c/);
+  assert.match(weeklyPeriodRule, /color:\s*#68765c/);
+  const dailyPeriodRule = readCSSRule(css, ".budget-period-label-daily");
+  assert.match(dailyPeriodRule, /#b5652d/);
+  assert.match(dailyPeriodRule, /color:\s*#b5652d/);
+  const hourlyPeriodRule = readCSSRule(css, ".budget-period-label-hourly");
+  assert.match(hourlyPeriodRule, /#783f22/);
+  assert.match(hourlyPeriodRule, /color:\s*#783f22/);
   const customPeriodRule = readCSSRule(css, ".budget-period-label-custom");
   assert.match(customPeriodRule, /border-style:\s*dashed/);
-  assert.match(customPeriodRule, /var\(--text-muted\)/);
-  const customMarkerRule = readCSSRule(css, ".budget-period-label-custom::before");
-  assert.match(customMarkerRule, /background:\s*transparent/);
-  assert.match(customMarkerRule, /border:\s*1px solid currentColor/);
+  assert.match(customPeriodRule, /#bfa584/);
+  assert.match(customPeriodRule, /color:\s*#8b6f4f/);
+
+  assert.match(readCSSRule(css, ".budget-bar-fill-period-monthly"), /background:\s*#30302c/);
+  assert.match(readCSSRule(css, ".budget-bar-fill-period-weekly"), /background:\s*#68765c/);
+  assert.match(readCSSRule(css, ".budget-bar-fill-period-daily"), /background:\s*#b5652d/);
+  assert.match(readCSSRule(css, ".budget-bar-fill-period-hourly"), /background:\s*#783f22/);
+  assert.match(readCSSRule(css, ".budget-bar-fill-period-custom"), /background:\s*#bfa584/);
 });
 
 test("usage request log toolbar puts search above the remaining filters", () => {
@@ -1064,6 +1157,7 @@ test("modal and conversation close controls use the shared dialog close style", 
   assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close workflow editor"[\s\S]*{{template "x-icon"}}/);
   assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close guardrail editor"[\s\S]*{{template "x-icon"}}/);
   assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close budget editor"[\s\S]*{{template "x-icon"}}/);
+  assert.match(indexTemplate, /class="auth-dialog-close dialog-close-btn" aria-label="Close budget override dialog"[\s\S]*{{template "x-icon"}}/);
   assert.match(indexTemplate, /class="dialog-close-btn"[\s\S]*@click="closeAuthKeyForm\(\)"[\s\S]*{{template "x-icon"}}/);
   assert.match(indexTemplate, /class="dialog-close-btn" x-ref="conversationCloseBtn" aria-label="Close interactions"[\s\S]*{{template "x-icon"}}/);
   assert.doesNotMatch(indexTemplate, /alias-close-btn/);
@@ -1084,7 +1178,8 @@ test("modal escape handlers do not close editors behind the auth dialog", () => 
   assert.match(indexTemplate, /@keydown\.escape\.window="workflowFormOpen && !authDialogOpen && closeWorkflowForm\(\)"/);
   assert.match(indexTemplate, /@keydown\.escape\.window="guardrailFormOpen && !authDialogOpen && closeGuardrailForm\(\)"/);
   assert.match(indexTemplate, /@keydown\.escape\.window="authKeyFormOpen && !authDialogOpen && closeAuthKeyForm\(\)"/);
-  assert.match(indexTemplate, /@keydown\.escape\.window="budgetFormOpen && !authDialogOpen && closeBudgetForm\(\)"/);
+  assert.match(indexTemplate, /@keydown\.escape\.window="budgetFormOpen && !authDialogOpen && !budgetOverrideDialogOpen && closeBudgetForm\(\)"/);
+  assert.match(indexTemplate, /@keydown\.escape\.window="budgetOverrideDialogOpen && closeBudgetOverrideDialog\(\)"/);
 });
 
 test("overview interval controls are explicit non-submit buttons", () => {

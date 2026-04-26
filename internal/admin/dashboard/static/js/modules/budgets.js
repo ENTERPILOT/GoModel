@@ -22,16 +22,20 @@
             budgetsAvailable: true,
             budgetsLoading: false,
             budgetFilter: '',
+            budgetSortBy: 'user_path',
             budgetError: '',
             budgetNotice: '',
             budgetFormOpen: false,
             budgetFormSubmitting: false,
             budgetFormError: '',
             budgetEditing: false,
+            budgetOverrideDialogOpen: false,
+            budgetOverridePendingPayload: null,
+            budgetOverrideExistingBudget: null,
             budgetResettingKey: '',
             budgetDeletingKey: '',
             budgetForm: {
-                user_path: '',
+                user_path: '/',
                 period: 'daily',
                 period_seconds: 86400,
                 amount: '',
@@ -46,7 +50,7 @@
 
             defaultBudgetForm() {
                 return {
-                    user_path: '',
+                    user_path: '/',
                     period: 'daily',
                     period_seconds: 86400,
                     amount: '',
@@ -106,6 +110,14 @@
                 return String(item && item.user_path || '') + ':' + String(item && item.period_seconds || '');
             },
 
+            existingBudgetForPayload(payload) {
+                if (!payload || !Array.isArray(this.budgets)) {
+                    return null;
+                }
+                const key = this.budgetKey(payload);
+                return this.budgets.find((item) => this.budgetKey(item) === key) || null;
+            },
+
             budgetUserPathValidationError(value) {
                 const trimmed = String(value || '').trim();
                 if (!trimmed) {
@@ -145,6 +157,18 @@
                 return canonical.length ? '/' + canonical.join('/') : '/';
             },
 
+            budgetInputUserPath(value) {
+                const body = String(value || '').trimStart().replace(/^\/+/, '');
+                return '/' + body;
+            },
+
+            setBudgetFormUserPath(value) {
+                if (!this.budgetForm) {
+                    return;
+                }
+                this.budgetForm.user_path = this.budgetInputUserPath(value);
+            },
+
             normalizeBudgetListPayload(payload) {
                 if (Array.isArray(payload)) {
                     return payload;
@@ -157,13 +181,40 @@
 
             filteredBudgets() {
                 const filter = String(this.budgetFilter || '').trim().toLowerCase();
+                let items = this.budgets;
                 if (!filter) {
-                    return this.budgets;
+                    items = this.budgets.slice();
+                } else {
+                    items = this.budgets.filter((item) => {
+                        return this.budgetFilterText(item).includes(filter);
+                    });
                 }
-                return this.budgets.filter((item) => {
-                    const userPath = String(item && item.user_path || '').toLowerCase();
-                    return userPath.includes(filter);
+                return this.sortBudgets(items);
+            },
+
+            budgetFilterText(item) {
+                const seconds = Number(item && item.period_seconds || 0);
+                return [
+                    item && item.user_path,
+                    this.budgetPeriodLabel(item),
+                    this.budgetPeriodFromSeconds(seconds),
+                    seconds ? String(seconds) + 's' : '',
+                    seconds ? String(seconds) + ' seconds' : ''
+                ].join(' ').toLowerCase();
+            },
+
+            sortBudgets(items) {
+                const sorted = Array.isArray(items) ? items.slice() : [];
+                const sortBy = String(this.budgetSortBy || 'user_path');
+                sorted.sort((a, b) => {
+                    const pathCompare = String(a && a.user_path || '').localeCompare(String(b && b.user_path || ''));
+                    const periodCompare = Number(b && b.period_seconds || 0) - Number(a && a.period_seconds || 0);
+                    if (sortBy === 'period') {
+                        return periodCompare || pathCompare;
+                    }
+                    return pathCompare || periodCompare;
                 });
+                return sorted;
             },
 
             async budgetResponseMessage(res, fallback) {
@@ -254,6 +305,7 @@
             },
 
             closeBudgetForm() {
+                this.closeBudgetOverrideDialog();
                 this.budgetFormOpen = false;
                 this.budgetFormSubmitting = false;
                 this.budgetFormError = '';
@@ -289,12 +341,83 @@
                 };
             },
 
+            openBudgetOverrideDialog(existing, payload) {
+                this.budgetOverrideExistingBudget = existing || null;
+                this.budgetOverridePendingPayload = payload || null;
+                this.budgetOverrideDialogOpen = true;
+                if (typeof this.renderIconsAfterUpdate === 'function') {
+                    this.renderIconsAfterUpdate();
+                }
+                if (typeof this.$nextTick === 'function') {
+                    this.$nextTick(() => {
+                        const refs = this.$refs || {};
+                        const button = refs.budgetOverrideCancelButton;
+                        if (button && typeof button.focus === 'function') {
+                            button.focus({ preventScroll: true });
+                        }
+                    });
+                }
+            },
+
+            closeBudgetOverrideDialog() {
+                this.budgetOverrideDialogOpen = false;
+                this.budgetOverridePendingPayload = null;
+                this.budgetOverrideExistingBudget = null;
+            },
+
+            budgetAmountLabel(value) {
+                const amount = Number(value);
+                if (!Number.isFinite(amount)) {
+                    return 'N/A';
+                }
+                if (typeof this.formatCost === 'function') {
+                    return this.formatCost(amount);
+                }
+                return '$' + amount.toFixed(4);
+            },
+
+            budgetOverrideDialogMessage() {
+                const payload = this.budgetOverridePendingPayload || {};
+                const existing = this.budgetOverrideExistingBudget || {};
+                const label = String(payload.user_path || existing.user_path || '') + ' ' + this.budgetPeriodLabel({
+                    period_seconds: payload.period_seconds || existing.period_seconds,
+                    period_label: existing.period_label
+                });
+                return 'A budget for "' + label + '" already exists. Saving will override the current '
+                    + this.budgetAmountLabel(existing.amount) + ' limit with '
+                    + this.budgetAmountLabel(payload.amount) + '.';
+            },
+
+            async confirmBudgetOverride() {
+                if (!this.budgetOverridePendingPayload) {
+                    this.closeBudgetOverrideDialog();
+                    return;
+                }
+                const payload = this.budgetOverridePendingPayload;
+                this.closeBudgetOverrideDialog();
+                await this.saveBudgetPayload(payload);
+            },
+
             async submitBudgetForm() {
                 if (this.budgetFormSubmitting) {
                     return;
                 }
                 const payload = this.budgetFormPayload();
                 if (!payload) {
+                    return;
+                }
+                if (!this.budgetEditing) {
+                    const existing = this.existingBudgetForPayload(payload);
+                    if (existing) {
+                        this.openBudgetOverrideDialog(existing, payload);
+                        return;
+                    }
+                }
+                await this.saveBudgetPayload(payload);
+            },
+
+            async saveBudgetPayload(payload) {
+                if (this.budgetFormSubmitting || !payload) {
                     return;
                 }
                 this.budgetFormSubmitting = true;
@@ -518,6 +641,51 @@
                 default:
                     return 'budget-period-label-custom';
                 }
+            },
+
+            budgetPeriodBarClass(item) {
+                return this.budgetPeriodClass(item).replace('budget-period-label-', 'budget-bar-fill-period-');
+            },
+
+            budgetPeriodTrackClass(item) {
+                return this.budgetPeriodClass(item).replace('budget-period-label-', 'budget-bar-track-period-');
+            },
+
+            budgetPeriodIcon(item) {
+                const seconds = Number(item && item.period_seconds || 0);
+                switch (seconds) {
+                case 3600:
+                    return 'clock';
+                case 86400:
+                    return 'sun';
+                case 604800:
+                    return 'calendar-days';
+                case 2592000:
+                    return 'calendar';
+                default:
+                    return 'settings-2';
+                }
+            },
+
+            budgetPeriodDurationLabel(item) {
+                const seconds = Number(item && item.period_seconds || 0);
+                switch (seconds) {
+                case 3600:
+                    return '1 hour';
+                case 86400:
+                    return '1 day';
+                case 604800:
+                    return '1 week';
+                case 2592000:
+                    return '1 month';
+                default:
+                    return this.formatBudgetPeriodSeconds(seconds);
+                }
+            },
+
+            formatBudgetPeriodSeconds(seconds) {
+                const normalized = Math.max(0, Math.trunc(Number(seconds || 0)));
+                return normalized + ' ' + (normalized === 1 ? 'second' : 'seconds');
             },
 
             budgetSourceLabel(item) {
