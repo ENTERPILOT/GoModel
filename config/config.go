@@ -377,7 +377,8 @@ type UsageConfig struct {
 // BudgetsConfig holds per-user-path spend limits.
 type BudgetsConfig struct {
 	// Enabled controls whether budget checks are active.
-	// Default: true. With no configured budgets, this has no effect.
+	// Default: true. Requires usage tracking because spend limits are evaluated
+	// from usage cost records.
 	Enabled bool `yaml:"enabled" env:"BUDGETS_ENABLED"`
 
 	// UserPaths declares budget limits by tracked user path.
@@ -1387,7 +1388,7 @@ func validateBudgetConfig(cfg *BudgetsConfig) error {
 }
 
 func validateBudgetDependencies(cfg *Config) error {
-	if cfg == nil || !cfg.Budgets.Enabled || len(cfg.Budgets.UserPaths) == 0 || cfg.Usage.Enabled {
+	if cfg == nil || !cfg.Budgets.Enabled || cfg.Usage.Enabled {
 		return nil
 	}
 	return fmt.Errorf("budgets require usage tracking to be enabled because spend limits are evaluated from usage cost records")

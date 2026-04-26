@@ -269,6 +269,22 @@ func TestLoadBudgetEnvRequiresUsageTracking(t *testing.T) {
 	})
 }
 
+func TestLoadBudgetsEnabledRequiresUsageTrackingWithoutSeedBudgets(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(string) {
+		t.Setenv("USAGE_ENABLED", "false")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("expected Load() to fail when budgets are enabled while usage tracking is disabled")
+		}
+		if !strings.Contains(err.Error(), "budgets require usage tracking") {
+			t.Fatalf("Load() error = %v, want budget usage dependency error", err)
+		}
+	})
+}
+
 func TestLoadDisabledBudgetsIgnoreMalformedBudgetEnv(t *testing.T) {
 	clearAllConfigEnvVars(t)
 

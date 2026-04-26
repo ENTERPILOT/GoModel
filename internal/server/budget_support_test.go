@@ -61,3 +61,28 @@ func TestEnforceBudgetDefaultsEnabledWithoutWorkflow(t *testing.T) {
 		t.Fatalf("budget user path = %q, want /", checker.userPath)
 	}
 }
+
+func TestBatchBudgetEnforcerUsesResolvedWorkflow(t *testing.T) {
+	checker := &countingBudgetChecker{}
+	enforcer := batchBudgetEnforcer(checker)
+	if enforcer == nil {
+		t.Fatal("batchBudgetEnforcer() = nil, want function")
+	}
+
+	ctx := core.WithWorkflow(context.Background(), &core.Workflow{
+		Policy: &core.ResolvedWorkflowPolicy{
+			VersionID: "workflow-v1",
+			Features: core.WorkflowFeatures{
+				Usage:  true,
+				Budget: false,
+			},
+		},
+	})
+
+	if err := enforcer(ctx); err != nil {
+		t.Fatalf("batch budget enforcer returned error: %v", err)
+	}
+	if checker.calls != 0 {
+		t.Fatalf("budget checker was called %d times, want 0", checker.calls)
+	}
+}

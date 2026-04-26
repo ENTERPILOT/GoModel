@@ -94,7 +94,7 @@ func (f FeatureFlags) runtimeFeatures() core.WorkflowFeatures {
 		Cache:      f.Cache,
 		Audit:      f.Audit,
 		Usage:      f.Usage,
-		Budget:     budget,
+		Budget:     f.Usage && budget,
 		Guardrails: f.Guardrails,
 		Fallback:   fallback,
 	}

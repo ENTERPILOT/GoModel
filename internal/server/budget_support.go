@@ -21,14 +21,21 @@ func enforceBudget(c *echo.Context, checker BudgetChecker) error {
 	if checker == nil || c == nil || c.Request() == nil {
 		return nil
 	}
-	if workflow := core.GetWorkflow(c.Request().Context()); workflow != nil && !workflow.BudgetEnabled() {
+	return enforceBudgetForContext(c.Request().Context(), checker)
+}
+
+func enforceBudgetForContext(ctx context.Context, checker BudgetChecker) error {
+	if checker == nil || ctx == nil {
 		return nil
 	}
-	userPath := core.UserPathFromContext(c.Request().Context())
+	if workflow := core.GetWorkflow(ctx); workflow != nil && !workflow.BudgetEnabled() {
+		return nil
+	}
+	userPath := core.UserPathFromContext(ctx)
 	if userPath == "" {
 		userPath = "/"
 	}
-	if err := checker.Check(c.Request().Context(), userPath, time.Now().UTC()); err != nil {
+	if err := checker.Check(ctx, userPath, time.Now().UTC()); err != nil {
 		return budgetCheckError(err)
 	}
 	return nil

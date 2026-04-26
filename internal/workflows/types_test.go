@@ -123,6 +123,45 @@ func TestFeatureFlagsRuntimeFeatures_FallbackDefaultsToTrue(t *testing.T) {
 	}
 }
 
+func TestFeatureFlagsRuntimeFeatures_DisablesBudgetWhenUsageDisabled(t *testing.T) {
+	t.Parallel()
+
+	explicitBudget := true
+	tests := []struct {
+		name   string
+		flags  FeatureFlags
+		budget bool
+	}{
+		{
+			name:   "implicit budget",
+			flags:  FeatureFlags{Usage: false},
+			budget: false,
+		},
+		{
+			name:   "explicit budget",
+			flags:  FeatureFlags{Usage: false, Budget: &explicitBudget},
+			budget: false,
+		},
+		{
+			name:   "usage enabled",
+			flags:  FeatureFlags{Usage: true, Budget: &explicitBudget},
+			budget: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			features := tt.flags.runtimeFeatures()
+			if features.Budget != tt.budget {
+				t.Fatalf("runtimeFeatures().Budget = %v, want %v", features.Budget, tt.budget)
+			}
+		})
+	}
+}
+
 func TestNormalizePayload_CanonicalizesFallbackForStableWorkflowHash(t *testing.T) {
 	explicitTrue := true
 

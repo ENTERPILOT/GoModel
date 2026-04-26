@@ -47,6 +47,7 @@ func (s *nativeBatchService) batch() *gateway.BatchOrchestrator {
 		CleanupStoredBatchRewrittenInputFile: s.cleanupStoredBatchRewrittenInputFile,
 		UsageLogger:                          s.usageLogger,
 		PricingResolver:                      s.pricingResolver,
+		BudgetEnforcer:                       batchBudgetEnforcer(s.budgetChecker),
 	})
 	return s.orchestrator
 }
@@ -55,9 +56,6 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 	req, err := canonicalJSONRequestFromSemantics[*core.BatchRequest](c, core.DecodeBatchRequest)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
-	}
-	if err := enforceBudget(c, s.budgetChecker); err != nil {
-		return handleError(c, err)
 	}
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
@@ -167,6 +165,15 @@ func batchIDFromRequest(c *echo.Context) (string, error) {
 		return "", core.NewInvalidRequestError("batch id is required", nil)
 	}
 	return id, nil
+}
+
+func batchBudgetEnforcer(checker BudgetChecker) func(context.Context) error {
+	if checker == nil {
+		return nil
+	}
+	return func(ctx context.Context) error {
+		return enforceBudgetForContext(ctx, checker)
+	}
 }
 
 func auditBatchEntry(c *echo.Context, providerType string) {

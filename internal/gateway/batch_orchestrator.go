@@ -28,6 +28,7 @@ type BatchConfig struct {
 	CleanupStoredBatchRewrittenInputFile func(context.Context, *batchstore.StoredBatch) bool
 	UsageLogger                          usage.LoggerInterface
 	PricingResolver                      usage.PricingResolver
+	BudgetEnforcer                       func(context.Context) error
 }
 
 // BatchOrchestrator owns native batch lifecycle behavior independent of HTTP.
@@ -42,6 +43,7 @@ type BatchOrchestrator struct {
 	cleanupStoredBatchRewrittenInputFile func(context.Context, *batchstore.StoredBatch) bool
 	usageLogger                          usage.LoggerInterface
 	pricingResolver                      usage.PricingResolver
+	budgetEnforcer                       func(context.Context) error
 }
 
 // NewBatchOrchestrator creates a native batch orchestrator.
@@ -57,6 +59,7 @@ func NewBatchOrchestrator(cfg BatchConfig) *BatchOrchestrator {
 		cleanupStoredBatchRewrittenInputFile: cfg.CleanupStoredBatchRewrittenInputFile,
 		usageLogger:                          cfg.UsageLogger,
 		pricingResolver:                      cfg.PricingResolver,
+		budgetEnforcer:                       cfg.BudgetEnforcer,
 	}
 }
 
@@ -114,6 +117,12 @@ func (o *BatchOrchestrator) Create(ctx context.Context, req *core.BatchRequest, 
 	workflow, err := o.workflowForBatch(ctx, meta, selection)
 	if err != nil {
 		return nil, err
+	}
+	ctx = core.WithWorkflow(ctx, workflow)
+	if o.budgetEnforcer != nil {
+		if err := o.budgetEnforcer(ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	forward := req

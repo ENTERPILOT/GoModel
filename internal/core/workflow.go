@@ -103,11 +103,12 @@ type WorkflowFeatures struct {
 
 // ApplyUpperBound returns features with process-level caps applied.
 func (f WorkflowFeatures) ApplyUpperBound(caps WorkflowFeatures) WorkflowFeatures {
+	usage := f.Usage && caps.Usage
 	return WorkflowFeatures{
 		Cache:      f.Cache && caps.Cache,
 		Audit:      f.Audit && caps.Audit,
-		Usage:      f.Usage && caps.Usage,
-		Budget:     f.Budget && caps.Budget,
+		Usage:      usage,
+		Budget:     usage && f.Budget && caps.Budget,
 		Guardrails: f.Guardrails && caps.Guardrails,
 		Fallback:   f.Fallback && caps.Fallback,
 	}
