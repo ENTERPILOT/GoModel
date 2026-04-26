@@ -25,8 +25,6 @@ import (
 	"gomodel/internal/responsecache"
 	"gomodel/internal/responsestore"
 	"gomodel/internal/usage"
-
-	echoswagger "github.com/swaggo/echo-swagger"
 )
 
 // Server wraps the Echo server
@@ -170,7 +168,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.MasterKey == "" && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
 		authSkipPaths = append(authSkipPaths, "/admin/api/v1/*")
 	}
-	if cfg != nil && cfg.SwaggerEnabled {
+	if cfg != nil && cfg.SwaggerEnabled && SwaggerAvailable() {
 		authSkipPaths = append(authSkipPaths, "/swagger/*")
 	}
 	if cfg != nil && cfg.PprofEnabled {
@@ -263,9 +261,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// Public routes
 	e.GET("/health", handler.Health)
-	if cfg != nil && cfg.SwaggerEnabled {
-		e.GET("/swagger/*", echoswagger.WrapHandler)
-	}
+	registerSwagger(e, cfg)
 	if cfg != nil && cfg.MetricsEnabled {
 		e.GET(metricsPath, echo.WrapHandler(promhttp.Handler()))
 	}

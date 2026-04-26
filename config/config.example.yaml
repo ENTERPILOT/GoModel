@@ -8,6 +8,7 @@ server:
   base_path: "/" # env: BASE_PATH; set to "/g" to serve the gateway under https://example.com/g/
   master_key: "your-secret-key"
   body_size_limit: "10M"
+  swagger_enabled: false # env: SWAGGER_ENABLED; requires a binary built with -tags=swagger
   pprof_enabled: false # expose /debug/pprof/* for local profiling only
   enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical

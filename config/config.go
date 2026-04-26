@@ -951,7 +951,7 @@ func buildDefaultConfig() *Config {
 		Server: ServerConfig{
 			Port:                    "8080",
 			BasePath:                "/",
-			SwaggerEnabled:          true,
+			SwaggerEnabled:          false,
 			PprofEnabled:            false,
 			EnablePassthroughRoutes: true,
 			AllowPassthroughV1Alias: true,

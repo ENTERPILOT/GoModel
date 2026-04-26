@@ -22,7 +22,7 @@ build:
 	go build -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
 # Run the application
 run:
-	go run ./cmd/gomodel
+	LOG_LEVEL=debug SWAGGER_ENABLED=true go run -tags=swagger ./cmd/gomodel
 
 # Clean build artifacts
 clean:

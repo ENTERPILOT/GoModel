@@ -325,6 +325,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	// Create server
 	allowPassthroughV1Alias := appCfg.Server.AllowPassthroughV1Alias
+	swaggerEnabled := appCfg.Server.SwaggerEnabled && server.SwaggerAvailable()
+	if appCfg.Server.SwaggerEnabled && !server.SwaggerAvailable() {
+		slog.Warn("swagger UI requested but not available in this build",
+			"recommendation", "rebuild with -tags=swagger")
+	}
+
 	serverCfg := &server.Config{
 		BasePath:                        appCfg.Server.BasePath,
 		MasterKey:                       appCfg.Server.MasterKey,
@@ -350,7 +356,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		DisablePassthroughRoutes:        !appCfg.Server.EnablePassthroughRoutes,
 		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,
 		AllowPassthroughV1Alias:         &allowPassthroughV1Alias,
-		SwaggerEnabled:                  appCfg.Server.SwaggerEnabled,
+		SwaggerEnabled:                  swaggerEnabled,
 	}
 
 	// Initialize admin API and dashboard (behind separate feature flags)
@@ -392,7 +398,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		slog.Info("admin API disabled")
 	}
 
-	if appCfg.Server.SwaggerEnabled {
+	if swaggerEnabled {
 		slog.Info("swagger UI enabled", "path", config.JoinBasePath(appCfg.Server.BasePath, "/swagger/index.html"))
 	}
 	if appCfg.Server.PprofEnabled {

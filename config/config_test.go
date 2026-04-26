@@ -94,6 +94,9 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Server.PprofEnabled {
 		t.Error("expected Server.PprofEnabled=false")
 	}
+	if cfg.Server.SwaggerEnabled {
+		t.Error("expected Server.SwaggerEnabled=false")
+	}
 	if !cfg.Server.EnablePassthroughRoutes {
 		t.Error("expected Server.EnablePassthroughRoutes=true")
 	}
