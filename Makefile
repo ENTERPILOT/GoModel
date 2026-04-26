@@ -50,7 +50,7 @@ test-race:
 
 # Run dashboard JavaScript unit tests
 test-dashboard:
-	node --test internal/admin/dashboard/static/js/modules/*.test.js
+	node --test internal/admin/dashboard/static/js/modules/*.test.cjs
 
 # Run e2e tests (uses an in-process mock LLM server; no Docker required)
 test-e2e:
