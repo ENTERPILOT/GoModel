@@ -109,7 +109,7 @@ docs-openapi:
 
 # Run linter
 lint:
-	golangci-lint run --build-tags=e2e,integration,contract ./cmd/... ./config/... ./internal/... ./tests/...
+	golangci-lint run --build-tags=swagger,e2e,integration,contract ./cmd/... ./config/... ./internal/... ./tests/...
 
 # Run linter with auto-fix
 lint-fix:
