@@ -819,12 +819,12 @@ jq -e '.error.type == "invalid_request_error"' "$BODY_FILE" >/dev/null
 sleep 6
 AUDIT_JSON_FILE="$QA_RUN_DIR/s61.audit.json"
 curl -fsS "$BASE_URL/admin/api/v1/audit/log?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
-jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,model,resolved_model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
+jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,requested_model,resolved_model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
 jq -e --arg request_id "$REQUEST_ID" '
     any(.entries[]?;
       .request_id == $request_id
       and .path == "/v1/chat/completions"
-      and .model == "does-not-exist-model"
+      and .requested_model == "does-not-exist-model"
       and .status_code == 400
       and .error_type == "invalid_request_error"
     )
@@ -850,12 +850,12 @@ jq -e '.error.type == "invalid_request_error"' "$BODY_FILE" >/dev/null
 sleep 6
 AUDIT_JSON_FILE="$QA_RUN_DIR/s62.audit.json"
 curl -fsS "$BASE_URL/admin/api/v1/audit/log?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
-jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
+jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,requested_model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
 jq -e --arg request_id "$REQUEST_ID" '
     any(.entries[]?;
       .request_id == $request_id
       and .path == "/p/not-a-real-provider/responses"
-      and .model == "gpt-4.1-nano"
+      and .requested_model == "gpt-4.1-nano"
       and .provider == "not-a-real-provider"
       and .status_code == 400
       and .error_type == "invalid_request_error"

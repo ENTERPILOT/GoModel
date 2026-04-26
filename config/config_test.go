@@ -36,7 +36,7 @@ func clearProviderEnvVars(t *testing.T) {
 func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"PORT", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "ENABLED_PASSTHROUGH_PROVIDERS",
+		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "ENABLED_PASSTHROUGH_PROVIDERS",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"RESPONSE_CACHE_SIMPLE_ENABLED",
@@ -96,8 +96,14 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Server.Port != "8080" {
 		t.Errorf("expected Server.Port=8080, got %s", cfg.Server.Port)
 	}
+	if cfg.Server.BasePath != "/" {
+		t.Errorf("expected Server.BasePath=/, got %s", cfg.Server.BasePath)
+	}
 	if cfg.Server.PprofEnabled {
 		t.Error("expected Server.PprofEnabled=false")
+	}
+	if cfg.Server.SwaggerEnabled {
+		t.Error("expected Server.SwaggerEnabled=false")
 	}
 	if !cfg.Server.EnablePassthroughRoutes {
 		t.Error("expected Server.EnablePassthroughRoutes=true")
@@ -935,6 +941,7 @@ func TestLoad_EnvOverridesYAML(t *testing.T) {
 		yaml := `
 server:
   port: "3000"
+  base_path: "internal/"
 cache:
   model:
     local: null
@@ -948,6 +955,7 @@ logging:
 		}
 
 		t.Setenv("PORT", "9090")
+		t.Setenv("BASE_PATH", "g/")
 		t.Setenv("CACHE_REFRESH_INTERVAL", "1800")
 		t.Setenv("LOGGING_ENABLED", "false")
 
@@ -959,6 +967,9 @@ logging:
 
 		if cfg.Server.Port != "9090" {
 			t.Errorf("expected port 9090 (env override), got %s", cfg.Server.Port)
+		}
+		if cfg.Server.BasePath != "/g" {
+			t.Errorf("expected base path /g (env override), got %s", cfg.Server.BasePath)
 		}
 		if cfg.Cache.Model.RefreshInterval != 1800 {
 			t.Errorf("expected Cache.Model.RefreshInterval=1800 (env override), got %d", cfg.Cache.Model.RefreshInterval)

@@ -65,6 +65,37 @@ func TestIndex_ReturnsHTML(t *testing.T) {
 	}
 }
 
+func TestIndex_UsesBasePathForGeneratedURLs(t *testing.T) {
+	h, err := NewWithBasePath("g/")
+	if err != nil {
+		t.Fatalf("NewWithBasePath() returned error: %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.Index(c); err != nil {
+		t.Fatalf("Index() returned error: %v", err)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `window.GOMODEL_BASE_PATH = basePath`) ||
+		!regexp.MustCompile(`const basePath = "\\?/g";`).MatchString(body) {
+		t.Errorf("expected base path bootstrap in page HTML")
+	}
+	if !regexp.MustCompile(`/g/admin/static/css/dashboard\.css\?v=[0-9a-f]+`).MatchString(body) {
+		t.Errorf("expected versioned dashboard CSS link to include base path")
+	}
+	if !strings.Contains(body, `href="/g/admin/dashboard/overview"`) {
+		t.Errorf("expected dashboard navigation links to include base path")
+	}
+	if strings.Contains(body, `href="/admin/dashboard/overview"`) {
+		t.Errorf("expected dashboard navigation links not to point at root admin path")
+	}
+}
+
 func TestStatic_ServesCSS(t *testing.T) {
 	h, err := New()
 	if err != nil {

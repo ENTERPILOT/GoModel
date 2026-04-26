@@ -255,6 +255,79 @@ func TestMetricsEndpoint(t *testing.T) {
 	}
 }
 
+func TestBasePathStripsPrefixBeforeRouting(t *testing.T) {
+	mock := &mockProvider{
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "llama3.2", Object: "model", OwnedBy: "ollama"},
+			},
+		},
+	}
+	srv := New(mock, &Config{
+		BasePath:        "g/",
+		MetricsEnabled:  true,
+		MetricsEndpoint: "/metrics",
+	})
+
+	tests := []struct {
+		name           string
+		method         string
+		path           string
+		expectedStatus int
+		expectBody     string
+	}{
+		{
+			name:           "prefixed health route",
+			method:         http.MethodGet,
+			path:           "/g/health",
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "unprefixed health route is not exposed",
+			method:         http.MethodGet,
+			path:           "/health",
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:           "prefixed models route sees canonical internal path",
+			method:         http.MethodGet,
+			path:           "/g/v1/models",
+			expectedStatus: http.StatusOK,
+			expectBody:     "llama3.2",
+		},
+		{
+			name:           "prefixed metrics route",
+			method:         http.MethodGet,
+			path:           "/g/metrics",
+			expectedStatus: http.StatusOK,
+			expectBody:     "go_goroutines",
+		},
+		{
+			name:           "prefix overmatch is rejected",
+			method:         http.MethodGet,
+			path:           "/gopher/health",
+			expectedStatus: http.StatusNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+
+			srv.ServeHTTP(rec, req)
+
+			if rec.Code != tt.expectedStatus {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tt.expectedStatus, rec.Body.String())
+			}
+			if tt.expectBody != "" && !strings.Contains(rec.Body.String(), tt.expectBody) {
+				t.Fatalf("body = %q, want substring %q", rec.Body.String(), tt.expectBody)
+			}
+		})
+	}
+}
+
 func TestMetricsEndpointReturnsPrometheusFormat(t *testing.T) {
 	mock := &mockProvider{}
 	srv := New(mock, &Config{
@@ -684,29 +757,6 @@ func TestHealthEndpointAlwaysAvailable(t *testing.T) {
 	}
 }
 
-func TestSwaggerEndpoint_Enabled(t *testing.T) {
-	mock := &mockProvider{}
-	srv := New(mock, &Config{SwaggerEnabled: true})
-
-	req := httptest.NewRequest(http.MethodGet, "/swagger/index.html", nil)
-	rec := httptest.NewRecorder()
-
-	srv.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
-	}
-
-	contentType := rec.Header().Get("Content-Type")
-	if !strings.Contains(contentType, "text/html") {
-		t.Errorf("expected text/html Content-Type, got %s", contentType)
-	}
-
-	if !strings.Contains(rec.Body.String(), "swagger") {
-		t.Errorf("expected body to contain swagger UI content, got: %s", rec.Body.String()[:min(200, len(rec.Body.String()))])
-	}
-}
-
 func TestSwaggerEndpoint_Disabled(t *testing.T) {
 	mock := &mockProvider{}
 	srv := New(mock, &Config{SwaggerEnabled: false})
@@ -732,28 +782,6 @@ func TestSwaggerEndpoint_NilConfig(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", rec.Code)
-	}
-}
-
-func TestSwaggerDocJson_ReturnsExpectedContent(t *testing.T) {
-	mock := &mockProvider{}
-	srv := New(mock, &Config{SwaggerEnabled: true})
-
-	req := httptest.NewRequest(http.MethodGet, "/swagger/doc.json", nil)
-	rec := httptest.NewRecorder()
-
-	srv.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
-	}
-
-	body := rec.Body.String()
-	if !strings.Contains(body, "GoModel") {
-		t.Errorf("expected doc.json to contain GoModel API title, got: %s", body[:min(300, len(body))])
-	}
-	if !strings.Contains(body, "swagger") {
-		t.Errorf("expected doc.json to contain swagger spec, got: %s", body[:min(300, len(body))])
 	}
 }
 

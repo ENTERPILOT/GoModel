@@ -63,7 +63,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ steps.build_meta.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ steps.build_meta.outputs.image }},push-by-digest=true,name-canonical=true,push=true,compression=zstd,compression-level=3,force-compression=true
           build-args: |
             VERSION=${{ steps.build_meta.outputs.version }}
             COMMIT=${{ steps.build_meta.outputs.commit }}

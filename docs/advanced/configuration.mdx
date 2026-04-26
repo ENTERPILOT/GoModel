@@ -41,6 +41,7 @@ The most common way to configure GoModel. Set any of the variables below to over
 | Variable             | Description                                           | Default                |
 | -------------------- | ----------------------------------------------------- | ---------------------- |
 | `PORT`               | HTTP server port                                      | `8080`                 |
+| `BASE_PATH`          | Mount path prefix, for example `/g`                   | `/`                    |
 | `GOMODEL_MASTER_KEY` | Authentication key for securing the gateway           | _(empty, unsafe mode)_ |
 | `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`) | _(no limit)_           |
 
@@ -195,6 +196,7 @@ GoModel automatically loads a `.env` file from the working directory at startup.
 ```bash
 # .env
 PORT=3000
+BASE_PATH=/g
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 ```
@@ -231,6 +233,7 @@ Then uncomment and edit the settings you want to change:
 ```yaml
 server:
   port: "3000"
+  base_path: "/g"
   master_key: "my-secret-key"
 
 cache:

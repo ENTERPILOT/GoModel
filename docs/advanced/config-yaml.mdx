@@ -50,6 +50,10 @@ The current source of truth lives in the main codebase:
 - [config/config.go](https://github.com/ENTERPILOT/GoModel/blob/main/config/config.go)
 - [config/config.example.yaml](https://github.com/ENTERPILOT/GoModel/blob/main/config/config.example.yaml)
 
+For deployments mounted below a domain root, set `server.base_path` or
+`BASE_PATH`. For example, `BASE_PATH=/g` serves the gateway at `/g/v1/...`,
+`/g/admin/...`, and `/g/health`.
+
 ## Docker
 
 GoModel reads `config/config.yaml` first, then `config.yaml`.

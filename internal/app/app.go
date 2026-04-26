@@ -348,7 +348,14 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	// Create server
 	allowPassthroughV1Alias := appCfg.Server.AllowPassthroughV1Alias
+	swaggerEnabled := appCfg.Server.SwaggerEnabled && server.SwaggerAvailable()
+	if appCfg.Server.SwaggerEnabled && !server.SwaggerAvailable() {
+		slog.Warn("swagger UI requested but not available in this build",
+			"recommendation", "rebuild with -tags=swagger")
+	}
+
 	serverCfg := &server.Config{
+		BasePath:                        appCfg.Server.BasePath,
 		MasterKey:                       appCfg.Server.MasterKey,
 		Authenticator:                   authKeyResult.Service,
 		MetricsEnabled:                  appCfg.Metrics.Enabled,
@@ -373,7 +380,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		DisablePassthroughRoutes:        !appCfg.Server.EnablePassthroughRoutes,
 		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,
 		AllowPassthroughV1Alias:         &allowPassthroughV1Alias,
-		SwaggerEnabled:                  appCfg.Server.SwaggerEnabled,
+		SwaggerEnabled:                  swaggerEnabled,
 	}
 
 	// Initialize admin API and dashboard (behind separate feature flags)
@@ -397,6 +404,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			budgetResult.Service,
 			app,
 			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard),
+			appCfg.Server.BasePath,
 			adminCfg.UIEnabled,
 		)
 		if adminErr != nil {
@@ -404,25 +412,25 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		} else {
 			serverCfg.AdminEndpointsEnabled = true
 			serverCfg.AdminHandler = adminHandler
-			slog.Info("admin API enabled", "api", "/admin/api/v1")
+			slog.Info("admin API enabled", "api", config.JoinBasePath(appCfg.Server.BasePath, "/admin/api/v1"))
 			if adminCfg.UIEnabled {
 				serverCfg.AdminUIEnabled = true
 				serverCfg.DashboardHandler = dashHandler
-				slog.Info("admin UI enabled", "url", fmt.Sprintf("http://localhost:%s/admin/dashboard", appCfg.Server.Port))
+				slog.Info("admin UI enabled", "url", fmt.Sprintf("http://localhost:%s%s", appCfg.Server.Port, config.JoinBasePath(appCfg.Server.BasePath, "/admin/dashboard")))
 			}
 		}
 	} else {
 		slog.Info("admin API disabled")
 	}
 
-	if appCfg.Server.SwaggerEnabled {
-		slog.Info("swagger UI enabled", "path", "/swagger/index.html")
+	if swaggerEnabled {
+		slog.Info("swagger UI enabled", "path", config.JoinBasePath(appCfg.Server.BasePath, "/swagger/index.html"))
 	}
 	if appCfg.Server.PprofEnabled {
-		slog.Info("pprof enabled", "path", "/debug/pprof/")
+		slog.Info("pprof enabled", "path", config.JoinBasePath(appCfg.Server.BasePath, "/debug/pprof/"))
 	}
 	if appCfg.Server.EnablePassthroughRoutes {
-		slog.Info("provider passthrough enabled", "path", "/p/{provider}/{endpoint}")
+		slog.Info("provider passthrough enabled", "path", config.JoinBasePath(appCfg.Server.BasePath, "/p/{provider}/{endpoint}"))
 	} else {
 		slog.Info("provider passthrough disabled")
 	}
@@ -785,6 +793,7 @@ func initAdmin(
 	budgetService *budget.Service,
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
+	basePath string,
 	uiEnabled bool,
 ) (*admin.Handler, *dashboard.Handler, error) {
 	// Find a storage connection for reading usage data
@@ -834,7 +843,7 @@ func initAdmin(
 	var dashHandler *dashboard.Handler
 	if uiEnabled {
 		var err error
-		dashHandler, err = dashboard.New()
+		dashHandler, err = dashboard.NewWithBasePath(basePath)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize dashboard: %w", err)
 		}

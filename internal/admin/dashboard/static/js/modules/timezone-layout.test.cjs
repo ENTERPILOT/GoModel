@@ -42,7 +42,7 @@ test("dashboard layout loads the timezone module before the main bootstrap", () 
 
   assert.match(
     layout,
-    /<script src="\/admin\/static\/js\/modules\/timezone\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/dashboard\.js"><\/script>/,
+    /<script src="{{assetURL "js\/modules\/timezone\.js"}}"><\/script>[\s\S]*<script src="{{assetURL "js\/dashboard\.js"}}"><\/script>/,
   );
 });
 

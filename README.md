@@ -241,6 +241,7 @@ Key settings:
 | Variable                        | Default                                | Description                                                                      |
 | ------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------- |
 | `PORT`                          | `8080`                                 | Server port                                                                      |
+| `BASE_PATH`                     | `/`                                    | Mount the gateway under a path prefix such as `/g`                               |
 | `GOMODEL_MASTER_KEY`            | (none)                                 | API key for authentication                                                       |
 | `ENABLE_PASSTHROUGH_ROUTES`     | `true`                                 | Enable provider-native passthrough routes under `/p/{provider}/...`              |
 | `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                                 | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |

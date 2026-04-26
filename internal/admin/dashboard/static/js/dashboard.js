@@ -1,5 +1,32 @@
 // GoModel Dashboard — Alpine.js + Chart.js logic
 
+function dashboardPath(path) {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.gomodelPath === "function"
+  ) {
+    return window.gomodelPath(path);
+  }
+  return path;
+}
+
+function dashboardUnprefixedPath(path) {
+  if (typeof window === "undefined") {
+    return path;
+  }
+  const basePath = window.GOMODEL_BASE_PATH || "/";
+  if (basePath === "/" || !path) {
+    return path;
+  }
+  if (path === basePath) {
+    return "/";
+  }
+  if (path.indexOf(basePath + "/") === 0) {
+    return path.slice(basePath.length) || "/";
+  }
+  return path;
+}
+
 function dashboard() {
   const STALE_AUTH_RESPONSE = "STALE_AUTH";
   const API_KEY_STORAGE_KEY = "gomodel_api_key";
@@ -143,7 +170,7 @@ function dashboard() {
     bodyPointerStart: null,
 
     _parseRoute(pathname) {
-      const path = pathname.replace(/\/$/, "");
+      const path = dashboardUnprefixedPath(pathname).replace(/\/$/, "");
       const rest = path.replace("/admin/dashboard", "").replace(/^\//, "");
       const parts = rest.split("/");
       let page = parts[0];
@@ -252,7 +279,7 @@ function dashboard() {
     },
 
     navigate(page) {
-      history.pushState(null, "", "/admin/dashboard/" + page);
+      history.pushState(null, "", dashboardPath("/admin/dashboard/" + page));
       this._applyRoute(page, null);
     },
 

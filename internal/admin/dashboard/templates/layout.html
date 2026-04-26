@@ -4,13 +4,75 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GoModel Dashboard</title>
-    <link rel="icon" type="image/svg+xml" href="/admin/static/favicon.svg">
+    <link rel="icon" type="image/svg+xml" href="{{assetURL "favicon.svg"}}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js" integrity="sha384-XcdcwHqIPULERb2yDEM4R0XaQKU3YnDsrTmjACBZyfdVVqjh6xQ4/DCMd7XLcA6Y" crossorigin="anonymous"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.15.8/dist/cdn.min.js" integrity="sha384-LXWjKwDZz29o7TduNe+r/UxaolHh5FsSvy2W7bDHSZ8jJeGgDeuNnsDNHoxpSgDi" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="{{assetURL "css/dashboard.css"}}">
+    <script>
+        (function () {
+            const basePath = "{{.BasePath}}";
+            window.GOMODEL_BASE_PATH = basePath;
+            window.gomodelPath = function (urlPath) {
+                if (!urlPath || urlPath.charAt(0) !== "/" || urlPath.indexOf("//") === 0 || basePath === "/") {
+                    return urlPath;
+                }
+                if (urlPath === basePath || urlPath.indexOf(basePath + "/") === 0) {
+                    return urlPath;
+                }
+                return basePath + urlPath;
+            };
+            function sameOriginURLWithBasePath(rawURL) {
+                if (typeof URL !== "function") {
+                    return rawURL;
+                }
+                const url = new URL(rawURL, window.location.href);
+                if (url.origin !== window.location.origin) {
+                    return rawURL;
+                }
+                const nextPath = window.gomodelPath(url.pathname);
+                if (nextPath === url.pathname) {
+                    return rawURL;
+                }
+                url.pathname = nextPath;
+                return url.toString();
+            }
+            if (basePath !== "/" && typeof window.fetch === "function") {
+                const rawFetch = window.fetch.bind(window);
+                window.fetch = function (input, init) {
+                    if (typeof input === "string") {
+                        return rawFetch(window.gomodelPath(input), init);
+                    }
+                    if (typeof URL === "function" && input instanceof URL) {
+                        return rawFetch(new URL(sameOriginURLWithBasePath(input.toString())), init);
+                    }
+                    if (typeof Request === "function" && input instanceof Request) {
+                        const nextURL = sameOriginURLWithBasePath(input.url);
+                        if (nextURL !== input.url) {
+                            return rawFetch(new Request(nextURL, input), init);
+                        }
+                    }
+                    return rawFetch(input, init);
+                };
+            }
+            if (basePath !== "/" && window.history) {
+                ["pushState", "replaceState"].forEach(function (method) {
+                    if (typeof window.history[method] !== "function") {
+                        return;
+                    }
+                    const rawHistoryMethod = window.history[method].bind(window.history);
+                    window.history[method] = function (state, title, url) {
+                        if (typeof url === "string") {
+                            return rawHistoryMethod(state, title, window.gomodelPath(url));
+                        }
+                        return rawHistoryMethod(state, title, url);
+                    };
+                });
+            }
+        })();
+    </script>
 </head>
 <body x-data="dashboard()" :class="{ 'dashboard-modal-open': overlayDialogOpen() }">
     <div class="app">
@@ -69,22 +131,22 @@
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/lucide@0.577.0/dist/umd/lucide.min.js" integrity="sha384-orgVf2eX2+m1zKAOIi09hD0W6GtVhoOUmqDK+sysYB2JTZ4vS86j4jm+X7a4Nnei" crossorigin="anonymous"></script>
-    <script src="/admin/static/js/modules/conversation-helpers.js"></script>
-    <script src="/admin/static/js/modules/icons.js"></script>
-    <script src="/admin/static/js/modules/clipboard.js"></script>
-    <script src="/admin/static/js/modules/timezone.js"></script>
-    <script src="/admin/static/js/modules/date-picker.js"></script>
-    <script src="/admin/static/js/modules/providers.js"></script>
-    <script src="/admin/static/js/modules/usage.js"></script>
-    <script src="/admin/static/js/modules/audit-list.js"></script>
-    <script src="/admin/static/js/modules/aliases.js"></script>
-    <script src="/admin/static/js/modules/workflows.js"></script>
-    <script src="/admin/static/js/modules/auth-keys.js"></script>
-    <script src="/admin/static/js/modules/guardrails.js"></script>
-    <script src="/admin/static/js/modules/budgets.js"></script>
-    <script src="/admin/static/js/modules/conversation-drawer.js"></script>
-    <script src="/admin/static/js/modules/contribution-calendar.js"></script>
-    <script src="/admin/static/js/modules/charts.js"></script>
-    <script src="/admin/static/js/dashboard.js"></script>
+    <script src="{{assetURL "js/modules/conversation-helpers.js"}}"></script>
+    <script src="{{assetURL "js/modules/icons.js"}}"></script>
+    <script src="{{assetURL "js/modules/clipboard.js"}}"></script>
+    <script src="{{assetURL "js/modules/timezone.js"}}"></script>
+    <script src="{{assetURL "js/modules/date-picker.js"}}"></script>
+    <script src="{{assetURL "js/modules/providers.js"}}"></script>
+    <script src="{{assetURL "js/modules/usage.js"}}"></script>
+    <script src="{{assetURL "js/modules/audit-list.js"}}"></script>
+    <script src="{{assetURL "js/modules/aliases.js"}}"></script>
+    <script src="{{assetURL "js/modules/workflows.js"}}"></script>
+    <script src="{{assetURL "js/modules/auth-keys.js"}}"></script>
+    <script src="{{assetURL "js/modules/guardrails.js"}}"></script>
+    <script src="{{assetURL "js/modules/budgets.js"}}"></script>
+    <script src="{{assetURL "js/modules/conversation-drawer.js"}}"></script>
+    <script src="{{assetURL "js/modules/contribution-calendar.js"}}"></script>
+    <script src="{{assetURL "js/modules/charts.js"}}"></script>
+    <script src="{{assetURL "js/dashboard.js"}}"></script>
 </body>
 </html>{{end}}

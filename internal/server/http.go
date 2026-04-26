@@ -25,8 +25,6 @@ import (
 	"gomodel/internal/responsecache"
 	"gomodel/internal/responsestore"
 	"gomodel/internal/usage"
-
-	echoswagger "github.com/swaggo/echo-swagger"
 )
 
 // Server wraps the Echo server
@@ -45,6 +43,7 @@ const (
 
 // Config holds server configuration options
 type Config struct {
+	BasePath                        string                                 // URL path prefix where the app is mounted (default: /)
 	MasterKey                       string                                 // Optional: Master key for authentication
 	Authenticator                   BearerTokenAuthenticator               // Optional: managed API key authenticator
 	MetricsEnabled                  bool                                   // Whether to expose Prometheus metrics endpoint
@@ -84,6 +83,10 @@ type Config struct {
 func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e := echo.New()
 	e.Logger = slog.Default()
+	basePath := configuredBasePath(cfg)
+	if basePath != "/" {
+		e.Pre(stripBasePathMiddleware(basePath))
+	}
 	// Keep client IP handling explicit after Echo v5.1.0 changed RealIP defaults.
 	// Direct extraction is the safe baseline unless a caller opts into trusted
 	// proxy header handling via Config.IPExtractor.
@@ -169,7 +172,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.MasterKey == "" && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
 		authSkipPaths = append(authSkipPaths, "/admin/api/v1/*")
 	}
-	if cfg != nil && cfg.SwaggerEnabled {
+	if cfg != nil && cfg.SwaggerEnabled && SwaggerAvailable() {
 		authSkipPaths = append(authSkipPaths, "/swagger/*")
 	}
 	if cfg != nil && cfg.PprofEnabled {
@@ -262,9 +265,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// Public routes
 	e.GET("/health", handler.Health)
-	if cfg != nil && cfg.SwaggerEnabled {
-		e.GET("/swagger/*", echoswagger.WrapHandler)
-	}
+	registerSwagger(e, cfg)
 	if cfg != nil && cfg.MetricsEnabled {
 		e.GET(metricsPath, echo.WrapHandler(promhttp.Handler()))
 	}

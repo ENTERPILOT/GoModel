@@ -12,39 +12,39 @@
         <span class="badge">Admin</span>
     </div>
     <nav class="sidebar-nav">
-        <a href="/admin/dashboard/overview" class="nav-item" :class="{ active: page === 'overview' }" title="Overview" @click.prevent="navigate('overview')">
+        <a href="{{appURL "/admin/dashboard/overview"}}" class="nav-item" :class="{ active: page === 'overview' }" title="Overview" @click.prevent="navigate('overview')">
             <i data-lucide="layout-dashboard" class="nav-icon" aria-hidden="true"></i>
             <span>Overview</span>
         </a>
-        <a href="/admin/dashboard/models" class="nav-item" :class="{ active: page === 'models' }" title="Models" @click.prevent="navigate('models')">
+        <a href="{{appURL "/admin/dashboard/models"}}" class="nav-item" :class="{ active: page === 'models' }" title="Models" @click.prevent="navigate('models')">
             <i data-lucide="box" class="nav-icon" aria-hidden="true"></i>
             <span>Models</span>
         </a>
-        <a href="/admin/dashboard/audit-logs" class="nav-item" :class="{ active: page === 'audit-logs' }" title="Audit Logs" @click.prevent="navigate('audit-logs')">
+        <a href="{{appURL "/admin/dashboard/audit-logs"}}" class="nav-item" :class="{ active: page === 'audit-logs' }" title="Audit Logs" @click.prevent="navigate('audit-logs')">
             <i data-lucide="history" class="nav-icon" aria-hidden="true"></i>
             <span>Audit Logs</span>
         </a>
-        <a href="/admin/dashboard/usage" class="nav-item" :class="{ active: page === 'usage' }" title="Usage" @click.prevent="navigate('usage')">
+        <a href="{{appURL "/admin/dashboard/usage"}}" class="nav-item" :class="{ active: page === 'usage' }" title="Usage" @click.prevent="navigate('usage')">
             <i data-lucide="chart-column" class="nav-icon" aria-hidden="true"></i>
             <span>Usage</span>
         </a>
-        <a href="/admin/dashboard/budgets" class="nav-item" :class="{ active: page === 'budgets' }" title="Budgets" x-show="budgetManagementEnabled()" @click.prevent="navigate('budgets')">
+        <a href="{{appURL "/admin/dashboard/budgets"}}" class="nav-item" :class="{ active: page === 'budgets' }" title="Budgets" x-show="budgetManagementEnabled()" @click.prevent="navigate('budgets')">
             <i data-lucide="wallet" class="nav-icon" aria-hidden="true"></i>
             <span>Budgets</span>
         </a>
-        <a href="/admin/dashboard/auth-keys" class="nav-item" :class="{ active: page === 'auth-keys' }" title="API Keys" @click.prevent="navigate('auth-keys')">
+        <a href="{{appURL "/admin/dashboard/auth-keys"}}" class="nav-item" :class="{ active: page === 'auth-keys' }" title="API Keys" @click.prevent="navigate('auth-keys')">
             <i data-lucide="key-round" class="nav-icon" aria-hidden="true"></i>
             <span>API Keys</span>
         </a>
-        <a href="/admin/dashboard/workflows" class="nav-item" :class="{ active: page === 'workflows' }" title="Workflows" @click.prevent="navigate('workflows')">
+        <a href="{{appURL "/admin/dashboard/workflows"}}" class="nav-item" :class="{ active: page === 'workflows' }" title="Workflows" @click.prevent="navigate('workflows')">
             <i data-lucide="workflow" class="nav-icon" aria-hidden="true"></i>
             <span>Workflows</span>
         </a>
-        <a href="/admin/dashboard/guardrails" class="nav-item" :class="{ active: page === 'guardrails' }" title="Guardrails (experimental)" x-show="guardrailsPageVisible()" @click.prevent="navigate('guardrails')">
+        <a href="{{appURL "/admin/dashboard/guardrails"}}" class="nav-item" :class="{ active: page === 'guardrails' }" title="Guardrails (experimental)" x-show="guardrailsPageVisible()" @click.prevent="navigate('guardrails')">
             <i data-lucide="shield-check" class="nav-icon" aria-hidden="true"></i>
             <span>Guardrails (experimental)</span>
         </a>
-        <a href="/admin/dashboard/settings" class="nav-item" :class="{ active: page === 'settings' }" title="Settings" @click.prevent="navigate('settings')">
+        <a href="{{appURL "/admin/dashboard/settings"}}" class="nav-item" :class="{ active: page === 'settings' }" title="Settings" @click.prevent="navigate('settings')">
             <i data-lucide="settings" class="nav-icon" aria-hidden="true"></i>
             <span>Settings</span>
         </a>

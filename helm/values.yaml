@@ -23,6 +23,8 @@ fullnameOverride: ""
 server:
   # -- Server port
   port: 8080
+  # -- URL path prefix where GoModel is mounted (for example, "/g")
+  basePath: "/"
   # -- Maximum request body size (e.g., "10M", "1G", "500K")
   bodySizeLimit: "10M"
 
@@ -145,6 +147,7 @@ metrics:
   serviceMonitor:
     # -- Create a ServiceMonitor for Prometheus Operator
     enabled: false
+    # ServiceMonitor path is automatically prefixed with server.basePath.
     # -- Scrape interval
     interval: "15s"
     # -- Additional labels for the ServiceMonitor
@@ -230,6 +233,7 @@ podDisruptionBudget:
   # maxUnavailable: 1
 
 # Liveness probe configuration
+# httpGet.path is automatically prefixed with server.basePath.
 livenessProbe:
   httpGet:
     path: /health
@@ -240,6 +244,7 @@ livenessProbe:
   failureThreshold: 3
 
 # Readiness probe configuration
+# httpGet.path is automatically prefixed with server.basePath.
 readinessProbe:
   httpGet:
     path: /health

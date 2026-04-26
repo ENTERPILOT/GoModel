@@ -50,6 +50,7 @@ helm install gomodel ./helm \
 | `image.repository`               | Image repository                                                                               | `enterpilot/gomodel`   |
 | `image.tag`                      | Image tag                                                                                      | `""` (uses appVersion) |
 | `server.port`                    | Server port                                                                                    | `8080`                 |
+| `server.basePath`                | URL path prefix where GoModel is mounted                                                       | `"/"`                  |
 | `server.bodySizeLimit`           | Max request body size                                                                          | `"10M"`                |
 | `auth.masterKey`                 | Master key for auth                                                                            | `""`                   |
 | `auth.existingSecret`            | Existing secret for auth                                                                       | `""`                   |

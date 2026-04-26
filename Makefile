@@ -7,6 +7,8 @@ VERSION ?= $(shell git describe --tags --always --dirty)
 COMMIT ?= $(shell git rev-parse --short HEAD)
 DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 DOCS_API_SERVERS ?= https://gomodel.example.com,http://localhost:8080
+LOG_LEVEL ?= debug
+SWAGGER_ENABLED ?= true
 
 # Linker flags to inject version info
 LDFLAGS := -X "gomodel/internal/version.Version=$(VERSION)" \
@@ -22,7 +24,7 @@ build:
 	go build -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
 # Run the application
 run:
-	go run ./cmd/gomodel
+	LOG_LEVEL=$(LOG_LEVEL) SWAGGER_ENABLED=$(SWAGGER_ENABLED) go run -tags=swagger ./cmd/gomodel
 
 # Clean build artifacts
 clean:
@@ -50,7 +52,7 @@ test-race:
 
 # Run dashboard JavaScript unit tests
 test-dashboard:
-	node --test internal/admin/dashboard/static/js/modules/*.test.js
+	node --test internal/admin/dashboard/static/js/modules/*.test.cjs
 
 # Run e2e tests (uses an in-process mock LLM server; no Docker required)
 test-e2e:
@@ -107,7 +109,7 @@ docs-openapi:
 
 # Run linter
 lint:
-	golangci-lint run --build-tags=e2e,integration,contract ./cmd/... ./config/... ./internal/... ./tests/...
+	golangci-lint run --build-tags=swagger,e2e,integration,contract ./cmd/... ./config/... ./internal/... ./tests/...
 
 # Run linter with auto-fix
 lint-fix:

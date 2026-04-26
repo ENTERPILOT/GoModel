@@ -63,7 +63,7 @@ test("sidebar and main content share the flex layout without manual content offs
   assert.doesNotMatch(template, /content-collapsed/);
   assert.match(
     template,
-    /href="\/admin\/dashboard\/overview"[\s\S]*<span>Overview<\/span>[\s\S]*href="\/admin\/dashboard\/models"[\s\S]*<span>Models<\/span>[\s\S]*href="\/admin\/dashboard\/audit-logs"[\s\S]*<span>Audit Logs<\/span>[\s\S]*href="\/admin\/dashboard\/usage"[\s\S]*<span>Usage<\/span>[\s\S]*href="\/admin\/dashboard\/budgets"[\s\S]*x-show="budgetManagementEnabled\(\)"[\s\S]*<span>Budgets<\/span>[\s\S]*href="\/admin\/dashboard\/auth-keys"[\s\S]*<span>API Keys<\/span>[\s\S]*href="\/admin\/dashboard\/workflows"[\s\S]*<span>Workflows<\/span>[\s\S]*href="\/admin\/dashboard\/guardrails"[\s\S]*x-show="guardrailsPageVisible\(\)"[\s\S]*<span>Guardrails \(experimental\)<\/span>[\s\S]*href="\/admin\/dashboard\/settings"[\s\S]*<span>Settings<\/span>/,
+    /href="{{appURL "\/admin\/dashboard\/overview"}}"[\s\S]*<span>Overview<\/span>[\s\S]*href="{{appURL "\/admin\/dashboard\/models"}}"[\s\S]*<span>Models<\/span>[\s\S]*href="{{appURL "\/admin\/dashboard\/audit-logs"}}"[\s\S]*<span>Audit Logs<\/span>[\s\S]*href="{{appURL "\/admin\/dashboard\/usage"}}"[\s\S]*<span>Usage<\/span>[\s\S]*href="{{appURL "\/admin\/dashboard\/budgets"}}"[\s\S]*x-show="budgetManagementEnabled\(\)"[\s\S]*<span>Budgets<\/span>[\s\S]*href="{{appURL "\/admin\/dashboard\/auth-keys"}}"[\s\S]*<span>API Keys<\/span>[\s\S]*href="{{appURL "\/admin\/dashboard\/workflows"}}"[\s\S]*<span>Workflows<\/span>[\s\S]*href="{{appURL "\/admin\/dashboard\/guardrails"}}"[\s\S]*x-show="guardrailsPageVisible\(\)"[\s\S]*<span>Guardrails \(experimental\)<\/span>[\s\S]*href="{{appURL "\/admin\/dashboard\/settings"}}"[\s\S]*<span>Settings<\/span>/,
   );
 
   const sidebarRule = readCSSRule(css, ".sidebar");
@@ -157,7 +157,7 @@ test("dashboard layout pins Chart.js to 4.5.0 and avoids unused htmx", () => {
   assert.doesNotMatch(template, /htmx/i);
   assert.match(
     template,
-    /<script src="\/admin\/static\/js\/modules\/conversation-helpers\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/icons\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/clipboard\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/providers\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/audit-list\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/auth-keys\.js"><\/script>[\s\S]*<script src="\/admin\/static\/js\/modules\/guardrails\.js"><\/script>/,
+    /<script src="{{assetURL "js\/modules\/conversation-helpers\.js"}}"><\/script>[\s\S]*<script src="{{assetURL "js\/modules\/icons\.js"}}"><\/script>[\s\S]*<script src="{{assetURL "js\/modules\/clipboard\.js"}}"><\/script>[\s\S]*<script src="{{assetURL "js\/modules\/providers\.js"}}"><\/script>[\s\S]*<script src="{{assetURL "js\/modules\/audit-list\.js"}}"><\/script>[\s\S]*<script src="{{assetURL "js\/modules\/auth-keys\.js"}}"><\/script>[\s\S]*<script src="{{assetURL "js\/modules\/guardrails\.js"}}"><\/script>/,
   );
 });
 

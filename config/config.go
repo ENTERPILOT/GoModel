@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -868,6 +869,7 @@ func applyResponseSemanticEnv(resp *ResponseCacheConfig) error {
 // ServerConfig holds HTTP server configuration
 type ServerConfig struct {
 	Port           string `yaml:"port" env:"PORT"`
+	BasePath       string `yaml:"base_path" env:"BASE_PATH"`             // URL path prefix where the app is mounted (e.g., "/g")
 	MasterKey      string `yaml:"master_key" env:"GOMODEL_MASTER_KEY"`   // Optional: Master key for authentication
 	BodySizeLimit  string `yaml:"body_size_limit" env:"BODY_SIZE_LIMIT"` // Max request body size (e.g., "10M", "1024K")
 	SwaggerEnabled bool   `yaml:"swagger_enabled" env:"SWAGGER_ENABLED"` // Whether to expose the Swagger UI at /swagger/index.html
@@ -882,6 +884,42 @@ type ServerConfig struct {
 	// /p/{provider}/... passthrough routes. Default:
 	// ["openai", "anthropic", "openrouter", "zai", "vllm"].
 	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
+}
+
+// NormalizeBasePath canonicalizes the public mount path for the HTTP server.
+// Empty, whitespace-only, and "/" all resolve to root.
+func NormalizeBasePath(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || trimmed == "/" {
+		return "/"
+	}
+	if !strings.HasPrefix(trimmed, "/") {
+		trimmed = "/" + trimmed
+	}
+	normalized := path.Clean(trimmed)
+	if normalized == "." || normalized == "/" {
+		return "/"
+	}
+	return normalized
+}
+
+// JoinBasePath prefixes urlPath with the normalized public mount path.
+func JoinBasePath(basePath, urlPath string) string {
+	basePath = NormalizeBasePath(basePath)
+	trimmedPath := strings.TrimSpace(urlPath)
+	if trimmedPath == "" || trimmedPath == "/" {
+		if basePath == "/" {
+			return "/"
+		}
+		return basePath
+	}
+	if !strings.HasPrefix(trimmedPath, "/") {
+		trimmedPath = "/" + trimmedPath
+	}
+	if basePath == "/" {
+		return trimmedPath
+	}
+	return basePath + trimmedPath
 }
 
 // MetricsConfig holds observability configuration for Prometheus metrics
@@ -944,7 +982,8 @@ func buildDefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
 			Port:                    "8080",
-			SwaggerEnabled:          true,
+			BasePath:                "/",
+			SwaggerEnabled:          false,
 			PprofEnabled:            false,
 			EnablePassthroughRoutes: true,
 			AllowPassthroughV1Alias: true,
@@ -1060,6 +1099,7 @@ func Load() (*LoadResult, error) {
 	if err := validateBudgetDependencies(cfg); err != nil {
 		return nil, err
 	}
+	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)
 	cfg.Models.ConfiguredProviderModelsMode = ResolveConfiguredProviderModelsMode(cfg.Models.ConfiguredProviderModelsMode)
 	if !cfg.Models.ConfiguredProviderModelsMode.Valid() {
 		return nil, fmt.Errorf("models.configured_provider_models_mode must be one of: fallback, allowlist")

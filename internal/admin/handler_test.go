@@ -823,6 +823,54 @@ func TestAuditLog_Success(t *testing.T) {
 	}
 }
 
+func TestAuditLog_EmitsRequestedModel(t *testing.T) {
+	now := time.Now().UTC()
+	reader := &mockAuditReader{
+		logResult: &auditlog.LogListResult{
+			Entries: []auditlog.LogEntry{
+				{
+					ID:             "log-1",
+					Timestamp:      now,
+					RequestedModel: "does-not-exist-model",
+					StatusCode:     http.StatusBadRequest,
+					RequestID:      "req-1",
+					Method:         http.MethodPost,
+					Path:           "/v1/chat/completions",
+					ErrorType:      string(core.ErrorTypeInvalidRequest),
+				},
+			},
+			Total:  1,
+			Limit:  25,
+			Offset: 0,
+		},
+	}
+
+	h := NewHandler(nil, nil, WithAuditReader(reader))
+	c, rec := newHandlerContext("/admin/api/v1/audit/log?search=req-1")
+
+	if err := h.AuditLog(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var result struct {
+		Entries []struct {
+			RequestedModel string `json:"requested_model"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(result.Entries))
+	}
+	if result.Entries[0].RequestedModel != "does-not-exist-model" {
+		t.Fatalf("requested_model = %q, want does-not-exist-model", result.Entries[0].RequestedModel)
+	}
+}
+
 func TestAuditLog_EnrichesEntriesWithUsageSummary(t *testing.T) {
 	now := time.Now().UTC()
 	usageReader := &mockUsageReader{
@@ -1940,6 +1988,75 @@ func TestCacheOverview_ReturnsErrorWhenReaderFails(t *testing.T) {
 	}
 }
 
+func TestCacheOverview_ReturnsClientClosedWhenRequestIsCanceled(t *testing.T) {
+	reader := &mockUsageReader{cacheErr: errors.Join(errors.New("failed to query cache overview summary"), context.Canceled)}
+	h := NewHandler(reader, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
+		CacheEnabled: "on",
+	}))
+	c, rec := newHandlerContext("/admin/api/v1/cache/overview?days=30")
+
+	if err := h.CacheOverview(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != statusClientClosedRequest {
+		t.Fatalf("expected %d, got %d", statusClientClosedRequest, rec.Code)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	errorBody, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error payload, got %v", body)
+	}
+	if got, ok := errorBody["type"].(string); !ok || got != string(core.ErrorTypeInvalidRequest) {
+		t.Fatalf("error.type = %#v, want %q", errorBody["type"], core.ErrorTypeInvalidRequest)
+	}
+	if got, ok := errorBody["message"].(string); !ok || got != "request canceled" {
+		t.Fatalf("error.message = %#v, want request canceled", errorBody["message"])
+	}
+	if got, ok := errorBody["code"].(string); !ok || got != "request_canceled" {
+		t.Fatalf("error.code = %#v, want request_canceled", errorBody["code"])
+	}
+	if reader.lastCacheOverview.CacheMode != usage.CacheModeCached {
+		t.Fatalf("CacheMode = %q, want %q", reader.lastCacheOverview.CacheMode, usage.CacheModeCached)
+	}
+}
+
+func TestCacheOverview_ReturnsGatewayTimeoutWhenRequestDeadlineExceeded(t *testing.T) {
+	reader := &mockUsageReader{cacheErr: errors.Join(errors.New("failed to query cache overview summary"), context.DeadlineExceeded)}
+	h := NewHandler(reader, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
+		CacheEnabled: "on",
+	}))
+	c, rec := newHandlerContext("/admin/api/v1/cache/overview?days=30")
+
+	if err := h.CacheOverview(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected %d, got %d", http.StatusGatewayTimeout, rec.Code)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	errorBody, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error payload, got %v", body)
+	}
+	if got, ok := errorBody["type"].(string); !ok || got != string(core.ErrorTypeInvalidRequest) {
+		t.Fatalf("error.type = %#v, want %q", errorBody["type"], core.ErrorTypeInvalidRequest)
+	}
+	if got, ok := errorBody["message"].(string); !ok || got != "request timed out" {
+		t.Fatalf("error.message = %#v, want request timed out", errorBody["message"])
+	}
+	if got, ok := errorBody["code"].(string); !ok || got != "request_timeout" {
+		t.Fatalf("error.code = %#v, want request_timeout", errorBody["code"])
+	}
+}
+
 // --- handleError tests ---
 
 func TestHandleError_GatewayErrors(t *testing.T) {
@@ -2014,6 +2131,32 @@ func TestHandleError_UnexpectedError(t *testing.T) {
 	}
 	if containsString(body, "something broke") {
 		t.Errorf("original error should be hidden, got: %s", body)
+	}
+}
+
+func TestHandleError_DoesNotLogCanceledRequestsAtDefaultLevel(t *testing.T) {
+	var buf bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() {
+		slog.SetDefault(original)
+	})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/v1/cache/overview", nil)
+	req = req.WithContext(core.WithRequestID(req.Context(), "admin-canceled-req-789"))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := handleError(c, errors.Join(errors.New("failed to query cache overview summary"), context.Canceled)); err != nil {
+		t.Fatalf("handleError() error = %v", err)
+	}
+
+	if rec.Code != statusClientClosedRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, statusClientClosedRequest)
+	}
+	if logOutput := buf.String(); logOutput != "" {
+		t.Fatalf("expected canceled request to be hidden at info level, got %q", logOutput)
 	}
 }
 

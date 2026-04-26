@@ -6,6 +6,7 @@ metadata:
     {{- include "gomodel.labels" . | nindent 4 }}
 data:
   PORT: {{ .Values.server.port | quote }}
+  BASE_PATH: {{ .Values.server.basePath | default "/" | quote }}
   BODY_SIZE_LIMIT: {{ .Values.server.bodySizeLimit | quote }}
   {{- if or .Values.redis.enabled .Values.cache.redis.url }}
   REDIS_KEY_MODELS: {{ .Values.cache.redis.keyModels | default "gomodel:models" | quote }}

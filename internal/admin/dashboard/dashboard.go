@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 
+	"gomodel/config"
+
 	"github.com/labstack/echo/v5"
 )
 
@@ -22,10 +24,17 @@ var content embed.FS
 type Handler struct {
 	indexTmpl *template.Template
 	staticFS  http.Handler
+	basePath  string
 }
 
 // New creates a new dashboard handler with parsed templates and static file server.
 func New() (*Handler, error) {
+	return NewWithBasePath("/")
+}
+
+// NewWithBasePath creates a dashboard handler for an app mounted under basePath.
+func NewWithBasePath(basePath string) (*Handler, error) {
+	basePath = config.NormalizeBasePath(basePath)
 	assetVersions, err := buildAssetVersions("css/dashboard.css")
 	if err != nil {
 		return nil, err
@@ -33,7 +42,10 @@ func New() (*Handler, error) {
 
 	tmpl, err := template.New("layout").Funcs(template.FuncMap{
 		"assetURL": func(path string) string {
-			return assetURL(path, assetVersions)
+			return assetURL(basePath, path, assetVersions)
+		},
+		"appURL": func(path string) string {
+			return config.JoinBasePath(basePath, path)
 		},
 	}).ParseFS(content, "templates/*.html")
 	if err != nil {
@@ -48,13 +60,18 @@ func New() (*Handler, error) {
 	return &Handler{
 		indexTmpl: tmpl,
 		staticFS:  http.StripPrefix("/admin/static/", http.FileServer(http.FS(staticSub))),
+		basePath:  basePath,
 	}, nil
+}
+
+type templateData struct {
+	BasePath string
 }
 
 // Index serves GET /admin/dashboard — the main dashboard page.
 func (h *Handler) Index(c *echo.Context) error {
 	var buf bytes.Buffer
-	if err := h.indexTmpl.ExecuteTemplate(&buf, "layout", nil); err != nil {
+	if err := h.indexTmpl.ExecuteTemplate(&buf, "layout", templateData{BasePath: h.basePath}); err != nil {
 		slog.Error("failed to render admin dashboard", "path", c.Request().URL.Path, "error", err)
 		return err
 	}
@@ -90,12 +107,12 @@ func buildAssetVersions(paths ...string) (map[string]string, error) {
 	return versions, nil
 }
 
-func assetURL(path string, versions map[string]string) string {
-	normalizedPath := strings.TrimLeft(strings.TrimSpace(path), "/")
+func assetURL(basePath, assetPath string, versions map[string]string) string {
+	normalizedPath := strings.TrimLeft(strings.TrimSpace(assetPath), "/")
 	if normalizedPath == "" {
-		return "/admin/static/"
+		return config.JoinBasePath(basePath, "/admin/static/")
 	}
-	urlPath := "/admin/static/" + normalizedPath
+	urlPath := config.JoinBasePath(basePath, "/admin/static/"+normalizedPath)
 	if version := versions[normalizedPath]; version != "" {
 		return urlPath + "?v=" + version
 	}
