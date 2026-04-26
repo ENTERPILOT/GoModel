@@ -1322,10 +1322,17 @@ func applyBudgetEnv(cfg *Config) error {
 		if len(limits) == 0 {
 			continue
 		}
-		cfg.Budgets.UserPaths = append(cfg.Budgets.UserPaths, BudgetUserPathConfig{
+		entry := BudgetUserPathConfig{
 			Path:   path,
 			Limits: limits,
-		})
+		}
+		replaced := cfg.Budgets.UserPaths[:0]
+		for _, existing := range cfg.Budgets.UserPaths {
+			if existing.Path != entry.Path {
+				replaced = append(replaced, existing)
+			}
+		}
+		cfg.Budgets.UserPaths = append(replaced, entry)
 	}
 	return nil
 }
@@ -1417,8 +1424,8 @@ func validateBudgetConfig(cfg *BudgetsConfig) error {
 			return fmt.Errorf("budgets.user_paths[%d].path is required", pathIdx)
 		}
 		for limitIdx, limit := range entry.Limits {
-			if limit.Amount <= 0 {
-				return fmt.Errorf("budgets.user_paths[%d].limits[%d].amount must be greater than 0", pathIdx, limitIdx)
+			if math.IsNaN(limit.Amount) || math.IsInf(limit.Amount, 0) || limit.Amount <= 0 {
+				return fmt.Errorf("budgets.user_paths[%d].limits[%d].amount must be a finite number greater than 0", pathIdx, limitIdx)
 			}
 			if limit.PeriodSeconds <= 0 {
 				seconds, ok := budgetPeriodSeconds(limit.Period)

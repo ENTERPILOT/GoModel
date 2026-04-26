@@ -1,6 +1,7 @@
 package budget
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,33 @@ func TestApplySettingValueRejectsKnownNonInteger(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "must be an integer") {
 		t.Fatalf("applySettingValue() error = %v", err)
+	}
+}
+
+func TestNormalizeBudgetRejectsNonFiniteAmount(t *testing.T) {
+	tests := []struct {
+		name   string
+		amount float64
+	}{
+		{name: "nan", amount: math.NaN()},
+		{name: "positive infinity", amount: math.Inf(1)},
+		{name: "negative infinity", amount: math.Inf(-1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NormalizeBudget(Budget{
+				UserPath:      "/team",
+				PeriodSeconds: PeriodDailySeconds,
+				Amount:        tt.amount,
+			})
+			if err == nil {
+				t.Fatal("NormalizeBudget() error = nil, want non-finite amount error")
+			}
+			if !strings.Contains(err.Error(), "amount must be a finite number greater than 0") {
+				t.Fatalf("NormalizeBudget() error = %v, want finite amount validation", err)
+			}
+		})
 	}
 }
 

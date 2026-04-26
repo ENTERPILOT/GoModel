@@ -4,4 +4,9 @@
 
 ### Migration notes
 
-- Budget management depends on usage tracking. If `USAGE_ENABLED=false`, GoModel starts with budgets disabled and logs a warning even when `BUDGETS_ENABLED=true`; enable both `USAGE_ENABLED` and `BUDGETS_ENABLED` to enforce budgets.
+- Budget defaults are `USAGE_ENABLED=true` and `BUDGETS_ENABLED=true`.
+- `internal/app/app.go` disables budgets when it sees `BUDGETS_ENABLED=true` with `USAGE_ENABLED=false`, because budget checks depend on usage data.
+- Minimal enablement:
+  ```bash
+  USAGE_ENABLED=true BUDGETS_ENABLED=true ./gomodel
+  ```

@@ -2,10 +2,13 @@ package budget
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
+
+var ErrNotFound = errors.New("budget not found")
 
 // Store persists budget definitions, reset settings, and spend lookups.
 type Store interface {

@@ -160,7 +160,7 @@ func (s *SQLiteStore) DeleteBudget(ctx context.Context, userPath string, periodS
 	}
 	affected, err := result.RowsAffected()
 	if err == nil && affected == 0 {
-		return fmt.Errorf("budget %s/%d not found", userPath, periodSeconds)
+		return fmt.Errorf("%w: %s/%d", ErrNotFound, userPath, periodSeconds)
 	}
 	return nil
 }
@@ -269,7 +269,7 @@ func (s *SQLiteStore) ResetBudget(ctx context.Context, userPath string, periodSe
 	}
 	affected, err := result.RowsAffected()
 	if err == nil && affected == 0 {
-		return fmt.Errorf("budget %s/%d not found", userPath, periodSeconds)
+		return fmt.Errorf("%w: %s/%d", ErrNotFound, userPath, periodSeconds)
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package budget
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,6 +123,37 @@ func TestSeedConfiguredBudgetsReplacesEmptyConfigSet(t *testing.T) {
 	}
 	if len(store.replacedBudgets) != 0 {
 		t.Fatalf("replaced budgets = %+v, want empty", store.replacedBudgets)
+	}
+}
+
+func TestSeedConfiguredBudgetsRejectsInvalidPeriodBeforeReplacing(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+	store.replaceCalls = 0
+
+	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{
+		UserPaths: []config.BudgetUserPathConfig{
+			{
+				Path: "/team",
+				Limits: []config.BudgetLimitConfig{
+					{Period: "fortnightly", Amount: 10},
+				},
+			},
+		},
+	})
+
+	if err == nil {
+		t.Fatal("seedConfiguredBudgets() error = nil, want invalid period error")
+	}
+	if !strings.Contains(err.Error(), `invalid budget period for user path "/team" limit 0: "fortnightly"`) {
+		t.Fatalf("seedConfiguredBudgets() error = %v, want contextual invalid period error", err)
+	}
+	if store.replaceCalls != 0 {
+		t.Fatalf("ReplaceConfigBudgets calls = %d, want 0", store.replaceCalls)
 	}
 }
 

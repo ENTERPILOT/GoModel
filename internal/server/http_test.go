@@ -328,6 +328,49 @@ func TestBasePathStripsPrefixBeforeRouting(t *testing.T) {
 	}
 }
 
+func TestBasePathPreservesEscapedPathParamsBeforeRouting(t *testing.T) {
+	srv := New(&mockProvider{}, &Config{BasePath: "/g"})
+	srv.echo.PUT("/admin/api/v1/budgets/:user_path/:period", func(c *echo.Context) error {
+		return c.String(
+			http.StatusOK,
+			c.Param("user_path")+"|"+c.Param("period")+"|"+c.Request().URL.RawPath+"|"+c.Request().RequestURI,
+		)
+	})
+
+	tests := []struct {
+		name     string
+		path     string
+		expected string
+	}{
+		{
+			name:     "root user path",
+			path:     "/g/admin/api/v1/budgets/%2F/86400",
+			expected: "%2F|86400|/admin/api/v1/budgets/%2F/86400|/admin/api/v1/budgets/%2F/86400",
+		},
+		{
+			name:     "nested user path",
+			path:     "/g/admin/api/v1/budgets/%2Fteam%2Fbeta/604800",
+			expected: "%2Fteam%2Fbeta|604800|/admin/api/v1/budgets/%2Fteam%2Fbeta/604800|/admin/api/v1/budgets/%2Fteam%2Fbeta/604800",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut, tt.path, nil)
+			rec := httptest.NewRecorder()
+
+			srv.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+			}
+			if got := rec.Body.String(); got != tt.expected {
+				t.Fatalf("body = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestMetricsEndpointReturnsPrometheusFormat(t *testing.T) {
 	mock := &mockProvider{}
 	srv := New(mock, &Config{

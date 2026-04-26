@@ -1035,7 +1035,7 @@ func (h *Handler) ListBudgets(c *echo.Context) error {
 	now := time.Now().UTC()
 	statuses, err := h.budgets.Statuses(c.Request().Context(), now)
 	if err != nil {
-		return handleError(c, core.NewProviderError("budgets", http.StatusServiceUnavailable, "failed to list budgets", err))
+		return handleError(c, budgetServiceError("failed to list budgets", err))
 	}
 	return c.JSON(http.StatusOK, budgetListResponse{
 		Budgets:    budgetStatusResponses(statuses, now),
@@ -1224,7 +1224,7 @@ func (h *Handler) ResetBudgets(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("confirmation must be reset", nil))
 	}
 	if err := h.budgets.ResetAll(c.Request().Context(), time.Now().UTC()); err != nil {
-		return handleError(c, core.NewProviderError("budgets", http.StatusServiceUnavailable, "failed to reset budgets", err))
+		return handleError(c, budgetServiceError("failed to reset budgets", err))
 	}
 	return c.JSON(http.StatusOK, resetBudgetsResponse{Status: "ok"})
 }
@@ -1570,6 +1570,9 @@ func clampBudgetRatio(value float64) float64 {
 }
 
 func budgetServiceError(message string, err error) error {
+	if errors.Is(err, budget.ErrNotFound) {
+		return core.NewNotFoundError("budget not found").WithCode("budget_not_found")
+	}
 	return core.NewProviderError("budgets", http.StatusServiceUnavailable, message, err)
 }
 

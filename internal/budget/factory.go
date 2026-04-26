@@ -113,12 +113,14 @@ func seedConfiguredBudgets(ctx context.Context, service *Service, cfg config.Bud
 		if err != nil {
 			return fmt.Errorf("invalid budget user path %q: %w", entry.Path, err)
 		}
-		for _, limit := range entry.Limits {
+		for limitIdx, limit := range entry.Limits {
 			seconds := limit.PeriodSeconds
 			if seconds <= 0 {
-				if parsed, ok := PeriodSeconds(limit.Period); ok {
-					seconds = parsed
+				parsed, ok := PeriodSeconds(limit.Period)
+				if !ok {
+					return fmt.Errorf("invalid budget period for user path %q limit %d: %q", userPath, limitIdx, limit.Period)
 				}
+				seconds = parsed
 			}
 			budgets = append(budgets, Budget{
 				UserPath:      userPath,

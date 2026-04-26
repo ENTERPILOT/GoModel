@@ -2,6 +2,7 @@ package budget
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -102,8 +103,8 @@ func NormalizeBudget(b Budget) (Budget, error) {
 	if b.PeriodSeconds <= 0 {
 		return Budget{}, fmt.Errorf("period_seconds must be greater than 0")
 	}
-	if b.Amount <= 0 {
-		return Budget{}, fmt.Errorf("amount must be greater than 0")
+	if math.IsNaN(b.Amount) || math.IsInf(b.Amount, 0) || b.Amount <= 0 {
+		return Budget{}, fmt.Errorf("amount must be a finite number greater than 0")
 	}
 	b.Source = strings.TrimSpace(b.Source)
 	if b.LastResetAt != nil {

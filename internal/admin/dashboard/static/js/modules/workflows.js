@@ -184,11 +184,12 @@
 	            workflowApplyGlobalFeatureCaps(raw) {
 	                const features = this.workflowNormalizedFeatures(raw);
 	                const caps = this.workflowFeatureCaps();
+	                const usage = features.usage && caps.usage;
 	                return {
 	                    cache: features.cache && caps.cache,
 	                    audit: features.audit && caps.audit,
-	                    usage: features.usage && caps.usage,
-	                    budget: features.budget && caps.budget,
+	                    usage,
+	                    budget: usage && features.budget && caps.budget,
 	                    guardrails: features.guardrails && caps.guardrails,
 	                    fallback: features.fallback
 	                };

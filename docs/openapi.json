@@ -4674,6 +4674,9 @@
       },
       "admin.upsertBudgetRequest": {
         "type": "object",
+        "required": [
+          "amount"
+        ],
         "properties": {
           "amount": {
             "type": "number"

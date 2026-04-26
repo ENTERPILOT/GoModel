@@ -299,6 +299,64 @@ func TestLoadBudgetEnvJSONLimitsAreSorted(t *testing.T) {
 	})
 }
 
+func TestLoadBudgetEnvReplacesMatchingYAMLUserPath(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yamlConfig := `
+budgets:
+  user_paths:
+    - path: /team/alpha
+      limits:
+        - period: daily
+          amount: 1
+    - path: /team/beta
+      limits:
+        - period: daily
+          amount: 2
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlConfig), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+		t.Setenv("SET_BUDGET_TEAM__ALPHA", "weekly=50")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+
+		entries := result.Config.Budgets.UserPaths
+		if len(entries) != 2 {
+			t.Fatalf("expected 2 budget user paths, got %d: %+v", len(entries), entries)
+		}
+		if entries[0].Path != "/team/beta" || entries[0].Limits[0].Amount != 2 {
+			t.Fatalf("first budget entry = %+v, want untouched /team/beta YAML entry", entries[0])
+		}
+		if entries[1].Path != "/team/alpha" {
+			t.Fatalf("env replacement path = %q, want /team/alpha", entries[1].Path)
+		}
+		if len(entries[1].Limits) != 1 || entries[1].Limits[0].PeriodSeconds != 604800 || entries[1].Limits[0].Amount != 50 {
+			t.Fatalf("env replacement limits = %+v, want weekly=50", entries[1].Limits)
+		}
+	})
+}
+
+func TestLoadBudgetEnvRejectsNonFiniteAmount(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(string) {
+		t.Setenv("SET_BUDGET_TEAM__ALPHA", "daily=NaN")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("Load() error = nil, want non-finite budget amount error")
+		}
+		if !strings.Contains(err.Error(), "amount must be a finite number greater than 0") {
+			t.Fatalf("Load() error = %v, want finite amount validation", err)
+		}
+	})
+}
+
 func TestLoadBudgetEnvDisablesBudgetsWhenUsageTrackingDisabled(t *testing.T) {
 	clearAllConfigEnvVars(t)
 

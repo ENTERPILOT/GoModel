@@ -22,6 +22,8 @@ type adminBudgetStore struct {
 	resetUserPath      string
 	resetPeriodSeconds int64
 	resetAllAt         time.Time
+	deleteErr          error
+	resetErr           error
 }
 
 func (s *adminBudgetStore) ListBudgets(context.Context) ([]budget.Budget, error) {
@@ -50,6 +52,9 @@ func (s *adminBudgetStore) UpsertBudgets(_ context.Context, budgets []budget.Bud
 }
 
 func (s *adminBudgetStore) DeleteBudget(_ context.Context, userPath string, periodSeconds int64) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
 	normalizedPath, err := budget.NormalizeUserPath(userPath)
 	if err != nil {
 		return err
@@ -81,6 +86,9 @@ func (s *adminBudgetStore) SaveSettings(_ context.Context, settings budget.Setti
 }
 
 func (s *adminBudgetStore) ResetBudget(_ context.Context, userPath string, periodSeconds int64, at time.Time) error {
+	if s.resetErr != nil {
+		return s.resetErr
+	}
 	s.resetUserPath = userPath
 	s.resetPeriodSeconds = periodSeconds
 	for i := range s.budgets {
@@ -224,6 +232,72 @@ func TestBudgetEndpointsDeleteBudget(t *testing.T) {
 	}
 	if len(store.budgets) != 1 || store.budgets[0].PeriodSeconds != budget.PeriodDailySeconds {
 		t.Fatalf("stored budgets after delete = %+v", store.budgets)
+	}
+}
+
+func TestBudgetEndpointsMissingMutationsReturnNotFound(t *testing.T) {
+	tests := []struct {
+		name  string
+		run   func(*Handler, *echo.Echo) *httptest.ResponseRecorder
+		setup func(*adminBudgetStore)
+	}{
+		{
+			name: "delete missing budget",
+			setup: func(store *adminBudgetStore) {
+				store.deleteErr = budget.ErrNotFound
+			},
+			run: func(h *Handler, e *echo.Echo) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/budgets/%2Fteam/86400", nil)
+				rec := httptest.NewRecorder()
+				c := e.NewContext(req, rec)
+				c.SetPathValues(echo.PathValues{
+					{Name: "user_path", Value: "%2Fteam"},
+					{Name: "period", Value: "86400"},
+				})
+				if err := h.DeleteBudget(c); err != nil {
+					t.Fatalf("DeleteBudget() returned handler error: %v", err)
+				}
+				return rec
+			},
+		},
+		{
+			name: "reset missing budget",
+			setup: func(store *adminBudgetStore) {
+				store.resetErr = budget.ErrNotFound
+			},
+			run: func(h *Handler, e *echo.Echo) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(
+					http.MethodPost,
+					"/admin/api/v1/budgets/reset-one",
+					strings.NewReader(`{"user_path":"/team","period_seconds":86400}`),
+				)
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+				c := e.NewContext(req, rec)
+				if err := h.ResetBudget(c); err != nil {
+					t.Fatalf("ResetBudget() returned handler error: %v", err)
+				}
+				return rec
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &adminBudgetStore{}
+			tt.setup(store)
+			h := newBudgetHandler(t, store)
+			e := echo.New()
+
+			rec := tt.run(h, e)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), `"code":"budget_not_found"`) {
+				t.Fatalf("body = %s, want budget_not_found code", rec.Body.String())
+			}
+		})
 	}
 }
 

@@ -143,7 +143,7 @@ func (s *PostgreSQLStore) DeleteBudget(ctx context.Context, userPath string, per
 		return fmt.Errorf("delete budget %s/%d: %w", userPath, periodSeconds, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("budget %s/%d not found", userPath, periodSeconds)
+		return fmt.Errorf("%w: %s/%d", ErrNotFound, userPath, periodSeconds)
 	}
 	return nil
 }
@@ -244,7 +244,7 @@ func (s *PostgreSQLStore) ResetBudget(ctx context.Context, userPath string, peri
 		return fmt.Errorf("reset budget %s/%d: %w", userPath, periodSeconds, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("budget %s/%d not found", userPath, periodSeconds)
+		return fmt.Errorf("%w: %s/%d", ErrNotFound, userPath, periodSeconds)
 	}
 	return nil
 }

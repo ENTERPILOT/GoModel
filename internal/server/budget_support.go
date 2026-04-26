@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"net/http"
 	"strconv"
@@ -59,7 +58,7 @@ func budgetCheckError(err error) error {
 		}
 		return gatewayErr
 	}
-	return core.NewProviderError("budget", http.StatusServiceUnavailable, fmt.Sprintf("budget check failed: %v", err), err).
+	return core.NewProviderError("budget", http.StatusServiceUnavailable, "budget check failed", err).
 		WithCode("budget_check_failed")
 }
 

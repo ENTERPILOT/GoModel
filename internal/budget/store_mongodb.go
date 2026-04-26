@@ -2,9 +2,12 @@ package budget
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -113,7 +116,7 @@ func (s *MongoDBStore) DeleteBudget(ctx context.Context, userPath string, period
 		return fmt.Errorf("delete budget %s/%d: %w", userPath, periodSeconds, err)
 	}
 	if result.DeletedCount == 0 {
-		return fmt.Errorf("budget %s/%d not found", userPath, periodSeconds)
+		return fmt.Errorf("%w: %s/%d", ErrNotFound, userPath, periodSeconds)
 	}
 	return nil
 }
@@ -135,11 +138,24 @@ func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budge
 
 	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
 		if err := s.replaceConfigBudgets(txCtx, budgets); err != nil {
+			if isMongoTransactionCapabilityError(err) {
+				return nil, &mongoTransactionFallbackError{err: err}
+			}
 			return nil, err
 		}
 		return nil, nil
 	})
 	if err != nil {
+		if fallbackErr := mongoTransactionFallbackCause(err); fallbackErr != nil || isMongoTransactionCapabilityError(err) {
+			if fallbackErr == nil {
+				fallbackErr = err
+			}
+			slog.Warn("MongoDB transactions unavailable for budget config replacement; falling back to non-transactional update", "error", fallbackErr)
+			if err := s.replaceConfigBudgets(ctx, budgets); err != nil {
+				return fmt.Errorf("replace config budgets without transaction: %w", errors.Join(fallbackErr, err))
+			}
+			return nil
+		}
 		return fmt.Errorf("replace config budgets transaction: %w", err)
 	}
 	return nil
@@ -211,14 +227,71 @@ func (s *MongoDBStore) SaveSettings(ctx context.Context, settings Settings) (Set
 
 	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
 		if err := s.saveSettingsValues(txCtx, settings); err != nil {
+			if isMongoTransactionCapabilityError(err) {
+				return nil, &mongoTransactionFallbackError{err: err}
+			}
 			return nil, err
 		}
 		return nil, nil
 	})
 	if err != nil {
+		if fallbackErr := mongoTransactionFallbackCause(err); fallbackErr != nil || isMongoTransactionCapabilityError(err) {
+			if fallbackErr == nil {
+				fallbackErr = err
+			}
+			slog.Warn("MongoDB transactions unavailable for budget settings save; falling back to non-transactional update", "error", fallbackErr)
+			if err := s.saveSettingsValues(ctx, settings); err != nil {
+				return Settings{}, fmt.Errorf("save budget settings without transaction: %w", errors.Join(fallbackErr, err))
+			}
+			return settings, nil
+		}
 		return Settings{}, fmt.Errorf("save budget settings transaction: %w", err)
 	}
 	return settings, nil
+}
+
+type mongoTransactionFallbackError struct {
+	err error
+}
+
+func (e *mongoTransactionFallbackError) Error() string {
+	if e == nil || e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func mongoTransactionFallbackCause(err error) error {
+	var fallbackErr *mongoTransactionFallbackError
+	if errors.As(err, &fallbackErr) {
+		return fallbackErr.err
+	}
+	return nil
+}
+
+func isMongoTransactionCapabilityError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	capabilityPhrases := []string{
+		"transaction numbers are only allowed",
+		"transactions are not supported",
+		"transaction is not supported",
+		"transaction not supported",
+		"replica set member or mongos",
+		"requires a replica set",
+	}
+	for _, phrase := range capabilityPhrases {
+		if strings.Contains(message, phrase) {
+			return true
+		}
+	}
+	var labeled mongo.LabeledError
+	return errors.As(err, &labeled) &&
+		labeled.HasErrorLabel("TransientTransactionError") &&
+		strings.Contains(message, "transaction") &&
+		(strings.Contains(message, "not supported") || strings.Contains(message, "not allowed"))
 }
 
 func (s *MongoDBStore) saveSettingsValues(ctx context.Context, settings Settings) error {
@@ -255,7 +328,7 @@ func (s *MongoDBStore) ResetBudget(ctx context.Context, userPath string, periodS
 		return fmt.Errorf("reset budget %s/%d: %w", userPath, periodSeconds, err)
 	}
 	if result.MatchedCount == 0 {
-		return fmt.Errorf("budget %s/%d not found", userPath, periodSeconds)
+		return fmt.Errorf("%w: %s/%d", ErrNotFound, userPath, periodSeconds)
 	}
 	return nil
 }
@@ -276,14 +349,12 @@ func (s *MongoDBStore) SumUsageCost(ctx context.Context, userPath string, start,
 	if err != nil {
 		return 0, false, err
 	}
-	pathPattern := usagePathRegex(userPath)
 	pipeline := bson.A{
 		bson.D{{Key: "$match", Value: bson.D{
 			{Key: "timestamp", Value: bson.D{{Key: "$gte", Value: start.UTC()}, {Key: "$lt", Value: end.UTC()}}},
-			{Key: "user_path", Value: bson.D{{Key: "$regex", Value: pathPattern}}},
-			{Key: "$or", Value: bson.A{
-				bson.D{{Key: "cache_type", Value: bson.D{{Key: "$exists", Value: false}}}},
-				bson.D{{Key: "cache_type", Value: ""}},
+			{Key: "$and", Value: bson.A{
+				mongoUsagePathMatch(userPath),
+				mongoUncachedUsageMatch(),
 			}},
 		}}},
 		bson.D{{Key: "$group", Value: bson.D{
@@ -320,4 +391,23 @@ func usagePathRegex(userPath string) string {
 		return "^/"
 	}
 	return "^" + regexp.QuoteMeta(userPath) + "(?:/|$)"
+}
+
+func mongoUsagePathMatch(userPath string) bson.D {
+	pathPattern := usagePathRegex(userPath)
+	if userPath == "/" {
+		return bson.D{{Key: "$or", Value: bson.A{
+			bson.D{{Key: "user_path", Value: bson.D{{Key: "$exists", Value: false}}}},
+			bson.D{{Key: "user_path", Value: bson.D{{Key: "$regex", Value: `^\s*$`}}}},
+			bson.D{{Key: "user_path", Value: bson.D{{Key: "$regex", Value: pathPattern}}}},
+		}}}
+	}
+	return bson.D{{Key: "user_path", Value: bson.D{{Key: "$regex", Value: pathPattern}}}}
+}
+
+func mongoUncachedUsageMatch() bson.D {
+	return bson.D{{Key: "$or", Value: bson.A{
+		bson.D{{Key: "cache_type", Value: bson.D{{Key: "$exists", Value: false}}}},
+		bson.D{{Key: "cache_type", Value: ""}},
+	}}}
 }

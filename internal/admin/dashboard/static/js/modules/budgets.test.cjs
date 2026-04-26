@@ -363,3 +363,44 @@ test('resetBudgets requires the typed reset confirmation before posting', async 
     assert.equal(module.budgetSettingsError, 'Type reset to confirm.');
     assert.equal(module.budgetResetLoading, false);
 });
+
+test('resetBudgets posts after confirmation and refreshes the budget page', async () => {
+    const requests = [];
+    let refreshCalls = 0;
+    const module = createBudgetsModule({
+        fetch(url, request) {
+            return module.fetch(url, request);
+        }
+    });
+    module.fetch = (url, request) => {
+        requests.push({ url, request });
+        assert.equal(url, '/admin/api/v1/budgets/reset');
+        assert.equal(request.method, 'POST');
+        return Promise.resolve({ status: 200, ok: true });
+    };
+    module.requestOptions = (options) => options || {};
+    module.handleFetchResponse = (res, label, request) => {
+        assert.equal(label, 'budget reset');
+        assert.equal(res.ok, true);
+        assert.equal(request.method, 'POST');
+        return true;
+    };
+    module.page = 'budgets';
+    module.budgetResetDialogOpen = true;
+    module.budgetResetConfirmation = 'reset';
+    module.fetchBudgets = async () => {
+        refreshCalls++;
+        module.budgets = [{ user_path: '/', period_seconds: 86400, amount: 1 }];
+    };
+
+    await module.resetBudgets();
+
+    assert.equal(module.budgetSettingsError, '');
+    assert.equal(module.budgetResetLoading, false);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].request.body, JSON.stringify({ confirmation: 'reset' }));
+    assert.equal(refreshCalls, 1);
+    assert.equal(module.budgetResetDialogOpen, false);
+    assert.equal(module.budgetSettingsNotice, 'Budgets reset.');
+    assert.deepEqual(module.budgets, [{ user_path: '/', period_seconds: 86400, amount: 1 }]);
+});

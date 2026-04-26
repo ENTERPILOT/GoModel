@@ -218,7 +218,7 @@ test('workflowChart returns the shared chart contract for workflow sources', () 
             }
         })),
         JSON.stringify({
-            showBudget: true,
+            showBudget: false,
             budgetNodeClass: '',
             budgetStatusLabel: null,
             showGuardrails: true,
@@ -835,6 +835,34 @@ test('buildWorkflowRequest emits provider-model payload and strips guardrails wh
             }
         })
     );
+});
+
+test('buildWorkflowRequest disables budget when usage is disabled in the form', () => {
+    const module = createWorkflowsModule();
+    module.workflowRuntimeConfig = {
+        USAGE_ENABLED: 'on',
+        BUDGETS_ENABLED: 'on'
+    };
+    module.workflowForm = {
+        scope_provider: 'openai',
+        scope_model: 'gpt-5',
+        name: 'OpenAI GPT-5',
+        description: 'Usage disabled',
+        features: {
+            cache: true,
+            audit: true,
+            usage: false,
+            budget: true,
+            guardrails: false,
+            fallback: true
+        },
+        guardrails: []
+    };
+
+    const features = module.buildWorkflowRequest().workflow_payload.features;
+
+    assert.equal(features.usage, false);
+    assert.equal(features.budget, false);
 });
 
 test('openWorkflowCreate hydrates features and guardrails via shared normalizers', () => {

@@ -33,9 +33,9 @@ func stripBasePathMiddleware(basePath string) echo.MiddlewareFunc {
 			cloned := req.Clone(req.Context())
 			urlCopy := *req.URL
 			urlCopy.Path = strippedPath
-			urlCopy.RawPath = ""
+			urlCopy.RawPath = strippedRawPath(req.URL.RawPath, basePath)
 			cloned.URL = &urlCopy
-			cloned.RequestURI = strippedPath
+			cloned.RequestURI = strippedRequestURI(strippedPath, urlCopy.RawPath)
 			if urlCopy.RawQuery != "" {
 				cloned.RequestURI += "?" + urlCopy.RawQuery
 			}
@@ -65,4 +65,22 @@ func stripBasePath(requestPath, basePath string) (string, bool) {
 		return "/", true
 	}
 	return stripped, true
+}
+
+func strippedRawPath(rawPath, basePath string) string {
+	if rawPath == "" {
+		return ""
+	}
+	stripped, ok := stripBasePath(rawPath, basePath)
+	if !ok {
+		return ""
+	}
+	return stripped
+}
+
+func strippedRequestURI(pathValue, rawPath string) string {
+	if rawPath != "" {
+		return rawPath
+	}
+	return pathValue
 }

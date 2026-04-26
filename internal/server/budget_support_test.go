@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,5 +150,34 @@ func TestBudgetExceededResponseIncludesRetryAfter(t *testing.T) {
 	}
 	if seconds <= 0 || seconds > 300 {
 		t.Fatalf("Retry-After = %d, want between 1 and 300", seconds)
+	}
+}
+
+func TestBudgetCheckFailedResponseMapping(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := budgetCheckError(errors.New("backend details should not leak"))
+	if err := handleError(c, err); err != nil {
+		t.Fatalf("handleError() error = %v", err)
+	}
+
+	if rec.Code == http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want non-rate-limit budget_check_failed response", rec.Code)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"code":"budget_check_failed"`) {
+		t.Fatalf("body = %s, want budget_check_failed code", body)
+	}
+	if !strings.Contains(body, `"message":"budget check failed"`) {
+		t.Fatalf("body = %s, want generic budget check message", body)
+	}
+	if strings.Contains(body, "backend details should not leak") {
+		t.Fatalf("body leaked wrapped error detail: %s", body)
 	}
 }
