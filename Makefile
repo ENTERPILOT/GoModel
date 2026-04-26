@@ -7,6 +7,8 @@ VERSION ?= $(shell git describe --tags --always --dirty)
 COMMIT ?= $(shell git rev-parse --short HEAD)
 DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 DOCS_API_SERVERS ?= https://gomodel.example.com,http://localhost:8080
+LOG_LEVEL ?= debug
+SWAGGER_ENABLED ?= true
 
 # Linker flags to inject version info
 LDFLAGS := -X "gomodel/internal/version.Version=$(VERSION)" \
@@ -22,7 +24,7 @@ build:
 	go build -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
 # Run the application
 run:
-	LOG_LEVEL=debug SWAGGER_ENABLED=true go run -tags=swagger ./cmd/gomodel
+	LOG_LEVEL=$(LOG_LEVEL) SWAGGER_ENABLED=$(SWAGGER_ENABLED) go run -tags=swagger ./cmd/gomodel
 
 # Clean build artifacts
 clean:
