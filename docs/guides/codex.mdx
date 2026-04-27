@@ -9,7 +9,7 @@ Responses API.
 
 Flow:
 
-`Codex -> GoModel -> OpenAI`
+`Codex -> GoModel -> upstream model provider`
 
 ## Before you start
 
@@ -95,6 +95,38 @@ The validated result was:
 
 ```text
 ok
+```
+
+## DeepSeek V4
+
+Codex sends `POST /v1/responses`. DeepSeek exposes chat completions instead of
+a native Responses API, so configure the first-class DeepSeek provider and let
+GoModel translate the request.
+
+```yaml
+providers:
+  deepseek:
+    type: deepseek
+    base_url: "https://api.deepseek.com"
+    api_key: "${DEEPSEEK_API_KEY}"
+```
+
+If you previously configured DeepSeek as `type: openai`, change it to
+`type: deepseek` for Codex. The generic OpenAI provider forwards `/responses`
+upstream, while the DeepSeek provider translates `/responses` to
+`/chat/completions`.
+
+Then use the DeepSeek model name in Codex:
+
+```toml
+model_provider = "gomodel"
+model = "deepseek-v4-pro"
+
+[model_providers.gomodel]
+name = "GoModel"
+base_url = "http://localhost:8080/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
 ```
 
 ## 5. Check the traffic in GoModel

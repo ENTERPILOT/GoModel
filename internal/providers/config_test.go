@@ -27,6 +27,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"gemini": {
 		DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
 	},
+	"deepseek": {
+		DefaultBaseURL: "https://api.deepseek.com",
+	},
 	"xai": {
 		DefaultBaseURL: "https://api.x.ai/v1",
 	},
@@ -399,6 +402,26 @@ func TestApplyProviderEnvVars_DiscoversOpenRouterFromAPIKey(t *testing.T) {
 	}
 	if p.BaseURL != testDiscoveryConfigs["openrouter"].DefaultBaseURL {
 		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["openrouter"].DefaultBaseURL)
+	}
+}
+
+func TestApplyProviderEnvVars_DiscoversDeepSeekFromAPIKey(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "deepseek-key")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["deepseek"]
+	if !exists {
+		t.Fatal("expected deepseek to be discovered from env var")
+	}
+	if p.APIKey != "deepseek-key" {
+		t.Errorf("APIKey = %q, want deepseek-key", p.APIKey)
+	}
+	if p.Type != "deepseek" {
+		t.Errorf("Type = %q, want deepseek", p.Type)
+	}
+	if p.BaseURL != testDiscoveryConfigs["deepseek"].DefaultBaseURL {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["deepseek"].DefaultBaseURL)
 	}
 }
 

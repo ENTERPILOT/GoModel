@@ -18,6 +18,7 @@ import (
 	"gomodel/internal/providers"
 	"gomodel/internal/providers/anthropic"
 	"gomodel/internal/providers/azure"
+	"gomodel/internal/providers/deepseek"
 	"gomodel/internal/providers/gemini"
 	"gomodel/internal/providers/groq"
 	"gomodel/internal/providers/minimax"
@@ -73,7 +74,7 @@ func startApplication(application lifecycleApp, addr string) error {
 
 // @title          GoModel API
 // @version        1.0
-// @description    High-performance AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, Z.ai, xAI, MiniMax, Oracle, Ollama). Drop-in OpenAI-compatible API.
+// @description    High-performance AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, DeepSeek, Z.ai, xAI, MiniMax, Oracle, Ollama). Drop-in OpenAI-compatible API.
 // @BasePath       /
 // @schemes        http
 // @securityDefinitions.apikey BearerAuth
@@ -119,6 +120,7 @@ func main() {
 	factory.Add(azure.Registration)
 	factory.Add(oracle.Registration)
 	factory.Add(anthropic.Registration)
+	factory.Add(deepseek.Registration)
 	factory.Add(gemini.Registration)
 	factory.Add(groq.Registration)
 	factory.Add(minimax.Registration)

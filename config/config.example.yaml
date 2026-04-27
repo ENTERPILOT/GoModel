@@ -264,10 +264,11 @@ providers:
   #     - openai.gpt-oss-120b
   #     - xai.grok-3
 
-  # Example: DeepSeek (OpenAI-compatible)
+  # Example: DeepSeek. GoModel translates /v1/responses requests to DeepSeek
+  # chat completions because DeepSeek does not expose a native Responses API.
   # deepseek:
-  #   type: "openai"
-  #   base_url: "https://api.deepseek.com/v1"
+  #   type: "deepseek"
+  #   base_url: "https://api.deepseek.com"
   #   api_key: "${DEEPSEEK_API_KEY}"
 
   # Example: local Ollama server with explicit per-model metadata.

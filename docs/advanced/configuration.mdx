@@ -181,6 +181,7 @@ Set these to automatically register providers. No YAML configuration required.
 | `OPENAI_API_KEY`     | OpenAI                                             |
 | `ANTHROPIC_API_KEY`  | Anthropic                                          |
 | `GEMINI_API_KEY`     | Google Gemini                                      |
+| `DEEPSEEK_API_KEY`   | DeepSeek                                           |
 | `OPENROUTER_API_KEY` | OpenRouter                                         |
 | `ZAI_API_KEY`        | Z.ai                                               |
 | `XAI_API_KEY`        | xAI (Grok)                                         |
@@ -190,7 +191,7 @@ Set these to automatically register providers. No YAML configuration required.
 | `OLLAMA_BASE_URL`    | Ollama (no API key needed)                        |
 | `VLLM_BASE_URL`      | vLLM (no API key needed unless upstream requires) |
 
-Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. vLLM defaults to `http://localhost:8000/v1` when `VLLM_API_KEY` is set, but keyless deployments should set `VLLM_BASE_URL` explicitly to register the provider. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
+Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). DeepSeek defaults to `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only for a compatible proxy or alternate DeepSeek endpoint. OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. vLLM defaults to `http://localhost:8000/v1` when `VLLM_API_KEY` is set, but keyless deployments should set `VLLM_BASE_URL` explicitly to register the provider. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
 
 Every provider type also accepts a comma-separated configured model list via
 `<PROVIDER>_MODELS`, for example `OPENROUTER_MODELS`, `ORACLE_MODELS`,
@@ -311,6 +312,7 @@ The simplest way to add providers. GoModel checks for well-known API key environ
 export OPENAI_API_KEY="sk-..."      # Registers "openai" provider
 export ANTHROPIC_API_KEY="sk-ant-..." # Registers "anthropic" provider
 export GEMINI_API_KEY="..."          # Registers "gemini" provider
+export DEEPSEEK_API_KEY="..."        # Registers "deepseek" provider
 export XAI_API_KEY="..."             # Registers "xai" provider
 export GROQ_API_KEY="gsk_..."        # Registers "groq" provider
 export OPENROUTER_API_KEY="sk-or-..." # Registers "openrouter" provider
@@ -380,6 +382,12 @@ providers:
     models:
       - openai.gpt-oss-120b
       - xai.grok-3
+
+  # Add DeepSeek. GoModel translates /v1/responses to DeepSeek chat completions.
+  deepseek:
+    type: deepseek
+    base_url: "https://api.deepseek.com"
+    api_key: "..."
 
   # Add a vLLM OpenAI-compatible server
   vllm:

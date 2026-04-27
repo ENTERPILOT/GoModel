@@ -1,6 +1,6 @@
 # GoModel Helm Chart
 
-High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, Z.ai, xAI, Oracle).
+High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Gemini, DeepSeek, Groq, Z.ai, xAI, Oracle).
 
 ## Prerequisites
 

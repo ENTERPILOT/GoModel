@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  A fast and lightweight AI gateway written in Go, providing a unified OpenAI-compatible API for OpenAI, Anthropic, Gemini, xAI, Groq, OpenRouter, Z.ai, Azure OpenAI, Oracle, Ollama, and more.
+  A fast and lightweight AI gateway written in Go, providing a unified OpenAI-compatible API for OpenAI, Anthropic, Gemini, DeepSeek, xAI, Groq, OpenRouter, Z.ai, Azure OpenAI, Oracle, Ollama, and more.
 </p>
 
 <a href="docs/dashboard.gif">
@@ -51,6 +51,7 @@ docker run --rm -p 8080:8080 \
   -e OPENAI_API_KEY="your-openai-key" \
   -e ANTHROPIC_API_KEY="your-anthropic-key" \
   -e GEMINI_API_KEY="your-gemini-key" \
+  -e DEEPSEEK_API_KEY="your-deepseek-key" \
   -e GROQ_API_KEY="your-groq-key" \
   -e OPENROUTER_API_KEY="your-openrouter-key" \
   -e ZAI_API_KEY="your-zai-key" \
@@ -90,6 +91,7 @@ Example model identifiers are illustrative and subject to change; consult provid
 | OpenAI        | `OPENAI_API_KEY`                                                  | `gpt-5.5`                          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
 | Anthropic     | `ANTHROPIC_API_KEY`                                               | `claude-sonnet-4-20250514`         |  ✅  |      ✅      |  ❌   |  ❌   |   ✅    |    ✅    |
 | Google Gemini | `GEMINI_API_KEY`                                                  | `gemini-2.5-flash`                 |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
+| DeepSeek      | `DEEPSEEK_API_KEY`                                                | `deepseek-v4-pro`                  |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ❌    |
 | Groq          | `GROQ_API_KEY`                                                    | `llama-3.3-70b-versatile`          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
 | OpenRouter    | `OPENROUTER_API_KEY`                                              | `google/gemini-2.5-flash`          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
 | Z.ai          | `ZAI_API_KEY` (`ZAI_BASE_URL` optional)                           | `glm-5.1`                          |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ✅    |
@@ -105,7 +107,9 @@ For Z.ai's GLM Coding Plan, set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v
 Configured model lists are available for every provider with
 `<PROVIDER>_MODELS`, for example
 `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` or
-`ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. By default,
+`ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. DeepSeek defaults to
+`https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only when using a compatible
+proxy or alternate DeepSeek endpoint. By default,
 `CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses those lists only when upstream
 `/models` is unavailable or empty. Set `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`
 to expose only configured models for providers that define a list, skipping
@@ -288,7 +292,7 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for testing, linting, and pre-commit s
 ### Must Have
 
 - [ ] Intelligent routing
-- [ ] Broader provider support: Oracle model configuration via environment variables, plus Cohere, Command A, Operational, and DeepSeek V3
+- [ ] Broader provider support: Cohere, Command A, and Operational
 - [ ] Budget management with limits per `user_path` and/or API key
 - [ ] Editable model pricing for accurate cost tracking and budgeting
 - [ ] Full support for the OpenAI `/responses` and `/conversations` lifecycle
