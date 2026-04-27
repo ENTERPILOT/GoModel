@@ -86,6 +86,7 @@
                 "pages": [
                     "guides/openclaw",
                     "guides/oracle",
+                    "guides/deepseek",
                     "guides/vllm",
                     "guides/multiple-ollama",
                     "guides/claude-code",

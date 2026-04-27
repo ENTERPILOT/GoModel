@@ -1,0 +1,67 @@
+---
+title: "GoModel & DeepSeek"
+description: "Configure DeepSeek V4 in GoModel and understand how reasoning effort is mapped to DeepSeek's reasoning_effort field."
+icon: "brain"
+---
+
+GoModel routes to DeepSeek through DeepSeek's chat completions API. DeepSeek
+does not expose a native Responses API, so GoModel translates `/v1/responses`
+requests to `/chat/completions` automatically.
+
+## 1. Configure DeepSeek
+
+Env-only is enough:
+
+```bash
+export DEEPSEEK_API_KEY="..."
+```
+
+Or in `config.yaml` (not recommended):
+
+```yaml
+providers:
+  deepseek:
+    type: deepseek
+    base_url: "https://api.deepseek.com"
+    api_key: "${DEEPSEEK_API_KEY}"
+```
+
+<Note>
+  If you previously configured DeepSeek as `type: openai`, switch it to `type:
+  deepseek` so GoModel translates `/v1/responses` and remaps reasoning effort.
+  The generic OpenAI provider does neither.
+</Note>
+
+## 2. Reasoning effort mapping
+
+DeepSeek V4 reasoning models accept `reasoning_effort` as a top-level string
+with two levels: `high` and `max`. GoModel accepts the standard OpenAI-style
+levels and remaps them:
+
+| Client sends    | DeepSeek receives |
+| --------------- | ----------------- |
+| `low`           | `high`            |
+| `medium`        | `high`            |
+| `high`          | `high`            |
+| `xhigh` / `max` | `max`             |
+| anything else   | passed through    |
+
+`low` and `medium` are mapped up to `high` because DeepSeek's reasoning models
+do not accept lower levels. If you want to avoid reasoning entirely, omit the
+`reasoning` field instead of passing `low`.
+
+GoModel rewrites the request body so DeepSeek sees a top-level
+`reasoning_effort: "..."` instead of OpenAI's nested
+`"reasoning": {"effort": "..."}` shape. No client change is required.
+
+## Current support
+
+Integrated:
+
+- chat completions and streaming
+- Responses API and streaming (translated to chat completions)
+- model listing through `/models`
+
+Not supported by DeepSeek:
+
+- embeddings (returns an `invalid_request_error`)

@@ -116,6 +116,10 @@ If you previously configured DeepSeek as `type: openai`, change it to
 upstream, while the DeepSeek provider translates `/responses` to
 `/chat/completions`.
 
+See the [DeepSeek guide](/guides/deepseek) for the full reasoning effort
+mapping table (DeepSeek V4 only accepts `high` and `max`, so GoModel maps
+`low` and `medium` up to `high`).
+
 Then use the DeepSeek model name in Codex:
 
 ```toml
