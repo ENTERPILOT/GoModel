@@ -1062,7 +1062,7 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
 	}
 	var req upsertBudgetRequest
-	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 	userPath, periodSeconds, err := budgetRouteKey(c)
@@ -1143,19 +1143,10 @@ func (h *Handler) UpdateBudgetSettings(c *echo.Context) error {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
 	}
 	var req updateBudgetSettingsRequest
-	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	settings := budget.Settings{
-		DailyResetHour:     req.DailyResetHour,
-		DailyResetMinute:   req.DailyResetMinute,
-		WeeklyResetWeekday: req.WeeklyResetWeekday,
-		WeeklyResetHour:    req.WeeklyResetHour,
-		WeeklyResetMinute:  req.WeeklyResetMinute,
-		MonthlyResetDay:    req.MonthlyResetDay,
-		MonthlyResetHour:   req.MonthlyResetHour,
-		MonthlyResetMinute: req.MonthlyResetMinute,
-	}
+	settings := req.apply(h.budgets.Settings())
 	if err := budget.ValidateSettings(settings); err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
@@ -1183,7 +1174,7 @@ func (h *Handler) ResetBudget(c *echo.Context) error {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
 	}
 	var req resetBudgetRequest
-	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 	periodSeconds, err := budgetRequestPeriodSeconds(req.Period, req.PeriodSeconds)
@@ -1217,7 +1208,7 @@ func (h *Handler) ResetBudgets(c *echo.Context) error {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
 	}
 	var req resetBudgetsRequest
-	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 	if strings.TrimSpace(strings.ToLower(req.confirmationValue())) != "reset" {
@@ -1455,14 +1446,42 @@ type resetBudgetRequest struct {
 }
 
 type updateBudgetSettingsRequest struct {
-	DailyResetHour     int `json:"daily_reset_hour"`
-	DailyResetMinute   int `json:"daily_reset_minute"`
-	WeeklyResetWeekday int `json:"weekly_reset_weekday"`
-	WeeklyResetHour    int `json:"weekly_reset_hour"`
-	WeeklyResetMinute  int `json:"weekly_reset_minute"`
-	MonthlyResetDay    int `json:"monthly_reset_day"`
-	MonthlyResetHour   int `json:"monthly_reset_hour"`
-	MonthlyResetMinute int `json:"monthly_reset_minute"`
+	DailyResetHour     *int `json:"daily_reset_hour"`
+	DailyResetMinute   *int `json:"daily_reset_minute"`
+	WeeklyResetWeekday *int `json:"weekly_reset_weekday"`
+	WeeklyResetHour    *int `json:"weekly_reset_hour"`
+	WeeklyResetMinute  *int `json:"weekly_reset_minute"`
+	MonthlyResetDay    *int `json:"monthly_reset_day"`
+	MonthlyResetHour   *int `json:"monthly_reset_hour"`
+	MonthlyResetMinute *int `json:"monthly_reset_minute"`
+}
+
+func (r updateBudgetSettingsRequest) apply(settings budget.Settings) budget.Settings {
+	if r.DailyResetHour != nil {
+		settings.DailyResetHour = *r.DailyResetHour
+	}
+	if r.DailyResetMinute != nil {
+		settings.DailyResetMinute = *r.DailyResetMinute
+	}
+	if r.WeeklyResetWeekday != nil {
+		settings.WeeklyResetWeekday = *r.WeeklyResetWeekday
+	}
+	if r.WeeklyResetHour != nil {
+		settings.WeeklyResetHour = *r.WeeklyResetHour
+	}
+	if r.WeeklyResetMinute != nil {
+		settings.WeeklyResetMinute = *r.WeeklyResetMinute
+	}
+	if r.MonthlyResetDay != nil {
+		settings.MonthlyResetDay = *r.MonthlyResetDay
+	}
+	if r.MonthlyResetHour != nil {
+		settings.MonthlyResetHour = *r.MonthlyResetHour
+	}
+	if r.MonthlyResetMinute != nil {
+		settings.MonthlyResetMinute = *r.MonthlyResetMinute
+	}
+	return settings
 }
 
 type resetBudgetsRequest struct {

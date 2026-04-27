@@ -64,3 +64,39 @@ func TestSQLiteStoreReplaceConfigBudgetsRemovesStaleConfigRowsOnly(t *testing.T)
 		t.Fatal("manual budget was removed by config replacement")
 	}
 }
+
+func TestSQLiteStoreReplaceConfigBudgetsPreservesManualCollision(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("sql.Open() failed: %v", err)
+	}
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore() failed: %v", err)
+	}
+	if err := store.UpsertBudgets(ctx, []Budget{
+		{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10, Source: SourceManual},
+	}); err != nil {
+		t.Fatalf("UpsertBudgets() failed: %v", err)
+	}
+
+	if err := store.ReplaceConfigBudgets(ctx, []Budget{
+		{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 99},
+	}); err != nil {
+		t.Fatalf("ReplaceConfigBudgets() failed: %v", err)
+	}
+
+	got, err := store.ListBudgets(ctx)
+	if err != nil {
+		t.Fatalf("ListBudgets() failed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 budget, got %d: %+v", len(got), got)
+	}
+	if got[0].Source != SourceManual || got[0].Amount != 10 {
+		t.Fatalf("manual budget = %+v, want manual amount preserved", got[0])
+	}
+}

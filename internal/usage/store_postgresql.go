@@ -99,6 +99,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage(provider)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_provider_name ON usage(provider_name)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_user_path ON usage(user_path)",
+		"CREATE INDEX IF NOT EXISTS idx_usage_user_path_normalized ON usage(COALESCE(NULLIF(TRIM(user_path), ''), '/'))",
 		"CREATE INDEX IF NOT EXISTS idx_usage_cache_type ON usage(cache_type)",
 		"CREATE INDEX IF NOT EXISTS idx_usage_raw_data_gin ON usage USING GIN (raw_data)",
 	}

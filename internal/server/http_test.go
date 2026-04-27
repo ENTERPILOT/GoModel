@@ -381,6 +381,41 @@ func TestBasePathPreservesEscapedPathParamsBeforeRouting(t *testing.T) {
 	}
 }
 
+func TestBasePathRejectsInvalidRawPathPrefix(t *testing.T) {
+	srv := New(&mockProvider{}, &Config{BasePath: "/g"})
+	srv.echo.PUT("/admin/api/v1/budgets/:user_path/:period", func(c *echo.Context) error {
+		return c.NoContent(http.StatusOK)
+	})
+
+	tests := []struct {
+		name    string
+		rawPath string
+	}{
+		{
+			name:    "decoded raw path does not match base path",
+			rawPath: "/%2Fg/admin/api/v1/budgets/%2F/86400",
+		},
+		{
+			name:    "encoded slash in raw base path segment",
+			rawPath: "/%67%2Fadmin/api/v1/budgets/%2F/86400",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut, "/g/admin/api/v1/budgets/%2F/86400", nil)
+			req.URL.RawPath = tt.rawPath
+			rec := httptest.NewRecorder()
+
+			srv.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestMetricsEndpointReturnsPrometheusFormat(t *testing.T) {
 	mock := &mockProvider{}
 	srv := New(mock, &Config{

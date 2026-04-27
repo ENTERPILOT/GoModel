@@ -232,7 +232,8 @@ func anchoredWeekStart(now time.Time, weekday time.Weekday, hour, minute int) ti
 func anchoredMonthStart(now time.Time, day, hour, minute int) time.Time {
 	start := monthAnchor(now.Year(), now.Month(), day, hour, minute)
 	if now.Before(start) {
-		prev := now.AddDate(0, -1, 0)
+		prevFirst := time.Date(now.Year(), now.Month(), 1, now.Hour(), now.Minute(), now.Second(), now.Nanosecond(), now.Location())
+		prev := prevFirst.AddDate(0, -1, 0)
 		start = monthAnchor(prev.Year(), prev.Month(), day, hour, minute)
 	}
 	return start

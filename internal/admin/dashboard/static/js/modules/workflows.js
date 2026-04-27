@@ -559,8 +559,17 @@
                     scope_model: String(workflow.scope && workflow.scope.scope_model || '').trim(),
                     scope_user_path: String(workflow.scope && workflow.scope.scope_user_path || '').trim()
                 };
-                const features = this.workflowSourceFeatures(workflow);
-                const guardrails = this.workflowSourceGuardrails(workflow);
+                const storedFeatures = workflow && workflow.workflow_payload && workflow.workflow_payload.features
+                    ? this.workflowNormalizedFeatures(workflow.workflow_payload.features)
+                    : this.workflowSourceFeatures(workflow);
+                const storedGuardrails = Array.isArray(workflow && workflow.workflow_payload && workflow.workflow_payload.guardrails)
+                    ? workflow.workflow_payload.guardrails
+                        .map((step) => ({
+                            ref: String(step && step.ref || '').trim(),
+                            step: this.parseWorkflowGuardrailStep(step && step.step)
+                        }))
+                        .filter((step) => Number.isInteger(step.step) && step.step >= 0)
+                    : this.workflowSourceGuardrails(workflow);
                 this.workflowForm = {
                     scope_provider: this.workflowScopeProviderValue(workflow.scope),
                     scope_model: String(workflow.scope && workflow.scope.scope_model || ''),
@@ -568,14 +577,14 @@
                     name: String(workflow.name || ''),
                     description: String(workflow.description || ''),
                     features: {
-                        cache: !!features.cache,
-                        audit: !!features.audit,
-                        usage: !!features.usage,
-                        budget: !!features.budget,
-                        guardrails: !!features.guardrails,
-                        fallback: !!features.fallback
+                        cache: !!storedFeatures.cache,
+                        audit: !!storedFeatures.audit,
+                        usage: !!storedFeatures.usage,
+                        budget: !!storedFeatures.budget,
+                        guardrails: !!storedFeatures.guardrails,
+                        fallback: !!storedFeatures.fallback
                     },
-                    guardrails: guardrails.map((step) => ({
+                    guardrails: storedGuardrails.map((step) => ({
                         ref: String(step && step.ref || ''),
                         step: Number.isFinite(step && step.step) ? step.step : 10
                     }))

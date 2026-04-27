@@ -21,6 +21,15 @@ func TestIsMongoTransactionCapabilityError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "illegal operation command code",
+			err: mongo.CommandError{
+				Code:    20,
+				Message: "transaction is not supported by this deployment",
+				Labels:  []string{"TransientTransactionError"},
+			},
+			want: true,
+		},
+		{
 			name: "labeled unsupported transaction message",
 			err: mongo.CommandError{
 				Message: "transaction is not supported by this deployment",
@@ -71,5 +80,18 @@ func TestMongoUsagePathMatchNestedPathRequiresPrefixBoundary(t *testing.T) {
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("mongoUsagePathMatch(/team) = %#v, want %#v", got, want)
+	}
+}
+
+func TestMongoUncachedUsageMatchIncludesMissingNilAndEmptyCacheType(t *testing.T) {
+	got := mongoUncachedUsageMatch()
+	want := bson.D{{Key: "$or", Value: bson.A{
+		bson.D{{Key: "cache_type", Value: bson.D{{Key: "$exists", Value: false}}}},
+		bson.D{{Key: "cache_type", Value: nil}},
+		bson.D{{Key: "cache_type", Value: ""}},
+	}}}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mongoUncachedUsageMatch() = %#v, want %#v", got, want)
 	}
 }

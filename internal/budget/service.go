@@ -124,7 +124,7 @@ func (s *Service) SaveSettings(ctx context.Context, settings Settings) (Settings
 		return Settings{}, err
 	}
 	if err := s.Refresh(ctx); err != nil {
-		return Settings{}, err
+		return saved, fmt.Errorf("refresh budget service after saving settings: %w", err)
 	}
 	return saved, nil
 }
@@ -216,7 +216,7 @@ func (s *Service) CheckWithResults(ctx context.Context, userPath string, now tim
 		return nil, nil
 	}
 
-	results := make([]CheckResult, 0)
+	results := make([]CheckResult, 0, len(budgets))
 	for _, budget := range budgets {
 		if !budgetAppliesToPath(budget.UserPath, userPath) {
 			continue

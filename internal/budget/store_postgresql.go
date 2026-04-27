@@ -51,7 +51,6 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 		return nil, fmt.Errorf("failed to create budget_settings table: %w", err)
 	}
 	for _, index := range []string{
-		`CREATE INDEX IF NOT EXISTS idx_budgets_user_path ON budgets(user_path)`,
 		`CREATE INDEX IF NOT EXISTS idx_budgets_period_seconds ON budgets(period_seconds)`,
 	} {
 		if _, err := pool.Exec(ctx, index); err != nil {
@@ -100,26 +99,8 @@ func (s *PostgreSQLStore) UpsertBudgets(ctx context.Context, budgets []Budget) e
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	for _, budget := range budgets {
-		_, err := tx.Exec(ctx, `
-			INSERT INTO budgets (user_path, period_seconds, amount, source, last_reset_at, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT (user_path, period_seconds) DO UPDATE SET
-				amount = excluded.amount,
-				source = excluded.source,
-				updated_at = excluded.updated_at
-		`,
-			budget.UserPath,
-			budget.PeriodSeconds,
-			budget.Amount,
-			budget.Source,
-			unixOrNil(budget.LastResetAt),
-			budget.CreatedAt.Unix(),
-			budget.UpdatedAt.Unix(),
-		)
-		if err != nil {
-			return fmt.Errorf("upsert budget %s/%d: %w", budget.UserPath, budget.PeriodSeconds, err)
-		}
+	if err := upsertPostgreSQLBudgets(ctx, tx, budgets); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit budget upsert: %w", err)
@@ -251,7 +232,8 @@ func (s *PostgreSQLStore) ResetBudget(ctx context.Context, userPath string, peri
 }
 
 func (s *PostgreSQLStore) ResetAllBudgets(ctx context.Context, at time.Time) error {
-	_, err := s.pool.Exec(ctx, `UPDATE budgets SET last_reset_at = $1, updated_at = $2`, at.UTC().Unix(), at.UTC().Unix())
+	utcUnix := at.UTC().Unix()
+	_, err := s.pool.Exec(ctx, `UPDATE budgets SET last_reset_at = $1, updated_at = $2`, utcUnix, utcUnix)
 	if err != nil {
 		return fmt.Errorf("reset all budgets: %w", err)
 	}
@@ -289,9 +271,9 @@ func upsertPostgreSQLBudgets(ctx context.Context, tx pgx.Tx, budgets []Budget) e
 			INSERT INTO budgets (user_path, period_seconds, amount, source, last_reset_at, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (user_path, period_seconds) DO UPDATE SET
-				amount = excluded.amount,
-				source = excluded.source,
-				updated_at = excluded.updated_at
+				amount = CASE WHEN excluded.source = $8 OR budgets.source = $9 THEN excluded.amount ELSE budgets.amount END,
+				source = CASE WHEN excluded.source = $8 OR budgets.source = $9 THEN excluded.source ELSE budgets.source END,
+				updated_at = CASE WHEN excluded.source = $8 OR budgets.source = $9 THEN excluded.updated_at ELSE budgets.updated_at END
 		`,
 			budget.UserPath,
 			budget.PeriodSeconds,
@@ -300,6 +282,8 @@ func upsertPostgreSQLBudgets(ctx context.Context, tx pgx.Tx, budgets []Budget) e
 			unixOrNil(budget.LastResetAt),
 			budget.CreatedAt.Unix(),
 			budget.UpdatedAt.Unix(),
+			SourceManual,
+			SourceConfig,
 		)
 		if err != nil {
 			return fmt.Errorf("upsert budget %s/%d: %w", budget.UserPath, budget.PeriodSeconds, err)

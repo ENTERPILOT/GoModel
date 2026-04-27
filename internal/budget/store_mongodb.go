@@ -35,7 +35,6 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 			Keys:    bson.D{{Key: "user_path", Value: 1}, {Key: "period_seconds", Value: 1}},
 			Options: options.Index().SetUnique(true),
 		},
-		{Keys: bson.D{{Key: "user_path", Value: 1}}},
 		{Keys: bson.D{{Key: "period_seconds", Value: 1}}},
 	})
 	if err != nil {
@@ -84,6 +83,7 @@ func (s *MongoDBStore) upsertNormalizedBudgets(ctx context.Context, budgets []Bu
 	if len(budgets) == 0 {
 		return nil
 	}
+	models := make([]mongo.WriteModel, 0, len(budgets))
 	for _, budget := range budgets {
 		filter := bson.D{{Key: "user_path", Value: budget.UserPath}, {Key: "period_seconds", Value: budget.PeriodSeconds}}
 		update := bson.D{{Key: "$set", Value: bson.D{
@@ -96,9 +96,13 @@ func (s *MongoDBStore) upsertNormalizedBudgets(ctx context.Context, budgets []Bu
 			{Key: "created_at", Value: budget.CreatedAt},
 			{Key: "last_reset_at", Value: budget.LastResetAt},
 		}}}
-		if _, err := s.budgets.UpdateOne(ctx, filter, update, options.UpdateOne().SetUpsert(true)); err != nil {
-			return fmt.Errorf("upsert budget %s/%d: %w", budget.UserPath, budget.PeriodSeconds, err)
-		}
+		models = append(models, mongo.NewUpdateOneModel().
+			SetFilter(filter).
+			SetUpdate(update).
+			SetUpsert(true))
+	}
+	if _, err := s.budgets.BulkWrite(ctx, models); err != nil {
+		return fmt.Errorf("upsert %d budgets: %w", len(budgets), err)
 	}
 	return nil
 }
@@ -176,7 +180,50 @@ func (s *MongoDBStore) replaceConfigBudgets(ctx context.Context, budgets []Budge
 	if _, err := s.budgets.DeleteMany(ctx, filter); err != nil {
 		return fmt.Errorf("delete old config budgets: %w", err)
 	}
-	return s.upsertNormalizedBudgets(ctx, budgets)
+	configBudgets, err := s.configBudgetsWithoutManualCollisions(ctx, budgets)
+	if err != nil {
+		return err
+	}
+	return s.upsertNormalizedBudgets(ctx, configBudgets)
+}
+
+func (s *MongoDBStore) configBudgetsWithoutManualCollisions(ctx context.Context, budgets []Budget) ([]Budget, error) {
+	if len(budgets) == 0 {
+		return nil, nil
+	}
+	keys := make(bson.A, 0, len(budgets))
+	for _, budget := range budgets {
+		keys = append(keys, bson.D{
+			{Key: "user_path", Value: budget.UserPath},
+			{Key: "period_seconds", Value: budget.PeriodSeconds},
+		})
+	}
+	cursor, err := s.budgets.Find(ctx, bson.D{{Key: "$or", Value: keys}})
+	if err != nil {
+		return nil, fmt.Errorf("find existing config budget collisions: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	existingSources := make(map[string]string, len(budgets))
+	for cursor.Next(ctx) {
+		var existing Budget
+		if err := cursor.Decode(&existing); err != nil {
+			return nil, fmt.Errorf("decode existing budget collision: %w", err)
+		}
+		existingSources[budgetKey(existing.UserPath, existing.PeriodSeconds)] = existing.Source
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("iterate existing budget collisions: %w", err)
+	}
+
+	filtered := make([]Budget, 0, len(budgets))
+	for _, budget := range budgets {
+		if source, ok := existingSources[budgetKey(budget.UserPath, budget.PeriodSeconds)]; ok && source != "" && source != SourceConfig {
+			continue
+		}
+		filtered = append(filtered, budget)
+	}
+	return filtered, nil
 }
 
 func (s *MongoDBStore) GetSettings(ctx context.Context) (Settings, error) {
@@ -273,26 +320,20 @@ func isMongoTransactionCapabilityError(err error) bool {
 	if err == nil {
 		return false
 	}
-	message := strings.ToLower(err.Error())
-	// TODO: Prefer structured driver labels here and revisit these defensive message matches on mongo-driver upgrades.
-	capabilityPhrases := []string{
-		"transaction numbers are only allowed",
-		"transactions are not supported",
-		"transaction is not supported",
-		"transaction not supported",
-		"replica set member or mongos",
-		"requires a replica set",
-	}
-	for _, phrase := range capabilityPhrases {
-		if strings.Contains(message, phrase) {
-			return true
-		}
+	var commandErr mongo.CommandError
+	if errors.As(err, &commandErr) && commandErr.HasErrorCode(20) {
+		return true
 	}
 	var labeled mongo.LabeledError
-	return errors.As(err, &labeled) &&
-		labeled.HasErrorLabel("TransientTransactionError") &&
-		strings.Contains(message, "transaction") &&
-		(strings.Contains(message, "not supported") || strings.Contains(message, "not allowed"))
+	if errors.As(err, &labeled) && labeled.HasErrorLabel("TransientTransactionError") {
+		message := strings.ToLower(err.Error())
+		return strings.Contains(message, "transaction") &&
+			(strings.Contains(message, "not supported") ||
+				strings.Contains(message, "not allowed") ||
+				strings.Contains(message, "replica set"))
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "transaction numbers are only allowed on a replica set member or mongos")
 }
 
 func (s *MongoDBStore) saveSettingsValues(ctx context.Context, settings Settings) error {
@@ -409,6 +450,7 @@ func mongoUsagePathMatch(userPath string) bson.D {
 func mongoUncachedUsageMatch() bson.D {
 	return bson.D{{Key: "$or", Value: bson.A{
 		bson.D{{Key: "cache_type", Value: bson.D{{Key: "$exists", Value: false}}}},
+		bson.D{{Key: "cache_type", Value: nil}},
 		bson.D{{Key: "cache_type", Value: ""}},
 	}}}
 }

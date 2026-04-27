@@ -114,9 +114,9 @@ func (s *SQLiteStore) UpsertBudgets(ctx context.Context, budgets []Budget) error
 		INSERT INTO budgets (user_path, period_seconds, amount, source, last_reset_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_path, period_seconds) DO UPDATE SET
-			amount = excluded.amount,
-			source = excluded.source,
-			updated_at = excluded.updated_at
+			amount = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.amount ELSE budgets.amount END,
+			source = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.source ELSE budgets.source END,
+			updated_at = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.updated_at ELSE budgets.updated_at END
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare budget upsert: %w", err)
@@ -133,6 +133,12 @@ func (s *SQLiteStore) UpsertBudgets(ctx context.Context, budgets []Budget) error
 			unixOrNil(budget.LastResetAt),
 			budget.CreatedAt.Unix(),
 			budget.UpdatedAt.Unix(),
+			SourceManual,
+			SourceConfig,
+			SourceManual,
+			SourceConfig,
+			SourceManual,
+			SourceConfig,
 		); err != nil {
 			return fmt.Errorf("upsert budget %s/%d: %w", budget.UserPath, budget.PeriodSeconds, err)
 		}
@@ -323,9 +329,9 @@ func upsertSQLiteBudgets(ctx context.Context, tx *sql.Tx, budgets []Budget) erro
 		INSERT INTO budgets (user_path, period_seconds, amount, source, last_reset_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_path, period_seconds) DO UPDATE SET
-			amount = excluded.amount,
-			source = excluded.source,
-			updated_at = excluded.updated_at
+			amount = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.amount ELSE budgets.amount END,
+			source = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.source ELSE budgets.source END,
+			updated_at = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.updated_at ELSE budgets.updated_at END
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare budget upsert: %w", err)
@@ -342,6 +348,12 @@ func upsertSQLiteBudgets(ctx context.Context, tx *sql.Tx, budgets []Budget) erro
 			unixOrNil(budget.LastResetAt),
 			budget.CreatedAt.Unix(),
 			budget.UpdatedAt.Unix(),
+			SourceManual,
+			SourceConfig,
+			SourceManual,
+			SourceConfig,
+			SourceManual,
+			SourceConfig,
 		); err != nil {
 			return fmt.Errorf("upsert budget %s/%d: %w", budget.UserPath, budget.PeriodSeconds, err)
 		}

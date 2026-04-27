@@ -33,8 +33,12 @@ func stripBasePathMiddleware(basePath string) echo.MiddlewareFunc {
 
 			cloned := req.Clone(req.Context())
 			urlCopy := *req.URL
+			strippedRaw := strippedRawPath(req.URL.RawPath, basePath)
+			if req.URL.RawPath != "" && strippedRaw == "" {
+				return echo.NewHTTPError(http.StatusBadRequest, "invalid encoded request path")
+			}
 			urlCopy.Path = strippedPath
-			urlCopy.RawPath = strippedRawPath(req.URL.RawPath, basePath)
+			urlCopy.RawPath = strippedRaw
 			cloned.URL = &urlCopy
 			cloned.RequestURI = strippedRequestURI(strippedPath, urlCopy.RawPath)
 			if urlCopy.RawQuery != "" {
@@ -95,6 +99,11 @@ func stripRawPathByDecodedBase(rawPath, basePath string) string {
 	baseParts := strings.Split(strings.Trim(basePath, "/"), "/")
 	if len(rawParts) == 0 || rawParts[0] != "" || len(rawParts) < len(baseParts)+1 {
 		return ""
+	}
+	for _, rawPart := range rawParts[1 : len(baseParts)+1] {
+		if strings.Contains(strings.ToLower(rawPart), "%2f") {
+			return ""
+		}
 	}
 	suffixParts := rawParts[len(baseParts)+1:]
 	if len(suffixParts) == 0 {

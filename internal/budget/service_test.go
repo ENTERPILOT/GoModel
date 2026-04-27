@@ -13,6 +13,7 @@ import (
 type fakeStore struct {
 	budgets  []Budget
 	settings Settings
+	listErr  error
 	sum      func(userPath string, start, end time.Time) (float64, bool, error)
 
 	lastSumUserPath string
@@ -23,6 +24,9 @@ type fakeStore struct {
 }
 
 func (s *fakeStore) ListBudgets(context.Context) ([]Budget, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
 	return append([]Budget(nil), s.budgets...), nil
 }
 
@@ -47,8 +51,9 @@ func (s *fakeStore) GetSettings(context.Context) (Settings, error) {
 	return s.settings, nil
 }
 
-func (s *fakeStore) SaveSettings(context.Context, Settings) (Settings, error) {
-	return Settings{}, nil
+func (s *fakeStore) SaveSettings(_ context.Context, settings Settings) (Settings, error) {
+	s.settings = settings
+	return settings, nil
 }
 
 func (s *fakeStore) ResetBudget(_ context.Context, _ string, _ int64, at time.Time) error {
@@ -114,6 +119,30 @@ func TestServiceUnavailableOperationsReturnErrors(t *testing.T) {
 				t.Fatalf("error = %v, want ErrUnavailable", err)
 			}
 		})
+	}
+}
+
+func TestServiceSaveSettingsReturnsSavedSnapshotWhenRefreshFails(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+	store.listErr = errors.New("refresh failed")
+
+	want := DefaultSettings()
+	want.DailyResetHour = 7
+	saved, err := service.SaveSettings(ctx, want)
+
+	if err == nil {
+		t.Fatal("SaveSettings() error = nil, want refresh error")
+	}
+	if !strings.Contains(err.Error(), "refresh budget service after saving settings") {
+		t.Fatalf("SaveSettings() error = %v, want refresh wrapper", err)
+	}
+	if saved.DailyResetHour != want.DailyResetHour {
+		t.Fatalf("saved settings = %+v, want persisted snapshot %+v", saved, want)
 	}
 }
 

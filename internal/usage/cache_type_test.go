@@ -21,21 +21,6 @@ func TestNormalizedUsageEntryForStorageClearsInvalidCacheTypeWithoutMutatingInpu
 	}
 }
 
-func TestNormalizedUsageEntryForStorageNormalizesUserPath(t *testing.T) {
-	entry := &UsageEntry{
-		ID:       "usage-1",
-		UserPath: " team/alpha ",
-	}
-
-	got := normalizedUsageEntryForStorage(entry)
-	if got.UserPath != "/team/alpha" {
-		t.Fatalf("normalized UserPath = %q, want /team/alpha", got.UserPath)
-	}
-	if entry.UserPath != " team/alpha " {
-		t.Fatalf("input UserPath mutated to %q", entry.UserPath)
-	}
-}
-
 func TestNormalizedUsageEntryForStorageUserPathFallbackAndCloneBehavior(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -45,6 +30,11 @@ func TestNormalizedUsageEntryForStorageUserPathFallbackAndCloneBehavior(t *testi
 		wantProviderName string
 		wantSamePointer  bool
 	}{
+		{
+			name:         "trims whitespace and prepends slash",
+			entry:        UsageEntry{ID: "usage-0", UserPath: " team/alpha "},
+			wantUserPath: "/team/alpha",
+		},
 		{
 			name:             "invalid dotdot path falls back to root",
 			entry:            UsageEntry{ID: "usage-1", UserPath: "/team/../alpha", CacheType: CacheTypeExact, ProviderName: "openai"},

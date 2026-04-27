@@ -376,6 +376,24 @@ func TestBudgetSettingsEndpoints(t *testing.T) {
 		t.Fatalf("stored settings = %+v", store.settings)
 	}
 
+	partialReq := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/api/v1/budgets/settings",
+		strings.NewReader(`{"daily_reset_hour":8}`),
+	)
+	partialReq.Header.Set("Content-Type", "application/json")
+	partialRec := httptest.NewRecorder()
+	partialCtx := e.NewContext(partialReq, partialRec)
+	if err := h.UpdateBudgetSettings(partialCtx); err != nil {
+		t.Fatalf("partial UpdateBudgetSettings() failed: %v", err)
+	}
+	if partialRec.Code != http.StatusOK {
+		t.Fatalf("partial update status = %d, want %d body=%s", partialRec.Code, http.StatusOK, partialRec.Body.String())
+	}
+	if store.settings.DailyResetHour != 8 || store.settings.DailyResetMinute != 30 || store.settings.MonthlyResetDay != 31 {
+		t.Fatalf("partial settings update = %+v, want existing values preserved", store.settings)
+	}
+
 	invalidReq := httptest.NewRequest(
 		http.MethodPut,
 		"/admin/api/v1/budgets/settings",

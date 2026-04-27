@@ -865,7 +865,7 @@ test('buildWorkflowRequest disables budget when usage is disabled in the form', 
     assert.equal(features.budget, false);
 });
 
-test('openWorkflowCreate hydrates features and guardrails via shared normalizers', () => {
+test('openWorkflowCreate hydrates saved features and guardrails from payload', () => {
     const module = createWorkflowsModule();
     module.workflowSourceFeatures = () => ({
         cache: false,
@@ -904,18 +904,18 @@ test('openWorkflowCreate hydrates features and guardrails via shared normalizers
     assert.equal(
         JSON.stringify(module.workflowForm.features),
         JSON.stringify({
-            cache: false,
-            audit: false,
-            usage: true,
-            budget: false,
-            guardrails: true,
-            fallback: false
+            cache: true,
+            audit: true,
+            usage: false,
+            budget: true,
+            guardrails: false,
+            fallback: true
         })
     );
     assert.equal(module.workflowFormHydrated, true);
     assert.equal(
         JSON.stringify(module.workflowForm.guardrails),
-        JSON.stringify([{ ref: 'policy-system', step: 30 }])
+        JSON.stringify([{ ref: 'wrong-source', step: 10 }])
     );
     assert.equal(module.workflowForm.scope_user_path, '/team/alpha');
 });

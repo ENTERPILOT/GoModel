@@ -114,6 +114,13 @@ func TestPeriodBoundsUsesConfiguredAnchors(t *testing.T) {
 			wantEnd:   time.Date(2026, time.March, 31, 2, 45, 0, 0, time.UTC),
 		},
 		{
+			name:      "monthly day 31 before March anchor uses February anchor",
+			now:       time.Date(2026, time.March, 30, 3, 0, 0, 0, time.UTC),
+			period:    PeriodMonthlySeconds,
+			wantStart: time.Date(2026, time.February, 28, 2, 45, 0, 0, time.UTC),
+			wantEnd:   time.Date(2026, time.March, 31, 2, 45, 0, 0, time.UTC),
+		},
+		{
 			name:      "monthly day 31 at leap February anchor",
 			now:       time.Date(2024, time.February, 29, 2, 45, 0, 0, time.UTC),
 			period:    PeriodMonthlySeconds,

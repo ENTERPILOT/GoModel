@@ -357,6 +357,36 @@ func TestLoadBudgetEnvRejectsNonFiniteAmount(t *testing.T) {
 	})
 }
 
+func TestLoadBudgetConfigRejectsDuplicateLogicalBudgets(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yamlConfig := `
+budgets:
+  user_paths:
+    - path: team/alpha
+      limits:
+        - period: daily
+          amount: 1
+    - path: /team/alpha
+      limits:
+        - period_seconds: 86400
+          amount: 2
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlConfig), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("Load() error = nil, want duplicate budget error")
+		}
+		if !strings.Contains(err.Error(), "duplicate budget for path /team/alpha period 86400") {
+			t.Fatalf("Load() error = %v, want duplicate budget validation", err)
+		}
+	})
+}
+
 func TestLoadBudgetEnvDisablesBudgetsWhenUsageTrackingDisabled(t *testing.T) {
 	clearAllConfigEnvVars(t)
 

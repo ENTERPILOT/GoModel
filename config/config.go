@@ -19,6 +19,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"gomodel/internal/core"
 	"gomodel/internal/storage"
 )
 
@@ -1419,21 +1420,37 @@ func validateBudgetConfig(cfg *BudgetsConfig) error {
 	if !cfg.Enabled {
 		return nil
 	}
+	seen := make(map[string]struct{})
 	for pathIdx, entry := range cfg.UserPaths {
 		if strings.TrimSpace(entry.Path) == "" {
 			return fmt.Errorf("budgets.user_paths[%d].path is required", pathIdx)
 		}
+		normalizedPath, err := core.NormalizeUserPath(entry.Path)
+		if err != nil {
+			return fmt.Errorf("budgets.user_paths[%d].path is invalid: %w", pathIdx, err)
+		}
+		if normalizedPath == "" {
+			return fmt.Errorf("budgets.user_paths[%d].path is required", pathIdx)
+		}
+		cfg.UserPaths[pathIdx].Path = normalizedPath
 		for limitIdx, limit := range entry.Limits {
 			if math.IsNaN(limit.Amount) || math.IsInf(limit.Amount, 0) || limit.Amount <= 0 {
 				return fmt.Errorf("budgets.user_paths[%d].limits[%d].amount must be a finite number greater than 0", pathIdx, limitIdx)
 			}
+			seconds := limit.PeriodSeconds
 			if limit.PeriodSeconds <= 0 {
-				seconds, ok := budgetPeriodSeconds(limit.Period)
+				parsed, ok := budgetPeriodSeconds(limit.Period)
 				if !ok {
 					return fmt.Errorf("budgets.user_paths[%d].limits[%d].period must be one of hourly, daily, weekly, monthly or period_seconds must be set", pathIdx, limitIdx)
 				}
+				seconds = parsed
 				cfg.UserPaths[pathIdx].Limits[limitIdx].PeriodSeconds = seconds
 			}
+			key := normalizedPath + ":" + strconv.FormatInt(seconds, 10)
+			if _, ok := seen[key]; ok {
+				return fmt.Errorf("duplicate budget for path %s period %d", normalizedPath, seconds)
+			}
+			seen[key] = struct{}{}
 		}
 	}
 	return nil
