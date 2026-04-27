@@ -559,10 +559,10 @@
                     scope_model: String(workflow.scope && workflow.scope.scope_model || '').trim(),
                     scope_user_path: String(workflow.scope && workflow.scope.scope_user_path || '').trim()
                 };
-                const storedFeatures = workflow && workflow.workflow_payload && workflow.workflow_payload.features
+                const storedFeatures = workflow.workflow_payload && workflow.workflow_payload.features
                     ? this.workflowNormalizedFeatures(workflow.workflow_payload.features)
                     : this.workflowSourceFeatures(workflow);
-                const storedGuardrails = Array.isArray(workflow && workflow.workflow_payload && workflow.workflow_payload.guardrails)
+                const storedGuardrails = Array.isArray(workflow.workflow_payload && workflow.workflow_payload.guardrails)
                     ? workflow.workflow_payload.guardrails
                         .map((step) => ({
                             ref: String(step && step.ref || '').trim(),
