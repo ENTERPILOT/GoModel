@@ -246,6 +246,7 @@ start_stack() {
   start_gateway sqlite-main \
     -u GOMODEL_MASTER_KEY \
     PORT=18080 \
+    BASE_PATH= \
     STORAGE_TYPE=sqlite \
     SQLITE_PATH="$(gateway_dir sqlite-main)/data/gomodel.db" \
     METRICS_ENABLED=true \
@@ -261,6 +262,7 @@ start_stack() {
   start_gateway pg-smoke \
     -u GOMODEL_MASTER_KEY \
     PORT=18081 \
+    BASE_PATH= \
     STORAGE_TYPE=postgresql \
     POSTGRES_URL="postgres://gomodel:gomodel@localhost:5432/$PG_DATABASE?sslmode=disable" \
     LOGGING_ENABLED=true \
@@ -275,6 +277,7 @@ start_stack() {
   start_gateway mongo-smoke \
     -u GOMODEL_MASTER_KEY \
     PORT=18082 \
+    BASE_PATH= \
     STORAGE_TYPE=mongodb \
     MONGODB_URL="mongodb://localhost:27017/?replicaSet=rs0" \
     MONGODB_DATABASE="$MONGO_DATABASE" \
@@ -290,6 +293,7 @@ start_stack() {
   start_gateway guardrails \
     -u GOMODEL_MASTER_KEY \
     PORT=18083 \
+    BASE_PATH= \
     STORAGE_TYPE=sqlite \
     SQLITE_PATH="$(gateway_dir guardrails)/data/gomodel.db" \
     LOGGING_ENABLED=true \
@@ -303,6 +307,7 @@ start_stack() {
 
   start_gateway auth-cache \
     PORT=18084 \
+    BASE_PATH= \
     STORAGE_TYPE=sqlite \
     SQLITE_PATH="$(gateway_dir auth-cache)/data/gomodel.db" \
     LOGGING_ENABLED=true \

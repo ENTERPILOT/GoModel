@@ -37,6 +37,12 @@ type TestServerConfig struct {
 	// UsageEnabled enables usage tracking
 	UsageEnabled bool
 
+	// BudgetsEnabled enables budget enforcement.
+	BudgetsEnabled bool
+
+	// BudgetUserPaths seeds configured budget limits.
+	BudgetUserPaths []config.BudgetUserPathConfig
+
 	// LogBodies enables body logging in audit logs
 	LogBodies bool
 
@@ -171,6 +177,8 @@ func resetPostgreSQLStorage(t *testing.T) {
 	tables := []string{
 		"audit_logs",
 		"usage",
+		"budgets",
+		"budget_settings",
 		"workflow_versions",
 		"guardrail_definitions",
 		"auth_keys",
@@ -196,6 +204,8 @@ func resetMongoDBStorage(t *testing.T) {
 	collections := []string{
 		"audit_logs",
 		"usage",
+		"budgets",
+		"budget_settings",
 		"workflow_versions",
 		"guardrail_definitions",
 		"auth_keys",
@@ -292,6 +302,10 @@ func buildAppConfig(t *testing.T, cfg TestServerConfig, mockLLMURL string, port 
 			FlushInterval:             1,
 			RetentionDays:             0,
 		},
+		Budgets: config.BudgetsConfig{
+			Enabled:   cfg.BudgetsEnabled,
+			UserPaths: cfg.BudgetUserPaths,
+		},
 		Metrics: config.MetricsConfig{
 			Enabled: false,
 		},
@@ -326,7 +340,24 @@ func buildAppConfig(t *testing.T, cfg TestServerConfig, mockLLMURL string, port 
 				Type:    "test",
 				APIKey:  "sk-test-key",
 				BaseURL: mockLLMURL,
+				Models: []config.RawProviderModel{
+					{ID: "gpt-4", Metadata: testPricingMetadata()},
+					{ID: "gpt-4.1", Metadata: testPricingMetadata()},
+					{ID: "gpt-3.5-turbo", Metadata: testPricingMetadata()},
+				},
 			},
+		},
+	}
+}
+
+func testPricingMetadata() *core.ModelMetadata {
+	inputPerMtok := 1000.0
+	outputPerMtok := 1000.0
+	return &core.ModelMetadata{
+		Pricing: &core.ModelPricing{
+			Currency:      "USD",
+			InputPerMtok:  &inputPerMtok,
+			OutputPerMtok: &outputPerMtok,
 		},
 	}
 }

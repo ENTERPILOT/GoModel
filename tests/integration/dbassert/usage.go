@@ -28,6 +28,9 @@ type UsageEntry struct {
 	InputTokens  int
 	OutputTokens int
 	TotalTokens  int
+	InputCost    *float64
+	OutputCost   *float64
+	TotalCost    *float64
 	RawData      map[string]any
 }
 
@@ -39,7 +42,7 @@ func QueryUsageByRequestID(t *testing.T, pool *pgxpool.Pool, requestID string) [
 
 	query := `
 		SELECT id, request_id, provider_id, timestamp, model, provider, endpoint, user_path, cache_type,
-		       input_tokens, output_tokens, total_tokens, raw_data
+		       input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, raw_data
 		FROM usage
 		WHERE request_id = $1
 		ORDER BY timestamp ASC
@@ -53,16 +56,28 @@ func QueryUsageByRequestID(t *testing.T, pool *pgxpool.Pool, requestID string) [
 	for rows.Next() {
 		var entry UsageEntry
 		var cacheType sql.NullString
+		var inputCost sql.NullFloat64
+		var outputCost sql.NullFloat64
+		var totalCost sql.NullFloat64
 		var rawDataJSON []byte
 		err := rows.Scan(
 			&entry.ID, &entry.RequestID, &entry.ProviderID,
 			&entry.Timestamp, &entry.Model, &entry.Provider, &entry.Endpoint, &entry.UserPath, &cacheType,
-			&entry.InputTokens, &entry.OutputTokens, &entry.TotalTokens, &rawDataJSON,
+			&entry.InputTokens, &entry.OutputTokens, &entry.TotalTokens, &inputCost, &outputCost, &totalCost, &rawDataJSON,
 		)
 		require.NoError(t, err, "failed to scan usage row")
 
 		if cacheType.Valid {
 			entry.CacheType = cacheType.String
+		}
+		if inputCost.Valid {
+			entry.InputCost = &inputCost.Float64
+		}
+		if outputCost.Valid {
+			entry.OutputCost = &outputCost.Float64
+		}
+		if totalCost.Valid {
+			entry.TotalCost = &totalCost.Float64
 		}
 		if rawDataJSON != nil {
 			entry.RawData = unmarshalRawData(t, rawDataJSON)
@@ -219,6 +234,15 @@ func bsonToUsageEntry(t *testing.T, doc bson.M) UsageEntry {
 		entry.TotalTokens = int(v)
 	} else if v, ok := doc["total_tokens"].(int64); ok {
 		entry.TotalTokens = int(v)
+	}
+	if v, ok := doc["input_cost"].(float64); ok {
+		entry.InputCost = &v
+	}
+	if v, ok := doc["output_cost"].(float64); ok {
+		entry.OutputCost = &v
+	}
+	if v, ok := doc["total_cost"].(float64); ok {
+		entry.TotalCost = &v
 	}
 	if v, ok := doc["raw_data"].(bson.M); ok {
 		entry.RawData = bsonToMap(v)

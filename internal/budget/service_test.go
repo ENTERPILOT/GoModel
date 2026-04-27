@@ -257,6 +257,53 @@ func TestServiceCheckRejectsExceededBudgetForMatchingUserPath(t *testing.T) {
 	}
 }
 
+func TestServiceCheckBudgetAmountBoundary(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name      string
+		spent     float64
+		wantError bool
+	}{
+		{name: "below amount passes", spent: 9.99},
+		{name: "equal amount blocks", spent: 10, wantError: true},
+		{name: "above amount blocks", spent: 10.01, wantError: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{
+				budgets: []Budget{
+					{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+				},
+				sum: func(userPath string, start, end time.Time) (float64, bool, error) {
+					return tt.spent, true, nil
+				},
+			}
+			service, err := NewService(ctx, store)
+			if err != nil {
+				t.Fatalf("NewService() failed: %v", err)
+			}
+
+			err = service.Check(ctx, "/team/app", now)
+			var exceeded *ExceededError
+			if tt.wantError {
+				if !errors.As(err, &exceeded) {
+					t.Fatalf("Check() error = %v, want ExceededError", err)
+				}
+				if exceeded.Result.Spent != tt.spent {
+					t.Fatalf("exceeded spent = %v, want %v", exceeded.Result.Spent, tt.spent)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Check() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
 func TestServiceCheckDoesNotEnforceBudgetWithoutUsage(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{
@@ -338,5 +385,29 @@ func TestServiceCheckStartsAtManualResetWhenNewerThanPeriodStart(t *testing.T) {
 	}
 	if !store.lastSumStart.Equal(resetAt) {
 		t.Fatalf("sum start = %s, want reset time %s", store.lastSumStart, resetAt)
+	}
+}
+
+func TestServiceCheckIgnoresManualResetOlderThanPeriodStart(t *testing.T) {
+	ctx := context.Background()
+	resetAt := time.Date(2026, time.April, 24, 9, 0, 0, 0, time.UTC)
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+	store := &fakeStore{
+		budgets: []Budget{
+			{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10, LastResetAt: &resetAt},
+		},
+	}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+
+	_, err = service.CheckWithResults(ctx, "/team", now)
+	if err != nil {
+		t.Fatalf("CheckWithResults() error = %v", err)
+	}
+	want := time.Date(2026, time.April, 25, 0, 0, 0, 0, time.UTC)
+	if !store.lastSumStart.Equal(want) {
+		t.Fatalf("sum start = %s, want period start %s", store.lastSumStart, want)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"gomodel/internal/usage"
 )
 
 func TestSQLiteStoreReplaceConfigBudgetsRemovesStaleConfigRowsOnly(t *testing.T) {
@@ -98,5 +100,78 @@ func TestSQLiteStoreReplaceConfigBudgetsPreservesManualCollision(t *testing.T) {
 	}
 	if got[0].Source != SourceManual || got[0].Amount != 10 {
 		t.Fatalf("manual budget = %+v, want manual amount preserved", got[0])
+	}
+}
+
+func TestSQLiteStoreSumUsageCostHonorsUserPathBoundaryAndCacheType(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("sql.Open() failed: %v", err)
+	}
+	defer db.Close()
+
+	usageStore, err := usage.NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore() for usage failed: %v", err)
+	}
+	store, err := NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore() failed: %v", err)
+	}
+
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+	entries := []*usage.UsageEntry{
+		usageEntryWithCost("team-root", "/team", "", now, 0.25),
+		usageEntryWithCost("team-child", "/team/app", "", now, 0.75),
+		usageEntryWithCost("sibling", "/team-alpha", "", now, 5),
+		usageEntryWithCost("cached", "/team/cache", usage.CacheTypeExact, now, 10),
+		usageEntryWithCost("outside-window", "/team/app", "", now.Add(-48*time.Hour), 7),
+	}
+	if err := usageStore.WriteBatch(ctx, entries); err != nil {
+		t.Fatalf("WriteBatch() failed: %v", err)
+	}
+
+	got, hasUsage, err := store.SumUsageCost(ctx, "/team", now.Add(-time.Hour), now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("SumUsageCost() failed: %v", err)
+	}
+	if !hasUsage {
+		t.Fatal("SumUsageCost() hasUsage = false, want true")
+	}
+	if got != 1.0 {
+		t.Fatalf("SumUsageCost() = %v, want 1.0", got)
+	}
+
+	got, hasUsage, err = store.SumUsageCost(ctx, "/missing", now.Add(-time.Hour), now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("SumUsageCost() for missing path failed: %v", err)
+	}
+	if hasUsage || got != 0 {
+		t.Fatalf("missing path sum = %v/%v, want 0/false", got, hasUsage)
+	}
+}
+
+func usageEntryWithCost(id, userPath, cacheType string, ts time.Time, cost float64) *usage.UsageEntry {
+	inputCost := cost / 2
+	outputCost := cost / 2
+	totalCost := cost
+	return &usage.UsageEntry{
+		ID:           id,
+		RequestID:    id,
+		ProviderID:   id,
+		Timestamp:    ts,
+		Model:        "gpt-4",
+		Provider:     "test",
+		ProviderName: "test",
+		Endpoint:     "/v1/chat/completions",
+		UserPath:     userPath,
+		CacheType:    cacheType,
+		InputTokens:  1,
+		OutputTokens: 1,
+		TotalTokens:  2,
+		InputCost:    &inputCost,
+		OutputCost:   &outputCost,
+		TotalCost:    &totalCost,
 	}
 }

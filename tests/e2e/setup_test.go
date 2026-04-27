@@ -25,7 +25,10 @@ type e2eServerOptions struct {
 	adminEndpointsEnabled bool
 	adminUIEnabled        bool
 	adminUsageReader      usage.UsageReader
+	adminOptions          []admin.Option
 	usageLogger           usage.LoggerInterface
+	budgetChecker         server.BudgetChecker
+	pricingResolver       usage.PricingResolver
 	providerType          string
 }
 
@@ -77,11 +80,13 @@ func setupE2EServer(t *testing.T, opts e2eServerOptions) *server.Server {
 	cfg := &server.Config{
 		MasterKey:             opts.masterKey,
 		UsageLogger:           opts.usageLogger,
+		BudgetChecker:         opts.budgetChecker,
+		PricingResolver:       opts.pricingResolver,
 		AdminEndpointsEnabled: opts.adminEndpointsEnabled,
 	}
 
 	if opts.adminEndpointsEnabled {
-		cfg.AdminHandler = admin.NewHandler(opts.adminUsageReader, registry)
+		cfg.AdminHandler = admin.NewHandler(opts.adminUsageReader, registry, opts.adminOptions...)
 	}
 
 	if opts.adminUIEnabled {

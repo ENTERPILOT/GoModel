@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 85 end-to-end curl scenarios for release validation.
+This file contains 89 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -34,6 +34,7 @@ Stateful note:
 - `S13`-`S60` mutate shared aliases/files/batches
 - `S64`-`S79` mutate managed keys, workflows, and auth artifacts
 - `S80`-`S85` mutate response snapshots and response-cache artifacts
+- `S86`-`S89` mutate budget settings and budgets
 - For stateful partial reruns, prefer a contiguous range that includes the
   prerequisite setup scenarios, or rerun with the same `--qa-suffix` and
   `--keep-artifacts`
@@ -45,6 +46,11 @@ export QA_SUFFIX="${QA_SUFFIX:-$(date +%s)-$$}"
 export QA_RUN_DIR="${QA_RUN_DIR:-/tmp/gomodel-release-e2e-$QA_SUFFIX}"
 export QA_OPENAI_ALIAS="${QA_OPENAI_ALIAS:-qa-gpt-latest-$QA_SUFFIX}"
 export QA_ANTHROPIC_ALIAS="${QA_ANTHROPIC_ALIAS:-qa-sonnet-thinking-$QA_SUFFIX}"
+export QA_BUDGET_SUFFIX="${QA_SUFFIX//[^[:alnum:]]/_}"
+export QA_BUDGET_AMOUNT="${QA_BUDGET_AMOUNT:-0.000000001}"
+export QA_BUDGET_SQLITE_PATH="/team/budget/sqlite/$QA_SUFFIX"
+export QA_BUDGET_PG_PATH="/team/budget/postgres/$QA_SUFFIX"
+export QA_BUDGET_MONGO_PATH="/team/budget/mongo/$QA_SUFFIX"
 
 mkdir -p "$QA_RUN_DIR"
 
@@ -61,6 +67,104 @@ printf 'qa file payload\n' > "$QA_RUN_DIR/qa-upload.txt"
 
 export BATCH_FILE="$QA_RUN_DIR/qa-openai-batch.jsonl"
 export UPLOAD_FILE="$QA_RUN_DIR/qa-upload.txt"
+
+wait_release_usage_entry() {
+  local base_url="$1"
+  local request_id="$2"
+  local user_path="$3"
+  local output_file="$4"
+
+  for _ in $(seq 1 15); do
+    curl -fsS "$base_url/admin/api/v1/usage/log?search=$request_id&limit=5" > "$output_file"
+    if jq -e --arg request_id "$request_id" --arg user_path "$user_path" '
+      any(.entries[]?; .request_id == $request_id and .user_path == $user_path and (.total_cost // 0) > 0 and (.total_tokens // 0) > 0)
+    ' "$output_file" >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  jq . "$output_file" >&2 || true
+  echo "error: usage entry was not flushed for $request_id" >&2
+  exit 1
+}
+
+run_release_budget_enforcement() {
+  local base_url="$1"
+  local budget_path="$2"
+  local artifact_prefix="$3"
+  local expected_reply="$4"
+
+  local leaf_path="$budget_path/leaf"
+  local encoded_path
+  encoded_path=$(jq -nr --arg value "$budget_path" '$value | @uri')
+
+  local req1="qa-budget-$artifact_prefix-$QA_SUFFIX-1"
+  local req2="qa-budget-$artifact_prefix-$QA_SUFFIX-2"
+  local budget_json_file="$QA_RUN_DIR/$artifact_prefix.budget.json"
+  local usage_json_file="$QA_RUN_DIR/$artifact_prefix.usage.json"
+  local audit_json_file="$QA_RUN_DIR/$artifact_prefix.audit.json"
+  local headers_file="$QA_RUN_DIR/$artifact_prefix.headers"
+  local body_file="$QA_RUN_DIR/$artifact_prefix.body"
+
+  curl -fsS -X PUT "$base_url/admin/api/v1/budgets/$encoded_path/daily" \
+    -H 'Content-Type: application/json' \
+    -d "{\"amount\":$QA_BUDGET_AMOUNT}" \
+    > "$budget_json_file"
+  jq -e --arg user_path "$budget_path" --argjson amount "$QA_BUDGET_AMOUNT" '
+    any(.budgets[]?; .user_path == $user_path and .period_seconds == 86400 and .amount == $amount and .source == "manual" and .spent == 0)
+  ' "$budget_json_file" >/dev/null
+
+  curl -fsS -D "$headers_file" -o "$body_file" -X POST "$base_url/v1/chat/completions" \
+    -H 'Content-Type: application/json' \
+    -H "X-Request-ID: $req1" \
+    -H "X-GoModel-User-Path: $leaf_path" \
+    -d "{\"model\":\"gpt-4.1-nano\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly $expected_reply\"}],\"max_tokens\":20,\"temperature\":0}"
+  jq -e '.object == "chat.completion" and (.usage.total_tokens // 0) > 0 and (.choices[0].message.content | type == "string" and length > 0)' "$body_file" >/dev/null
+
+  wait_release_usage_entry "$base_url" "$req1" "$leaf_path" "$usage_json_file"
+
+  curl -fsS "$base_url/admin/api/v1/budgets" > "$budget_json_file"
+  jq -e --arg user_path "$budget_path" '
+    any(.budgets[]?; .user_path == $user_path and .spent > 0 and .has_usage == true and .remaining < 0 and .usage_ratio > 1)
+  ' "$budget_json_file" >/dev/null
+
+  curl -sS -D "$headers_file" -o "$body_file" -w '%{http_code}' -X POST "$base_url/v1/chat/completions" \
+    -H 'Content-Type: application/json' \
+    -H "X-Request-ID: $req2" \
+    -H "X-GoModel-User-Path: $leaf_path" \
+    -d "{\"model\":\"gpt-4.1-nano\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly QA_BUDGET_SHOULD_BLOCK_$QA_BUDGET_SUFFIX\"}],\"max_tokens\":20,\"temperature\":0}" \
+    | jq -R -e '. == "429"' >/dev/null
+  grep -Eiq '^Retry-After: *[0-9]+' "$headers_file"
+  jq -e '.error.type == "rate_limit_error" and .error.code == "budget_exceeded" and (.error.message | test("budget exceeded"))' "$body_file" >/dev/null
+
+  for _ in $(seq 1 10); do
+    curl -fsS "$base_url/admin/api/v1/audit/log?search=$req2&limit=5" > "$audit_json_file"
+    if jq -e --arg request_id "$req2" --arg user_path "$leaf_path" '
+      any(.entries[]?; .request_id == $request_id and .user_path == $user_path and .status_code == 429 and .error_type == "rate_limit_error")
+    ' "$audit_json_file" >/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  jq -e --arg request_id "$req2" --arg user_path "$leaf_path" '
+    any(.entries[]?; .request_id == $request_id and .user_path == $user_path and .status_code == 429 and .error_type == "rate_limit_error")
+  ' "$audit_json_file" >/dev/null
+
+  curl -fsS -X POST "$base_url/admin/api/v1/budgets/reset-one" \
+    -H 'Content-Type: application/json' \
+    -d "{\"user_path\":\"$budget_path\",\"period\":\"daily\"}" \
+    > "$budget_json_file"
+  jq -e --arg user_path "$budget_path" '
+    any(.budgets[]?; .user_path == $user_path and .last_reset_at != null and .spent == 0 and .has_usage == false)
+  ' "$budget_json_file" >/dev/null
+
+  curl -fsS -X DELETE "$base_url/admin/api/v1/budgets/$encoded_path/daily" \
+    > "$budget_json_file"
+  jq -e --arg user_path "$budget_path" '
+    all(.budgets[]?; .user_path != $user_path)
+  ' "$budget_json_file" >/dev/null
+}
 ```
 
 ## Auth-enabled runtime environment
@@ -1336,4 +1440,89 @@ jq -e --arg reply "$QA_RESP_CACHE_REPLY" '
     any(.output[]?.content[]?; .text == $reply)
   ' "$BODY_FILE" >/dev/null
 grep -Eiq '^X-Cache: HIT \(exact\)' "$HEADERS_FILE"
+```
+
+## 15. Budget management
+
+### S86 Budget admin validation and lifecycle
+
+Checks budget settings validation, manual budget creation, and deletion on the main SQLite-backed gateway.
+
+```bash
+BUDGET_PATH="/team/budget/admin/$QA_SUFFIX"
+ENCODED_PATH=$(jq -nr --arg value "$BUDGET_PATH" '$value | @uri')
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s86.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s86.body.XXXXXX")
+
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/api/v1/budgets/settings" \
+  -H 'Content-Type: application/json' \
+  -d '{"daily_reset_hour":24}'
+sed -n '1,20p' "$HEADERS_FILE"
+jq . "$BODY_FILE"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("daily_reset_hour"))' "$BODY_FILE" >/dev/null
+
+curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets/settings" \
+  -H 'Content-Type: application/json' \
+  -d '{"daily_reset_hour":1,"daily_reset_minute":15,"weekly_reset_weekday":2,"monthly_reset_day":2}' \
+  | jq -e '.daily_reset_hour == 1 and .daily_reset_minute == 15 and .weekly_reset_weekday == 2 and .monthly_reset_day == 2'
+
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/api/v1/budgets/$ENCODED_PATH/daily" \
+  -H 'Content-Type: application/json' \
+  -d '{"amount":-1}'
+sed -n '1,20p' "$HEADERS_FILE"
+jq . "$BODY_FILE"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("amount"))' "$BODY_FILE" >/dev/null
+
+curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets/$ENCODED_PATH/weekly" \
+  -H 'Content-Type: application/json' \
+  -d '{"amount":12.5}' \
+  | jq -e --arg user_path "$BUDGET_PATH" '
+      any(.budgets[]?; .user_path == $user_path and .period_seconds == 604800 and .amount == 12.5 and .source == "manual")
+    ' >/dev/null
+
+curl -fsS -X DELETE "$BASE_URL/admin/api/v1/budgets/$ENCODED_PATH/weekly" \
+  | jq -e --arg user_path "$BUDGET_PATH" 'all(.budgets[]?; .user_path != $user_path)' >/dev/null
+
+curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets/settings" \
+  -H 'Content-Type: application/json' \
+  -d '{"daily_reset_hour":0,"daily_reset_minute":0,"weekly_reset_weekday":1,"weekly_reset_hour":0,"weekly_reset_minute":0,"monthly_reset_day":1,"monthly_reset_hour":0,"monthly_reset_minute":0}' \
+  >/dev/null
+```
+
+### S87 SQLite budget enforcement and audit
+
+Creates a tiny daily budget, verifies the first request is recorded as spend, and verifies the next request is blocked with an OpenAI-compatible rate-limit error.
+
+```bash
+run_release_budget_enforcement \
+  "$BASE_URL" \
+  "$QA_BUDGET_SQLITE_PATH" \
+  "s87-sqlite-budget" \
+  "QA_BUDGET_SQLITE_OK_$QA_BUDGET_SUFFIX"
+```
+
+### S88 PostgreSQL budget enforcement and audit
+
+Runs the same budget enforcement flow against the PostgreSQL-backed gateway.
+
+```bash
+run_release_budget_enforcement \
+  "$PG_BASE_URL" \
+  "$QA_BUDGET_PG_PATH" \
+  "s88-postgres-budget" \
+  "QA_BUDGET_POSTGRES_OK_$QA_BUDGET_SUFFIX"
+```
+
+### S89 MongoDB budget enforcement and audit
+
+Runs the same budget enforcement flow against the MongoDB-backed gateway.
+
+```bash
+run_release_budget_enforcement \
+  "$MONGO_BASE_URL" \
+  "$QA_BUDGET_MONGO_PATH" \
+  "s89-mongo-budget" \
+  "QA_BUDGET_MONGO_OK_$QA_BUDGET_SUFFIX"
 ```
