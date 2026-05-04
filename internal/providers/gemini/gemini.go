@@ -105,10 +105,9 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
+	useNativeAPI := useNativeAPIForBaseURLs(url, p.modelsURL)
 	p.client.SetBaseURL(url)
-	p.modelsURL = url
-	p.modelsClientConf.BaseURL = url
-	p.useNativeAPI = useNativeAPIForBaseURLs(url, p.modelsURL)
+	p.useNativeAPI = useNativeAPI
 }
 
 // SetModelsURL allows configuring a custom models API base URL.

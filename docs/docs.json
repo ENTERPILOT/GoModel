@@ -85,6 +85,7 @@
                 "icon": "compass",
                 "pages": [
                     "guides/openclaw",
+                    "guides/gemini",
                     "guides/oracle",
                     "guides/deepseek",
                     "guides/vllm",

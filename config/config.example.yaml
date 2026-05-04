@@ -203,6 +203,7 @@ providers:
     api_key: "..."
     # Chat/responses use Gemini's native generateContent API by default.
     # Set USE_GOOGLE_GEMINI_NATIVE_API=false to use Gemini's OpenAI-compatible API instead.
+    # Native mode accepts image data URLs but does not fetch remote image URLs yet.
 
   xai:
     type: xai

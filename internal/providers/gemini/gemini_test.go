@@ -118,6 +118,65 @@ func TestSetBaseURLDisablesNativeRouting(t *testing.T) {
 	}
 }
 
+func TestSetBaseURLPreservesModelsURL(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	modelsHit := false
+	modelsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		modelsHit = true
+		if r.URL.Path != "/models" {
+			t.Errorf("models path = %q, want /models", r.URL.Path)
+		}
+		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
+			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"models": [{
+				"name": "models/gemini-2.5-flash",
+				"displayName": "Gemini 2.5 Flash",
+				"supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+				"inputTokenLimit": 1048576,
+				"outputTokenLimit": 8192
+			}]
+		}`))
+	}))
+	defer modelsServer.Close()
+
+	openAICompatHit := false
+	openAICompatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		openAICompatHit = true
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"ListModels should use models URL"}}`))
+	}))
+	defer openAICompatServer.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetModelsURL(modelsServer.URL)
+	provider.SetBaseURL(openAICompatServer.URL + "/v1beta/openai")
+
+	if provider.modelsURL != modelsServer.URL {
+		t.Fatalf("modelsURL = %q, want %q", provider.modelsURL, modelsServer.URL)
+	}
+	if provider.modelsClientConf.BaseURL != modelsServer.URL {
+		t.Fatalf("modelsClientConf.BaseURL = %q, want %q", provider.modelsClientConf.BaseURL, modelsServer.URL)
+	}
+
+	resp, err := provider.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].ID != "gemini-2.5-flash" {
+		t.Fatalf("models = %+v, want gemini-2.5-flash", resp.Data)
+	}
+	if !modelsHit {
+		t.Fatal("models server was not called")
+	}
+	if openAICompatHit {
+		t.Fatal("OpenAI-compatible server was called for ListModels")
+	}
+}
+
 func TestChatCompletion(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "false")
 
