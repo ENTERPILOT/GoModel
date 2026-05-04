@@ -820,7 +820,7 @@ func TestStreamChatCompletion_UsesNativeStreamByDefault(t *testing.T) {
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}]}
+		_, _ = w.Write([]byte(`data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":1,"totalTokenCount":5}}
 
 data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model","parts":[{"text":"!"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2,"totalTokenCount":6}}
 

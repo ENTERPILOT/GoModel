@@ -71,6 +71,10 @@ func convertGeminiNativeStream(body io.ReadCloser, out *io.PipeWriter, model str
 		_ = out.CloseWithError(err)
 		return
 	}
+	if err := state.writeFinalUsage(out); err != nil {
+		_ = out.CloseWithError(err)
+		return
+	}
 	_, _ = io.WriteString(out, "data: [DONE]\n\n")
 	_ = out.Close()
 }
@@ -82,6 +86,7 @@ type geminiStreamState struct {
 	responseID   string
 	choices      map[int]*geminiChoiceStreamState
 	stopped      bool
+	latestUsage  map[string]any
 }
 
 type geminiChoiceStreamState struct {
@@ -130,22 +135,25 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 	}
 
 	if s.includeUsage {
-		if usage := geminiUsageMap(event.UsageMetadata); usage != nil {
-			chunk := map[string]any{
-				"id":       s.responseID,
-				"object":   "chat.completion.chunk",
-				"created":  s.created,
-				"model":    s.model,
-				"provider": "gemini",
-				"choices":  []map[string]any{},
-				"usage":    usage,
-			}
-			if err := writeOpenAIStreamChunk(out, chunk); err != nil {
-				return err
-			}
-		}
+		s.latestUsage = geminiUsageMap(event.UsageMetadata)
 	}
 	return nil
+}
+
+func (s *geminiStreamState) writeFinalUsage(out io.Writer) error {
+	if !s.includeUsage || s.latestUsage == nil || s.stopped {
+		return nil
+	}
+	chunk := map[string]any{
+		"id":       s.responseID,
+		"object":   "chat.completion.chunk",
+		"created":  s.created,
+		"model":    s.model,
+		"provider": "gemini",
+		"choices":  []map[string]any{},
+		"usage":    s.latestUsage,
+	}
+	return writeOpenAIStreamChunk(out, chunk)
 }
 
 func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackIndex int) (map[string]any, bool) {
