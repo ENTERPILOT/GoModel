@@ -50,13 +50,12 @@ type Provider struct {
 
 // New creates a new Gemini provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	baseURL := providers.ResolveBaseURL(providerCfg.BaseURL, defaultOpenAICompatibleBaseURL)
-	modelsURL := defaultModelsBaseURL
+	baseURL, modelsURL := geminiBaseURLs(providerCfg.BaseURL)
 	p := &Provider{
 		httpClient:   nil,
 		apiKey:       providerCfg.APIKey,
 		hooks:        opts.Hooks,
-		useNativeAPI: useNativeAPIForBaseURLs(baseURL, modelsURL),
+		useNativeAPI: useNativeAPIFromEnv(),
 		modelsURL:    modelsURL,
 		modelsClientConf: llmclient.Config{
 			ProviderName:   "gemini",
@@ -84,13 +83,12 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	baseURL := defaultOpenAICompatibleBaseURL
-	modelsURL := defaultModelsBaseURL
+	baseURL, modelsURL := geminiBaseURLs("")
 	p := &Provider{
 		httpClient:   httpClient,
 		apiKey:       apiKey,
 		hooks:        hooks,
-		useNativeAPI: useNativeAPIForBaseURLs(baseURL, modelsURL),
+		useNativeAPI: useNativeAPIFromEnv(),
 		modelsURL:    modelsURL,
 	}
 	modelsCfg := llmclient.DefaultConfig("gemini", modelsURL)
@@ -105,9 +103,14 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
-	useNativeAPI := useNativeAPIForBaseURLs(url, p.modelsURL)
-	p.client.SetBaseURL(url)
-	p.useNativeAPI = useNativeAPI
+	baseURL, modelsURL := geminiBaseURLs(url)
+	p.client.SetBaseURL(baseURL)
+	p.modelsURL = modelsURL
+	p.modelsClientConf.BaseURL = modelsURL
+	if p.nativeClient != nil {
+		p.nativeClient.SetBaseURL(modelsURL)
+	}
+	p.useNativeAPI = useNativeAPIFromEnv()
 }
 
 // SetModelsURL allows configuring a custom models API base URL.
@@ -152,10 +155,33 @@ func useNativeAPIFromEnv() bool {
 	}
 }
 
-func useNativeAPIForBaseURLs(baseURL, modelsURL string) bool {
-	return useNativeAPIFromEnv() &&
-		baseURL == defaultOpenAICompatibleBaseURL &&
-		modelsURL == defaultModelsBaseURL
+func geminiBaseURLs(configuredBaseURL string) (openAICompatibleBaseURL, nativeBaseURL string) {
+	baseURL := strings.TrimRight(strings.TrimSpace(configuredBaseURL), "/")
+	if baseURL == "" {
+		return defaultOpenAICompatibleBaseURL, defaultModelsBaseURL
+	}
+	if baseURL == defaultOpenAICompatibleBaseURL {
+		return defaultOpenAICompatibleBaseURL, defaultModelsBaseURL
+	}
+	if baseURL == defaultModelsBaseURL {
+		return defaultOpenAICompatibleBaseURL, defaultModelsBaseURL
+	}
+	if nativeBaseURL, ok := nativeBaseURLFromOpenAICompatibleBaseURL(baseURL); ok {
+		return baseURL, nativeBaseURL
+	}
+	return baseURL, baseURL
+}
+
+func nativeBaseURLFromOpenAICompatibleBaseURL(baseURL string) (string, bool) {
+	const suffix = "/openai"
+	if !strings.HasSuffix(baseURL, suffix) {
+		return "", false
+	}
+	nativeBaseURL := strings.TrimRight(strings.TrimSuffix(baseURL, suffix), "/")
+	if nativeBaseURL == "" {
+		return "", false
+	}
+	return nativeBaseURL, true
 }
 
 // adaptChatRequest rewrites a ChatRequest for Gemini's OpenAI-compatible endpoint.

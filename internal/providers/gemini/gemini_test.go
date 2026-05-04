@@ -39,7 +39,58 @@ func TestNew_ReturnsProvider(t *testing.T) {
 	}
 }
 
-func TestNew_CustomBaseURLDisablesNativeMode(t *testing.T) {
+func TestGeminiBaseURLs(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured string
+		wantCompat string
+		wantNative string
+	}{
+		{
+			name:       "empty uses official defaults",
+			wantCompat: defaultOpenAICompatibleBaseURL,
+			wantNative: defaultModelsBaseURL,
+		},
+		{
+			name:       "official OpenAI-compatible default derives native default",
+			configured: defaultOpenAICompatibleBaseURL,
+			wantCompat: defaultOpenAICompatibleBaseURL,
+			wantNative: defaultModelsBaseURL,
+		},
+		{
+			name:       "official native default keeps OpenAI-compatible default",
+			configured: defaultModelsBaseURL,
+			wantCompat: defaultOpenAICompatibleBaseURL,
+			wantNative: defaultModelsBaseURL,
+		},
+		{
+			name:       "custom OpenAI-compatible URL derives native sibling",
+			configured: "https://proxy.example.com/v1beta/openai/",
+			wantCompat: "https://proxy.example.com/v1beta/openai",
+			wantNative: "https://proxy.example.com/v1beta",
+		},
+		{
+			name:       "custom URL without OpenAI suffix is used for both clients",
+			configured: "https://proxy.example.com/gemini",
+			wantCompat: "https://proxy.example.com/gemini",
+			wantNative: "https://proxy.example.com/gemini",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotCompat, gotNative := geminiBaseURLs(tt.configured)
+			if gotCompat != tt.wantCompat {
+				t.Fatalf("OpenAI-compatible base = %q, want %q", gotCompat, tt.wantCompat)
+			}
+			if gotNative != tt.wantNative {
+				t.Fatalf("native base = %q, want %q", gotNative, tt.wantNative)
+			}
+		})
+	}
+}
+
+func TestNew_CustomBaseURLDerivesNativeBaseURL(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
 	provider := New(providers.ProviderConfig{
@@ -51,52 +102,51 @@ func TestNew_CustomBaseURLDisablesNativeMode(t *testing.T) {
 	if !ok {
 		t.Fatalf("provider type = %T, want *Provider", provider)
 	}
-	if geminiProvider.useNativeAPI {
-		t.Fatal("useNativeAPI = true, want false for custom OpenAI-compatible base URL")
+	if !geminiProvider.useNativeAPI {
+		t.Fatal("useNativeAPI = false, want true for custom OpenAI-compatible base URL")
+	}
+	if got := geminiProvider.client.BaseURL(); got != "https://proxy.example.com/v1beta/openai" {
+		t.Fatalf("client.BaseURL() = %q, want OpenAI-compatible base URL", got)
+	}
+	if geminiProvider.modelsURL != "https://proxy.example.com/v1beta" {
+		t.Fatalf("modelsURL = %q, want derived native base URL", geminiProvider.modelsURL)
+	}
+	if geminiProvider.modelsClientConf.BaseURL != "https://proxy.example.com/v1beta" {
+		t.Fatalf("modelsClientConf.BaseURL = %q, want derived native base URL", geminiProvider.modelsClientConf.BaseURL)
 	}
 }
 
-func TestSetBaseURLDisablesNativeRouting(t *testing.T) {
+func TestSetBaseURLDerivesNativeRouting(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
 	nativeHit := false
-	nativeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/openai/") {
+			t.Fatalf("native routing used OpenAI-compatible path %q", r.URL.Path)
+		}
 		nativeHit = true
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":{"message":"native client should not be used after SetBaseURL"}}`))
-	}))
-	defer nativeServer.Close()
-
-	openAICompatHit := false
-	openAICompatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		openAICompatHit = true
-		if r.URL.Path != "/v1beta/openai/chat/completions" {
-			t.Errorf("OpenAI-compatible path = %q, want /v1beta/openai/chat/completions", r.URL.Path)
+		if r.URL.Path != "/v1beta/models/gemini-2.5-flash:generateContent" {
+			t.Errorf("native path = %q, want /v1beta/models/gemini-2.5-flash:generateContent", r.URL.Path)
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer test-api-key" {
-			t.Errorf("Authorization = %q, want bearer API key", got)
+		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
+			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
 		}
-		if got := r.Header.Get("x-goog-api-key"); got != "" {
-			t.Errorf("x-goog-api-key = %q, want empty for OpenAI-compatible API", got)
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization = %q, want empty for native Gemini API", got)
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{
-			"id": "gemini-openai-compatible-baseurl",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "gemini-2.5-flash",
-			"choices": [{
-				"index": 0,
-				"message": {"role": "assistant", "content": "ok"},
-				"finish_reason": "stop"
+			"responseId": "gemini-native-baseurl",
+			"candidates": [{
+				"content": {"role": "model", "parts": [{"text": "ok"}]},
+				"finishReason": "STOP"
 			}]
 		}`))
 	}))
-	defer openAICompatServer.Close()
+	defer server.Close()
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetModelsURL(nativeServer.URL)
-	provider.SetBaseURL(openAICompatServer.URL + "/v1beta/openai")
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "gemini-2.5-flash",
@@ -107,25 +157,25 @@ func TestSetBaseURLDisablesNativeRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp == nil || resp.ID != "gemini-openai-compatible-baseurl" {
-		t.Fatalf("response = %+v, want OpenAI-compatible response", resp)
+	if resp == nil || resp.ID != "gemini-native-baseurl" {
+		t.Fatalf("response = %+v, want native response", resp)
 	}
-	if nativeHit {
-		t.Fatal("native server was called after SetBaseURL")
-	}
-	if !openAICompatHit {
-		t.Fatal("OpenAI-compatible server was not called")
+	if !nativeHit {
+		t.Fatal("native server was not called")
 	}
 }
 
-func TestSetBaseURLPreservesModelsURL(t *testing.T) {
+func TestSetBaseURLDerivesModelsURL(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
 	modelsHit := false
-	modelsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		modelsHit = true
-		if r.URL.Path != "/models" {
-			t.Errorf("models path = %q, want /models", r.URL.Path)
+		if strings.Contains(r.URL.Path, "/openai/") {
+			t.Fatalf("models request used OpenAI-compatible path %q", r.URL.Path)
+		}
+		if r.URL.Path != "/v1beta/models" {
+			t.Errorf("models path = %q, want /v1beta/models", r.URL.Path)
 		}
 		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
 			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
@@ -141,25 +191,19 @@ func TestSetBaseURLPreservesModelsURL(t *testing.T) {
 			}]
 		}`))
 	}))
-	defer modelsServer.Close()
-
-	openAICompatHit := false
-	openAICompatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		openAICompatHit = true
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":{"message":"ListModels should use models URL"}}`))
-	}))
-	defer openAICompatServer.Close()
+	defer server.Close()
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetModelsURL(modelsServer.URL)
-	provider.SetBaseURL(openAICompatServer.URL + "/v1beta/openai")
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
 
-	if provider.modelsURL != modelsServer.URL {
-		t.Fatalf("modelsURL = %q, want %q", provider.modelsURL, modelsServer.URL)
+	if provider.client.BaseURL() != server.URL+"/v1beta/openai" {
+		t.Fatalf("client.BaseURL() = %q, want OpenAI-compatible base URL", provider.client.BaseURL())
 	}
-	if provider.modelsClientConf.BaseURL != modelsServer.URL {
-		t.Fatalf("modelsClientConf.BaseURL = %q, want %q", provider.modelsClientConf.BaseURL, modelsServer.URL)
+	if provider.modelsURL != server.URL+"/v1beta" {
+		t.Fatalf("modelsURL = %q, want derived native base URL", provider.modelsURL)
+	}
+	if provider.modelsClientConf.BaseURL != server.URL+"/v1beta" {
+		t.Fatalf("modelsClientConf.BaseURL = %q, want derived native base URL", provider.modelsClientConf.BaseURL)
 	}
 
 	resp, err := provider.ListModels(context.Background())
@@ -171,9 +215,6 @@ func TestSetBaseURLPreservesModelsURL(t *testing.T) {
 	}
 	if !modelsHit {
 		t.Fatal("models server was not called")
-	}
-	if openAICompatHit {
-		t.Fatal("OpenAI-compatible server was called for ListModels")
 	}
 }
 
@@ -1128,6 +1169,109 @@ func TestResponses(t *testing.T) {
 	}
 }
 
+func TestResponses_Native(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("Method = %q, want %q", r.Method, http.MethodPost)
+		}
+		if r.URL.Path != "/models/gemini-2.5-flash:generateContent" {
+			t.Errorf("Path = %q, want native generateContent endpoint", r.URL.Path)
+		}
+		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
+			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization = %q, want empty for native Gemini API", got)
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+		if _, ok := payload["messages"]; ok {
+			t.Fatal("native request should not contain OpenAI messages")
+		}
+		systemInstruction, ok := payload["system_instruction"].(map[string]any)
+		if !ok {
+			t.Fatalf("system_instruction = %#v, want object", payload["system_instruction"])
+		}
+		systemParts, ok := systemInstruction["parts"].([]any)
+		if !ok || len(systemParts) != 1 || systemParts[0].(map[string]any)["text"] != "Be concise." {
+			t.Fatalf("system_instruction.parts = %#v, want instruction text", systemInstruction["parts"])
+		}
+		contents, ok := payload["contents"].([]any)
+		if !ok || len(contents) != 1 {
+			t.Fatalf("contents = %#v, want one native content", payload["contents"])
+		}
+		firstContent := contents[0].(map[string]any)
+		if firstContent["role"] != "user" {
+			t.Fatalf("contents[0].role = %#v, want user", firstContent["role"])
+		}
+		parts := firstContent["parts"].([]any)
+		if len(parts) != 1 || parts[0].(map[string]any)["text"] != "Hello" {
+			t.Fatalf("contents[0].parts = %#v, want user text", firstContent["parts"])
+		}
+		generationConfig, ok := payload["generationConfig"].(map[string]any)
+		if !ok {
+			t.Fatalf("generationConfig = %#v, want object", payload["generationConfig"])
+		}
+		if got := generationConfig["maxOutputTokens"]; got != float64(64) {
+			t.Fatalf("maxOutputTokens = %#v, want 64", got)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"responseId": "gemini-native-response",
+			"candidates": [{
+				"content": {"role": "model", "parts": [{"text": "Native response"}]},
+				"finishReason": "STOP"
+			}],
+			"usageMetadata": {
+				"promptTokenCount": 5,
+				"candidatesTokenCount": 3,
+				"totalTokenCount": 8
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetModelsURL(server.URL)
+
+	maxOutputTokens := 64
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
+		Model:           "gemini-2.5-flash",
+		Instructions:    "Be concise.",
+		Input:           "Hello",
+		MaxOutputTokens: &maxOutputTokens,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.ID != "gemini-native-response" {
+		t.Fatalf("ID = %q, want gemini-native-response", resp.ID)
+	}
+	if resp.Object != "response" {
+		t.Fatalf("Object = %q, want response", resp.Object)
+	}
+	if resp.Model != "gemini-2.5-flash" {
+		t.Fatalf("Model = %q, want gemini-2.5-flash", resp.Model)
+	}
+	if resp.Provider != "gemini" {
+		t.Fatalf("Provider = %q, want gemini", resp.Provider)
+	}
+	if len(resp.Output) != 1 || len(resp.Output[0].Content) != 1 || resp.Output[0].Content[0].Text != "Native response" {
+		t.Fatalf("Output = %+v, want native response text", resp.Output)
+	}
+}
+
 func TestStreamResponses(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "false")
 
@@ -1168,5 +1312,98 @@ data: [DONE]
 	}
 	if !strings.Contains(responseStr, "[DONE]") {
 		t.Error("response should end with [DONE]")
+	}
+}
+
+func TestStreamResponses_Native(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("Method = %q, want %q", r.Method, http.MethodPost)
+		}
+		if r.URL.Path != "/models/gemini-2.5-flash:streamGenerateContent" {
+			t.Errorf("Path = %q, want native streamGenerateContent endpoint", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("alt"); got != "sse" {
+			t.Errorf("alt = %q, want sse", got)
+		}
+		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
+			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization = %q, want empty for native Gemini API", got)
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+		if _, ok := payload["stream"]; ok {
+			t.Fatal("native stream request should not contain OpenAI stream flag")
+		}
+		systemInstruction, ok := payload["system_instruction"].(map[string]any)
+		if !ok {
+			t.Fatalf("system_instruction = %#v, want object", payload["system_instruction"])
+		}
+		systemParts := systemInstruction["parts"].([]any)
+		if len(systemParts) != 1 || systemParts[0].(map[string]any)["text"] != "Be concise." {
+			t.Fatalf("system_instruction.parts = %#v, want instruction text", systemInstruction["parts"])
+		}
+		contents, ok := payload["contents"].([]any)
+		if !ok || len(contents) != 1 {
+			t.Fatalf("contents = %#v, want one native content", payload["contents"])
+		}
+		parts := contents[0].(map[string]any)["parts"].([]any)
+		if len(parts) != 1 || parts[0].(map[string]any)["text"] != "Hello" {
+			t.Fatalf("contents[0].parts = %#v, want user text", contents[0].(map[string]any)["parts"])
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`data: {"responseId":"gemini-native-stream-response","candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}]}
+
+data: {"responseId":"gemini-native-stream-response","candidates":[{"content":{"role":"model","parts":[{"text":"!"}]},"finishReason":"STOP"}]}
+
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetModelsURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model:        "gemini-2.5-flash",
+		Instructions: "Be concise.",
+		Input:        "Hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if body == nil {
+		t.Fatal("body should not be nil")
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response stream: %v", err)
+	}
+	stream := string(raw)
+	if !strings.Contains(stream, "response.created") {
+		t.Fatalf("stream = %q, want response.created event", stream)
+	}
+	if !strings.Contains(stream, "response.output_text.delta") {
+		t.Fatalf("stream = %q, want response.output_text.delta event", stream)
+	}
+	if !strings.Contains(stream, `"delta":"Hello"`) || !strings.Contains(stream, `"delta":"!"`) {
+		t.Fatalf("stream = %q, want normalized text deltas", stream)
+	}
+	if !strings.Contains(stream, "data: [DONE]") {
+		t.Fatalf("stream = %q, want [DONE]", stream)
 	}
 }

@@ -41,17 +41,24 @@ OpenAI-compatible `/chat/completions` endpoint:
 export USE_GOOGLE_GEMINI_NATIVE_API=false
 ```
 
-`GEMINI_BASE_URL` configures the OpenAI-compatible Gemini base URL. GoModel also
-uses that compatibility surface for Gemini embeddings, files, and batches.
+`GEMINI_BASE_URL` configures the Gemini base. GoModel keeps separate internal
+bases for native Gemini and the OpenAI-compatible API:
+
+- native chat/models default: `https://generativelanguage.googleapis.com/v1beta`
+- OpenAI-compatible default: `https://generativelanguage.googleapis.com/v1beta/openai`
+
+When `GEMINI_BASE_URL` ends in `/openai`, GoModel uses that value for the
+OpenAI-compatible client and derives the native base by stripping `/openai`.
+Gemini embeddings, files, and batches still use the OpenAI-compatible surface.
 
 ```bash
 export GEMINI_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai"
 ```
 
 <Note>
-  If you configure a custom `GEMINI_BASE_URL`, GoModel disables native Gemini
-  chat routing for that provider and sends chat requests to the configured
-  OpenAI-compatible endpoint.
+  `USE_GOOGLE_GEMINI_NATIVE_API` decides whether chat and Responses API calls
+  use native Gemini or the OpenAI-compatible API. `GEMINI_BASE_URL` only
+  configures the upstream base URLs.
 </Note>
 
 ## Image URL behavior
