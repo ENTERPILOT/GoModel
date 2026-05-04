@@ -99,6 +99,11 @@ type geminiGenerateContentResponse struct {
 	ModelStatus    json.RawMessage     `json:"modelStatus,omitempty"`
 }
 
+type geminiPromptFeedback struct {
+	BlockReason        string `json:"blockReason,omitempty"`
+	BlockReasonMessage string `json:"blockReasonMessage,omitempty"`
+}
+
 type geminiCandidate struct {
 	Content       geminiContent   `json:"content,omitempty"`
 	FinishReason  string          `json:"finishReason,omitempty"`
@@ -302,11 +307,10 @@ func geminiPartFromImageURL(image *core.ImageURLContent) (geminiPart, error) {
 		return geminiPart{InlineData: &geminiBlob{MimeType: mimeType, Data: data}}, nil
 	}
 
-	mimeType := image.MediaType
-	if mimeType == "" {
-		mimeType = "image/jpeg"
-	}
-	return geminiPart{FileData: &geminiFileData{MimeType: mimeType, FileURI: rawURL}}, nil
+	return geminiPart{}, core.NewInvalidRequestError(
+		"gemini native image_url supports only data: URLs; remote URLs must be uploaded via the Gemini Files API or fetched by a future adapter path",
+		nil,
+	)
 }
 
 func parseDataURL(rawURL string) (string, string, error) {
@@ -565,7 +569,11 @@ func geminiCachedContent(req *core.ChatRequest) string {
 	return cached
 }
 
-func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContentResponse) *core.ChatResponse {
+func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContentResponse) (*core.ChatResponse, error) {
+	if err := geminiBlockedPromptError(geminiResp); err != nil {
+		return nil, err
+	}
+
 	created := time.Now().Unix()
 	respID := geminiResp.ResponseID
 	if respID == "" {
@@ -596,7 +604,38 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 			FinishReason: finishReasonFromGemini(candidate.FinishReason, len(toolCalls) > 0),
 		})
 	}
-	return resp
+	return resp, nil
+}
+
+func geminiBlockedPromptError(resp *geminiGenerateContentResponse) *core.GatewayError {
+	if resp == nil || len(resp.Candidates) > 0 {
+		return nil
+	}
+	reason := geminiPromptBlockReason(resp.PromptFeedback)
+	if reason == "" {
+		return nil
+	}
+	return nativeProviderError("Gemini blocked prompt: "+reason, nil)
+}
+
+func geminiPromptBlockReason(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var feedback geminiPromptFeedback
+	if err := json.Unmarshal(raw, &feedback); err != nil {
+		return ""
+	}
+	reason := strings.TrimSpace(feedback.BlockReason)
+	message := strings.TrimSpace(feedback.BlockReasonMessage)
+	switch {
+	case reason != "" && message != "":
+		return fmt.Sprintf("%s: %s", reason, message)
+	case reason != "":
+		return reason
+	default:
+		return message
+	}
 }
 
 func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall) {

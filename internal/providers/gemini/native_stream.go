@@ -80,13 +80,18 @@ type geminiStreamState struct {
 	includeUsage bool
 	created      int64
 	responseID   string
+	choices      map[int]*geminiChoiceStreamState
+	stopped      bool
+}
+
+type geminiChoiceStreamState struct {
 	roleSent     bool
 	sawToolCalls bool
 }
 
 func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "[DONE]" {
+	if raw == "" || raw == "[DONE]" || s.stopped {
 		return nil
 	}
 
@@ -99,6 +104,11 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 		if s.responseID == "" {
 			s.responseID = "chatcmpl-gemini-" + strconv.FormatInt(s.created, 10)
 		}
+	}
+
+	if err := geminiBlockedPromptError(&event); err != nil {
+		s.stopped = true
+		return writeOpenAIStreamError(out, err)
 	}
 
 	for i, candidate := range event.Candidates {
@@ -144,15 +154,13 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 }
 
 func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackIndex int) (map[string]any, bool) {
-	index := candidate.Index
-	if index == 0 && fallbackIndex > 0 {
-		index = fallbackIndex
-	}
+	index := streamChoiceIndex(candidate, fallbackIndex)
+	state := s.choiceState(index)
 
 	delta := make(map[string]any)
-	if !s.roleSent {
+	if !state.roleSent {
 		delta["role"] = "assistant"
-		s.roleSent = true
+		state.roleSent = true
 	}
 
 	content, toolCalls := openAIMessageFromGeminiParts(candidate.Content.Parts)
@@ -160,11 +168,11 @@ func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackI
 		delta["content"] = content
 	}
 	if len(toolCalls) > 0 {
-		s.sawToolCalls = true
+		state.sawToolCalls = true
 		delta["tool_calls"] = streamToolCalls(toolCalls)
 	}
 
-	finish := finishReasonFromGemini(candidate.FinishReason, s.sawToolCalls)
+	finish := finishReasonFromGemini(candidate.FinishReason, state.sawToolCalls)
 	if len(delta) == 0 && finish == "" {
 		return nil, false
 	}
@@ -177,6 +185,26 @@ func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackI
 		choice["finish_reason"] = finish
 	}
 	return choice, true
+}
+
+func streamChoiceIndex(candidate geminiCandidate, fallbackIndex int) int {
+	index := candidate.Index
+	if index == 0 && fallbackIndex > 0 {
+		index = fallbackIndex
+	}
+	return index
+}
+
+func (s *geminiStreamState) choiceState(index int) *geminiChoiceStreamState {
+	if s.choices == nil {
+		s.choices = make(map[int]*geminiChoiceStreamState)
+	}
+	state := s.choices[index]
+	if state == nil {
+		state = &geminiChoiceStreamState{}
+		s.choices[index] = state
+	}
+	return state
 }
 
 func streamToolCalls(toolCalls []core.ToolCall) []map[string]any {
@@ -224,4 +252,11 @@ func writeOpenAIStreamChunk(out io.Writer, chunk map[string]any) error {
 	}
 	_, err = out.Write([]byte("data: " + string(body) + "\n\n"))
 	return err
+}
+
+func writeOpenAIStreamError(out io.Writer, err *core.GatewayError) error {
+	if err == nil {
+		return nil
+	}
+	return writeOpenAIStreamChunk(out, err.ToJSON())
 }

@@ -51,11 +51,15 @@ type Provider struct {
 // New creates a new Gemini provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	baseURL := providers.ResolveBaseURL(providerCfg.BaseURL, defaultOpenAICompatibleBaseURL)
+	useNativeAPI := useNativeAPIFromEnv()
+	if baseURL != defaultOpenAICompatibleBaseURL {
+		useNativeAPI = false
+	}
 	p := &Provider{
 		httpClient:   nil,
 		apiKey:       providerCfg.APIKey,
 		hooks:        opts.Hooks,
-		useNativeAPI: useNativeAPIFromEnv(),
+		useNativeAPI: useNativeAPI,
 		modelsURL:    defaultModelsBaseURL,
 		modelsClientConf: llmclient.Config{
 			ProviderName:   "gemini",
@@ -103,9 +107,6 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
 	p.client.SetBaseURL(url)
-	if p.nativeClient != nil {
-		p.nativeClient.SetBaseURL(url)
-	}
 }
 
 // SetModelsURL allows configuring a custom models API base URL.
@@ -113,6 +114,9 @@ func (p *Provider) SetBaseURL(url string) {
 func (p *Provider) SetModelsURL(url string) {
 	p.modelsURL = url
 	p.modelsClientConf.BaseURL = url
+	if p.nativeClient != nil {
+		p.nativeClient.SetBaseURL(url)
+	}
 }
 
 // setHeaders sets the required headers for Gemini API requests
@@ -212,7 +216,7 @@ func (p *Provider) nativeChatCompletion(ctx context.Context, req *core.ChatReque
 	if err != nil {
 		return nil, err
 	}
-	return nativeChatResponse(req, &geminiResp), nil
+	return nativeChatResponse(req, &geminiResp)
 }
 
 // StreamChatCompletion returns a raw response body for streaming (caller must close)

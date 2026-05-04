@@ -3,6 +3,7 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -35,6 +36,75 @@ func TestNew_ReturnsProvider(t *testing.T) {
 
 	if provider == nil {
 		t.Error("provider should not be nil")
+	}
+}
+
+func TestNew_CustomBaseURLDisablesNativeMode(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	provider := New(providers.ProviderConfig{
+		APIKey:  "test-api-key",
+		BaseURL: "https://proxy.example.com/v1beta/openai",
+	}, providers.ProviderOptions{})
+
+	geminiProvider, ok := provider.(*Provider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *Provider", provider)
+	}
+	if geminiProvider.useNativeAPI {
+		t.Fatal("useNativeAPI = true, want false for custom OpenAI-compatible base URL")
+	}
+}
+
+func TestSetBaseURLDoesNotMutateNativeClient(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	nativeHit := false
+	nativeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nativeHit = true
+		if r.URL.Path != "/models/gemini-2.5-flash:generateContent" {
+			t.Errorf("native path = %q, want generateContent path", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"responseId": "gemini-native-baseurl",
+			"candidates": [{
+				"content": {"role": "model", "parts": [{"text": "ok"}]},
+				"finishReason": "STOP"
+			}]
+		}`))
+	}))
+	defer nativeServer.Close()
+
+	openAICompatHit := false
+	openAICompatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		openAICompatHit = true
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"native client used OpenAI-compatible base URL"}}`))
+	}))
+	defer openAICompatServer.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetModelsURL(nativeServer.URL)
+	provider.SetBaseURL(openAICompatServer.URL + "/v1beta/openai")
+
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || resp.ID != "gemini-native-baseurl" {
+		t.Fatalf("response = %+v, want native response", resp)
+	}
+	if !nativeHit {
+		t.Fatal("native server was not called")
+	}
+	if openAICompatHit {
+		t.Fatal("OpenAI-compatible server was called by native client")
 	}
 }
 
@@ -226,7 +296,7 @@ func TestChatCompletion_UsesNativeGenerateContentByDefault(t *testing.T) {
 	defer server.Close()
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider.SetModelsURL(server.URL)
 
 	maxTokens := 128
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -286,7 +356,7 @@ func TestChatCompletion_NativeUsageMetadata(t *testing.T) {
 	defer server.Close()
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider.SetModelsURL(server.URL)
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "gemini-2.5-flash",
@@ -318,6 +388,71 @@ func TestChatCompletion_NativeUsageMetadata(t *testing.T) {
 	}
 	if resp.Usage.RawUsage["completion_reasoning_tokens"] != 7 {
 		t.Fatalf("RawUsage[completion_reasoning_tokens] = %#v, want 7", resp.Usage.RawUsage["completion_reasoning_tokens"])
+	}
+}
+
+func TestChatCompletion_NativeBlockedPromptReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"responseId": "gemini-blocked",
+			"promptFeedback": {
+				"blockReason": "SAFETY",
+				"blockReasonMessage": "unsafe prompt"
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetModelsURL(server.URL)
+
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []core.Message{
+			{Role: "user", Content: "blocked"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected blocked prompt error, got nil")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T %[1]v, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeProvider {
+		t.Fatalf("error type = %q, want provider_error", gatewayErr.Type)
+	}
+	if !strings.Contains(gatewayErr.Message, "SAFETY: unsafe prompt") {
+		t.Fatalf("message = %q, want block reason", gatewayErr.Message)
+	}
+}
+
+func TestChatCompletion_NativeRejectsRemoteImageURL(t *testing.T) {
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []core.Message{{
+			Role: "user",
+			Content: []core.ContentPart{
+				{Type: "text", Text: "Describe the image."},
+				{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"}},
+			},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected remote image_url error, got nil")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T %[1]v, want *core.GatewayError", err)
+	}
+	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
+	}
+	if !strings.Contains(gatewayErr.Message, "supports only data: URLs") {
+		t.Fatalf("message = %q, want data URL guidance", gatewayErr.Message)
 	}
 }
 
@@ -362,7 +497,7 @@ func TestChatCompletion_NativeFunctionCallTranslation(t *testing.T) {
 	defer server.Close()
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider.SetModelsURL(server.URL)
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "gemini-2.5-flash",
@@ -534,7 +669,7 @@ data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model"
 	defer server.Close()
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider.SetModelsURL(server.URL)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "gemini-2.5-flash",
@@ -564,6 +699,83 @@ data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model"
 	}
 	if !strings.Contains(stream, `"usage"`) || !strings.Contains(stream, `"total_tokens":6`) {
 		t.Fatalf("stream = %q, want usage chunk", stream)
+	}
+	if !strings.Contains(stream, "data: [DONE]") {
+		t.Fatalf("stream = %q, want [DONE]", stream)
+	}
+}
+
+func TestStreamChatCompletion_NativePerChoiceState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`data: {"responseId":"gemini-stream-choice-state","candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"id":"call_0","name":"lookup_weather","args":{"city":"Warsaw"}}}]},"finishReason":"STOP"},{"index":1,"content":{"role":"model","parts":[{"text":"plain text"}]},"finishReason":"STOP"}]}
+
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetModelsURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read stream: %v", err)
+	}
+	stream := string(raw)
+	if got := strings.Count(stream, `"role":"assistant"`); got != 2 {
+		t.Fatalf("assistant role count = %d, want 2 in stream %q", got, stream)
+	}
+	if got := strings.Count(stream, `"finish_reason":"tool_calls"`); got != 1 {
+		t.Fatalf("tool_calls finish count = %d, want 1 in stream %q", got, stream)
+	}
+	if got := strings.Count(stream, `"finish_reason":"stop"`); got != 1 {
+		t.Fatalf("stop finish count = %d, want 1 in stream %q", got, stream)
+	}
+}
+
+func TestStreamChatCompletion_NativeBlockedPromptEmitsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`data: {"responseId":"gemini-stream-blocked","promptFeedback":{"blockReason":"SAFETY","blockReasonMessage":"unsafe prompt"}}
+
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetModelsURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []core.Message{
+			{Role: "user", Content: "blocked"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read stream: %v", err)
+	}
+	stream := string(raw)
+	if !strings.Contains(stream, `"type":"provider_error"`) || !strings.Contains(stream, "Gemini blocked prompt: SAFETY: unsafe prompt") {
+		t.Fatalf("stream = %q, want normalized provider error", stream)
 	}
 	if !strings.Contains(stream, "data: [DONE]") {
 		t.Fatalf("stream = %q, want [DONE]", stream)
@@ -657,7 +869,7 @@ func TestListModels(t *testing.T) {
 			defer server.Close()
 
 			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.modelsURL = server.URL
+			provider.SetModelsURL(server.URL)
 
 			resp, err := provider.ListModels(context.Background())
 
@@ -755,6 +967,8 @@ func TestResponses(t *testing.T) {
 }
 
 func TestStreamResponses(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "false")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`data: {"id":"gemini-123","object":"chat.completion.chunk","created":1677652288,"model":"gemini-2.0-flash","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
