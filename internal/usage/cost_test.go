@@ -130,6 +130,67 @@ func TestCalculateGranularCost_Gemini_PromptCachedTokens(t *testing.T) {
 	}
 }
 
+func TestCalculateGranularCost_Gemini_NativeUsageAliases(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:           new(0.30),
+		OutputPerMtok:          new(2.50),
+		CachedInputPerMtok:     new(0.03),
+		ReasoningOutputPerMtok: new(5.00),
+	}
+	rawData := map[string]any{
+		"cached_content_token_count":  50_000,
+		"prompt_cached_tokens":        50_000,
+		"thoughts_token_count":        20_000,
+		"completion_reasoning_tokens": 20_000,
+		"tool_use_prompt_token_count": 1000,
+	}
+	result := CalculateGranularCost(100_000, 120_000, rawData, "gemini", pricing)
+
+	// Input: 100k * 0.30/1M + 50k * (0.03-0.30)/1M
+	assertCostNear(t, "InputCost", result.InputCost, 0.0165)
+	// Output: 120k * 2.50/1M + 20k * (5.00-2.50)/1M
+	assertCostNear(t, "OutputCost", result.OutputCost, 0.35)
+	assertCostNear(t, "TotalCost", result.TotalCost, 0.3665)
+	if result.Caveat != "" {
+		t.Fatalf("expected no caveat for native Gemini usage aliases, got %q", result.Caveat)
+	}
+}
+
+func TestCalculateGranularCost_Gemini_AudioTokens(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:       new(0.30),
+		OutputPerMtok:      new(2.50),
+		AudioInputPerMtok:  new(1.00),
+		AudioOutputPerMtok: new(12.00),
+	}
+	rawData := map[string]any{
+		"prompt_audio_tokens":     30_000,
+		"completion_audio_tokens": 10_000,
+	}
+	result := CalculateGranularCost(100_000, 40_000, rawData, "gemini", pricing)
+
+	// Input: 100k * 0.30/1M + 30k * (1.00-0.30)/1M
+	assertCostNear(t, "InputCost", result.InputCost, 0.051)
+	// Output: 40k * 2.50/1M + 10k * (12.00-2.50)/1M
+	assertCostNear(t, "OutputCost", result.OutputCost, 0.195)
+}
+
+func TestCalculateGranularCost_TieredPricingUsesPromptTokenThreshold(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:  new(1.25),
+		OutputPerMtok: new(10.0),
+		Tiers: []core.ModelPricingTier{
+			{UpToTokens: new(200_000.0), InputPerMtok: new(1.25), OutputPerMtok: new(10.0)},
+			{UpToTokens: new(1_048_576.0), InputPerMtok: new(2.50), OutputPerMtok: new(15.0)},
+		},
+	}
+	result := CalculateGranularCost(250_000, 10_000, nil, "gemini", pricing)
+
+	assertCostNear(t, "InputCost", result.InputCost, 0.625)
+	assertCostNear(t, "OutputCost", result.OutputCost, 0.15)
+	assertCostNear(t, "TotalCost", result.TotalCost, 0.775)
+}
+
 func TestCalculateGranularCost_XAI_ImageTokens(t *testing.T) {
 	pricing := &core.ModelPricing{
 		InputPerMtok:  new(2.0),

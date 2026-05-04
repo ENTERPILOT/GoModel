@@ -260,6 +260,7 @@ type ModelPricing struct {
 
 // ModelPricingTier represents a volume-based pricing tier.
 type ModelPricingTier struct {
+	UpToTokens    *float64 `json:"up_to_tokens,omitempty" yaml:"up_to_tokens,omitempty"`
 	UpToMtok      *float64 `json:"up_to_mtok,omitempty" yaml:"up_to_mtok,omitempty"`
 	InputPerMtok  *float64 `json:"input_per_mtok,omitempty" yaml:"input_per_mtok,omitempty"`
 	OutputPerMtok *float64 `json:"output_per_mtok,omitempty" yaml:"output_per_mtok,omitempty"`
@@ -318,6 +319,7 @@ func (p *ModelPricing) Clone() *ModelPricing {
 		tiers := make([]ModelPricingTier, len(p.Tiers))
 		for i, t := range p.Tiers {
 			tiers[i] = ModelPricingTier{
+				UpToTokens:    cloneFloatPtr(t.UpToTokens),
 				UpToMtok:      cloneFloatPtr(t.UpToMtok),
 				InputPerMtok:  cloneFloatPtr(t.InputPerMtok),
 				OutputPerMtok: cloneFloatPtr(t.OutputPerMtok),

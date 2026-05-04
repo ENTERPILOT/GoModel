@@ -257,6 +257,70 @@ func TestChatCompletion_UsesNativeGenerateContentByDefault(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_NativeUsageMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"responseId": "gemini-native-usage",
+			"candidates": [{
+				"index": 0,
+				"content": {"role": "model", "parts": [{"text": "Done"}]},
+				"finishReason": "STOP"
+			}],
+			"usageMetadata": {
+				"promptTokenCount": 100,
+				"cachedContentTokenCount": 40,
+				"candidatesTokenCount": 20,
+				"thoughtsTokenCount": 7,
+				"totalTokenCount": 127,
+				"promptTokensDetails": [
+					{"modality": "TEXT", "tokenCount": 60},
+					{"modality": "AUDIO", "tokenCount": 40}
+				],
+				"candidatesTokensDetails": [
+					{"modality": "AUDIO", "tokenCount": 5}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.Usage.PromptTokens != 100 {
+		t.Fatalf("PromptTokens = %d, want 100", resp.Usage.PromptTokens)
+	}
+	if resp.Usage.CompletionTokens != 27 {
+		t.Fatalf("CompletionTokens = %d, want candidates + thoughts = 27", resp.Usage.CompletionTokens)
+	}
+	if resp.Usage.TotalTokens != 127 {
+		t.Fatalf("TotalTokens = %d, want 127", resp.Usage.TotalTokens)
+	}
+	if resp.Usage.PromptTokensDetails == nil || resp.Usage.PromptTokensDetails.CachedTokens != 40 || resp.Usage.PromptTokensDetails.AudioTokens != 40 {
+		t.Fatalf("PromptTokensDetails = %+v, want cached=40 audio=40", resp.Usage.PromptTokensDetails)
+	}
+	if resp.Usage.CompletionTokensDetails == nil || resp.Usage.CompletionTokensDetails.ReasoningTokens != 7 || resp.Usage.CompletionTokensDetails.AudioTokens != 5 {
+		t.Fatalf("CompletionTokensDetails = %+v, want reasoning=7 audio=5", resp.Usage.CompletionTokensDetails)
+	}
+	if resp.Usage.RawUsage["prompt_cached_tokens"] != 40 {
+		t.Fatalf("RawUsage[prompt_cached_tokens] = %#v, want 40", resp.Usage.RawUsage["prompt_cached_tokens"])
+	}
+	if resp.Usage.RawUsage["completion_reasoning_tokens"] != 7 {
+		t.Fatalf("RawUsage[completion_reasoning_tokens] = %#v, want 7", resp.Usage.RawUsage["completion_reasoning_tokens"])
+	}
+}
+
 func TestChatCompletion_NativeFunctionCallTranslation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)

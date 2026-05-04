@@ -634,30 +634,100 @@ func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall) 
 }
 
 func usageFromGemini(usage geminiUsageMetadata) core.Usage {
+	completionTokens := usage.CandidatesTokenCount + usage.ThoughtsTokenCount
 	out := core.Usage{
 		PromptTokens:     usage.PromptTokenCount,
-		CompletionTokens: usage.CandidatesTokenCount,
+		CompletionTokens: completionTokens,
 		TotalTokens:      usage.TotalTokenCount,
 	}
-	if out.TotalTokens == 0 {
+	minimumTotal := out.PromptTokens + out.CompletionTokens
+	if out.TotalTokens < minimumTotal {
 		out.TotalTokens = out.PromptTokens + out.CompletionTokens
 	}
+
 	raw := make(map[string]any)
+	promptDetails := promptTokenDetailsFromGemini(usage.PromptTokensDetails)
 	if usage.CachedContentTokenCount > 0 {
 		raw["cached_content_token_count"] = usage.CachedContentTokenCount
-		out.PromptTokensDetails = &core.PromptTokensDetails{CachedTokens: usage.CachedContentTokenCount}
+		raw["prompt_cached_tokens"] = usage.CachedContentTokenCount
+		if promptDetails == nil {
+			promptDetails = &core.PromptTokensDetails{}
+		}
+		promptDetails.CachedTokens = usage.CachedContentTokenCount
 	}
+	if promptDetails != nil {
+		out.PromptTokensDetails = promptDetails
+	}
+
 	if usage.ToolUsePromptTokenCount > 0 {
 		raw["tool_use_prompt_token_count"] = usage.ToolUsePromptTokenCount
 	}
+	completionDetails := completionTokenDetailsFromGemini(usage.CandidatesTokensDetails)
 	if usage.ThoughtsTokenCount > 0 {
 		raw["thoughts_token_count"] = usage.ThoughtsTokenCount
-		out.CompletionTokensDetails = &core.CompletionTokensDetails{ReasoningTokens: usage.ThoughtsTokenCount}
+		raw["completion_reasoning_tokens"] = usage.ThoughtsTokenCount
+		if completionDetails == nil {
+			completionDetails = &core.CompletionTokensDetails{}
+		}
+		completionDetails.ReasoningTokens = usage.ThoughtsTokenCount
+	}
+	if completionDetails != nil {
+		out.CompletionTokensDetails = completionDetails
 	}
 	if len(raw) > 0 {
 		out.RawUsage = raw
 	}
 	return out
+}
+
+func promptTokenDetailsFromGemini(raw json.RawMessage) *core.PromptTokensDetails {
+	if len(raw) == 0 {
+		return nil
+	}
+	var counts []geminiModalityTokenCount
+	if err := json.Unmarshal(raw, &counts); err != nil {
+		return nil
+	}
+	var out core.PromptTokensDetails
+	for _, count := range counts {
+		switch strings.ToUpper(strings.TrimSpace(count.Modality)) {
+		case "AUDIO":
+			out.AudioTokens += count.TokenCount
+		case "IMAGE":
+			out.ImageTokens += count.TokenCount
+		case "TEXT":
+			out.TextTokens += count.TokenCount
+		}
+	}
+	if out == (core.PromptTokensDetails{}) {
+		return nil
+	}
+	return &out
+}
+
+func completionTokenDetailsFromGemini(raw json.RawMessage) *core.CompletionTokensDetails {
+	if len(raw) == 0 {
+		return nil
+	}
+	var counts []geminiModalityTokenCount
+	if err := json.Unmarshal(raw, &counts); err != nil {
+		return nil
+	}
+	var out core.CompletionTokensDetails
+	for _, count := range counts {
+		if strings.EqualFold(strings.TrimSpace(count.Modality), "AUDIO") {
+			out.AudioTokens += count.TokenCount
+		}
+	}
+	if out == (core.CompletionTokensDetails{}) {
+		return nil
+	}
+	return &out
+}
+
+type geminiModalityTokenCount struct {
+	Modality   string `json:"modality"`
+	TokenCount int    `json:"tokenCount"`
 }
 
 func finishReasonFromGemini(reason string, hasToolCalls bool) string {

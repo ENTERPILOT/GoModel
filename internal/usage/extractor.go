@@ -361,11 +361,17 @@ func pricingForEndpoint(pricing *core.ModelPricing, endpoint string) *core.Model
 	}
 
 	effective := *pricing
+	usesBatchRate := false
 	if pricing.BatchInputPerMtok != nil {
 		effective.InputPerMtok = pricing.BatchInputPerMtok
+		usesBatchRate = true
 	}
 	if pricing.BatchOutputPerMtok != nil {
 		effective.OutputPerMtok = pricing.BatchOutputPerMtok
+		usesBatchRate = true
+	}
+	if usesBatchRate {
+		effective.Tiers = nil
 	}
 	return &effective
 }

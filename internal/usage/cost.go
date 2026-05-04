@@ -71,7 +71,13 @@ var providerMappings = map[string][]tokenCostMapping{
 	"gemini": {
 		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
 		{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "cached_content_token_count", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
 		{rawDataKey: "thought_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "thoughts_token_count", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "prompt_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+		{rawDataKey: "completion_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	},
 	"groq": {
 		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
@@ -95,6 +101,7 @@ var providerMappings = map[string][]tokenCostMapping{
 var informationalFields = map[string]struct{}{
 	"prompt_text_tokens":                    {},
 	"prompt_image_tokens":                   {},
+	"tool_use_prompt_token_count":           {},
 	"completion_accepted_prediction_tokens": {},
 	"completion_rejected_prediction_tokens": {},
 }
@@ -109,6 +116,7 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 	if pricing == nil {
 		return CostResult{}
 	}
+	pricing = pricingForTokenCount(pricing, inputTokens)
 
 	var inputCost, outputCost float64
 	var hasInput, hasOutput bool
@@ -219,6 +227,67 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 	result.Caveat = strings.Join(caveats, "; ")
 
 	return result
+}
+
+func pricingForTokenCount(pricing *core.ModelPricing, inputTokens int) *core.ModelPricing {
+	if pricing == nil || inputTokens <= 0 || len(pricing.Tiers) == 0 {
+		return pricing
+	}
+
+	tier, ok := selectPricingTier(pricing.Tiers, inputTokens)
+	if !ok {
+		return pricing
+	}
+
+	effective := *pricing
+	if tier.InputPerMtok != nil {
+		effective.InputPerMtok = tier.InputPerMtok
+	}
+	if tier.OutputPerMtok != nil {
+		effective.OutputPerMtok = tier.OutputPerMtok
+	}
+	return &effective
+}
+
+func selectPricingTier(tiers []core.ModelPricingTier, inputTokens int) (core.ModelPricingTier, bool) {
+	type tierWithLimit struct {
+		tier  core.ModelPricingTier
+		limit float64
+	}
+
+	limited := make([]tierWithLimit, 0, len(tiers))
+	for _, tier := range tiers {
+		limit, ok := tierLimitTokens(tier)
+		if !ok || limit <= 0 {
+			continue
+		}
+		limited = append(limited, tierWithLimit{tier: tier, limit: limit})
+	}
+	if len(limited) == 0 {
+		return core.ModelPricingTier{}, false
+	}
+
+	sort.Slice(limited, func(i, j int) bool {
+		return limited[i].limit < limited[j].limit
+	})
+
+	tokenCount := float64(inputTokens)
+	for _, candidate := range limited {
+		if tokenCount <= candidate.limit {
+			return candidate.tier, true
+		}
+	}
+	return limited[len(limited)-1].tier, true
+}
+
+func tierLimitTokens(tier core.ModelPricingTier) (float64, bool) {
+	if tier.UpToTokens != nil {
+		return *tier.UpToTokens, true
+	}
+	if tier.UpToMtok != nil {
+		return *tier.UpToMtok * 1_000_000, true
+	}
+	return 0, false
 }
 
 func baseRateForSide(pricing *core.ModelPricing, side costSide) *float64 {

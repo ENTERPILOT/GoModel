@@ -707,6 +707,39 @@ func TestExtractFromChatResponse_WithBatchPricingEndpoint(t *testing.T) {
 	}
 }
 
+func TestExtractFromChatResponse_BatchPricingIgnoresStandardTiers(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:       new(4.0),
+		OutputPerMtok:      new(8.0),
+		BatchInputPerMtok:  new(1.0),
+		BatchOutputPerMtok: new(2.0),
+		Tiers: []core.ModelPricingTier{
+			{UpToTokens: new(200_000.0), InputPerMtok: new(4.0), OutputPerMtok: new(8.0)},
+			{UpToTokens: new(1_048_576.0), InputPerMtok: new(40.0), OutputPerMtok: new(80.0)},
+		},
+	}
+	resp := &core.ChatResponse{
+		ID:    "chatcmpl-batch-tiered",
+		Model: "gpt-4o",
+		Usage: core.Usage{
+			PromptTokens:     250_000,
+			CompletionTokens: 10_000,
+			TotalTokens:      260_000,
+		},
+	}
+
+	entry := ExtractFromChatResponse(resp, "req-batch-tiered", "openai", "/v1/batches", pricing)
+	if entry == nil {
+		t.Fatal("expected non-nil entry")
+	}
+	if math.Abs(*entry.InputCost-0.25) > 1e-9 {
+		t.Errorf("InputCost = %f, want 0.25", *entry.InputCost)
+	}
+	if math.Abs(*entry.OutputCost-0.02) > 1e-9 {
+		t.Errorf("OutputCost = %f, want 0.02", *entry.OutputCost)
+	}
+}
+
 func TestExtractFromChatResponse_WithBatchPricingSubpathEndpoint(t *testing.T) {
 	pricing := &core.ModelPricing{
 		InputPerMtok:       new(4.0),

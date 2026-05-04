@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+func TestModelPricingTierUnmarshalUpToTokens(t *testing.T) {
+	var pricing ModelPricing
+	if err := json.Unmarshal([]byte(`{
+		"currency": "USD",
+		"tiers": [
+			{"up_to_tokens": 200000, "input_per_mtok": 1.25, "output_per_mtok": 10.0}
+		]
+	}`), &pricing); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, want nil", err)
+	}
+	if len(pricing.Tiers) != 1 {
+		t.Fatalf("len(Tiers) = %d, want 1", len(pricing.Tiers))
+	}
+	if pricing.Tiers[0].UpToTokens == nil || *pricing.Tiers[0].UpToTokens != 200000 {
+		t.Fatalf("UpToTokens = %#v, want 200000", pricing.Tiers[0].UpToTokens)
+	}
+}
+
 func TestMessageUnmarshalJSON_AllowsNullContent(t *testing.T) {
 	payload := []byte(`{
 		"role":"assistant",
