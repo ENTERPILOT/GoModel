@@ -201,6 +201,8 @@ providers:
   gemini:
     type: gemini
     api_key: "..."
+    # Chat/responses use Gemini's native generateContent API by default.
+    # Set USE_GOOGLE_GEMINI_NATIVE_API=false to use Gemini's OpenAI-compatible API instead.
 
   xai:
     type: xai

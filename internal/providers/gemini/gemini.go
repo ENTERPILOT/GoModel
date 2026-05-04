@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -30,16 +31,19 @@ var Registration = providers.Registration{
 const (
 	// Gemini provides an OpenAI-compatible endpoint
 	defaultOpenAICompatibleBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
-	// Native Gemini API endpoint for models listing
+	// Native Gemini API endpoint for generateContent and models listing
 	defaultModelsBaseURL = "https://generativelanguage.googleapis.com/v1beta"
+	useNativeAPIEnvVar   = "USE_GOOGLE_GEMINI_NATIVE_API"
 )
 
 // Provider implements the core.Provider interface for Google Gemini
 type Provider struct {
 	client           *llmclient.Client
+	nativeClient     *llmclient.Client
 	httpClient       *http.Client
 	hooks            llmclient.Hooks
 	apiKey           string
+	useNativeAPI     bool
 	modelsURL        string
 	modelsClientConf llmclient.Config
 }
@@ -48,10 +52,11 @@ type Provider struct {
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	baseURL := providers.ResolveBaseURL(providerCfg.BaseURL, defaultOpenAICompatibleBaseURL)
 	p := &Provider{
-		httpClient: nil,
-		apiKey:     providerCfg.APIKey,
-		hooks:      opts.Hooks,
-		modelsURL:  defaultModelsBaseURL,
+		httpClient:   nil,
+		apiKey:       providerCfg.APIKey,
+		hooks:        opts.Hooks,
+		useNativeAPI: useNativeAPIFromEnv(),
+		modelsURL:    defaultModelsBaseURL,
 		modelsClientConf: llmclient.Config{
 			ProviderName:   "gemini",
 			BaseURL:        defaultModelsBaseURL,
@@ -68,6 +73,7 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
 	p.client = llmclient.New(clientCfg, p.setHeaders)
+	p.nativeClient = llmclient.New(p.modelsClientConf, p.setNativeHeaders)
 	return p
 }
 
@@ -78,10 +84,11 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 		httpClient = http.DefaultClient
 	}
 	p := &Provider{
-		httpClient: httpClient,
-		apiKey:     apiKey,
-		hooks:      hooks,
-		modelsURL:  defaultModelsBaseURL,
+		httpClient:   httpClient,
+		apiKey:       apiKey,
+		hooks:        hooks,
+		useNativeAPI: useNativeAPIFromEnv(),
+		modelsURL:    defaultModelsBaseURL,
 	}
 	modelsCfg := llmclient.DefaultConfig("gemini", defaultModelsBaseURL)
 	modelsCfg.Hooks = hooks
@@ -89,12 +96,16 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 	cfg := llmclient.DefaultConfig("gemini", defaultOpenAICompatibleBaseURL)
 	cfg.Hooks = hooks
 	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
+	p.nativeClient = llmclient.NewWithHTTPClient(httpClient, modelsCfg, p.setNativeHeaders)
 	return p
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
 	p.client.SetBaseURL(url)
+	if p.nativeClient != nil {
+		p.nativeClient.SetBaseURL(url)
+	}
 }
 
 // SetModelsURL allows configuring a custom models API base URL.
@@ -111,6 +122,28 @@ func (p *Provider) setHeaders(req *http.Request) {
 	// Forward request ID if present in context for request tracing
 	if requestID := core.GetRequestID(req.Context()); requestID != "" {
 		req.Header.Set("X-Request-Id", requestID)
+	}
+}
+
+// setNativeHeaders sets the required headers for Gemini native API requests.
+func (p *Provider) setNativeHeaders(req *http.Request) {
+	req.Header.Set("x-goog-api-key", p.apiKey)
+
+	if requestID := core.GetRequestID(req.Context()); requestID != "" {
+		req.Header.Set("X-Request-Id", requestID)
+	}
+}
+
+func useNativeAPIFromEnv() bool {
+	value, ok := os.LookupEnv(useNativeAPIEnvVar)
+	if !ok || strings.TrimSpace(value) == "" {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
 	}
 }
 
@@ -140,6 +173,12 @@ func adaptChatRequest(req *core.ChatRequest) (any, error) {
 
 // ChatCompletion sends a chat completion request to Gemini
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("chat request is required", nil)
+	}
+	if p.useNativeAPI {
+		return p.nativeChatCompletion(ctx, req)
+	}
 	body, err := adaptChatRequest(req)
 	if err != nil {
 		return nil, err
@@ -159,8 +198,31 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	return &resp, nil
 }
 
+func (p *Provider) nativeChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	body, err := convertChatRequestToGemini(req)
+	if err != nil {
+		return nil, err
+	}
+	var geminiResp geminiGenerateContentResponse
+	err = p.nativeClient.Do(ctx, llmclient.Request{
+		Method:   http.MethodPost,
+		Endpoint: nativeGenerateEndpoint(req.Model),
+		Body:     body,
+	}, &geminiResp)
+	if err != nil {
+		return nil, err
+	}
+	return nativeChatResponse(req, &geminiResp), nil
+}
+
 // StreamChatCompletion returns a raw response body for streaming (caller must close)
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("chat request is required", nil)
+	}
+	if p.useNativeAPI {
+		return p.nativeStreamChatCompletion(ctx, req)
+	}
 	streamReq := req.WithStreaming()
 	body, err := adaptChatRequest(streamReq)
 	if err != nil {
@@ -177,6 +239,24 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 
 	// Gemini's OpenAI-compatible endpoint returns OpenAI-format SSE, so we can pass it through directly
 	return stream, nil
+}
+
+func (p *Provider) nativeStreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	streamReq := req.WithStreaming()
+	body, err := convertChatRequestToGemini(streamReq)
+	if err != nil {
+		return nil, err
+	}
+	stream, err := p.nativeClient.DoStream(ctx, llmclient.Request{
+		Method:   http.MethodPost,
+		Endpoint: nativeStreamEndpoint(req.Model),
+		Body:     body,
+	})
+	if err != nil {
+		return nil, err
+	}
+	includeUsage := streamReq.StreamOptions != nil && streamReq.StreamOptions.IncludeUsage
+	return newGeminiNativeStream(stream, req.Model, includeUsage), nil
 }
 
 // geminiModel represents a model in Gemini's native API response

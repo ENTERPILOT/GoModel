@@ -255,6 +255,7 @@
           "properties": {
             "enabled": { "type": "boolean" },
             "apiKey": { "type": "string" },
+            "useNativeApi": { "type": "boolean" },
             "baseUrl": { "type": "string" }
           }
         },

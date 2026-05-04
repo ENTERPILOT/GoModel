@@ -58,6 +58,7 @@ helm install gomodel ./helm \
 | `providers.openai.enabled`       | Enable OpenAI                                                                                  | `false`                |
 | `providers.anthropic.enabled`    | Enable Anthropic                                                                               | `false`                |
 | `providers.gemini.enabled`       | Enable Gemini                                                                                  | `false`                |
+| `providers.gemini.useNativeApi`  | Use Gemini native generateContent for chat/responses; set false for Gemini OpenAI compatibility | `true`                 |
 | `providers.groq.enabled`         | Enable Groq                                                                                    | `false`                |
 | `providers.xai.enabled`          | Enable xAI                                                                                     | `false`                |
 | `providers.zai.enabled`          | Enable Z.ai                                                                                    | `false`                |

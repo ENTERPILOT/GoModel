@@ -39,6 +39,8 @@ func TestNew_ReturnsProvider(t *testing.T) {
 }
 
 func TestChatCompletion(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "false")
+
 	tests := []struct {
 		name          string
 		statusCode    int
@@ -166,7 +168,183 @@ func TestChatCompletion(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_UsesNativeGenerateContentByDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("Method = %q, want %q", r.Method, http.MethodPost)
+		}
+		if r.URL.Path != "/models/gemini-2.5-flash:generateContent" {
+			t.Errorf("Path = %q, want native generateContent endpoint", r.URL.Path)
+		}
+		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
+			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization = %q, want empty for native Gemini API", got)
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+		if _, ok := payload["messages"]; ok {
+			t.Fatal("native request should not contain OpenAI messages")
+		}
+		if _, ok := payload["contents"]; !ok {
+			t.Fatal("native request should contain contents")
+		}
+		generationConfig, ok := payload["generationConfig"].(map[string]any)
+		if !ok {
+			t.Fatalf("generationConfig = %#v, want object", payload["generationConfig"])
+		}
+		if got := generationConfig["maxOutputTokens"]; got != float64(128) {
+			t.Fatalf("maxOutputTokens = %#v, want 128", got)
+		}
+		if _, ok := payload["system_instruction"]; !ok {
+			t.Fatal("system_instruction missing")
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"responseId": "gemini-native-123",
+			"candidates": [{
+				"index": 0,
+				"content": {"role": "model", "parts": [{"text": "Hello from native Gemini"}]},
+				"finishReason": "STOP"
+			}],
+			"usageMetadata": {
+				"promptTokenCount": 7,
+				"candidatesTokenCount": 5,
+				"totalTokenCount": 12
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	maxTokens := 128
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:     "gemini-2.5-flash",
+		MaxTokens: &maxTokens,
+		Messages: []core.Message{
+			{Role: "system", Content: "Be concise."},
+			{Role: "user", Content: "Hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != "gemini-native-123" {
+		t.Fatalf("ID = %q, want gemini-native-123", resp.ID)
+	}
+	if resp.Provider != "gemini" {
+		t.Fatalf("Provider = %q, want gemini", resp.Provider)
+	}
+	if got := resp.Choices[0].Message.Content; got != "Hello from native Gemini" {
+		t.Fatalf("content = %q, want native text", got)
+	}
+	if got := resp.Choices[0].FinishReason; got != "stop" {
+		t.Fatalf("finish_reason = %q, want stop", got)
+	}
+	if resp.Usage.TotalTokens != 12 {
+		t.Fatalf("TotalTokens = %d, want 12", resp.Usage.TotalTokens)
+	}
+}
+
+func TestChatCompletion_NativeFunctionCallTranslation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+		tools, ok := payload["tools"].([]any)
+		if !ok || len(tools) != 1 {
+			t.Fatalf("tools = %#v, want one Gemini tool", payload["tools"])
+		}
+		toolConfig, ok := payload["toolConfig"].(map[string]any)
+		if !ok {
+			t.Fatalf("toolConfig = %#v, want object", payload["toolConfig"])
+		}
+		functionConfig := toolConfig["functionCallingConfig"].(map[string]any)
+		if functionConfig["mode"] != "ANY" {
+			t.Fatalf("tool mode = %#v, want ANY", functionConfig["mode"])
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"responseId": "gemini-tools-123",
+			"candidates": [{
+				"content": {"role": "model", "parts": [{
+					"functionCall": {
+						"id": "call_native",
+						"name": "lookup_weather",
+						"args": {"city": "Warsaw"}
+					}
+				}]},
+				"finishReason": "STOP"
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []core.Message{
+			{Role: "user", Content: "Weather?"},
+		},
+		Tools: []map[string]any{{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "lookup_weather",
+				"description": "Look up weather",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"city": map[string]any{"type": "string"},
+					},
+					"required": []any{"city"},
+				},
+			},
+		}},
+		ToolChoice: map[string]any{
+			"type":     "function",
+			"function": map[string]any{"name": "lookup_weather"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := resp.Choices[0].FinishReason; got != "tool_calls" {
+		t.Fatalf("finish_reason = %q, want tool_calls", got)
+	}
+	if len(resp.Choices[0].Message.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %d, want 1", len(resp.Choices[0].Message.ToolCalls))
+	}
+	call := resp.Choices[0].Message.ToolCalls[0]
+	if call.ID != "call_native" || call.Function.Name != "lookup_weather" {
+		t.Fatalf("tool call = %+v, want native function call", call)
+	}
+	if call.Function.Arguments != `{"city":"Warsaw"}` {
+		t.Fatalf("arguments = %q, want JSON object", call.Function.Arguments)
+	}
+}
+
 func TestStreamChatCompletion(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "false")
+
 	tests := []struct {
 		name          string
 		statusCode    int
@@ -254,6 +432,77 @@ data: [DONE]
 				}
 			}
 		})
+	}
+}
+
+func TestStreamChatCompletion_UsesNativeStreamByDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models/gemini-2.5-flash:streamGenerateContent" {
+			t.Errorf("Path = %q, want native streamGenerateContent endpoint", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("alt"); got != "sse" {
+			t.Errorf("alt = %q, want sse", got)
+		}
+		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
+			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to unmarshal request: %v", err)
+		}
+		if _, ok := payload["stream"]; ok {
+			t.Fatal("native stream request should not contain OpenAI stream flag")
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}]}
+
+data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model","parts":[{"text":"!"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2,"totalTokenCount":6}}
+
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+		StreamOptions: &core.StreamOptions{IncludeUsage: true},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read stream: %v", err)
+	}
+	stream := string(raw)
+	if !strings.Contains(stream, `"id":"gemini-stream-123"`) {
+		t.Fatalf("stream = %q, want native response id", stream)
+	}
+	if !strings.Contains(stream, `"content":"Hello"`) || !strings.Contains(stream, `"content":"!"`) {
+		t.Fatalf("stream = %q, want converted content chunks", stream)
+	}
+	if !strings.Contains(stream, `"finish_reason":"stop"`) {
+		t.Fatalf("stream = %q, want stop finish reason", stream)
+	}
+	if !strings.Contains(stream, `"usage"`) || !strings.Contains(stream, `"total_tokens":6`) {
+		t.Fatalf("stream = %q, want usage chunk", stream)
+	}
+	if !strings.Contains(stream, "data: [DONE]") {
+		t.Fatalf("stream = %q, want [DONE]", stream)
 	}
 }
 
@@ -391,6 +640,8 @@ func TestChatCompletionWithContext(t *testing.T) {
 }
 
 func TestResponses(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "false")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{

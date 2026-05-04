@@ -250,6 +250,7 @@ Key settings:
 | `ENABLE_PASSTHROUGH_ROUTES`     | `true`                                 | Enable provider-native passthrough routes under `/p/{provider}/...`              |
 | `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                                 | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |
 | `ENABLED_PASSTHROUGH_PROVIDERS` | `openai,anthropic,openrouter,zai,vllm` | Comma-separated list of enabled passthrough providers                            |
+| `USE_GOOGLE_GEMINI_NATIVE_API`  | `true`                                 | Use Gemini native `generateContent` for chat/responses; set `false` for Gemini's OpenAI-compatible API |
 | `STORAGE_TYPE`                  | `sqlite`                               | Storage backend (`sqlite`, `postgresql`, `mongodb`)                              |
 | `METRICS_ENABLED`               | `false`                                | Enable Prometheus metrics (experimental)                                         |
 | `LOGGING_ENABLED`               | `false`                                | Enable audit logging                                                             |

@@ -173,6 +173,10 @@ Generate provider environment variables for the Deployment.
   value: {{ $config.baseUrl | quote }}
 {{- end }}
 {{- end }}
+{{- if and (eq $name "gemini") (hasKey $config "useNativeApi") }}
+- name: USE_GOOGLE_GEMINI_NATIVE_API
+  value: {{ $config.useNativeApi | quote }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

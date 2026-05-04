@@ -64,6 +64,8 @@ providers:
     enabled: false
     # -- Gemini API key (ignored if providers.existingSecret is set)
     apiKey: ""
+    # -- Use Gemini native generateContent API for chat/responses. Set false to use Gemini's OpenAI-compatible API.
+    useNativeApi: true
     # -- Optional: Override Gemini base URL
     baseUrl: ""
 
