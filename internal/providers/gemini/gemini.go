@@ -51,19 +51,16 @@ type Provider struct {
 // New creates a new Gemini provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	baseURL := providers.ResolveBaseURL(providerCfg.BaseURL, defaultOpenAICompatibleBaseURL)
-	useNativeAPI := useNativeAPIFromEnv()
-	if baseURL != defaultOpenAICompatibleBaseURL {
-		useNativeAPI = false
-	}
+	modelsURL := defaultModelsBaseURL
 	p := &Provider{
 		httpClient:   nil,
 		apiKey:       providerCfg.APIKey,
 		hooks:        opts.Hooks,
-		useNativeAPI: useNativeAPI,
-		modelsURL:    defaultModelsBaseURL,
+		useNativeAPI: useNativeAPIForBaseURLs(baseURL, modelsURL),
+		modelsURL:    modelsURL,
 		modelsClientConf: llmclient.Config{
 			ProviderName:   "gemini",
-			BaseURL:        defaultModelsBaseURL,
+			BaseURL:        modelsURL,
 			Retry:          opts.Resilience.Retry,
 			Hooks:          opts.Hooks,
 			CircuitBreaker: opts.Resilience.CircuitBreaker,
@@ -87,17 +84,19 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	baseURL := defaultOpenAICompatibleBaseURL
+	modelsURL := defaultModelsBaseURL
 	p := &Provider{
 		httpClient:   httpClient,
 		apiKey:       apiKey,
 		hooks:        hooks,
-		useNativeAPI: useNativeAPIFromEnv(),
-		modelsURL:    defaultModelsBaseURL,
+		useNativeAPI: useNativeAPIForBaseURLs(baseURL, modelsURL),
+		modelsURL:    modelsURL,
 	}
-	modelsCfg := llmclient.DefaultConfig("gemini", defaultModelsBaseURL)
+	modelsCfg := llmclient.DefaultConfig("gemini", modelsURL)
 	modelsCfg.Hooks = hooks
 	p.modelsClientConf = modelsCfg
-	cfg := llmclient.DefaultConfig("gemini", defaultOpenAICompatibleBaseURL)
+	cfg := llmclient.DefaultConfig("gemini", baseURL)
 	cfg.Hooks = hooks
 	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
 	p.nativeClient = llmclient.NewWithHTTPClient(httpClient, modelsCfg, p.setNativeHeaders)
@@ -107,6 +106,9 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
 	p.client.SetBaseURL(url)
+	p.modelsURL = url
+	p.modelsClientConf.BaseURL = url
+	p.useNativeAPI = useNativeAPIForBaseURLs(url, p.modelsURL)
 }
 
 // SetModelsURL allows configuring a custom models API base URL.
@@ -149,6 +151,12 @@ func useNativeAPIFromEnv() bool {
 	default:
 		return true
 	}
+}
+
+func useNativeAPIForBaseURLs(baseURL, modelsURL string) bool {
+	return useNativeAPIFromEnv() &&
+		baseURL == defaultOpenAICompatibleBaseURL &&
+		modelsURL == defaultModelsBaseURL
 }
 
 // adaptChatRequest rewrites a ChatRequest for Gemini's OpenAI-compatible endpoint.

@@ -740,6 +740,72 @@ func TestExtractFromChatResponse_BatchPricingIgnoresStandardTiers(t *testing.T) 
 	}
 }
 
+func TestExtractFromChatResponse_PartialBatchPricingPreservesOtherSideTiers(t *testing.T) {
+	tests := []struct {
+		name       string
+		pricing    *core.ModelPricing
+		wantInput  float64
+		wantOutput float64
+	}{
+		{
+			name: "batch input preserves output tier",
+			pricing: &core.ModelPricing{
+				InputPerMtok:      new(4.0),
+				OutputPerMtok:     new(8.0),
+				BatchInputPerMtok: new(1.0),
+				Tiers: []core.ModelPricingTier{
+					{UpToTokens: new(200_000.0), InputPerMtok: new(4.0), OutputPerMtok: new(8.0)},
+					{UpToTokens: new(1_048_576.0), InputPerMtok: new(40.0), OutputPerMtok: new(80.0)},
+				},
+			},
+			wantInput:  0.25,
+			wantOutput: 0.8,
+		},
+		{
+			name: "batch output preserves input tier",
+			pricing: &core.ModelPricing{
+				InputPerMtok:       new(4.0),
+				OutputPerMtok:      new(8.0),
+				BatchOutputPerMtok: new(2.0),
+				Tiers: []core.ModelPricingTier{
+					{UpToTokens: new(200_000.0), InputPerMtok: new(4.0), OutputPerMtok: new(8.0)},
+					{UpToTokens: new(1_048_576.0), InputPerMtok: new(40.0), OutputPerMtok: new(80.0)},
+				},
+			},
+			wantInput:  10.0,
+			wantOutput: 0.02,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &core.ChatResponse{
+				ID:    "chatcmpl-batch-partial-tiered",
+				Model: "gpt-4o",
+				Usage: core.Usage{
+					PromptTokens:     250_000,
+					CompletionTokens: 10_000,
+					TotalTokens:      260_000,
+				},
+			}
+
+			entry := ExtractFromChatResponse(resp, "req-batch-partial-tiered", "openai", "/v1/batches", tt.pricing)
+			if entry == nil {
+				t.Fatal("expected non-nil entry")
+			}
+			if entry.InputCost == nil || entry.OutputCost == nil {
+				t.Fatalf("costs = input:%v output:%v, want both populated", entry.InputCost, entry.OutputCost)
+			}
+			if math.Abs(*entry.InputCost-tt.wantInput) > 1e-9 {
+				t.Errorf("InputCost = %f, want %f", *entry.InputCost, tt.wantInput)
+			}
+			if math.Abs(*entry.OutputCost-tt.wantOutput) > 1e-9 {
+				t.Errorf("OutputCost = %f, want %f", *entry.OutputCost, tt.wantOutput)
+			}
+		})
+	}
+}
+
 func TestExtractFromChatResponse_WithBatchPricingSubpathEndpoint(t *testing.T) {
 	pricing := &core.ModelPricing{
 		InputPerMtok:       new(4.0),

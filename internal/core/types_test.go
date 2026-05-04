@@ -21,6 +21,24 @@ func TestModelPricingTierUnmarshalUpToTokens(t *testing.T) {
 	if pricing.Tiers[0].UpToTokens == nil || *pricing.Tiers[0].UpToTokens != 200000 {
 		t.Fatalf("UpToTokens = %#v, want 200000", pricing.Tiers[0].UpToTokens)
 	}
+
+	cloned := pricing.Clone()
+	if cloned == nil {
+		t.Fatal("Clone() = nil, want pricing copy")
+	}
+	if len(cloned.Tiers) != 1 {
+		t.Fatalf("len(cloned.Tiers) = %d, want 1", len(cloned.Tiers))
+	}
+	if cloned.Tiers[0].UpToTokens == nil || *cloned.Tiers[0].UpToTokens != 200000 {
+		t.Fatalf("cloned UpToTokens = %#v, want 200000", cloned.Tiers[0].UpToTokens)
+	}
+	if cloned.Tiers[0].UpToTokens == pricing.Tiers[0].UpToTokens {
+		t.Fatal("Clone() reused UpToTokens pointer, want deep copy")
+	}
+	*pricing.Tiers[0].UpToTokens = 123
+	if *cloned.Tiers[0].UpToTokens != 200000 {
+		t.Fatalf("cloned UpToTokens after source mutation = %v, want 200000", *cloned.Tiers[0].UpToTokens)
+	}
 }
 
 func TestMessageUnmarshalJSON_AllowsNullContent(t *testing.T) {

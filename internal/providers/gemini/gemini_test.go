@@ -56,31 +56,41 @@ func TestNew_CustomBaseURLDisablesNativeMode(t *testing.T) {
 	}
 }
 
-func TestSetBaseURLDoesNotMutateNativeClient(t *testing.T) {
+func TestSetBaseURLDisablesNativeRouting(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
 	nativeHit := false
 	nativeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nativeHit = true
-		if r.URL.Path != "/models/gemini-2.5-flash:generateContent" {
-			t.Errorf("native path = %q, want generateContent path", r.URL.Path)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"responseId": "gemini-native-baseurl",
-			"candidates": [{
-				"content": {"role": "model", "parts": [{"text": "ok"}]},
-				"finishReason": "STOP"
-			}]
-		}`))
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"native client should not be used after SetBaseURL"}}`))
 	}))
 	defer nativeServer.Close()
 
 	openAICompatHit := false
 	openAICompatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		openAICompatHit = true
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":{"message":"native client used OpenAI-compatible base URL"}}`))
+		if r.URL.Path != "/v1beta/openai/chat/completions" {
+			t.Errorf("OpenAI-compatible path = %q, want /v1beta/openai/chat/completions", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-api-key" {
+			t.Errorf("Authorization = %q, want bearer API key", got)
+		}
+		if got := r.Header.Get("x-goog-api-key"); got != "" {
+			t.Errorf("x-goog-api-key = %q, want empty for OpenAI-compatible API", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id": "gemini-openai-compatible-baseurl",
+			"object": "chat.completion",
+			"created": 1677652288,
+			"model": "gemini-2.5-flash",
+			"choices": [{
+				"index": 0,
+				"message": {"role": "assistant", "content": "ok"},
+				"finish_reason": "stop"
+			}]
+		}`))
 	}))
 	defer openAICompatServer.Close()
 
@@ -97,14 +107,14 @@ func TestSetBaseURLDoesNotMutateNativeClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp == nil || resp.ID != "gemini-native-baseurl" {
-		t.Fatalf("response = %+v, want native response", resp)
+	if resp == nil || resp.ID != "gemini-openai-compatible-baseurl" {
+		t.Fatalf("response = %+v, want OpenAI-compatible response", resp)
 	}
-	if !nativeHit {
-		t.Fatal("native server was not called")
+	if nativeHit {
+		t.Fatal("native server was called after SetBaseURL")
 	}
-	if openAICompatHit {
-		t.Fatal("OpenAI-compatible server was called by native client")
+	if !openAICompatHit {
+		t.Fatal("OpenAI-compatible server was not called")
 	}
 }
 
@@ -239,6 +249,8 @@ func TestChatCompletion(t *testing.T) {
 }
 
 func TestChatCompletion_UsesNativeGenerateContentByDefault(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("Method = %q, want %q", r.Method, http.MethodPost)
@@ -328,6 +340,8 @@ func TestChatCompletion_UsesNativeGenerateContentByDefault(t *testing.T) {
 }
 
 func TestChatCompletion_NativeUsageMetadata(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{
@@ -391,7 +405,47 @@ func TestChatCompletion_NativeUsageMetadata(t *testing.T) {
 	}
 }
 
+func TestCopyJSONNumberAcceptsOnlyNumericValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		wantSet bool
+		want    float64
+	}{
+		{name: "number", raw: `42`, wantSet: true, want: 42},
+		{name: "numeric string", raw: `"42.5"`, wantSet: true, want: 42.5},
+		{name: "object", raw: `{"value":42}`, wantSet: false},
+		{name: "array", raw: `[42]`, wantSet: false},
+		{name: "boolean", raw: `true`, wantSet: false},
+		{name: "non numeric string", raw: `"fast"`, wantSet: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := map[string]any{}
+			copyJSONNumber(json.RawMessage(tt.raw), cfg, "value")
+
+			got, ok := cfg["value"]
+			if ok != tt.wantSet {
+				t.Fatalf("cfg[value] set = %v, want %v; cfg = %#v", ok, tt.wantSet, cfg)
+			}
+			if !tt.wantSet {
+				return
+			}
+			gotFloat, ok := got.(float64)
+			if !ok {
+				t.Fatalf("cfg[value] = %T(%[1]v), want float64", got)
+			}
+			if gotFloat != tt.want {
+				t.Fatalf("cfg[value] = %v, want %v", gotFloat, tt.want)
+			}
+		})
+	}
+}
+
 func TestChatCompletion_NativeBlockedPromptReturnsError(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{
@@ -429,6 +483,8 @@ func TestChatCompletion_NativeBlockedPromptReturnsError(t *testing.T) {
 }
 
 func TestChatCompletion_NativeRejectsRemoteImageURL(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -457,6 +513,8 @@ func TestChatCompletion_NativeRejectsRemoteImageURL(t *testing.T) {
 }
 
 func TestChatCompletion_NativeFunctionCallTranslation(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -635,6 +693,8 @@ data: [DONE]
 }
 
 func TestStreamChatCompletion_UsesNativeStreamByDefault(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/models/gemini-2.5-flash:streamGenerateContent" {
 			t.Errorf("Path = %q, want native streamGenerateContent endpoint", r.URL.Path)
@@ -700,12 +760,53 @@ data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model"
 	if !strings.Contains(stream, `"usage"`) || !strings.Contains(stream, `"total_tokens":6`) {
 		t.Fatalf("stream = %q, want usage chunk", stream)
 	}
+	usageChunks := 0
+	for _, chunk := range parseOpenAIStreamChunks(t, stream) {
+		if _, ok := chunk["usage"]; !ok {
+			continue
+		}
+		usageChunks++
+		choices, ok := chunk["choices"].([]any)
+		if !ok {
+			t.Fatalf("usage chunk choices = %T(%[1]v), want array", chunk["choices"])
+		}
+		if len(choices) != 0 {
+			t.Fatalf("usage chunk choices = %#v, want empty choices", choices)
+		}
+	}
+	if usageChunks != 1 {
+		t.Fatalf("usage chunk count = %d, want 1 in stream %q", usageChunks, stream)
+	}
 	if !strings.Contains(stream, "data: [DONE]") {
 		t.Fatalf("stream = %q, want [DONE]", stream)
 	}
 }
 
+func parseOpenAIStreamChunks(t *testing.T, stream string) []map[string]any {
+	t.Helper()
+
+	var chunks []map[string]any
+	for _, line := range strings.Split(stream, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		var chunk map[string]any
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			t.Fatalf("failed to parse stream chunk %q: %v", payload, err)
+		}
+		chunks = append(chunks, chunk)
+	}
+	return chunks
+}
+
 func TestStreamChatCompletion_NativePerChoiceState(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
@@ -746,6 +847,8 @@ func TestStreamChatCompletion_NativePerChoiceState(t *testing.T) {
 }
 
 func TestStreamChatCompletion_NativeBlockedPromptEmitsError(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)

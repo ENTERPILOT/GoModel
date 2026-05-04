@@ -124,17 +124,12 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 			"provider": "gemini",
 			"choices":  []map[string]any{choice},
 		}
-		if s.includeUsage {
-			if usage := geminiUsageMap(event.UsageMetadata); usage != nil {
-				chunk["usage"] = usage
-			}
-		}
 		if err := writeOpenAIStreamChunk(out, chunk); err != nil {
 			return err
 		}
 	}
 
-	if len(event.Candidates) == 0 && s.includeUsage {
+	if s.includeUsage {
 		if usage := geminiUsageMap(event.UsageMetadata); usage != nil {
 			chunk := map[string]any{
 				"id":       s.responseID,

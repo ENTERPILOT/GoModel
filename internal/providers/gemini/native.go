@@ -452,8 +452,22 @@ func copyJSONNumber(raw json.RawMessage, cfg map[string]any, key string) {
 		return
 	}
 	var value any
-	if err := json.Unmarshal(raw, &value); err == nil {
-		cfg[key] = value
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return
+	}
+	switch v := value.(type) {
+	case float64:
+		cfg[key] = v
+	case json.Number:
+		if parsed, err := v.Float64(); err == nil {
+			cfg[key] = parsed
+		}
+	case string:
+		if parsed, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg[key] = parsed
+		}
 	}
 }
 
