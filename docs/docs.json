@@ -85,15 +85,21 @@
                 "icon": "compass",
                 "pages": [
                     "guides/openclaw",
-                    "guides/gemini",
-                    "guides/oracle",
-                    "guides/deepseek",
-                    "guides/vllm",
-                    "guides/multiple-ollama",
                     "guides/claude-code",
                     "guides/codex",
                     "guides/opencode-and-other-agents",
                     "guides/prometheus-metrics"
+                ]
+            },
+            {
+                "tab": "Providers",
+                "icon": "plug",
+                "pages": [
+                    "guides/gemini",
+                    "guides/oracle",
+                    "guides/deepseek",
+                    "guides/vllm",
+                    "guides/multiple-ollama"
                 ]
             },
             {
