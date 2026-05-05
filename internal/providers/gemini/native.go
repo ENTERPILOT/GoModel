@@ -583,9 +583,12 @@ func geminiCachedContent(req *core.ChatRequest) string {
 	return cached
 }
 
-func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContentResponse) (*core.ChatResponse, error) {
+func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContentResponse, providerName string) (*core.ChatResponse, error) {
 	if err := geminiBlockedPromptError(geminiResp); err != nil {
 		return nil, err
+	}
+	if providerName == "" {
+		providerName = "gemini"
 	}
 
 	created := time.Now().Unix()
@@ -598,7 +601,7 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 		Object:   "chat.completion",
 		Created:  created,
 		Model:    req.Model,
-		Provider: "gemini",
+		Provider: providerName,
 		Choices:  make([]core.Choice, 0, len(geminiResp.Candidates)),
 		Usage:    usageFromGemini(geminiResp.UsageMetadata),
 	}

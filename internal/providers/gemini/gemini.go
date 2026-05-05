@@ -47,6 +47,7 @@ const (
 type Provider struct {
 	client       *llmclient.Client
 	nativeClient *llmclient.Client
+	modelsClient *llmclient.Client
 	apiKey       string
 	backend      string
 	authType     string
@@ -71,7 +72,8 @@ func NewVertexWithHTTPClient(providerCfg providers.ProviderConfig, opts provider
 func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOptions, httpClient *http.Client, preauthenticated bool) *Provider {
 	backend := normalizeGeminiBackend(providerCfg)
 	authType := normalizeGeminiAuthType(backend, providerCfg)
-	baseURL, modelsURL := geminiBaseURLs(providerCfg, backend)
+	baseURL, nativeBaseURL := geminiBaseURLs(providerCfg, backend)
+	modelsURL := geminiModelsBaseURL(backend, nativeBaseURL)
 	p := &Provider{
 		apiKey:       providerCfg.APIKey,
 		backend:      backend,
@@ -95,15 +97,19 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
+	nativeCfg := clientCfg
+	nativeCfg.BaseURL = nativeBaseURL
 	modelsCfg := clientCfg
 	modelsCfg.BaseURL = modelsURL
 	if httpClient != nil {
 		p.client = llmclient.NewWithHTTPClient(httpClient, clientCfg, p.setHeaders)
-		p.nativeClient = llmclient.NewWithHTTPClient(httpClient, modelsCfg, p.setNativeHeaders)
+		p.nativeClient = llmclient.NewWithHTTPClient(httpClient, nativeCfg, p.setNativeHeaders)
+		p.modelsClient = llmclient.NewWithHTTPClient(httpClient, modelsCfg, p.setNativeHeaders)
 		return p
 	}
 	p.client = llmclient.New(clientCfg, p.setHeaders)
-	p.nativeClient = llmclient.New(modelsCfg, p.setNativeHeaders)
+	p.nativeClient = llmclient.New(nativeCfg, p.setNativeHeaders)
+	p.modelsClient = llmclient.New(modelsCfg, p.setNativeHeaders)
 	return p
 }
 
@@ -114,7 +120,8 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 		httpClient = http.DefaultClient
 	}
 	providerCfg := providers.ProviderConfig{APIKey: apiKey}
-	baseURL, modelsURL := geminiBaseURLs(providerCfg, geminiBackendAIStudio)
+	baseURL, nativeBaseURL := geminiBaseURLs(providerCfg, geminiBackendAIStudio)
+	modelsURL := geminiModelsBaseURL(geminiBackendAIStudio, nativeBaseURL)
 	p := &Provider{
 		apiKey:       apiKey,
 		backend:      geminiBackendAIStudio,
@@ -126,18 +133,25 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 	modelsCfg.Hooks = hooks
 	cfg := llmclient.DefaultConfig("gemini", baseURL)
 	cfg.Hooks = hooks
+	nativeCfg := llmclient.DefaultConfig("gemini", nativeBaseURL)
+	nativeCfg.Hooks = hooks
 	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
-	p.nativeClient = llmclient.NewWithHTTPClient(httpClient, modelsCfg, p.setNativeHeaders)
+	p.nativeClient = llmclient.NewWithHTTPClient(httpClient, nativeCfg, p.setNativeHeaders)
+	p.modelsClient = llmclient.NewWithHTTPClient(httpClient, modelsCfg, p.setNativeHeaders)
 	return p
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
-	baseURL, modelsURL := geminiBaseURLs(providers.ProviderConfig{BaseURL: url}, p.backend)
+	baseURL, nativeBaseURL := geminiBaseURLs(providers.ProviderConfig{BaseURL: url}, p.backend)
+	modelsURL := geminiModelsBaseURL(p.backend, nativeBaseURL)
 	p.client.SetBaseURL(baseURL)
 	p.modelsURL = modelsURL
 	if p.nativeClient != nil {
-		p.nativeClient.SetBaseURL(modelsURL)
+		p.nativeClient.SetBaseURL(nativeBaseURL)
+	}
+	if p.modelsClient != nil {
+		p.modelsClient.SetBaseURL(modelsURL)
 	}
 }
 
@@ -147,6 +161,9 @@ func (p *Provider) SetModelsURL(url string) {
 	p.modelsURL = url
 	if p.nativeClient != nil {
 		p.nativeClient.SetBaseURL(url)
+	}
+	if p.modelsClient != nil {
+		p.modelsClient.SetBaseURL(url)
 	}
 }
 
@@ -195,6 +212,13 @@ func (p *Provider) ready() error {
 		return nil
 	}
 	return core.NewProviderError("gemini", http.StatusBadGateway, "invalid Gemini provider configuration: "+p.configErr.Error(), p.configErr)
+}
+
+func (p *Provider) responseProviderName() string {
+	if p.backend == geminiBackendVertex {
+		return "vertex"
+	}
+	return "gemini"
 }
 
 // setHeaders sets the required headers for Gemini API requests
@@ -310,6 +334,17 @@ func geminiBaseURLs(providerCfg providers.ProviderConfig, backend string) (openA
 	return baseURL, baseURL
 }
 
+func geminiModelsBaseURL(backend, nativeBaseURL string) string {
+	nativeBaseURL = strings.TrimRight(strings.TrimSpace(nativeBaseURL), "/")
+	if backend != geminiBackendVertex {
+		return nativeBaseURL
+	}
+	if modelsURL, ok := vertexPublisherModelsBaseURL(nativeBaseURL); ok {
+		return modelsURL
+	}
+	return nativeBaseURL
+}
+
 func vertexBaseURLs(providerCfg providers.ProviderConfig) (openAICompatibleBaseURL, nativeBaseURL string) {
 	baseURL := strings.TrimRight(strings.TrimSpace(providerCfg.BaseURL), "/")
 	if baseURL == "" {
@@ -349,6 +384,20 @@ func vertexOpenAICompatibleBaseURLFromNativeBaseURL(baseURL string) (string, boo
 		return "", false
 	}
 	return root + "/endpoints/openapi", true
+}
+
+func vertexPublisherModelsBaseURL(nativeBaseURL string) (string, bool) {
+	const projectsPath = "/v1/projects/"
+	nativeBaseURL = strings.TrimRight(strings.TrimSpace(nativeBaseURL), "/")
+	idx := strings.Index(nativeBaseURL, projectsPath)
+	if idx < 0 {
+		return "", false
+	}
+	root := strings.TrimRight(nativeBaseURL[:idx], "/")
+	if root == "" {
+		return "", false
+	}
+	return root + "/v1beta1/publishers/google", true
 }
 
 func nativeBaseURLFromOpenAICompatibleBaseURL(baseURL string) (string, bool) {
@@ -466,7 +515,7 @@ func (p *Provider) nativeChatCompletion(ctx context.Context, req *core.ChatReque
 	if err != nil {
 		return nil, err
 	}
-	return nativeChatResponse(req, &geminiResp)
+	return nativeChatResponse(req, &geminiResp, p.responseProviderName())
 }
 
 // StreamChatCompletion returns a raw response body for streaming (caller must close)
@@ -513,7 +562,7 @@ func (p *Provider) nativeStreamChatCompletion(ctx context.Context, req *core.Cha
 		return nil, err
 	}
 	includeUsage := streamReq.StreamOptions != nil && streamReq.StreamOptions.IncludeUsage
-	return newGeminiNativeStream(stream, req.Model, includeUsage), nil
+	return newGeminiNativeStream(stream, req.Model, includeUsage, p.responseProviderName()), nil
 }
 
 // geminiModel represents a model in Gemini's native API response
@@ -549,7 +598,11 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	rawResp, err := p.nativeClient.DoRaw(ctx, llmclient.Request{
+	modelsClient := p.modelsClient
+	if modelsClient == nil {
+		modelsClient = p.nativeClient
+	}
+	rawResp, err := modelsClient.DoRaw(ctx, llmclient.Request{
 		Method:   http.MethodGet,
 		Endpoint: "/models",
 	})

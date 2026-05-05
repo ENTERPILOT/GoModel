@@ -16,10 +16,13 @@ type geminiNativeStream struct {
 	body   io.ReadCloser
 }
 
-func newGeminiNativeStream(body io.ReadCloser, model string, includeUsage bool) io.ReadCloser {
+func newGeminiNativeStream(body io.ReadCloser, model string, includeUsage bool, providerName string) io.ReadCloser {
+	if providerName == "" {
+		providerName = "gemini"
+	}
 	pr, pw := io.Pipe()
 	stream := &geminiNativeStream{reader: pr, body: body}
-	go convertGeminiNativeStream(body, pw, model, includeUsage)
+	go convertGeminiNativeStream(body, pw, model, includeUsage, providerName)
 	return stream
 }
 
@@ -32,7 +35,7 @@ func (s *geminiNativeStream) Close() error {
 	return s.body.Close()
 }
 
-func convertGeminiNativeStream(body io.ReadCloser, out *io.PipeWriter, model string, includeUsage bool) {
+func convertGeminiNativeStream(body io.ReadCloser, out *io.PipeWriter, model string, includeUsage bool, providerName string) {
 	defer func() { _ = body.Close() }()
 
 	scanner := bufio.NewScanner(body)
@@ -40,6 +43,7 @@ func convertGeminiNativeStream(body io.ReadCloser, out *io.PipeWriter, model str
 
 	state := geminiStreamState{
 		model:        model,
+		providerName: providerName,
 		includeUsage: includeUsage,
 		created:      time.Now().Unix(),
 	}
@@ -81,6 +85,7 @@ func convertGeminiNativeStream(body io.ReadCloser, out *io.PipeWriter, model str
 
 type geminiStreamState struct {
 	model        string
+	providerName string
 	includeUsage bool
 	created      int64
 	responseID   string
@@ -126,7 +131,7 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 			"object":   "chat.completion.chunk",
 			"created":  s.created,
 			"model":    s.model,
-			"provider": "gemini",
+			"provider": s.providerName,
 			"choices":  []map[string]any{choice},
 		}
 		if err := writeOpenAIStreamChunk(out, chunk); err != nil {
@@ -149,7 +154,7 @@ func (s *geminiStreamState) writeFinalUsage(out io.Writer) error {
 		"object":   "chat.completion.chunk",
 		"created":  s.created,
 		"model":    s.model,
-		"provider": "gemini",
+		"provider": s.providerName,
 		"choices":  []map[string]any{},
 		"usage":    s.latestUsage,
 	}
