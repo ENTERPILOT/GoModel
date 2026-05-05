@@ -75,8 +75,9 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 }
 
 func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
-	if strings.TrimSpace(providerCfg.VertexProject) == "" || strings.TrimSpace(providerCfg.VertexLocation) == "" {
-		p.configErr = fmt.Errorf("vertex AI requires vertex_project and vertex_location")
+	if !hasResolvedProviderValue(providerCfg.BaseURL) &&
+		(!hasResolvedProviderValue(providerCfg.VertexProject) || !hasResolvedProviderValue(providerCfg.VertexLocation)) {
+		p.configErr = fmt.Errorf("vertex AI requires base_url or vertex_project and vertex_location")
 		return
 	}
 	switch p.authType {
@@ -94,6 +95,11 @@ func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
 	default:
 		p.configErr = fmt.Errorf("unsupported Vertex AI auth type %q", providerCfg.AuthType)
 	}
+}
+
+func hasResolvedProviderValue(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && !strings.Contains(value, "${")
 }
 
 func normalizeAuthType(providerCfg providers.ProviderConfig) string {
@@ -273,17 +279,15 @@ func embeddingInputs(input any) ([]string, error) {
 }
 
 func nonEmptyEmbeddingInputs(inputs []string) ([]string, error) {
-	out := make([]string, 0, len(inputs))
 	for _, input := range inputs {
 		if strings.TrimSpace(input) == "" {
-			continue
+			return nil, core.NewInvalidRequestError("embedding input must not be empty", nil)
 		}
-		out = append(out, input)
 	}
-	if len(out) == 0 {
+	if len(inputs) == 0 {
 		return nil, core.NewInvalidRequestError("embedding input is required", nil)
 	}
-	return out, nil
+	return inputs, nil
 }
 
 func openAIEmbeddingResponse(req *core.EmbeddingRequest, resp *vertexEmbeddingPredictResponse) (*core.EmbeddingResponse, error) {

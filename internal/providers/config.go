@@ -214,21 +214,28 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		name  string
 		field providerEnvField
 	}{
-		{name: "SERVICE_ACCOUNT_JSON_BASE64", field: providerEnvFieldServiceAccountJSONBase64},
-		{name: "SERVICE_ACCOUNT_JSON", field: providerEnvFieldServiceAccountJSON},
-		{name: "SERVICE_ACCOUNT_FILE", field: providerEnvFieldServiceAccountFile},
-		{name: "VERTEX_PROJECT", field: providerEnvFieldVertexProject},
-		{name: "VERTEX_LOCATION", field: providerEnvFieldVertexLocation},
 		{name: "API_VERSION", field: providerEnvFieldAPIVersion},
 		{name: "BASE_URL", field: providerEnvFieldBaseURL},
 		{name: "AUTH_TYPE", field: providerEnvFieldAuthType},
 		{name: "API_MODE", field: providerEnvFieldAPIMode},
-		{name: "PROJECT", field: providerEnvFieldVertexProject},
-		{name: "LOCATION", field: providerEnvFieldVertexLocation},
-		{name: "GCP_SCOPE", field: providerEnvFieldGCPScope},
 		{name: "BACKEND", field: providerEnvFieldBackend},
 		{name: "API_KEY", field: providerEnvFieldAPIKey},
 		{name: "MODELS", field: providerEnvFieldModels},
+	}
+	if strings.EqualFold(prefix, "VERTEX") {
+		fields = append([]struct {
+			name  string
+			field providerEnvField
+		}{
+			{name: "SERVICE_ACCOUNT_JSON_BASE64", field: providerEnvFieldServiceAccountJSONBase64},
+			{name: "SERVICE_ACCOUNT_JSON", field: providerEnvFieldServiceAccountJSON},
+			{name: "SERVICE_ACCOUNT_FILE", field: providerEnvFieldServiceAccountFile},
+			{name: "VERTEX_PROJECT", field: providerEnvFieldVertexProject},
+			{name: "VERTEX_LOCATION", field: providerEnvFieldVertexLocation},
+			{name: "PROJECT", field: providerEnvFieldVertexProject},
+			{name: "LOCATION", field: providerEnvFieldVertexLocation},
+			{name: "GCP_SCOPE", field: providerEnvFieldGCPScope},
+		}, fields...)
 	}
 
 	for _, candidate := range fields {
@@ -573,7 +580,8 @@ func isVertexProviderConfig(p config.RawProviderConfig) bool {
 }
 
 func validVertexProviderConfig(p config.RawProviderConfig) bool {
-	if !hasResolvedProviderValue(p.VertexProject) || !hasResolvedProviderValue(p.VertexLocation) {
+	if !hasResolvedProviderValue(p.BaseURL) &&
+		(!hasResolvedProviderValue(p.VertexProject) || !hasResolvedProviderValue(p.VertexLocation)) {
 		return false
 	}
 	authType := strings.ToLower(strings.TrimSpace(p.AuthType))

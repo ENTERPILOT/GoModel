@@ -602,6 +602,27 @@ func TestResolveProviders_KeepsVertexWithProjectAndLocationUsingDefaultADC(t *te
 	}
 }
 
+func TestResolveProviders_KeepsVertexWithBaseURLWithoutProjectLocation(t *testing.T) {
+	t.Setenv("VERTEX_BASE_URL", "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google")
+	t.Setenv("VERTEX_AUTH_TYPE", "gcp_adc")
+
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+
+	p, exists := got["vertex"]
+	if !exists {
+		t.Fatal("expected vertex with resolved base URL to be resolved")
+	}
+	if p.Type != "vertex" {
+		t.Fatalf("Type = %q, want vertex", p.Type)
+	}
+	if p.BaseURL != "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google" {
+		t.Fatalf("BaseURL = %q, want custom Vertex base URL", p.BaseURL)
+	}
+	if _, exists := filteredRaw["vertex"]; !exists {
+		t.Fatal("expected raw vertex with resolved base URL to be retained")
+	}
+}
+
 func TestResolveProviders_FiltersVertexServiceAccountWithoutCredentials(t *testing.T) {
 	t.Setenv("VERTEX_PROJECT", "prod-ai")
 	t.Setenv("VERTEX_LOCATION", "us-central1")
@@ -655,6 +676,36 @@ func TestResolveProviders_FiltersVertexWithUnresolvedServiceAccountPlaceholder(t
 	}
 	if _, exists := filteredRaw["vertex"]; exists {
 		t.Fatal("expected raw vertex with unresolved service account placeholder to be filtered")
+	}
+}
+
+func TestApplyProviderEnvVars_GeminiIgnoresVertexSpecificEnv(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "gemini-key")
+	t.Setenv("GEMINI_PROJECT", "prod-ai")
+	t.Setenv("GEMINI_LOCATION", "us-central1")
+	t.Setenv("GEMINI_GCP_SCOPE", "scope-a")
+	t.Setenv("GEMINI_SERVICE_ACCOUNT_FILE", "/secrets/gemini.json")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["gemini"]
+	if !exists {
+		t.Fatal("expected gemini to be discovered from GEMINI_API_KEY")
+	}
+	if p.Type != "gemini" {
+		t.Fatalf("Type = %q, want gemini", p.Type)
+	}
+	if p.VertexProject != "" {
+		t.Fatalf("VertexProject = %q, want empty", p.VertexProject)
+	}
+	if p.VertexLocation != "" {
+		t.Fatalf("VertexLocation = %q, want empty", p.VertexLocation)
+	}
+	if p.GCPScope != "" {
+		t.Fatalf("GCPScope = %q, want empty", p.GCPScope)
+	}
+	if p.ServiceAccountFile != "" {
+		t.Fatalf("ServiceAccountFile = %q, want empty", p.ServiceAccountFile)
 	}
 }
 

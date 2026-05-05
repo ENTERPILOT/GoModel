@@ -69,14 +69,13 @@ func TokenSource(ctx context.Context, cfg Config) (oauth2.TokenSource, error) {
 			return nil, fmt.Errorf("load application default credentials: %w", err)
 		}
 		return source, nil
-	default:
-		return nil, fmt.Errorf("unsupported Google auth type %q", cfg.AuthType)
 	}
+	return nil, fmt.Errorf("unsupported Google auth type %q", authType)
 }
 
 func serviceAccountJSON(cfg Config) ([]byte, error) {
 	if value := strings.TrimSpace(cfg.ServiceAccountJSONBase64); value != "" {
-		decoded, err := base64.StdEncoding.DecodeString(value)
+		decoded, err := decodeServiceAccountBase64(value)
 		if err != nil {
 			return nil, fmt.Errorf("decode service account JSON: %w", err)
 		}
@@ -93,6 +92,44 @@ func serviceAccountJSON(cfg Config) ([]byte, error) {
 		return contents, nil
 	}
 	return nil, fmt.Errorf("service account credentials are required")
+}
+
+func decodeServiceAccountBase64(value string) ([]byte, error) {
+	decoded, stdErr := base64.StdEncoding.DecodeString(value)
+	if stdErr == nil {
+		return decoded, nil
+	}
+
+	for _, encoding := range []*base64.Encoding{
+		base64.RawStdEncoding,
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+	} {
+		if decoded, err := encoding.DecodeString(value); err == nil {
+			return decoded, nil
+		}
+	}
+	if padded := paddedBase64(value); padded != value {
+		for _, encoding := range []*base64.Encoding{base64.StdEncoding, base64.URLEncoding} {
+			if decoded, err := encoding.DecodeString(padded); err == nil {
+				return decoded, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("standard base64 decode failed: %w; also tried raw standard, URL-safe, raw URL-safe, and padded variants", stdErr)
+}
+
+func paddedBase64(value string) string {
+	switch remainder := len(value) % 4; remainder {
+	case 0:
+		return value
+	case 2:
+		return value + "=="
+	case 3:
+		return value + "="
+	default:
+		return value
+	}
 }
 
 func HTTPClient(base *http.Client, source oauth2.TokenSource) *http.Client {

@@ -140,6 +140,17 @@ func TestVertexBaseURLs(t *testing.T) {
 	}
 }
 
+func TestNewVertexWithHTTPClientAcceptsBaseURLWithoutProjectLocation(t *testing.T) {
+	p := NewVertexWithHTTPClient(providers.ProviderConfig{
+		BaseURL:  "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google",
+		AuthType: "gcp_adc",
+	}, providers.ProviderOptions{}, http.DefaultClient)
+
+	if err := p.ready(); err != nil {
+		t.Fatalf("ready() error = %v, want nil for Vertex custom base URL", err)
+	}
+}
+
 func TestVertexModelNormalization(t *testing.T) {
 	tests := []struct {
 		in         string

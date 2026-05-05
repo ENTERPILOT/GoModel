@@ -835,6 +835,9 @@ func displayModelIDFromGemini(model, backend string) string {
 	return model
 }
 
+// isGeminiExposedModel normalizes provider model names and exposes only the
+// model families reachable through Gemini/OpenAI-compatible text endpoints.
+// Families such as imagen-* use different upstream endpoints.
 func isGeminiExposedModel(modelID string) bool {
 	modelID = normalizeGeminiModelID(modelID)
 	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-")

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"gomodel/internal/core"
@@ -85,6 +86,33 @@ func TestEmbeddingsUsesNativePrediction(t *testing.T) {
 	}
 	if resp.Usage.PromptTokens != 9 || resp.Usage.TotalTokens != 9 {
 		t.Fatalf("usage = %+v, want 9 prompt/total tokens", resp.Usage)
+	}
+}
+
+func TestEmbeddingsRejectsEmptyStringInBatch(t *testing.T) {
+	provider := newProvider(testConfig(), providers.ProviderOptions{}, authedTestClient(http.DefaultClient))
+
+	_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
+		Model: "google/text-embedding-005",
+		Input: []string{"hello", "", "world"},
+	})
+	if err == nil {
+		t.Fatal("expected empty batch embedding input to be rejected")
+	}
+	if !strings.Contains(err.Error(), "embedding input must not be empty") {
+		t.Fatalf("error = %v, want empty input error", err)
+	}
+}
+
+func TestNewAcceptsBaseURLWithoutProjectLocation(t *testing.T) {
+	provider := newProvider(providers.ProviderConfig{
+		Type:     "vertex",
+		AuthType: "gcp_adc",
+		BaseURL:  "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google",
+	}, providers.ProviderOptions{}, authedTestClient(http.DefaultClient))
+
+	if err := provider.ready(); err != nil {
+		t.Fatalf("ready() error = %v, want nil for custom Vertex base URL", err)
 	}
 }
 
