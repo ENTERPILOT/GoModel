@@ -81,6 +81,25 @@ func TestNew_VertexAcceptsGCPAuthAliases(t *testing.T) {
 	}
 }
 
+func TestNew_VertexConfigErrorUsesVertexProviderName(t *testing.T) {
+	p := NewVertexWithHTTPClient(providers.ProviderConfig{
+		AuthType: "api_key",
+		BaseURL:  "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google",
+	}, providers.ProviderOptions{}, http.DefaultClient)
+
+	err := p.ready()
+	if err == nil {
+		t.Fatal("expected config error, got nil")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T %[1]v, want *core.GatewayError", err)
+	}
+	if gatewayErr.Provider != "vertex" {
+		t.Fatalf("provider = %q, want vertex", gatewayErr.Provider)
+	}
+}
+
 func TestGeminiBaseURLs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -591,6 +610,66 @@ func TestVertexOpenAICompatibleChatUsesOAuthAndGoogleModelPrefix(t *testing.T) {
 	}
 }
 
+func TestVertexOpenAICompatibleEmbeddingsUsesOAuthAndGoogleModelPrefix(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "false")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/endpoints/openapi/embeddings" {
+			t.Errorf("Path = %q, want Vertex OpenAI-compatible embeddings endpoint", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer vertex-token" {
+			t.Errorf("Authorization = %q, want Bearer vertex-token", got)
+		}
+		if got := r.Header.Get("x-goog-api-key"); got != "" {
+			t.Errorf("x-goog-api-key = %q, want empty for Vertex OAuth", got)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if got := payload["model"]; got != "google/text-embedding-005" {
+			t.Fatalf("model = %#v, want google/text-embedding-005", got)
+		}
+		if got := payload["input"]; got != "text" {
+			t.Fatalf("input = %#v, want text", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"object": "list",
+			"model": "google/text-embedding-005",
+			"data": [{
+				"object": "embedding",
+				"embedding": [0.1, 0.2],
+				"index": 0
+			}],
+			"usage": {"prompt_tokens": 1, "total_tokens": 1}
+		}`))
+	}))
+	defer server.Close()
+
+	p := newVertexTestProvider(server, false)
+	resp, err := p.Embeddings(context.Background(), &core.EmbeddingRequest{
+		Model: "text-embedding-005",
+		Input: "text",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || resp.Model != "google/text-embedding-005" {
+		t.Fatalf("response = %+v, want google/text-embedding-005", resp)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("data = %+v, want one embedding", resp.Data)
+	}
+	var embedding []float64
+	if err := json.Unmarshal(resp.Data[0].Embedding, &embedding); err != nil {
+		t.Fatalf("embedding = %s, want float array: %v", string(resp.Data[0].Embedding), err)
+	}
+	if len(embedding) != 2 || embedding[0] != 0.1 || embedding[1] != 0.2 {
+		t.Fatalf("embedding = %v, want [0.1 0.2]", embedding)
+	}
+}
+
 func TestVertexListModelsAcceptsPublisherModelsResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1beta1/publishers/google/models" {
@@ -623,6 +702,45 @@ func TestVertexListModelsAcceptsPublisherModelsResponse(t *testing.T) {
 	}
 }
 
+func TestVertexListModelsErrorsUseVertexProviderName(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "native parse error",
+			body: `{"publisherModels":"bad"}`,
+		},
+		{
+			name: "unexpected format",
+			body: `{"unexpected":true}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			p := newVertexTestProvider(server, true)
+			_, err := p.ListModels(context.Background())
+			if err == nil {
+				t.Fatal("expected models error, got nil")
+			}
+			var gatewayErr *core.GatewayError
+			if !errors.As(err, &gatewayErr) {
+				t.Fatalf("error = %T %[1]v, want *core.GatewayError", err)
+			}
+			if gatewayErr.Provider != "vertex" {
+				t.Fatalf("provider = %q, want vertex", gatewayErr.Provider)
+			}
+		})
+	}
+}
+
 func newVertexTestProvider(server *httptest.Server, native bool) *Provider {
 	tokenClient := googleauth.HTTPClient(server.Client(), oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: "vertex-token",
@@ -636,9 +754,9 @@ func newVertexTestProvider(server *httptest.Server, native bool) *Provider {
 	openAIBaseURL := server.URL + "/v1/projects/prod-ai/locations/us-central1/endpoints/openapi"
 	nativeBaseURL := server.URL + "/v1/projects/prod-ai/locations/us-central1/publishers/google"
 	modelsBaseURL := server.URL + "/v1beta1/publishers/google"
-	openAICfg := llmclient.DefaultConfig("gemini", openAIBaseURL)
-	nativeCfg := llmclient.DefaultConfig("gemini", nativeBaseURL)
-	modelsCfg := llmclient.DefaultConfig("gemini", modelsBaseURL)
+	openAICfg := llmclient.DefaultConfig("vertex", openAIBaseURL)
+	nativeCfg := llmclient.DefaultConfig("vertex", nativeBaseURL)
+	modelsCfg := llmclient.DefaultConfig("vertex", modelsBaseURL)
 	p.client = llmclient.NewWithHTTPClient(tokenClient, openAICfg, p.setHeaders)
 	p.nativeClient = llmclient.NewWithHTTPClient(tokenClient, nativeCfg, p.setNativeHeaders)
 	p.modelsClient = llmclient.NewWithHTTPClient(tokenClient, modelsCfg, p.setNativeHeaders)

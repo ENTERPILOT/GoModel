@@ -211,7 +211,7 @@ func (p *Provider) ready() error {
 	if p.configErr == nil {
 		return nil
 	}
-	return core.NewProviderError("gemini", http.StatusBadGateway, "invalid Gemini provider configuration: "+p.configErr.Error(), p.configErr)
+	return core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, "invalid Gemini provider configuration: "+p.configErr.Error(), p.configErr)
 }
 
 func (p *Provider) responseProviderName() string {
@@ -622,7 +622,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	if err := json.Unmarshal(rawResp.Body, &nativeProbe); err == nil && (nativeProbe.Models != nil || nativeProbe.PublisherModels != nil) {
 		var geminiResp geminiModelsResponse
 		if err := json.Unmarshal(rawResp.Body, &geminiResp); err != nil {
-			return nil, core.NewProviderError("gemini", http.StatusBadGateway, "failed to parse native Gemini models response", err)
+			return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, "failed to parse native Gemini models response", err)
 		}
 		modelEntries := append(geminiResp.Models, geminiResp.PublisherModels...)
 		if len(modelEntries) == 0 {
@@ -684,7 +684,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	if len(responsePreview) > 512 {
 		responsePreview = responsePreview[:512] + "...(truncated)"
 	}
-	return nil, core.NewProviderError("gemini", http.StatusBadGateway, "unexpected Gemini models response format", fmt.Errorf("models response body: %s", responsePreview))
+	return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, "unexpected Gemini models response format", fmt.Errorf("models response body: %s", responsePreview))
 }
 
 // Responses sends a Responses API request to Gemini (converted to chat format)
