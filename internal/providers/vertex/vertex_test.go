@@ -2,12 +2,18 @@ package vertex
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"encoding/pem"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -177,6 +183,98 @@ func TestNewRejectsUnsupportedAuthType(t *testing.T) {
 	}
 }
 
+func TestNewAuthFormsInjectBearerToken(t *testing.T) {
+	tests := []struct {
+		name      string
+		authType  string
+		token     string
+		grantType string
+		configure func(t *testing.T, cfg *providers.ProviderConfig, tokenURL string)
+	}{
+		{
+			name:      "ADC",
+			authType:  "gcp_adc",
+			token:     "adc-token",
+			grantType: "refresh_token",
+			configure: func(t *testing.T, cfg *providers.ProviderConfig, tokenURL string) {
+				t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", vertexADCCredentialsFile(t, tokenURL))
+			},
+		},
+		{
+			name:      "service account JSON",
+			authType:  "gcp_service_account",
+			token:     "service-account-token",
+			grantType: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+			configure: func(t *testing.T, cfg *providers.ProviderConfig, tokenURL string) {
+				cfg.ServiceAccountJSON = vertexServiceAccountCredentials(t, tokenURL)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotGrantType string
+			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseForm(); err != nil {
+					t.Fatalf("ParseForm() error = %v", err)
+				}
+				gotGrantType = r.PostForm.Get("grant_type")
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"access_token": tt.token,
+					"token_type":   "Bearer",
+					"expires_in":   3600,
+				})
+			}))
+			defer tokenServer.Close()
+
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent" {
+					t.Errorf("Path = %q, want Vertex native generateContent endpoint", r.URL.Path)
+				}
+				if got := r.Header.Get("Authorization"); got != "Bearer "+tt.token {
+					t.Errorf("Authorization = %q, want Bearer %s", got, tt.token)
+				}
+				if got := r.Header.Get("x-goog-api-key"); got != "" {
+					t.Errorf("x-goog-api-key = %q, want empty for Vertex OAuth", got)
+				}
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{
+					"responseId": "vertex-auth",
+					"candidates": [{
+						"content": {"role": "model", "parts": [{"text": "ok"}]},
+						"finishReason": "STOP"
+					}]
+				}`))
+			}))
+			defer upstream.Close()
+
+			cfg := testConfig()
+			cfg.AuthType = tt.authType
+			cfg.APIMode = "native"
+			cfg.BaseURL = upstream.URL + "/v1/projects/prod-ai/locations/us-central1/publishers/google"
+			tt.configure(t, &cfg, tokenServer.URL)
+
+			provider := New(cfg, providers.ProviderOptions{})
+			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model: "google/gemini-2.5-flash",
+				Messages: []core.Message{
+					{Role: "user", Content: "Hello"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("ChatCompletion() error = %v", err)
+			}
+			if resp == nil || resp.Provider != "vertex" {
+				t.Fatalf("response = %+v, want vertex response", resp)
+			}
+			if gotGrantType != tt.grantType {
+				t.Fatalf("grant_type = %q, want %q", gotGrantType, tt.grantType)
+			}
+		})
+	}
+}
+
 func TestVertexBaseURLs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -238,4 +336,52 @@ func authedTestClient(base *http.Client) *http.Client {
 		AccessToken: "vertex-token",
 		TokenType:   "Bearer",
 	}))
+}
+
+func vertexADCCredentialsFile(t *testing.T, tokenURL string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "adc.json")
+	contents := map[string]string{
+		"type":          "authorized_user",
+		"client_id":     "adc-client-id",
+		"client_secret": "adc-client-secret",
+		"refresh_token": "adc-refresh-token",
+		"token_uri":     tokenURL,
+	}
+	encoded, err := json.Marshal(contents)
+	if err != nil {
+		t.Fatalf("failed to marshal ADC credentials: %v", err)
+	}
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatalf("failed to write ADC credentials: %v", err)
+	}
+	return path
+}
+
+func vertexServiceAccountCredentials(t *testing.T, tokenURL string) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate test RSA key: %v", err)
+	}
+	keyBytes, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("failed to marshal test RSA key: %v", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: keyBytes,
+	})
+	contents := map[string]string{
+		"type":           "service_account",
+		"client_email":   "service@example.com",
+		"private_key_id": "test-key-id",
+		"private_key":    string(keyPEM),
+		"token_uri":      tokenURL,
+	}
+	encoded, err := json.Marshal(contents)
+	if err != nil {
+		t.Fatalf("failed to marshal service account credentials: %v", err)
+	}
+	return string(encoded)
 }
