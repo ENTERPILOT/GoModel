@@ -15,8 +15,10 @@ import (
 	"time"
 
 	"gomodel/internal/core"
+	"gomodel/internal/httpclient"
 	"gomodel/internal/llmclient"
 	"gomodel/internal/providers"
+	"gomodel/internal/providers/googleauth"
 )
 
 // Registration provides factory registration for the Gemini provider.
@@ -32,48 +34,76 @@ const (
 	// Gemini provides an OpenAI-compatible endpoint
 	defaultOpenAICompatibleBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
 	// Native Gemini API endpoint for generateContent and models listing
-	defaultModelsBaseURL = "https://generativelanguage.googleapis.com/v1beta"
-	useNativeAPIEnvVar   = "USE_GOOGLE_GEMINI_NATIVE_API"
+	defaultModelsBaseURL     = "https://generativelanguage.googleapis.com/v1beta"
+	useNativeAPIEnvVar       = "USE_GOOGLE_GEMINI_NATIVE_API"
+	geminiBackendAIStudio    = "aistudio"
+	geminiBackendVertex      = "vertex"
+	geminiAuthTypeAPIKey     = "api_key"
+	geminiAuthTypeGCPADC     = "gcp_adc"
+	geminiAuthTypeServiceKey = "gcp_service_account"
 )
 
 // Provider implements the core.Provider interface for Google Gemini
 type Provider struct {
-	client           *llmclient.Client
-	nativeClient     *llmclient.Client
-	httpClient       *http.Client
-	hooks            llmclient.Hooks
-	apiKey           string
-	useNativeAPI     bool
-	modelsURL        string
-	modelsClientConf llmclient.Config
+	client       *llmclient.Client
+	nativeClient *llmclient.Client
+	apiKey       string
+	backend      string
+	authType     string
+	useNativeAPI bool
+	modelsURL    string
+	configErr    error
 }
 
 // New creates a new Gemini provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	baseURL, modelsURL := geminiBaseURLs(providerCfg.BaseURL)
+	return newProvider(providerCfg, opts, nil, false)
+}
+
+// NewVertexWithHTTPClient creates a Vertex-configured Gemini provider using an
+// already-authenticated HTTP client. It is used by the vertex package so Vertex
+// owns Google auth while reusing Gemini request/response translation.
+func NewVertexWithHTTPClient(providerCfg providers.ProviderConfig, opts providers.ProviderOptions, httpClient *http.Client) *Provider {
+	providerCfg.Backend = geminiBackendVertex
+	return newProvider(providerCfg, opts, httpClient, true)
+}
+
+func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOptions, httpClient *http.Client, preauthenticated bool) *Provider {
+	backend := normalizeGeminiBackend(providerCfg)
+	authType := normalizeGeminiAuthType(backend, providerCfg)
+	baseURL, modelsURL := geminiBaseURLs(providerCfg, backend)
 	p := &Provider{
-		httpClient:   nil,
 		apiKey:       providerCfg.APIKey,
-		hooks:        opts.Hooks,
-		useNativeAPI: useNativeAPIFromEnv(),
+		backend:      backend,
+		authType:     authType,
+		useNativeAPI: useNativeAPI(providerCfg.APIMode),
 		modelsURL:    modelsURL,
-		modelsClientConf: llmclient.Config{
-			ProviderName:   "gemini",
-			BaseURL:        modelsURL,
-			Retry:          opts.Resilience.Retry,
-			Hooks:          opts.Hooks,
-			CircuitBreaker: opts.Resilience.CircuitBreaker,
-		},
+	}
+	p.validateConfig(providerCfg)
+	if !preauthenticated {
+		httpClient = p.authHTTPClient(providerCfg, httpClient)
+	}
+
+	clientProviderName := "gemini"
+	if backend == geminiBackendVertex {
+		clientProviderName = "vertex"
 	}
 	clientCfg := llmclient.Config{
-		ProviderName:   "gemini",
+		ProviderName:   clientProviderName,
 		BaseURL:        baseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
+	modelsCfg := clientCfg
+	modelsCfg.BaseURL = modelsURL
+	if httpClient != nil {
+		p.client = llmclient.NewWithHTTPClient(httpClient, clientCfg, p.setHeaders)
+		p.nativeClient = llmclient.NewWithHTTPClient(httpClient, modelsCfg, p.setNativeHeaders)
+		return p
+	}
 	p.client = llmclient.New(clientCfg, p.setHeaders)
-	p.nativeClient = llmclient.New(p.modelsClientConf, p.setNativeHeaders)
+	p.nativeClient = llmclient.New(modelsCfg, p.setNativeHeaders)
 	return p
 }
 
@@ -83,17 +113,17 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	baseURL, modelsURL := geminiBaseURLs("")
+	providerCfg := providers.ProviderConfig{APIKey: apiKey}
+	baseURL, modelsURL := geminiBaseURLs(providerCfg, geminiBackendAIStudio)
 	p := &Provider{
-		httpClient:   httpClient,
 		apiKey:       apiKey,
-		hooks:        hooks,
+		backend:      geminiBackendAIStudio,
+		authType:     geminiAuthTypeAPIKey,
 		useNativeAPI: useNativeAPIFromEnv(),
 		modelsURL:    modelsURL,
 	}
 	modelsCfg := llmclient.DefaultConfig("gemini", modelsURL)
 	modelsCfg.Hooks = hooks
-	p.modelsClientConf = modelsCfg
 	cfg := llmclient.DefaultConfig("gemini", baseURL)
 	cfg.Hooks = hooks
 	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
@@ -103,29 +133,70 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
-	baseURL, modelsURL := geminiBaseURLs(url)
+	baseURL, modelsURL := geminiBaseURLs(providers.ProviderConfig{BaseURL: url}, p.backend)
 	p.client.SetBaseURL(baseURL)
 	p.modelsURL = modelsURL
-	p.modelsClientConf.BaseURL = modelsURL
 	if p.nativeClient != nil {
 		p.nativeClient.SetBaseURL(modelsURL)
 	}
-	p.useNativeAPI = useNativeAPIFromEnv()
 }
 
 // SetModelsURL allows configuring a custom models API base URL.
 // This is primarily useful for tests and local emulators.
 func (p *Provider) SetModelsURL(url string) {
 	p.modelsURL = url
-	p.modelsClientConf.BaseURL = url
 	if p.nativeClient != nil {
 		p.nativeClient.SetBaseURL(url)
 	}
 }
 
+func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
+	if p.backend == geminiBackendVertex && p.authType == geminiAuthTypeAPIKey {
+		p.configErr = fmt.Errorf("vertex Gemini requires gcp_adc or gcp_service_account auth")
+		return
+	}
+	if p.backend == geminiBackendVertex && (strings.TrimSpace(providerCfg.VertexProject) == "" || strings.TrimSpace(providerCfg.VertexLocation) == "") {
+		p.configErr = fmt.Errorf("vertex Gemini requires vertex_project and vertex_location")
+		return
+	}
+	if p.backend == geminiBackendAIStudio && p.authType == geminiAuthTypeAPIKey && strings.TrimSpace(providerCfg.APIKey) == "" {
+		p.configErr = fmt.Errorf("gemini API key is required")
+	}
+}
+
+func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *http.Client) *http.Client {
+	if p.configErr != nil || p.authType == geminiAuthTypeAPIKey {
+		return base
+	}
+	source, err := googleauth.TokenSource(context.Background(), googleauth.Config{
+		AuthType:                 p.authType,
+		ServiceAccountFile:       providerCfg.ServiceAccountFile,
+		ServiceAccountJSON:       providerCfg.ServiceAccountJSON,
+		ServiceAccountJSONBase64: providerCfg.ServiceAccountJSONBase64,
+		Scope:                    providerCfg.GCPScope,
+	})
+	if err != nil {
+		p.configErr = err
+		return base
+	}
+	if base == nil {
+		base = httpclient.NewDefaultHTTPClient()
+	}
+	return googleauth.HTTPClient(base, source)
+}
+
+func (p *Provider) ready() error {
+	if p.configErr == nil {
+		return nil
+	}
+	return core.NewProviderError("gemini", http.StatusBadGateway, "invalid Gemini provider configuration: "+p.configErr.Error(), p.configErr)
+}
+
 // setHeaders sets the required headers for Gemini API requests
 func (p *Provider) setHeaders(req *http.Request) {
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	if p.authType == geminiAuthTypeAPIKey {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
 
 	// Forward request ID if present in context for request tracing
 	if requestID := core.GetRequestID(req.Context()); requestID != "" {
@@ -135,10 +206,64 @@ func (p *Provider) setHeaders(req *http.Request) {
 
 // setNativeHeaders sets the required headers for Gemini native API requests.
 func (p *Provider) setNativeHeaders(req *http.Request) {
-	req.Header.Set("x-goog-api-key", p.apiKey)
+	if p.authType == geminiAuthTypeAPIKey {
+		req.Header.Set("x-goog-api-key", p.apiKey)
+	}
 
 	if requestID := core.GetRequestID(req.Context()); requestID != "" {
 		req.Header.Set("X-Request-Id", requestID)
+	}
+}
+
+func normalizeGeminiBackend(cfg providers.ProviderConfig) string {
+	backend := strings.ToLower(strings.TrimSpace(cfg.Backend))
+	switch backend {
+	case geminiBackendVertex:
+		return geminiBackendVertex
+	case geminiBackendAIStudio, "ai_studio", "developer", "developer_api":
+		return geminiBackendAIStudio
+	}
+	if strings.TrimSpace(cfg.VertexProject) != "" ||
+		strings.TrimSpace(cfg.VertexLocation) != "" ||
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(cfg.AuthType)), "gcp") {
+		return geminiBackendVertex
+	}
+	return geminiBackendAIStudio
+}
+
+func normalizeGeminiAuthType(backend string, cfg providers.ProviderConfig) string {
+	authType := strings.ToLower(strings.TrimSpace(cfg.AuthType))
+	switch authType {
+	case "":
+		if backend == geminiBackendVertex {
+			return googleauth.NormalizeAuthType(authType, googleauth.HasServiceAccount(googleauth.Config{
+				ServiceAccountFile:       cfg.ServiceAccountFile,
+				ServiceAccountJSON:       cfg.ServiceAccountJSON,
+				ServiceAccountJSONBase64: cfg.ServiceAccountJSONBase64,
+			}))
+		}
+		return geminiAuthTypeAPIKey
+	case "api_key", "key":
+		return geminiAuthTypeAPIKey
+	case "gcp_adc", "adc", "google_adc":
+		return geminiAuthTypeGCPADC
+	case "gcp_service_account", "service_account":
+		return geminiAuthTypeServiceKey
+	default:
+		return authType
+	}
+}
+
+func useNativeAPI(apiMode string) bool {
+	switch strings.ToLower(strings.TrimSpace(apiMode)) {
+	case "native", "gemini_native", "generate_content":
+		return true
+	case "openai", "openai_compatible", "openai-compatible", "compat", "compatible":
+		return false
+	case "":
+		return useNativeAPIFromEnv()
+	default:
+		return useNativeAPIFromEnv()
 	}
 }
 
@@ -155,7 +280,11 @@ func useNativeAPIFromEnv() bool {
 	}
 }
 
-func geminiBaseURLs(configuredBaseURL string) (openAICompatibleBaseURL, nativeBaseURL string) {
+func geminiBaseURLs(providerCfg providers.ProviderConfig, backend string) (openAICompatibleBaseURL, nativeBaseURL string) {
+	if backend == geminiBackendVertex {
+		return vertexBaseURLs(providerCfg)
+	}
+	configuredBaseURL := providerCfg.BaseURL
 	baseURL := strings.TrimRight(strings.TrimSpace(configuredBaseURL), "/")
 	if baseURL == "" {
 		return defaultOpenAICompatibleBaseURL, defaultModelsBaseURL
@@ -170,6 +299,47 @@ func geminiBaseURLs(configuredBaseURL string) (openAICompatibleBaseURL, nativeBa
 		return baseURL, nativeBaseURL
 	}
 	return baseURL, baseURL
+}
+
+func vertexBaseURLs(providerCfg providers.ProviderConfig) (openAICompatibleBaseURL, nativeBaseURL string) {
+	baseURL := strings.TrimRight(strings.TrimSpace(providerCfg.BaseURL), "/")
+	if baseURL == "" {
+		project := strings.TrimSpace(providerCfg.VertexProject)
+		location := strings.TrimSpace(providerCfg.VertexLocation)
+		root := "https://aiplatform.googleapis.com/v1/projects/" + url.PathEscape(project) + "/locations/" + url.PathEscape(location)
+		return root + "/endpoints/openapi", root + "/publishers/google"
+	}
+	if nativeBaseURL, ok := vertexNativeBaseURLFromOpenAICompatibleBaseURL(baseURL); ok {
+		return baseURL, nativeBaseURL
+	}
+	if openAIBaseURL, ok := vertexOpenAICompatibleBaseURLFromNativeBaseURL(baseURL); ok {
+		return openAIBaseURL, baseURL
+	}
+	return baseURL, baseURL
+}
+
+func vertexNativeBaseURLFromOpenAICompatibleBaseURL(baseURL string) (string, bool) {
+	const suffix = "/endpoints/openapi"
+	if !strings.HasSuffix(baseURL, suffix) {
+		return "", false
+	}
+	root := strings.TrimRight(strings.TrimSuffix(baseURL, suffix), "/")
+	if root == "" {
+		return "", false
+	}
+	return root + "/publishers/google", true
+}
+
+func vertexOpenAICompatibleBaseURLFromNativeBaseURL(baseURL string) (string, bool) {
+	const suffix = "/publishers/google"
+	if !strings.HasSuffix(baseURL, suffix) {
+		return "", false
+	}
+	root := strings.TrimRight(strings.TrimSuffix(baseURL, suffix), "/")
+	if root == "" {
+		return "", false
+	}
+	return root + "/endpoints/openapi", true
 }
 
 func nativeBaseURLFromOpenAICompatibleBaseURL(baseURL string) (string, bool) {
@@ -208,15 +378,53 @@ func adaptChatRequest(req *core.ChatRequest) (any, error) {
 	return raw, nil
 }
 
+func rewriteRequestModel(body any, model string) (any, error) {
+	if strings.TrimSpace(model) == "" {
+		return body, nil
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return nil, core.NewInvalidRequestError("failed to marshal gemini request: "+err.Error(), err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &raw); err != nil {
+		return nil, core.NewInvalidRequestError("failed to decode gemini request payload: "+err.Error(), err)
+	}
+	modelJSON, _ := json.Marshal(model)
+	raw["model"] = modelJSON
+	return raw, nil
+}
+
+func (p *Provider) openAICompatibleChatBody(req *core.ChatRequest) (any, error) {
+	body, err := adaptChatRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	if p.backend != geminiBackendVertex {
+		return body, nil
+	}
+	return rewriteRequestModel(body, vertexOpenAIModelID(req.Model))
+}
+
+func (p *Provider) openAICompatibleEmbeddingBody(req *core.EmbeddingRequest) (any, error) {
+	if p.backend != geminiBackendVertex {
+		return req, nil
+	}
+	return rewriteRequestModel(req, vertexOpenAIModelID(req.Model))
+}
+
 // ChatCompletion sends a chat completion request to Gemini
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	if req == nil {
 		return nil, core.NewInvalidRequestError("chat request is required", nil)
 	}
 	if p.useNativeAPI {
 		return p.nativeChatCompletion(ctx, req)
 	}
-	body, err := adaptChatRequest(req)
+	body, err := p.openAICompatibleChatBody(req)
 	if err != nil {
 		return nil, err
 	}
@@ -254,6 +462,9 @@ func (p *Provider) nativeChatCompletion(ctx context.Context, req *core.ChatReque
 
 // StreamChatCompletion returns a raw response body for streaming (caller must close)
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	if req == nil {
 		return nil, core.NewInvalidRequestError("chat request is required", nil)
 	}
@@ -261,7 +472,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 		return p.nativeStreamChatCompletion(ctx, req)
 	}
 	streamReq := req.WithStreaming()
-	body, err := adaptChatRequest(streamReq)
+	body, err := p.openAICompatibleChatBody(streamReq)
 	if err != nil {
 		return nil, err
 	}
@@ -311,38 +522,25 @@ type geminiModel struct {
 
 // geminiModelsResponse represents the native Gemini models list response
 type geminiModelsResponse struct {
-	Models []geminiModel `json:"models"`
+	Models          []geminiModel `json:"models"`
+	PublisherModels []geminiModel `json:"publisherModels"`
+}
+
+func geminiModelSupportedMethods(modelID string, methods []string) (supportsGenerate, supportsEmbed bool) {
+	if len(methods) == 0 {
+		normalized := normalizeGeminiModelID(modelID)
+		return strings.HasPrefix(normalized, "gemini-"), strings.HasPrefix(normalized, "text-embedding-")
+	}
+	return slices.Contains(methods, "generateContent") || slices.Contains(methods, "streamGenerateContent"),
+		slices.Contains(methods, "embedContent")
 }
 
 // ListModels retrieves the list of available models from Gemini
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	// Use the native Gemini API to list models
-	// We need to create a separate client for the models endpoint since it uses a different URL
-	modelsCfg := p.modelsClientConf
-	modelsCfg.BaseURL = p.modelsURL
-	modelsCfg.Hooks = p.hooks
-	headers := func(req *http.Request) {
-		// Use header-based API key auth for models requests.
-		req.Header.Set("x-goog-api-key", p.apiKey)
-
-		// Preserve request tracing across list-models requests.
-		requestID := req.Header.Get("X-Request-Id")
-		if requestID == "" {
-			requestID = core.GetRequestID(req.Context())
-		}
-		if requestID != "" {
-			req.Header.Set("X-Request-Id", requestID)
-		}
+	if err := p.ready(); err != nil {
+		return nil, err
 	}
-
-	var modelsClient *llmclient.Client
-	if p.httpClient != nil {
-		modelsClient = llmclient.NewWithHTTPClient(p.httpClient, modelsCfg, headers)
-	} else {
-		modelsClient = llmclient.New(modelsCfg, headers)
-	}
-
-	rawResp, err := modelsClient.DoRaw(ctx, llmclient.Request{
+	rawResp, err := p.nativeClient.DoRaw(ctx, llmclient.Request{
 		Method:   http.MethodGet,
 		Endpoint: "/models",
 	})
@@ -356,38 +554,31 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	// If the payload contains an explicit "models" field with an empty array,
 	// return an empty list instead of falling through to fallback parsing.
 	var nativeProbe struct {
-		Models json.RawMessage `json:"models"`
+		Models          json.RawMessage `json:"models"`
+		PublisherModels json.RawMessage `json:"publisherModels"`
 	}
-	if err := json.Unmarshal(rawResp.Body, &nativeProbe); err == nil && nativeProbe.Models != nil {
+	if err := json.Unmarshal(rawResp.Body, &nativeProbe); err == nil && (nativeProbe.Models != nil || nativeProbe.PublisherModels != nil) {
 		var geminiResp geminiModelsResponse
 		if err := json.Unmarshal(rawResp.Body, &geminiResp); err != nil {
 			return nil, core.NewProviderError("gemini", http.StatusBadGateway, "failed to parse native Gemini models response", err)
 		}
-		if len(geminiResp.Models) == 0 {
+		modelEntries := append(geminiResp.Models, geminiResp.PublisherModels...)
+		if len(modelEntries) == 0 {
 			return &core.ModelsResponse{
 				Object: "list",
 				Data:   []core.Model{},
 			}, nil
 		}
 
-		models := make([]core.Model, 0, len(geminiResp.Models))
+		models := make([]core.Model, 0, len(modelEntries))
 
-		for _, gm := range geminiResp.Models {
-			// Extract model ID from name (format: "models/gemini-...")
-			modelID := strings.TrimPrefix(gm.Name, "models/")
+		for _, gm := range modelEntries {
+			modelID := displayModelIDFromGemini(gm.Name, p.backend)
 
 			// Only include models that support generateContent (chat/completion)
-			supportsGenerate := false
-			for _, method := range gm.SupportedMethods {
-				if method == "generateContent" || method == "streamGenerateContent" {
-					supportsGenerate = true
-					break
-				}
-			}
+			supportsGenerate, supportsEmbed := geminiModelSupportedMethods(modelID, gm.SupportedMethods)
 
-			supportsEmbed := slices.Contains(gm.SupportedMethods, "embedContent")
-
-			isOpenAICompatModel := strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-")
+			isOpenAICompatModel := isGeminiExposedModel(modelID)
 			if (supportsGenerate || supportsEmbed) && isOpenAICompatModel {
 				models = append(models, core.Model{
 					ID:      modelID,
@@ -409,8 +600,8 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	if err := json.Unmarshal(rawResp.Body, &openAIResp); err == nil && openAIResp.Object == "list" {
 		models := make([]core.Model, 0, len(openAIResp.Data))
 		for _, m := range openAIResp.Data {
-			modelID := strings.TrimPrefix(m.ID, "models/")
-			isOpenAICompatModel := strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-")
+			modelID := displayModelIDFromGemini(m.ID, p.backend)
+			isOpenAICompatModel := isGeminiExposedModel(modelID)
 			if !isOpenAICompatModel {
 				continue
 			}
@@ -436,16 +627,29 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 
 // Responses sends a Responses API request to Gemini (converted to chat format)
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	return providers.ResponsesViaChat(ctx, p, req)
 }
 
 // Embeddings sends an embeddings request to Gemini via its OpenAI-compatible endpoint
 func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
+	if req == nil {
+		return nil, core.NewInvalidRequestError("embedding request is required", nil)
+	}
+	body, err := p.openAICompatibleEmbeddingBody(req)
+	if err != nil {
+		return nil, err
+	}
 	var resp core.EmbeddingResponse
-	err := p.client.Do(ctx, llmclient.Request{
+	err = p.client.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/embeddings",
-		Body:     req,
+		Body:     body,
 	}, &resp)
 	if err != nil {
 		return nil, err
@@ -458,11 +662,17 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 
 // StreamResponses returns a raw response body for streaming Responses API (caller must close)
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	return providers.StreamResponsesViaChat(ctx, p, req, "gemini")
 }
 
 // CreateBatch creates a native Gemini batch job through its OpenAI-compatible endpoint.
 func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	var resp core.BatchResponse
 	err := p.client.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
@@ -480,6 +690,9 @@ func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*co
 
 // GetBatch retrieves a native Gemini batch job.
 func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	var resp core.BatchResponse
 	err := p.client.Do(ctx, llmclient.Request{
 		Method:   http.MethodGet,
@@ -496,6 +709,9 @@ func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse
 
 // ListBatches lists native Gemini batch jobs.
 func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*core.BatchListResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	values := url.Values{}
 	if limit > 0 {
 		values.Set("limit", strconv.Itoa(limit))
@@ -526,6 +742,9 @@ func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*c
 
 // CancelBatch cancels a native Gemini batch job.
 func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	var resp core.BatchResponse
 	err := p.client.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
@@ -542,11 +761,17 @@ func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchRespo
 
 // GetBatchResults fetches Gemini batch results via the output file API.
 func (p *Provider) GetBatchResults(ctx context.Context, id string) (*core.BatchResultsResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	return providers.FetchBatchResultsFromOutputFile(ctx, p.client, "gemini", id)
 }
 
 // CreateFile uploads a file through Gemini's OpenAI-compatible /files API.
 func (p *Provider) CreateFile(ctx context.Context, req *core.FileCreateRequest) (*core.FileObject, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	resp, err := providers.CreateOpenAICompatibleFile(ctx, p.client, req)
 	if err != nil {
 		return nil, err
@@ -557,6 +782,9 @@ func (p *Provider) CreateFile(ctx context.Context, req *core.FileCreateRequest) 
 
 // ListFiles lists files through Gemini's OpenAI-compatible /files API.
 func (p *Provider) ListFiles(ctx context.Context, purpose string, limit int, after string) (*core.FileListResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	resp, err := providers.ListOpenAICompatibleFiles(ctx, p.client, purpose, limit, after)
 	if err != nil {
 		return nil, err
@@ -569,6 +797,9 @@ func (p *Provider) ListFiles(ctx context.Context, purpose string, limit int, aft
 
 // GetFile retrieves one file object through Gemini's OpenAI-compatible /files API.
 func (p *Provider) GetFile(ctx context.Context, id string) (*core.FileObject, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	resp, err := providers.GetOpenAICompatibleFile(ctx, p.client, id)
 	if err != nil {
 		return nil, err
@@ -579,10 +810,16 @@ func (p *Provider) GetFile(ctx context.Context, id string) (*core.FileObject, er
 
 // DeleteFile deletes a file object through Gemini's OpenAI-compatible /files API.
 func (p *Provider) DeleteFile(ctx context.Context, id string) (*core.FileDeleteResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	return providers.DeleteOpenAICompatibleFile(ctx, p.client, id)
 }
 
 // GetFileContent fetches raw file bytes through Gemini's /files/{id}/content API.
 func (p *Provider) GetFileContent(ctx context.Context, id string) (*core.FileContentResponse, error) {
+	if err := p.ready(); err != nil {
+		return nil, err
+	}
 	return providers.GetOpenAICompatibleFileContent(ctx, p.client, id)
 }

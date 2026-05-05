@@ -202,8 +202,21 @@ providers:
     type: gemini
     api_key: "..."
     # Chat/responses use Gemini's native generateContent API by default.
-    # Set USE_GOOGLE_GEMINI_NATIVE_API=false to use Gemini's OpenAI-compatible API instead.
+    # Set GEMINI_API_MODE=openai_compatible or api_mode: openai_compatible to use
+    # Gemini's OpenAI-compatible API instead.
     # Native mode accepts image data URLs but does not fetch remote image URLs yet.
+
+  vertex:
+    type: vertex
+    auth_type: gcp_adc # or gcp_service_account
+    vertex_project: "my-gcp-project"
+    vertex_location: "us-central1"
+    # service_account_file: "/var/run/secrets/google/service-account.json"
+    # service_account_json: "${VERTEX_SERVICE_ACCOUNT_JSON}"
+    # service_account_json_base64: "${VERTEX_SERVICE_ACCOUNT_JSON_BASE64}"
+    # api_mode: native # or openai_compatible
+    # models:
+    #   - id: "google/gemini-2.5-flash"
 
   xai:
     type: xai

@@ -17,6 +17,7 @@ require (
 	github.com/swaggo/swag/v2 v2.0.0-rc5
 	github.com/tidwall/gjson v1.18.0
 	go.mongodb.org/mongo-driver/v2 v2.6.0
+	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -24,6 +25,7 @@ require (
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.5 // indirect

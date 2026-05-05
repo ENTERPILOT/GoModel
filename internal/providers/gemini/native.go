@@ -811,8 +811,33 @@ func nativeStreamEndpoint(model string) string {
 
 func normalizeGeminiModelID(model string) string {
 	model = strings.TrimSpace(model)
+	if idx := strings.LastIndex(model, "/models/"); idx >= 0 {
+		model = model[idx+len("/models/"):]
+	}
 	model = strings.TrimPrefix(model, "models/")
+	model = strings.TrimPrefix(model, "google/")
 	return model
+}
+
+func vertexOpenAIModelID(model string) string {
+	model = normalizeGeminiModelID(model)
+	if model == "" {
+		return ""
+	}
+	return "google/" + model
+}
+
+func displayModelIDFromGemini(model, backend string) string {
+	model = normalizeGeminiModelID(model)
+	if backend == geminiBackendVertex && model != "" {
+		return "google/" + model
+	}
+	return model
+}
+
+func isGeminiExposedModel(modelID string) bool {
+	modelID = normalizeGeminiModelID(modelID)
+	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-")
 }
 
 func nativeProviderError(message string, err error) *core.GatewayError {

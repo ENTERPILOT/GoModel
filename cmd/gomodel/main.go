@@ -26,6 +26,7 @@ import (
 	"gomodel/internal/providers/openai"
 	"gomodel/internal/providers/openrouter"
 	"gomodel/internal/providers/oracle"
+	"gomodel/internal/providers/vertex"
 	"gomodel/internal/providers/vllm"
 	"gomodel/internal/providers/xai"
 	"gomodel/internal/providers/zai"
@@ -122,6 +123,7 @@ func main() {
 	factory.Add(anthropic.Registration)
 	factory.Add(deepseek.Registration)
 	factory.Add(gemini.Registration)
+	factory.Add(vertex.Registration)
 	factory.Add(groq.Registration)
 	factory.Add(minimax.Registration)
 	factory.Add(ollama.Registration)

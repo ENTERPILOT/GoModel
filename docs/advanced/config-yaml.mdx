@@ -25,6 +25,11 @@ For multiple provider instances, env vars support
 `OLLAMA_A_BASE_URL` registers `ollama-a`. Azure also supports
 `<PROVIDER>_<SUFFIX>_API_VERSION`.
 
+Vertex AI is the exception to the provider-name shape: use `VERTEX_*`
+env vars to create `type: vertex` providers named `vertex`, `vertex_us`,
+`vertex_eu`, and so on. Vertex requires `VERTEX_PROJECT` and
+`VERTEX_LOCATION`; `VERTEX_AUTH_TYPE` defaults to `gcp_adc`.
+
 Configured provider model lists can stay in env via `<PROVIDER>_MODELS`, for
 example `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, or `VLLM_MODELS`.
 Set `CONFIGURED_PROVIDER_MODELS_MODE=fallback` (default) to use those lists only

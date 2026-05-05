@@ -14,11 +14,20 @@ import (
 // ProviderConfig holds the fully resolved provider configuration after merging
 // global defaults with per-provider overrides.
 type ProviderConfig struct {
-	Type       string
-	APIKey     string
-	BaseURL    string
-	APIVersion string
-	Models     []string
+	Type                     string
+	APIKey                   string
+	BaseURL                  string
+	APIVersion               string
+	Backend                  string
+	AuthType                 string
+	APIMode                  string
+	VertexProject            string
+	VertexLocation           string
+	ServiceAccountFile       string
+	ServiceAccountJSON       string
+	ServiceAccountJSONBase64 string
+	GCPScope                 string
+	Models                   []string
 	// ModelMetadataOverrides holds operator-supplied metadata keyed by raw model
 	// ID (as it appears in the provider's /models response). The registry merges
 	// these onto remote-registry metadata after enrichment; non-zero fields here
@@ -47,17 +56,19 @@ func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map
 
 	for _, providerType := range sortedDiscoveryTypes(discovery) {
 		spec := discovery[providerType]
-		envGroups := collectProviderEnvValues(providerType, spec, environ)
+		for _, source := range providerEnvSources(providerType, spec) {
+			envGroups := collectProviderEnvValues(source.Prefix, spec, environ)
 
-		if values, ok := envGroups[""]; ok {
-			applyUnsuffixedProviderEnvVars(result, providerType, spec, values)
-		}
-
-		for _, suffix := range sortedProviderEnvSuffixes(envGroups) {
-			if suffix == "" {
-				continue
+			if values, ok := envGroups[""]; ok {
+				applyUnsuffixedProviderEnvVars(result, providerType, spec, source, values)
 			}
-			applySuffixedProviderEnvVars(result, providerType, spec, suffix, envGroups[suffix])
+
+			for _, suffix := range sortedProviderEnvSuffixes(envGroups) {
+				if suffix == "" {
+					continue
+				}
+				applySuffixedProviderEnvVars(result, providerType, spec, source, suffix, envGroups[suffix])
+			}
 		}
 	}
 
@@ -71,25 +82,71 @@ const (
 	providerEnvFieldBaseURL
 	providerEnvFieldAPIVersion
 	providerEnvFieldModels
+	providerEnvFieldBackend
+	providerEnvFieldAuthType
+	providerEnvFieldAPIMode
+	providerEnvFieldVertexProject
+	providerEnvFieldVertexLocation
+	providerEnvFieldServiceAccountFile
+	providerEnvFieldServiceAccountJSON
+	providerEnvFieldServiceAccountJSONBase64
+	providerEnvFieldGCPScope
 )
 
+type providerEnvSource struct {
+	Prefix        string
+	DefaultName   string
+	NameSeparator string
+	OverlayByType bool
+}
+
 type providerEnvValues struct {
-	APIKey     string
-	BaseURL    string
-	APIVersion string
-	Models     []string
+	APIKey                   string
+	BaseURL                  string
+	APIVersion               string
+	Backend                  string
+	AuthType                 string
+	APIMode                  string
+	VertexProject            string
+	VertexLocation           string
+	ServiceAccountFile       string
+	ServiceAccountJSON       string
+	ServiceAccountJSONBase64 string
+	GCPScope                 string
+	Models                   []string
 }
 
 func (v providerEnvValues) empty() bool {
 	return strings.TrimSpace(v.APIKey) == "" &&
 		strings.TrimSpace(v.BaseURL) == "" &&
 		strings.TrimSpace(v.APIVersion) == "" &&
+		strings.TrimSpace(v.Backend) == "" &&
+		strings.TrimSpace(v.AuthType) == "" &&
+		strings.TrimSpace(v.APIMode) == "" &&
+		strings.TrimSpace(v.VertexProject) == "" &&
+		strings.TrimSpace(v.VertexLocation) == "" &&
+		strings.TrimSpace(v.ServiceAccountFile) == "" &&
+		strings.TrimSpace(v.ServiceAccountJSON) == "" &&
+		strings.TrimSpace(v.ServiceAccountJSONBase64) == "" &&
+		strings.TrimSpace(v.GCPScope) == "" &&
 		len(v.Models) == 0
 }
 
-func collectProviderEnvValues(providerType string, spec DiscoveryConfig, environ []string) map[string]providerEnvValues {
+func providerEnvSources(providerType string, spec DiscoveryConfig) []providerEnvSource {
+	separator := spec.NameSeparator
+	if separator == "" {
+		separator = "-"
+	}
+	return []providerEnvSource{{
+		Prefix:        envPrefix(providerType),
+		DefaultName:   providerType,
+		NameSeparator: separator,
+		OverlayByType: true,
+	}}
+}
+
+func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []string) map[string]providerEnvValues {
 	groups := make(map[string]providerEnvValues)
-	prefix := envPrefix(providerType)
 	prefixWithSeparator := prefix + "_"
 
 	for _, entry := range environ {
@@ -113,6 +170,24 @@ func collectProviderEnvValues(providerType string, spec DiscoveryConfig, environ
 			values.APIVersion = value
 		case providerEnvFieldModels:
 			values.Models = parseCSVEnvList(value)
+		case providerEnvFieldBackend:
+			values.Backend = value
+		case providerEnvFieldAuthType:
+			values.AuthType = value
+		case providerEnvFieldAPIMode:
+			values.APIMode = value
+		case providerEnvFieldVertexProject:
+			values.VertexProject = value
+		case providerEnvFieldVertexLocation:
+			values.VertexLocation = value
+		case providerEnvFieldServiceAccountFile:
+			values.ServiceAccountFile = value
+		case providerEnvFieldServiceAccountJSON:
+			values.ServiceAccountJSON = value
+		case providerEnvFieldServiceAccountJSONBase64:
+			values.ServiceAccountJSONBase64 = value
+		case providerEnvFieldGCPScope:
+			values.GCPScope = value
 		}
 		groups[suffix] = values
 	}
@@ -139,8 +214,19 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		name  string
 		field providerEnvField
 	}{
+		{name: "SERVICE_ACCOUNT_JSON_BASE64", field: providerEnvFieldServiceAccountJSONBase64},
+		{name: "SERVICE_ACCOUNT_JSON", field: providerEnvFieldServiceAccountJSON},
+		{name: "SERVICE_ACCOUNT_FILE", field: providerEnvFieldServiceAccountFile},
+		{name: "VERTEX_PROJECT", field: providerEnvFieldVertexProject},
+		{name: "VERTEX_LOCATION", field: providerEnvFieldVertexLocation},
 		{name: "API_VERSION", field: providerEnvFieldAPIVersion},
 		{name: "BASE_URL", field: providerEnvFieldBaseURL},
+		{name: "AUTH_TYPE", field: providerEnvFieldAuthType},
+		{name: "API_MODE", field: providerEnvFieldAPIMode},
+		{name: "PROJECT", field: providerEnvFieldVertexProject},
+		{name: "LOCATION", field: providerEnvFieldVertexLocation},
+		{name: "GCP_SCOPE", field: providerEnvFieldGCPScope},
+		{name: "BACKEND", field: providerEnvFieldBackend},
 		{name: "API_KEY", field: providerEnvFieldAPIKey},
 		{name: "MODELS", field: providerEnvFieldModels},
 	}
@@ -192,12 +278,12 @@ func sortedProviderEnvSuffixes(groups map[string]providerEnvValues) []string {
 	return suffixes
 }
 
-func applyUnsuffixedProviderEnvVars(result map[string]config.RawProviderConfig, providerType string, spec DiscoveryConfig, values providerEnvValues) {
+func applyUnsuffixedProviderEnvVars(result map[string]config.RawProviderConfig, providerType string, spec DiscoveryConfig, source providerEnvSource, values providerEnvValues) {
 	if values.empty() {
 		return
 	}
 
-	targetKey, matched, ambiguous := findEnvOverlayTarget(result, providerType)
+	targetKey, matched, ambiguous := findEnvOverlayTarget(result, providerType, source)
 	if matched {
 		result[targetKey] = overlayProviderEnvValues(result[targetKey], values, spec)
 		return
@@ -209,15 +295,15 @@ func applyUnsuffixedProviderEnvVars(result map[string]config.RawProviderConfig, 
 		return
 	}
 
-	result[providerType] = values.rawConfig(providerType, spec)
+	result[source.DefaultName] = values.rawConfig(providerType, spec)
 }
 
-func applySuffixedProviderEnvVars(result map[string]config.RawProviderConfig, providerType string, spec DiscoveryConfig, suffix string, values providerEnvValues) {
+func applySuffixedProviderEnvVars(result map[string]config.RawProviderConfig, providerType string, spec DiscoveryConfig, source providerEnvSource, suffix string, values providerEnvValues) {
 	if values.empty() {
 		return
 	}
 
-	targetKey := providerNameForEnvSuffix(providerType, suffix)
+	targetKey := providerNameForEnvSuffix(source, suffix)
 	if targetKey == "" {
 		return
 	}
@@ -238,12 +324,22 @@ func applySuffixedProviderEnvVars(result map[string]config.RawProviderConfig, pr
 }
 
 func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) config.RawProviderConfig {
+	backend := v.Backend
 	return config.RawProviderConfig{
-		Type:       providerType,
-		APIKey:     v.APIKey,
-		BaseURL:    v.resolvedBaseURL(spec),
-		APIVersion: v.APIVersion,
-		Models:     rawProviderModelsFromIDs(v.Models),
+		Type:                     providerType,
+		APIKey:                   v.APIKey,
+		BaseURL:                  v.resolvedBaseURL(spec),
+		APIVersion:               v.APIVersion,
+		Backend:                  backend,
+		AuthType:                 v.AuthType,
+		APIMode:                  v.APIMode,
+		VertexProject:            v.VertexProject,
+		VertexLocation:           v.VertexLocation,
+		ServiceAccountFile:       v.ServiceAccountFile,
+		ServiceAccountJSON:       v.ServiceAccountJSON,
+		ServiceAccountJSONBase64: v.ServiceAccountJSONBase64,
+		GCPScope:                 v.GCPScope,
+		Models:                   rawProviderModelsFromIDs(v.Models),
 	}
 }
 
@@ -267,25 +363,55 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	if values.APIVersion != "" {
 		existing.APIVersion = values.APIVersion
 	}
+	if values.Backend != "" {
+		existing.Backend = values.Backend
+	}
+	if values.AuthType != "" {
+		existing.AuthType = values.AuthType
+	}
+	if values.APIMode != "" {
+		existing.APIMode = values.APIMode
+	}
+	if values.VertexProject != "" {
+		existing.VertexProject = values.VertexProject
+	}
+	if values.VertexLocation != "" {
+		existing.VertexLocation = values.VertexLocation
+	}
+	if values.ServiceAccountFile != "" {
+		existing.ServiceAccountFile = values.ServiceAccountFile
+	}
+	if values.ServiceAccountJSON != "" {
+		existing.ServiceAccountJSON = values.ServiceAccountJSON
+	}
+	if values.ServiceAccountJSONBase64 != "" {
+		existing.ServiceAccountJSONBase64 = values.ServiceAccountJSONBase64
+	}
+	if values.GCPScope != "" {
+		existing.GCPScope = values.GCPScope
+	}
 	if len(values.Models) > 0 {
 		existing.Models = rawProviderModelsFromIDs(values.Models)
 	}
 	return existing
 }
 
-func providerNameForEnvSuffix(providerType, suffix string) string {
-	providerType = strings.TrimSpace(providerType)
-	suffixName := normalizeEnvSuffixForProviderName(suffix)
+func providerNameForEnvSuffix(source providerEnvSource, suffix string) string {
+	baseName := strings.TrimSpace(source.DefaultName)
+	suffixName := normalizeEnvSuffixForProviderName(suffix, source.NameSeparator)
 	if suffixName == "" {
-		return providerType
+		return baseName
 	}
-	if providerType == "" {
+	if baseName == "" {
 		return suffixName
 	}
-	return providerType + "-" + suffixName
+	return baseName + source.NameSeparator + suffixName
 }
 
-func normalizeEnvSuffixForProviderName(suffix string) string {
+func normalizeEnvSuffixForProviderName(suffix, separator string) string {
+	if separator == "" {
+		separator = "-"
+	}
 	var b strings.Builder
 	lastHyphen := false
 	for _, r := range strings.TrimSpace(suffix) {
@@ -294,16 +420,19 @@ func normalizeEnvSuffixForProviderName(suffix string) string {
 			b.WriteRune(unicode.ToLower(r))
 			lastHyphen = false
 		case r == '_' && !lastHyphen:
-			b.WriteByte('-')
+			b.WriteString(separator)
 			lastHyphen = true
 		}
 	}
-	return strings.Trim(b.String(), "-")
+	return strings.Trim(b.String(), separator)
 }
 
-func findEnvOverlayTarget(raw map[string]config.RawProviderConfig, providerType string) (string, bool, bool) {
-	if existing, ok := raw[providerType]; ok && rawProviderMatchesType(existing, providerType) {
-		return providerType, true, false
+func findEnvOverlayTarget(raw map[string]config.RawProviderConfig, providerType string, source providerEnvSource) (string, bool, bool) {
+	if existing, ok := raw[source.DefaultName]; ok && rawProviderMatchesType(existing, providerType) {
+		return source.DefaultName, true, false
+	}
+	if !source.OverlayByType {
+		return "", false, false
 	}
 
 	var matchedKey string
@@ -326,6 +455,9 @@ func findEnvOverlayTarget(raw map[string]config.RawProviderConfig, providerType 
 }
 
 func rawProviderMatchesType(cfg config.RawProviderConfig, providerType string) bool {
+	if strings.EqualFold(strings.TrimSpace(providerType), "vertex") {
+		return isVertexProviderConfig(cfg)
+	}
 	return strings.TrimSpace(cfg.Type) == strings.TrimSpace(providerType)
 }
 
@@ -412,8 +544,16 @@ func isUnresolvedEnvPlaceholder(value string) bool {
 func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) map[string]config.RawProviderConfig {
 	result := make(map[string]config.RawProviderConfig, len(raw))
 	for name, p := range raw {
-		spec, known := discovery[strings.TrimSpace(p.Type)]
+		providerType := normalizeProviderType(p)
+		spec, known := discovery[providerType]
 		if known && spec.RequireBaseURL && strings.TrimSpace(p.BaseURL) == "" {
+			continue
+		}
+		if isVertexProviderConfig(p) {
+			p.Type = providerType
+			if validVertexProviderConfig(p) {
+				result[name] = p
+			}
 			continue
 		}
 		if known && spec.AllowAPIKeyless {
@@ -425,6 +565,33 @@ func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map
 		}
 	}
 	return result
+}
+
+func isVertexProviderConfig(p config.RawProviderConfig) bool {
+	return strings.EqualFold(strings.TrimSpace(p.Type), "vertex") ||
+		(strings.EqualFold(strings.TrimSpace(p.Type), "gemini") && strings.EqualFold(strings.TrimSpace(p.Backend), "vertex"))
+}
+
+func validVertexProviderConfig(p config.RawProviderConfig) bool {
+	if !hasResolvedProviderValue(p.VertexProject) || !hasResolvedProviderValue(p.VertexLocation) {
+		return false
+	}
+	authType := strings.ToLower(strings.TrimSpace(p.AuthType))
+	switch authType {
+	case "", "gcp_adc", "adc", "google_adc":
+		return true
+	case "gcp_service_account", "service_account":
+		return hasResolvedProviderValue(p.ServiceAccountFile) ||
+			hasResolvedProviderValue(p.ServiceAccountJSON) ||
+			hasResolvedProviderValue(p.ServiceAccountJSONBase64)
+	default:
+		return false
+	}
+}
+
+func hasResolvedProviderValue(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && !strings.Contains(value, "${")
 }
 
 // buildProviderConfigs merges each raw provider config with the global ResilienceConfig,
@@ -441,13 +608,22 @@ func buildProviderConfigs(raw map[string]config.RawProviderConfig, global config
 // Non-nil fields in the raw config override the global defaults.
 func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceConfig) ProviderConfig {
 	resolved := ProviderConfig{
-		Type:                   raw.Type,
-		APIKey:                 raw.APIKey,
-		BaseURL:                raw.BaseURL,
-		APIVersion:             raw.APIVersion,
-		Models:                 config.ProviderModelIDs(raw.Models),
-		ModelMetadataOverrides: config.ProviderModelMetadataOverrides(raw.Models),
-		Resilience:             global,
+		Type:                     normalizeProviderType(raw),
+		APIKey:                   raw.APIKey,
+		BaseURL:                  raw.BaseURL,
+		APIVersion:               raw.APIVersion,
+		Backend:                  raw.Backend,
+		AuthType:                 raw.AuthType,
+		APIMode:                  raw.APIMode,
+		VertexProject:            raw.VertexProject,
+		VertexLocation:           raw.VertexLocation,
+		ServiceAccountFile:       raw.ServiceAccountFile,
+		ServiceAccountJSON:       raw.ServiceAccountJSON,
+		ServiceAccountJSONBase64: raw.ServiceAccountJSONBase64,
+		GCPScope:                 raw.GCPScope,
+		Models:                   config.ProviderModelIDs(raw.Models),
+		ModelMetadataOverrides:   config.ProviderModelMetadataOverrides(raw.Models),
+		Resilience:               global,
 	}
 
 	if raw.Resilience == nil {
@@ -485,6 +661,14 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 	}
 
 	return resolved
+}
+
+func normalizeProviderType(raw config.RawProviderConfig) string {
+	providerType := strings.TrimSpace(raw.Type)
+	if strings.EqualFold(providerType, "gemini") && strings.EqualFold(strings.TrimSpace(raw.Backend), "vertex") {
+		return "vertex"
+	}
+	return providerType
 }
 
 // rawProviderModelsFromIDs wraps a plain string slice into RawProviderModel

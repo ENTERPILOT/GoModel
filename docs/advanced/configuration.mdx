@@ -350,6 +350,18 @@ The same pattern works for every registered provider type:
 suffixed `BASE_URL` values because their endpoints are deployment- or
 region-specific.
 
+Vertex AI uses the dedicated `VERTEX_*` prefix and registers provider
+`vertex` with type `vertex`. Suffixed Vertex env vars keep underscores in the
+provider name:
+
+```bash
+export VERTEX_PROJECT="prod-ai"
+export VERTEX_LOCATION="us-central1" # Registers "vertex", type "vertex"
+
+export VERTEX_US_PROJECT="prod-ai"
+export VERTEX_US_LOCATION="us-central1" # Registers "vertex_us", type "vertex"
+```
+
 ### YAML Provider Blocks
 
 For more control (custom names, per-provider resilience, or larger structured
@@ -404,6 +416,16 @@ providers:
     models:
       - gemini-2.0-flash
       - gemini-1.5-pro
+
+  # Add Vertex AI. Project and location are required.
+  vertex:
+    type: vertex
+    auth_type: gcp_adc
+    vertex_project: "prod-ai"
+    vertex_location: "us-central1"
+    api_mode: native
+    models:
+      - google/gemini-2.5-flash
 ```
 
 <Note>

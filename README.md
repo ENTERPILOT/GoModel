@@ -51,6 +51,9 @@ docker run --rm -p 8080:8080 \
   -e OPENAI_API_KEY="your-openai-key" \
   -e ANTHROPIC_API_KEY="your-anthropic-key" \
   -e GEMINI_API_KEY="your-gemini-key" \
+  -e VERTEX_PROJECT="your-gcp-project" \
+  -e VERTEX_LOCATION="us-central1" \
+  -e VERTEX_AUTH_TYPE="gcp_adc" \
   -e DEEPSEEK_API_KEY="your-deepseek-key" \
   -e GROQ_API_KEY="your-groq-key" \
   -e OPENROUTER_API_KEY="your-openrouter-key" \
@@ -90,7 +93,8 @@ Example model identifiers are illustrative and subject to change; consult provid
 | ------------- | ----------------------------------------------------------------- | ---------------------------------- | :--: | :----------: | :---: | :---: | :-----: | :------: |
 | OpenAI        | `OPENAI_API_KEY`                                                  | `gpt-5.5`                          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
 | Anthropic     | `ANTHROPIC_API_KEY`                                               | `claude-sonnet-4-20250514`         |  ✅  |      ✅      |  ❌   |  ❌   |   ✅    |    ✅    |
-| Google Gemini | `GEMINI_API_KEY`                                                  | `gemini-2.5-flash`                 |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
+| Google Gemini | `GEMINI_API_KEY`                                                   | `gemini-2.5-flash`                 |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
+| Vertex AI     | `VERTEX_PROJECT` + `VERTEX_LOCATION`                               | `google/gemini-2.5-flash`          |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ❌    |
 | DeepSeek      | `DEEPSEEK_API_KEY`                                                | `deepseek-v4-pro`                  |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ❌    |
 | Groq          | `GROQ_API_KEY`                                                    | `llama-3.3-70b-versatile`          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
 | OpenRouter    | `OPENROUTER_API_KEY`                                              | `google/gemini-2.5-flash`          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
@@ -120,6 +124,10 @@ To register multiple instances of the same provider type without `config.yaml`,
 use suffixed env vars such as `OPENAI_EAST_API_KEY` and
 `OPENAI_EAST_BASE_URL`; add `OPENAI_EAST_MODELS` to configure that instance's
 model list. This registers provider `openai-east` with type `openai`.
+Vertex AI uses the `VERTEX_*` prefix and registers provider `vertex`
+with type `vertex`; suffixed variables such as `VERTEX_US_PROJECT` register
+provider `vertex_us`. Vertex requires `VERTEX_PROJECT` and `VERTEX_LOCATION`;
+`VERTEX_AUTH_TYPE` defaults to Application Default Credentials (`gcp_adc`).
 
 ---
 
@@ -250,7 +258,9 @@ Key settings:
 | `ENABLE_PASSTHROUGH_ROUTES`     | `true`                                 | Enable provider-native passthrough routes under `/p/{provider}/...`              |
 | `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                                 | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |
 | `ENABLED_PASSTHROUGH_PROVIDERS` | `openai,anthropic,openrouter,zai,vllm` | Comma-separated list of enabled passthrough providers                            |
-| `USE_GOOGLE_GEMINI_NATIVE_API`  | `true`                                 | Use Gemini native `generateContent` for chat/responses; set `false` for Gemini's OpenAI-compatible API and image_url pass-through behavior |
+| `GEMINI_API_MODE`               | `native`                               | Gemini AI Studio upstream mode: `native` or `openai_compatible`                 |
+| `VERTEX_API_MODE`               | `native`                               | Vertex AI Gemini upstream mode: `native` or `openai_compatible`                 |
+| `USE_GOOGLE_GEMINI_NATIVE_API`  | `true`                                 | Legacy global Gemini mode toggle used when per-provider `*_API_MODE` is unset   |
 | `STORAGE_TYPE`                  | `sqlite`                               | Storage backend (`sqlite`, `postgresql`, `mongodb`)                              |
 | `METRICS_ENABLED`               | `false`                                | Enable Prometheus metrics (experimental)                                         |
 | `LOGGING_ENABLED`               | `false`                                | Enable audit logging                                                             |

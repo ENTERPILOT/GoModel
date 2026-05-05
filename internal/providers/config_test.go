@@ -27,6 +27,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"gemini": {
 		DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
 	},
+	"vertex": {
+		NameSeparator: "_",
+	},
 	"deepseek": {
 		DefaultBaseURL: "https://api.deepseek.com",
 	},
@@ -171,10 +174,17 @@ func TestBuildProviderConfig_ZeroValueOverride(t *testing.T) {
 
 func TestBuildProviderConfig_PreservesFields(t *testing.T) {
 	raw := config.RawProviderConfig{
-		Type:    "openai",
-		APIKey:  "sk-key",
-		BaseURL: "https://custom.endpoint.com",
-		Models:  []config.RawProviderModel{{ID: "gpt-4"}, {ID: "gpt-3.5-turbo"}},
+		Type:               "gemini",
+		APIKey:             "sk-key",
+		BaseURL:            "https://custom.endpoint.com",
+		Backend:            "vertex",
+		AuthType:           "gcp_adc",
+		APIMode:            "native",
+		VertexProject:      "prod-ai",
+		VertexLocation:     "us-central1",
+		ServiceAccountFile: "/secrets/vertex.json",
+		GCPScope:           "scope-a",
+		Models:             []config.RawProviderModel{{ID: "gpt-4"}, {ID: "gpt-3.5-turbo"}},
 	}
 	got := buildProviderConfig(raw, globalResilience)
 
@@ -184,8 +194,48 @@ func TestBuildProviderConfig_PreservesFields(t *testing.T) {
 	if got.BaseURL != "https://custom.endpoint.com" {
 		t.Errorf("BaseURL = %q, want https://custom.endpoint.com", got.BaseURL)
 	}
+	if got.Backend != "vertex" {
+		t.Errorf("Backend = %q, want vertex", got.Backend)
+	}
+	if got.AuthType != "gcp_adc" {
+		t.Errorf("AuthType = %q, want gcp_adc", got.AuthType)
+	}
+	if got.APIMode != "native" {
+		t.Errorf("APIMode = %q, want native", got.APIMode)
+	}
+	if got.VertexProject != "prod-ai" {
+		t.Errorf("VertexProject = %q, want prod-ai", got.VertexProject)
+	}
+	if got.VertexLocation != "us-central1" {
+		t.Errorf("VertexLocation = %q, want us-central1", got.VertexLocation)
+	}
+	if got.ServiceAccountFile != "/secrets/vertex.json" {
+		t.Errorf("ServiceAccountFile = %q, want /secrets/vertex.json", got.ServiceAccountFile)
+	}
+	if got.GCPScope != "scope-a" {
+		t.Errorf("GCPScope = %q, want scope-a", got.GCPScope)
+	}
 	if len(got.Models) != 2 || got.Models[0] != "gpt-4" {
 		t.Errorf("Models = %v, want [gpt-4 gpt-3.5-turbo]", got.Models)
+	}
+}
+
+func TestBuildProviderConfig_NormalizesLegacyGeminiVertexType(t *testing.T) {
+	raw := config.RawProviderConfig{
+		Type:           "gemini",
+		Backend:        "vertex",
+		AuthType:       "gcp_adc",
+		VertexProject:  "prod-ai",
+		VertexLocation: "us-central1",
+	}
+
+	got := buildProviderConfig(raw, globalResilience)
+
+	if got.Type != "vertex" {
+		t.Fatalf("Type = %q, want vertex", got.Type)
+	}
+	if got.Backend != "vertex" {
+		t.Fatalf("Backend = %q, want vertex", got.Backend)
 	}
 }
 
@@ -467,6 +517,147 @@ func TestApplyProviderEnvVars_DiscoversZAIWithExplicitBaseURL(t *testing.T) {
 	}
 }
 
+func TestApplyProviderEnvVars_DiscoversVertexProviderFromEnvAlias(t *testing.T) {
+	t.Setenv("VERTEX_PROJECT", "prod-ai")
+	t.Setenv("VERTEX_LOCATION", "us-central1")
+	t.Setenv("VERTEX_AUTH_TYPE", "gcp_adc")
+	t.Setenv("VERTEX_API_MODE", "native")
+	t.Setenv("VERTEX_MODELS", "google/gemini-2.5-flash")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["vertex"]
+	if !exists {
+		t.Fatal("expected vertex to be discovered from VERTEX_* env vars")
+	}
+	if p.Type != "vertex" {
+		t.Fatalf("Type = %q, want vertex", p.Type)
+	}
+	if p.VertexProject != "prod-ai" {
+		t.Fatalf("VertexProject = %q, want prod-ai", p.VertexProject)
+	}
+	if p.VertexLocation != "us-central1" {
+		t.Fatalf("VertexLocation = %q, want us-central1", p.VertexLocation)
+	}
+	if p.AuthType != "gcp_adc" {
+		t.Fatalf("AuthType = %q, want gcp_adc", p.AuthType)
+	}
+	if p.APIMode != "native" {
+		t.Fatalf("APIMode = %q, want native", p.APIMode)
+	}
+	if len(p.Models) != 1 || p.Models[0].ID != "google/gemini-2.5-flash" {
+		t.Fatalf("Models = %v, want [google/gemini-2.5-flash]", p.Models)
+	}
+}
+
+func TestApplyProviderEnvVars_DiscoversSuffixedVertexProviderWithUnderscoreName(t *testing.T) {
+	t.Setenv("VERTEX_US_PROJECT", "prod-ai")
+	t.Setenv("VERTEX_US_LOCATION", "us-central1")
+	t.Setenv("VERTEX_US_AUTH_TYPE", "gcp_service_account")
+	t.Setenv("VERTEX_US_SERVICE_ACCOUNT_FILE", "/secrets/vertex.json")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["vertex_us"]
+	if !exists {
+		t.Fatal("expected vertex_us to be discovered from VERTEX_US_* env vars")
+	}
+	if p.Type != "vertex" {
+		t.Fatalf("Type = %q, want vertex", p.Type)
+	}
+	if p.ServiceAccountFile != "/secrets/vertex.json" {
+		t.Fatalf("ServiceAccountFile = %q, want /secrets/vertex.json", p.ServiceAccountFile)
+	}
+}
+
+func TestResolveProviders_FiltersVertexWithoutProjectOrLocation(t *testing.T) {
+	t.Setenv("VERTEX_PROJECT", "prod-ai")
+	t.Setenv("VERTEX_AUTH_TYPE", "gcp_adc")
+
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+
+	if _, exists := got["vertex"]; exists {
+		t.Fatal("expected vertex without location to be filtered")
+	}
+	if _, exists := filteredRaw["vertex"]; exists {
+		t.Fatal("expected raw vertex without location to be filtered")
+	}
+}
+
+func TestResolveProviders_KeepsVertexWithProjectAndLocationUsingDefaultADC(t *testing.T) {
+	t.Setenv("VERTEX_PROJECT", "prod-ai")
+	t.Setenv("VERTEX_LOCATION", "us-central1")
+
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+
+	p, exists := got["vertex"]
+	if !exists {
+		t.Fatal("expected vertex with project and location to be resolved")
+	}
+	if p.Type != "vertex" {
+		t.Fatalf("Type = %q, want vertex", p.Type)
+	}
+	if _, exists := filteredRaw["vertex"]; !exists {
+		t.Fatal("expected raw vertex with project and location to be retained")
+	}
+}
+
+func TestResolveProviders_FiltersVertexServiceAccountWithoutCredentials(t *testing.T) {
+	t.Setenv("VERTEX_PROJECT", "prod-ai")
+	t.Setenv("VERTEX_LOCATION", "us-central1")
+	t.Setenv("VERTEX_AUTH_TYPE", "gcp_service_account")
+
+	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+
+	if _, exists := got["vertex"]; exists {
+		t.Fatal("expected vertex service account provider without credentials to be filtered")
+	}
+	if _, exists := filteredRaw["vertex"]; exists {
+		t.Fatal("expected raw vertex service account provider without credentials to be filtered")
+	}
+}
+
+func TestResolveProviders_FiltersVertexWithUnresolvedProjectPlaceholder(t *testing.T) {
+	raw := map[string]config.RawProviderConfig{
+		"vertex": {
+			Type:           "vertex",
+			AuthType:       "gcp_adc",
+			VertexProject:  "${VERTEX_PROJECT}",
+			VertexLocation: "us-central1",
+		},
+	}
+
+	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
+
+	if _, exists := got["vertex"]; exists {
+		t.Fatal("expected vertex with unresolved project placeholder to be filtered")
+	}
+	if _, exists := filteredRaw["vertex"]; exists {
+		t.Fatal("expected raw vertex with unresolved project placeholder to be filtered")
+	}
+}
+
+func TestResolveProviders_FiltersVertexWithUnresolvedServiceAccountPlaceholder(t *testing.T) {
+	raw := map[string]config.RawProviderConfig{
+		"vertex": {
+			Type:               "vertex",
+			AuthType:           "gcp_service_account",
+			VertexProject:      "prod-ai",
+			VertexLocation:     "us-central1",
+			ServiceAccountFile: "${VERTEX_SERVICE_ACCOUNT_FILE}",
+		},
+	}
+
+	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
+
+	if _, exists := got["vertex"]; exists {
+		t.Fatal("expected vertex with unresolved service account placeholder to be filtered")
+	}
+	if _, exists := filteredRaw["vertex"]; exists {
+		t.Fatal("expected raw vertex with unresolved service account placeholder to be filtered")
+	}
+}
+
 func TestApplyProviderEnvVars_DiscoversVLLMFromBaseURLWithoutAPIKey(t *testing.T) {
 	t.Setenv("VLLM_BASE_URL", "http://localhost:8000/v1")
 
@@ -605,7 +796,11 @@ func TestApplyProviderEnvVars_DiscoversSuffixedProvidersForEveryRegisteredType(t
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	for providerType, spec := range testDiscoveryConfigs {
-		name := providerType + "-east"
+		separator := spec.NameSeparator
+		if separator == "" {
+			separator = "-"
+		}
+		name := providerType + separator + "east"
 		p, exists := got[name]
 		if !exists {
 			t.Fatalf("expected %s to be discovered from suffixed env vars", name)
