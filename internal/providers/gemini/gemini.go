@@ -727,7 +727,7 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	return providers.StreamResponsesViaChat(ctx, p, req, "gemini")
+	return providers.StreamResponsesViaChat(ctx, p, req, p.responseProviderName())
 }
 
 // CreateBatch creates a native Gemini batch job through its OpenAI-compatible endpoint.

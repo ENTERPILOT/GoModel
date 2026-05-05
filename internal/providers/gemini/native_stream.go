@@ -107,7 +107,7 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 
 	var event geminiGenerateContentResponse
 	if err := json.Unmarshal([]byte(raw), &event); err != nil {
-		return nativeProviderError("failed to parse native Gemini stream event", err)
+		return nativeProviderError(s.providerName, "failed to parse native Gemini stream event", err)
 	}
 	if s.responseID == "" {
 		s.responseID = event.ResponseID
@@ -116,7 +116,7 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 		}
 	}
 
-	if err := geminiBlockedPromptError(&event); err != nil {
+	if err := geminiBlockedPromptError(&event, s.providerName); err != nil {
 		s.stopped = true
 		return writeOpenAIStreamError(out, err)
 	}

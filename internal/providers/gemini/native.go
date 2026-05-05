@@ -584,11 +584,11 @@ func geminiCachedContent(req *core.ChatRequest) string {
 }
 
 func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContentResponse, providerName string) (*core.ChatResponse, error) {
-	if err := geminiBlockedPromptError(geminiResp); err != nil {
-		return nil, err
-	}
 	if providerName == "" {
 		providerName = "gemini"
+	}
+	if err := geminiBlockedPromptError(geminiResp, providerName); err != nil {
+		return nil, err
 	}
 
 	created := time.Now().Unix()
@@ -624,7 +624,7 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 	return resp, nil
 }
 
-func geminiBlockedPromptError(resp *geminiGenerateContentResponse) *core.GatewayError {
+func geminiBlockedPromptError(resp *geminiGenerateContentResponse, providerName string) *core.GatewayError {
 	if resp == nil || len(resp.Candidates) > 0 {
 		return nil
 	}
@@ -632,7 +632,7 @@ func geminiBlockedPromptError(resp *geminiGenerateContentResponse) *core.Gateway
 	if reason == "" {
 		return nil
 	}
-	return nativeProviderError("Gemini blocked prompt: "+reason, nil)
+	return nativeProviderError(providerName, "Gemini blocked prompt: "+reason, nil)
 }
 
 func geminiPromptBlockReason(raw json.RawMessage) string {
@@ -846,6 +846,9 @@ func isGeminiExposedModel(modelID string) bool {
 	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-")
 }
 
-func nativeProviderError(message string, err error) *core.GatewayError {
-	return core.NewProviderError("gemini", http.StatusBadGateway, message, err)
+func nativeProviderError(providerName, message string, err error) *core.GatewayError {
+	if providerName == "" {
+		providerName = "gemini"
+	}
+	return core.NewProviderError(providerName, http.StatusBadGateway, message, err)
 }

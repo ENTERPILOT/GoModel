@@ -420,6 +420,46 @@ func TestVertexNativeChatUsesOAuthAuthorization(t *testing.T) {
 	}
 }
 
+func TestVertexNativeBlockedPromptUsesVertexProviderName(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent" {
+			t.Errorf("Path = %q, want Vertex native generateContent endpoint", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"responseId": "vertex-blocked",
+			"promptFeedback": {
+				"blockReason": "SAFETY",
+				"blockReasonMessage": "unsafe prompt"
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	p := newVertexTestProvider(server, true)
+	_, err := p.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "google/gemini-2.5-flash",
+		Messages: []core.Message{
+			{Role: "user", Content: "blocked"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected blocked prompt error, got nil")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T %[1]v, want *core.GatewayError", err)
+	}
+	if gatewayErr.Provider != "vertex" {
+		t.Fatalf("provider = %q, want vertex", gatewayErr.Provider)
+	}
+	if !strings.Contains(gatewayErr.Message, "SAFETY: unsafe prompt") {
+		t.Fatalf("message = %q, want block reason", gatewayErr.Message)
+	}
+}
+
 func TestVertexNativeStreamUsesVertexProviderName(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
@@ -463,6 +503,41 @@ func TestVertexNativeStreamUsesVertexProviderName(t *testing.T) {
 		if got := chunk["provider"]; got != "vertex" {
 			t.Fatalf("provider = %#v, want vertex in stream %q", got, string(raw))
 		}
+	}
+}
+
+func TestVertexNativeStreamResponsesUsesVertexProviderName(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent" {
+			t.Errorf("Path = %q, want Vertex native streamGenerateContent endpoint", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`data: {"responseId":"vertex-responses-stream","candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}
+
+`))
+	}))
+	defer server.Close()
+
+	p := newVertexTestProvider(server, true)
+	body, err := p.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "google/gemini-2.5-flash",
+		Input: "Hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read stream: %v", err)
+	}
+	stream := string(raw)
+	if !strings.Contains(stream, `"provider":"vertex"`) {
+		t.Fatalf("stream = %q, want vertex provider metadata", stream)
 	}
 }
 
