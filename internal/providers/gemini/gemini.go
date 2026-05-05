@@ -160,6 +160,10 @@ func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
 		p.configErr = fmt.Errorf("vertex Gemini requires base_url or vertex_project and vertex_location")
 		return
 	}
+	if p.backend == geminiBackendAIStudio && p.authType != geminiAuthTypeAPIKey {
+		p.configErr = fmt.Errorf("ai studio backend does not support GCP auth; use Vertex backend or provide an API key")
+		return
+	}
 	if p.backend == geminiBackendAIStudio && p.authType == geminiAuthTypeAPIKey && strings.TrimSpace(providerCfg.APIKey) == "" {
 		p.configErr = fmt.Errorf("gemini API key is required")
 	}
@@ -225,8 +229,7 @@ func normalizeGeminiBackend(cfg providers.ProviderConfig) string {
 		return geminiBackendAIStudio
 	}
 	if strings.TrimSpace(cfg.VertexProject) != "" ||
-		strings.TrimSpace(cfg.VertexLocation) != "" ||
-		strings.HasPrefix(strings.ToLower(strings.TrimSpace(cfg.AuthType)), "gcp") {
+		strings.TrimSpace(cfg.VertexLocation) != "" {
 		return geminiBackendVertex
 	}
 	return geminiBackendAIStudio

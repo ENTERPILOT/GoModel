@@ -3,9 +3,12 @@ package vertex
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -88,14 +91,12 @@ func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
 	case authTypeGCPADC:
 		return
 	case authTypeServiceAccount:
-		if googleauth.HasServiceAccount(googleauth.Config{
-			ServiceAccountFile:       providerCfg.ServiceAccountFile,
-			ServiceAccountJSON:       providerCfg.ServiceAccountJSON,
-			ServiceAccountJSONBase64: providerCfg.ServiceAccountJSONBase64,
-		}) {
+		if googleauth.HasServiceAccount(buildGoogleAuthConfig(providerCfg)) {
 			return
 		}
 		p.configErr = fmt.Errorf("vertex AI service account auth requires service_account_file, service_account_json, or service_account_json_base64")
+	default:
+		p.configErr = fmt.Errorf("unsupported normalized vertex AI auth type %q", p.authType)
 	}
 }
 
@@ -114,24 +115,16 @@ func hasResolvedProviderValue(value string) bool {
 }
 
 func normalizeAuthType(providerCfg providers.ProviderConfig) string {
-	return googleauth.NormalizeAuthType(providerCfg.AuthType, googleauth.HasServiceAccount(googleauth.Config{
-		ServiceAccountFile:       providerCfg.ServiceAccountFile,
-		ServiceAccountJSON:       providerCfg.ServiceAccountJSON,
-		ServiceAccountJSONBase64: providerCfg.ServiceAccountJSONBase64,
-	}))
+	return googleauth.NormalizeAuthType(providerCfg.AuthType, googleauth.HasServiceAccount(buildGoogleAuthConfig(providerCfg)))
 }
 
 func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *http.Client) *http.Client {
 	if p.configErr != nil {
 		return base
 	}
-	source, err := googleauth.TokenSource(context.Background(), googleauth.Config{
-		AuthType:                 p.authType,
-		ServiceAccountFile:       providerCfg.ServiceAccountFile,
-		ServiceAccountJSON:       providerCfg.ServiceAccountJSON,
-		ServiceAccountJSONBase64: providerCfg.ServiceAccountJSONBase64,
-		Scope:                    providerCfg.GCPScope,
-	})
+	authCfg := buildGoogleAuthConfig(providerCfg)
+	authCfg.AuthType = p.authType
+	source, err := googleauth.TokenSource(context.Background(), authCfg)
 	if err != nil {
 		p.configErr = err
 		return base
@@ -140,6 +133,16 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 		base = httpclient.NewDefaultHTTPClient()
 	}
 	return googleauth.HTTPClient(base, source)
+}
+
+func buildGoogleAuthConfig(providerCfg providers.ProviderConfig) googleauth.Config {
+	return googleauth.Config{
+		AuthType:                 providerCfg.AuthType,
+		ServiceAccountFile:       providerCfg.ServiceAccountFile,
+		ServiceAccountJSON:       providerCfg.ServiceAccountJSON,
+		ServiceAccountJSONBase64: providerCfg.ServiceAccountJSONBase64,
+		Scope:                    providerCfg.GCPScope,
+	}
 }
 
 func (p *Provider) ready() error {
@@ -313,7 +316,7 @@ func openAIEmbeddingResponse(req *core.EmbeddingRequest, resp *vertexEmbeddingPr
 		if len(values) == 0 {
 			values = prediction.Values
 		}
-		embedding, err := json.Marshal(values)
+		embedding, err := encodeEmbedding(values, req.EncodingFormat)
 		if err != nil {
 			return nil, core.NewProviderError("vertex", http.StatusBadGateway, "failed to encode Vertex AI embedding response", err)
 		}
@@ -328,11 +331,25 @@ func openAIEmbeddingResponse(req *core.EmbeddingRequest, resp *vertexEmbeddingPr
 	return out, nil
 }
 
+func encodeEmbedding(values []float64, encodingFormat string) (json.RawMessage, error) {
+	if strings.EqualFold(strings.TrimSpace(encodingFormat), "base64") {
+		buf := make([]byte, len(values)*4)
+		for i, value := range values {
+			binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(float32(value)))
+		}
+		return json.Marshal(base64.StdEncoding.EncodeToString(buf))
+	}
+	return json.Marshal(values)
+}
+
 func vertexNativeBaseURL(providerCfg providers.ProviderConfig) string {
 	_, nativeBaseURL := vertexBaseURLs(providerCfg)
 	return nativeBaseURL
 }
 
+// TODO: Share Vertex URL derivation with the Gemini Vertex path if this logic
+// changes again. It is intentionally duplicated today to keep provider package
+// boundaries simple.
 func vertexBaseURLs(providerCfg providers.ProviderConfig) (openAICompatibleBaseURL, nativeBaseURL string) {
 	baseURL := strings.TrimRight(strings.TrimSpace(providerCfg.BaseURL), "/")
 	if baseURL == "" {

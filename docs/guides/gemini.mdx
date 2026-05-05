@@ -72,6 +72,11 @@ Vertex requires both project and location. `VERTEX_AUTH_TYPE` defaults to
 Application Default Credentials (`gcp_adc`) when service-account fields are not
 set. Use service-account JSON directly when ADC is not appropriate:
 
+<Note>
+  Vertex authentication is enterprise-oriented and may become paid or licensed
+  in a future release.
+</Note>
+
 ```bash
 export VERTEX_AUTH_TYPE="gcp_service_account"
 export VERTEX_SERVICE_ACCOUNT_FILE="/secrets/service-account.json"

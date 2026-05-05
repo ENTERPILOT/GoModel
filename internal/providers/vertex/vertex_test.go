@@ -2,7 +2,10 @@ package vertex
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -101,6 +104,48 @@ func TestEmbeddingsRejectsEmptyStringInBatch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "embedding input must not be empty") {
 		t.Fatalf("error = %v, want empty input error", err)
+	}
+}
+
+func TestOpenAIEmbeddingResponseSupportsBase64Encoding(t *testing.T) {
+	resp, err := openAIEmbeddingResponse(&core.EmbeddingRequest{
+		Model:          "google/text-embedding-005",
+		EncodingFormat: "base64",
+	}, &vertexEmbeddingPredictResponse{
+		Predictions: []vertexEmbeddingPrediction{{
+			Embeddings: vertexEmbeddingValues{
+				Values:     []float64{0.5, -1.25},
+				Statistics: vertexEmbeddingStatistics{TokenCount: 3},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("openAIEmbeddingResponse() error = %v", err)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("data = %+v, want one embedding", resp.Data)
+	}
+
+	var encoded string
+	if err := json.Unmarshal(resp.Data[0].Embedding, &encoded); err != nil {
+		t.Fatalf("embedding is not JSON string: %v", err)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("embedding is not valid base64: %v", err)
+	}
+	if len(decoded) != 8 {
+		t.Fatalf("decoded length = %d, want 8", len(decoded))
+	}
+	values := []float32{
+		math.Float32frombits(binary.LittleEndian.Uint32(decoded[0:4])),
+		math.Float32frombits(binary.LittleEndian.Uint32(decoded[4:8])),
+	}
+	if values[0] != 0.5 || values[1] != -1.25 {
+		t.Fatalf("decoded values = %v, want [0.5 -1.25]", values)
+	}
+	if resp.Usage.PromptTokens != 3 || resp.Usage.TotalTokens != 3 {
+		t.Fatalf("usage = %+v, want 3 prompt/total tokens", resp.Usage)
 	}
 }
 

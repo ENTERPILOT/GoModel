@@ -42,6 +42,45 @@ func TestNew_ReturnsProvider(t *testing.T) {
 	}
 }
 
+func TestNew_AIStudioRejectsGCPAuthAliases(t *testing.T) {
+	for _, authType := range []string{"adc", "service_account"} {
+		t.Run(authType, func(t *testing.T) {
+			provider := New(providers.ProviderConfig{
+				BaseURL:  defaultOpenAICompatibleBaseURL,
+				AuthType: authType,
+			}, providers.ProviderOptions{})
+
+			geminiProvider, ok := provider.(*Provider)
+			if !ok {
+				t.Fatalf("provider type = %T, want *Provider", provider)
+			}
+			err := geminiProvider.ready()
+			if err == nil {
+				t.Fatal("expected GCP auth alias to be rejected for AI Studio")
+			}
+			if !strings.Contains(err.Error(), "ai studio backend does not support GCP auth") {
+				t.Fatalf("error = %v, want AI Studio GCP auth rejection", err)
+			}
+		})
+	}
+}
+
+func TestNew_VertexAcceptsGCPAuthAliases(t *testing.T) {
+	for _, authType := range []string{"adc", "service_account"} {
+		t.Run(authType, func(t *testing.T) {
+			p := NewVertexWithHTTPClient(providers.ProviderConfig{
+				AuthType:       authType,
+				VertexProject:  "prod-ai",
+				VertexLocation: "us-central1",
+			}, providers.ProviderOptions{}, http.DefaultClient)
+
+			if err := p.ready(); err != nil {
+				t.Fatalf("ready() error = %v, want nil for Vertex auth alias", err)
+			}
+		})
+	}
+}
+
 func TestGeminiBaseURLs(t *testing.T) {
 	tests := []struct {
 		name       string
