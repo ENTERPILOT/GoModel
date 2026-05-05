@@ -498,6 +498,9 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if resp.Model == "" {
 		resp.Model = req.Model
 	}
+	if resp.Provider == "" {
+		resp.Provider = p.responseProviderName()
+	}
 	return &resp, nil
 }
 
@@ -719,6 +722,9 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 	if resp.Model == "" {
 		resp.Model = req.Model
 	}
+	if resp.Provider == "" {
+		resp.Provider = p.responseProviderName()
+	}
 	return &resp, nil
 }
 
@@ -826,7 +832,7 @@ func (p *Provider) GetBatchResults(ctx context.Context, id string) (*core.BatchR
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	return providers.FetchBatchResultsFromOutputFile(ctx, p.client, "gemini", id)
+	return providers.FetchBatchResultsFromOutputFile(ctx, p.client, p.responseProviderName(), id)
 }
 
 // CreateFile uploads a file through Gemini's OpenAI-compatible /files API.
@@ -838,7 +844,7 @@ func (p *Provider) CreateFile(ctx context.Context, req *core.FileCreateRequest) 
 	if err != nil {
 		return nil, err
 	}
-	resp.Provider = "gemini"
+	resp.Provider = p.responseProviderName()
 	return resp, nil
 }
 
@@ -852,7 +858,7 @@ func (p *Provider) ListFiles(ctx context.Context, purpose string, limit int, aft
 		return nil, err
 	}
 	for i := range resp.Data {
-		resp.Data[i].Provider = "gemini"
+		resp.Data[i].Provider = p.responseProviderName()
 	}
 	return resp, nil
 }
@@ -866,7 +872,7 @@ func (p *Provider) GetFile(ctx context.Context, id string) (*core.FileObject, er
 	if err != nil {
 		return nil, err
 	}
-	resp.Provider = "gemini"
+	resp.Provider = p.responseProviderName()
 	return resp, nil
 }
 

@@ -608,6 +608,9 @@ func TestVertexOpenAICompatibleChatUsesOAuthAndGoogleModelPrefix(t *testing.T) {
 	if resp == nil || resp.ID != "vertex-openai" {
 		t.Fatalf("response = %+v, want vertex-openai", resp)
 	}
+	if resp.Provider != "vertex" {
+		t.Fatalf("provider = %q, want vertex", resp.Provider)
+	}
 }
 
 func TestVertexOpenAICompatibleEmbeddingsUsesOAuthAndGoogleModelPrefix(t *testing.T) {
@@ -657,6 +660,9 @@ func TestVertexOpenAICompatibleEmbeddingsUsesOAuthAndGoogleModelPrefix(t *testin
 	}
 	if resp == nil || resp.Model != "google/text-embedding-005" {
 		t.Fatalf("response = %+v, want google/text-embedding-005", resp)
+	}
+	if resp.Provider != "vertex" {
+		t.Fatalf("provider = %q, want vertex", resp.Provider)
 	}
 	if len(resp.Data) != 1 {
 		t.Fatalf("data = %+v, want one embedding", resp.Data)
@@ -803,6 +809,9 @@ func TestChatCompletion(t *testing.T) {
 				}
 				if resp.Model != "gemini-2.0-flash" {
 					t.Errorf("Model = %q, want %q", resp.Model, "gemini-2.0-flash")
+				}
+				if resp.Provider != "gemini" {
+					t.Errorf("Provider = %q, want gemini", resp.Provider)
 				}
 				if len(resp.Choices) != 1 {
 					t.Fatalf("len(Choices) = %d, want 1", len(resp.Choices))

@@ -17,7 +17,7 @@
       "type": "message"
     }
   ],
-  "provider": "",
+  "provider": "gemini",
   "status": "completed",
   "usage": {
     "input_tokens": 4,

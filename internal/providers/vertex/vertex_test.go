@@ -209,6 +209,25 @@ func TestNewAuthFormsInjectBearerToken(t *testing.T) {
 				cfg.ServiceAccountJSON = vertexServiceAccountCredentials(t, tokenURL)
 			},
 		},
+		{
+			name:      "service account file",
+			authType:  "gcp_service_account",
+			token:     "service-account-token",
+			grantType: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+			configure: func(t *testing.T, cfg *providers.ProviderConfig, tokenURL string) {
+				cfg.ServiceAccountFile = vertexServiceAccountCredentialsFile(t, tokenURL)
+			},
+		},
+		{
+			name:      "service account JSON base64",
+			authType:  "gcp_service_account",
+			token:     "service-account-token",
+			grantType: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+			configure: func(t *testing.T, cfg *providers.ProviderConfig, tokenURL string) {
+				credentials := vertexServiceAccountCredentials(t, tokenURL)
+				cfg.ServiceAccountJSONBase64 = base64.StdEncoding.EncodeToString([]byte(credentials))
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -354,6 +373,15 @@ func vertexADCCredentialsFile(t *testing.T, tokenURL string) string {
 	}
 	if err := os.WriteFile(path, encoded, 0o600); err != nil {
 		t.Fatalf("failed to write ADC credentials: %v", err)
+	}
+	return path
+}
+
+func vertexServiceAccountCredentialsFile(t *testing.T, tokenURL string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "service-account.json")
+	if err := os.WriteFile(path, []byte(vertexServiceAccountCredentials(t, tokenURL)), 0o600); err != nil {
+		t.Fatalf("failed to write service account credentials: %v", err)
 	}
 	return path
 }

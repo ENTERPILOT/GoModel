@@ -23,7 +23,7 @@
   "id": "4zpyaaPLGYXlxN8Pq7jUkQs",
   "model": "gemini-2.5-flash-preview-09-2025",
   "object": "chat.completion",
-  "provider": "",
+  "provider": "gemini",
   "usage": {
     "completion_tokens": 19,
     "prompt_tokens": 44,
