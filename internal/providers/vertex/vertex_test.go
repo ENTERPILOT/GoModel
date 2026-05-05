@@ -116,6 +116,22 @@ func TestNewAcceptsBaseURLWithoutProjectLocation(t *testing.T) {
 	}
 }
 
+func TestNewRejectsUnsupportedAuthType(t *testing.T) {
+	provider := newProvider(providers.ProviderConfig{
+		Type:     "vertex",
+		AuthType: "api_key",
+		BaseURL:  "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google",
+	}, providers.ProviderOptions{}, authedTestClient(http.DefaultClient))
+
+	err := provider.ready()
+	if err == nil {
+		t.Fatal("expected unsupported auth type error")
+	}
+	if !strings.Contains(err.Error(), `unsupported vertex AI auth type "api_key"`) {
+		t.Fatalf("error = %v, want unsupported auth type", err)
+	}
+}
+
 func TestVertexBaseURLs(t *testing.T) {
 	tests := []struct {
 		name       string

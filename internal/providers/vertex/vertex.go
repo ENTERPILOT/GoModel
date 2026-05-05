@@ -80,6 +80,10 @@ func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
 		p.configErr = fmt.Errorf("vertex AI requires base_url or vertex_project and vertex_location")
 		return
 	}
+	if !validAuthType(providerCfg.AuthType) {
+		p.configErr = fmt.Errorf("unsupported vertex AI auth type %q", providerCfg.AuthType)
+		return
+	}
 	switch p.authType {
 	case authTypeGCPADC:
 		return
@@ -92,8 +96,15 @@ func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
 			return
 		}
 		p.configErr = fmt.Errorf("vertex AI service account auth requires service_account_file, service_account_json, or service_account_json_base64")
+	}
+}
+
+func validAuthType(authType string) bool {
+	switch strings.ToLower(strings.TrimSpace(authType)) {
+	case "", "gcp_adc", "adc", "google_adc", "gcp_service_account", "service_account":
+		return true
 	default:
-		p.configErr = fmt.Errorf("unsupported Vertex AI auth type %q", providerCfg.AuthType)
+		return false
 	}
 }
 
