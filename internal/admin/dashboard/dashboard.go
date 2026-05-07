@@ -115,8 +115,8 @@ func assetURL(basePath, assetPath string, versions map[string]string) string {
 		return config.JoinBasePath(basePath, "/admin/static/")
 	}
 	urlPath := config.JoinBasePath(basePath, "/admin/static/"+normalizedPath)
-	if version := versions[normalizedPath]; version != "" {
-		return urlPath + "?v=" + version
+	if v := versions[normalizedPath]; v != "" {
+		return urlPath + "?v=" + v
 	}
 	return urlPath
 }
