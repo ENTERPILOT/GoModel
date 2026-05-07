@@ -6390,7 +6390,7 @@
           },
           "up_to_tokens": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 1
           }
         }
       },
@@ -7048,7 +7048,7 @@
           },
           "up_to_tokens": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 1
           }
         }
       },

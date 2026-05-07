@@ -166,7 +166,7 @@ function applyPricingSchemaConstraints() {
       throw new Error(`missing up_to_tokens property on schema: ${name}`);
     }
     upToTokens.type = "integer";
-    upToTokens.minimum = 0;
+    upToTokens.minimum = 1;
   }
 }
 
