@@ -13,6 +13,7 @@ import (
 
 	"gomodel/internal/core"
 	"gomodel/internal/modeloverrides"
+	"gomodel/internal/modelselectors"
 	"gomodel/internal/providers"
 )
 
@@ -290,12 +291,15 @@ func TestUpsertAndDeleteModelOverride(t *testing.T) {
 		t.Fatalf("put status = %d, want 200", putRec.Code)
 	}
 
-	var body modeloverrides.Override
+	var body modeloverrides.View
 	if err := json.Unmarshal(putRec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode upsert response: %v", err)
 	}
 	if body.Selector != "openai/gpt-4o" {
 		t.Fatalf("body.Selector = %q, want openai/gpt-4o", body.Selector)
+	}
+	if body.ScopeKind != modelselectors.ScopeProviderModel {
+		t.Fatalf("body.ScopeKind = %q, want %q", body.ScopeKind, modelselectors.ScopeProviderModel)
 	}
 	if len(body.UserPaths) != 1 || body.UserPaths[0] != "/team/alpha" {
 		t.Fatalf("body.UserPaths = %#v, want [/team/alpha]", body.UserPaths)

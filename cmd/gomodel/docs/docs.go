@@ -665,7 +665,7 @@ const docTemplate = `{
         },
         "/admin/api/v1/model-overrides": {
             "get": {
-                "description": "Lists persisted model access overrides by global, provider-wide, model-wide, or exact selector.",
+                "description": "Lists persisted model access overrides by global, provider-wide, model-wide, or exact selector.\nSelectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
                 "produces": [
                     "application/json"
                 ],
@@ -737,7 +737,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/modeloverrides.Override"
+                            "$ref": "#/definitions/modeloverrides.View"
                         }
                     },
                     "400": {

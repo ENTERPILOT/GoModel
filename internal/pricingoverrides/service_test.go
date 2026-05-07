@@ -3,7 +3,9 @@ package pricingoverrides
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"gomodel/internal/core"
 )
@@ -332,5 +334,46 @@ func TestServiceReconcilesSnapshotWhenDeleteRollbackFails(t *testing.T) {
 
 	if _, ok := service.Get("openai/gpt-4o"); ok {
 		t.Fatal("Get() found deleted override after rollback failure, want reconciled persisted state")
+	}
+}
+
+func TestServiceBuildSnapshotRejectsDuplicateNormalizedSelectors(t *testing.T) {
+	service, err := NewService(newTestStore(), testCatalog{providerNames: []string{"openai"}}, nil)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	_, err = service.buildSnapshot([]Override{
+		{Selector: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", Pricing: Pricing{InputPerMtok: ptr(1)}},
+		{Selector: " openai/gpt-4o ", ProviderName: "openai", Model: "gpt-4o", Pricing: Pricing{InputPerMtok: ptr(2)}},
+	})
+	if err == nil {
+		t.Fatal("buildSnapshot() error = nil, want duplicate selector error")
+	}
+	if !strings.Contains(err.Error(), `duplicate model pricing override selector "openai/gpt-4o"`) ||
+		!strings.Contains(err.Error(), `stored selector " openai/gpt-4o "`) {
+		t.Fatalf("buildSnapshot() error = %v, want normalized and original selector details", err)
+	}
+}
+
+func TestNormalizedRefreshIntervalClampsBelowRefreshTimeout(t *testing.T) {
+	tests := []struct {
+		name     string
+		interval time.Duration
+		want     time.Duration
+	}{
+		{name: "default", interval: 0, want: time.Minute},
+		{name: "negative default", interval: -time.Second, want: time.Minute},
+		{name: "below timeout", interval: time.Second, want: refreshTimeout},
+		{name: "at timeout", interval: refreshTimeout, want: refreshTimeout},
+		{name: "above timeout", interval: time.Minute, want: time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizedRefreshInterval(tt.interval); got != tt.want {
+				t.Fatalf("normalizedRefreshInterval(%s) = %s, want %s", tt.interval, got, tt.want)
+			}
+		})
 	}
 }

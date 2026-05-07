@@ -147,11 +147,23 @@ function applyStringEnum(schemaName, values, varnames) {
   }
 }
 
+function applyStringArrayPropertyBounds(schemaName, propertyName, maxItems, itemMaxLength) {
+  const target = schema(schemaName);
+  const property = target.properties?.[propertyName];
+  if (!property || property.type !== "array") {
+    throw new Error(`expected array property ${propertyName} on schema: ${schemaName}`);
+  }
+  property.maxItems = maxItems;
+  property.items = property.items || {};
+  property.items.maxLength = itemMaxLength;
+}
+
 spec.servers = parseServers(process.env.DOCS_API_SERVERS);
 ensureResponsesInputElementSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
 ensureRequiredProperty("admin.upsertModelPricingOverrideRequest", "pricing");
+applyStringArrayPropertyBounds("admin.upsertModelOverrideRequest", "user_paths", 100, 1024);
 
 // Bound the registry-backed admin model listing so OpenAPI consumers (and
 // security scanners like CKV_OPENAPI_21) see an explicit upper limit. The
@@ -161,13 +173,16 @@ applyArrayMaxItems("/admin/api/v1/models", "get", "200", 10000);
 applyArrayMaxItems("/admin/api/v1/model-overrides", "get", "200", 10000);
 applyArrayMaxItems("/admin/api/v1/model-pricing-overrides", "get", "200", 10000);
 
-for (const name of ["modeloverrides.ScopeKind", "pricingoverrides.ScopeKind"]) {
-  applyStringEnum(
-    name,
-    ["global", "model", "provider", "provider_model"],
-    ["ScopeGlobal", "ScopeModel", "ScopeProvider", "ScopeProviderModel"],
-  );
-}
+applyStringEnum(
+  "modeloverrides.ScopeKind",
+  ["global", "model", "provider", "provider_model"],
+  ["ModelScopeGlobal", "ModelScopeModel", "ModelScopeProvider", "ModelScopeProviderModel"],
+);
+applyStringEnum(
+  "pricingoverrides.ScopeKind",
+  ["global", "model", "provider", "provider_model"],
+  ["PricingScopeGlobal", "PricingScopeModel", "PricingScopeProvider", "PricingScopeProviderModel"],
+);
 
 for (const name of [
   "core.ResponsesRequest",

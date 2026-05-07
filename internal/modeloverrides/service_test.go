@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gomodel/internal/core"
+	"gomodel/internal/modelselectors"
 )
 
 type testStore struct {
@@ -263,6 +264,81 @@ func TestService_MostSpecificOverrideWins(t *testing.T) {
 			if len(state.UserPaths) != 1 || state.UserPaths[0] != tt.wantPath {
 				t.Fatalf("EffectiveState().UserPaths = %#v, want [%s]", state.UserPaths, tt.wantPath)
 			}
+		})
+	}
+}
+
+func TestServiceBuildSnapshotIndexesAllScopeKinds(t *testing.T) {
+	service, err := NewService(newTestStore(), testCatalog{providerNames: []string{"openai"}}, true)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		override Override
+		assert   func(t *testing.T, snap snapshot)
+	}{
+		{
+			name:     "exact provider model",
+			override: Override{Selector: "openai/gpt-4o", UserPaths: []string{"/"}},
+			assert: func(t *testing.T, snap snapshot) {
+				t.Helper()
+				key := modelselectors.ExactMatchKey("openai", "gpt-4o")
+				if got, ok := snap.exact[key]; !ok || got.override.Selector != "openai/gpt-4o" {
+					t.Fatalf("exact[%q] = %+v, %v; want openai/gpt-4o", key, got, ok)
+				}
+			},
+		},
+		{
+			name:     "model wide",
+			override: Override{Selector: "gpt-4o", UserPaths: []string{"/"}},
+			assert: func(t *testing.T, snap snapshot) {
+				t.Helper()
+				if got, ok := snap.modelWide["gpt-4o"]; !ok || got.override.Selector != "gpt-4o" {
+					t.Fatalf("modelWide[gpt-4o] = %+v, %v; want gpt-4o", got, ok)
+				}
+			},
+		},
+		{
+			name:     "provider wide",
+			override: Override{Selector: "openai/", UserPaths: []string{"/"}},
+			assert: func(t *testing.T, snap snapshot) {
+				t.Helper()
+				if got, ok := snap.providerWide["openai"]; !ok || got.override.Selector != "openai/" {
+					t.Fatalf("providerWide[openai] = %+v, %v; want openai/", got, ok)
+				}
+			},
+		},
+		{
+			name:     "global",
+			override: Override{Selector: "/", UserPaths: []string{"/"}},
+			assert: func(t *testing.T, snap snapshot) {
+				t.Helper()
+				if !snap.hasGlobal || snap.global.override.Selector != "/" {
+					t.Fatalf("global = %+v hasGlobal=%v; want /", snap.global, snap.hasGlobal)
+				}
+			},
+		},
+		{
+			name:     "slash-shaped raw model id",
+			override: Override{Selector: "vendor/model-with-slash", Model: "vendor/model-with-slash", UserPaths: []string{"/"}},
+			assert: func(t *testing.T, snap snapshot) {
+				t.Helper()
+				if got, ok := snap.modelWide["vendor/model-with-slash"]; !ok || got.override.Model != "vendor/model-with-slash" {
+					t.Fatalf("modelWide[vendor/model-with-slash] = %+v, %v; want raw model id", got, ok)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snap, err := service.buildSnapshot([]Override{tt.override})
+			if err != nil {
+				t.Fatalf("buildSnapshot() error = %v", err)
+			}
+			tt.assert(t, snap)
 		})
 	}
 }

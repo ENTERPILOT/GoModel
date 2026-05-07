@@ -74,6 +74,9 @@ func TestInitialize_AppliesConfigMetadataOverrides(t *testing.T) {
 	if got := overridden.Model.Metadata.PricingSources["input_per_mtok"]; got != core.ModelPricingSourceConfigYAML {
 		t.Errorf("PricingSources[input_per_mtok] = %q, want %q", got, core.ModelPricingSourceConfigYAML)
 	}
+	if got := overridden.Model.Metadata.PricingSources["output_per_mtok"]; got != core.ModelPricingSourceConfigYAML {
+		t.Errorf("PricingSources[output_per_mtok] = %q, want %q", got, core.ModelPricingSourceConfigYAML)
+	}
 
 	untouched := registry.GetModel("nippur/Gemma4-31B")
 	if untouched == nil {

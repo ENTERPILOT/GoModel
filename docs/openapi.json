@@ -817,7 +817,7 @@
     },
     "/admin/api/v1/model-overrides": {
       "get": {
-        "description": "Lists persisted model access overrides by global, provider-wide, model-wide, or exact selector.",
+        "description": "Lists persisted model access overrides by global, provider-wide, model-wide, or exact selector.\nSelectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
         "tags": [
           "admin"
         ],
@@ -900,7 +900,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/modeloverrides.Override"
+                  "$ref": "#/components/schemas/modeloverrides.View"
                 }
               }
             }
@@ -5358,8 +5358,10 @@
           "user_paths": {
             "type": "array",
             "items": {
-              "type": "string"
-            }
+              "type": "string",
+              "maxLength": 1024
+            },
+            "maxItems": 100
           }
         }
       },
@@ -6916,10 +6918,10 @@
           "provider_model"
         ],
         "x-enum-varnames": [
-          "ScopeGlobal",
-          "ScopeModel",
-          "ScopeProvider",
-          "ScopeProviderModel"
+          "ModelScopeGlobal",
+          "ModelScopeModel",
+          "ModelScopeProvider",
+          "ModelScopeProviderModel"
         ]
       },
       "modeloverrides.View": {
@@ -7036,10 +7038,10 @@
           "provider_model"
         ],
         "x-enum-varnames": [
-          "ScopeGlobal",
-          "ScopeModel",
-          "ScopeProvider",
-          "ScopeProviderModel"
+          "PricingScopeGlobal",
+          "PricingScopeModel",
+          "PricingScopeProvider",
+          "PricingScopeProviderModel"
         ]
       },
       "pricingoverrides.View": {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -49,9 +50,20 @@ func (s *modelPricingOverrideTestStore) Delete(_ context.Context, selector strin
 
 func (s *modelPricingOverrideTestStore) Close() error { return nil }
 
-func newModelPricingOverrideService(t *testing.T, store pricingoverrides.Store) *pricingoverrides.Service {
+type modelPricingOverrideTestCatalog struct {
+	providerNames []string
+}
+
+func (c modelPricingOverrideTestCatalog) ProviderNames() []string {
+	return append([]string(nil), c.providerNames...)
+}
+
+func newModelPricingOverrideService(t *testing.T, store pricingoverrides.Store, providerNames ...string) *pricingoverrides.Service {
 	t.Helper()
-	service, err := pricingoverrides.NewService(store, newModelOverrideRegistry(t), nil)
+	if len(providerNames) == 0 {
+		providerNames = []string{"openai"}
+	}
+	service, err := pricingoverrides.NewService(store, modelPricingOverrideTestCatalog{providerNames: providerNames}, nil)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -62,69 +74,106 @@ func newModelPricingOverrideService(t *testing.T, store pricingoverrides.Store) 
 }
 
 func TestModelPricingOverrideLifecycle(t *testing.T) {
-	service := newModelPricingOverrideService(t, newModelPricingOverrideTestStore())
-	h := NewHandler(nil, nil, WithPricingOverrides(service))
-	e := echo.New()
-
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-pricing-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"pricing":{"input_per_mtok":1.25}}`))
-	putReq.Header.Set("Content-Type", "application/json")
-	putRec := httptest.NewRecorder()
-	putCtx := e.NewContext(putReq, putRec)
-	putCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/gpt-4o"}})
-
-	if err := h.UpsertModelPricingOverride(putCtx); err != nil {
-		t.Fatalf("UpsertModelPricingOverride() error = %v", err)
-	}
-	if putRec.Code != http.StatusOK {
-		t.Fatalf("put status = %d, want 200 body=%s", putRec.Code, putRec.Body.String())
-	}
-
-	var body pricingoverrides.View
-	if err := json.Unmarshal(putRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode upsert response: %v", err)
-	}
-	if body.Selector != "openai/gpt-4o" || body.ProviderName != "openai" || body.Model != "gpt-4o" {
-		t.Fatalf("body selector parts = (%q, %q, %q), want openai/gpt-4o parts", body.Selector, body.ProviderName, body.Model)
-	}
-	if body.ScopeKind != modelselectors.ScopeProviderModel {
-		t.Fatalf("ScopeKind = %q, want %q", body.ScopeKind, modelselectors.ScopeProviderModel)
-	}
-	if body.Pricing.InputPerMtok == nil || *body.Pricing.InputPerMtok != 1.25 {
-		t.Fatalf("InputPerMtok = %#v, want 1.25", body.Pricing.InputPerMtok)
-	}
-
-	listReq := httptest.NewRequest(http.MethodGet, "/admin/api/v1/model-pricing-overrides", nil)
-	listRec := httptest.NewRecorder()
-	listCtx := e.NewContext(listReq, listRec)
-	if err := h.ListModelPricingOverrides(listCtx); err != nil {
-		t.Fatalf("ListModelPricingOverrides() error = %v", err)
-	}
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("list status = %d, want 200", listRec.Code)
-	}
-	var listBody []pricingoverrides.View
-	if err := json.Unmarshal(listRec.Body.Bytes(), &listBody); err != nil {
-		t.Fatalf("decode list response: %v", err)
-	}
-	if len(listBody) != 1 {
-		t.Fatalf("list length = %d, want 1: %+v", len(listBody), listBody)
-	}
-	if listBody[0].Selector != "openai/gpt-4o" || listBody[0].ProviderName != "openai" || listBody[0].Model != "gpt-4o" {
-		t.Fatalf("list[0] selector parts = (%q, %q, %q), want openai/gpt-4o parts", listBody[0].Selector, listBody[0].ProviderName, listBody[0].Model)
-	}
-	if listBody[0].Pricing.InputPerMtok == nil || *listBody[0].Pricing.InputPerMtok != 1.25 {
-		t.Fatalf("list[0].InputPerMtok = %#v, want 1.25", listBody[0].Pricing.InputPerMtok)
+	tests := []struct {
+		name         string
+		providers    []string
+		selector     string
+		encodedPath  string
+		price        float64
+		wantProvider string
+		wantModel    string
+		wantScope    modelselectors.ScopeKind
+	}{
+		{
+			name:         "simple provider model selector",
+			providers:    []string{"openai"},
+			selector:     "openai/gpt-4o",
+			encodedPath:  "openai%2Fgpt-4o",
+			price:        1.25,
+			wantProvider: "openai",
+			wantModel:    "gpt-4o",
+			wantScope:    modelselectors.ScopeProviderModel,
+		},
+		{
+			name:         "provider model selector with slash-shaped model id",
+			providers:    []string{"openrouter"},
+			selector:     "openrouter/meta-llama/llama-3.1-8b-instruct",
+			encodedPath:  "openrouter%2Fmeta-llama%2Fllama-3.1-8b-instruct",
+			price:        0.18,
+			wantProvider: "openrouter",
+			wantModel:    "meta-llama/llama-3.1-8b-instruct",
+			wantScope:    modelselectors.ScopeProviderModel,
+		},
 	}
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-pricing-overrides/openai%2Fgpt-4o", nil)
-	deleteRec := httptest.NewRecorder()
-	deleteCtx := e.NewContext(deleteReq, deleteRec)
-	deleteCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/gpt-4o"}})
-	if err := h.DeleteModelPricingOverride(deleteCtx); err != nil {
-		t.Fatalf("DeleteModelPricingOverride() error = %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := newModelPricingOverrideService(t, newModelPricingOverrideTestStore(), tt.providers...)
+			h := NewHandler(nil, nil, WithPricingOverrides(service))
+			e := echo.New()
+
+			bodyJSON := `{"pricing":{"input_per_mtok":` + strconv.FormatFloat(tt.price, 'f', -1, 64) + `}}`
+			putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-pricing-overrides/"+tt.encodedPath, bytes.NewBufferString(bodyJSON))
+			putReq.Header.Set("Content-Type", "application/json")
+			putRec := httptest.NewRecorder()
+			putCtx := e.NewContext(putReq, putRec)
+			putCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: tt.selector}})
+
+			if err := h.UpsertModelPricingOverride(putCtx); err != nil {
+				t.Fatalf("UpsertModelPricingOverride() error = %v", err)
+			}
+			if putRec.Code != http.StatusOK {
+				t.Fatalf("put status = %d, want 200 body=%s", putRec.Code, putRec.Body.String())
+			}
+
+			var body pricingoverrides.View
+			if err := json.Unmarshal(putRec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode upsert response: %v", err)
+			}
+			assertPricingOverrideView(t, body, tt.selector, tt.wantProvider, tt.wantModel, tt.wantScope, tt.price)
+
+			listReq := httptest.NewRequest(http.MethodGet, "/admin/api/v1/model-pricing-overrides", nil)
+			listRec := httptest.NewRecorder()
+			listCtx := e.NewContext(listReq, listRec)
+			if err := h.ListModelPricingOverrides(listCtx); err != nil {
+				t.Fatalf("ListModelPricingOverrides() error = %v", err)
+			}
+			if listRec.Code != http.StatusOK {
+				t.Fatalf("list status = %d, want 200", listRec.Code)
+			}
+			var listBody []pricingoverrides.View
+			if err := json.Unmarshal(listRec.Body.Bytes(), &listBody); err != nil {
+				t.Fatalf("decode list response: %v", err)
+			}
+			if len(listBody) != 1 {
+				t.Fatalf("list length = %d, want 1: %+v", len(listBody), listBody)
+			}
+			assertPricingOverrideView(t, listBody[0], tt.selector, tt.wantProvider, tt.wantModel, tt.wantScope, tt.price)
+
+			deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-pricing-overrides/"+tt.encodedPath, nil)
+			deleteRec := httptest.NewRecorder()
+			deleteCtx := e.NewContext(deleteReq, deleteRec)
+			deleteCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: tt.selector}})
+			if err := h.DeleteModelPricingOverride(deleteCtx); err != nil {
+				t.Fatalf("DeleteModelPricingOverride() error = %v", err)
+			}
+			if deleteRec.Code != http.StatusNoContent {
+				t.Fatalf("delete status = %d, want 204", deleteRec.Code)
+			}
+		})
 	}
-	if deleteRec.Code != http.StatusNoContent {
-		t.Fatalf("delete status = %d, want 204", deleteRec.Code)
+}
+
+func assertPricingOverrideView(t *testing.T, view pricingoverrides.View, selector, provider, model string, scope modelselectors.ScopeKind, price float64) {
+	t.Helper()
+	if view.Selector != selector || view.ProviderName != provider || view.Model != model {
+		t.Fatalf("selector parts = (%q, %q, %q), want (%q, %q, %q)", view.Selector, view.ProviderName, view.Model, selector, provider, model)
+	}
+	if view.ScopeKind != scope {
+		t.Fatalf("ScopeKind = %q, want %q", view.ScopeKind, scope)
+	}
+	if view.Pricing.InputPerMtok == nil || *view.Pricing.InputPerMtok != price {
+		t.Fatalf("InputPerMtok = %#v, want %v", view.Pricing.InputPerMtok, price)
 	}
 }
 

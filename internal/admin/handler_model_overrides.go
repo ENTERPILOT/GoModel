@@ -19,6 +19,7 @@ type upsertModelOverrideRequest struct {
 //
 // @Summary      List model access overrides
 // @Description  Lists persisted model access overrides by global, provider-wide, model-wide, or exact selector.
+// @Description  Selectors support global "/", provider-wide "provider/", model-wide "model", and exact "provider/model" scopes.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
@@ -46,7 +47,7 @@ func (h *Handler) ListModelOverrides(c *echo.Context) error {
 // @Security     BearerAuth
 // @Param        selector  path      string                      true  "URL-encoded model selector such as /, openai/, gpt-4o-mini, or openai/gpt-4o-mini"
 // @Param        override  body      upsertModelOverrideRequest  true  "Allowed user paths"
-// @Success      200       {object}  modeloverrides.Override
+// @Success      200       {object}  modeloverrides.View
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
 // @Failure      500       {object}  core.GatewayError
@@ -81,7 +82,10 @@ func (h *Handler) UpsertModelOverride(c *echo.Context) error {
 		slog.Error("model override service returned no override after upsert", "selector", selector)
 		return handleError(c, core.NewProviderError("model_overrides", http.StatusInternalServerError, "model override update failed unexpectedly", nil))
 	}
-	return c.JSON(http.StatusOK, override)
+	return c.JSON(http.StatusOK, modeloverrides.View{
+		Override:  *override,
+		ScopeKind: override.ScopeKind(),
+	})
 }
 
 // DeleteModelOverride handles DELETE /admin/api/v1/model-overrides/{selector}.

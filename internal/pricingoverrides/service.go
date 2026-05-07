@@ -21,6 +21,8 @@ type Service struct {
 	refreshMu sync.Mutex
 }
 
+const refreshTimeout = 30 * time.Second
+
 // NewService creates a pricing override service backed by storage.
 func NewService(store Store, catalog Catalog, base usage.PricingResolver) (*Service, error) {
 	if store == nil {
@@ -194,10 +196,9 @@ func (s *Service) Delete(ctx context.Context, selector string) error {
 }
 
 // StartBackgroundRefresh periodically reloads pricing overrides from storage until stopped.
+// Each s.Refresh call is capped by refreshTimeout, and shorter intervals are clamped to refreshTimeout.
 func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
-	if interval <= 0 {
-		interval = time.Minute
-	}
+	interval = normalizedRefreshInterval(interval)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -212,7 +213,7 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
+				refreshCtx, refreshCancel := context.WithTimeout(ctx, refreshTimeout)
 				if err := s.Refresh(refreshCtx); err != nil {
 					slog.Error("failed to refresh model pricing overrides", "error", err)
 				}
@@ -227,6 +228,16 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 			<-done
 		})
 	}
+}
+
+func normalizedRefreshInterval(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return time.Minute
+	}
+	if interval < refreshTimeout {
+		return refreshTimeout
+	}
+	return interval
 }
 
 func rollbackContext() (context.Context, context.CancelFunc) {

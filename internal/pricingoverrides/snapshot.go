@@ -35,12 +35,17 @@ func (s *Service) buildSnapshot(overrides []Override) (snapshot, error) {
 	next := emptySnapshot()
 	next.order = make([]string, 0, len(overrides))
 	next.bySelector = make(map[string]Override, len(overrides))
+	originalSelectors := make(map[string]string, len(overrides))
 
 	for _, override := range overrides {
 		normalized, err := normalizeStoredOverride(override)
 		if err != nil {
 			return snapshot{}, fmt.Errorf("load model pricing override %q: %w", override.Selector, err)
 		}
+		if original, exists := originalSelectors[normalized.Selector]; exists {
+			return snapshot{}, fmt.Errorf("duplicate model pricing override selector %q from stored selector %q collides with stored selector %q", normalized.Selector, override.Selector, original)
+		}
+		originalSelectors[normalized.Selector] = override.Selector
 		next.order = append(next.order, normalized.Selector)
 		next.bySelector[normalized.Selector] = normalized
 

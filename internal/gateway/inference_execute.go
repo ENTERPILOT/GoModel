@@ -350,6 +350,7 @@ func requestModel[Req any](req Req, model func(Req) string) string {
 }
 
 func usagePricingModel(workflow *core.Workflow, requestedModel, failoverModel, responseModel string) string {
+	requestedModel = strings.TrimSpace(requestedModel)
 	failoverModel = strings.TrimSpace(failoverModel)
 	if failoverModel != "" {
 		return failoverModel

@@ -127,7 +127,7 @@ func NormalizeStored(selector, providerName, model string) (Selector, error) {
 	if providerName == "" && model == "" && !globalSelector {
 		providerName, model = ParseStoredParts(selector)
 	}
-	if providerName == "" && model == "" && !IsGlobal(selector) {
+	if providerName == "" && model == "" && !globalSelector {
 		return Selector{}, NewValidationError("selector is required", nil)
 	}
 	if normalized := String(providerName, model); normalized != "" {
