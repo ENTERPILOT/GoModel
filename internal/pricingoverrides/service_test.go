@@ -2,13 +2,17 @@ package pricingoverrides
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"gomodel/internal/core"
 )
 
 type testStore struct {
-	items map[string]Override
+	items     map[string]Override
+	listErrs  []error
+	upsertErr error
+	deleteErr error
 }
 
 func newTestStore(items ...Override) *testStore {
@@ -20,6 +24,13 @@ func newTestStore(items ...Override) *testStore {
 }
 
 func (s *testStore) List(_ context.Context) ([]Override, error) {
+	if len(s.listErrs) > 0 {
+		err := s.listErrs[0]
+		s.listErrs = s.listErrs[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	result := make([]Override, 0, len(s.items))
 	for _, item := range s.items {
 		result = append(result, item)
@@ -28,11 +39,17 @@ func (s *testStore) List(_ context.Context) ([]Override, error) {
 }
 
 func (s *testStore) Upsert(_ context.Context, override Override) error {
+	if s.upsertErr != nil {
+		return s.upsertErr
+	}
 	s.items[override.Selector] = override
 	return nil
 }
 
 func (s *testStore) Delete(_ context.Context, selector string) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
 	if _, ok := s.items[selector]; !ok {
 		return ErrNotFound
 	}
@@ -225,6 +242,12 @@ func TestServiceRejectsInvalidTieredPricing(t *testing.T) {
 			}},
 		},
 		{
+			name: "both threshold units",
+			pricing: Pricing{Tiers: []PricingTier{
+				{UpToTokens: ptr(1000), UpToMtok: ptr(1), InputPerMtok: ptr(1)},
+			}},
+		},
+		{
 			name: "negative tier rate",
 			pricing: Pricing{Tiers: []PricingTier{
 				{UpToTokens: ptr(1000), InputPerMtok: ptr(-1)},
@@ -259,5 +282,55 @@ func TestServiceAcceptsIncreasingTieredPricing(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Upsert(valid tiers) error = %v", err)
+	}
+}
+
+func TestServiceReconcilesSnapshotWhenUpsertRollbackFails(t *testing.T) {
+	store := newTestStore()
+	service, err := NewService(store, testCatalog{providerNames: []string{"openai"}}, nil)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	store.listErrs = []error{errors.New("list failed"), nil}
+	store.deleteErr = errors.New("rollback delete failed")
+	err = service.Upsert(context.Background(), Override{
+		Selector: "openai/gpt-4o",
+		Pricing:  Pricing{InputPerMtok: ptr(9)},
+	})
+	if err == nil {
+		t.Fatal("Upsert() error = nil, want refresh/rollback error")
+	}
+
+	pricing := service.ResolvePricing("gpt-4o", "openai")
+	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 9 {
+		t.Fatalf("ResolvePricing() = %+v, want reconciled persisted override", pricing)
+	}
+}
+
+func TestServiceReconcilesSnapshotWhenDeleteRollbackFails(t *testing.T) {
+	store := newTestStore(Override{
+		Selector:     "openai/gpt-4o",
+		ProviderName: "openai",
+		Model:        "gpt-4o",
+		Pricing:      Pricing{InputPerMtok: ptr(9)},
+	})
+	service, err := NewService(store, testCatalog{providerNames: []string{"openai"}}, nil)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	store.listErrs = []error{errors.New("list failed"), nil}
+	store.upsertErr = errors.New("rollback upsert failed")
+	err = service.Delete(context.Background(), "openai/gpt-4o")
+	if err == nil {
+		t.Fatal("Delete() error = nil, want refresh/rollback error")
+	}
+
+	if _, ok := service.Get("openai/gpt-4o"); ok {
+		t.Fatal("Get() found deleted override after rollback failure, want reconciled persisted state")
 	}
 }

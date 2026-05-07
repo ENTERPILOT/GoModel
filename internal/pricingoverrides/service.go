@@ -150,7 +150,7 @@ func (s *Service) Upsert(ctx context.Context, override Override) error {
 			rollbackErr = s.store.Delete(rollbackCtx, normalized.Selector)
 		}
 		if rollbackErr != nil {
-			return fmt.Errorf("refresh model pricing overrides: %w (rollback failed: %v)", err, rollbackErr)
+			return s.reconcileSnapshotAfterRollbackFailureLocked("upsert", err, rollbackErr)
 		}
 		return fmt.Errorf("refresh model pricing overrides: %w", err)
 	}
@@ -186,7 +186,7 @@ func (s *Service) Delete(ctx context.Context, selector string) error {
 		rollbackCtx, cancel := rollbackContext()
 		defer cancel()
 		if rollbackErr := s.store.Upsert(rollbackCtx, previous); rollbackErr != nil {
-			return fmt.Errorf("refresh model pricing overrides: %w (rollback failed: %v)", err, rollbackErr)
+			return s.reconcileSnapshotAfterRollbackFailureLocked("delete", err, rollbackErr)
 		}
 		return fmt.Errorf("refresh model pricing overrides: %w", err)
 	}
@@ -231,4 +231,28 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 
 func rollbackContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 30*time.Second)
+}
+
+func (s *Service) reconcileSnapshotAfterRollbackFailureLocked(operation string, refreshErr, rollbackErr error) error {
+	reconcileCtx, cancel := rollbackContext()
+	defer cancel()
+
+	if reconcileErr := s.refreshLocked(reconcileCtx); reconcileErr != nil {
+		slog.Warn(
+			"model pricing override snapshot may be stale after failed rollback",
+			"operation", operation,
+			"refresh_error", refreshErr,
+			"rollback_error", rollbackErr,
+			"reconcile_error", reconcileErr,
+		)
+		return fmt.Errorf("refresh model pricing overrides: %w (rollback failed: %v; snapshot refresh failed: %v)", refreshErr, rollbackErr, reconcileErr)
+	}
+
+	slog.Warn(
+		"model pricing override rollback failed; refreshed snapshot from persisted state",
+		"operation", operation,
+		"refresh_error", refreshErr,
+		"rollback_error", rollbackErr,
+	)
+	return fmt.Errorf("refresh model pricing overrides: %w (rollback failed: %v)", refreshErr, rollbackErr)
 }

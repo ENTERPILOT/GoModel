@@ -195,6 +195,9 @@ func ExactMatchKey(providerName, model string) string {
 }
 
 // ParseStoredParts splits a stored selector without a configured-provider catalog.
+// This is a best-effort fallback for old rows. Stores should persist
+// provider_name and model columns because slash-shaped model IDs cannot be
+// distinguished from provider/model selectors without a provider catalog.
 func ParseStoredParts(selector string) (providerName, model string) {
 	selector = strings.TrimSpace(selector)
 	if IsGlobal(selector) {

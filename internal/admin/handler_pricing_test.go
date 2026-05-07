@@ -35,6 +35,13 @@ func (m *mockPricingRecalculator) RecalculatePricing(_ context.Context, params u
 	return m.result, nil
 }
 
+func TestNewHandlerDoesNotWrapNilRegistryAsPricingResolver(t *testing.T) {
+	h := NewHandler(nil, nil)
+	if h.pricingResolver != nil {
+		t.Fatal("pricingResolver is non-nil for nil registry")
+	}
+}
+
 func TestRecalculateUsagePricingResolvesAliasAndFilters(t *testing.T) {
 	catalog := newAliasTestCatalog()
 	catalog.add("openai/gpt-4o", "openai")

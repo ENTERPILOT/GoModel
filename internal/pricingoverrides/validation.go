@@ -12,6 +12,9 @@ func validatePricing(p Pricing) error {
 		}
 	}
 	for i, tier := range p.Tiers {
+		if tier.UpToTokens != nil && tier.UpToMtok != nil {
+			return newValidationError("pricing.tiers must set only one threshold: up_to_tokens or up_to_mtok", nil)
+		}
 		if tier.UpToTokens != nil && *tier.UpToTokens <= 0 {
 			return newValidationError("pricing.tiers up_to_tokens must be greater than 0", nil)
 		}

@@ -8,12 +8,12 @@ import (
 
 // ResolvePricing resolves base pricing and applies the most specific DB override.
 func (s *Service) ResolvePricing(model, providerName string) *core.ModelPricing {
-	var basePricing *core.ModelPricing
-	if s != nil && s.base != nil {
-		basePricing = s.base.ResolvePricing(model, providerName)
-	}
 	if s == nil {
-		return cloneBasePricing(basePricing)
+		return nil
+	}
+	var basePricing *core.ModelPricing
+	if s.base != nil {
+		basePricing = s.base.ResolvePricing(model, providerName)
 	}
 
 	providerName = strings.TrimSpace(providerName)

@@ -251,10 +251,12 @@ func WithConfiguredProviders(configs []providers.SanitizedProviderConfig) Option
 // usageReader may be nil if usage tracking is not available.
 func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, options ...Option) *Handler {
 	h := &Handler{
-		usageReader:     reader,
-		registry:        registry,
-		pricingResolver: registry,
-		runtimeConfig:   DashboardConfigResponse{},
+		usageReader:   reader,
+		registry:      registry,
+		runtimeConfig: DashboardConfigResponse{},
+	}
+	if registry != nil {
+		h.pricingResolver = registry
 	}
 
 	for _, opt := range options {

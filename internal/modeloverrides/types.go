@@ -29,18 +29,18 @@ type Override struct {
 }
 
 // ScopeKind identifies how broadly an override applies.
-type ScopeKind string
+type ScopeKind = modelselectors.ScopeKind
 
 const (
-	ScopeGlobal        ScopeKind = ScopeKind(modelselectors.ScopeGlobal)
-	ScopeModel         ScopeKind = ScopeKind(modelselectors.ScopeModel)
-	ScopeProvider      ScopeKind = ScopeKind(modelselectors.ScopeProvider)
-	ScopeProviderModel ScopeKind = ScopeKind(modelselectors.ScopeProviderModel)
+	ScopeGlobal        = modelselectors.ScopeGlobal
+	ScopeModel         = modelselectors.ScopeModel
+	ScopeProvider      = modelselectors.ScopeProvider
+	ScopeProviderModel = modelselectors.ScopeProviderModel
 )
 
 // ScopeKind reports the normalized selector scope for one override.
 func (o Override) ScopeKind() ScopeKind {
-	return ScopeKind(modelselectors.ScopeKindFor(o.Selector, o.ProviderName, o.Model))
+	return modelselectors.ScopeKindFor(o.Selector, o.ProviderName, o.Model)
 }
 
 // View is the admin-facing representation of one persisted override.
