@@ -3,7 +3,6 @@ package pricingoverrides
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -350,9 +349,14 @@ func TestServiceBuildSnapshotRejectsDuplicateNormalizedSelectors(t *testing.T) {
 	if err == nil {
 		t.Fatal("buildSnapshot() error = nil, want duplicate selector error")
 	}
-	if !strings.Contains(err.Error(), `duplicate model pricing override selector "openai/gpt-4o"`) ||
-		!strings.Contains(err.Error(), `stored selector " openai/gpt-4o "`) {
-		t.Fatalf("buildSnapshot() error = %v, want normalized and original selector details", err)
+	var duplicateErr *DuplicateSelectorError
+	if !errors.As(err, &duplicateErr) {
+		t.Fatalf("buildSnapshot() error = %T %v, want *DuplicateSelectorError", err, err)
+	}
+	if duplicateErr.Normalized != "openai/gpt-4o" ||
+		duplicateErr.Original != " openai/gpt-4o " ||
+		duplicateErr.Existing != "openai/gpt-4o" {
+		t.Fatalf("DuplicateSelectorError = %+v, want normalized/original/existing selector details", duplicateErr)
 	}
 }
 

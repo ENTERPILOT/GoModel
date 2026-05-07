@@ -203,9 +203,6 @@ func ParseStoredParts(selector string) (providerName, model string) {
 	if IsGlobal(selector) {
 		return "", ""
 	}
-	if prefix, rest, ok := splitFirst(selector); ok && rest == "" {
-		return prefix, ""
-	}
 	if providerName, model, ok := splitFirst(selector); ok {
 		return providerName, model
 	}

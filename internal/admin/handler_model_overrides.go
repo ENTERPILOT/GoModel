@@ -51,6 +51,7 @@ func (h *Handler) ListModelOverrides(c *echo.Context) error {
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
 // @Failure      500       {object}  core.GatewayError
+// @Failure      502       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
 // @Router       /admin/api/v1/model-overrides/{selector} [put]
 //
@@ -99,6 +100,7 @@ func (h *Handler) UpsertModelOverride(c *echo.Context) error {
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
 // @Failure      404       {object}  core.GatewayError
+// @Failure      502       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
 // @Router       /admin/api/v1/model-overrides/{selector} [delete]
 func (h *Handler) DeleteModelOverride(c *echo.Context) error {

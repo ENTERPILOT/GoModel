@@ -935,6 +935,16 @@
               }
             }
           },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Service Unavailable",
             "content": {
@@ -994,6 +1004,16 @@
           },
           "404": {
             "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
             "content": {
               "application/json": {
                 "schema": {
@@ -6369,7 +6389,8 @@
             "type": "number"
           },
           "up_to_tokens": {
-            "type": "number"
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
@@ -7010,7 +7031,8 @@
               "$ref": "#/components/schemas/pricingoverrides.PricingTier"
             }
           }
-        }
+        },
+        "minProperties": 1
       },
       "pricingoverrides.PricingTier": {
         "type": "object",
@@ -7025,7 +7047,8 @@
             "type": "number"
           },
           "up_to_tokens": {
-            "type": "number"
+            "type": "integer",
+            "minimum": 0
           }
         }
       },

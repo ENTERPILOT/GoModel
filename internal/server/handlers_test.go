@@ -3349,7 +3349,7 @@ func TestEmbeddings_WithUsageTracking(t *testing.T) {
 			Data: []core.EmbeddingData{
 				{Object: "embedding", Embedding: json.RawMessage(`[0.1,0.2,0.3]`), Index: 0},
 			},
-			Model: "text-embedding-3-small",
+			Model: "provider-canonical-embedding",
 			Usage: core.EmbeddingUsage{PromptTokens: 10, TotalTokens: 10},
 		},
 	}
@@ -3395,6 +3395,9 @@ func TestEmbeddings_WithUsageTracking(t *testing.T) {
 	}
 	if capturedEntry.RequestID != "test-req-embed-usage" {
 		t.Errorf("RequestID = %q, want %q", capturedEntry.RequestID, "test-req-embed-usage")
+	}
+	if resolver.model != "text-embedding-3-small" {
+		t.Errorf("pricing resolver model = %q, want requested model", resolver.model)
 	}
 	if capturedEntry.InputCost == nil || *capturedEntry.InputCost == 0 {
 		t.Error("expected non-zero InputCost from pricing resolver")
@@ -4961,10 +4964,14 @@ func (c *collectingUsageLogger) Config() usage.Config { return c.config }
 func (c *collectingUsageLogger) Close() error         { return nil }
 
 type mockPricingResolver struct {
-	pricing *core.ModelPricing
+	pricing  *core.ModelPricing
+	model    string
+	provider string
 }
 
-func (m *mockPricingResolver) ResolvePricing(_, _ string) *core.ModelPricing {
+func (m *mockPricingResolver) ResolvePricing(model, provider string) *core.ModelPricing {
+	m.model = model
+	m.provider = provider
 	return m.pricing
 }
 

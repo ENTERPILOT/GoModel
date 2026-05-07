@@ -111,17 +111,13 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 			service := newModelPricingOverrideService(t, newModelPricingOverrideTestStore(), tt.providers...)
 			h := NewHandler(nil, nil, WithPricingOverrides(service))
 			e := echo.New()
+			h.RegisterRoutes(e.Group("/admin/api/v1"))
 
 			bodyJSON := `{"pricing":{"input_per_mtok":` + strconv.FormatFloat(tt.price, 'f', -1, 64) + `}}`
 			putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-pricing-overrides/"+tt.encodedPath, bytes.NewBufferString(bodyJSON))
 			putReq.Header.Set("Content-Type", "application/json")
 			putRec := httptest.NewRecorder()
-			putCtx := e.NewContext(putReq, putRec)
-			putCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: tt.selector}})
-
-			if err := h.UpsertModelPricingOverride(putCtx); err != nil {
-				t.Fatalf("UpsertModelPricingOverride() error = %v", err)
-			}
+			e.ServeHTTP(putRec, putReq)
 			if putRec.Code != http.StatusOK {
 				t.Fatalf("put status = %d, want 200 body=%s", putRec.Code, putRec.Body.String())
 			}
@@ -134,10 +130,7 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 
 			listReq := httptest.NewRequest(http.MethodGet, "/admin/api/v1/model-pricing-overrides", nil)
 			listRec := httptest.NewRecorder()
-			listCtx := e.NewContext(listReq, listRec)
-			if err := h.ListModelPricingOverrides(listCtx); err != nil {
-				t.Fatalf("ListModelPricingOverrides() error = %v", err)
-			}
+			e.ServeHTTP(listRec, listReq)
 			if listRec.Code != http.StatusOK {
 				t.Fatalf("list status = %d, want 200", listRec.Code)
 			}
@@ -152,11 +145,7 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 
 			deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-pricing-overrides/"+tt.encodedPath, nil)
 			deleteRec := httptest.NewRecorder()
-			deleteCtx := e.NewContext(deleteReq, deleteRec)
-			deleteCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: tt.selector}})
-			if err := h.DeleteModelPricingOverride(deleteCtx); err != nil {
-				t.Fatalf("DeleteModelPricingOverride() error = %v", err)
-			}
+			e.ServeHTTP(deleteRec, deleteReq)
 			if deleteRec.Code != http.StatusNoContent {
 				t.Fatalf("delete status = %d, want 204", deleteRec.Code)
 			}

@@ -7,6 +7,20 @@ import (
 	"gomodel/internal/modelselectors"
 )
 
+// DuplicateSelectorError reports two stored rows that normalize to one selector.
+type DuplicateSelectorError struct {
+	Normalized string
+	Original   string
+	Existing   string
+}
+
+func (e *DuplicateSelectorError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("duplicate model pricing override selector %q from stored selector %q collides with stored selector %q", e.Normalized, e.Original, e.Existing)
+}
+
 type compiledOverride struct {
 	override Override
 }
@@ -43,7 +57,11 @@ func (s *Service) buildSnapshot(overrides []Override) (snapshot, error) {
 			return snapshot{}, fmt.Errorf("load model pricing override %q: %w", override.Selector, err)
 		}
 		if original, exists := originalSelectors[normalized.Selector]; exists {
-			return snapshot{}, fmt.Errorf("duplicate model pricing override selector %q from stored selector %q collides with stored selector %q", normalized.Selector, override.Selector, original)
+			return snapshot{}, &DuplicateSelectorError{
+				Normalized: normalized.Selector,
+				Original:   override.Selector,
+				Existing:   original,
+			}
 		}
 		originalSelectors[normalized.Selector] = override.Selector
 		next.order = append(next.order, normalized.Selector)
@@ -58,8 +76,10 @@ func (s *Service) buildSnapshot(overrides []Override) (snapshot, error) {
 			next.exact[modelselectors.ExactMatchKey(normalized.ProviderName, normalized.Model)] = compiled
 		case modelselectors.ScopeProvider:
 			next.providerWide[normalized.ProviderName] = compiled
-		default:
+		case modelselectors.ScopeModel:
 			next.modelWide[normalized.Model] = compiled
+		default:
+			return snapshot{}, fmt.Errorf("unknown model pricing override scope %q for selector %q", normalized.ScopeKind(), normalized.Selector)
 		}
 	}
 	sort.Strings(next.order)

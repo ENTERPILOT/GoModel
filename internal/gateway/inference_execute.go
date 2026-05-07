@@ -106,7 +106,8 @@ func (o *InferenceOrchestrator) ExecuteEmbeddings(ctx context.Context, workflow 
 	if err != nil {
 		return nil, err
 	}
-	o.logUsage(ctx, workflow, resp.Model, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
+	pricingModel := usagePricingModel(workflow, req.Model, "", resp.Model)
+	o.logUsage(ctx, workflow, pricingModel, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromEmbeddingResponse(resp, requestID, providerType, endpoint, pricing)
 	})
 	return &EmbeddingResult{

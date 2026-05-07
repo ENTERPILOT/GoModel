@@ -158,12 +158,25 @@ function applyStringArrayPropertyBounds(schemaName, propertyName, maxItems, item
   property.items.maxLength = itemMaxLength;
 }
 
+function applyPricingSchemaConstraints() {
+  schema("pricingoverrides.Pricing").minProperties = 1;
+  for (const name of ["core.ModelPricingTier", "pricingoverrides.PricingTier"]) {
+    const upToTokens = schema(name).properties?.up_to_tokens;
+    if (!upToTokens) {
+      throw new Error(`missing up_to_tokens property on schema: ${name}`);
+    }
+    upToTokens.type = "integer";
+    upToTokens.minimum = 0;
+  }
+}
+
 spec.servers = parseServers(process.env.DOCS_API_SERVERS);
 ensureResponsesInputElementSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
 ensureRequiredProperty("admin.upsertModelPricingOverrideRequest", "pricing");
 applyStringArrayPropertyBounds("admin.upsertModelOverrideRequest", "user_paths", 100, 1024);
+applyPricingSchemaConstraints();
 
 // Bound the registry-backed admin model listing so OpenAPI consumers (and
 // security scanners like CKV_OPENAPI_21) see an explicit upper limit. The

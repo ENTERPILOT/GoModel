@@ -182,6 +182,8 @@ func (s *Service) Delete(ctx context.Context, selector string) error {
 		return fmt.Errorf("delete model pricing override: %w", err)
 	}
 	if err := s.refreshLocked(ctx); err != nil {
+		// If the selector was absent from the snapshot, there is no known previous
+		// value to restore, so we intentionally skip rollback.
 		if !existed {
 			return fmt.Errorf("refresh model pricing overrides: %w", err)
 		}
@@ -240,8 +242,10 @@ func normalizedRefreshInterval(interval time.Duration) time.Duration {
 	return interval
 }
 
+// rollbackContext deliberately uses context.Background with context.WithTimeout
+// so cleanup can continue briefly even when the caller's request context is canceled.
 func rollbackContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 30*time.Second)
+	return context.WithTimeout(context.Background(), refreshTimeout)
 }
 
 func (s *Service) reconcileSnapshotAfterRollbackFailureLocked(operation string, refreshErr, rollbackErr error) error {
