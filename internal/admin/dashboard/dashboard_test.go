@@ -63,6 +63,12 @@ func TestIndex_ReturnsHTML(t *testing.T) {
 	if !regexp.MustCompile(`/admin/static/css/dashboard\.css\?v=[0-9a-f]+`).MatchString(rec.Body.String()) {
 		t.Errorf("expected versioned dashboard CSS link in page HTML")
 	}
+	if !strings.Contains(body, "settings-version-footer") {
+		t.Errorf("expected settings-version-footer element in page HTML")
+	}
+	if !strings.Contains(body, "gomodel ") {
+		t.Errorf("expected gomodel version string in page HTML")
+	}
 }
 
 func TestIndex_UsesBasePathForGeneratedURLs(t *testing.T) {

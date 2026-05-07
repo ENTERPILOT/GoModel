@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"gomodel/config"
+	"gomodel/internal/version"
 
 	"github.com/labstack/echo/v5"
 )
@@ -66,12 +67,13 @@ func NewWithBasePath(basePath string) (*Handler, error) {
 
 type templateData struct {
 	BasePath string
+	Version  string
 }
 
 // Index serves GET /admin/dashboard — the main dashboard page.
 func (h *Handler) Index(c *echo.Context) error {
 	var buf bytes.Buffer
-	if err := h.indexTmpl.ExecuteTemplate(&buf, "layout", templateData{BasePath: h.basePath}); err != nil {
+	if err := h.indexTmpl.ExecuteTemplate(&buf, "layout", templateData{BasePath: h.basePath, Version: version.Info()}); err != nil {
 		slog.Error("failed to render admin dashboard", "path", c.Request().URL.Path, "error", err)
 		return err
 	}

@@ -3414,6 +3414,13 @@ body.conversation-drawer-open {
   border-top: 1px solid var(--border);
 }
 
+.settings-version-footer {
+  margin-top: 24px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
 .settings-refresh-section h3 {
   font-size: 18px;
 }
