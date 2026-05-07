@@ -122,6 +122,56 @@ func TestServiceResolvePricingModelWideBeatsProviderWide(t *testing.T) {
 	}
 }
 
+func TestServiceResolvePricingPreservesSlashShapedModelIDs(t *testing.T) {
+	service, err := NewService(
+		newTestStore(
+			Override{Selector: "openrouter/", Pricing: Pricing{InputPerMtok: ptr(20)}},
+			Override{Selector: "anthropic/claude-sonnet", Pricing: Pricing{InputPerMtok: ptr(30)}},
+			Override{Selector: "openrouter/anthropic/claude-sonnet", Pricing: Pricing{InputPerMtok: ptr(40)}},
+		),
+		testCatalog{providerNames: []string{"openrouter"}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	pricing := service.ResolvePricing("anthropic/claude-sonnet", "openrouter")
+	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 40 {
+		t.Fatalf("ResolvePricing(slash-shaped exact) = %+v, want exact input rate 40", pricing)
+	}
+
+	pricing = service.ResolvePricing("openrouter/anthropic/claude-sonnet", "openrouter")
+	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 40 {
+		t.Fatalf("ResolvePricing(redundant provider prefix) = %+v, want exact input rate 40", pricing)
+	}
+}
+
+func TestServiceResolvePricingSlashShapedModelWideBeatsProviderWide(t *testing.T) {
+	service, err := NewService(
+		newTestStore(
+			Override{Selector: "openrouter/", Pricing: Pricing{InputPerMtok: ptr(20)}},
+			Override{Selector: "anthropic/claude-sonnet", Model: "anthropic/claude-sonnet", Pricing: Pricing{InputPerMtok: ptr(30)}},
+		),
+		testCatalog{providerNames: []string{"openrouter"}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	pricing := service.ResolvePricing("anthropic/claude-sonnet", "openrouter")
+	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 30 {
+		t.Fatalf("ResolvePricing(slash-shaped model-wide) = %+v, want model-wide input rate 30", pricing)
+	}
+}
+
 func TestServiceRejectsEmptyAndNegativePricing(t *testing.T) {
 	service, err := NewService(newTestStore(), testCatalog{providerNames: []string{"openai"}}, nil)
 	if err != nil {

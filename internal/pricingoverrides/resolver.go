@@ -41,11 +41,5 @@ func modelIDFromSelector(model, providerName string) string {
 	if providerName != "" && strings.HasPrefix(model, providerName+"/") {
 		return strings.TrimSpace(strings.TrimPrefix(model, providerName+"/"))
 	}
-	if providerName == "" {
-		return model
-	}
-	if _, rest, ok := strings.Cut(model, "/"); ok && rest != "" {
-		return strings.TrimSpace(rest)
-	}
 	return model
 }
