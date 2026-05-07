@@ -319,6 +319,9 @@ func applyConfigMetadataOverrides(
 				continue
 			}
 			merged := modeldata.MergeMetadata(current.Model.Metadata, override)
+			if override.Pricing != nil {
+				merged.PricingSources = override.Pricing.FieldSources(core.ModelPricingSourceConfigYAML)
+			}
 			// Skip no-op merges so concurrent readers holding the current
 			// pointer keep a stable view when the override adds no new info.
 			if reflect.DeepEqual(current.Model.Metadata, merged) {

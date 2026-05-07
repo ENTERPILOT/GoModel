@@ -93,6 +93,12 @@ func TestResolve_DirectModelMatch(t *testing.T) {
 	if *meta.Pricing.OutputPerMtok != 10.00 {
 		t.Errorf("OutputPerMtok = %f, want 10.00", *meta.Pricing.OutputPerMtok)
 	}
+	if got := meta.PricingSources["input_per_mtok"]; got != core.ModelPricingSourceModelRegistry {
+		t.Errorf("PricingSources[input_per_mtok] = %q, want %q", got, core.ModelPricingSourceModelRegistry)
+	}
+	if got := meta.PricingSources["output_per_mtok"]; got != core.ModelPricingSourceModelRegistry {
+		t.Errorf("PricingSources[output_per_mtok] = %q, want %q", got, core.ModelPricingSourceModelRegistry)
+	}
 }
 
 func TestResolve_ProviderModelOverride(t *testing.T) {
@@ -144,6 +150,9 @@ func TestResolve_ProviderModelOverride(t *testing.T) {
 	}
 	if *meta.Pricing.OutputPerMtok != 15.00 {
 		t.Errorf("OutputPerMtok = %f, want 15.00 (override)", *meta.Pricing.OutputPerMtok)
+	}
+	if got := meta.PricingSources["input_per_mtok"]; got != core.ModelPricingSourceModelRegistry {
+		t.Errorf("PricingSources[input_per_mtok] = %q, want %q", got, core.ModelPricingSourceModelRegistry)
 	}
 	// DisplayName from base model
 	if meta.DisplayName != "GPT-4o" {

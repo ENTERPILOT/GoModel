@@ -49,7 +49,7 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 
 		var pricing *core.ModelPricing
 		if pricingResolver != nil {
-			pricing = pricingResolver.ResolvePricing(model, provider)
+			pricing = pricingResolver.ResolvePricing(model, cacheHitPricingProvider(provider, providerName))
 		}
 
 		entry := usage.ExtractFromCachedResponseBody(body, requestID, model, provider, endpoint, cacheType, pricing)
@@ -60,4 +60,11 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 		entry.UserPath = core.UserPathFromContext(ctx)
 		logger.Write(entry)
 	}
+}
+
+func cacheHitPricingProvider(provider, providerName string) string {
+	if name := strings.TrimSpace(providerName); name != "" {
+		return name
+	}
+	return strings.TrimSpace(provider)
 }

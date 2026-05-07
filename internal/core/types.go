@@ -165,6 +165,7 @@ type ModelMetadata struct {
 	Capabilities    map[string]bool         `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
 	Rankings        map[string]ModelRanking `json:"rankings,omitempty" yaml:"rankings,omitempty"`
 	Pricing         *ModelPricing           `json:"pricing,omitempty" yaml:"pricing,omitempty"`
+	PricingSources  map[string]string       `json:"pricing_sources,omitempty" yaml:"-"`
 }
 
 // ModelRanking holds one benchmark or leaderboard entry for a model.
@@ -256,6 +257,47 @@ type ModelPricing struct {
 	PerRequest             *float64           `json:"per_request,omitempty" yaml:"per_request,omitempty"`
 	PerPage                *float64           `json:"per_page,omitempty" yaml:"per_page,omitempty"`
 	Tiers                  []ModelPricingTier `json:"tiers,omitempty" yaml:"tiers,omitempty"`
+}
+
+const (
+	ModelPricingSourceModelRegistry = "model_registry"
+	ModelPricingSourceConfigYAML    = "config_yaml"
+)
+
+// FieldSources returns a field-name keyed source map for non-empty pricing fields.
+func (p *ModelPricing) FieldSources(source string) map[string]string {
+	if p == nil || source == "" {
+		return nil
+	}
+	out := make(map[string]string)
+	add := func(name string, value *float64) {
+		if value != nil {
+			out[name] = source
+		}
+	}
+	add("input_per_mtok", p.InputPerMtok)
+	add("output_per_mtok", p.OutputPerMtok)
+	add("cached_input_per_mtok", p.CachedInputPerMtok)
+	add("cache_write_per_mtok", p.CacheWritePerMtok)
+	add("reasoning_output_per_mtok", p.ReasoningOutputPerMtok)
+	add("batch_input_per_mtok", p.BatchInputPerMtok)
+	add("batch_output_per_mtok", p.BatchOutputPerMtok)
+	add("audio_input_per_mtok", p.AudioInputPerMtok)
+	add("audio_output_per_mtok", p.AudioOutputPerMtok)
+	add("per_image", p.PerImage)
+	add("input_per_image", p.InputPerImage)
+	add("per_second_input", p.PerSecondInput)
+	add("per_second_output", p.PerSecondOutput)
+	add("per_character_input", p.PerCharacterInput)
+	add("per_request", p.PerRequest)
+	add("per_page", p.PerPage)
+	if len(p.Tiers) > 0 {
+		out["tiers"] = source
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // ModelPricingTier represents a volume-based pricing tier.
@@ -375,6 +417,14 @@ func (m *ModelMetadata) Clone() *ModelMetadata {
 	out.ContextWindow = cloneIntPtr(m.ContextWindow)
 	out.MaxOutputTokens = cloneIntPtr(m.MaxOutputTokens)
 	out.Pricing = m.Pricing.Clone()
+	if len(m.PricingSources) > 0 {
+		out.PricingSources = make(map[string]string, len(m.PricingSources))
+		for k, v := range m.PricingSources {
+			out.PricingSources[k] = v
+		}
+	} else {
+		out.PricingSources = nil
+	}
 	return &out
 }
 

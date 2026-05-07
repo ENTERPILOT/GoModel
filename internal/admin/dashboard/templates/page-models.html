@@ -18,6 +18,8 @@
     <div class="alert alert-success" x-show="aliasNotice" x-text="aliasNotice"></div>
     <div class="alert alert-warning" x-show="modelOverrideError && !authError && !modelOverrideFormOpen" x-text="modelOverrideError"></div>
     <div class="alert alert-success" x-show="modelOverrideNotice && !modelOverrideError" x-text="modelOverrideNotice"></div>
+    <div class="alert alert-warning" x-show="modelPricingOverrideError && !authError && !modelPricingOverrideFormOpen" x-text="modelPricingOverrideError"></div>
+    <div class="alert alert-success" x-show="modelPricingOverrideNotice && !modelPricingOverrideError" x-text="modelPricingOverrideNotice"></div>
 
     <!-- Category Tabs -->
     <div class="category-tabs" x-show="categories.length > 0">
@@ -177,6 +179,116 @@
         </div>
     </div>
 
+    <div class="editor-modal-backdrop"
+         x-cloak
+         x-show="modelPricingOverrideFormOpen"
+         x-transition.opacity.duration.160ms
+         aria-hidden="true"></div>
+    <div class="editor-modal-shell"
+         x-cloak
+         x-show="modelPricingOverrideFormOpen"
+         x-transition.opacity.duration.160ms
+         @click="closeModelPricingOverrideForm()"
+         @keydown.escape.window="modelPricingOverrideFormOpen && !authDialogOpen && closeModelPricingOverrideForm()">
+        <div class="model-editor model-pricing-editor" x-show="modelPricingOverrideFormOpen" x-ref="modelPricingOverrideEditor" role="dialog" aria-modal="true" aria-label="Model pricing editor" @click.stop>
+            <form class="form" @submit.prevent="submitModelPricingOverrideForm()">
+                <div class="editor-header">
+                    <div>
+                        <p class="form-kicker">Pricing override</p>
+                        <h3 x-text="modelPricingOverrideFormDisplayName || modelPricingOverrideForm.selector || 'Pricing'"></h3>
+                    </div>
+                    <button type="button" class="dialog-close-btn" aria-label="Close model pricing editor" @click="closeModelPricingOverrideForm()">
+                        {{template "x-icon"}}
+                    </button>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label class="form-field-label" for="model-pricing-override-selector">Selector</label>
+                        <input id="model-pricing-override-selector" type="text" class="mono" x-model="modelPricingOverrideForm.selector" disabled>
+                    </div>
+
+                    <div class="form-field" x-show="modelPricingOverrideFormScopeOptions.length > 1">
+                        <label class="form-field-label" for="model-pricing-override-scope">Scope</label>
+                        <select id="model-pricing-override-scope" class="form-select" x-model="modelPricingOverrideFormScope" @change="setModelPricingOverrideScope(modelPricingOverrideFormScope)">
+                            <template x-for="option in modelPricingOverrideFormScopeOptions" :key="option.value">
+                                <option :value="option.value" x-text="option.label"></option>
+                            </template>
+                        </select>
+                    </div>
+                </div>
+
+                <p class="form-hint">
+                    Currency is USD. Saved fields override model registry and config.yaml pricing for this selector; unset fields continue to inherit.
+                </p>
+
+                <div class="pricing-override-rows">
+                    <template x-for="row in modelPricingOverrideRows" :key="row.id">
+                        <div class="pricing-override-row">
+                            <div class="form-field pricing-override-type-field">
+                                <label class="form-field-label">Price Type</label>
+                                <select class="form-select" x-model="row.field" data-modal-autofocus>
+                                    <template x-for="option in availablePricingFieldOptions(row)" :key="option.value">
+                                        <option :value="option.value" x-text="option.group + ' - ' + option.label"></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div class="form-field pricing-override-value-field">
+                                <label class="form-field-label">USD Value</label>
+                                <input type="number" step="any" min="0" inputmode="decimal" x-model="row.value">
+                            </div>
+                            <button type="button"
+                                    class="table-action-btn table-action-btn-danger table-icon-btn pricing-override-remove-row"
+                                    :aria-label="'Remove ' + pricingFieldLabel(row.field)"
+                                    :title="'Remove ' + pricingFieldLabel(row.field)"
+                                    @click="removeModelPricingOverrideRow(row)">
+                                {{template "x-icon"}}
+                            </button>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="pricing-override-row-actions">
+                    <button type="button" class="pagination-btn pagination-btn-with-icon" @click="addModelPricingOverrideRow()">
+                        <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                        <span>Add Price</span>
+                    </button>
+                </div>
+
+                <div class="pricing-override-tier-note" x-show="modelPricingOverrideFormPreservedTiers.length > 0">
+                    Tiered pricing exists for this override and will be preserved. Tier editing can be added without a database migration.
+                </div>
+
+                <div class="pricing-preview">
+                    <div class="pricing-preview-header">
+                        <span>Price Type</span>
+                        <span>USD</span>
+                        <span>Source</span>
+                    </div>
+                    <div class="pricing-preview-row pricing-preview-row-empty" x-show="modelPricingEffectivePreviewRows().length === 0">No pricing fields set.</div>
+                    <template x-for="row in modelPricingEffectivePreviewRows()" :key="row.field">
+                        <div class="pricing-preview-row">
+                            <span x-text="row.label"></span>
+                            <span class="mono" x-text="row.value === null || row.value === undefined ? '-' : formatPriceFine(Number(row.value))"></span>
+                            <span x-text="row.source"></span>
+                        </div>
+                    </template>
+                </div>
+
+                <p class="form-error" x-show="modelPricingOverrideError" x-text="modelPricingOverrideError" role="alert" aria-live="assertive"></p>
+
+                <div class="form-actions">
+                    <button type="button" class="pagination-btn" @click="closeModelPricingOverrideForm()">Cancel</button>
+                    <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="modelPricingOverrideFormHasExistingOverride" :disabled="modelPricingOverrideSubmitting" @click="deleteModelPricingOverride()">Remove Override</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon model-pricing-submit-btn" :disabled="modelPricingOverrideSubmitting">
+                        <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                        <span x-text="modelPricingOverrideSubmitting ? 'Saving...' : 'Save Pricing'"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Models Table: All / Text Generation -->
     <template x-if="(displayModels.length > 0 || modelFilter) && (activeCategory === 'all' || activeCategory === 'text_generation')">
     <div class="table-wrapper">
@@ -188,16 +300,7 @@
                     <th class="col-price">Input<br>$/MTok</th>
                     <th class="col-price">Output<br>$/MTok</th>
                     <th class="col-price" x-show="activeCategory === 'text_generation'">Cached $/MTok</th>
-                    <th class="model-actions-header">
-                        <button type="button" class="table-action-btn table-icon-btn"
-                            x-show="modelOverridesAvailable"
-                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
-                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
-                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
-                            @click="openGlobalModelOverrideEdit()">
-                            {{template "edit-icon"}}
-                        </button>
-                    </th>
+                    <th class="model-actions-header">{{template "model-global-action-buttons" .}}</th>
                 </tr>
             </thead>
             {{template "model-table-body" .}}
@@ -213,16 +316,7 @@
                 <tr>
                     <th>Model</th>
                     <th class="col-price">Input<br>$/MTok</th>
-                    <th class="model-actions-header">
-                        <button type="button" class="table-action-btn table-icon-btn"
-                            x-show="modelOverridesAvailable"
-                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
-                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
-                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
-                            @click="openGlobalModelOverrideEdit()">
-                            {{template "edit-icon"}}
-                        </button>
-                    </th>
+                    <th class="model-actions-header">{{template "model-global-action-buttons" .}}</th>
                 </tr>
             </thead>
             {{template "model-table-body" .}}
@@ -238,16 +332,7 @@
                 <tr>
                     <th>Model</th>
                     <th class="col-price">$/Image</th>
-                    <th class="model-actions-header">
-                        <button type="button" class="table-action-btn table-icon-btn"
-                            x-show="modelOverridesAvailable"
-                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
-                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
-                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
-                            @click="openGlobalModelOverrideEdit()">
-                            {{template "edit-icon"}}
-                        </button>
-                    </th>
+                    <th class="model-actions-header">{{template "model-global-action-buttons" .}}</th>
                 </tr>
             </thead>
             {{template "model-table-body" .}}
@@ -264,16 +349,7 @@
                     <th>Model</th>
                     <th class="col-price">$/Second</th>
                     <th class="col-price">$/Character</th>
-                    <th class="model-actions-header">
-                        <button type="button" class="table-action-btn table-icon-btn"
-                            x-show="modelOverridesAvailable"
-                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
-                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
-                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
-                            @click="openGlobalModelOverrideEdit()">
-                            {{template "edit-icon"}}
-                        </button>
-                    </th>
+                    <th class="model-actions-header">{{template "model-global-action-buttons" .}}</th>
                 </tr>
             </thead>
             {{template "model-table-body" .}}
@@ -290,16 +366,7 @@
                     <th>Model</th>
                     <th class="col-price">$/Second (In)</th>
                     <th class="col-price">$/Second (Out)</th>
-                    <th class="model-actions-header">
-                        <button type="button" class="table-action-btn table-icon-btn"
-                            x-show="modelOverridesAvailable"
-                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
-                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
-                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
-                            @click="openGlobalModelOverrideEdit()">
-                            {{template "edit-icon"}}
-                        </button>
-                    </th>
+                    <th class="model-actions-header">{{template "model-global-action-buttons" .}}</th>
                 </tr>
             </thead>
             {{template "model-table-body" .}}
@@ -316,16 +383,7 @@
                     <th>Model</th>
                     <th class="col-price">$/Page</th>
                     <th class="col-price">$/Request</th>
-                    <th class="model-actions-header">
-                        <button type="button" class="table-action-btn table-icon-btn"
-                            x-show="modelOverridesAvailable"
-                            :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
-                            :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
-                            :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
-                            @click="openGlobalModelOverrideEdit()">
-                            {{template "edit-icon"}}
-                        </button>
-                    </th>
+                    <th class="model-actions-header">{{template "model-global-action-buttons" .}}</th>
                 </tr>
             </thead>
             {{template "model-table-body" .}}
@@ -338,4 +396,25 @@
     <p class="empty-state" x-show="displayModels.length > 0 && filteredDisplayModels.length === 0 && modelFilter">No models match your filter.</p>
 </div>
 </template>
+{{end}}
+
+{{define "model-global-action-buttons"}}
+<div class="alias-actions-cell model-list-actions">
+    <button type="button" class="table-action-btn table-icon-btn"
+        x-show="modelPricingOverridesAvailable"
+        :class="modelPricingButtonClass(hasGlobalPricingOverride())"
+        :aria-label="modelPricingButtonLabel('global model pricing', hasGlobalPricingOverride())"
+        :title="modelPricingButtonLabel('global model pricing', hasGlobalPricingOverride())"
+        @click="openGlobalPricingOverrideEdit()">
+        {{template "dollar-icon"}}
+    </button>
+    <button type="button" class="table-action-btn table-icon-btn"
+        x-show="modelOverridesAvailable"
+        :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
+        :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+        :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
+        @click="openGlobalModelOverrideEdit()">
+        {{template "edit-icon"}}
+    </button>
+</div>
 {{end}}

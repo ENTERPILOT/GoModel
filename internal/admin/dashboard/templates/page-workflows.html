@@ -67,7 +67,7 @@
                 <div class="form-grid">
                     <div class="form-field">
                         <label class="form-field-label" for="workflow-scope-provider">Provider Name</label>
-                        <select id="workflow-scope-provider" class="usage-log-select workflow-input" x-model="workflowForm.scope_provider" @change="setWorkflowProvider(workflowForm.scope_provider)" data-modal-autofocus>
+                        <select id="workflow-scope-provider" class="form-select workflow-input" x-model="workflowForm.scope_provider" @change="setWorkflowProvider(workflowForm.scope_provider)" data-modal-autofocus>
                             <option value="">All providers and models</option>
                             <template x-for="providerName in workflowProviderOptions()" :key="providerName">
                                 <option :value="providerName" x-text="providerName"></option>
@@ -77,7 +77,7 @@
 
                     <div class="form-field" x-show="workflowForm.scope_provider">
                         <label class="form-field-label" for="workflow-scope-model">Model</label>
-                        <select id="workflow-scope-model" class="usage-log-select workflow-input" x-model="workflowForm.scope_model">
+                        <select id="workflow-scope-model" class="form-select workflow-input" x-model="workflowForm.scope_model">
                             <option value="">All models for provider</option>
                             <template x-for="modelID in workflowModelOptions(workflowForm.scope_provider)" :key="workflowForm.scope_provider + '-' + modelID">
                                 <option :value="modelID" x-text="modelID"></option>

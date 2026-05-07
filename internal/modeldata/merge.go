@@ -74,7 +74,23 @@ func MergeMetadata(base, override *core.ModelMetadata) *core.ModelMetadata {
 	}
 	if override.Pricing != nil {
 		merged.Pricing = override.Pricing.Clone()
+		if len(override.PricingSources) > 0 {
+			merged.PricingSources = clonePricingSources(override.PricingSources)
+		} else {
+			merged.PricingSources = nil
+		}
 	}
 
 	return merged
+}
+
+func clonePricingSources(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

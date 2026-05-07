@@ -1,0 +1,213 @@
+package pricingoverrides
+
+import (
+	"context"
+	"testing"
+
+	"gomodel/internal/core"
+)
+
+type testStore struct {
+	items map[string]Override
+}
+
+func newTestStore(items ...Override) *testStore {
+	store := &testStore{items: make(map[string]Override, len(items))}
+	for _, item := range items {
+		store.items[item.Selector] = item
+	}
+	return store
+}
+
+func (s *testStore) List(_ context.Context) ([]Override, error) {
+	result := make([]Override, 0, len(s.items))
+	for _, item := range s.items {
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+func (s *testStore) Upsert(_ context.Context, override Override) error {
+	s.items[override.Selector] = override
+	return nil
+}
+
+func (s *testStore) Delete(_ context.Context, selector string) error {
+	if _, ok := s.items[selector]; !ok {
+		return ErrNotFound
+	}
+	delete(s.items, selector)
+	return nil
+}
+
+func (s *testStore) Close() error { return nil }
+
+type testCatalog struct {
+	providerNames []string
+}
+
+func (c testCatalog) ProviderNames() []string {
+	return append([]string(nil), c.providerNames...)
+}
+
+type staticPricingResolver struct {
+	pricing *core.ModelPricing
+}
+
+func (r staticPricingResolver) ResolvePricing(_, _ string) *core.ModelPricing {
+	return r.pricing
+}
+
+func ptr(v float64) *float64 {
+	return &v
+}
+
+func TestServiceResolvePricingAppliesMostSpecificOverride(t *testing.T) {
+	baseInput := 1.0
+	baseOutput := 2.0
+	service, err := NewService(
+		newTestStore(
+			Override{Selector: "/", Pricing: Pricing{InputPerMtok: ptr(10)}},
+			Override{Selector: "openai/", Pricing: Pricing{InputPerMtok: ptr(20)}},
+			Override{Selector: "gpt-4o", Pricing: Pricing{InputPerMtok: ptr(30)}},
+			Override{Selector: "openai/gpt-4o", Pricing: Pricing{InputPerMtok: ptr(40)}},
+		),
+		testCatalog{providerNames: []string{"openai"}},
+		staticPricingResolver{pricing: &core.ModelPricing{
+			InputPerMtok:  &baseInput,
+			OutputPerMtok: &baseOutput,
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	pricing := service.ResolvePricing("gpt-4o", "openai")
+	if pricing == nil {
+		t.Fatal("ResolvePricing() = nil")
+	}
+	if pricing.InputPerMtok == nil || *pricing.InputPerMtok != 40 {
+		t.Fatalf("InputPerMtok = %#v, want 40", pricing.InputPerMtok)
+	}
+	if pricing.OutputPerMtok == nil || *pricing.OutputPerMtok != baseOutput {
+		t.Fatalf("OutputPerMtok = %#v, want base %v", pricing.OutputPerMtok, baseOutput)
+	}
+	if pricing.Currency != CurrencyUSD {
+		t.Fatalf("Currency = %q, want %q", pricing.Currency, CurrencyUSD)
+	}
+}
+
+func TestServiceResolvePricingModelWideBeatsProviderWide(t *testing.T) {
+	service, err := NewService(
+		newTestStore(
+			Override{Selector: "openai/", Pricing: Pricing{InputPerMtok: ptr(20)}},
+			Override{Selector: "gpt-4o", Pricing: Pricing{InputPerMtok: ptr(30)}},
+		),
+		testCatalog{providerNames: []string{"openai"}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	pricing := service.ResolvePricing("gpt-4o", "openai")
+	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 30 {
+		t.Fatalf("ResolvePricing() = %+v, want model-wide input rate 30", pricing)
+	}
+}
+
+func TestServiceRejectsEmptyAndNegativePricing(t *testing.T) {
+	service, err := NewService(newTestStore(), testCatalog{providerNames: []string{"openai"}}, nil)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	if err := service.Upsert(context.Background(), Override{Selector: "openai/gpt-4o"}); !IsValidationError(err) {
+		t.Fatalf("Upsert(empty) error = %v, want validation", err)
+	}
+	if err := service.Upsert(context.Background(), Override{
+		Selector: "openai/gpt-4o",
+		Pricing:  Pricing{InputPerMtok: ptr(-1)},
+	}); !IsValidationError(err) {
+		t.Fatalf("Upsert(negative) error = %v, want validation", err)
+	}
+}
+
+func TestServiceRejectsInvalidTieredPricing(t *testing.T) {
+	service, err := NewService(newTestStore(), testCatalog{providerNames: []string{"openai"}}, nil)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		pricing Pricing
+	}{
+		{
+			name: "missing threshold",
+			pricing: Pricing{Tiers: []PricingTier{
+				{InputPerMtok: ptr(1)},
+			}},
+		},
+		{
+			name: "missing rate",
+			pricing: Pricing{Tiers: []PricingTier{
+				{UpToTokens: ptr(1000)},
+			}},
+		},
+		{
+			name: "non-increasing thresholds",
+			pricing: Pricing{Tiers: []PricingTier{
+				{UpToTokens: ptr(1000), InputPerMtok: ptr(1)},
+				{UpToTokens: ptr(500), InputPerMtok: ptr(2)},
+			}},
+		},
+		{
+			name: "zero threshold",
+			pricing: Pricing{Tiers: []PricingTier{
+				{UpToMtok: ptr(0), InputPerMtok: ptr(1)},
+			}},
+		},
+		{
+			name: "negative tier rate",
+			pricing: Pricing{Tiers: []PricingTier{
+				{UpToTokens: ptr(1000), InputPerMtok: ptr(-1)},
+			}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := service.Upsert(context.Background(), Override{
+				Selector: "openai/gpt-4o",
+				Pricing:  tc.pricing,
+			})
+			if !IsValidationError(err) {
+				t.Fatalf("Upsert(%s) error = %v, want validation", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestServiceAcceptsIncreasingTieredPricing(t *testing.T) {
+	service, err := NewService(newTestStore(), testCatalog{providerNames: []string{"openai"}}, nil)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	err = service.Upsert(context.Background(), Override{
+		Selector: "openai/gpt-4o",
+		Pricing: Pricing{Tiers: []PricingTier{
+			{UpToTokens: ptr(200_000), InputPerMtok: ptr(1)},
+			{UpToMtok: ptr(1), InputPerMtok: ptr(0.5)},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Upsert(valid tiers) error = %v", err)
+	}
+}

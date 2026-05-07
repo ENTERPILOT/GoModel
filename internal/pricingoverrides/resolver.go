@@ -1,0 +1,51 @@
+package pricingoverrides
+
+import (
+	"strings"
+
+	"gomodel/internal/core"
+)
+
+// ResolvePricing resolves base pricing and applies the most specific DB override.
+func (s *Service) ResolvePricing(model, providerName string) *core.ModelPricing {
+	var basePricing *core.ModelPricing
+	if s != nil && s.base != nil {
+		basePricing = s.base.ResolvePricing(model, providerName)
+	}
+	if s == nil {
+		return cloneBasePricing(basePricing)
+	}
+
+	providerName = strings.TrimSpace(providerName)
+	model = modelIDFromSelector(model, providerName)
+	if rule, ok := s.snapshot().matchingOverride(providerName, model); ok {
+		return mergePricing(basePricing, rule.override.Pricing)
+	}
+	return cloneBasePricing(basePricing)
+}
+
+func cloneBasePricing(base *core.ModelPricing) *core.ModelPricing {
+	if base == nil {
+		return nil
+	}
+	cloned := base.Clone()
+	if cloned != nil && strings.TrimSpace(cloned.Currency) == "" {
+		cloned.Currency = CurrencyUSD
+	}
+	return cloned
+}
+
+func modelIDFromSelector(model, providerName string) string {
+	model = strings.TrimSpace(model)
+	providerName = strings.TrimSpace(providerName)
+	if providerName != "" && strings.HasPrefix(model, providerName+"/") {
+		return strings.TrimSpace(strings.TrimPrefix(model, providerName+"/"))
+	}
+	if providerName == "" {
+		return model
+	}
+	if _, rest, ok := strings.Cut(model, "/"); ok && rest != "" {
+		return strings.TrimSpace(rest)
+	}
+	return model
+}

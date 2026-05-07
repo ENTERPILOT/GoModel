@@ -10,6 +10,8 @@ import (
 
 func ctxWindow(v int) *int { return &v }
 
+func price(v float64) *float64 { return &v }
+
 // TestInitialize_AppliesConfigMetadataOverrides verifies that operator-supplied
 // metadata from config.yaml takes precedence over (and merges onto) the remote
 // model registry during provider initialization. Exercises the config-driven
@@ -44,6 +46,11 @@ func TestInitialize_AppliesConfigMetadataOverrides(t *testing.T) {
 			DisplayName:   "GLM 4.7 Flash (local)",
 			ContextWindow: ctxWindow(131072),
 			Capabilities:  map[string]bool{"tools": true},
+			Pricing: &core.ModelPricing{
+				Currency:      "USD",
+				InputPerMtok:  price(0),
+				OutputPerMtok: price(0),
+			},
 		},
 	})
 
@@ -63,6 +70,9 @@ func TestInitialize_AppliesConfigMetadataOverrides(t *testing.T) {
 	}
 	if !overridden.Model.Metadata.Capabilities["tools"] {
 		t.Errorf("Capabilities[tools] = false, want true")
+	}
+	if got := overridden.Model.Metadata.PricingSources["input_per_mtok"]; got != core.ModelPricingSourceConfigYAML {
+		t.Errorf("PricingSources[input_per_mtok] = %q, want %q", got, core.ModelPricingSourceConfigYAML)
 	}
 
 	untouched := registry.GetModel("nippur/Gemma4-31B")

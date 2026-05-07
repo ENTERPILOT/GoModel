@@ -15,6 +15,17 @@ type upsertModelOverrideRequest struct {
 	UserPaths []string `json:"user_paths,omitempty"`
 }
 
+// ListModelOverrides handles GET /admin/api/v1/model-overrides.
+//
+// @Summary      List model access overrides
+// @Description  Lists persisted model access overrides by global, provider-wide, model-wide, or exact selector.
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {array}   modeloverrides.View
+// @Failure      401  {object}  core.GatewayError
+// @Failure      503  {object}  core.GatewayError
+// @Router       /admin/api/v1/model-overrides [get]
 func (h *Handler) ListModelOverrides(c *echo.Context) error {
 	if h.modelOverrides == nil {
 		return handleError(c, featureUnavailableError("model overrides feature is unavailable"))
@@ -27,6 +38,22 @@ func (h *Handler) ListModelOverrides(c *echo.Context) error {
 }
 
 // UpsertModelOverride handles PUT /admin/api/v1/model-overrides/{selector}.
+//
+// @Summary      Create or update one model access override
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        selector  path      string                      true  "URL-encoded model selector such as /, openai/, gpt-4o-mini, or openai/gpt-4o-mini"
+// @Param        override  body      upsertModelOverrideRequest  true  "Allowed user paths"
+// @Success      200       {object}  modeloverrides.Override
+// @Failure      400       {object}  core.GatewayError
+// @Failure      401       {object}  core.GatewayError
+// @Failure      500       {object}  core.GatewayError
+// @Failure      503       {object}  core.GatewayError
+// @Router       /admin/api/v1/model-overrides/{selector} [put]
+//
+//nolint:dupl // structurally similar to UpsertModelPricingOverride but operates on different types and stores.
 func (h *Handler) UpsertModelOverride(c *echo.Context) error {
 	if h.modelOverrides == nil {
 		return handleError(c, featureUnavailableError("model overrides feature is unavailable"))
@@ -58,6 +85,18 @@ func (h *Handler) UpsertModelOverride(c *echo.Context) error {
 }
 
 // DeleteModelOverride handles DELETE /admin/api/v1/model-overrides/{selector}.
+//
+// @Summary      Delete one model access override
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Param        selector  path  string  true  "URL-encoded model selector"
+// @Success      204       "No Content"
+// @Failure      400       {object}  core.GatewayError
+// @Failure      401       {object}  core.GatewayError
+// @Failure      404       {object}  core.GatewayError
+// @Failure      503       {object}  core.GatewayError
+// @Router       /admin/api/v1/model-overrides/{selector} [delete]
 func (h *Handler) DeleteModelOverride(c *echo.Context) error {
 	var unavailableErr error
 	var deleteFunc func(context.Context, string) error

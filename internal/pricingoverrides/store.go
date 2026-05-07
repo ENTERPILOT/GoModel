@@ -1,4 +1,4 @@
-package modeloverrides
+package pricingoverrides
 
 import (
 	"context"
@@ -10,8 +10,8 @@ import (
 	"gomodel/internal/modelselectors"
 )
 
-// ErrNotFound indicates a requested override was not found.
-var ErrNotFound = errors.New("model override not found")
+// ErrNotFound indicates a requested pricing override was not found.
+var ErrNotFound = errors.New("model pricing override not found")
 
 // ValidationError indicates invalid override input or invalid override state.
 type ValidationError = modelselectors.ValidationError
@@ -25,7 +25,7 @@ func IsValidationError(err error) bool {
 	return modelselectors.IsValidationError(err)
 }
 
-// Store defines persistence operations for model overrides.
+// Store defines persistence operations for pricing overrides.
 type Store interface {
 	List(ctx context.Context) ([]Override, error)
 	Upsert(ctx context.Context, override Override) error
@@ -46,7 +46,7 @@ func collectOverrides(next func() (Override, bool, error), rowsErr func() error)
 		result = append(result, override)
 	}
 	if err := rowsErr(); err != nil {
-		return nil, fmt.Errorf("iterate model overrides: %w", err)
+		return nil, fmt.Errorf("iterate model pricing overrides: %w", err)
 	}
 	return result, nil
 }
@@ -57,9 +57,9 @@ func prepareOverrideUpsert(override Override) (Override, string, error) {
 		return Override{}, "", err
 	}
 
-	pathsJSON, err := json.Marshal(override.UserPaths)
+	pricingJSON, err := json.Marshal(override.Pricing)
 	if err != nil {
-		return Override{}, "", fmt.Errorf("encode user_paths: %w", err)
+		return Override{}, "", fmt.Errorf("encode pricing: %w", err)
 	}
 
 	now := time.Now().UTC()
@@ -67,5 +67,5 @@ func prepareOverrideUpsert(override Override) (Override, string, error) {
 		override.CreatedAt = now
 	}
 	override.UpdatedAt = now
-	return override, string(pathsJSON), nil
+	return override, string(pricingJSON), nil
 }

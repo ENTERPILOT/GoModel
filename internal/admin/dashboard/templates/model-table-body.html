@@ -12,8 +12,16 @@
                         </div>
                         <div class="provider-group-summary" x-show="group.access_summary" x-text="group.access_summary"></div>
                     </div>
-                    <div class="alias-actions-cell">
+                    <div class="alias-actions-cell model-list-actions">
                         <span class="model-access-state-badge" :class="modelAccessStateClass(group.access)" x-text="modelAccessStateText(group.access)"></span>
+                        <button type="button" class="table-action-btn table-icon-btn"
+                            x-show="modelPricingOverridesAvailable && group.provider_name"
+                            :class="modelPricingButtonClass(hasProviderPricingOverride(group))"
+                            :aria-label="modelPricingButtonLabel('provider pricing for ' + group.display_name, hasProviderPricingOverride(group))"
+                            :title="modelPricingButtonLabel('provider pricing for ' + group.display_name, hasProviderPricingOverride(group))"
+                            @click="openProviderPricingOverrideEdit(group)">
+                            {{template "dollar-icon"}}
+                        </button>
                         <button type="button" class="table-action-btn table-icon-btn"
                             x-show="modelOverridesAvailable && group.access.selector"
                             :class="modelOverrideEditButtonClass(hasAccessOverride(group.access))"
@@ -43,19 +51,19 @@
                     </div>
                 </td>
                 <td x-show="activeCategory === 'all' || activeCategory === 'text_generation'" x-text="(row.model.metadata?.modes ?? []).join(', ') || '-'"></td>
-                <td class="col-price" x-show="activeCategory === 'all' || activeCategory === 'text_generation' || activeCategory === 'embedding'" x-text="formatPrice(row.model.metadata?.pricing?.input_per_mtok)"></td>
-                <td class="col-price" x-show="activeCategory === 'all' || activeCategory === 'text_generation'" x-text="formatPrice(row.model.metadata?.pricing?.output_per_mtok)"></td>
-                <td class="col-price" x-show="activeCategory === 'text_generation'" x-text="formatPrice(row.model.metadata?.pricing?.cached_input_per_mtok)"></td>
-                <td class="col-price" x-show="activeCategory === 'image'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_image)"></td>
-                <td class="col-price" x-show="activeCategory === 'audio'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_second_input)"></td>
-                <td class="col-price" x-show="activeCategory === 'audio'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_character_input)"></td>
-                <td class="col-price" x-show="activeCategory === 'video'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_second_input)"></td>
-                <td class="col-price" x-show="activeCategory === 'video'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_second_output)"></td>
-                <td class="col-price" x-show="activeCategory === 'utility'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_page)"></td>
-                <td class="col-price" x-show="activeCategory === 'utility'" x-text="formatPriceFine(row.model.metadata?.pricing?.per_request)"></td>
+                <td class="col-price" x-show="activeCategory === 'all' || activeCategory === 'text_generation' || activeCategory === 'embedding'" x-text="formatPrice(modelRowPricing(row)?.input_per_mtok)"></td>
+                <td class="col-price" x-show="activeCategory === 'all' || activeCategory === 'text_generation'" x-text="formatPrice(modelRowPricing(row)?.output_per_mtok)"></td>
+                <td class="col-price" x-show="activeCategory === 'text_generation'" x-text="formatPrice(modelRowPricing(row)?.cached_input_per_mtok)"></td>
+                <td class="col-price" x-show="activeCategory === 'image'" x-text="formatPriceFine(modelRowPricing(row)?.per_image)"></td>
+                <td class="col-price" x-show="activeCategory === 'audio'" x-text="formatPriceFine(modelRowPricing(row)?.per_second_input)"></td>
+                <td class="col-price" x-show="activeCategory === 'audio'" x-text="formatPriceFine(modelRowPricing(row)?.per_character_input)"></td>
+                <td class="col-price" x-show="activeCategory === 'video'" x-text="formatPriceFine(modelRowPricing(row)?.per_second_input)"></td>
+                <td class="col-price" x-show="activeCategory === 'video'" x-text="formatPriceFine(modelRowPricing(row)?.per_second_output)"></td>
+                <td class="col-price" x-show="activeCategory === 'utility'" x-text="formatPriceFine(modelRowPricing(row)?.per_page)"></td>
+                <td class="col-price" x-show="activeCategory === 'utility'" x-text="formatPriceFine(modelRowPricing(row)?.per_request)"></td>
                 <td class="model-row-actions">
                     <template x-if="row.is_alias">
-                        <div class="alias-actions-cell">
+                        <div class="alias-actions-cell model-list-actions">
                             <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
                                 <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
                                 <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
@@ -76,8 +84,16 @@
                         </div>
                     </template>
                     <template x-if="!row.is_alias">
-                        <div class="alias-actions-cell">
+                        <div class="alias-actions-cell model-list-actions">
                             <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
+                            <button type="button" class="table-action-btn table-icon-btn"
+                                x-show="modelPricingOverridesAvailable"
+                                :class="modelPricingButtonClass(hasModelPricingOverride(row))"
+                                :aria-label="modelPricingButtonLabel('model pricing for ' + row.display_name, hasModelPricingOverride(row))"
+                                :title="modelPricingButtonLabel('model pricing for ' + row.display_name, hasModelPricingOverride(row))"
+                                @click="openModelPricingOverrideEdit(row)">
+                                {{template "dollar-icon"}}
+                            </button>
                             <button type="button" class="table-action-btn table-icon-btn"
                                 x-show="modelOverridesAvailable"
                                 :class="modelOverrideEditButtonClass(hasAccessOverride(row.access))"

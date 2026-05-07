@@ -257,7 +257,7 @@ func (h *Handler) RecalculateUsagePricing(c *echo.Context) error {
 	h.pricingMu.Lock()
 	defer h.pricingMu.Unlock()
 
-	result, err := h.usageRecalculator.RecalculatePricing(c.Request().Context(), params, h.registry)
+	result, err := h.usageRecalculator.RecalculatePricing(c.Request().Context(), params, h.pricingResolver)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return handleError(c, err)

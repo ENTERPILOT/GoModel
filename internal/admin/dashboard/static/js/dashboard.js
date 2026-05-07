@@ -402,7 +402,9 @@ function dashboard() {
       return (
         this.authDialogOpen ||
         (this.page === "models" &&
-          (this.aliasFormOpen || this.modelOverrideFormOpen)) ||
+          (this.aliasFormOpen ||
+            this.modelOverrideFormOpen ||
+            this.modelPricingOverrideFormOpen)) ||
         (this.page === "workflows" && this.workflowFormOpen) ||
         (this.page === "guardrails" && this.guardrailFormOpen) ||
         (this.page === "auth-keys" && this.authKeyFormOpen) ||
@@ -586,6 +588,9 @@ function dashboard() {
       }
       if (typeof this.fetchModelOverrides === "function") {
         requests.push(this.fetchModelOverrides());
+      }
+      if (typeof this.fetchModelPricingOverrides === "function") {
+        requests.push(this.fetchModelPricingOverrides());
       }
       if (typeof this.fetchWorkflowsPage === "function") {
         requests.push(this.fetchWorkflowsPage());
@@ -1066,6 +1071,12 @@ function dashboard() {
         ? dashboardAliasesModule
         : null,
       "dashboardAliasesModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardModelPricingOverridesModule === "function"
+        ? dashboardModelPricingOverridesModule
+        : null,
+      "dashboardModelPricingOverridesModule",
     ),
     resolveModuleFactory(
       typeof dashboardAuthKeysModule === "function"

@@ -260,6 +260,7 @@ func (o *InferenceOrchestrator) streamResponses(
 type translatedExecutionSpec[Req any, Resp any, Result any] struct {
 	execute func(*InferenceOrchestrator, context.Context, *core.Workflow, Req) (Resp, string, string, string, bool, error)
 	model   func(Resp) string
+	request func(Req) string
 	usage   func(Resp, string, string, string, *core.ModelPricing) *usage.UsageEntry
 	build   func(Resp, ExecutionMeta) Result
 }
@@ -267,6 +268,7 @@ type translatedExecutionSpec[Req any, Resp any, Result any] struct {
 var chatExecutionSpec = translatedExecutionSpec[*core.ChatRequest, *core.ChatResponse, *ChatCompletionResult]{
 	execute: executeChatCompletionRequest,
 	model:   chatResponseModel,
+	request: chatRequestModel,
 	usage: func(resp *core.ChatResponse, requestID, providerType, endpoint string, pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromChatResponse(resp, requestID, providerType, endpoint, pricing)
 	},
@@ -278,6 +280,7 @@ var chatExecutionSpec = translatedExecutionSpec[*core.ChatRequest, *core.ChatRes
 var responsesExecutionSpec = translatedExecutionSpec[*core.ResponsesRequest, *core.ResponsesResponse, *ResponsesResult]{
 	execute: executeResponsesRequest,
 	model:   responsesResponseModel,
+	request: responsesRequestModel,
 	usage: func(resp *core.ResponsesResponse, requestID, providerType, endpoint string, pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromResponsesResponse(resp, requestID, providerType, endpoint, pricing)
 	},
@@ -298,6 +301,7 @@ func executeTranslatedResult[Req any, Resp any, Result any](
 		func() (Resp, string, string, string, bool, error) {
 			return spec.execute(o, ctx, workflow, req)
 		},
+		requestModel(req, spec.request),
 		spec.model,
 		func(resp Resp, providerType string, pricing *core.ModelPricing) *usage.UsageEntry {
 			return spec.usage(resp, requestID, providerType, endpoint, pricing)
@@ -315,6 +319,7 @@ func executeWithUsage[Resp any](
 	ctx context.Context,
 	workflow *core.Workflow,
 	execute func() (Resp, string, string, string, bool, error),
+	requestedModel string,
 	modelFromResponse func(Resp) string,
 	entry func(Resp, string, *core.ModelPricing) *usage.UsageEntry,
 ) (Resp, ExecutionMeta, error) {
@@ -324,7 +329,8 @@ func executeWithUsage[Resp any](
 		return zero, ExecutionMeta{}, err
 	}
 	model := modelFromResponse(resp)
-	o.logUsage(ctx, workflow, model, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
+	pricingModel := usagePricingModel(workflow, requestedModel, failoverModel, model)
+	o.logUsage(ctx, workflow, pricingModel, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return entry(resp, providerType, pricing)
 	})
 	return resp, ExecutionMeta{
@@ -334,6 +340,23 @@ func executeWithUsage[Resp any](
 		FailoverModel: failoverModel,
 		UsedFallback:  usedFallback,
 	}, nil
+}
+
+func requestModel[Req any](req Req, model func(Req) string) string {
+	if model == nil {
+		return ""
+	}
+	return strings.TrimSpace(model(req))
+}
+
+func usagePricingModel(workflow *core.Workflow, requestedModel, failoverModel, responseModel string) string {
+	if failoverModel = strings.TrimSpace(failoverModel); failoverModel != "" {
+		return failoverModel
+	}
+	if model := ResolvedModelFromWorkflow(workflow, requestedModel); model != "" {
+		return model
+	}
+	return strings.TrimSpace(responseModel)
 }
 
 func executeTranslatedProviderRequest[Req any, Resp any](
@@ -467,6 +490,13 @@ func chatResponseModel(resp *core.ChatResponse) string {
 	return resp.Model
 }
 
+func chatRequestModel(req *core.ChatRequest) string {
+	if req == nil {
+		return ""
+	}
+	return req.Model
+}
+
 func chatResponseProvider(resp *core.ChatResponse) string {
 	if resp == nil {
 		return ""
@@ -479,6 +509,13 @@ func responsesResponseModel(resp *core.ResponsesResponse) string {
 		return ""
 	}
 	return resp.Model
+}
+
+func responsesRequestModel(req *core.ResponsesRequest) string {
+	if req == nil {
+		return ""
+	}
+	return req.Model
 }
 
 func responsesResponseProvider(resp *core.ResponsesResponse) string {

@@ -20,6 +20,7 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/modeloverrides"
+	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
 	"gomodel/internal/usage"
 	"gomodel/internal/workflows"
@@ -31,9 +32,11 @@ type Handler struct {
 	usageRecalculator   usage.PricingRecalculator
 	auditReader         auditlog.Reader
 	registry            *providers.ModelRegistry
+	pricingResolver     usage.PricingResolver
 	authKeys            *authkeys.Service
 	aliases             *aliases.Service
 	modelOverrides      *modeloverrides.Service
+	pricingOverrides    *pricingoverrides.Service
 	workflows           *workflows.Service
 	budgets             *budget.Service
 	guardrails          guardrails.Catalog
@@ -159,6 +162,13 @@ func WithUsagePricingRecalculator(recalculator usage.PricingRecalculator) Option
 	}
 }
 
+// WithPricingResolver sets the resolver used for usage pricing recalculation.
+func WithPricingResolver(resolver usage.PricingResolver) Option {
+	return func(h *Handler) {
+		h.pricingResolver = resolver
+	}
+}
+
 // WithAliases enables alias administration endpoints.
 func WithAliases(service *aliases.Service) Option {
 	return func(h *Handler) {
@@ -177,6 +187,13 @@ func WithAuthKeys(service *authkeys.Service) Option {
 func WithModelOverrides(service *modeloverrides.Service) Option {
 	return func(h *Handler) {
 		h.modelOverrides = service
+	}
+}
+
+// WithPricingOverrides enables model pricing override administration endpoints.
+func WithPricingOverrides(service *pricingoverrides.Service) Option {
+	return func(h *Handler) {
+		h.pricingOverrides = service
 	}
 }
 
@@ -234,9 +251,10 @@ func WithConfiguredProviders(configs []providers.SanitizedProviderConfig) Option
 // usageReader may be nil if usage tracking is not available.
 func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, options ...Option) *Handler {
 	h := &Handler{
-		usageReader:   reader,
-		registry:      registry,
-		runtimeConfig: DashboardConfigResponse{},
+		usageReader:     reader,
+		registry:        registry,
+		pricingResolver: registry,
+		runtimeConfig:   DashboardConfigResponse{},
 	}
 
 	for _, opt := range options {

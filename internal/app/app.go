@@ -26,6 +26,7 @@ import (
 	"gomodel/internal/fallback"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/modeloverrides"
+	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
 	"gomodel/internal/responsecache"
 	"gomodel/internal/server"
@@ -37,18 +38,19 @@ import (
 // App represents the main application with all its dependencies.
 // It provides centralized lifecycle management for all components.
 type App struct {
-	config         *config.Config
-	providers      *providers.InitResult
-	audit          *auditlog.Result
-	usage          *usage.Result
-	budgets        *budget.Result
-	batch          *batch.Result
-	aliases        *aliases.Result
-	modelOverrides *modeloverrides.Result
-	authKeys       *authkeys.Result
-	guardrails     *guardrails.Result
-	workflows      *workflows.Result
-	server         *server.Server
+	config           *config.Config
+	providers        *providers.InitResult
+	audit            *auditlog.Result
+	usage            *usage.Result
+	budgets          *budget.Result
+	batch            *batch.Result
+	aliases          *aliases.Result
+	modelOverrides   *modeloverrides.Result
+	pricingOverrides *pricingoverrides.Result
+	authKeys         *authkeys.Result
+	guardrails       *guardrails.Result
+	workflows        *workflows.Result
+	server           *server.Server
 
 	shutdownMu  sync.Mutex
 	shutdown    bool
@@ -225,6 +227,26 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	app.modelOverrides = modelOverrideResult
 
+	var pricingOverrideResult *pricingoverrides.Result
+	sharedPricingOverrideStorage := firstSharedStorage(auditResult.Storage, usageResult.Storage, batchResult.Storage, aliasResult.Storage, modelOverrideResult.Storage)
+	if sharedPricingOverrideStorage != nil {
+		pricingOverrideResult, err = pricingoverrides.NewWithSharedStorage(ctx, appCfg, sharedPricingOverrideStorage, providerResult.Registry, providerResult.Registry)
+	} else {
+		pricingOverrideResult, err = pricingoverrides.New(ctx, appCfg, providerResult.Registry, providerResult.Registry)
+	}
+	if err != nil {
+		closeErr := errors.Join(app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to initialize model pricing overrides: %w (also: close error: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to initialize model pricing overrides: %w", err)
+	}
+	app.pricingOverrides = pricingOverrideResult
+	pricingResolver := usage.PricingResolver(providerResult.Registry)
+	if app.pricingOverrides != nil && app.pricingOverrides.Service != nil {
+		pricingResolver = app.pricingOverrides.Service
+	}
+
 	refreshInterval := workflowRefreshInterval(appCfg)
 	var guardrailExecutor guardrails.ChatCompletionExecutor = app.providers.Router
 	if app.aliases != nil && app.aliases.Service != nil {
@@ -233,14 +255,14 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	// Initialize reusable guardrail definitions using shared storage when already available.
 	var guardrailResult *guardrails.Result
-	sharedGuardrailStorage := firstSharedStorage(auditResult.Storage, usageResult.Storage, batchResult.Storage, aliasResult.Storage, modelOverrideResult.Storage)
+	sharedGuardrailStorage := firstSharedStorage(auditResult.Storage, usageResult.Storage, batchResult.Storage, aliasResult.Storage, modelOverrideResult.Storage, pricingOverrideResult.Storage)
 	if sharedGuardrailStorage != nil {
 		guardrailResult, err = guardrails.NewWithSharedStorage(ctx, sharedGuardrailStorage, refreshInterval, guardrailExecutor)
 	} else {
 		guardrailResult, err = guardrails.New(ctx, appCfg, refreshInterval, guardrailExecutor)
 	}
 	if err != nil {
-		closeErr := errors.Join(app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to initialize guardrails: %w (also: close error: %v)", err, closeErr)
 		}
@@ -250,14 +272,14 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	seedGuardrails, err := configGuardrailDefinitions(appCfg.Guardrails)
 	if err != nil {
-		closeErr := errors.Join(app.guardrails.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(app.guardrails.Close(), app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to prepare guardrail definitions: %w (also: close error: %v)", err, closeErr)
 		}
 		return nil, fmt.Errorf("failed to prepare guardrail definitions: %w", err)
 	}
 	if err := guardrailResult.Service.UpsertDefinitions(ctx, seedGuardrails); err != nil {
-		closeErr := errors.Join(app.guardrails.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(app.guardrails.Close(), app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to upsert guardrails: %w (also: close error: %v)", err, closeErr)
 		}
@@ -272,7 +294,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	featureCaps := runtimeWorkflowFeatureCaps(appCfg)
 
 	var workflowResult *workflows.Result
-	sharedWorkflowStorage := firstSharedStorage(auditResult.Storage, usageResult.Storage, batchResult.Storage, aliasResult.Storage, modelOverrideResult.Storage, guardrailResult.Storage)
+	sharedWorkflowStorage := firstSharedStorage(auditResult.Storage, usageResult.Storage, batchResult.Storage, aliasResult.Storage, modelOverrideResult.Storage, pricingOverrideResult.Storage, guardrailResult.Storage)
 	workflowCompiler := workflows.NewCompilerWithFeatureCaps(guardrailResult.Service, featureCaps)
 	if sharedWorkflowStorage != nil {
 		workflowResult, err = workflows.NewWithSharedStorage(ctx, sharedWorkflowStorage, workflowCompiler, refreshInterval)
@@ -280,7 +302,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		workflowResult, err = workflows.New(ctx, appCfg, workflowCompiler, refreshInterval)
 	}
 	if err != nil {
-		closeErr := errors.Join(app.guardrails.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(app.guardrails.Close(), app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to initialize workflows: %w (also: close error: %v)", err, closeErr)
 		}
@@ -288,14 +310,14 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	defaultWorkflow := defaultWorkflowInput(appCfg, guardrailResult.Service.Names(), seedGuardrails)
 	if err := workflowResult.Service.EnsureDefaultGlobal(ctx, defaultWorkflow); err != nil {
-		closeErr := errors.Join(workflowResult.Close(), app.guardrails.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(workflowResult.Close(), app.guardrails.Close(), app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to seed workflows: %w (also: close error: %v)", err, closeErr)
 		}
 		return nil, fmt.Errorf("failed to seed workflows: %w", err)
 	}
 	if err := workflowResult.Service.Refresh(ctx); err != nil {
-		closeErr := errors.Join(workflowResult.Close(), app.guardrails.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(workflowResult.Close(), app.guardrails.Close(), app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to load workflows: %w (also: close error: %v)", err, closeErr)
 		}
@@ -310,6 +332,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		batchResult.Storage,
 		aliasResult.Storage,
 		modelOverrideResult.Storage,
+		pricingOverrideResult.Storage,
 		guardrailResult.Storage,
 		workflowResult.Storage,
 	)
@@ -319,7 +342,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		authKeyResult, err = authkeys.New(ctx, appCfg)
 	}
 	if err != nil {
-		closeErr := errors.Join(workflowResult.Close(), app.guardrails.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(workflowResult.Close(), app.guardrails.Close(), app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to initialize auth keys: %w (also: close error: %v)", err, closeErr)
 		}
@@ -373,7 +396,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		AuditLogger:                     auditResult.Logger,
 		UsageLogger:                     usageResult.Logger,
 		BudgetChecker:                   budgetResult.Service,
-		PricingResolver:                 providerResult.Registry,
+		PricingResolver:                 pricingResolver,
 		ModelResolver:                   app.aliases.Service,
 		ModelAuthorizer:                 app.modelOverrides.Service,
 		FallbackResolver:                fallback.NewResolver(appCfg.Fallback, providerResult.Registry),
@@ -407,6 +430,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			authKeyResult.Service,
 			app.aliases.Service,
 			app.modelOverrides.Service,
+			app.pricingOverrides.Service,
 			workflowResult.Service,
 			app.guardrails.Service,
 			budgetResult.Service,
@@ -444,15 +468,16 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		slog.Info("provider passthrough disabled")
 	}
 
-	rcm, err := responsecache.NewResponseCacheMiddleware(appCfg.Cache.Response, providerResult.CredentialResolvedProviders, usageResult.Logger, providerResult.Registry)
+	rcm, err := responsecache.NewResponseCacheMiddleware(appCfg.Cache.Response, providerResult.CredentialResolvedProviders, usageResult.Logger, pricingResolver)
 	if err != nil {
 		var (
-			workflowsCloseErr      error
-			guardrailsCloseErr     error
-			authKeysCloseErr       error
-			aliasCloseErr          error
-			modelOverridesCloseErr error
-			batchCloseErr          error
+			workflowsCloseErr        error
+			guardrailsCloseErr       error
+			authKeysCloseErr         error
+			aliasCloseErr            error
+			modelOverridesCloseErr   error
+			pricingOverridesCloseErr error
+			batchCloseErr            error
 		)
 		if app.workflows != nil {
 			workflowsCloseErr = app.workflows.Close()
@@ -469,10 +494,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		if app.modelOverrides != nil {
 			modelOverridesCloseErr = app.modelOverrides.Close()
 		}
+		if app.pricingOverrides != nil {
+			pricingOverridesCloseErr = app.pricingOverrides.Close()
+		}
 		if app.batch != nil {
 			batchCloseErr = app.batch.Close()
 		}
-		closeErr := errors.Join(workflowsCloseErr, guardrailsCloseErr, authKeysCloseErr, aliasCloseErr, modelOverridesCloseErr, batchCloseErr, app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(workflowsCloseErr, guardrailsCloseErr, authKeysCloseErr, aliasCloseErr, modelOverridesCloseErr, pricingOverridesCloseErr, batchCloseErr, app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to initialize response cache: %w (also: close error: %v)", err, closeErr)
 		}
@@ -487,18 +515,18 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		FallbackResolver:       serverCfg.FallbackResolver,
 		AuditLogger:            auditResult.Logger,
 		UsageLogger:            usageResult.Logger,
-		PricingResolver:        providerResult.Registry,
+		PricingResolver:        pricingResolver,
 		ResponseCache:          rcm,
 	})
 	if err := guardrailResult.Service.SetExecutor(ctx, internalGuardrailExecutor); err != nil {
-		closeErr := errors.Join(rcm.Close(), app.workflows.Close(), app.guardrails.Close(), app.authKeys.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(rcm.Close(), app.workflows.Close(), app.guardrails.Close(), app.authKeys.Close(), app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to wire internal guardrail executor: %w (also: close error: %v)", err, closeErr)
 		}
 		return nil, fmt.Errorf("failed to wire internal guardrail executor: %w", err)
 	}
 	if err := workflowResult.Service.Refresh(ctx); err != nil {
-		closeErr := errors.Join(rcm.Close(), app.workflows.Close(), app.guardrails.Close(), app.authKeys.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
+		closeErr := errors.Join(rcm.Close(), app.workflows.Close(), app.guardrails.Close(), app.authKeys.Close(), app.pricingOverrides.Close(), app.modelOverrides.Close(), app.aliases.Close(), app.batch.Close(), app.budgets.Close(), app.usage.Close(), app.audit.Close(), app.providers.Close())
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to refresh workflows after wiring internal guardrail executor: %w (also: close error: %v)", err, closeErr)
 		}
@@ -679,7 +707,15 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 6. Close reusable guardrails subsystem.
+	// 6. Close model pricing overrides subsystem.
+	if a.pricingOverrides != nil {
+		if err := a.pricingOverrides.Close(); err != nil {
+			slog.Error("model pricing overrides close error", "error", err)
+			errs = append(errs, fmt.Errorf("model pricing overrides close: %w", err))
+		}
+	}
+
+	// 7. Close reusable guardrails subsystem.
 	if a.guardrails != nil {
 		if err := a.guardrails.Close(); err != nil {
 			slog.Error("guardrails close error", "error", err)
@@ -687,7 +723,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 7. Close managed auth keys subsystem.
+	// 8. Close managed auth keys subsystem.
 	if a.authKeys != nil {
 		if err := a.authKeys.Close(); err != nil {
 			slog.Error("auth keys close error", "error", err)
@@ -695,7 +731,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 8. Close batch store (flushes pending entries)
+	// 9. Close batch store (flushes pending entries)
 	if a.batch != nil {
 		if err := a.batch.Close(); err != nil {
 			slog.Error("batch store close error", "error", err)
@@ -703,7 +739,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 9. Close budget subsystem.
+	// 10. Close budget subsystem.
 	if a.budgets != nil {
 		if err := a.budgets.Close(); err != nil {
 			slog.Error("budgets close error", "error", err)
@@ -797,6 +833,7 @@ func initAdmin(
 	authKeyService *authkeys.Service,
 	aliasService *aliases.Service,
 	modelOverrideService *modeloverrides.Service,
+	pricingOverrideService *pricingoverrides.Service,
 	workflowService *workflows.Service,
 	guardrailService *guardrails.Service,
 	budgetService *budget.Service,
@@ -849,10 +886,12 @@ func initAdmin(
 		registry,
 		admin.WithConfiguredProviders(configuredProviders),
 		admin.WithUsagePricingRecalculator(pricingRecalculator),
+		admin.WithPricingResolver(pricingOverrideService),
 		admin.WithAuditReader(auditReader),
 		admin.WithAuthKeys(authKeyService),
 		admin.WithAliases(aliasService),
 		admin.WithModelOverrides(modelOverrideService),
+		admin.WithPricingOverrides(pricingOverrideService),
 		admin.WithWorkflows(workflowService),
 		admin.WithGuardrailService(guardrailService),
 		admin.WithBudgets(budgetService),

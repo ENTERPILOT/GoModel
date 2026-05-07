@@ -76,7 +76,7 @@
 
                     <div class="form-field">
                         <label class="form-field-label" for="guardrail-type">Type</label>
-                        <select id="guardrail-type" class="usage-log-select settings-select" x-ref="guardrailTypeSelect" x-model="guardrailForm.type" x-effect="guardrailTypes.length; guardrailForm.type; $nextTick(() => syncGuardrailTypeSelectValue())" :disabled="guardrailFormMode === 'edit'" @change="onGuardrailTypeChange()">
+                        <select id="guardrail-type" class="form-select settings-select" x-ref="guardrailTypeSelect" x-model="guardrailForm.type" x-effect="guardrailTypes.length; guardrailForm.type; $nextTick(() => syncGuardrailTypeSelectValue())" :disabled="guardrailFormMode === 'edit'" @change="onGuardrailTypeChange()">
                             <template x-for="typeDef in guardrailTypes" :key="typeDef.type">
                                 <option :value="typeDef.type" x-text="typeDef.label"></option>
                             </template>
@@ -113,7 +113,7 @@
                                         <p :id="copyId" class="inline-help-copy" x-show="open && text" x-transition.opacity.duration.200ms x-text="text"></p>
                                     </div>
                                     <template x-if="field.input === 'select'">
-                                        <select class="usage-log-select settings-select" :id="'guardrail-field-' + field.key" :value="guardrailFieldValue(field)" :aria-describedby="field.help ? 'guardrail-field-help-' + field.key : null" @change="setGuardrailFieldValue(field, $event.target.value)">
+                                        <select class="form-select settings-select" :id="'guardrail-field-' + field.key" :value="guardrailFieldValue(field)" :aria-describedby="field.help ? 'guardrail-field-help-' + field.key : null" @change="setGuardrailFieldValue(field, $event.target.value)">
                                             <template x-for="option in field.options" :key="option.value">
                                                 <option :value="option.value" x-text="option.label"></option>
                                             </template>

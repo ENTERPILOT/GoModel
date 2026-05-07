@@ -815,6 +815,413 @@
         ]
       }
     },
+    "/admin/api/v1/model-overrides": {
+      "get": {
+        "description": "Lists persisted model access overrides by global, provider-wide, model-wide, or exact selector.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "List model access overrides",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/modeloverrides.View"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/model-overrides/{selector}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create or update one model access override",
+        "parameters": [
+          {
+            "description": "URL-encoded model selector such as /, openai/, gpt-4o-mini, or openai/gpt-4o-mini",
+            "name": "selector",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.upsertModelOverrideRequest"
+              }
+            }
+          },
+          "description": "Allowed user paths",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/modeloverrides.Override"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete one model access override",
+        "parameters": [
+          {
+            "description": "URL-encoded model selector",
+            "name": "selector",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/model-pricing-overrides": {
+      "get": {
+        "description": "Lists persisted USD pricing overrides. Selectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "List model pricing overrides",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/pricingoverrides.View"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/model-pricing-overrides/{selector}": {
+      "put": {
+        "description": "Stores USD-only pricing for one selector. More precise selectors override broader selectors at runtime.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create or update one model pricing override",
+        "parameters": [
+          {
+            "description": "URL-encoded pricing selector such as /, openai/, gpt-4o-mini, or openai/gpt-4o-mini",
+            "name": "selector",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.upsertModelPricingOverrideRequest"
+              }
+            }
+          },
+          "description": "Pricing override",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/pricingoverrides.View"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete one model pricing override",
+        "parameters": [
+          {
+            "description": "URL-encoded pricing selector",
+            "name": "selector",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/models": {
       "get": {
         "tags": [
@@ -4941,6 +5348,25 @@
           }
         }
       },
+      "admin.upsertModelOverrideRequest": {
+        "type": "object",
+        "properties": {
+          "user_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "admin.upsertModelPricingOverrideRequest": {
+        "type": "object",
+        "properties": {
+          "pricing": {
+            "$ref": "#/components/schemas/pricingoverrides.Pricing"
+          }
+        }
+      },
       "auditlog.ConversationResult": {
         "type": "object",
         "properties": {
@@ -5839,6 +6265,12 @@
           "pricing": {
             "$ref": "#/components/schemas/core.ModelPricing"
           },
+          "pricing_sources": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
           "rankings": {
             "type": "object",
             "additionalProperties": {
@@ -5925,6 +6357,9 @@
             "type": "number"
           },
           "up_to_mtok": {
+            "type": "number"
+          },
+          "up_to_tokens": {
             "type": "number"
           }
         }
@@ -6462,6 +6897,171 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "modeloverrides.ScopeKind": {
+        "type": "string",
+        "enum": [
+          "global",
+          "model",
+          "provider",
+          "provider_model"
+        ],
+        "x-enum-varnames": [
+          "ScopeGlobal",
+          "ScopeModel",
+          "ScopeProvider",
+          "ScopeProviderModel"
+        ]
+      },
+      "modeloverrides.View": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "scope_kind": {
+            "$ref": "#/components/schemas/modeloverrides.ScopeKind"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "user_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "pricingoverrides.Pricing": {
+        "type": "object",
+        "properties": {
+          "audio_input_per_mtok": {
+            "type": "number"
+          },
+          "audio_output_per_mtok": {
+            "type": "number"
+          },
+          "batch_input_per_mtok": {
+            "type": "number"
+          },
+          "batch_output_per_mtok": {
+            "type": "number"
+          },
+          "cache_write_per_mtok": {
+            "type": "number"
+          },
+          "cached_input_per_mtok": {
+            "type": "number"
+          },
+          "input_per_image": {
+            "type": "number"
+          },
+          "input_per_mtok": {
+            "type": "number"
+          },
+          "output_per_mtok": {
+            "type": "number"
+          },
+          "per_character_input": {
+            "type": "number"
+          },
+          "per_image": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          },
+          "per_request": {
+            "type": "number"
+          },
+          "per_second_input": {
+            "type": "number"
+          },
+          "per_second_output": {
+            "type": "number"
+          },
+          "reasoning_output_per_mtok": {
+            "type": "number"
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/pricingoverrides.PricingTier"
+            }
+          }
+        }
+      },
+      "pricingoverrides.PricingTier": {
+        "type": "object",
+        "properties": {
+          "input_per_mtok": {
+            "type": "number"
+          },
+          "output_per_mtok": {
+            "type": "number"
+          },
+          "up_to_mtok": {
+            "type": "number"
+          },
+          "up_to_tokens": {
+            "type": "number"
+          }
+        }
+      },
+      "pricingoverrides.ScopeKind": {
+        "type": "string",
+        "enum": [
+          "global",
+          "model",
+          "provider",
+          "provider_model",
+          "global",
+          "model",
+          "provider",
+          "provider_model"
+        ],
+        "x-enum-varnames": [
+          "ScopeGlobal",
+          "ScopeModel",
+          "ScopeProvider",
+          "ScopeProviderModel"
+        ]
+      },
+      "pricingoverrides.View": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "pricing": {
+            "$ref": "#/components/schemas/pricingoverrides.Pricing"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "scope_kind": {
+            "$ref": "#/components/schemas/pricingoverrides.ScopeKind"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
           }
         }
       },

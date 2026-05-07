@@ -15,6 +15,7 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/modeloverrides"
+	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/workflows"
 )
 
@@ -59,6 +60,16 @@ func modelOverrideWriteError(err error) error {
 		return core.NewInvalidRequestError(err.Error(), err)
 	}
 	return core.NewProviderError("model_overrides", http.StatusBadGateway, err.Error(), err)
+}
+
+func pricingOverrideWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if pricingoverrides.IsValidationError(err) {
+		return core.NewInvalidRequestError(err.Error(), err)
+	}
+	return core.NewProviderError("model_pricing_overrides", http.StatusBadGateway, err.Error(), err)
 }
 
 func deactivateByID(
@@ -136,6 +147,25 @@ func decodeModelOverridePathSelector(raw string) (string, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
 		return "", core.NewInvalidRequestError("model override selector is required", nil)
+	}
+	return selector, nil
+}
+
+// modelPricingOverrideSelectorMaxLen caps decoded selectors to a sane size; provider
+// IDs and model IDs are short identifiers, never essays.
+const modelPricingOverrideSelectorMaxLen = 256
+
+func decodeModelPricingOverridePathSelector(raw string) (string, error) {
+	selector, err := url.PathUnescape(strings.TrimSpace(raw))
+	if err != nil {
+		return "", core.NewInvalidRequestError("invalid model pricing override selector", err)
+	}
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return "", core.NewInvalidRequestError("model pricing override selector is required", nil)
+	}
+	if len(selector) > modelPricingOverrideSelectorMaxLen {
+		return "", core.NewInvalidRequestError("model pricing override selector is too long", nil)
 	}
 	return selector, nil
 }

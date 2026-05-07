@@ -2,10 +2,10 @@ package modeloverrides
 
 import (
 	"sort"
-	"strings"
 	"time"
 
 	"gomodel/internal/core"
+	"gomodel/internal/modelselectors"
 )
 
 // Override stores one persisted access-policy override for a model selector.
@@ -32,24 +32,15 @@ type Override struct {
 type ScopeKind string
 
 const (
-	ScopeGlobal        ScopeKind = "global"
-	ScopeModel         ScopeKind = "model"
-	ScopeProvider      ScopeKind = "provider"
-	ScopeProviderModel ScopeKind = "provider_model"
+	ScopeGlobal        ScopeKind = ScopeKind(modelselectors.ScopeGlobal)
+	ScopeModel         ScopeKind = ScopeKind(modelselectors.ScopeModel)
+	ScopeProvider      ScopeKind = ScopeKind(modelselectors.ScopeProvider)
+	ScopeProviderModel ScopeKind = ScopeKind(modelselectors.ScopeProviderModel)
 )
 
 // ScopeKind reports the normalized selector scope for one override.
 func (o Override) ScopeKind() ScopeKind {
-	switch {
-	case isGlobalSelector(o.Selector):
-		return ScopeGlobal
-	case strings.TrimSpace(o.ProviderName) != "" && strings.TrimSpace(o.Model) != "":
-		return ScopeProviderModel
-	case strings.TrimSpace(o.ProviderName) != "":
-		return ScopeProvider
-	default:
-		return ScopeModel
-	}
+	return ScopeKind(modelselectors.ScopeKindFor(o.Selector, o.ProviderName, o.Model))
 }
 
 // View is the admin-facing representation of one persisted override.
@@ -74,14 +65,14 @@ type Catalog interface {
 }
 
 func normalizeOverrideInput(catalog Catalog, override Override) (Override, error) {
-	selector, providerName, model, err := normalizeSelectorInput(selectorProviderNames(catalog), override.Selector)
+	parts, err := modelselectors.NormalizeInput(catalog, override.Selector)
 	if err != nil {
 		return Override{}, err
 	}
 
-	override.Selector = selector
-	override.ProviderName = providerName
-	override.Model = model
+	override.Selector = parts.Selector
+	override.ProviderName = parts.ProviderName
+	override.Model = parts.Model
 
 	paths, err := normalizeUserPaths(override.UserPaths)
 	if err != nil {
@@ -95,28 +86,13 @@ func normalizeOverrideInput(catalog Catalog, override Override) (Override, error
 }
 
 func normalizeStoredOverride(override Override) (Override, error) {
-	override.Selector = strings.TrimSpace(override.Selector)
-	override.ProviderName = strings.TrimSpace(override.ProviderName)
-	override.Model = strings.TrimSpace(override.Model)
-	globalSelector := isGlobalSelector(override.Selector)
-
-	if override.Selector == "" {
-		override.Selector = selectorString(override.ProviderName, override.Model)
+	parts, err := modelselectors.NormalizeStored(override.Selector, override.ProviderName, override.Model)
+	if err != nil {
+		return Override{}, err
 	}
-	if override.Selector == "" {
-		return Override{}, newValidationError("selector is required", nil)
-	}
-	if override.ProviderName == "" && override.Model == "" && !globalSelector {
-		providerName, model := parseStoredSelectorParts(override.Selector)
-		override.ProviderName = providerName
-		override.Model = model
-	}
-	if override.ProviderName == "" && override.Model == "" && !isGlobalSelector(override.Selector) {
-		return Override{}, newValidationError("selector is required", nil)
-	}
-	if normalized := selectorString(override.ProviderName, override.Model); normalized != "" {
-		override.Selector = normalized
-	}
+	override.Selector = parts.Selector
+	override.ProviderName = parts.ProviderName
+	override.Model = parts.Model
 
 	paths, err := normalizeUserPaths(override.UserPaths)
 	if err != nil {
@@ -130,50 +106,15 @@ func normalizeStoredOverride(override Override) (Override, error) {
 }
 
 func normalizeSelectorInput(providerNames []string, raw string) (selector, providerName, model string, err error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", "", "", newValidationError("selector is required", nil)
+	parts, err := modelselectors.NormalizeInputWithProviderNames(providerNames, raw)
+	if err != nil {
+		return "", "", "", err
 	}
-	if isGlobalSelector(raw) {
-		return "/", "", "", nil
-	}
-
-	providerNameSet := make(map[string]struct{}, len(providerNames))
-	for _, name := range providerNames {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		providerNameSet[name] = struct{}{}
-	}
-
-	if prefix, rest, ok := splitFirst(raw); ok {
-		if _, exists := providerNameSet[prefix]; exists {
-			providerName = prefix
-			model = rest
-		} else {
-			model = raw
-		}
-	} else {
-		model = raw
-	}
-
-	if providerName == "" && model == "" {
-		return "", "", "", newValidationError("selector is required", nil)
-	}
-	if providerName != "" {
-		if _, exists := providerNameSet[providerName]; !exists {
-			return "", "", "", newValidationError("unknown provider_name: "+providerName, nil)
-		}
-	}
-	return selectorString(providerName, model), providerName, model, nil
+	return parts.Selector, parts.ProviderName, parts.Model, nil
 }
 
 func selectorProviderNames(catalog Catalog) []string {
-	if catalog == nil {
-		return nil
-	}
-	return append([]string(nil), catalog.ProviderNames()...)
+	return modelselectors.ProviderNames(catalog)
 }
 
 func normalizeUserPaths(paths []string) ([]string, error) {
@@ -205,59 +146,5 @@ func normalizeUserPaths(paths []string) ([]string, error) {
 }
 
 func selectorString(providerName, model string) string {
-	providerName = strings.TrimSpace(providerName)
-	model = strings.TrimSpace(model)
-	switch {
-	case providerName != "" && model != "":
-		return providerName + "/" + model
-	case providerName != "":
-		return providerName + "/"
-	case model != "":
-		return model
-	default:
-		return ""
-	}
-}
-
-func isGlobalSelector(selector string) bool {
-	return strings.TrimSpace(selector) == "/"
-}
-
-func exactMatchKey(providerName, model string) string {
-	providerName = strings.TrimSpace(providerName)
-	model = strings.TrimSpace(model)
-	if providerName == "" || model == "" {
-		return ""
-	}
-	return providerName + "/" + model
-}
-
-func splitFirst(value string) (prefix, rest string, ok bool) {
-	parts := strings.SplitN(strings.TrimSpace(value), "/", 2)
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	prefix = strings.TrimSpace(parts[0])
-	rest = strings.TrimSpace(parts[1])
-	if prefix == "" {
-		return "", "", false
-	}
-	return prefix, rest, true
-}
-
-func parseStoredSelectorParts(selector string) (providerName, model string) {
-	selector = strings.TrimSpace(selector)
-	if selector == "" {
-		return "", ""
-	}
-	if isGlobalSelector(selector) {
-		return "", ""
-	}
-	if strings.HasSuffix(selector, "/") {
-		return strings.TrimSpace(strings.TrimSuffix(selector, "/")), ""
-	}
-	if providerName, model, ok := splitFirst(selector); ok {
-		return providerName, model
-	}
-	return "", selector
+	return modelselectors.String(providerName, model)
 }

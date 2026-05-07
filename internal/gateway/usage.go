@@ -29,13 +29,20 @@ func (o *InferenceOrchestrator) logUsage(
 	}
 	var pricing *core.ModelPricing
 	if o.pricingResolver != nil {
-		pricing = o.pricingResolver.ResolvePricing(model, providerType)
+		pricing = o.pricingResolver.ResolvePricing(model, effectivePricingProvider(providerType, providerName))
 	}
 	if entry := extractFn(pricing); entry != nil {
 		entry.ProviderName = strings.TrimSpace(providerName)
 		entry.UserPath = core.UserPathFromContext(ctx)
 		o.usageLogger.Write(entry)
 	}
+}
+
+func effectivePricingProvider(providerType, providerName string) string {
+	if name := strings.TrimSpace(providerName); name != "" {
+		return name
+	}
+	return strings.TrimSpace(providerType)
 }
 
 // ShouldEnforceReturningUsageData reports whether streams should request usage chunks.

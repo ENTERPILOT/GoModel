@@ -214,6 +214,7 @@ func buildMetadata(model *ModelEntry, pm *ProviderModelEntry) *core.ModelMetadat
 		meta.Capabilities = model.Capabilities
 		meta.Rankings = buildRankings(model.Rankings)
 		meta.Pricing = model.Pricing
+		meta.PricingSources = model.Pricing.FieldSources(core.ModelPricingSourceModelRegistry)
 	}
 
 	// Apply provider_model overrides (non-nil fields win)
@@ -226,6 +227,7 @@ func buildMetadata(model *ModelEntry, pm *ProviderModelEntry) *core.ModelMetadat
 		}
 		if pm.Pricing != nil {
 			meta.Pricing = pm.Pricing
+			meta.PricingSources = pm.Pricing.FieldSources(core.ModelPricingSourceModelRegistry)
 		}
 		if pm.Capabilities != nil {
 			meta.Capabilities = pm.Capabilities

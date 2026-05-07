@@ -1118,6 +1118,51 @@ test("alias rows use a shared icon-only edit action", () => {
   assert.match(editIconTemplate, /{{define "edit-icon"}}/);
 });
 
+test("pricing action buttons use inline dollar icons that survive table remounts", () => {
+  const pageModelsTemplate = readFixture("../../../templates/page-models.html");
+  const modelTableTemplate = readFixture(
+    "../../../templates/model-table-body.html",
+  );
+  const dollarIconTemplate = readFixture("../../../templates/dollar-icon.html");
+
+  assert.match(dollarIconTemplate, /{{define "dollar-icon"}}/);
+  assert.match(dollarIconTemplate, /<circle cx="12" cy="12" r="10"><\/circle>/);
+  assert.match(pageModelsTemplate, /modelPricingButtonLabel\('global model pricing'[\s\S]*{{template "dollar-icon"}}/);
+  assert.match(modelTableTemplate, /modelPricingButtonLabel\('provider pricing for ' \+ group\.display_name[\s\S]*{{template "dollar-icon"}}/);
+  assert.match(modelTableTemplate, /modelPricingButtonLabel\('model pricing for ' \+ row\.display_name[\s\S]*{{template "dollar-icon"}}/);
+  assert.doesNotMatch(pageModelsTemplate, /data-lucide="circle-dollar-sign"/);
+  assert.doesNotMatch(modelTableTemplate, /data-lucide="circle-dollar-sign"/);
+});
+
+test("pricing override dropdowns use the shared form select style", () => {
+  const indexTemplate = readDashboardTemplateSource();
+  const css = readFixture("../../css/dashboard.css");
+
+  assert.match(
+    indexTemplate,
+    /<select id="model-pricing-override-scope" class="form-select"[\s\S]*x-model="modelPricingOverrideFormScope"/,
+  );
+  assert.match(
+    indexTemplate,
+    /<select class="form-select" x-model="row\.field" data-modal-autofocus>/,
+  );
+  assert.match(
+    indexTemplate,
+    /<div class="pricing-preview-header">[\s\S]*<span>Price Type<\/span>[\s\S]*<span>USD<\/span>[\s\S]*<span>Source<\/span>/,
+  );
+
+  assert.match(css, /\.form-select,\s*\.usage-log-select\s*\{/);
+
+  const sharedSelectRule = readCSSRule(css, ".usage-log-select");
+  assert.match(sharedSelectRule, /appearance:\s*none/);
+  assert.match(sharedSelectRule, /padding:\s*8px 34px 8px 12px/);
+  assert.match(sharedSelectRule, /background-image:[\s\S]*currentcolor/);
+
+  const formSelectRule = readCSSRule(css, ".form-select");
+  assert.match(formSelectRule, /width:\s*100%/);
+  assert.match(formSelectRule, /min-width:\s*0/);
+});
+
 test("mobile modal editor headers keep the close action beside the title", () => {
   const indexTemplate = readDashboardTemplateSource();
   const css = readFixture("../../css/dashboard.css");

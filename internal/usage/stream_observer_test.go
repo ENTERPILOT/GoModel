@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"gomodel/internal/core"
 	"gomodel/internal/streaming"
 )
 
@@ -37,6 +38,18 @@ func (l *trackingLogger) getEntries() []*UsageEntry {
 	result := make([]*UsageEntry, len(l.entries))
 	copy(result, l.entries)
 	return result
+}
+
+type streamPricingCaptureResolver struct {
+	model    string
+	provider string
+	pricing  *core.ModelPricing
+}
+
+func (r *streamPricingCaptureResolver) ResolvePricing(model, provider string) *core.ModelPricing {
+	r.model = model
+	r.provider = provider
+	return r.pricing
 }
 
 func TestStreamUsageObserverChatCompletionStream(t *testing.T) {
@@ -83,6 +96,47 @@ data: [DONE]
 	}
 	if entry.Model != "gpt-4" {
 		t.Errorf("Model = %s, want gpt-4", entry.Model)
+	}
+}
+
+func TestStreamUsageObserverPricesRequestedModelWhenEventModelIsVersioned(t *testing.T) {
+	zero := 0.0
+	perRequest := 0.033333
+	resolver := &streamPricingCaptureResolver{pricing: &core.ModelPricing{
+		InputPerMtok:  &zero,
+		OutputPerMtok: &zero,
+		PerRequest:    &perRequest,
+	}}
+	logger := &trackingLogger{enabled: true}
+	observer := NewStreamUsageObserver(logger, "gpt-4o-mini", "openai", "req-stream", "/v1/chat/completions", resolver)
+	observer.SetProviderName("openai")
+	observer.OnJSONEvent(map[string]any{
+		"id":    "chatcmpl-stream",
+		"model": "gpt-4o-mini-2024-07-18",
+		"usage": map[string]any{
+			"prompt_tokens":     float64(12),
+			"completion_tokens": float64(1),
+			"total_tokens":      float64(13),
+		},
+	})
+	observer.OnStreamClose()
+
+	if resolver.model != "gpt-4o-mini" {
+		t.Fatalf("pricing model = %q, want gpt-4o-mini", resolver.model)
+	}
+	if resolver.provider != "openai" {
+		t.Fatalf("pricing provider = %q, want openai", resolver.provider)
+	}
+	entries := logger.getEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.Model != "gpt-4o-mini-2024-07-18" {
+		t.Fatalf("usage model = %q, want provider event model", entry.Model)
+	}
+	if entry.TotalCost == nil || math.Abs(*entry.TotalCost-perRequest) > 0.0000001 {
+		t.Fatalf("total cost = %v, want %f", entry.TotalCost, perRequest)
 	}
 }
 

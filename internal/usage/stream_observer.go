@@ -136,7 +136,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 
 	var pricingArgs []*core.ModelPricing
 	if o.pricingResolver != nil {
-		if p := o.pricingResolver.ResolvePricing(model, o.provider); p != nil {
+		if p := o.pricingResolver.ResolvePricing(o.pricingModel(model), o.pricingProvider()); p != nil {
 			pricingArgs = append(pricingArgs, p)
 		}
 	}
@@ -153,6 +153,26 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 		entry.UserPath = o.userPath
 	}
 	return entry
+}
+
+func (o *StreamUsageObserver) pricingModel(responseModel string) string {
+	if o == nil {
+		return strings.TrimSpace(responseModel)
+	}
+	if model := strings.TrimSpace(o.model); model != "" {
+		return model
+	}
+	return strings.TrimSpace(responseModel)
+}
+
+func (o *StreamUsageObserver) pricingProvider() string {
+	if o == nil {
+		return ""
+	}
+	if providerName := strings.TrimSpace(o.providerName); providerName != "" {
+		return providerName
+	}
+	return strings.TrimSpace(o.provider)
 }
 
 func copyExtendedUsageFields(rawData map[string]any, usageMap map[string]any) {
