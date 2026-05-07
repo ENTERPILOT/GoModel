@@ -831,7 +831,9 @@
                   "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/modeloverrides.View"
-                  }
+                  },
+                  "maxItems": 10000,
+                  "description": "Bounded by maxItems=10000."
                 }
               }
             }
@@ -1034,7 +1036,9 @@
                   "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/pricingoverrides.View"
-                  }
+                  },
+                  "maxItems": 10000,
+                  "description": "Bounded by maxItems=10000."
                 }
               }
             }
@@ -5361,6 +5365,9 @@
       },
       "admin.upsertModelPricingOverrideRequest": {
         "type": "object",
+        "required": [
+          "pricing"
+        ],
         "properties": {
           "pricing": {
             "$ref": "#/components/schemas/pricingoverrides.Pricing"
@@ -7023,10 +7030,6 @@
       "pricingoverrides.ScopeKind": {
         "type": "string",
         "enum": [
-          "global",
-          "model",
-          "provider",
-          "provider_model",
           "global",
           "model",
           "provider",

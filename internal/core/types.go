@@ -260,11 +260,15 @@ type ModelPricing struct {
 }
 
 const (
+	// ModelPricingSourceModelRegistry identifies pricing data from the model registry.
 	ModelPricingSourceModelRegistry = "model_registry"
-	ModelPricingSourceConfigYAML    = "config_yaml"
+	// ModelPricingSourceConfigYAML identifies pricing data from config.yaml.
+	ModelPricingSourceConfigYAML = "config_yaml"
 )
 
-// FieldSources returns a field-name keyed source map for non-empty pricing fields.
+// FieldSources returns non-empty pricing field names mapped to source.
+// Callers should pass a non-empty source string. Tiered pricing is reported as
+// the coarse "tiers" key rather than per-tier entries.
 func (p *ModelPricing) FieldSources(source string) map[string]string {
 	if p == nil || source == "" {
 		return nil

@@ -138,16 +138,36 @@ function applyArrayMaxItems(operationPath, method, statusCode, maxItems) {
   }
 }
 
+function applyStringEnum(schemaName, values, varnames) {
+  const target = schema(schemaName);
+  target.type = "string";
+  target.enum = values;
+  if (varnames) {
+    target["x-enum-varnames"] = varnames;
+  }
+}
+
 spec.servers = parseServers(process.env.DOCS_API_SERVERS);
 ensureResponsesInputElementSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
+ensureRequiredProperty("admin.upsertModelPricingOverrideRequest", "pricing");
 
 // Bound the registry-backed admin model listing so OpenAPI consumers (and
 // security scanners like CKV_OPENAPI_21) see an explicit upper limit. The
 // runtime registry is bounded by configured providers and the backing
 // model list; 10000 leaves substantial headroom for that worst case.
 applyArrayMaxItems("/admin/api/v1/models", "get", "200", 10000);
+applyArrayMaxItems("/admin/api/v1/model-overrides", "get", "200", 10000);
+applyArrayMaxItems("/admin/api/v1/model-pricing-overrides", "get", "200", 10000);
+
+for (const name of ["modeloverrides.ScopeKind", "pricingoverrides.ScopeKind"]) {
+  applyStringEnum(
+    name,
+    ["global", "model", "provider", "provider_model"],
+    ["ScopeGlobal", "ScopeModel", "ScopeProvider", "ScopeProviderModel"],
+  );
+}
 
 for (const name of [
   "core.ResponsesRequest",

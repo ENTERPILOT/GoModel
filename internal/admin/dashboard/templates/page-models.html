@@ -226,16 +226,16 @@
                     <template x-for="row in modelPricingOverrideRows" :key="row.id">
                         <div class="pricing-override-row">
                             <div class="form-field pricing-override-type-field">
-                                <label class="form-field-label">Price Type</label>
-                                <select class="form-select" x-model="row.field" data-modal-autofocus>
+                                <label class="form-field-label" :for="'pricing-type-' + row.id">Price Type</label>
+                                <select :id="'pricing-type-' + row.id" class="form-select" x-model="row.field" data-modal-autofocus>
                                     <template x-for="option in availablePricingFieldOptions(row)" :key="option.value">
                                         <option :value="option.value" x-text="option.group + ' - ' + option.label"></option>
                                     </template>
                                 </select>
                             </div>
                             <div class="form-field pricing-override-value-field">
-                                <label class="form-field-label">USD Value</label>
-                                <input type="number" step="any" min="0" inputmode="decimal" x-model="row.value">
+                                <label class="form-field-label" :for="'pricing-value-' + row.id">USD Value</label>
+                                <input :id="'pricing-value-' + row.id" type="number" step="any" min="0" inputmode="decimal" x-model="row.value">
                             </div>
                             <button type="button"
                                     class="table-action-btn table-action-btn-danger table-icon-btn pricing-override-remove-row"

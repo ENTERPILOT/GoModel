@@ -11,13 +11,14 @@ func (s *Service) ResolvePricing(model, providerName string) *core.ModelPricing 
 	if s == nil {
 		return nil
 	}
+	providerName = strings.TrimSpace(providerName)
+	model = modelIDFromSelector(model, providerName)
+
 	var basePricing *core.ModelPricing
 	if s.base != nil {
 		basePricing = s.base.ResolvePricing(model, providerName)
 	}
 
-	providerName = strings.TrimSpace(providerName)
-	model = modelIDFromSelector(model, providerName)
 	if rule, ok := s.snapshot().matchingOverride(providerName, model); ok {
 		return mergePricing(basePricing, rule.override.Pricing)
 	}

@@ -185,6 +185,59 @@ func TestResolvePricingPrefersProviderSpecificMetadata(t *testing.T) {
 	}
 }
 
+func TestApplyConfigMetadataOverrides_MergesPricingSourcesPerField(t *testing.T) {
+	baseInput := 1.0
+	baseOutput := 2.0
+	configInput := 3.0
+	existing := &ModelInfo{
+		Model: core.Model{
+			ID: "priced-model",
+			Metadata: &core.ModelMetadata{
+				Pricing: &core.ModelPricing{
+					Currency:      "USD",
+					InputPerMtok:  &baseInput,
+					OutputPerMtok: &baseOutput,
+				},
+				PricingSources: map[string]string{
+					"input_per_mtok":  core.ModelPricingSourceModelRegistry,
+					"output_per_mtok": core.ModelPricingSourceModelRegistry,
+				},
+			},
+		},
+		ProviderName: "openai-main",
+		ProviderType: "openai",
+	}
+	modelsByProvider := map[string]map[string]*ModelInfo{
+		"openai-main": {"priced-model": existing},
+	}
+	overrides := map[string]map[string]*core.ModelMetadata{
+		"openai-main": {
+			"priced-model": {
+				Pricing: &core.ModelPricing{InputPerMtok: &configInput},
+			},
+		},
+	}
+
+	applied := applyConfigMetadataOverrides(overrides, modelsByProvider, nil)
+	if applied != 1 {
+		t.Fatalf("applied = %d, want 1", applied)
+	}
+
+	metadata := existing.Model.Metadata
+	if metadata.Pricing == nil || metadata.Pricing.InputPerMtok == nil || *metadata.Pricing.InputPerMtok != configInput {
+		t.Fatalf("InputPerMtok = %#v, want config override %v", metadata.Pricing, configInput)
+	}
+	if metadata.Pricing.OutputPerMtok == nil || *metadata.Pricing.OutputPerMtok != baseOutput {
+		t.Fatalf("OutputPerMtok = %#v, want registry value %v", metadata.Pricing.OutputPerMtok, baseOutput)
+	}
+	if got := metadata.PricingSources["input_per_mtok"]; got != core.ModelPricingSourceConfigYAML {
+		t.Errorf("PricingSources[input_per_mtok] = %q, want %q", got, core.ModelPricingSourceConfigYAML)
+	}
+	if got := metadata.PricingSources["output_per_mtok"]; got != core.ModelPricingSourceModelRegistry {
+		t.Errorf("PricingSources[output_per_mtok] = %q, want %q", got, core.ModelPricingSourceModelRegistry)
+	}
+}
+
 // TestApplyConfigMetadataOverrides_NoOpPreservesPointerIdentity verifies that
 // an override whose fields already match the current metadata does not
 // replace the ModelInfo pointer — a concurrent reader that captured the

@@ -12,7 +12,7 @@ import (
 )
 
 type upsertModelPricingOverrideRequest struct {
-	Pricing pricingoverrides.Pricing `json:"pricing"`
+	Pricing pricingoverrides.Pricing `json:"pricing" binding:"required"`
 }
 
 // ListModelPricingOverrides handles GET /admin/api/v1/model-pricing-overrides.

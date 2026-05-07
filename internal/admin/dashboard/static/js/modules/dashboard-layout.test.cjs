@@ -1144,7 +1144,11 @@ test("pricing override dropdowns use the shared form select style", () => {
   );
   assert.match(
     indexTemplate,
-    /<select class="form-select" x-model="row\.field" data-modal-autofocus>/,
+    /<label class="form-field-label" :for="'pricing-type-' \+ row\.id">Price Type<\/label>\s*<select :id="'pricing-type-' \+ row\.id" class="form-select" x-model="row\.field" data-modal-autofocus>/,
+  );
+  assert.match(
+    indexTemplate,
+    /<label class="form-field-label" :for="'pricing-value-' \+ row\.id">USD Value<\/label>\s*<input :id="'pricing-value-' \+ row\.id" type="number" step="any" min="0" inputmode="decimal" x-model="row\.value">/,
   );
   assert.match(
     indexTemplate,

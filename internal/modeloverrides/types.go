@@ -31,13 +31,6 @@ type Override struct {
 // ScopeKind identifies how broadly an override applies.
 type ScopeKind = modelselectors.ScopeKind
 
-const (
-	ScopeGlobal        = modelselectors.ScopeGlobal
-	ScopeModel         = modelselectors.ScopeModel
-	ScopeProvider      = modelselectors.ScopeProvider
-	ScopeProviderModel = modelselectors.ScopeProviderModel
-)
-
 // ScopeKind reports the normalized selector scope for one override.
 func (o Override) ScopeKind() ScopeKind {
 	return modelselectors.ScopeKindFor(o.Selector, o.ProviderName, o.Model)

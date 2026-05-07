@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"gomodel/internal/modelselectors"
 	"gomodel/internal/pricingoverrides"
 )
 
@@ -85,8 +86,8 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 	if body.Selector != "openai/gpt-4o" || body.ProviderName != "openai" || body.Model != "gpt-4o" {
 		t.Fatalf("body selector parts = (%q, %q, %q), want openai/gpt-4o parts", body.Selector, body.ProviderName, body.Model)
 	}
-	if body.ScopeKind != pricingoverrides.ScopeProviderModel {
-		t.Fatalf("ScopeKind = %q, want %q", body.ScopeKind, pricingoverrides.ScopeProviderModel)
+	if body.ScopeKind != modelselectors.ScopeProviderModel {
+		t.Fatalf("ScopeKind = %q, want %q", body.ScopeKind, modelselectors.ScopeProviderModel)
 	}
 	if body.Pricing.InputPerMtok == nil || *body.Pricing.InputPerMtok != 1.25 {
 		t.Fatalf("InputPerMtok = %#v, want 1.25", body.Pricing.InputPerMtok)
@@ -100,6 +101,19 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 	}
 	if listRec.Code != http.StatusOK {
 		t.Fatalf("list status = %d, want 200", listRec.Code)
+	}
+	var listBody []pricingoverrides.View
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listBody); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listBody) != 1 {
+		t.Fatalf("list length = %d, want 1: %+v", len(listBody), listBody)
+	}
+	if listBody[0].Selector != "openai/gpt-4o" || listBody[0].ProviderName != "openai" || listBody[0].Model != "gpt-4o" {
+		t.Fatalf("list[0] selector parts = (%q, %q, %q), want openai/gpt-4o parts", listBody[0].Selector, listBody[0].ProviderName, listBody[0].Model)
+	}
+	if listBody[0].Pricing.InputPerMtok == nil || *listBody[0].Pricing.InputPerMtok != 1.25 {
+		t.Fatalf("list[0].InputPerMtok = %#v, want 1.25", listBody[0].Pricing.InputPerMtok)
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-pricing-overrides/openai%2Fgpt-4o", nil)

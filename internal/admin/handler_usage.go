@@ -237,7 +237,7 @@ func (h *Handler) RecalculateUsagePricing(c *echo.Context) error {
 	if h.usageRecalculator == nil {
 		return handleError(c, featureUnavailableError("usage pricing recalculation is unavailable"))
 	}
-	if h.registry == nil {
+	if h.pricingResolver == nil {
 		return handleError(c, featureUnavailableError("model pricing metadata is unavailable"))
 	}
 

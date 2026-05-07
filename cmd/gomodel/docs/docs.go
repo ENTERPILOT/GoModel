@@ -3792,6 +3792,9 @@ const docTemplate = `{
         },
         "admin.upsertModelPricingOverrideRequest": {
             "type": "object",
+            "required": [
+                "pricing"
+            ],
             "properties": {
                 "pricing": {
                     "$ref": "#/definitions/pricingoverrides.Pricing"
@@ -5421,10 +5424,6 @@ const docTemplate = `{
         "pricingoverrides.ScopeKind": {
             "type": "string",
             "enum": [
-                "global",
-                "model",
-                "provider",
-                "provider_model",
                 "global",
                 "model",
                 "provider",

@@ -154,6 +154,9 @@ func TestResolve_ProviderModelOverride(t *testing.T) {
 	if got := meta.PricingSources["input_per_mtok"]; got != core.ModelPricingSourceModelRegistry {
 		t.Errorf("PricingSources[input_per_mtok] = %q, want %q", got, core.ModelPricingSourceModelRegistry)
 	}
+	if got := meta.PricingSources["output_per_mtok"]; got != core.ModelPricingSourceModelRegistry {
+		t.Errorf("PricingSources[output_per_mtok] = %q, want %q", got, core.ModelPricingSourceModelRegistry)
+	}
 	// DisplayName from base model
 	if meta.DisplayName != "GPT-4o" {
 		t.Errorf("DisplayName = %s, want GPT-4o (base)", meta.DisplayName)

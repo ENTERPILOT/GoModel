@@ -133,12 +133,12 @@ func (s *Service) buildSnapshot(overrides []Override) (snapshot, error) {
 
 		compiled := compiledOverride{override: normalized}
 		switch normalized.ScopeKind() {
-		case ScopeGlobal:
+		case modelselectors.ScopeGlobal:
 			next.global = compiled
 			next.hasGlobal = true
-		case ScopeProviderModel:
+		case modelselectors.ScopeProviderModel:
 			next.exact[modelselectors.ExactMatchKey(normalized.ProviderName, normalized.Model)] = compiled
-		case ScopeProvider:
+		case modelselectors.ScopeProvider:
 			next.providerWide[normalized.ProviderName] = compiled
 		default:
 			next.modelWide[normalized.Model] = compiled
