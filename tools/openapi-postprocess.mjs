@@ -170,11 +170,27 @@ function applyPricingSchemaConstraints() {
   }
 }
 
+function applyBudgetKeySchemaConstraints() {
+  const target = schema("admin.budgetKeyRequest");
+  if (!target.properties?.period || !target.properties?.period_seconds) {
+    throw new Error("missing budget key period properties");
+  }
+  target.oneOf = [{ required: ["period"] }, { required: ["period_seconds"] }];
+}
+
 spec.servers = parseServers(process.env.DOCS_API_SERVERS);
 ensureResponsesInputElementSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
+ensureRequiredProperty("admin.upsertBudgetRequest", "amount");
+ensureRequiredProperty("admin.upsertBudgetRequest", "budget_key");
+ensureRequiredProperty("admin.deleteBudgetRequest", "budget_key");
+ensureRequiredProperty("admin.upsertModelOverrideRequest", "selector");
+ensureRequiredProperty("admin.deleteModelOverrideRequest", "selector");
+ensureRequiredProperty("admin.upsertModelPricingOverrideRequest", "selector");
 ensureRequiredProperty("admin.upsertModelPricingOverrideRequest", "pricing");
+ensureRequiredProperty("admin.deleteModelPricingOverrideRequest", "selector");
+applyBudgetKeySchemaConstraints();
 applyStringArrayPropertyBounds("admin.upsertModelOverrideRequest", "user_paths", 100, 1024);
 applyPricingSchemaConstraints();
 

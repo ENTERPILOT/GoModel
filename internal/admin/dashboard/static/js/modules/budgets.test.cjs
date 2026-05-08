@@ -213,7 +213,9 @@ test('confirmBudgetOverride saves the pending create after confirmation', async 
     assert.equal(requests[0].request.method, 'PUT');
     assert.equal(requests[0].request.body, JSON.stringify({
         user_path: '/team',
-        period_seconds: 86400,
+        budget_key: {
+            period_seconds: 86400
+        },
         amount: 12.5
     }));
     assert.equal(requests[1].url, '/admin/api/v1/budgets');
@@ -344,7 +346,9 @@ test('deleteBudget sends the selected budget key in the body and refreshes from 
     assert.equal(requests[0].request.method, 'DELETE');
     assert.equal(requests[0].request.body, JSON.stringify({
         user_path: '/team',
-        period_seconds: 86400
+        budget_key: {
+            period_seconds: 86400
+        }
     }));
     assert.equal(module.budgetDeletingKey, '');
     assert.equal(module.budgetNotice, 'Budget deleted.');

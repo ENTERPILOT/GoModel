@@ -165,7 +165,7 @@ func TestBudgetEndpointsUpsertAndResetOneBudget(t *testing.T) {
 	upsertReq := httptest.NewRequest(
 		http.MethodPut,
 		"/admin/api/v1/budgets",
-		strings.NewReader(`{"user_path":"/team/beta","period":"weekly","amount":12.5}`),
+		strings.NewReader(`{"user_path":"/team/beta","budget_key":{"period":"weekly"},"amount":12.5}`),
 	)
 	upsertReq.Header.Set("Content-Type", "application/json")
 	upsertRec := httptest.NewRecorder()
@@ -210,7 +210,7 @@ func TestBudgetEndpointsUpsertMarksConfigBudgetManual(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPut,
 		"/admin/api/v1/budgets",
-		strings.NewReader(`{"user_path":"/team","period":"daily","amount":12.5}`),
+		strings.NewReader(`{"user_path":"/team","budget_key":{"period":"daily"},"amount":12.5}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -237,7 +237,7 @@ func TestBudgetEndpointsUpsertAcceptsNumericPeriodString(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPut,
 		"/admin/api/v1/budgets",
-		strings.NewReader(`{"user_path":"/team","period":"604800","amount":12.5}`),
+		strings.NewReader(`{"user_path":"/team","budget_key":{"period":"604800"},"amount":12.5}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -254,6 +254,54 @@ func TestBudgetEndpointsUpsertAcceptsNumericPeriodString(t *testing.T) {
 	}
 }
 
+func TestBudgetEndpointsRejectInvalidBudgetKey(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		run  func(*Handler, *echo.Context) error
+	}{
+		{
+			name: "missing budget key",
+			body: `{"user_path":"/team","amount":12.5}`,
+			run:  (*Handler).UpsertBudget,
+		},
+		{
+			name: "empty budget key",
+			body: `{"user_path":"/team","budget_key":{},"amount":12.5}`,
+			run:  (*Handler).UpsertBudget,
+		},
+		{
+			name: "ambiguous budget key",
+			body: `{"user_path":"/team","budget_key":{"period":"daily","period_seconds":86400},"amount":12.5}`,
+			run:  (*Handler).UpsertBudget,
+		},
+		{
+			name: "delete missing budget key",
+			body: `{"user_path":"/team"}`,
+			run:  (*Handler).DeleteBudget,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &adminBudgetStore{}
+			h := newBudgetHandler(t, store)
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/budgets", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			if err := tt.run(h, c); err != nil {
+				t.Fatalf("handler failed: %v", err)
+			}
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestBudgetEndpointsDeleteBudget(t *testing.T) {
 	store := &adminBudgetStore{
 		budgets: []budget.Budget{
@@ -266,7 +314,7 @@ func TestBudgetEndpointsDeleteBudget(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodDelete,
 		"/admin/api/v1/budgets",
-		strings.NewReader(`{"user_path":"/team/beta","period_seconds":604800}`),
+		strings.NewReader(`{"user_path":"/team/beta","budget_key":{"period_seconds":604800}}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -295,7 +343,7 @@ func TestBudgetEndpointsMissingMutationsReturnNotFound(t *testing.T) {
 				store.deleteErr = budget.ErrNotFound
 			},
 			run: func(h *Handler, e *echo.Echo) *httptest.ResponseRecorder {
-				req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/budgets", strings.NewReader(`{"user_path":"/team","period_seconds":86400}`))
+				req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/budgets", strings.NewReader(`{"user_path":"/team","budget_key":{"period_seconds":86400}}`))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
 				c := e.NewContext(req, rec)

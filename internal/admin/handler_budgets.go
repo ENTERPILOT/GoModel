@@ -58,7 +58,7 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	userPath, periodSeconds, err := budgetRequestKey(req.UserPath, req.Period, req.PeriodSeconds)
+	userPath, periodSeconds, err := budgetRequestKey(req.UserPath, req.BudgetKey)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
@@ -97,7 +97,7 @@ func (h *Handler) DeleteBudget(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	userPath, periodSeconds, err := budgetRequestKey(req.UserPath, req.Period, req.PeriodSeconds)
+	userPath, periodSeconds, err := budgetRequestKey(req.UserPath, req.BudgetKey)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
@@ -241,14 +241,17 @@ type budgetStatusResponse struct {
 }
 
 type upsertBudgetRequest struct {
-	UserPath      string  `json:"user_path" binding:"required"`
-	Period        string  `json:"period,omitempty"`
-	PeriodSeconds int64   `json:"period_seconds,omitempty"`
-	Amount        float64 `json:"amount" binding:"required"`
+	UserPath  string            `json:"user_path"`
+	BudgetKey *budgetKeyRequest `json:"budget_key"`
+	Amount    float64           `json:"amount"`
 }
 
 type deleteBudgetRequest struct {
-	UserPath      string `json:"user_path" binding:"required"`
+	UserPath  string            `json:"user_path"`
+	BudgetKey *budgetKeyRequest `json:"budget_key"`
+}
+
+type budgetKeyRequest struct {
 	Period        string `json:"period,omitempty"`
 	PeriodSeconds int64  `json:"period_seconds,omitempty"`
 }
@@ -351,16 +354,35 @@ func budgetStatusResponses(statuses []budget.CheckResult, now time.Time) []budge
 	return responses
 }
 
-func budgetRequestKey(rawUserPath, period string, periodSeconds int64) (string, int64, error) {
+func budgetRequestKey(rawUserPath string, key *budgetKeyRequest) (string, int64, error) {
 	userPath, err := budget.NormalizeUserPath(rawUserPath)
 	if err != nil {
 		return "", 0, err
 	}
-	periodSeconds, err = budgetRequestPeriodSeconds(period, periodSeconds)
+	periodSeconds, err := budgetKeyPeriodSeconds(key)
 	if err != nil {
 		return "", 0, err
 	}
 	return userPath, periodSeconds, nil
+}
+
+func budgetKeyPeriodSeconds(key *budgetKeyRequest) (int64, error) {
+	if key == nil {
+		return 0, errors.New("budget_key is required")
+	}
+	period := strings.TrimSpace(key.Period)
+	hasPeriod := period != ""
+	hasPeriodSeconds := key.PeriodSeconds != 0
+	if !hasPeriod && !hasPeriodSeconds {
+		return 0, errors.New("budget_key.period or budget_key.period_seconds is required")
+	}
+	if hasPeriod && hasPeriodSeconds {
+		return 0, errors.New("set either budget_key.period or budget_key.period_seconds, not both")
+	}
+	if key.PeriodSeconds < 0 {
+		return 0, errors.New("budget_key.period_seconds must be greater than 0")
+	}
+	return budgetRequestPeriodSeconds(period, key.PeriodSeconds)
 }
 
 func budgetRequestPeriodSeconds(period string, periodSeconds int64) (int64, error) {

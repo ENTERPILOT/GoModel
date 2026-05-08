@@ -12,7 +12,7 @@ import (
 )
 
 type upsertAliasRequest struct {
-	Name           string `json:"name" binding:"required"`
+	Name           string `json:"name"`
 	TargetModel    string `json:"target_model"`
 	TargetProvider string `json:"target_provider,omitempty"`
 	Description    string `json:"description,omitempty"`
@@ -20,7 +20,7 @@ type upsertAliasRequest struct {
 }
 
 type deleteAliasRequest struct {
-	Name string `json:"name" binding:"required"`
+	Name string `json:"name"`
 }
 
 func (h *Handler) ListAliases(c *echo.Context) error {

@@ -437,7 +437,9 @@
                             method: 'PUT',
                             body: JSON.stringify({
                                 user_path: payload.user_path,
-                                period_seconds: payload.period_seconds,
+                                budget_key: {
+                                    period_seconds: payload.period_seconds
+                                },
                                 amount: payload.amount
                             })
                         })
@@ -446,7 +448,9 @@
                             headers: this.headers(),
                             body: JSON.stringify({
                                 user_path: payload.user_path,
-                                period_seconds: payload.period_seconds,
+                                budget_key: {
+                                    period_seconds: payload.period_seconds
+                                },
                                 amount: payload.amount
                             })
                         };
@@ -552,7 +556,9 @@
                             method: 'DELETE',
                             body: JSON.stringify({
                                 user_path: item.user_path,
-                                period_seconds: item.period_seconds
+                                budget_key: {
+                                    period_seconds: item.period_seconds
+                                }
                             })
                         })
                         : {
@@ -560,7 +566,9 @@
                             headers: this.headers(),
                             body: JSON.stringify({
                                 user_path: item.user_path,
-                                period_seconds: item.period_seconds
+                                budget_key: {
+                                    period_seconds: item.period_seconds
+                                }
                             })
                         };
                     const res = await fetch('/admin/api/v1/budgets', request);

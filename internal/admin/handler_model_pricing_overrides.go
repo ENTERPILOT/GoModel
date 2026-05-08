@@ -12,12 +12,12 @@ import (
 )
 
 type upsertModelPricingOverrideRequest struct {
-	Selector string                   `json:"selector" binding:"required"`
-	Pricing  pricingoverrides.Pricing `json:"pricing" binding:"required"`
+	Selector string                   `json:"selector"`
+	Pricing  pricingoverrides.Pricing `json:"pricing"`
 }
 
 type deleteModelPricingOverrideRequest struct {
-	Selector string `json:"selector" binding:"required"`
+	Selector string `json:"selector"`
 }
 
 // ListModelPricingOverrides handles GET /admin/api/v1/model-pricing-overrides.
@@ -55,6 +55,7 @@ func (h *Handler) ListModelPricingOverrides(c *echo.Context) error {
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
 // @Failure      500       {object}  core.GatewayError
+// @Failure      502       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
 // @Router       /admin/api/v1/model-pricing-overrides [put]
 //
@@ -100,6 +101,7 @@ func (h *Handler) UpsertModelPricingOverride(c *echo.Context) error {
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
 // @Failure      404       {object}  core.GatewayError
+// @Failure      502       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
 // @Router       /admin/api/v1/model-pricing-overrides [delete]
 //

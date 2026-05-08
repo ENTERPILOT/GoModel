@@ -13,7 +13,7 @@ import (
 )
 
 type upsertGuardrailRequest struct {
-	Name        string          `json:"name" binding:"required"`
+	Name        string          `json:"name"`
 	Type        string          `json:"type"`
 	Description string          `json:"description,omitempty"`
 	UserPath    string          `json:"user_path,omitempty"`
@@ -21,7 +21,7 @@ type upsertGuardrailRequest struct {
 }
 
 type deleteGuardrailRequest struct {
-	Name string `json:"name" binding:"required"`
+	Name string `json:"name"`
 }
 
 func (h *Handler) ListGuardrailTypes(c *echo.Context) error {

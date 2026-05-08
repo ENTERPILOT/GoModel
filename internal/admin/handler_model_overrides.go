@@ -12,12 +12,12 @@ import (
 )
 
 type upsertModelOverrideRequest struct {
-	Selector  string   `json:"selector" binding:"required"`
+	Selector  string   `json:"selector"`
 	UserPaths []string `json:"user_paths,omitempty"`
 }
 
 type deleteModelOverrideRequest struct {
-	Selector string `json:"selector" binding:"required"`
+	Selector string `json:"selector"`
 }
 
 // ListModelOverrides handles GET /admin/api/v1/model-overrides.

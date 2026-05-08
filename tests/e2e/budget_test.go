@@ -88,9 +88,9 @@ func TestBudgetAdminEndpointsSQLite_E2E(t *testing.T) {
 	defer ts.Close()
 
 	putResp := sendBudgetJSONRequest(t, http.MethodPut, ts.URL+"/admin/api/v1/budgets", map[string]any{
-		"user_path": "/team/admin",
-		"period":    "daily",
-		"amount":    12.5,
+		"user_path":  "/team/admin",
+		"budget_key": map[string]any{"period": "daily"},
+		"amount":     12.5,
 	})
 	require.Equal(t, http.StatusOK, putResp.StatusCode)
 	closeBody(putResp)
@@ -124,8 +124,8 @@ func TestBudgetAdminEndpointsSQLite_E2E(t *testing.T) {
 	require.NotNil(t, statuses[0].Budget.LastResetAt)
 
 	deleteResp := sendBudgetJSONRequest(t, http.MethodDelete, ts.URL+"/admin/api/v1/budgets", map[string]any{
-		"user_path": "/team/admin",
-		"period":    "daily",
+		"user_path":  "/team/admin",
+		"budget_key": map[string]any{"period": "daily"},
 	})
 	require.Equal(t, http.StatusOK, deleteResp.StatusCode)
 	closeBody(deleteResp)

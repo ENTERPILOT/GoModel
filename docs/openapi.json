@@ -1104,6 +1104,16 @@
               }
             }
           },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Service Unavailable",
             "content": {
@@ -1163,6 +1173,16 @@
           },
           "404": {
             "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
             "content": {
               "application/json": {
                 "schema": {
@@ -5109,6 +5129,29 @@
           }
         }
       },
+      "admin.budgetKeyRequest": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string"
+          },
+          "period_seconds": {
+            "type": "integer"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "period"
+            ]
+          },
+          {
+            "required": [
+              "period_seconds"
+            ]
+          }
+        ]
+      },
       "admin.budgetListResponse": {
         "type": "object",
         "properties": {
@@ -5175,42 +5218,39 @@
       },
       "admin.deleteBudgetRequest": {
         "type": "object",
-        "required": [
-          "user_path"
-        ],
         "properties": {
-          "period": {
-            "type": "string"
-          },
-          "period_seconds": {
-            "type": "integer"
+          "budget_key": {
+            "$ref": "#/components/schemas/admin.budgetKeyRequest"
           },
           "user_path": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "budget_key"
+        ]
       },
       "admin.deleteModelOverrideRequest": {
         "type": "object",
-        "required": [
-          "selector"
-        ],
         "properties": {
           "selector": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "selector"
+        ]
       },
       "admin.deleteModelPricingOverrideRequest": {
         "type": "object",
-        "required": [
-          "selector"
-        ],
         "properties": {
           "selector": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "selector"
+        ]
       },
       "admin.modelAccessResponse": {
         "type": "object",
@@ -5348,30 +5388,24 @@
       },
       "admin.upsertBudgetRequest": {
         "type": "object",
-        "required": [
-          "amount",
-          "user_path"
-        ],
         "properties": {
           "amount": {
             "type": "number"
           },
-          "period": {
-            "type": "string"
-          },
-          "period_seconds": {
-            "type": "integer"
+          "budget_key": {
+            "$ref": "#/components/schemas/admin.budgetKeyRequest"
           },
           "user_path": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "amount",
+          "budget_key"
+        ]
       },
       "admin.upsertModelOverrideRequest": {
         "type": "object",
-        "required": [
-          "selector"
-        ],
         "properties": {
           "selector": {
             "type": "string"
@@ -5384,14 +5418,13 @@
             },
             "maxItems": 100
           }
-        }
+        },
+        "required": [
+          "selector"
+        ]
       },
       "admin.upsertModelPricingOverrideRequest": {
         "type": "object",
-        "required": [
-          "pricing",
-          "selector"
-        ],
         "properties": {
           "pricing": {
             "$ref": "#/components/schemas/pricingoverrides.Pricing"
@@ -5399,7 +5432,11 @@
           "selector": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "pricing",
+          "selector"
+        ]
       },
       "auditlog.ConversationResult": {
         "type": "object",

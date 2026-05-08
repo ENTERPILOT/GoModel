@@ -901,6 +901,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.GatewayError"
                         }
                     },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -954,6 +960,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -3562,6 +3574,17 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.budgetKeyRequest": {
+            "type": "object",
+            "properties": {
+                "period": {
+                    "type": "string"
+                },
+                "period_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
         "admin.budgetListResponse": {
             "type": "object",
             "properties": {
@@ -3628,15 +3651,9 @@ const docTemplate = `{
         },
         "admin.deleteBudgetRequest": {
             "type": "object",
-            "required": [
-                "user_path"
-            ],
             "properties": {
-                "period": {
-                    "type": "string"
-                },
-                "period_seconds": {
-                    "type": "integer"
+                "budget_key": {
+                    "$ref": "#/definitions/admin.budgetKeyRequest"
                 },
                 "user_path": {
                     "type": "string"
@@ -3645,9 +3662,6 @@ const docTemplate = `{
         },
         "admin.deleteModelOverrideRequest": {
             "type": "object",
-            "required": [
-                "selector"
-            ],
             "properties": {
                 "selector": {
                     "type": "string"
@@ -3656,9 +3670,6 @@ const docTemplate = `{
         },
         "admin.deleteModelPricingOverrideRequest": {
             "type": "object",
-            "required": [
-                "selector"
-            ],
             "properties": {
                 "selector": {
                     "type": "string"
@@ -3798,19 +3809,12 @@ const docTemplate = `{
         },
         "admin.upsertBudgetRequest": {
             "type": "object",
-            "required": [
-                "amount",
-                "user_path"
-            ],
             "properties": {
                 "amount": {
                     "type": "number"
                 },
-                "period": {
-                    "type": "string"
-                },
-                "period_seconds": {
-                    "type": "integer"
+                "budget_key": {
+                    "$ref": "#/definitions/admin.budgetKeyRequest"
                 },
                 "user_path": {
                     "type": "string"
@@ -3819,9 +3823,6 @@ const docTemplate = `{
         },
         "admin.upsertModelOverrideRequest": {
             "type": "object",
-            "required": [
-                "selector"
-            ],
             "properties": {
                 "selector": {
                     "type": "string"
@@ -3836,10 +3837,6 @@ const docTemplate = `{
         },
         "admin.upsertModelPricingOverrideRequest": {
             "type": "object",
-            "required": [
-                "pricing",
-                "selector"
-            ],
             "properties": {
                 "pricing": {
                     "$ref": "#/definitions/pricingoverrides.Pricing"

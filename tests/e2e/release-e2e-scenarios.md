@@ -108,7 +108,7 @@ run_release_budget_enforcement() {
 
   curl -fsS -X PUT "$base_url/admin/api/v1/budgets" \
     -H 'Content-Type: application/json' \
-    -d "{\"user_path\":\"$budget_path\",\"period\":\"daily\",\"amount\":$QA_BUDGET_AMOUNT}" \
+    -d "{\"user_path\":\"$budget_path\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" \
     > "$budget_json_file"
   jq -e --arg user_path "$budget_path" --argjson amount "$QA_BUDGET_AMOUNT" '
     any(.budgets[]?; .user_path == $user_path and .period_seconds == 86400 and .amount == $amount and .source == "manual" and .spent == 0)
@@ -160,7 +160,7 @@ run_release_budget_enforcement() {
 
   curl -fsS -X DELETE "$base_url/admin/api/v1/budgets" \
     -H 'Content-Type: application/json' \
-    -d "{\"user_path\":\"$budget_path\",\"period\":\"daily\"}" \
+    -d "{\"user_path\":\"$budget_path\",\"budget_key\":{\"period\":\"daily\"}}" \
     > "$budget_json_file"
   jq -e --arg user_path "$budget_path" '
     all(.budgets[]?; .user_path != $user_path)
@@ -1473,7 +1473,7 @@ curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets/settings" \
 
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/api/v1/budgets" \
   -H 'Content-Type: application/json' \
-  -d "{\"user_path\":\"$BUDGET_PATH\",\"period\":\"daily\",\"amount\":-1}"
+  -d "{\"user_path\":\"$BUDGET_PATH\",\"budget_key\":{\"period\":\"daily\"},\"amount\":-1}"
 sed -n '1,20p' "$HEADERS_FILE"
 jq . "$BODY_FILE"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
@@ -1481,14 +1481,14 @@ jq -e '.error.type == "invalid_request_error" and (.error.message | test("amount
 
 curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets" \
   -H 'Content-Type: application/json' \
-  -d "{\"user_path\":\"$BUDGET_PATH\",\"period\":\"weekly\",\"amount\":12.5}" \
+  -d "{\"user_path\":\"$BUDGET_PATH\",\"budget_key\":{\"period\":\"weekly\"},\"amount\":12.5}" \
   | jq -e --arg user_path "$BUDGET_PATH" '
       any(.budgets[]?; .user_path == $user_path and .period_seconds == 604800 and .amount == 12.5 and .source == "manual")
     ' >/dev/null
 
 curl -fsS -X DELETE "$BASE_URL/admin/api/v1/budgets" \
   -H 'Content-Type: application/json' \
-  -d "{\"user_path\":\"$BUDGET_PATH\",\"period\":\"weekly\"}" \
+  -d "{\"user_path\":\"$BUDGET_PATH\",\"budget_key\":{\"period\":\"weekly\"}}" \
   | jq -e --arg user_path "$BUDGET_PATH" 'all(.budgets[]?; .user_path != $user_path)' >/dev/null
 
 curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets/settings" \
