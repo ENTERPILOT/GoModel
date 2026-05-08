@@ -265,6 +265,64 @@ test('submitGuardrailForm logs non-auth HTTP failures before surfacing the UI er
     assert.match(errors[0], /Failed to save guardrail: 400 Bad Request system_prompt content is required/);
 });
 
+test('guardrail mutations send guardrail name in JSON body', async () => {
+    const requests = [];
+    const module = createGuardrailsModule({
+        fetch: async (url, request) => {
+            requests.push({ url, request });
+            return {
+                status: 200,
+                statusText: 'OK'
+            };
+        },
+        window: {
+            confirm: () => true
+        }
+    });
+
+    Object.assign(module, {
+        guardrailForm: {
+            name: 'privacy/redactor',
+            type: 'llm_based_altering',
+            description: '',
+            user_path: '',
+            config: { model: 'openai/gpt-4o-mini', roles: ['user'] }
+        },
+        requestOptions(options) {
+            return {
+                ...(options || {}),
+                headers: {}
+            };
+        },
+        handleFetchResponse() {
+            return true;
+        },
+        fetchGuardrails: async () => {},
+        fetchWorkflowGuardrails: async () => {}
+    });
+
+    await module.submitGuardrailForm();
+    await module.deleteGuardrail({ name: 'privacy/redactor' });
+
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map((request) => request.url), [
+        '/admin/api/v1/guardrails',
+        '/admin/api/v1/guardrails'
+    ]);
+    assert.deepEqual(requests.map((request) => request.request.method), ['PUT', 'DELETE']);
+    assert.deepEqual(JSON.parse(requests[0].request.body), {
+        name: 'privacy/redactor',
+        type: 'llm_based_altering',
+        config: {
+            model: 'openai/gpt-4o-mini',
+            roles: ['user']
+        }
+    });
+    assert.deepEqual(JSON.parse(requests[1].request.body), {
+        name: 'privacy/redactor'
+    });
+});
+
 test('guardrail write paths use generation-aware request handling for stale auth responses', async () => {
     const scenarios = [
         {

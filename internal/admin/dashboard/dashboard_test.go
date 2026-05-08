@@ -63,6 +63,12 @@ func TestIndex_ReturnsHTML(t *testing.T) {
 	if !regexp.MustCompile(`/admin/static/css/dashboard\.css\?v=[0-9a-f]+`).MatchString(rec.Body.String()) {
 		t.Errorf("expected versioned dashboard CSS link in page HTML")
 	}
+	if !regexp.MustCompile(`/admin/static/js/dashboard\.js\?v=[0-9a-f]+`).MatchString(rec.Body.String()) {
+		t.Errorf("expected versioned dashboard JS link in page HTML")
+	}
+	if !regexp.MustCompile(`/admin/static/js/modules/aliases\.js\?v=[0-9a-f]+`).MatchString(rec.Body.String()) {
+		t.Errorf("expected versioned dashboard module JS link in page HTML")
+	}
 	if !strings.Contains(body, "settings-version-footer") {
 		t.Errorf("expected settings-version-footer element in page HTML")
 	}
@@ -93,6 +99,12 @@ func TestIndex_UsesBasePathForGeneratedURLs(t *testing.T) {
 	}
 	if !regexp.MustCompile(`/g/admin/static/css/dashboard\.css\?v=[0-9a-f]+`).MatchString(body) {
 		t.Errorf("expected versioned dashboard CSS link to include base path")
+	}
+	if !regexp.MustCompile(`/g/admin/static/js/dashboard\.js\?v=[0-9a-f]+`).MatchString(body) {
+		t.Errorf("expected versioned dashboard JS link to include base path")
+	}
+	if !regexp.MustCompile(`/g/admin/static/js/modules/aliases\.js\?v=[0-9a-f]+`).MatchString(body) {
+		t.Errorf("expected versioned dashboard module JS link to include base path")
 	}
 	if !strings.Contains(body, `href="/g/admin/dashboard/overview"`) {
 		t.Errorf("expected dashboard navigation links to include base path")

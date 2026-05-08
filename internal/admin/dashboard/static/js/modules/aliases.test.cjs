@@ -70,6 +70,137 @@ test('qualifiedModelName prefers selector when available', () => {
     assert.equal(module.qualifiedModelName(model), 'openrouter/openai/gpt-3.5-turbo');
 });
 
+test('model override mutations send selector in JSON body', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async() => ({})
+                };
+            }
+        },
+        window: {
+            confirm: () => true
+        }
+    });
+
+    Object.assign(module, {
+        modelOverrideForm: {
+            selector: 'openrouter/meta-llama/llama-3.1-8b-instruct',
+            user_paths: '/team/alpha'
+        },
+        modelOverrideFormHasExistingOverride: true,
+        requestOptions(options) {
+            return {
+                ...(options || {}),
+                headers: {}
+            };
+        },
+        handleFetchResponse() {
+            return true;
+        },
+        fetchModels: async() => {},
+        fetchModelOverrides: async() => {}
+    });
+
+    await module.submitModelOverrideForm();
+    module.modelOverrideForm = {
+        selector: 'openrouter/meta-llama/llama-3.1-8b-instruct',
+        user_paths: '/team/alpha'
+    };
+    module.modelOverrideFormHasExistingOverride = true;
+    await module.deleteModelOverride();
+
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].url, '/admin/api/v1/model-overrides');
+    assert.equal(requests[1].url, '/admin/api/v1/model-overrides');
+    assert.deepEqual(JSON.parse(requests[0].request.body), {
+        selector: 'openrouter/meta-llama/llama-3.1-8b-instruct',
+        user_paths: ['/team/alpha']
+    });
+    assert.deepEqual(JSON.parse(requests[1].request.body), {
+        selector: 'openrouter/meta-llama/llama-3.1-8b-instruct'
+    });
+});
+
+test('alias mutations send alias name in JSON body', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async() => ({})
+                };
+            }
+        },
+        window: {
+            confirm: () => true
+        }
+    });
+
+    Object.assign(module, {
+        aliases: [],
+        models: [],
+        requestOptions(options) {
+            return {
+                ...(options || {}),
+                headers: {}
+            };
+        },
+        handleFetchResponse() {
+            return true;
+        },
+        fetchAliases: async() => {}
+    });
+
+    await module.toggleAliasEnabled({
+        name: 'openai/smart',
+        target_model: 'gpt-4o',
+        target_provider: 'openai',
+        description: '',
+        enabled: true
+    });
+    module.aliasForm = {
+        name: 'openai/smart',
+        target_model: 'openai/gpt-4o',
+        description: 'smart alias',
+        enabled: true
+    };
+    module.aliasFormOriginalName = '';
+    await module.submitAliasForm();
+    await module.deleteAlias({ name: 'openai/smart' });
+
+    assert.equal(requests.length, 3);
+    assert.deepEqual(requests.map((request) => request.url), [
+        '/admin/api/v1/aliases',
+        '/admin/api/v1/aliases',
+        '/admin/api/v1/aliases'
+    ]);
+    assert.deepEqual(requests.map((request) => request.request.method), ['PUT', 'PUT', 'DELETE']);
+    assert.deepEqual(JSON.parse(requests[0].request.body), {
+        name: 'openai/smart',
+        target_model: 'openai/gpt-4o',
+        description: '',
+        enabled: false
+    });
+    assert.deepEqual(JSON.parse(requests[1].request.body), {
+        name: 'openai/smart',
+        target_model: 'openai/gpt-4o',
+        description: 'smart alias',
+        enabled: true
+    });
+    assert.deepEqual(JSON.parse(requests[2].request.body), {
+        name: 'openai/smart'
+    });
+});
+
 test('filteredDisplayModelGroups groups rows by provider_name and applies provider-wide overrides', () => {
     const module = createAliasesModule();
     module.models = [

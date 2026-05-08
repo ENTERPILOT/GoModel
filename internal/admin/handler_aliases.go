@@ -1,8 +1,9 @@
 package admin
 
 import (
-	"context"
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -11,10 +12,15 @@ import (
 )
 
 type upsertAliasRequest struct {
+	Name           string `json:"name" binding:"required"`
 	TargetModel    string `json:"target_model"`
 	TargetProvider string `json:"target_provider,omitempty"`
 	Description    string `json:"description,omitempty"`
 	Enabled        *bool  `json:"enabled,omitempty"`
+}
+
+type deleteAliasRequest struct {
+	Name string `json:"name" binding:"required"`
 }
 
 func (h *Handler) ListAliases(c *echo.Context) error {
@@ -28,20 +34,19 @@ func (h *Handler) ListAliases(c *echo.Context) error {
 	return c.JSON(http.StatusOK, views)
 }
 
-// UpsertAlias handles PUT /admin/api/v1/aliases/{name}
+// UpsertAlias handles PUT /admin/api/v1/aliases
 func (h *Handler) UpsertAlias(c *echo.Context) error {
 	if h.aliases == nil {
 		return handleError(c, featureUnavailableError("aliases feature is unavailable"))
 	}
 
-	name, err := decodeAliasPathName(c.Param("name"))
-	if err != nil {
-		return handleError(c, err)
-	}
-
 	var req upsertAliasRequest
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return handleError(c, core.NewInvalidRequestError("alias name is required", nil))
 	}
 
 	enabled := true
@@ -69,23 +74,26 @@ func (h *Handler) UpsertAlias(c *echo.Context) error {
 	return c.JSON(http.StatusOK, alias)
 }
 
-// DeleteAlias handles DELETE /admin/api/v1/aliases/{name}
+// DeleteAlias handles DELETE /admin/api/v1/aliases
 func (h *Handler) DeleteAlias(c *echo.Context) error {
-	var unavailableErr error
-	var deleteFunc func(context.Context, string) error
 	if h.aliases == nil {
-		unavailableErr = featureUnavailableError("aliases feature is unavailable")
-	} else {
-		deleteFunc = h.aliases.Delete
+		return handleError(c, featureUnavailableError("aliases feature is unavailable"))
 	}
-	return deleteByName(
-		c,
-		unavailableErr,
-		"name",
-		decodeAliasPathName,
-		deleteFunc,
-		aliases.ErrNotFound,
-		"alias not found: ",
-		aliasWriteError,
-	)
+
+	var req deleteAliasRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return handleError(c, core.NewInvalidRequestError("alias name is required", nil))
+	}
+
+	if err := h.aliases.Delete(c.Request().Context(), name); err != nil {
+		if errors.Is(err, aliases.ErrNotFound) {
+			return handleError(c, core.NewNotFoundError("alias not found: "+name))
+		}
+		return handleError(c, aliasWriteError(err))
+	}
+	return c.NoContent(http.StatusNoContent)
 }

@@ -285,7 +285,13 @@ func createWorkflow(t *testing.T, serverURL, masterKey string, payload map[strin
 func upsertGuardrail(t *testing.T, serverURL, masterKey, name string, payload map[string]any) guardrails.View {
 	t.Helper()
 
-	resp := adminJSONRequest(t, http.MethodPut, serverURL+"/admin/api/v1/guardrails/"+name, masterKey, payload)
+	body := make(map[string]any, len(payload)+1)
+	for key, value := range payload {
+		body[key] = value
+	}
+	body["name"] = name
+
+	resp := adminJSONRequest(t, http.MethodPut, serverURL+"/admin/api/v1/guardrails", masterKey, body)
 	defer closeBody(resp)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 

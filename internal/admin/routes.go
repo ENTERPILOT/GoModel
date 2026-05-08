@@ -33,8 +33,8 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.POST("/runtime/refresh", h.RefreshRuntime)
 
 	g.GET("/budgets", h.ListBudgets)
-	g.PUT("/budgets/:user_path/:period", h.UpsertBudget)
-	g.DELETE("/budgets/:user_path/:period", h.DeleteBudget)
+	g.PUT("/budgets", h.UpsertBudget)
+	g.DELETE("/budgets", h.DeleteBudget)
 	g.GET("/budgets/settings", h.BudgetSettings)
 	g.PUT("/budgets/settings", h.UpdateBudgetSettings)
 	g.POST("/budgets/reset-one", h.ResetBudget)
@@ -44,25 +44,25 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/models/categories", h.ListCategories)
 
 	g.GET("/model-overrides", h.ListModelOverrides)
-	g.PUT("/model-overrides/:selector", h.UpsertModelOverride)
-	g.DELETE("/model-overrides/:selector", h.DeleteModelOverride)
+	g.PUT("/model-overrides", h.UpsertModelOverride)
+	g.DELETE("/model-overrides", h.DeleteModelOverride)
 
 	g.GET("/model-pricing-overrides", h.ListModelPricingOverrides)
-	g.PUT("/model-pricing-overrides/:selector", h.UpsertModelPricingOverride)
-	g.DELETE("/model-pricing-overrides/:selector", h.DeleteModelPricingOverride)
+	g.PUT("/model-pricing-overrides", h.UpsertModelPricingOverride)
+	g.DELETE("/model-pricing-overrides", h.DeleteModelPricingOverride)
 
 	g.GET("/auth-keys", h.ListAuthKeys)
 	g.POST("/auth-keys", h.CreateAuthKey)
 	g.POST("/auth-keys/:id/deactivate", h.DeactivateAuthKey)
 
 	g.GET("/aliases", h.ListAliases)
-	g.PUT("/aliases/:name", h.UpsertAlias)
-	g.DELETE("/aliases/:name", h.DeleteAlias)
+	g.PUT("/aliases", h.UpsertAlias)
+	g.DELETE("/aliases", h.DeleteAlias)
 
 	g.GET("/guardrails/types", h.ListGuardrailTypes)
 	g.GET("/guardrails", h.ListGuardrails)
-	g.PUT("/guardrails/:name", h.UpsertGuardrail)
-	g.DELETE("/guardrails/:name", h.DeleteGuardrail)
+	g.PUT("/guardrails", h.UpsertGuardrail)
+	g.DELETE("/guardrails", h.DeleteGuardrail)
 
 	g.GET("/workflows", h.ListWorkflows)
 	g.GET("/workflows/guardrails", h.ListWorkflowGuardrails)

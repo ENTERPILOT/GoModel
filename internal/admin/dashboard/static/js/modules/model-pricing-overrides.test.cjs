@@ -122,3 +122,63 @@ test('payload preserves tiered pricing when scalar rows are absent', () => {
         }
     }));
 });
+
+test('model pricing override mutations send selector in JSON body', async() => {
+    const requests = [];
+    const module = createModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async() => ({})
+                };
+            }
+        },
+        window: {
+            confirm: () => true
+        }
+    });
+
+    Object.assign(module, {
+        modelPricingOverrideForm: {
+            selector: 'openrouter/meta-llama/llama-3.1-8b-instruct'
+        },
+        modelPricingOverrideFormHasExistingOverride: true,
+        modelPricingOverrideRows: [
+            { id: '1', field: 'input_per_mtok', value: '1.25' }
+        ],
+        adminRequestOptions(options) {
+            return {
+                ...(options || {}),
+                headers: {}
+            };
+        },
+        handleFetchResponse() {
+            return true;
+        },
+        fetchModelPricingOverrides: async() => {},
+        syncDisplayModels() {}
+    });
+
+    await module.submitModelPricingOverrideForm();
+    module.modelPricingOverrideForm = {
+        selector: 'openrouter/meta-llama/llama-3.1-8b-instruct'
+    };
+    module.modelPricingOverrideFormHasExistingOverride = true;
+    await module.deleteModelPricingOverride();
+
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].url, '/admin/api/v1/model-pricing-overrides');
+    assert.equal(requests[1].url, '/admin/api/v1/model-pricing-overrides');
+    assert.deepEqual(JSON.parse(requests[0].request.body), {
+        selector: 'openrouter/meta-llama/llama-3.1-8b-instruct',
+        pricing: {
+            input_per_mtok: 1.25
+        }
+    });
+    assert.deepEqual(JSON.parse(requests[1].request.body), {
+        selector: 'openrouter/meta-llama/llama-3.1-8b-instruct'
+    });
+});

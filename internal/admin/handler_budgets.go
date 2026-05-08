@@ -2,9 +2,7 @@ package admin
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -40,20 +38,18 @@ func (h *Handler) ListBudgets(c *echo.Context) error {
 	})
 }
 
-// UpsertBudget handles PUT /admin/api/v1/budgets/{user_path}/{period}.
+// UpsertBudget handles PUT /admin/api/v1/budgets.
 // @Summary      Create or update one budget
 // @Tags         admin
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        user_path  path      string               true  "URL-encoded budget user path"
-// @Param        period     path      string               true  "Budget period name or seconds"
-// @Param        budget     body      upsertBudgetRequest  true  "Budget amount"
+// @Param        budget     body      upsertBudgetRequest  true  "Budget key and amount"
 // @Success      200        {object}  budgetListResponse
 // @Failure      400        {object}  core.GatewayError
 // @Failure      401        {object}  core.GatewayError
 // @Failure      503        {object}  core.GatewayError
-// @Router       /admin/api/v1/budgets/{user_path}/{period} [put]
+// @Router       /admin/api/v1/budgets [put]
 func (h *Handler) UpsertBudget(c *echo.Context) error {
 	if h.budgets == nil {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
@@ -62,7 +58,7 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	userPath, periodSeconds, err := budgetRouteKey(c)
+	userPath, periodSeconds, err := budgetRequestKey(req.UserPath, req.Period, req.PeriodSeconds)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
@@ -81,23 +77,27 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 	return h.ListBudgets(c)
 }
 
-// DeleteBudget handles DELETE /admin/api/v1/budgets/{user_path}/{period}.
+// DeleteBudget handles DELETE /admin/api/v1/budgets.
 // @Summary      Delete one budget
 // @Tags         admin
+// @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        user_path  path      string  true  "URL-encoded budget user path"
-// @Param        period     path      string  true  "Budget period name or seconds"
+// @Param        budget     body      deleteBudgetRequest  true  "Budget key"
 // @Success      200        {object}  budgetListResponse
 // @Failure      400        {object}  core.GatewayError
 // @Failure      401        {object}  core.GatewayError
 // @Failure      503        {object}  core.GatewayError
-// @Router       /admin/api/v1/budgets/{user_path}/{period} [delete]
+// @Router       /admin/api/v1/budgets [delete]
 func (h *Handler) DeleteBudget(c *echo.Context) error {
 	if h.budgets == nil {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
 	}
-	userPath, periodSeconds, err := budgetRouteKey(c)
+	var req deleteBudgetRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	userPath, periodSeconds, err := budgetRequestKey(req.UserPath, req.Period, req.PeriodSeconds)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
@@ -241,7 +241,16 @@ type budgetStatusResponse struct {
 }
 
 type upsertBudgetRequest struct {
-	Amount float64 `json:"amount"`
+	UserPath      string  `json:"user_path" binding:"required"`
+	Period        string  `json:"period,omitempty"`
+	PeriodSeconds int64   `json:"period_seconds,omitempty"`
+	Amount        float64 `json:"amount" binding:"required"`
+}
+
+type deleteBudgetRequest struct {
+	UserPath      string `json:"user_path" binding:"required"`
+	Period        string `json:"period,omitempty"`
+	PeriodSeconds int64  `json:"period_seconds,omitempty"`
 }
 
 type resetBudgetRequest struct {
@@ -342,31 +351,12 @@ func budgetStatusResponses(statuses []budget.CheckResult, now time.Time) []budge
 	return responses
 }
 
-func budgetRouteKey(c *echo.Context) (string, int64, error) {
-	userPathParam := strings.TrimSpace(c.Param("user_path"))
-	if userPathParam == "" {
-		return "", 0, errors.New("user_path path parameter is required")
-	}
-	userPath, err := url.PathUnescape(userPathParam)
-	if err != nil {
-		return "", 0, fmt.Errorf("invalid user_path path parameter: %w", err)
-	}
-	userPath, err = budget.NormalizeUserPath(userPath)
+func budgetRequestKey(rawUserPath, period string, periodSeconds int64) (string, int64, error) {
+	userPath, err := budget.NormalizeUserPath(rawUserPath)
 	if err != nil {
 		return "", 0, err
 	}
-
-	periodParam := strings.TrimSpace(c.Param("period"))
-	if periodParam == "" {
-		return "", 0, errors.New("period path parameter is required")
-	}
-	if seconds, err := strconv.ParseInt(periodParam, 10, 64); err == nil {
-		if seconds <= 0 {
-			return "", 0, errors.New("period_seconds must be greater than 0")
-		}
-		return userPath, seconds, nil
-	}
-	periodSeconds, err := budgetRequestPeriodSeconds(periodParam, 0)
+	periodSeconds, err = budgetRequestPeriodSeconds(period, periodSeconds)
 	if err != nil {
 		return "", 0, err
 	}
@@ -377,7 +367,14 @@ func budgetRequestPeriodSeconds(period string, periodSeconds int64) (int64, erro
 	if periodSeconds > 0 {
 		return periodSeconds, nil
 	}
+	period = strings.TrimSpace(period)
 	if parsed, ok := budget.PeriodSeconds(period); ok {
+		return parsed, nil
+	}
+	if parsed, err := strconv.ParseInt(period, 10, 64); err == nil {
+		if parsed <= 0 {
+			return 0, errors.New("period_seconds must be greater than 0")
+		}
 		return parsed, nil
 	}
 	return 0, errors.New("period must be one of hourly, daily, weekly, monthly or period_seconds must be set")

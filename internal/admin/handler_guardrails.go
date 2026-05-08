@@ -13,10 +13,15 @@ import (
 )
 
 type upsertGuardrailRequest struct {
+	Name        string          `json:"name" binding:"required"`
 	Type        string          `json:"type"`
 	Description string          `json:"description,omitempty"`
 	UserPath    string          `json:"user_path,omitempty"`
 	Config      json.RawMessage `json:"config"`
+}
+
+type deleteGuardrailRequest struct {
+	Name string `json:"name" binding:"required"`
 }
 
 func (h *Handler) ListGuardrailTypes(c *echo.Context) error {
@@ -38,20 +43,19 @@ func (h *Handler) ListGuardrails(c *echo.Context) error {
 	return c.JSON(http.StatusOK, views)
 }
 
-// UpsertGuardrail handles PUT /admin/api/v1/guardrails/{name}
+// UpsertGuardrail handles PUT /admin/api/v1/guardrails
 func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 	if h.guardrailDefs == nil {
 		return handleError(c, featureUnavailableError("guardrails feature is unavailable"))
 	}
 
-	name := strings.TrimSpace(c.Param("name"))
-	if name == "" {
-		return handleError(c, core.NewInvalidRequestError("guardrail name is required", nil))
-	}
-
 	var req upsertGuardrailRequest
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return handleError(c, core.NewInvalidRequestError("guardrail name is required", nil))
 	}
 
 	userPath, err := normalizeUserPathQueryParam("user_path", req.UserPath)
@@ -82,13 +86,17 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 	return c.JSON(http.StatusOK, guardrails.ViewFromDefinition(*definition))
 }
 
-// DeleteGuardrail handles DELETE /admin/api/v1/guardrails/{name}
+// DeleteGuardrail handles DELETE /admin/api/v1/guardrails
 func (h *Handler) DeleteGuardrail(c *echo.Context) error {
 	if h.guardrailDefs == nil {
 		return handleError(c, featureUnavailableError("guardrails feature is unavailable"))
 	}
 
-	name := strings.TrimSpace(c.Param("name"))
+	var req deleteGuardrailRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		return handleError(c, core.NewInvalidRequestError("guardrail name is required", nil))
 	}

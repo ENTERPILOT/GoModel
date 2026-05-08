@@ -483,15 +483,16 @@
                     this.modelPricingOverrideError = payload.error;
                     return;
                 }
+                const requestPayload = { selector, ...payload };
 
                 this.modelPricingOverrideSubmitting = true;
                 this.modelPricingOverrideError = '';
                 this.modelPricingOverrideNotice = '';
                 try {
                     const request = typeof this.adminRequestOptions === 'function'
-                        ? this.adminRequestOptions({ method: 'PUT', body: JSON.stringify(payload) })
-                        : this.requestOptions({ method: 'PUT', body: JSON.stringify(payload) });
-                    const res = await fetch('/admin/api/v1/model-pricing-overrides/' + encodeURIComponent(selector), request);
+                        ? this.adminRequestOptions({ method: 'PUT', body: JSON.stringify(requestPayload) })
+                        : this.requestOptions({ method: 'PUT', body: JSON.stringify(requestPayload) });
+                    const res = await fetch('/admin/api/v1/model-pricing-overrides', request);
                     if (res.status === 503) {
                         this.modelPricingOverridesAvailable = false;
                         this.modelPricingOverrideError = 'Model pricing overrides feature is unavailable.';
@@ -536,9 +537,9 @@
                 this.modelPricingOverrideNotice = '';
                 try {
                     const request = typeof this.adminRequestOptions === 'function'
-                        ? this.adminRequestOptions({ method: 'DELETE' })
-                        : this.requestOptions({ method: 'DELETE' });
-                    const res = await fetch('/admin/api/v1/model-pricing-overrides/' + encodeURIComponent(selector), request);
+                        ? this.adminRequestOptions({ method: 'DELETE', body: JSON.stringify({ selector }) })
+                        : this.requestOptions({ method: 'DELETE', body: JSON.stringify({ selector }) });
+                    const res = await fetch('/admin/api/v1/model-pricing-overrides', request);
                     if (res.status === 503) {
                         this.modelPricingOverridesAvailable = false;
                         this.modelPricingOverrideError = 'Model pricing overrides feature is unavailable.';

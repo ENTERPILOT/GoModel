@@ -259,17 +259,16 @@ func TestModelOverrideEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	listCtx, listRec := newHandlerContext("/admin/api/v1/model-overrides")
 	assertUnavailable("ListModelOverrides", h.ListModelOverrides(listCtx), listRec)
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"user_paths":["/"]}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides", bytes.NewBufferString(`{"selector":"openai/gpt-4o","user_paths":["/"]}`))
 	putReq.Header.Set("Content-Type", "application/json")
 	putRec := httptest.NewRecorder()
 	putCtx := e.NewContext(putReq, putRec)
-	putCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/gpt-4o"}})
 	assertUnavailable("UpsertModelOverride", h.UpsertModelOverride(putCtx), putRec)
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", nil)
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides", bytes.NewBufferString(`{"selector":"openai/gpt-4o"}`))
+	deleteReq.Header.Set("Content-Type", "application/json")
 	deleteRec := httptest.NewRecorder()
 	deleteCtx := e.NewContext(deleteReq, deleteRec)
-	deleteCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/gpt-4o"}})
 	assertUnavailable("DeleteModelOverride", h.DeleteModelOverride(deleteCtx), deleteRec)
 }
 
@@ -278,11 +277,11 @@ func TestUpsertAndDeleteModelOverride(t *testing.T) {
 	h := NewHandler(nil, nil, WithModelOverrides(service))
 	e := echo.New()
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"user_paths":["team/alpha"]}`))
+	selector := "openai/meta-llama/llama-3.1-8b-instruct"
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides", bytes.NewBufferString(`{"selector":"`+selector+`","user_paths":["team/alpha"]}`))
 	putReq.Header.Set("Content-Type", "application/json")
 	putRec := httptest.NewRecorder()
 	putCtx := e.NewContext(putReq, putRec)
-	putCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/gpt-4o"}})
 
 	if err := h.UpsertModelOverride(putCtx); err != nil {
 		t.Fatalf("UpsertModelOverride() error = %v", err)
@@ -295,8 +294,8 @@ func TestUpsertAndDeleteModelOverride(t *testing.T) {
 	if err := json.Unmarshal(putRec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode upsert response: %v", err)
 	}
-	if body.Selector != "openai/gpt-4o" {
-		t.Fatalf("body.Selector = %q, want openai/gpt-4o", body.Selector)
+	if body.Selector != selector {
+		t.Fatalf("body.Selector = %q, want %q", body.Selector, selector)
 	}
 	if body.ScopeKind != modelselectors.ScopeProviderModel {
 		t.Fatalf("body.ScopeKind = %q, want %q", body.ScopeKind, modelselectors.ScopeProviderModel)
@@ -305,10 +304,10 @@ func TestUpsertAndDeleteModelOverride(t *testing.T) {
 		t.Fatalf("body.UserPaths = %#v, want [/team/alpha]", body.UserPaths)
 	}
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", nil)
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides", bytes.NewBufferString(`{"selector":"`+selector+`"}`))
+	deleteReq.Header.Set("Content-Type", "application/json")
 	deleteRec := httptest.NewRecorder()
 	deleteCtx := e.NewContext(deleteReq, deleteRec)
-	deleteCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/gpt-4o"}})
 
 	if err := h.DeleteModelOverride(deleteCtx); err != nil {
 		t.Fatalf("DeleteModelOverride() error = %v", err)
@@ -323,11 +322,10 @@ func TestUpsertAndDeleteProviderWideModelOverride(t *testing.T) {
 	h := NewHandler(nil, nil, WithModelOverrides(service))
 	e := echo.New()
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2F", bytes.NewBufferString(`{"user_paths":["/non-existing"]}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides", bytes.NewBufferString(`{"selector":"openai/","user_paths":["/non-existing"]}`))
 	putReq.Header.Set("Content-Type", "application/json")
 	putRec := httptest.NewRecorder()
 	putCtx := e.NewContext(putReq, putRec)
-	putCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/"}})
 
 	if err := h.UpsertModelOverride(putCtx); err != nil {
 		t.Fatalf("UpsertModelOverride() error = %v", err)
@@ -347,10 +345,10 @@ func TestUpsertAndDeleteProviderWideModelOverride(t *testing.T) {
 		t.Fatalf("body.UserPaths = %#v, want [/non-existing]", body.UserPaths)
 	}
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides/openai%2F", nil)
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides", bytes.NewBufferString(`{"selector":"openai/"}`))
+	deleteReq.Header.Set("Content-Type", "application/json")
 	deleteRec := httptest.NewRecorder()
 	deleteCtx := e.NewContext(deleteReq, deleteRec)
-	deleteCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/"}})
 
 	if err := h.DeleteModelOverride(deleteCtx); err != nil {
 		t.Fatalf("DeleteModelOverride() error = %v", err)
@@ -365,11 +363,10 @@ func TestUpsertAndDeleteGlobalModelOverride(t *testing.T) {
 	h := NewHandler(nil, nil, WithModelOverrides(service))
 	e := echo.New()
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/%2F", bytes.NewBufferString(`{"user_paths":["/"]}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides", bytes.NewBufferString(`{"selector":"/","user_paths":["/"]}`))
 	putReq.Header.Set("Content-Type", "application/json")
 	putRec := httptest.NewRecorder()
 	putCtx := e.NewContext(putReq, putRec)
-	putCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: "/"}})
 
 	if err := h.UpsertModelOverride(putCtx); err != nil {
 		t.Fatalf("UpsertModelOverride() error = %v", err)
@@ -389,10 +386,10 @@ func TestUpsertAndDeleteGlobalModelOverride(t *testing.T) {
 		t.Fatalf("body.UserPaths = %#v, want [/]", body.UserPaths)
 	}
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides/%2F", nil)
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides", bytes.NewBufferString(`{"selector":"/"}`))
+	deleteReq.Header.Set("Content-Type", "application/json")
 	deleteRec := httptest.NewRecorder()
 	deleteCtx := e.NewContext(deleteReq, deleteRec)
-	deleteCtx.SetPathValues(echo.PathValues{{Name: "selector", Value: "/"}})
 
 	if err := h.DeleteModelOverride(deleteCtx); err != nil {
 		t.Fatalf("DeleteModelOverride() error = %v", err)
@@ -407,11 +404,10 @@ func TestUpsertModelOverrideReturnsBadRequestForValidationErrors(t *testing.T) {
 	h := NewHandler(nil, nil, WithModelOverrides(service))
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"user_paths":[]}`))
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides", bytes.NewBufferString(`{"selector":"openai/gpt-4o","user_paths":[]}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/gpt-4o"}})
 
 	if err := h.UpsertModelOverride(c); err != nil {
 		t.Fatalf("UpsertModelOverride() error = %v", err)
@@ -428,11 +424,10 @@ func TestModelOverrideWriteErrorsBubbleProviderErrors(t *testing.T) {
 	h := NewHandler(nil, nil, WithModelOverrides(service))
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"user_paths":["/"]}`))
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-overrides", bytes.NewBufferString(`{"selector":"openai/gpt-4o","user_paths":["/"]}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/gpt-4o"}})
 
 	if err := h.UpsertModelOverride(c); err != nil {
 		t.Fatalf("UpsertModelOverride() error = %v", err)
@@ -460,10 +455,10 @@ func TestDeleteModelOverrideWriteErrorsBubbleProviderErrors(t *testing.T) {
 	h := NewHandler(nil, nil, WithModelOverrides(service))
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides/openai%2Fgpt-4o", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-overrides", bytes.NewBufferString(`{"selector":"openai/gpt-4o"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/gpt-4o"}})
 
 	if err := h.DeleteModelOverride(c); err != nil {
 		t.Fatalf("DeleteModelOverride() error = %v", err)

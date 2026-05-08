@@ -368,6 +368,7 @@
                 this.guardrailFormSubmitting = true;
 
                 const payload = {
+                    name,
                     type,
                     description: String(this.guardrailForm.description || '').trim() || undefined,
                     user_path: String(this.guardrailForm.user_path || '').trim() || undefined,
@@ -385,7 +386,7 @@
                             headers: this.headers(),
                             body: JSON.stringify(payload)
                         };
-                    const res = await fetch('/admin/api/v1/guardrails/' + encodeURIComponent(name), request);
+                    const res = await fetch('/admin/api/v1/guardrails', request);
                     if (res.status === 503) {
                         this.guardrailsAvailable = false;
                         this.guardrailError = 'Guardrails feature is unavailable.';
@@ -446,13 +447,15 @@
                 try {
                     const request = typeof this.requestOptions === 'function'
                         ? this.requestOptions({
-                            method: 'DELETE'
+                            method: 'DELETE',
+                            body: JSON.stringify({ name })
                         })
                         : {
                             method: 'DELETE',
-                            headers: this.headers()
+                            headers: this.headers(),
+                            body: JSON.stringify({ name })
                         };
-                    const res = await fetch('/admin/api/v1/guardrails/' + encodeURIComponent(name), request);
+                    const res = await fetch('/admin/api/v1/guardrails', request);
                     if (res.status === 503) {
                         this.guardrailsAvailable = false;
                         this.guardrailError = 'Guardrails feature is unavailable.';

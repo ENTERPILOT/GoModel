@@ -1284,7 +1284,7 @@ func TestAuditLog_NilReaderStillValidatesParams(t *testing.T) {
 }
 
 func TestAuditConversation_NilReaderStillValidatesParams(t *testing.T) {
-	h := NewHandler(nil, nil) // no audit reader configured
+	h := NewHandler(nil, nil)                                       // no audit reader configured
 	c, rec := newHandlerContext("/admin/api/v1/audit/conversation") // missing required log_id
 
 	if err := h.AuditConversation(c); err != nil {
@@ -2440,7 +2440,7 @@ func TestHandleError_LogsServerErrorsAtErrorLevel(t *testing.T) {
 	})
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails/privacy", nil)
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails", nil)
 	req = req.WithContext(core.WithRequestID(req.Context(), "admin-error-req-456"))
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)

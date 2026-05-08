@@ -1,7 +1,7 @@
 package admin
 
 import (
-	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -12,7 +12,12 @@ import (
 )
 
 type upsertModelOverrideRequest struct {
+	Selector  string   `json:"selector" binding:"required"`
 	UserPaths []string `json:"user_paths,omitempty"`
+}
+
+type deleteModelOverrideRequest struct {
+	Selector string `json:"selector" binding:"required"`
 }
 
 // ListModelOverrides handles GET /admin/api/v1/model-overrides.
@@ -38,22 +43,21 @@ func (h *Handler) ListModelOverrides(c *echo.Context) error {
 	return c.JSON(http.StatusOK, views)
 }
 
-// UpsertModelOverride handles PUT /admin/api/v1/model-overrides/{selector}.
+// UpsertModelOverride handles PUT /admin/api/v1/model-overrides.
 //
 // @Summary      Create or update one model access override
 // @Tags         admin
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        selector  path      string                      true  "URL-encoded model selector such as /, openai/, gpt-4o-mini, or openai/gpt-4o-mini"
-// @Param        override  body      upsertModelOverrideRequest  true  "Allowed user paths"
+// @Param        override  body      upsertModelOverrideRequest  true  "Model selector and allowed user paths"
 // @Success      200       {object}  modeloverrides.View
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
 // @Failure      500       {object}  core.GatewayError
 // @Failure      502       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
-// @Router       /admin/api/v1/model-overrides/{selector} [put]
+// @Router       /admin/api/v1/model-overrides [put]
 //
 //nolint:dupl // structurally similar to UpsertModelPricingOverride but operates on different types and stores.
 func (h *Handler) UpsertModelOverride(c *echo.Context) error {
@@ -61,14 +65,13 @@ func (h *Handler) UpsertModelOverride(c *echo.Context) error {
 		return handleError(c, featureUnavailableError("model overrides feature is unavailable"))
 	}
 
-	selector, err := decodeModelOverridePathSelector(c.Param("selector"))
-	if err != nil {
-		return handleError(c, err)
-	}
-
 	var req upsertModelOverrideRequest
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	selector, err := normalizeModelOverrideSelector(req.Selector)
+	if err != nil {
+		return handleError(c, err)
 	}
 
 	if err := h.modelOverrides.Upsert(c.Request().Context(), modeloverrides.Override{
@@ -89,36 +92,42 @@ func (h *Handler) UpsertModelOverride(c *echo.Context) error {
 	})
 }
 
-// DeleteModelOverride handles DELETE /admin/api/v1/model-overrides/{selector}.
+// DeleteModelOverride handles DELETE /admin/api/v1/model-overrides.
 //
 // @Summary      Delete one model access override
 // @Tags         admin
+// @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        selector  path  string  true  "URL-encoded model selector"
+// @Param        request  body  deleteModelOverrideRequest  true  "Model selector to remove"
 // @Success      204       "No Content"
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
 // @Failure      404       {object}  core.GatewayError
 // @Failure      502       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
-// @Router       /admin/api/v1/model-overrides/{selector} [delete]
+// @Router       /admin/api/v1/model-overrides [delete]
+//
+//nolint:dupl // structurally similar to DeleteModelPricingOverride but operates on different types and stores.
 func (h *Handler) DeleteModelOverride(c *echo.Context) error {
-	var unavailableErr error
-	var deleteFunc func(context.Context, string) error
 	if h.modelOverrides == nil {
-		unavailableErr = featureUnavailableError("model overrides feature is unavailable")
-	} else {
-		deleteFunc = h.modelOverrides.Delete
+		return handleError(c, featureUnavailableError("model overrides feature is unavailable"))
 	}
-	return deleteByName(
-		c,
-		unavailableErr,
-		"selector",
-		decodeModelOverridePathSelector,
-		deleteFunc,
-		modeloverrides.ErrNotFound,
-		"model override not found: ",
-		modelOverrideWriteError,
-	)
+
+	var req deleteModelOverrideRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	selector, err := normalizeModelOverrideSelector(req.Selector)
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	if err := h.modelOverrides.Delete(c.Request().Context(), selector); err != nil {
+		if errors.Is(err, modeloverrides.ErrNotFound) {
+			return handleError(c, core.NewNotFoundError("model override not found: "+selector))
+		}
+		return handleError(c, modelOverrideWriteError(err))
+	}
+	return c.NoContent(http.StatusNoContent)
 }

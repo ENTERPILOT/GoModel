@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -99,51 +98,7 @@ func deactivateByID(
 	return c.NoContent(http.StatusNoContent)
 }
 
-func deleteByName(
-	c *echo.Context,
-	unavailableErr error,
-	paramName string,
-	decode func(string) (string, error),
-	deleteFunc func(context.Context, string) error,
-	notFoundErr error,
-	notFoundMessage string,
-	writeError func(error) error,
-) error {
-	if unavailableErr != nil {
-		return handleError(c, unavailableErr)
-	}
-
-	name, err := decode(c.Param(paramName))
-	if err != nil {
-		return handleError(c, err)
-	}
-
-	if err := deleteFunc(c.Request().Context(), name); err != nil {
-		if errors.Is(err, notFoundErr) {
-			return handleError(c, core.NewNotFoundError(notFoundMessage+name))
-		}
-		return handleError(c, writeError(err))
-	}
-	return c.NoContent(http.StatusNoContent)
-}
-
-func decodeAliasPathName(raw string) (string, error) {
-	name, err := url.PathUnescape(strings.TrimSpace(raw))
-	if err != nil {
-		return "", core.NewInvalidRequestError("invalid alias name", err)
-	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", core.NewInvalidRequestError("alias name is required", nil)
-	}
-	return name, nil
-}
-
-func decodeModelOverridePathSelector(raw string) (string, error) {
-	selector, err := url.PathUnescape(strings.TrimSpace(raw))
-	if err != nil {
-		return "", core.NewInvalidRequestError("invalid model override selector", err)
-	}
+func normalizeModelOverrideSelector(selector string) (string, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
 		return "", core.NewInvalidRequestError("model override selector is required", nil)
@@ -155,11 +110,7 @@ func decodeModelOverridePathSelector(raw string) (string, error) {
 // IDs and model IDs are short identifiers, never essays.
 const modelPricingOverrideSelectorMaxLen = 256
 
-func decodeModelPricingOverridePathSelector(raw string) (string, error) {
-	selector, err := url.PathUnescape(strings.TrimSpace(raw))
-	if err != nil {
-		return "", core.NewInvalidRequestError("invalid model pricing override selector", err)
-	}
+func normalizeModelPricingOverrideSelector(selector string) (string, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
 		return "", core.NewInvalidRequestError("model pricing override selector is required", nil)

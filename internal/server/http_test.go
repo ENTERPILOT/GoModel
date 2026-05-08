@@ -332,7 +332,7 @@ func TestBasePathStripsPrefixBeforeRouting(t *testing.T) {
 
 func TestBasePathPreservesEscapedPathParamsBeforeRouting(t *testing.T) {
 	srv := New(&mockProvider{}, &Config{BasePath: "/g"})
-	srv.echo.PUT("/admin/api/v1/budgets/:user_path/:period", func(c *echo.Context) error {
+	srv.echo.PUT("/probe/:user_path/:period", func(c *echo.Context) error {
 		return c.String(
 			http.StatusOK,
 			c.Param("user_path")+"|"+c.Param("period")+"|"+c.Request().URL.RawPath+"|"+c.Request().RequestURI,
@@ -347,19 +347,19 @@ func TestBasePathPreservesEscapedPathParamsBeforeRouting(t *testing.T) {
 	}{
 		{
 			name:     "root user path",
-			path:     "/g/admin/api/v1/budgets/%2F/86400",
-			expected: "%2F|86400|/admin/api/v1/budgets/%2F/86400|/admin/api/v1/budgets/%2F/86400",
+			path:     "/g/probe/%2F/86400",
+			expected: "%2F|86400|/probe/%2F/86400|/probe/%2F/86400",
 		},
 		{
 			name:     "nested user path",
-			path:     "/g/admin/api/v1/budgets/%2Fteam%2Fbeta/604800",
-			expected: "%2Fteam%2Fbeta|604800|/admin/api/v1/budgets/%2Fteam%2Fbeta/604800|/admin/api/v1/budgets/%2Fteam%2Fbeta/604800",
+			path:     "/g/probe/%2Fteam%2Fbeta/604800",
+			expected: "%2Fteam%2Fbeta|604800|/probe/%2Fteam%2Fbeta/604800|/probe/%2Fteam%2Fbeta/604800",
 		},
 		{
 			name:     "encoded base path raw prefix",
-			path:     "/g/admin/api/v1/budgets/%2F/86400",
-			rawPath:  "/%67/admin/api/v1/budgets/%2F/86400",
-			expected: "%2F|86400|/admin/api/v1/budgets/%2F/86400|/admin/api/v1/budgets/%2F/86400",
+			path:     "/g/probe/%2F/86400",
+			rawPath:  "/%67/probe/%2F/86400",
+			expected: "%2F|86400|/probe/%2F/86400|/probe/%2F/86400",
 		},
 	}
 
@@ -385,7 +385,7 @@ func TestBasePathPreservesEscapedPathParamsBeforeRouting(t *testing.T) {
 
 func TestBasePathRejectsInvalidRawPathPrefix(t *testing.T) {
 	srv := New(&mockProvider{}, &Config{BasePath: "/g"})
-	srv.echo.PUT("/admin/api/v1/budgets/:user_path/:period", func(c *echo.Context) error {
+	srv.echo.PUT("/probe/:user_path/:period", func(c *echo.Context) error {
 		return c.NoContent(http.StatusOK)
 	})
 
@@ -395,17 +395,17 @@ func TestBasePathRejectsInvalidRawPathPrefix(t *testing.T) {
 	}{
 		{
 			name:    "decoded raw path does not match base path",
-			rawPath: "/%2Fg/admin/api/v1/budgets/%2F/86400",
+			rawPath: "/%2Fg/probe/%2F/86400",
 		},
 		{
 			name:    "encoded slash in raw base path segment",
-			rawPath: "/%67%2Fadmin/api/v1/budgets/%2F/86400",
+			rawPath: "/%67%2Fprobe/%2F/86400",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPut, "/g/admin/api/v1/budgets/%2F/86400", nil)
+			req := httptest.NewRequest(http.MethodPut, "/g/probe/%2F/86400", nil)
 			req.URL.RawPath = tt.rawPath
 			rec := httptest.NewRecorder()
 

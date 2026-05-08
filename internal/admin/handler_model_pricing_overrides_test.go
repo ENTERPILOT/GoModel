@@ -78,7 +78,6 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 		name         string
 		providers    []string
 		selector     string
-		encodedPath  string
 		price        float64
 		wantProvider string
 		wantModel    string
@@ -88,7 +87,6 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 			name:         "simple provider model selector",
 			providers:    []string{"openai"},
 			selector:     "openai/gpt-4o",
-			encodedPath:  "openai%2Fgpt-4o",
 			price:        1.25,
 			wantProvider: "openai",
 			wantModel:    "gpt-4o",
@@ -98,7 +96,6 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 			name:         "provider model selector with slash-shaped model id",
 			providers:    []string{"openrouter"},
 			selector:     "openrouter/meta-llama/llama-3.1-8b-instruct",
-			encodedPath:  "openrouter%2Fmeta-llama%2Fllama-3.1-8b-instruct",
 			price:        0.18,
 			wantProvider: "openrouter",
 			wantModel:    "meta-llama/llama-3.1-8b-instruct",
@@ -113,8 +110,8 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 			e := echo.New()
 			h.RegisterRoutes(e.Group("/admin/api/v1"))
 
-			bodyJSON := `{"pricing":{"input_per_mtok":` + strconv.FormatFloat(tt.price, 'f', -1, 64) + `}}`
-			putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-pricing-overrides/"+tt.encodedPath, bytes.NewBufferString(bodyJSON))
+			bodyJSON := `{"selector":"` + tt.selector + `","pricing":{"input_per_mtok":` + strconv.FormatFloat(tt.price, 'f', -1, 64) + `}}`
+			putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-pricing-overrides", bytes.NewBufferString(bodyJSON))
 			putReq.Header.Set("Content-Type", "application/json")
 			putRec := httptest.NewRecorder()
 			e.ServeHTTP(putRec, putReq)
@@ -143,7 +140,8 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 			}
 			assertPricingOverrideView(t, listBody[0], tt.selector, tt.wantProvider, tt.wantModel, tt.wantScope, tt.price)
 
-			deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-pricing-overrides/"+tt.encodedPath, nil)
+			deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-pricing-overrides", bytes.NewBufferString(`{"selector":"`+tt.selector+`"}`))
+			deleteReq.Header.Set("Content-Type", "application/json")
 			deleteRec := httptest.NewRecorder()
 			e.ServeHTTP(deleteRec, deleteReq)
 			if deleteRec.Code != http.StatusNoContent {
@@ -171,11 +169,10 @@ func TestUpsertModelPricingOverrideReturnsBadRequestForValidationErrors(t *testi
 	h := NewHandler(nil, nil, WithPricingOverrides(service))
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-pricing-overrides/openai%2Fgpt-4o", bytes.NewBufferString(`{"pricing":{}}`))
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-pricing-overrides", bytes.NewBufferString(`{"selector":"openai/gpt-4o","pricing":{}}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPathValues(echo.PathValues{{Name: "selector", Value: "openai/gpt-4o"}})
 
 	if err := h.UpsertModelPricingOverride(c); err != nil {
 		t.Fatalf("UpsertModelPricingOverride() error = %v", err)

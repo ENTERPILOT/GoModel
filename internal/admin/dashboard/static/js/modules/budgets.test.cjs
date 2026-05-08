@@ -209,9 +209,11 @@ test('confirmBudgetOverride saves the pending create after confirmation', async 
     await module.confirmBudgetOverride();
 
     assert.equal(requests.length, 2);
-    assert.equal(requests[0].url, '/admin/api/v1/budgets/%2Fteam/86400');
+    assert.equal(requests[0].url, '/admin/api/v1/budgets');
     assert.equal(requests[0].request.method, 'PUT');
     assert.equal(requests[0].request.body, JSON.stringify({
+        user_path: '/team',
+        period_seconds: 86400,
         amount: 12.5
     }));
     assert.equal(requests[1].url, '/admin/api/v1/budgets');
@@ -312,7 +314,7 @@ test('budgetPeriodLabel and class distinguish standard and custom periods', () =
     assert.equal(module.budgetPeriodDurationLabel({ period_seconds: 1 }), '1 second');
 });
 
-test('deleteBudget uses the selected budget key in the URL and refreshes from the response envelope', async () => {
+test('deleteBudget sends the selected budget key in the body and refreshes from the response envelope', async () => {
     const requests = [];
     const module = createBudgetsModule({
         confirm(message) {
@@ -338,9 +340,12 @@ test('deleteBudget uses the selected budget key in the URL and refreshes from th
     await module.deleteBudget({ user_path: '/team', period_seconds: 86400, period_label: 'daily' });
 
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].url, '/admin/api/v1/budgets/%2Fteam/86400');
+    assert.equal(requests[0].url, '/admin/api/v1/budgets');
     assert.equal(requests[0].request.method, 'DELETE');
-    assert.equal(requests[0].request.body, undefined);
+    assert.equal(requests[0].request.body, JSON.stringify({
+        user_path: '/team',
+        period_seconds: 86400
+    }));
     assert.equal(module.budgetDeletingKey, '');
     assert.equal(module.budgetNotice, 'Budget deleted.');
     assert.equal(JSON.stringify(module.budgets), JSON.stringify([

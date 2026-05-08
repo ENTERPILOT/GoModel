@@ -230,8 +230,8 @@ docker run --rm -p 8080:8080 --env-file .env gomodel
 | `/admin/api/v1/models`                     | GET    | List models with provider type             |
 | `/admin/api/v1/models/categories`          | GET    | List model categories                      |
 | `/admin/api/v1/model-overrides`            | GET    | List model overrides                       |
-| `/admin/api/v1/model-overrides/:selector`  | PUT    | Create/update model override               |
-| `/admin/api/v1/model-overrides/:selector`  | DELETE | Remove model override                      |
+| `/admin/api/v1/model-overrides`            | PUT    | Create/update model override               |
+| `/admin/api/v1/model-overrides`            | DELETE | Remove model override                      |
 | `/admin/api/v1/auth-keys`                  | GET    | List authentication keys                   |
 
 ### Operations Endpoints

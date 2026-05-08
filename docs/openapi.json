@@ -273,6 +273,134 @@
             "BearerAuth": []
           }
         ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create or update one budget",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.upsertBudgetRequest"
+              }
+            }
+          },
+          "description": "Budget key and amount",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.budgetListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete one budget",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.deleteBudgetRequest"
+              }
+            }
+          },
+          "description": "Budget key",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.budgetListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       }
     },
     "/admin/api/v1/budgets/reset": {
@@ -516,165 +644,6 @@
         ]
       }
     },
-    "/admin/api/v1/budgets/{user_path}/{period}": {
-      "put": {
-        "tags": [
-          "admin"
-        ],
-        "summary": "Create or update one budget",
-        "parameters": [
-          {
-            "description": "URL-encoded budget user path",
-            "name": "user_path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Budget period name or seconds",
-            "name": "period",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/admin.upsertBudgetRequest"
-              }
-            }
-          },
-          "description": "Budget amount",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/admin.budgetListResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad Request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Service Unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "admin"
-        ],
-        "summary": "Delete one budget",
-        "parameters": [
-          {
-            "description": "URL-encoded budget user path",
-            "name": "user_path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Budget period name or seconds",
-            "name": "period",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/admin.budgetListResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad Request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Service Unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
-      }
-    },
     "/admin/api/v1/cache/overview": {
       "get": {
         "tags": [
@@ -864,25 +833,12 @@
             "BearerAuth": []
           }
         ]
-      }
-    },
-    "/admin/api/v1/model-overrides/{selector}": {
+      },
       "put": {
         "tags": [
           "admin"
         ],
         "summary": "Create or update one model access override",
-        "parameters": [
-          {
-            "description": "URL-encoded model selector such as /, openai/, gpt-4o-mini, or openai/gpt-4o-mini",
-            "name": "selector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -891,7 +847,7 @@
               }
             }
           },
-          "description": "Allowed user paths",
+          "description": "Model selector and allowed user paths",
           "required": true
         },
         "responses": {
@@ -967,17 +923,17 @@
           "admin"
         ],
         "summary": "Delete one model access override",
-        "parameters": [
-          {
-            "description": "URL-encoded model selector",
-            "name": "selector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.deleteModelOverrideRequest"
+              }
             }
-          }
-        ],
+          },
+          "description": "Model selector to remove",
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "No Content"
@@ -1089,26 +1045,13 @@
             "BearerAuth": []
           }
         ]
-      }
-    },
-    "/admin/api/v1/model-pricing-overrides/{selector}": {
+      },
       "put": {
         "description": "Stores USD-only pricing for one selector. More precise selectors override broader selectors at runtime.",
         "tags": [
           "admin"
         ],
         "summary": "Create or update one model pricing override",
-        "parameters": [
-          {
-            "description": "URL-encoded pricing selector such as /, openai/, gpt-4o-mini, or openai/gpt-4o-mini",
-            "name": "selector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -1117,7 +1060,7 @@
               }
             }
           },
-          "description": "Pricing override",
+          "description": "Pricing selector and override",
           "required": true
         },
         "responses": {
@@ -1183,17 +1126,17 @@
           "admin"
         ],
         "summary": "Delete one model pricing override",
-        "parameters": [
-          {
-            "description": "URL-encoded pricing selector",
-            "name": "selector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.deleteModelPricingOverrideRequest"
+              }
             }
-          }
-        ],
+          },
+          "description": "Pricing selector to remove",
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "No Content"
@@ -5230,6 +5173,45 @@
           }
         }
       },
+      "admin.deleteBudgetRequest": {
+        "type": "object",
+        "required": [
+          "user_path"
+        ],
+        "properties": {
+          "period": {
+            "type": "string"
+          },
+          "period_seconds": {
+            "type": "integer"
+          },
+          "user_path": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.deleteModelOverrideRequest": {
+        "type": "object",
+        "required": [
+          "selector"
+        ],
+        "properties": {
+          "selector": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.deleteModelPricingOverrideRequest": {
+        "type": "object",
+        "required": [
+          "selector"
+        ],
+        "properties": {
+          "selector": {
+            "type": "string"
+          }
+        }
+      },
       "admin.modelAccessResponse": {
         "type": "object",
         "properties": {
@@ -5366,15 +5348,34 @@
       },
       "admin.upsertBudgetRequest": {
         "type": "object",
+        "required": [
+          "amount",
+          "user_path"
+        ],
         "properties": {
           "amount": {
             "type": "number"
+          },
+          "period": {
+            "type": "string"
+          },
+          "period_seconds": {
+            "type": "integer"
+          },
+          "user_path": {
+            "type": "string"
           }
         }
       },
       "admin.upsertModelOverrideRequest": {
         "type": "object",
+        "required": [
+          "selector"
+        ],
         "properties": {
+          "selector": {
+            "type": "string"
+          },
           "user_paths": {
             "type": "array",
             "items": {
@@ -5388,11 +5389,15 @@
       "admin.upsertModelPricingOverrideRequest": {
         "type": "object",
         "required": [
-          "pricing"
+          "pricing",
+          "selector"
         ],
         "properties": {
           "pricing": {
             "$ref": "#/components/schemas/pricingoverrides.Pricing"
+          },
+          "selector": {
+            "type": "string"
           }
         }
       },

@@ -48,8 +48,8 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"POST /admin/api/v1/runtime/refresh",
 
 		"GET /admin/api/v1/budgets",
-		"PUT /admin/api/v1/budgets/:user_path/:period",
-		"DELETE /admin/api/v1/budgets/:user_path/:period",
+		"PUT /admin/api/v1/budgets",
+		"DELETE /admin/api/v1/budgets",
 		"GET /admin/api/v1/budgets/settings",
 		"PUT /admin/api/v1/budgets/settings",
 		"POST /admin/api/v1/budgets/reset-one",
@@ -59,25 +59,25 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"GET /admin/api/v1/models/categories",
 
 		"GET /admin/api/v1/model-overrides",
-		"PUT /admin/api/v1/model-overrides/:selector",
-		"DELETE /admin/api/v1/model-overrides/:selector",
+		"PUT /admin/api/v1/model-overrides",
+		"DELETE /admin/api/v1/model-overrides",
 
 		"GET /admin/api/v1/model-pricing-overrides",
-		"PUT /admin/api/v1/model-pricing-overrides/:selector",
-		"DELETE /admin/api/v1/model-pricing-overrides/:selector",
+		"PUT /admin/api/v1/model-pricing-overrides",
+		"DELETE /admin/api/v1/model-pricing-overrides",
 
 		"GET /admin/api/v1/auth-keys",
 		"POST /admin/api/v1/auth-keys",
 		"POST /admin/api/v1/auth-keys/:id/deactivate",
 
 		"GET /admin/api/v1/aliases",
-		"PUT /admin/api/v1/aliases/:name",
-		"DELETE /admin/api/v1/aliases/:name",
+		"PUT /admin/api/v1/aliases",
+		"DELETE /admin/api/v1/aliases",
 
 		"GET /admin/api/v1/guardrails/types",
 		"GET /admin/api/v1/guardrails",
-		"PUT /admin/api/v1/guardrails/:name",
-		"DELETE /admin/api/v1/guardrails/:name",
+		"PUT /admin/api/v1/guardrails",
+		"DELETE /admin/api/v1/guardrails",
 
 		"GET /admin/api/v1/workflows",
 		"GET /admin/api/v1/workflows/guardrails",

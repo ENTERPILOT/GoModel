@@ -182,7 +182,8 @@ func TestUpsertGuardrail(t *testing.T) {
 	h := newGuardrailHandler(t)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails/policy-system", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails", bytes.NewBufferString(`{
+		"name":"policy-system",
 		"type":"system_prompt",
 		"description":"Default policy",
 		"user_path":"team/alpha",
@@ -191,8 +192,6 @@ func TestUpsertGuardrail(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPath("/admin/api/v1/guardrails/:name")
-	c.SetPathValues(echo.PathValues{{Name: "name", Value: "policy-system"}})
 
 	if err := h.UpsertGuardrail(c); err != nil {
 		t.Fatalf("UpsertGuardrail() error = %v", err)
@@ -217,7 +216,8 @@ func TestUpsertGuardrailLLMBasedAltering(t *testing.T) {
 	h := newGuardrailHandler(t)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails/privacy", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails", bytes.NewBufferString(`{
+		"name":"privacy",
 		"type":"llm_based_altering",
 		"description":"Rewrite user PII",
 		"config":{"model":"gpt-4o-mini","roles":["user","tool"]}
@@ -225,8 +225,6 @@ func TestUpsertGuardrailLLMBasedAltering(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPath("/admin/api/v1/guardrails/:name")
-	c.SetPathValues(echo.PathValues{{Name: "name", Value: "privacy"}})
 
 	if err := h.UpsertGuardrail(c); err != nil {
 		t.Fatalf("UpsertGuardrail() error = %v", err)
@@ -259,7 +257,8 @@ func TestUpsertGuardrailLLMBasedAlteringNormalizesProviderHintIntoModel(t *testi
 	h := newGuardrailHandler(t)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails/privacy", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails", bytes.NewBufferString(`{
+		"name":"privacy",
 		"type":"llm_based_altering",
 		"description":"Rewrite user PII",
 		"config":{"model":"gpt-4o-mini","provider":"openai","roles":["user"]}
@@ -267,8 +266,6 @@ func TestUpsertGuardrailLLMBasedAlteringNormalizesProviderHintIntoModel(t *testi
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPath("/admin/api/v1/guardrails/:name")
-	c.SetPathValues(echo.PathValues{{Name: "name", Value: "privacy"}})
 
 	if err := h.UpsertGuardrail(c); err != nil {
 		t.Fatalf("UpsertGuardrail() error = %v", err)
@@ -298,15 +295,14 @@ func TestUpsertGuardrailRejectsSlashInName(t *testing.T) {
 	h := newGuardrailHandler(t)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails/privacy/redactor", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails", bytes.NewBufferString(`{
+		"name":"privacy/redactor",
 		"type":"llm_based_altering",
 		"config":{"model":"gpt-4o-mini","roles":["user"]}
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPath("/admin/api/v1/guardrails/:name")
-	c.SetPathValues(echo.PathValues{{Name: "name", Value: "privacy/redactor"}})
 
 	if err := h.UpsertGuardrail(c); err != nil {
 		t.Fatalf("UpsertGuardrail() error = %v", err)
@@ -367,11 +363,10 @@ func TestDeleteGuardrailRejectsActiveWorkflowReference(t *testing.T) {
 
 	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithWorkflows(planService))
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/guardrails/policy-system", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/guardrails", bytes.NewBufferString(`{"name":"policy-system"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPath("/admin/api/v1/guardrails/:name")
-	c.SetPathValues(echo.PathValues{{Name: "name", Value: "policy-system"}})
 
 	if err := h.DeleteGuardrail(c); err != nil {
 		t.Fatalf("DeleteGuardrail() error = %v", err)
@@ -423,11 +418,10 @@ func TestDeleteGuardrailIgnoresDisabledWorkflowGuardrailRefs(t *testing.T) {
 
 	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithWorkflows(planService))
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/guardrails/policy-system", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/guardrails", bytes.NewBufferString(`{"name":"policy-system"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPath("/admin/api/v1/guardrails/:name")
-	c.SetPathValues(echo.PathValues{{Name: "name", Value: "policy-system"}})
 
 	if err := h.DeleteGuardrail(c); err != nil {
 		t.Fatalf("DeleteGuardrail() error = %v", err)

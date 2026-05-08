@@ -348,12 +348,6 @@
                 };
             },
 
-            budgetAPIPath(userPath, periodSeconds) {
-                const encodedPath = encodeURIComponent(this.normalizeBudgetUserPath(userPath));
-                const encodedPeriod = encodeURIComponent(String(Math.trunc(Number(periodSeconds || 0))));
-                return '/admin/api/v1/budgets/' + encodedPath + '/' + encodedPeriod;
-            },
-
             openBudgetOverrideDialog(existing, payload) {
                 this.budgetOverrideExistingBudget = existing || null;
                 this.budgetOverridePendingPayload = payload || null;
@@ -441,14 +435,22 @@
                     const request = typeof this.requestOptions === 'function'
                         ? this.requestOptions({
                             method: 'PUT',
-                            body: JSON.stringify({ amount: payload.amount })
+                            body: JSON.stringify({
+                                user_path: payload.user_path,
+                                period_seconds: payload.period_seconds,
+                                amount: payload.amount
+                            })
                         })
                         : {
                             method: 'PUT',
                             headers: this.headers(),
-                            body: JSON.stringify({ amount: payload.amount })
+                            body: JSON.stringify({
+                                user_path: payload.user_path,
+                                period_seconds: payload.period_seconds,
+                                amount: payload.amount
+                            })
                         };
-                    const res = await fetch(this.budgetAPIPath(payload.user_path, payload.period_seconds), request);
+                    const res = await fetch('/admin/api/v1/budgets', request);
                     if (res.status === 503) {
                         this.budgetsAvailable = false;
                         this.budgetFormError = 'Budget management is unavailable.';
@@ -547,13 +549,21 @@
                 try {
                     const request = typeof this.requestOptions === 'function'
                         ? this.requestOptions({
-                            method: 'DELETE'
+                            method: 'DELETE',
+                            body: JSON.stringify({
+                                user_path: item.user_path,
+                                period_seconds: item.period_seconds
+                            })
                         })
                         : {
                             method: 'DELETE',
-                            headers: this.headers()
+                            headers: this.headers(),
+                            body: JSON.stringify({
+                                user_path: item.user_path,
+                                period_seconds: item.period_seconds
+                            })
                         };
-                    const res = await fetch(this.budgetAPIPath(item.user_path, item.period_seconds), request);
+                    const res = await fetch('/admin/api/v1/budgets', request);
                     if (res.status === 503) {
                         this.budgetsAvailable = false;
                         this.budgetError = 'Budget management is unavailable.';

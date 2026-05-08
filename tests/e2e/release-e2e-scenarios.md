@@ -97,8 +97,6 @@ run_release_budget_enforcement() {
   local expected_reply="$4"
 
   local leaf_path="$budget_path/leaf"
-  local encoded_path
-  encoded_path=$(jq -nr --arg value "$budget_path" '$value | @uri')
 
   local req1="qa-budget-$artifact_prefix-$QA_SUFFIX-1"
   local req2="qa-budget-$artifact_prefix-$QA_SUFFIX-2"
@@ -108,9 +106,9 @@ run_release_budget_enforcement() {
   local headers_file="$QA_RUN_DIR/$artifact_prefix.headers"
   local body_file="$QA_RUN_DIR/$artifact_prefix.body"
 
-  curl -fsS -X PUT "$base_url/admin/api/v1/budgets/$encoded_path/daily" \
+  curl -fsS -X PUT "$base_url/admin/api/v1/budgets" \
     -H 'Content-Type: application/json' \
-    -d "{\"amount\":$QA_BUDGET_AMOUNT}" \
+    -d "{\"user_path\":\"$budget_path\",\"period\":\"daily\",\"amount\":$QA_BUDGET_AMOUNT}" \
     > "$budget_json_file"
   jq -e --arg user_path "$budget_path" --argjson amount "$QA_BUDGET_AMOUNT" '
     any(.budgets[]?; .user_path == $user_path and .period_seconds == 86400 and .amount == $amount and .source == "manual" and .spent == 0)
@@ -160,7 +158,9 @@ run_release_budget_enforcement() {
     any(.budgets[]?; .user_path == $user_path and .last_reset_at != null and .spent == 0 and .has_usage == false)
   ' "$budget_json_file" >/dev/null
 
-  curl -fsS -X DELETE "$base_url/admin/api/v1/budgets/$encoded_path/daily" \
+  curl -fsS -X DELETE "$base_url/admin/api/v1/budgets" \
+    -H 'Content-Type: application/json' \
+    -d "{\"user_path\":\"$budget_path\",\"period\":\"daily\"}" \
     > "$budget_json_file"
   jq -e --arg user_path "$budget_path" '
     all(.budgets[]?; .user_path != $user_path)
@@ -342,9 +342,9 @@ curl -fsS "$BASE_URL/admin/api/v1/aliases" | jq -e '.'
 Creates an alias pointing to the newest cheap OpenAI model.
 
 ```bash
-curl -fsS -X PUT "$BASE_URL/admin/api/v1/aliases/$QA_OPENAI_ALIAS" \
+curl -fsS -X PUT "$BASE_URL/admin/api/v1/aliases" \
   -H 'Content-Type: application/json' \
-  -d '{"target_model":"gpt-4.1-nano","target_provider":"openai","description":"QA alias for release e2e"}' \
+  -d "{\"name\":\"$QA_OPENAI_ALIAS\",\"target_model\":\"gpt-4.1-nano\",\"target_provider\":\"openai\",\"description\":\"QA alias for release e2e\"}" \
   | jq -e '.'
 ```
 
@@ -353,9 +353,9 @@ curl -fsS -X PUT "$BASE_URL/admin/api/v1/aliases/$QA_OPENAI_ALIAS" \
 Creates an alias pointing to `claude-sonnet-4-6`.
 
 ```bash
-curl -fsS -X PUT "$BASE_URL/admin/api/v1/aliases/$QA_ANTHROPIC_ALIAS" \
+curl -fsS -X PUT "$BASE_URL/admin/api/v1/aliases" \
   -H 'Content-Type: application/json' \
-  -d '{"target_model":"claude-sonnet-4-6","target_provider":"anthropic","description":"QA alias for anthropic reasoning"}' \
+  -d "{\"name\":\"$QA_ANTHROPIC_ALIAS\",\"target_model\":\"claude-sonnet-4-6\",\"target_provider\":\"anthropic\",\"description\":\"QA alias for anthropic reasoning\"}" \
   | jq -e '.'
 ```
 
@@ -892,7 +892,9 @@ curl -fsS "$GR_BASE_URL/admin/api/v1/usage/summary" | jq -e '.'
 Removes the per-run OpenAI alias.
 
 ```bash
-curl -fsS -X DELETE -i "$BASE_URL/admin/api/v1/aliases/$QA_OPENAI_ALIAS"
+curl -fsS -X DELETE -i "$BASE_URL/admin/api/v1/aliases" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$QA_OPENAI_ALIAS\"}"
 ```
 
 ### S60 Delete Anthropic alias
@@ -900,7 +902,9 @@ curl -fsS -X DELETE -i "$BASE_URL/admin/api/v1/aliases/$QA_OPENAI_ALIAS"
 Removes the per-run Anthropic alias.
 
 ```bash
-curl -fsS -X DELETE -i "$BASE_URL/admin/api/v1/aliases/$QA_ANTHROPIC_ALIAS"
+curl -fsS -X DELETE -i "$BASE_URL/admin/api/v1/aliases" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$QA_ANTHROPIC_ALIAS\"}"
 ```
 
 ## 11. Audit failure coverage
@@ -1451,7 +1455,6 @@ Checks budget settings validation, manual budget creation, and deletion on the m
 
 ```bash
 BUDGET_PATH="/team/budget/admin/$QA_SUFFIX"
-ENCODED_PATH=$(jq -nr --arg value "$BUDGET_PATH" '$value | @uri')
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s86.headers.XXXXXX")
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s86.body.XXXXXX")
 
@@ -1468,22 +1471,24 @@ curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets/settings" \
   -d '{"daily_reset_hour":1,"daily_reset_minute":15,"weekly_reset_weekday":2,"monthly_reset_day":2}' \
   | jq -e '.daily_reset_hour == 1 and .daily_reset_minute == 15 and .weekly_reset_weekday == 2 and .monthly_reset_day == 2'
 
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/api/v1/budgets/$ENCODED_PATH/daily" \
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/api/v1/budgets" \
   -H 'Content-Type: application/json' \
-  -d '{"amount":-1}'
+  -d "{\"user_path\":\"$BUDGET_PATH\",\"period\":\"daily\",\"amount\":-1}"
 sed -n '1,20p' "$HEADERS_FILE"
 jq . "$BODY_FILE"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.error.type == "invalid_request_error" and (.error.message | test("amount"))' "$BODY_FILE" >/dev/null
 
-curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets/$ENCODED_PATH/weekly" \
+curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets" \
   -H 'Content-Type: application/json' \
-  -d '{"amount":12.5}' \
+  -d "{\"user_path\":\"$BUDGET_PATH\",\"period\":\"weekly\",\"amount\":12.5}" \
   | jq -e --arg user_path "$BUDGET_PATH" '
       any(.budgets[]?; .user_path == $user_path and .period_seconds == 604800 and .amount == 12.5 and .source == "manual")
     ' >/dev/null
 
-curl -fsS -X DELETE "$BASE_URL/admin/api/v1/budgets/$ENCODED_PATH/weekly" \
+curl -fsS -X DELETE "$BASE_URL/admin/api/v1/budgets" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_path\":\"$BUDGET_PATH\",\"period\":\"weekly\"}" \
   | jq -e --arg user_path "$BUDGET_PATH" 'all(.budgets[]?; .user_path != $user_path)' >/dev/null
 
 curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets/settings" \

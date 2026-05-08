@@ -36,7 +36,7 @@ func New() (*Handler, error) {
 // NewWithBasePath creates a dashboard handler for an app mounted under basePath.
 func NewWithBasePath(basePath string) (*Handler, error) {
 	basePath = config.NormalizeBasePath(basePath)
-	assetVersions, err := buildAssetVersions("css/dashboard.css")
+	assetVersions, err := buildFrontendAssetVersions()
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +107,20 @@ func buildAssetVersions(paths ...string) (map[string]string, error) {
 		versions[normalizedPath] = hex.EncodeToString(sum[:6])
 	}
 	return versions, nil
+}
+
+func buildFrontendAssetVersions() (map[string]string, error) {
+	paths := []string{}
+	for _, pattern := range []string{"static/css/*.css", "static/js/*.js", "static/js/modules/*.js"} {
+		matches, err := fs.Glob(content, pattern)
+		if err != nil {
+			return nil, err
+		}
+		for _, match := range matches {
+			paths = append(paths, strings.TrimPrefix(match, "static/"))
+		}
+	}
+	return buildAssetVersions(paths...)
 }
 
 func assetURL(basePath, assetPath string, versions map[string]string) string {

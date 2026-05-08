@@ -1,7 +1,7 @@
 package admin
 
 import (
-	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -12,7 +12,12 @@ import (
 )
 
 type upsertModelPricingOverrideRequest struct {
-	Pricing pricingoverrides.Pricing `json:"pricing" binding:"required"`
+	Selector string                   `json:"selector" binding:"required"`
+	Pricing  pricingoverrides.Pricing `json:"pricing" binding:"required"`
+}
+
+type deleteModelPricingOverrideRequest struct {
+	Selector string `json:"selector" binding:"required"`
 }
 
 // ListModelPricingOverrides handles GET /admin/api/v1/model-pricing-overrides.
@@ -37,7 +42,7 @@ func (h *Handler) ListModelPricingOverrides(c *echo.Context) error {
 	return c.JSON(http.StatusOK, views)
 }
 
-// UpsertModelPricingOverride handles PUT /admin/api/v1/model-pricing-overrides/{selector}.
+// UpsertModelPricingOverride handles PUT /admin/api/v1/model-pricing-overrides.
 //
 // @Summary      Create or update one model pricing override
 // @Description  Stores USD-only pricing for one selector. More precise selectors override broader selectors at runtime.
@@ -45,14 +50,13 @@ func (h *Handler) ListModelPricingOverrides(c *echo.Context) error {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        selector  path      string                              true  "URL-encoded pricing selector such as /, openai/, gpt-4o-mini, or openai/gpt-4o-mini"
-// @Param        override  body      upsertModelPricingOverrideRequest  true  "Pricing override"
+// @Param        override  body      upsertModelPricingOverrideRequest  true  "Pricing selector and override"
 // @Success      200       {object}  pricingoverrides.View
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
 // @Failure      500       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
-// @Router       /admin/api/v1/model-pricing-overrides/{selector} [put]
+// @Router       /admin/api/v1/model-pricing-overrides [put]
 //
 //nolint:dupl // structurally similar to UpsertModelOverride but operates on different types and stores.
 func (h *Handler) UpsertModelPricingOverride(c *echo.Context) error {
@@ -60,14 +64,13 @@ func (h *Handler) UpsertModelPricingOverride(c *echo.Context) error {
 		return handleError(c, featureUnavailableError("model pricing overrides feature is unavailable"))
 	}
 
-	selector, err := decodeModelPricingOverridePathSelector(c.Param("selector"))
-	if err != nil {
-		return handleError(c, err)
-	}
-
 	var req upsertModelPricingOverrideRequest
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	selector, err := normalizeModelPricingOverrideSelector(req.Selector)
+	if err != nil {
+		return handleError(c, err)
 	}
 
 	if err := h.pricingOverrides.Upsert(c.Request().Context(), pricingoverrides.Override{
@@ -85,35 +88,41 @@ func (h *Handler) UpsertModelPricingOverride(c *echo.Context) error {
 	return c.JSON(http.StatusOK, view)
 }
 
-// DeleteModelPricingOverride handles DELETE /admin/api/v1/model-pricing-overrides/{selector}.
+// DeleteModelPricingOverride handles DELETE /admin/api/v1/model-pricing-overrides.
 //
 // @Summary      Delete one model pricing override
 // @Tags         admin
+// @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        selector  path  string  true  "URL-encoded pricing selector"
+// @Param        request  body  deleteModelPricingOverrideRequest  true  "Pricing selector to remove"
 // @Success      204       "No Content"
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
 // @Failure      404       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
-// @Router       /admin/api/v1/model-pricing-overrides/{selector} [delete]
+// @Router       /admin/api/v1/model-pricing-overrides [delete]
+//
+//nolint:dupl // structurally similar to DeleteModelOverride but operates on different types and stores.
 func (h *Handler) DeleteModelPricingOverride(c *echo.Context) error {
-	var unavailableErr error
-	var deleteFunc func(context.Context, string) error
 	if h.pricingOverrides == nil {
-		unavailableErr = featureUnavailableError("model pricing overrides feature is unavailable")
-	} else {
-		deleteFunc = h.pricingOverrides.Delete
+		return handleError(c, featureUnavailableError("model pricing overrides feature is unavailable"))
 	}
-	return deleteByName(
-		c,
-		unavailableErr,
-		"selector",
-		decodeModelPricingOverridePathSelector,
-		deleteFunc,
-		pricingoverrides.ErrNotFound,
-		"model pricing override not found: ",
-		pricingOverrideWriteError,
-	)
+
+	var req deleteModelPricingOverrideRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	selector, err := normalizeModelPricingOverrideSelector(req.Selector)
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	if err := h.pricingOverrides.Delete(c.Request().Context(), selector); err != nil {
+		if errors.Is(err, pricingoverrides.ErrNotFound) {
+			return handleError(c, core.NewNotFoundError("model pricing override not found: "+selector))
+		}
+		return handleError(c, pricingOverrideWriteError(err))
+	}
+	return c.NoContent(http.StatusNoContent)
 }
