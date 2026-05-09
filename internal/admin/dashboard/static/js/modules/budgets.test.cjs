@@ -175,7 +175,7 @@ test('submitBudgetForm asks for confirmation before a create overrides an existi
         source: 'manual'
     }));
     assert.match(module.budgetOverrideDialogMessage(), /A budget for "\/team Daily" already exists/);
-    assert.match(module.budgetOverrideDialogMessage(), /override the current \$10\.0000 limit with \$12\.5000/);
+    assert.match(module.budgetOverrideDialogMessage(), /override the current \$10\.00 limit with \$12\.50/);
 });
 
 test('confirmBudgetOverride saves the pending create after confirmation', async () => {
