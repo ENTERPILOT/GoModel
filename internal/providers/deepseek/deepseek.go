@@ -17,8 +17,9 @@ const defaultBaseURL = "https://api.deepseek.com"
 
 // Registration provides factory registration for the DeepSeek provider.
 var Registration = providers.Registration{
-	Type: "deepseek",
-	New:  New,
+	Type:                        "deepseek",
+	New:                         New,
+	PassthroughSemanticEnricher: passthroughSemanticEnricher{},
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL: defaultBaseURL,
 	},
