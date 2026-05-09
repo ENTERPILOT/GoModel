@@ -6,7 +6,7 @@ all: build
 VERSION ?= $(shell git describe --tags --always --dirty)
 COMMIT ?= $(shell git rev-parse --short HEAD)
 DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-DOCS_API_SERVERS ?= https://gomodel.example.com,http://localhost:8080
+DOCS_API_SERVERS ?= http://localhost:8080
 LOG_LEVEL ?= debug
 SWAGGER_ENABLED ?= true
 

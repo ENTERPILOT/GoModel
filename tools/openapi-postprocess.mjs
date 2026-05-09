@@ -3,6 +3,12 @@ import fs from "node:fs";
 const file = process.argv[2] || "docs/openapi.json";
 const spec = JSON.parse(fs.readFileSync(file, "utf8"));
 
+// parseServers emits a single templated OpenAPI 3 server entry whose URL is a
+// free-text variable. Mintlify renders this variable as an editable input at
+// the top of every API Reference page, so visitors can point the docs at
+// their own GoModel deployment without leaving the page. The first URL in
+// DOCS_API_SERVERS is used as the default; any additional URLs become
+// description hints so common deployments stay discoverable.
 function parseServers(value) {
   const urls = (value || "")
     .split(",")
@@ -11,14 +17,22 @@ function parseServers(value) {
   if (urls.length === 0) {
     throw new Error("DOCS_API_SERVERS must include at least one URL");
   }
-  return urls.map((url) => ({
-    url,
-    description: isLocalServer(url) ? "Local GoModel" : "GoModel HTTPS deployment",
-  }));
-}
-
-function isLocalServer(url) {
-  return /(^https?:\/\/)?(localhost|127\.0\.0\.1)(:|\/|$)/.test(url);
+  const [defaultURL, ...alternatives] = urls;
+  const description = alternatives.length === 0
+    ? "Your GoModel deployment URL"
+    : `Your GoModel deployment URL (e.g. ${alternatives.join(", ")})`;
+  return [
+    {
+      url: "{base_url}",
+      description: "Edit the base URL to point at your GoModel deployment.",
+      variables: {
+        base_url: {
+          default: defaultURL,
+          description,
+        },
+      },
+    },
+  ];
 }
 
 function clone(value) {

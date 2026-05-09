@@ -5243,12 +5243,14 @@
   },
   "servers": [
     {
-      "url": "https://gomodel.example.com",
-      "description": "GoModel HTTPS deployment"
-    },
-    {
-      "url": "http://localhost:8080",
-      "description": "Local GoModel"
+      "url": "{base_url}",
+      "description": "Edit the base URL to point at your GoModel deployment.",
+      "variables": {
+        "base_url": {
+          "default": "http://localhost:8080",
+          "description": "Your GoModel deployment URL"
+        }
+      }
     }
   ],
   "components": {
