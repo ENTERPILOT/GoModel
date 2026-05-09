@@ -168,11 +168,17 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 
 // Responses sends a Responses API request to DeepSeek using chat-completions translation.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("responses request is required", nil)
+	}
 	return providers.ResponsesViaChat(ctx, p, req)
 }
 
 // StreamResponses streams a Responses API request to DeepSeek using chat-completions translation.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("responses request is required", nil)
+	}
 	return providers.StreamResponsesViaChat(ctx, p, req, "deepseek")
 }
 

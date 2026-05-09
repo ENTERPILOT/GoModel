@@ -227,6 +227,22 @@ func TestProvider_DoesNotExposeOptionalNativeInterfaces(t *testing.T) {
 	}
 }
 
+func TestResponses_NilRequest_ReturnsError(t *testing.T) {
+	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+	_, err := provider.Responses(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error for nil Responses request, got nil")
+	}
+}
+
+func TestStreamResponses_NilRequest_ReturnsError(t *testing.T) {
+	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+	_, err := provider.StreamResponses(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error for nil StreamResponses request, got nil")
+	}
+}
+
 func TestEmbeddings_ReturnsUnsupported(t *testing.T) {
 	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
 
