@@ -13,7 +13,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/stretchr/testify v1.11.1
-	github.com/swaggo/echo-swagger v1.5.0
+	github.com/swaggo/files/v2 v2.0.2
 	github.com/swaggo/swag/v2 v2.0.0-rc5
 	github.com/tidwall/gjson v1.18.0
 	go.mongodb.org/mongo-driver/v2 v2.6.0
@@ -22,6 +22,7 @@ require (
 	golang.org/x/term v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.0
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -58,8 +59,6 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sv-tools/openapi v0.4.0 // indirect
-	github.com/swaggo/files/v2 v2.0.2 // indirect
-	github.com/swaggo/swag v1.16.6 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/urfave/cli/v2 v2.27.5 // indirect
@@ -72,7 +71,6 @@ require (
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
-	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
@@ -81,5 +79,4 @@ require (
 	modernc.org/libc v1.72.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	sigs.k8s.io/yaml v1.6.0 // indirect
 )
