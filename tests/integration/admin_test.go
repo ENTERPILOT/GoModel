@@ -41,7 +41,7 @@ func TestAdminUsageSummary_PostgreSQL(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// Query admin API
-	resp, err := http.Get(fixture.ServerURL + "/admin/api/v1/usage/summary?days=30")
+	resp, err := http.Get(fixture.ServerURL + "/admin/usage/summary?days=30")
 	require.NoError(t, err)
 	defer closeBody(resp)
 
@@ -84,7 +84,7 @@ func TestAdminDailyUsage_PostgreSQL(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// Query admin API
-	resp, err := http.Get(fixture.ServerURL + "/admin/api/v1/usage/daily?days=30")
+	resp, err := http.Get(fixture.ServerURL + "/admin/usage/daily?days=30")
 	require.NoError(t, err)
 	defer closeBody(resp)
 
@@ -139,7 +139,7 @@ func TestAdminUsageSummary_MongoDB(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// Query admin API
-	resp, err := http.Get(fixture.ServerURL + "/admin/api/v1/usage/summary?days=30")
+	resp, err := http.Get(fixture.ServerURL + "/admin/usage/summary?days=30")
 	require.NoError(t, err)
 	defer closeBody(resp)
 
@@ -177,7 +177,7 @@ func TestAdminDailyUsage_WithInterval_PostgreSQL(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// Query with weekly interval
-	resp, err := http.Get(fixture.ServerURL + "/admin/api/v1/usage/daily?interval=weekly")
+	resp, err := http.Get(fixture.ServerURL + "/admin/usage/daily?interval=weekly")
 	require.NoError(t, err)
 	defer closeBody(resp)
 
@@ -213,7 +213,7 @@ func TestAdminPricingRecalculationNoMasterKey_PostgreSQL(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
-	req, err := http.NewRequest(http.MethodPost, fixture.ServerURL+"/admin/api/v1/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
+	req, err := http.NewRequest(http.MethodPost, fixture.ServerURL+"/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err = http.DefaultClient.Do(req)
@@ -240,7 +240,7 @@ func TestAdminModels_PostgreSQL(t *testing.T) {
 	})
 
 	// Query admin models endpoint
-	resp, err := http.Get(fixture.ServerURL + "/admin/api/v1/models")
+	resp, err := http.Get(fixture.ServerURL + "/admin/models")
 	require.NoError(t, err)
 	defer closeBody(resp)
 

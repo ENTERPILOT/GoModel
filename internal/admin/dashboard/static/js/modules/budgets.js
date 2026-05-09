@@ -251,7 +251,7 @@
                 this.budgetError = '';
                 try {
                     const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                    const res = await fetch('/admin/api/v1/budgets', request);
+                    const res = await fetch('/admin/budgets', request);
                     if (res.status === 503) {
                         this.budgetsAvailable = false;
                         this.budgets = [];
@@ -454,7 +454,7 @@
                                 amount: payload.amount
                             })
                         };
-                    const res = await fetch('/admin/api/v1/budgets', request);
+                    const res = await fetch('/admin/budgets', request);
                     if (res.status === 503) {
                         this.budgetsAvailable = false;
                         this.budgetFormError = 'Budget management is unavailable.';
@@ -511,7 +511,7 @@
                                 period_seconds: item.period_seconds
                             })
                         };
-                    const res = await fetch('/admin/api/v1/budgets/reset-one', request);
+                    const res = await fetch('/admin/budgets/reset-one', request);
                     if (res.status === 503) {
                         this.budgetsAvailable = false;
                         this.budgetError = 'Budget management is unavailable.';
@@ -571,7 +571,7 @@
                                 }
                             })
                         };
-                    const res = await fetch('/admin/api/v1/budgets', request);
+                    const res = await fetch('/admin/budgets', request);
                     if (res.status === 503) {
                         this.budgetsAvailable = false;
                         this.budgetError = 'Budget management is unavailable.';
@@ -791,7 +791,7 @@
                 this.budgetSettingsError = '';
                 try {
                     const request = this.requestOptions();
-                    const res = await fetch('/admin/api/v1/budgets/settings', request);
+                    const res = await fetch('/admin/budgets/settings', request);
                     const handled = this.handleFetchResponse(res, 'budget settings', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
@@ -821,7 +821,7 @@
                         method: 'PUT',
                         body: JSON.stringify(this.budgetSettingsPayload())
                     });
-                    const res = await fetch('/admin/api/v1/budgets/settings', request);
+                    const res = await fetch('/admin/budgets/settings', request);
                     const handled = this.handleFetchResponse(res, 'budget settings', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
@@ -905,7 +905,7 @@
                         method: 'POST',
                         body: JSON.stringify({ confirmation: 'reset' })
                     });
-                    const res = await fetch('/admin/api/v1/budgets/reset', request);
+                    const res = await fetch('/admin/budgets/reset', request);
                     const handled = this.handleFetchResponse(res, 'budget reset', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;

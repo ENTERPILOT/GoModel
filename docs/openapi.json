@@ -7,7 +7,7 @@
     "version": "1.0"
   },
   "paths": {
-    "/admin/api/v1/audit/conversation": {
+    "/admin/audit/conversation": {
       "get": {
         "tags": [
           "admin"
@@ -68,10 +68,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/audit/conversation"
+          }
+        }
       }
     },
-    "/admin/api/v1/audit/log": {
+    "/admin/audit/log": {
       "get": {
         "tags": [
           "admin"
@@ -227,10 +232,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/audit/log"
+          }
+        }
       }
     },
-    "/admin/api/v1/budgets": {
+    "/admin/budgets": {
       "get": {
         "tags": [
           "admin"
@@ -272,7 +282,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets"
+          }
+        }
       },
       "put": {
         "tags": [
@@ -336,7 +351,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets"
+          }
+        }
       },
       "delete": {
         "tags": [
@@ -400,10 +420,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets"
+          }
+        }
       }
     },
-    "/admin/api/v1/budgets/reset": {
+    "/admin/budgets/reset": {
       "post": {
         "tags": [
           "admin"
@@ -466,10 +491,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets/reset"
+          }
+        }
       }
     },
-    "/admin/api/v1/budgets/reset-one": {
+    "/admin/budgets/reset-one": {
       "post": {
         "tags": [
           "admin"
@@ -532,10 +562,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets/reset-one"
+          }
+        }
       }
     },
-    "/admin/api/v1/budgets/settings": {
+    "/admin/budgets/settings": {
       "get": {
         "tags": [
           "admin"
@@ -577,7 +612,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets/settings"
+          }
+        }
       },
       "put": {
         "tags": [
@@ -641,10 +681,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets/settings"
+          }
+        }
       }
     },
-    "/admin/api/v1/cache/overview": {
+    "/admin/cache/overview": {
       "get": {
         "tags": [
           "admin"
@@ -746,45 +791,15 @@
           {
             "BearerAuth": []
           }
-        ]
-      }
-    },
-    "/admin/api/v1/dashboard/config": {
-      "get": {
-        "tags": [
-          "admin"
         ],
-        "summary": "Get dashboard runtime configuration",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/admin.DashboardConfigResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/cache/overview"
           }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
+        }
       }
     },
-    "/admin/api/v1/model-overrides": {
+    "/admin/model-overrides": {
       "get": {
         "description": "Lists persisted model access overrides by global, provider-wide, model-wide, or exact selector.\nSelectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
         "tags": [
@@ -832,7 +847,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-overrides"
+          }
+        }
       },
       "put": {
         "tags": [
@@ -916,7 +936,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-overrides"
+          }
+        }
       },
       "delete": {
         "tags": [
@@ -993,10 +1018,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-overrides"
+          }
+        }
       }
     },
-    "/admin/api/v1/model-pricing-overrides": {
+    "/admin/model-pricing-overrides": {
       "get": {
         "description": "Lists persisted USD pricing overrides. Selectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
         "tags": [
@@ -1044,7 +1074,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-pricing-overrides"
+          }
+        }
       },
       "put": {
         "description": "Stores USD-only pricing for one selector. More precise selectors override broader selectors at runtime.",
@@ -1129,7 +1164,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-pricing-overrides"
+          }
+        }
       },
       "delete": {
         "tags": [
@@ -1206,10 +1246,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-pricing-overrides"
+          }
+        }
       }
     },
-    "/admin/api/v1/models": {
+    "/admin/models": {
       "get": {
         "tags": [
           "admin"
@@ -1266,10 +1311,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/models"
+          }
+        }
       }
     },
-    "/admin/api/v1/models/categories": {
+    "/admin/models/categories": {
       "get": {
         "tags": [
           "admin"
@@ -1304,10 +1354,55 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/models/categories"
+          }
+        }
       }
     },
-    "/admin/api/v1/usage/daily": {
+    "/admin/runtime/config": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get admin runtime configuration",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.DashboardConfigResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/runtime/config"
+          }
+        }
+      }
+    },
+    "/admin/usage/daily": {
       "get": {
         "tags": [
           "admin"
@@ -1402,10 +1497,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/daily"
+          }
+        }
       }
     },
-    "/admin/api/v1/usage/log": {
+    "/admin/usage/log": {
       "get": {
         "tags": [
           "admin"
@@ -1529,10 +1629,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/log"
+          }
+        }
       }
     },
-    "/admin/api/v1/usage/models": {
+    "/admin/usage/models": {
       "get": {
         "tags": [
           "admin"
@@ -1619,10 +1724,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/models"
+          }
+        }
       }
     },
-    "/admin/api/v1/usage/recalculate-pricing": {
+    "/admin/usage/recalculate-pricing": {
       "post": {
         "tags": [
           "admin"
@@ -1695,10 +1805,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/recalculate-pricing"
+          }
+        }
       }
     },
-    "/admin/api/v1/usage/summary": {
+    "/admin/usage/summary": {
       "get": {
         "tags": [
           "admin"
@@ -1782,10 +1897,15 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/summary"
+          }
+        }
       }
     },
-    "/admin/api/v1/usage/user-paths": {
+    "/admin/usage/user-paths": {
       "get": {
         "tags": [
           "admin"
@@ -1872,7 +1992,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/user-paths"
+          }
+        }
       }
     },
     "/health": {
@@ -1894,6 +2019,11 @@
                 }
               }
             }
+          }
+        },
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/health"
           }
         }
       }
@@ -2080,7 +2210,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       },
       "put": {
         "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_passthrough_routes. The endpoint path is opaque and may proxy JSON, binary, or SSE responses with upstream status codes preserved. For multi-segment provider endpoints, clients that rely on OpenAPI-generated path handling should URL-encode embedded slashes in the endpoint parameter. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
@@ -2263,7 +2398,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       },
       "post": {
         "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_passthrough_routes. The endpoint path is opaque and may proxy JSON, binary, or SSE responses with upstream status codes preserved. For multi-segment provider endpoints, clients that rely on OpenAPI-generated path handling should URL-encode embedded slashes in the endpoint parameter. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
@@ -2446,7 +2586,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       },
       "delete": {
         "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_passthrough_routes. The endpoint path is opaque and may proxy JSON, binary, or SSE responses with upstream status codes preserved. For multi-segment provider endpoints, clients that rely on OpenAPI-generated path handling should URL-encode embedded slashes in the endpoint parameter. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
@@ -2629,7 +2774,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       },
       "options": {
         "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_passthrough_routes. The endpoint path is opaque and may proxy JSON, binary, or SSE responses with upstream status codes preserved. For multi-segment provider endpoints, clients that rely on OpenAPI-generated path handling should URL-encode embedded slashes in the endpoint parameter. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
@@ -2812,7 +2962,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       },
       "head": {
         "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_passthrough_routes. The endpoint path is opaque and may proxy JSON, binary, or SSE responses with upstream status codes preserved. For multi-segment provider endpoints, clients that rely on OpenAPI-generated path handling should URL-encode embedded slashes in the endpoint parameter. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
@@ -2995,7 +3150,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       },
       "patch": {
         "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_passthrough_routes. The endpoint path is opaque and may proxy JSON, binary, or SSE responses with upstream status codes preserved. For multi-segment provider endpoints, clients that rely on OpenAPI-generated path handling should URL-encode embedded slashes in the endpoint parameter. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
@@ -3178,7 +3338,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       }
     },
     "/v1/batches": {
@@ -3261,7 +3426,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/batches"
+          }
+        }
       },
       "post": {
         "tags": [
@@ -3325,7 +3495,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/batches"
+          }
+        }
       }
     },
     "/v1/batches/{id}": {
@@ -3411,7 +3586,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/batches/{id}"
+          }
+        }
       }
     },
     "/v1/batches/{id}/cancel": {
@@ -3497,7 +3677,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/batches/{id}/cancel"
+          }
+        }
       }
     },
     "/v1/batches/{id}/results": {
@@ -3593,7 +3778,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/batches/{id}/results"
+          }
+        }
       }
     },
     "/v1/chat/completions": {
@@ -3694,7 +3884,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/chat/completions"
+          }
+        }
       }
     },
     "/v1/embeddings": {
@@ -3770,7 +3965,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/embeddings"
+          }
+        }
       }
     },
     "/v1/files": {
@@ -3869,7 +4069,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/files"
+          }
+        }
       },
       "post": {
         "tags": [
@@ -3957,7 +4162,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/files"
+          }
+        }
       }
     },
     "/v1/files/{id}": {
@@ -4041,7 +4251,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/files/{id}"
+          }
+        }
       },
       "delete": {
         "tags": [
@@ -4123,7 +4338,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/files/{id}"
+          }
+        }
       }
     },
     "/v1/files/{id}/content": {
@@ -4208,7 +4428,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/files/{id}/content"
+          }
+        }
       }
     },
     "/v1/models": {
@@ -4253,7 +4478,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/models"
+          }
+        }
       }
     },
     "/v1/responses": {
@@ -4354,7 +4584,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses"
+          }
+        }
       }
     },
     "/v1/responses/compact": {
@@ -4430,7 +4665,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses/compact"
+          }
+        }
       }
     },
     "/v1/responses/input_tokens": {
@@ -4506,7 +4746,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses/input_tokens"
+          }
+        }
       }
     },
     "/v1/responses/{id}": {
@@ -4640,7 +4885,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses/{id}"
+          }
+        }
       },
       "delete": {
         "tags": [
@@ -4732,7 +4982,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses/{id}"
+          }
+        }
       }
     },
     "/v1/responses/{id}/cancel": {
@@ -4826,7 +5081,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses/{id}/cancel"
+          }
+        }
       }
     },
     "/v1/responses/{id}/input_items": {
@@ -4972,18 +5232,25 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses/{id}/input_items"
+          }
+        }
       }
     }
   },
   "servers": [
     {
-      "url": "https://gomodel.example.com",
-      "description": "GoModel HTTPS deployment"
-    },
-    {
-      "url": "http://localhost:8080",
-      "description": "Local GoModel"
+      "url": "{base_url}",
+      "description": "Edit the base URL to point at your GoModel deployment.",
+      "variables": {
+        "base_url": {
+          "default": "http://localhost:8080",
+          "description": "Your GoModel deployment URL"
+        }
+      }
     }
   ],
   "components": {

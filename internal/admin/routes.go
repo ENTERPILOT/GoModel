@@ -14,9 +14,9 @@ type RouteRegistrar interface {
 }
 
 // RegisterRoutes mounts the admin REST API on the given route group.
-// Callers typically pass an *echo.Group rooted at /admin/api/v1.
+// Callers typically pass an *echo.Group rooted at /admin.
 func (h *Handler) RegisterRoutes(g RouteRegistrar) {
-	g.GET("/dashboard/config", h.DashboardConfig)
+	g.GET("/runtime/config", h.DashboardConfig)
 	g.GET("/cache/overview", h.CacheOverview)
 
 	g.GET("/usage/summary", h.UsageSummary)

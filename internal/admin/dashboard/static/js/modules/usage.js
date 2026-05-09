@@ -85,7 +85,7 @@
                     }
                     queryStr += '&interval=' + this.interval;
 
-                    const res = await fetch('/admin/api/v1/cache/overview?' + queryStr, options);
+                    const res = await fetch('/admin/cache/overview?' + queryStr, options);
                     const handled = this.handleFetchResponse(res, 'cache overview', options);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
@@ -139,8 +139,8 @@
                     queryStr += '&interval=' + this.interval;
 
                     const [summaryRes, dailyRes] = await Promise.all([
-                        fetch('/admin/api/v1/usage/summary?' + queryStr, options),
-                        fetch('/admin/api/v1/usage/daily?' + queryStr, options)
+                        fetch('/admin/usage/summary?' + queryStr, options),
+                        fetch('/admin/usage/daily?' + queryStr, options)
                     ]);
 
                     const summaryHandled = this.handleFetchResponse(summaryRes, 'usage summary', options);
@@ -205,7 +205,7 @@
                     if (controller) {
                         options.signal = controller.signal;
                     }
-                    const res = await fetch('/admin/api/v1/usage/models?' + this._usageQueryStr(), options);
+                    const res = await fetch('/admin/usage/models?' + this._usageQueryStr(), options);
                     const handled = this.handleFetchResponse(res, 'usage models', options);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
@@ -242,7 +242,7 @@
                     if (controller) {
                         options.signal = controller.signal;
                     }
-                    const res = await fetch('/admin/api/v1/usage/user-paths?' + this._usageQueryStr(), options);
+                    const res = await fetch('/admin/usage/user-paths?' + this._usageQueryStr(), options);
                     const handled = this.handleFetchResponse(res, 'usage user paths', options);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
@@ -287,7 +287,7 @@
                     if (this.usageLogProvider) qs += '&provider=' + encodeURIComponent(this.usageLogProvider);
                     if (this.usageLogUserPath) qs += '&user_path=' + encodeURIComponent(this.usageLogUserPath);
 
-                    const res = await fetch('/admin/api/v1/usage/log?' + qs, options);
+                    const res = await fetch('/admin/usage/log?' + qs, options);
                     const handled = this.handleFetchResponse(res, 'usage log', options);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;

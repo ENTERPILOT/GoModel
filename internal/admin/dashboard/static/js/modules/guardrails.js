@@ -281,7 +281,7 @@
                 this.guardrailTypesLoading = true;
                 try {
                     const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                    const res = await fetch('/admin/api/v1/guardrails/types', request);
+                    const res = await fetch('/admin/guardrails/types', request);
                     if (res.status === 503) {
                         this.guardrailsAvailable = false;
                         this.guardrailTypes = [];
@@ -318,7 +318,7 @@
                 this.guardrailError = '';
                 try {
                     const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                    const res = await fetch('/admin/api/v1/guardrails', request);
+                    const res = await fetch('/admin/guardrails', request);
                     if (res.status === 503) {
                         this.guardrailsAvailable = false;
                         this.guardrails = [];
@@ -386,7 +386,7 @@
                             headers: this.headers(),
                             body: JSON.stringify(payload)
                         };
-                    const res = await fetch('/admin/api/v1/guardrails', request);
+                    const res = await fetch('/admin/guardrails', request);
                     if (res.status === 503) {
                         this.guardrailsAvailable = false;
                         this.guardrailError = 'Guardrails feature is unavailable.';
@@ -455,7 +455,7 @@
                             headers: this.headers(),
                             body: JSON.stringify({ name })
                         };
-                    const res = await fetch('/admin/api/v1/guardrails', request);
+                    const res = await fetch('/admin/guardrails', request);
                     if (res.status === 503) {
                         this.guardrailsAvailable = false;
                         this.guardrailError = 'Guardrails feature is unavailable.';

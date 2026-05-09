@@ -143,7 +143,7 @@
                     if (this.auditStream) qs += '&stream=' + encodeURIComponent(this.auditStream);
 
                     const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                    const res = await fetch('/admin/api/v1/audit/log?' + qs, request);
+                    const res = await fetch('/admin/audit/log?' + qs, request);
                     const handled = this.handleFetchResponse(res, 'audit log', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;

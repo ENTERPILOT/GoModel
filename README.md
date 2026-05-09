@@ -216,23 +216,29 @@ docker run --rm -p 8080:8080 --env-file .env gomodel
 | Endpoint                                   | Method | Description                                |
 | ------------------------------------------ | ------ | ------------------------------------------ |
 | `/admin/dashboard`                         | GET    | Admin dashboard UI                         |
-| `/admin/api/v1/dashboard/config`           | GET    | Dashboard configuration                    |
-| `/admin/api/v1/cache/overview`             | GET    | Cache statistics overview                  |
-| `/admin/api/v1/usage/summary`              | GET    | Aggregate token usage statistics           |
-| `/admin/api/v1/usage/daily`                | GET    | Per-period token usage breakdown           |
-| `/admin/api/v1/usage/models`               | GET    | Usage breakdown by model                   |
-| `/admin/api/v1/usage/user-paths`           | GET    | Usage breakdown by user path               |
-| `/admin/api/v1/usage/log`                  | GET    | Paginated usage log entries                |
-| `/admin/api/v1/audit/log`                  | GET    | Paginated audit log entries                |
-| `/admin/api/v1/audit/conversation`         | GET    | Conversation thread around one audit entry |
-| `/admin/api/v1/providers/status`           | GET    | Provider availability status               |
-| `/admin/api/v1/runtime/refresh`            | POST   | Refresh runtime configuration              |
-| `/admin/api/v1/models`                     | GET    | List models with provider type             |
-| `/admin/api/v1/models/categories`          | GET    | List model categories                      |
-| `/admin/api/v1/model-overrides`            | GET    | List model overrides                       |
-| `/admin/api/v1/model-overrides`            | PUT    | Create/update model override               |
-| `/admin/api/v1/model-overrides`            | DELETE | Remove model override                      |
-| `/admin/api/v1/auth-keys`                  | GET    | List authentication keys                   |
+| `/admin/runtime/config`                    | GET    | Admin runtime configuration                |
+| `/admin/cache/overview`             | GET    | Cache statistics overview                  |
+| `/admin/usage/summary`              | GET    | Aggregate token usage statistics           |
+| `/admin/usage/daily`                | GET    | Per-period token usage breakdown           |
+| `/admin/usage/models`               | GET    | Usage breakdown by model                   |
+| `/admin/usage/user-paths`           | GET    | Usage breakdown by user path               |
+| `/admin/usage/log`                  | GET    | Paginated usage log entries                |
+| `/admin/audit/log`                  | GET    | Paginated audit log entries                |
+| `/admin/audit/conversation`         | GET    | Conversation thread around one audit entry |
+| `/admin/providers/status`           | GET    | Provider availability status               |
+| `/admin/runtime/refresh`            | POST   | Refresh runtime configuration              |
+| `/admin/models`                     | GET    | List models with provider type             |
+| `/admin/models/categories`          | GET    | List model categories                      |
+| `/admin/model-overrides`            | GET    | List model overrides                       |
+| `/admin/model-overrides`            | PUT    | Create/update model override               |
+| `/admin/model-overrides`            | DELETE | Remove model override                      |
+| `/admin/auth-keys`                  | GET    | List authentication keys                   |
+
+> **Legacy alias:** Until **2026-08-09**, all admin endpoints are also
+> reachable under `/admin/api/v1/*`. Legacy responses include
+> `Deprecation: true` and `Sunset: Sun, 09 Aug 2026 00:00:00 GMT` headers.
+> The endpoint formerly at `/admin/api/v1/dashboard/config` moved to
+> `/admin/runtime/config` on the new prefix.
 
 ### Operations Endpoints
 

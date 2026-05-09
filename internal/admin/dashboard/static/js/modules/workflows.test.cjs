@@ -1194,7 +1194,7 @@ test('workflowSourceFeatures masks raw workflow features by global runtime confi
 test('fetchWorkflowRuntimeConfig loads FEATURE_FALLBACK_MODE from the admin config endpoint', async () => {
     const module = createWorkflowsModule({
         fetch(url, options) {
-            assert.equal(url, '/admin/api/v1/dashboard/config');
+            assert.equal(url, '/admin/runtime/config');
             assert.equal(options.headers.authorization, 'Bearer token');
             return Promise.resolve({
                 ok: true,
@@ -2241,8 +2241,8 @@ test('fetchWorkflowVersion loads a historical workflow version once and caches m
     assert.equal(missing, null);
     assert.equal(missingAgain, null);
     assert.deepEqual(fetchCalls, [
-        '/admin/api/v1/workflows/historical-v2',
-        '/admin/api/v1/workflows/missing-workflow'
+        '/admin/workflows/historical-v2',
+        '/admin/workflows/missing-workflow'
     ]);
 });
 

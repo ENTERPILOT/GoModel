@@ -192,9 +192,9 @@ func TestJoinBasePath(t *testing.T) {
 		urlPath  string
 		expected string
 	}{
-		{name: "root leaves absolute path unchanged", basePath: "/", urlPath: "/admin/api/v1", expected: "/admin/api/v1"},
-		{name: "root adds leading slash", basePath: "/", urlPath: "admin/api/v1", expected: "/admin/api/v1"},
-		{name: "prefixes normalized base path", basePath: "g/", urlPath: "/admin/api/v1", expected: "/g/admin/api/v1"},
+		{name: "root leaves absolute path unchanged", basePath: "/", urlPath: "/admin", expected: "/admin"},
+		{name: "root adds leading slash", basePath: "/", urlPath: "admin", expected: "/admin"},
+		{name: "prefixes normalized base path", basePath: "g/", urlPath: "/admin", expected: "/g/admin"},
 		{name: "empty app path resolves to base path", basePath: "/g", urlPath: "", expected: "/g"},
 		{name: "root app path resolves to base path", basePath: "/g", urlPath: "/", expected: "/g"},
 	}

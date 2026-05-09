@@ -108,10 +108,10 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 			service := newModelPricingOverrideService(t, newModelPricingOverrideTestStore(), tt.providers...)
 			h := NewHandler(nil, nil, WithPricingOverrides(service))
 			e := echo.New()
-			h.RegisterRoutes(e.Group("/admin/api/v1"))
+			h.RegisterRoutes(e.Group("/admin"))
 
 			bodyJSON := `{"selector":"` + tt.selector + `","pricing":{"input_per_mtok":` + strconv.FormatFloat(tt.price, 'f', -1, 64) + `}}`
-			putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-pricing-overrides", bytes.NewBufferString(bodyJSON))
+			putReq := httptest.NewRequest(http.MethodPut, "/admin/model-pricing-overrides", bytes.NewBufferString(bodyJSON))
 			putReq.Header.Set("Content-Type", "application/json")
 			putRec := httptest.NewRecorder()
 			e.ServeHTTP(putRec, putReq)
@@ -125,7 +125,7 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 			}
 			assertPricingOverrideView(t, body, tt.selector, tt.wantProvider, tt.wantModel, tt.wantScope, tt.price)
 
-			listReq := httptest.NewRequest(http.MethodGet, "/admin/api/v1/model-pricing-overrides", nil)
+			listReq := httptest.NewRequest(http.MethodGet, "/admin/model-pricing-overrides", nil)
 			listRec := httptest.NewRecorder()
 			e.ServeHTTP(listRec, listReq)
 			if listRec.Code != http.StatusOK {
@@ -140,7 +140,7 @@ func TestModelPricingOverrideLifecycle(t *testing.T) {
 			}
 			assertPricingOverrideView(t, listBody[0], tt.selector, tt.wantProvider, tt.wantModel, tt.wantScope, tt.price)
 
-			deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/model-pricing-overrides", bytes.NewBufferString(`{"selector":"`+tt.selector+`"}`))
+			deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/model-pricing-overrides", bytes.NewBufferString(`{"selector":"`+tt.selector+`"}`))
 			deleteReq.Header.Set("Content-Type", "application/json")
 			deleteRec := httptest.NewRecorder()
 			e.ServeHTTP(deleteRec, deleteReq)
@@ -169,7 +169,7 @@ func TestUpsertModelPricingOverrideReturnsBadRequestForValidationErrors(t *testi
 	h := NewHandler(nil, nil, WithPricingOverrides(service))
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/model-pricing-overrides", bytes.NewBufferString(`{"selector":"openai/gpt-4o","pricing":{}}`))
+	req := httptest.NewRequest(http.MethodPut, "/admin/model-pricing-overrides", bytes.NewBufferString(`{"selector":"openai/gpt-4o","pricing":{}}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)

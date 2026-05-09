@@ -74,7 +74,7 @@ test('submitAuthKeyForm serializes date-only expirations to the end of the selec
     await module.submitAuthKeyForm();
 
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].url, '/admin/api/v1/auth-keys');
+    assert.equal(requests[0].url, '/admin/auth-keys');
     assert.equal(
         JSON.parse(requests[0].options.body).expires_at,
         '2026-04-01T23:59:59Z'

@@ -104,7 +104,7 @@ func TestListGuardrails(t *testing.T) {
 		}),
 	})
 
-	c, rec := newHandlerContext("/admin/api/v1/guardrails")
+	c, rec := newHandlerContext("/admin/guardrails")
 	if err := h.ListGuardrails(c); err != nil {
 		t.Fatalf("ListGuardrails() error = %v", err)
 	}
@@ -126,7 +126,7 @@ func TestListGuardrails(t *testing.T) {
 
 func TestListGuardrailTypes(t *testing.T) {
 	h := newGuardrailHandler(t)
-	c, rec := newHandlerContext("/admin/api/v1/guardrails/types")
+	c, rec := newHandlerContext("/admin/guardrails/types")
 
 	if err := h.ListGuardrailTypes(c); err != nil {
 		t.Fatalf("ListGuardrailTypes() error = %v", err)
@@ -182,7 +182,7 @@ func TestUpsertGuardrail(t *testing.T) {
 	h := newGuardrailHandler(t)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPut, "/admin/guardrails", bytes.NewBufferString(`{
 		"name":"policy-system",
 		"type":"system_prompt",
 		"description":"Default policy",
@@ -216,7 +216,7 @@ func TestUpsertGuardrailLLMBasedAltering(t *testing.T) {
 	h := newGuardrailHandler(t)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPut, "/admin/guardrails", bytes.NewBufferString(`{
 		"name":"privacy",
 		"type":"llm_based_altering",
 		"description":"Rewrite user PII",
@@ -257,7 +257,7 @@ func TestUpsertGuardrailLLMBasedAlteringNormalizesProviderHintIntoModel(t *testi
 	h := newGuardrailHandler(t)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPut, "/admin/guardrails", bytes.NewBufferString(`{
 		"name":"privacy",
 		"type":"llm_based_altering",
 		"description":"Rewrite user PII",
@@ -295,7 +295,7 @@ func TestUpsertGuardrailRejectsSlashInName(t *testing.T) {
 	h := newGuardrailHandler(t)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPut, "/admin/guardrails", bytes.NewBufferString(`{
 		"name":"privacy/redactor",
 		"type":"llm_based_altering",
 		"config":{"model":"gpt-4o-mini","roles":["user"]}
@@ -363,7 +363,7 @@ func TestDeleteGuardrailRejectsActiveWorkflowReference(t *testing.T) {
 
 	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithWorkflows(planService))
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/guardrails", bytes.NewBufferString(`{"name":"policy-system"}`))
+	req := httptest.NewRequest(http.MethodDelete, "/admin/guardrails", bytes.NewBufferString(`{"name":"policy-system"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -418,7 +418,7 @@ func TestDeleteGuardrailIgnoresDisabledWorkflowGuardrailRefs(t *testing.T) {
 
 	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithWorkflows(planService))
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/guardrails", bytes.NewBufferString(`{"name":"policy-system"}`))
+	req := httptest.NewRequest(http.MethodDelete, "/admin/guardrails", bytes.NewBufferString(`{"name":"policy-system"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)

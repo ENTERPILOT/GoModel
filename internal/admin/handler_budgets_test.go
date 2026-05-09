@@ -135,7 +135,7 @@ func TestBudgetEndpointsListStatuses(t *testing.T) {
 	}
 	h := newBudgetHandler(t, store)
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/api/v1/budgets", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/budgets", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -164,7 +164,7 @@ func TestBudgetEndpointsUpsertAndResetOneBudget(t *testing.T) {
 
 	upsertReq := httptest.NewRequest(
 		http.MethodPut,
-		"/admin/api/v1/budgets",
+		"/admin/budgets",
 		strings.NewReader(`{"user_path":"/team/beta","budget_key":{"period":"weekly"},"amount":12.5}`),
 	)
 	upsertReq.Header.Set("Content-Type", "application/json")
@@ -182,7 +182,7 @@ func TestBudgetEndpointsUpsertAndResetOneBudget(t *testing.T) {
 
 	resetReq := httptest.NewRequest(
 		http.MethodPost,
-		"/admin/api/v1/budgets/reset-one",
+		"/admin/budgets/reset-one",
 		strings.NewReader(`{"user_path":"/team/beta","period_seconds":604800}`),
 	)
 	resetReq.Header.Set("Content-Type", "application/json")
@@ -209,7 +209,7 @@ func TestBudgetEndpointsUpsertMarksConfigBudgetManual(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(
 		http.MethodPut,
-		"/admin/api/v1/budgets",
+		"/admin/budgets",
 		strings.NewReader(`{"user_path":"/team","budget_key":{"period":"daily"},"amount":12.5}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
@@ -236,7 +236,7 @@ func TestBudgetEndpointsUpsertAcceptsNumericPeriodString(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(
 		http.MethodPut,
-		"/admin/api/v1/budgets",
+		"/admin/budgets",
 		strings.NewReader(`{"user_path":"/team","budget_key":{"period":"604800"},"amount":12.5}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
@@ -287,7 +287,7 @@ func TestBudgetEndpointsRejectInvalidBudgetKey(t *testing.T) {
 			store := &adminBudgetStore{}
 			h := newBudgetHandler(t, store)
 			e := echo.New()
-			req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/budgets", strings.NewReader(tt.body))
+			req := httptest.NewRequest(http.MethodPut, "/admin/budgets", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
@@ -313,7 +313,7 @@ func TestBudgetEndpointsDeleteBudget(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(
 		http.MethodDelete,
-		"/admin/api/v1/budgets",
+		"/admin/budgets",
 		strings.NewReader(`{"user_path":"/team/beta","budget_key":{"period_seconds":604800}}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
@@ -343,7 +343,7 @@ func TestBudgetEndpointsMissingMutationsReturnNotFound(t *testing.T) {
 				store.deleteErr = budget.ErrNotFound
 			},
 			run: func(h *Handler, e *echo.Echo) *httptest.ResponseRecorder {
-				req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/budgets", strings.NewReader(`{"user_path":"/team","budget_key":{"period_seconds":86400}}`))
+				req := httptest.NewRequest(http.MethodDelete, "/admin/budgets", strings.NewReader(`{"user_path":"/team","budget_key":{"period_seconds":86400}}`))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
 				c := e.NewContext(req, rec)
@@ -361,7 +361,7 @@ func TestBudgetEndpointsMissingMutationsReturnNotFound(t *testing.T) {
 			run: func(h *Handler, e *echo.Echo) *httptest.ResponseRecorder {
 				req := httptest.NewRequest(
 					http.MethodPost,
-					"/admin/api/v1/budgets/reset-one",
+					"/admin/budgets/reset-one",
 					strings.NewReader(`{"user_path":"/team","period_seconds":86400}`),
 				)
 				req.Header.Set("Content-Type", "application/json")
@@ -399,7 +399,7 @@ func TestBudgetSettingsEndpoints(t *testing.T) {
 	h := newBudgetHandler(t, store)
 	e := echo.New()
 
-	getReq := httptest.NewRequest(http.MethodGet, "/admin/api/v1/budgets/settings", nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/admin/budgets/settings", nil)
 	getRec := httptest.NewRecorder()
 	getCtx := e.NewContext(getReq, getRec)
 	if err := h.BudgetSettings(getCtx); err != nil {
@@ -418,7 +418,7 @@ func TestBudgetSettingsEndpoints(t *testing.T) {
 
 	updateReq := httptest.NewRequest(
 		http.MethodPut,
-		"/admin/api/v1/budgets/settings",
+		"/admin/budgets/settings",
 		strings.NewReader(`{"daily_reset_hour":6,"daily_reset_minute":30,"weekly_reset_weekday":2,"weekly_reset_hour":9,"weekly_reset_minute":15,"monthly_reset_day":31,"monthly_reset_hour":2,"monthly_reset_minute":45}`),
 	)
 	updateReq.Header.Set("Content-Type", "application/json")
@@ -436,7 +436,7 @@ func TestBudgetSettingsEndpoints(t *testing.T) {
 
 	partialReq := httptest.NewRequest(
 		http.MethodPut,
-		"/admin/api/v1/budgets/settings",
+		"/admin/budgets/settings",
 		strings.NewReader(`{"daily_reset_hour":8}`),
 	)
 	partialReq.Header.Set("Content-Type", "application/json")
@@ -454,7 +454,7 @@ func TestBudgetSettingsEndpoints(t *testing.T) {
 
 	invalidReq := httptest.NewRequest(
 		http.MethodPut,
-		"/admin/api/v1/budgets/settings",
+		"/admin/budgets/settings",
 		strings.NewReader(`{"daily_reset_hour":24,"daily_reset_minute":0,"weekly_reset_weekday":1,"weekly_reset_hour":0,"weekly_reset_minute":0,"monthly_reset_day":1,"monthly_reset_hour":0,"monthly_reset_minute":0}`),
 	)
 	invalidReq.Header.Set("Content-Type", "application/json")
@@ -469,7 +469,7 @@ func TestBudgetSettingsEndpoints(t *testing.T) {
 
 	malformedReq := httptest.NewRequest(
 		http.MethodPut,
-		"/admin/api/v1/budgets/settings",
+		"/admin/budgets/settings",
 		strings.NewReader(`{"daily_reset_hour":`),
 	)
 	malformedReq.Header.Set("Content-Type", "application/json")
@@ -492,7 +492,7 @@ func TestResetBudgetsEndpoint(t *testing.T) {
 	h := newBudgetHandler(t, store)
 	e := echo.New()
 
-	badReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/budgets/reset", strings.NewReader(`{"confirm":"no"}`))
+	badReq := httptest.NewRequest(http.MethodPost, "/admin/budgets/reset", strings.NewReader(`{"confirm":"no"}`))
 	badReq.Header.Set("Content-Type", "application/json")
 	badRec := httptest.NewRecorder()
 	badCtx := e.NewContext(badReq, badRec)
@@ -506,7 +506,7 @@ func TestResetBudgetsEndpoint(t *testing.T) {
 		t.Fatalf("resetAllAt = %s, want zero", store.resetAllAt)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/budgets/reset", strings.NewReader(`{"confirm":"reset"}`))
+	req := httptest.NewRequest(http.MethodPost, "/admin/budgets/reset", strings.NewReader(`{"confirm":"reset"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)

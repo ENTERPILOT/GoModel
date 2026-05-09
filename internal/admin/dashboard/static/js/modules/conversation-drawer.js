@@ -109,7 +109,7 @@
                 try {
                     const qs = 'log_id=' + encodeURIComponent(logID) + '&limit=120';
                     const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                    const res = await fetch('/admin/api/v1/audit/conversation?' + qs, request);
+                    const res = await fetch('/admin/audit/conversation?' + qs, request);
 
                     if (requestToken !== this.conversationRequestToken) return;
 

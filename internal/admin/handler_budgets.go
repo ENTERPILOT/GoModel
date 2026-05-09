@@ -13,7 +13,7 @@ import (
 	"gomodel/internal/core"
 )
 
-// ListBudgets handles GET /admin/api/v1/budgets.
+// ListBudgets handles GET /admin/budgets.
 //
 // @Summary      List budgets with current status
 // @Tags         admin
@@ -22,7 +22,7 @@ import (
 // @Success      200  {object}  budgetListResponse
 // @Failure      401  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
-// @Router       /admin/api/v1/budgets [get]
+// @Router       /admin/budgets [get]
 func (h *Handler) ListBudgets(c *echo.Context) error {
 	if h.budgets == nil {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
@@ -38,7 +38,7 @@ func (h *Handler) ListBudgets(c *echo.Context) error {
 	})
 }
 
-// UpsertBudget handles PUT /admin/api/v1/budgets.
+// UpsertBudget handles PUT /admin/budgets.
 // @Summary      Create or update one budget
 // @Tags         admin
 // @Accept       json
@@ -49,7 +49,7 @@ func (h *Handler) ListBudgets(c *echo.Context) error {
 // @Failure      400        {object}  core.GatewayError
 // @Failure      401        {object}  core.GatewayError
 // @Failure      503        {object}  core.GatewayError
-// @Router       /admin/api/v1/budgets [put]
+// @Router       /admin/budgets [put]
 func (h *Handler) UpsertBudget(c *echo.Context) error {
 	if h.budgets == nil {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
@@ -77,7 +77,7 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 	return h.ListBudgets(c)
 }
 
-// DeleteBudget handles DELETE /admin/api/v1/budgets.
+// DeleteBudget handles DELETE /admin/budgets.
 // @Summary      Delete one budget
 // @Tags         admin
 // @Accept       json
@@ -88,7 +88,7 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 // @Failure      400        {object}  core.GatewayError
 // @Failure      401        {object}  core.GatewayError
 // @Failure      503        {object}  core.GatewayError
-// @Router       /admin/api/v1/budgets [delete]
+// @Router       /admin/budgets [delete]
 func (h *Handler) DeleteBudget(c *echo.Context) error {
 	if h.budgets == nil {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
@@ -107,7 +107,7 @@ func (h *Handler) DeleteBudget(c *echo.Context) error {
 	return h.ListBudgets(c)
 }
 
-// BudgetSettings handles GET /admin/api/v1/budgets/settings.
+// BudgetSettings handles GET /admin/budgets/settings.
 // @Summary      Get budget reset settings
 // @Tags         admin
 // @Produce      json
@@ -115,7 +115,7 @@ func (h *Handler) DeleteBudget(c *echo.Context) error {
 // @Success      200  {object}  budget.Settings
 // @Failure      401  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
-// @Router       /admin/api/v1/budgets/settings [get]
+// @Router       /admin/budgets/settings [get]
 func (h *Handler) BudgetSettings(c *echo.Context) error {
 	if h.budgets == nil {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
@@ -123,7 +123,7 @@ func (h *Handler) BudgetSettings(c *echo.Context) error {
 	return c.JSON(http.StatusOK, h.budgets.Settings())
 }
 
-// UpdateBudgetSettings handles PUT /admin/api/v1/budgets/settings.
+// UpdateBudgetSettings handles PUT /admin/budgets/settings.
 // @Summary      Update budget reset settings
 // @Tags         admin
 // @Accept       json
@@ -134,7 +134,7 @@ func (h *Handler) BudgetSettings(c *echo.Context) error {
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
-// @Router       /admin/api/v1/budgets/settings [put]
+// @Router       /admin/budgets/settings [put]
 func (h *Handler) UpdateBudgetSettings(c *echo.Context) error {
 	if h.budgets == nil {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
@@ -154,7 +154,7 @@ func (h *Handler) UpdateBudgetSettings(c *echo.Context) error {
 	return c.JSON(http.StatusOK, saved)
 }
 
-// ResetBudget handles POST /admin/api/v1/budgets/reset-one.
+// ResetBudget handles POST /admin/budgets/reset-one.
 // @Summary      Reset one budget period
 // @Tags         admin
 // @Accept       json
@@ -165,7 +165,7 @@ func (h *Handler) UpdateBudgetSettings(c *echo.Context) error {
 // @Failure      400     {object}  core.GatewayError
 // @Failure      401     {object}  core.GatewayError
 // @Failure      503     {object}  core.GatewayError
-// @Router       /admin/api/v1/budgets/reset-one [post]
+// @Router       /admin/budgets/reset-one [post]
 func (h *Handler) ResetBudget(c *echo.Context) error {
 	if h.budgets == nil {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))
@@ -188,7 +188,7 @@ func (h *Handler) ResetBudget(c *echo.Context) error {
 	return h.ListBudgets(c)
 }
 
-// ResetBudgets handles POST /admin/api/v1/budgets/reset.
+// ResetBudgets handles POST /admin/budgets/reset.
 // @Summary      Reset all budget periods
 // @Tags         admin
 // @Accept       json
@@ -199,7 +199,7 @@ func (h *Handler) ResetBudget(c *echo.Context) error {
 // @Failure      400           {object}  core.GatewayError
 // @Failure      401           {object}  core.GatewayError
 // @Failure      503           {object}  core.GatewayError
-// @Router       /admin/api/v1/budgets/reset [post]
+// @Router       /admin/budgets/reset [post]
 func (h *Handler) ResetBudgets(c *echo.Context) error {
 	if h.budgets == nil {
 		return handleError(c, featureUnavailableError("budgets feature is unavailable"))

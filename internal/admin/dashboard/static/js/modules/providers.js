@@ -71,7 +71,7 @@
                     if (controller) {
                         options.signal = controller.signal;
                     }
-                    const res = await fetch('/admin/api/v1/providers/status', options);
+                    const res = await fetch('/admin/providers/status', options);
                     if (options.signal && options.signal.aborted) {
                         return;
                     }

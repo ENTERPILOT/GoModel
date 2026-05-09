@@ -3,6 +3,12 @@ import fs from "node:fs";
 const file = process.argv[2] || "docs/openapi.json";
 const spec = JSON.parse(fs.readFileSync(file, "utf8"));
 
+// parseServers emits a single templated OpenAPI 3 server entry whose URL is a
+// free-text variable. Mintlify renders this variable as an editable input at
+// the top of every API Reference page, so visitors can point the docs at
+// their own GoModel deployment without leaving the page. The first URL in
+// DOCS_API_SERVERS is used as the default; any additional URLs become
+// description hints so common deployments stay discoverable.
 function parseServers(value) {
   const urls = (value || "")
     .split(",")
@@ -11,14 +17,22 @@ function parseServers(value) {
   if (urls.length === 0) {
     throw new Error("DOCS_API_SERVERS must include at least one URL");
   }
-  return urls.map((url) => ({
-    url,
-    description: isLocalServer(url) ? "Local GoModel" : "GoModel HTTPS deployment",
-  }));
-}
-
-function isLocalServer(url) {
-  return /(^https?:\/\/)?(localhost|127\.0\.0\.1)(:|\/|$)/.test(url);
+  const [defaultURL, ...alternatives] = urls;
+  const description = alternatives.length === 0
+    ? "Your GoModel deployment URL"
+    : `Your GoModel deployment URL (e.g. ${alternatives.join(", ")})`;
+  return [
+    {
+      url: "{base_url}",
+      description: "Edit the base URL to point at your GoModel deployment.",
+      variables: {
+        base_url: {
+          default: defaultURL,
+          description,
+        },
+      },
+    },
+  ];
 }
 
 function clone(value) {
@@ -158,6 +172,34 @@ function applyStringArrayPropertyBounds(schemaName, propertyName, maxItems, item
   property.items.maxLength = itemMaxLength;
 }
 
+// applyPathSidebarTitles sets the API Reference sidebar entry of every
+// operation to its path so endpoints are listed by URL rather than by
+// natural-language summary. Mintlify renders the HTTP method as a colored
+// pill from the spec, so the title itself omits the method to avoid
+// duplicating it.
+function applyPathSidebarTitles() {
+  const httpMethods = new Set([
+    "get",
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "head",
+    "options",
+    "trace",
+  ]);
+  for (const [path, pathItem] of Object.entries(spec.paths || {})) {
+    if (!pathItem || typeof pathItem !== "object") continue;
+    for (const [method, operation] of Object.entries(pathItem)) {
+      if (!httpMethods.has(method)) continue;
+      if (!operation || typeof operation !== "object") continue;
+      operation["x-mint"] ??= {};
+      operation["x-mint"].metadata ??= {};
+      operation["x-mint"].metadata.sidebarTitle = path;
+    }
+  }
+}
+
 function applyPricingSchemaConstraints() {
   schema("pricingoverrides.Pricing").minProperties = 1;
   for (const name of ["core.ModelPricingTier", "pricingoverrides.PricingTier"]) {
@@ -193,14 +235,15 @@ ensureRequiredProperty("admin.deleteModelPricingOverrideRequest", "selector");
 applyBudgetKeySchemaConstraints();
 applyStringArrayPropertyBounds("admin.upsertModelOverrideRequest", "user_paths", 100, 1024);
 applyPricingSchemaConstraints();
+applyPathSidebarTitles();
 
 // Bound the registry-backed admin model listing so OpenAPI consumers (and
 // security scanners like CKV_OPENAPI_21) see an explicit upper limit. The
 // runtime registry is bounded by configured providers and the backing
 // model list; 10000 leaves substantial headroom for that worst case.
-applyArrayMaxItems("/admin/api/v1/models", "get", "200", 10000);
-applyArrayMaxItems("/admin/api/v1/model-overrides", "get", "200", 10000);
-applyArrayMaxItems("/admin/api/v1/model-pricing-overrides", "get", "200", 10000);
+applyArrayMaxItems("/admin/models", "get", "200", 10000);
+applyArrayMaxItems("/admin/model-overrides", "get", "200", 10000);
+applyArrayMaxItems("/admin/model-pricing-overrides", "get", "200", 10000);
 
 applyStringEnum(
   "modeloverrides.ScopeKind",

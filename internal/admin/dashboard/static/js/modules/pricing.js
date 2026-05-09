@@ -103,7 +103,7 @@
                         method: 'POST',
                         body: JSON.stringify(this.pricingRecalculatePayload('recalculate'))
                     });
-                    const res = await fetch('/admin/api/v1/usage/recalculate-pricing', request);
+                    const res = await fetch('/admin/usage/recalculate-pricing', request);
                     const handled = this.handleFetchResponse(res, 'pricing recalculation', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;

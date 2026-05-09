@@ -18,7 +18,7 @@ import (
 // matches the value documented in the @Param limit annotation below.
 const maxUsageLogLimit = 200
 
-// UsageSummary handles GET /admin/api/v1/usage/summary
+// UsageSummary handles GET /admin/usage/summary
 //
 // @Summary      Get usage summary
 // @Tags         admin
@@ -32,7 +32,7 @@ const maxUsageLogLimit = 200
 // @Success      200  {object}  usage.UsageSummary
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
-// @Router       /admin/api/v1/usage/summary [get]
+// @Router       /admin/usage/summary [get]
 func (h *Handler) UsageSummary(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
 	// always get a 400 for malformed inputs, regardless of wiring.
@@ -82,7 +82,7 @@ func usageSliceResponse[T any](
 	return c.JSON(http.StatusOK, values)
 }
 
-// DailyUsage handles GET /admin/api/v1/usage/daily
+// DailyUsage handles GET /admin/usage/daily
 //
 // @Summary      Get usage breakdown by period
 // @Tags         admin
@@ -97,14 +97,14 @@ func usageSliceResponse[T any](
 // @Success      200  {array}   usage.DailyUsage
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
-// @Router       /admin/api/v1/usage/daily [get]
+// @Router       /admin/usage/daily [get]
 func (h *Handler) DailyUsage(c *echo.Context) error {
 	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.DailyUsage, error) {
 		return h.usageReader.GetDailyUsage(ctx, params)
 	})
 }
 
-// UsageByModel handles GET /admin/api/v1/usage/models
+// UsageByModel handles GET /admin/usage/models
 //
 // @Summary      Get usage breakdown by model
 // @Tags         admin
@@ -118,14 +118,14 @@ func (h *Handler) DailyUsage(c *echo.Context) error {
 // @Success      200  {array}   usage.ModelUsage
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
-// @Router       /admin/api/v1/usage/models [get]
+// @Router       /admin/usage/models [get]
 func (h *Handler) UsageByModel(c *echo.Context) error {
 	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.ModelUsage, error) {
 		return h.usageReader.GetUsageByModel(ctx, params)
 	})
 }
 
-// UsageByUserPath handles GET /admin/api/v1/usage/user-paths
+// UsageByUserPath handles GET /admin/usage/user-paths
 //
 // @Summary      Get usage breakdown by user path
 // @Tags         admin
@@ -139,14 +139,14 @@ func (h *Handler) UsageByModel(c *echo.Context) error {
 // @Success      200  {array}   usage.UserPathUsage
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
-// @Router       /admin/api/v1/usage/user-paths [get]
+// @Router       /admin/usage/user-paths [get]
 func (h *Handler) UsageByUserPath(c *echo.Context) error {
 	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.UserPathUsage, error) {
 		return h.usageReader.GetUsageByUserPath(ctx, params)
 	})
 }
 
-// UsageLog handles GET /admin/api/v1/usage/log
+// UsageLog handles GET /admin/usage/log
 //
 // @Summary      Get paginated usage log entries
 // @Tags         admin
@@ -165,7 +165,7 @@ func (h *Handler) UsageByUserPath(c *echo.Context) error {
 // @Success      200  {object}  usage.UsageLogResult
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
-// @Router       /admin/api/v1/usage/log [get]
+// @Router       /admin/usage/log [get]
 func (h *Handler) UsageLog(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
 	// always get a 400 for malformed inputs, regardless of wiring.
@@ -219,7 +219,7 @@ func (h *Handler) UsageLog(c *echo.Context) error {
 	return c.JSON(http.StatusOK, result)
 }
 
-// RecalculateUsagePricing handles POST /admin/api/v1/usage/recalculate-pricing.
+// RecalculateUsagePricing handles POST /admin/usage/recalculate-pricing.
 //
 // @Summary      Recalculate stored usage costs from current model pricing metadata
 // @Tags         admin
@@ -232,7 +232,7 @@ func (h *Handler) UsageLog(c *echo.Context) error {
 // @Failure      401      {object}  core.GatewayError
 // @Failure      500      {object}  core.GatewayError
 // @Failure      503      {object}  core.GatewayError
-// @Router       /admin/api/v1/usage/recalculate-pricing [post]
+// @Router       /admin/usage/recalculate-pricing [post]
 func (h *Handler) RecalculateUsagePricing(c *echo.Context) error {
 	if h.usageRecalculator == nil {
 		return handleError(c, featureUnavailableError("usage pricing recalculation is unavailable"))
@@ -270,7 +270,7 @@ func (h *Handler) RecalculateUsagePricing(c *echo.Context) error {
 	return c.JSON(http.StatusOK, result)
 }
 
-// CacheOverview handles GET /admin/api/v1/cache/overview
+// CacheOverview handles GET /admin/cache/overview
 //
 // @Summary      Get cached-only usage overview
 // @Tags         admin
@@ -286,7 +286,7 @@ func (h *Handler) RecalculateUsagePricing(c *echo.Context) error {
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
-// @Router       /admin/api/v1/cache/overview [get]
+// @Router       /admin/cache/overview [get]
 func (h *Handler) CacheOverview(c *echo.Context) error {
 	// Feature-gate check stays first: this endpoint is conceptually unavailable
 	// when cache analytics is off, and the response shape (503) communicates

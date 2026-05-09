@@ -118,7 +118,7 @@ test('refreshRuntime posts to admin endpoint and refreshes dashboard data', asyn
     const refresh = app.refreshRuntime();
     assert.equal(app.runtimeRefreshLoading, true);
     assert.equal(queue.requests.length, 1);
-    assert.equal(queue.requests[0].url, '/admin/api/v1/runtime/refresh');
+    assert.equal(queue.requests[0].url, '/admin/runtime/refresh');
     assert.equal(queue.requests[0].options.method, 'POST');
 
     queue.requests[0].resolve(jsonResponse({
@@ -180,7 +180,7 @@ test('refreshRuntime leaves dashboard data untouched when the admin request fail
     const refresh = app.refreshRuntime();
     assert.equal(app.runtimeRefreshLoading, true);
     assert.equal(queue.requests.length, 1);
-    assert.equal(queue.requests[0].url, '/admin/api/v1/runtime/refresh');
+    assert.equal(queue.requests[0].url, '/admin/runtime/refresh');
     assert.equal(queue.requests[0].options.method, 'POST');
 
     queue.requests[0].resolve({

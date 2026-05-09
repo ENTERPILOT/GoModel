@@ -170,8 +170,8 @@ test('model pricing override mutations send selector in JSON body', async() => {
     await module.deleteModelPricingOverride();
 
     assert.equal(requests.length, 2);
-    assert.equal(requests[0].url, '/admin/api/v1/model-pricing-overrides');
-    assert.equal(requests[1].url, '/admin/api/v1/model-pricing-overrides');
+    assert.equal(requests[0].url, '/admin/model-pricing-overrides');
+    assert.equal(requests[1].url, '/admin/model-pricing-overrides');
     assert.deepEqual(JSON.parse(requests[0].request.body), {
         selector: 'openrouter/meta-llama/llama-3.1-8b-instruct',
         pricing: {

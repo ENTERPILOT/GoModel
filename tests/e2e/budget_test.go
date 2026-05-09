@@ -87,7 +87,7 @@ func TestBudgetAdminEndpointsSQLite_E2E(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	putResp := sendBudgetJSONRequest(t, http.MethodPut, ts.URL+"/admin/api/v1/budgets", map[string]any{
+	putResp := sendBudgetJSONRequest(t, http.MethodPut, ts.URL+"/admin/budgets", map[string]any{
 		"user_path":  "/team/admin",
 		"budget_key": map[string]any{"period": "daily"},
 		"amount":     12.5,
@@ -95,7 +95,7 @@ func TestBudgetAdminEndpointsSQLite_E2E(t *testing.T) {
 	require.Equal(t, http.StatusOK, putResp.StatusCode)
 	closeBody(putResp)
 
-	listResp := sendBudgetJSONRequest(t, http.MethodGet, ts.URL+"/admin/api/v1/budgets", nil)
+	listResp := sendBudgetJSONRequest(t, http.MethodGet, ts.URL+"/admin/budgets", nil)
 	require.Equal(t, http.StatusOK, listResp.StatusCode)
 	var listBody struct {
 		Budgets []struct {
@@ -111,7 +111,7 @@ func TestBudgetAdminEndpointsSQLite_E2E(t *testing.T) {
 	require.Equal(t, budget.PeriodDailySeconds, listBody.Budgets[0].PeriodSeconds)
 	require.Equal(t, 12.5, listBody.Budgets[0].Amount)
 
-	resetResp := sendBudgetJSONRequest(t, http.MethodPost, ts.URL+"/admin/api/v1/budgets/reset-one", map[string]any{
+	resetResp := sendBudgetJSONRequest(t, http.MethodPost, ts.URL+"/admin/budgets/reset-one", map[string]any{
 		"user_path":      "/team/admin",
 		"period_seconds": budget.PeriodDailySeconds,
 	})
@@ -123,7 +123,7 @@ func TestBudgetAdminEndpointsSQLite_E2E(t *testing.T) {
 	require.Len(t, statuses, 1)
 	require.NotNil(t, statuses[0].Budget.LastResetAt)
 
-	deleteResp := sendBudgetJSONRequest(t, http.MethodDelete, ts.URL+"/admin/api/v1/budgets", map[string]any{
+	deleteResp := sendBudgetJSONRequest(t, http.MethodDelete, ts.URL+"/admin/budgets", map[string]any{
 		"user_path":  "/team/admin",
 		"budget_key": map[string]any{"period": "daily"},
 	})

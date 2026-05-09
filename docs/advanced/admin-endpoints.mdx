@@ -10,7 +10,7 @@ GoModel ships with admin endpoints **enabled by default**. The goal is simple: y
 
 The admin layer is split into two independently controllable pieces:
 
-1. **Admin REST API** (`/admin/api/v1/*`) — machine-readable JSON endpoints for usage data, budgets, and model inventory. Protected by `GOMODEL_MASTER_KEY` like all other API routes.
+1. **Admin REST API** (`/admin/*`) — machine-readable JSON endpoints for usage data, budgets, and model inventory. Protected by `GOMODEL_MASTER_KEY` like all other API routes.
 2. **Admin Dashboard UI** (`/admin/dashboard`) — a lightweight, embedded HTML dashboard that visualizes the same data. No external dependencies, no JavaScript frameworks to install — it's compiled into the binary.
 
 Both are on by default because observability shouldn't be opt-in. If you don't need them, turn them off with a single environment variable.
@@ -38,11 +38,11 @@ admin:
 
 ## Authentication
 
-The admin REST API endpoints (`/admin/api/v1/*`) are protected by the same `GOMODEL_MASTER_KEY` authentication as the main API routes. Include the key as a Bearer token:
+The admin REST API endpoints (`/admin/*`) are protected by the same `GOMODEL_MASTER_KEY` authentication as the main API routes. Include the key as a Bearer token:
 
 ```bash
 curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
-  http://localhost:8080/admin/api/v1/usage/summary
+  http://localhost:8080/admin/usage/summary
 ```
 
 The dashboard UI pages (`/admin/dashboard`) and static assets (`/admin/static/*`) **skip authentication** so the dashboard is accessible without configuring API keys in the browser.
@@ -55,9 +55,18 @@ The dashboard UI pages (`/admin/dashboard`) and static assets (`/admin/static/*`
 
 ## REST API Endpoints
 
-All admin API endpoints are mounted under `/admin/api/v1`.
+All admin API endpoints are mounted under `/admin`.
 
-### GET /admin/api/v1/usage/summary
+<Note>
+  **Legacy path alias** — until **2026-08-09**, the same endpoints are also
+  reachable under `/admin/api/v1/*`. Responses on the legacy path carry
+  `Deprecation: true`, `Sunset: Sun, 09 Aug 2026 00:00:00 GMT`, and a `Link`
+  header pointing to the new path. To migrate, replace `/admin/api/v1/` with
+  `/admin/` in your scripts. One endpoint also moved within `/admin`:
+  `/admin/api/v1/dashboard/config` → `/admin/runtime/config`.
+</Note>
+
+### GET /admin/usage/summary
 
 Returns aggregate token usage statistics over a configurable time window.
 
@@ -84,7 +93,7 @@ Use `start_date`/`end_date` for explicit ranges or `days` as a shorthand. When b
 
 If usage tracking is disabled, returns zeroed values.
 
-### GET /admin/api/v1/usage/daily
+### GET /admin/usage/daily
 
 Returns per-period token usage breakdown over a configurable time window, grouped by the specified interval.
 
@@ -124,18 +133,18 @@ Returns an empty array if usage tracking is disabled or no data exists for the p
 
 ### Budget endpoints
 
-Budgets are managed under `/admin/api/v1/budgets`. These endpoints are
+Budgets are managed under `/admin/budgets`. These endpoints are
 available when budget management is enabled.
 
 | Method   | Path                                  | Description                          |
 | -------- | ------------------------------------- | ------------------------------------ |
-| `GET`    | `/admin/api/v1/budgets`               | List budgets with current status     |
-| `PUT`    | `/admin/api/v1/budgets/{user_path}/{period}` | Create or update one budget          |
-| `DELETE` | `/admin/api/v1/budgets/{user_path}/{period}` | Delete one budget                    |
-| `GET`    | `/admin/api/v1/budgets/settings`      | Read budget reset settings           |
-| `PUT`    | `/admin/api/v1/budgets/settings`      | Update budget reset settings         |
-| `POST`   | `/admin/api/v1/budgets/reset-one`     | Reset one budget period              |
-| `POST`   | `/admin/api/v1/budgets/reset`         | Reset all budget periods             |
+| `GET`    | `/admin/budgets`               | List budgets with current status     |
+| `PUT`    | `/admin/budgets/{user_path}/{period}` | Create or update one budget          |
+| `DELETE` | `/admin/budgets/{user_path}/{period}` | Delete one budget                    |
+| `GET`    | `/admin/budgets/settings`      | Read budget reset settings           |
+| `PUT`    | `/admin/budgets/settings`      | Update budget reset settings         |
+| `POST`   | `/admin/budgets/reset-one`     | Reset one budget period              |
+| `POST`   | `/admin/budgets/reset`         | Reset all budget periods             |
 
 `PUT`, `DELETE`, and `reset-one` identify one budget by the composite
 `(user_path, period)` key, or `(user_path, period_seconds)` for custom periods.
@@ -145,7 +154,7 @@ the request shape.
 
 See [Budgets](/features/budgets) for request examples and enforcement behavior.
 
-### GET /admin/api/v1/models
+### GET /admin/models
 
 Returns all registered models with both provider type and configured provider name.
 

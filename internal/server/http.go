@@ -170,7 +170,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// When no bootstrap master key is configured, keep admin APIs reachable so
 	// the dashboard can recover managed-key access instead of locking itself out.
 	if cfg != nil && cfg.MasterKey == "" && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
-		authSkipPaths = append(authSkipPaths, "/admin/api/v1/*")
+		authSkipPaths = append(authSkipPaths, "/admin/*")
 	}
 	if cfg != nil && cfg.SwaggerEnabled && SwaggerAvailable() {
 		authSkipPaths = append(authSkipPaths, "/swagger/*")
@@ -315,7 +315,16 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// Admin API routes (behind ADMIN_ENDPOINTS_ENABLED flag)
 	if cfg != nil && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
-		cfg.AdminHandler.RegisterRoutes(e.Group("/admin/api/v1"))
+		cfg.AdminHandler.RegisterRoutes(e.Group("/admin"))
+
+		// Legacy alias under /admin/api/v1/* — accepted until adminLegacySunset
+		// to give operators a window to migrate. Responses carry Deprecation,
+		// Sunset, and Link headers per RFC 8594 / draft-ietf-httpapi-deprecation-header.
+		legacy := e.Group("/admin/api/v1", adminLegacyDeprecationMiddleware)
+		cfg.AdminHandler.RegisterRoutes(legacy)
+		// DashboardConfig moved within /admin from /dashboard/config to
+		// /runtime/config; preserve the historical legacy path explicitly.
+		legacy.GET("/dashboard/config", cfg.AdminHandler.DashboardConfig)
 	}
 
 	// Admin dashboard UI routes (behind ADMIN_UI_ENABLED flag)
@@ -334,6 +343,22 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		handler:                 handler,
 		responseCacheMiddleware: rcm,
 		responseStore:           handler.currentResponseStore(),
+	}
+}
+
+// adminLegacySunset is the sunset date advertised on responses served from the
+// deprecated /admin/api/v1/* alias. Format follows RFC 7231 HTTP-date.
+const adminLegacySunset = "Sun, 09 Aug 2026 00:00:00 GMT"
+
+// adminLegacyDeprecationMiddleware tags responses on the legacy /admin/api/v1/*
+// alias with deprecation signals so clients can detect the move to /admin/*.
+func adminLegacyDeprecationMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		h := c.Response().Header()
+		h.Set("Deprecation", "true")
+		h.Set("Sunset", adminLegacySunset)
+		h.Set("Link", `</admin/>; rel="successor-version"`)
+		return next(c)
 	}
 }
 

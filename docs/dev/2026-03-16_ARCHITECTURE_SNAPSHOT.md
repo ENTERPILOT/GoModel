@@ -144,7 +144,7 @@ Echo + Handler"]
     Server --> HTTP["HTTP surface
 - /v1/*
 - /p/*
-- /admin/api/v1/*
+- /admin/*
 - /admin/dashboard
 - /metrics
 - /health
@@ -467,7 +467,7 @@ File request path:
 ## 6. Side Paths Outside The Main Ingress Pipeline
 
 - `GET /v1/models`: `Handler.ListModels` calls `providers.Router.ListModels()` and then merges alias-exposed models from `aliases.Service`.
-- `/admin/api/v1/*`: reads usage and audit storage, model registry, and alias service through `admin.Handler`.
+- `/admin/*`: reads usage and audit storage, model registry, and alias service through `admin.Handler`.
 - `/admin/dashboard`: dashboard UI handler over the same underlying readers.
 - `/metrics`: Prometheus endpoint when enabled.
 - `/health`: simple health check.

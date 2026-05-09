@@ -16,7 +16,7 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/admin/api/v1/audit/conversation": {
+        "/admin/audit/conversation": {
             "get": {
                 "produces": [
                     "application/json"
@@ -67,7 +67,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/audit/log": {
+        "/admin/audit/log": {
             "get": {
                 "produces": [
                     "application/json"
@@ -189,7 +189,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/budgets": {
+        "/admin/budgets": {
             "get": {
                 "produces": [
                     "application/json"
@@ -333,7 +333,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/budgets/reset": {
+        "/admin/budgets/reset": {
             "post": {
                 "consumes": [
                     "application/json"
@@ -389,7 +389,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/budgets/reset-one": {
+        "/admin/budgets/reset-one": {
             "post": {
                 "consumes": [
                     "application/json"
@@ -445,7 +445,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/budgets/settings": {
+        "/admin/budgets/settings": {
             "get": {
                 "produces": [
                     "application/json"
@@ -535,7 +535,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/cache/overview": {
+        "/admin/cache/overview": {
             "get": {
                 "produces": [
                     "application/json"
@@ -615,37 +615,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/dashboard/config": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Get dashboard runtime configuration",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/admin.DashboardConfigResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
-            }
-        },
-        "/admin/api/v1/model-overrides": {
+        "/admin/model-overrides": {
             "get": {
                 "description": "Lists persisted model access overrides by global, provider-wide, model-wide, or exact selector.\nSelectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
                 "produces": [
@@ -814,7 +784,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/model-pricing-overrides": {
+        "/admin/model-pricing-overrides": {
             "get": {
                 "description": "Lists persisted USD pricing overrides. Selectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
                 "produces": [
@@ -984,7 +954,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/models": {
+        "/admin/models": {
             "get": {
                 "produces": [
                     "application/json"
@@ -1031,7 +1001,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/models/categories": {
+        "/admin/models/categories": {
             "get": {
                 "produces": [
                     "application/json"
@@ -1064,7 +1034,37 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/usage/daily": {
+        "/admin/runtime/config": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get admin runtime configuration",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.DashboardConfigResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/usage/daily": {
             "get": {
                 "produces": [
                     "application/json"
@@ -1141,7 +1141,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/usage/log": {
+        "/admin/usage/log": {
             "get": {
                 "produces": [
                     "application/json"
@@ -1239,7 +1239,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/usage/models": {
+        "/admin/usage/models": {
             "get": {
                 "produces": [
                     "application/json"
@@ -1310,7 +1310,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/usage/recalculate-pricing": {
+        "/admin/usage/recalculate-pricing": {
             "post": {
                 "consumes": [
                     "application/json"
@@ -1372,7 +1372,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/usage/summary": {
+        "/admin/usage/summary": {
             "get": {
                 "produces": [
                     "application/json"
@@ -1440,7 +1440,7 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/api/v1/usage/user-paths": {
+        "/admin/usage/user-paths": {
             "get": {
                 "produces": [
                     "application/json"

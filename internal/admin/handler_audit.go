@@ -18,7 +18,7 @@ import (
 // matches the value documented in the @Param limit annotation below.
 const maxAuditLogLimit = 100
 
-// AuditLog handles GET /admin/api/v1/audit/log
+// AuditLog handles GET /admin/audit/log
 //
 // @Summary      Get paginated audit log entries
 // @Tags         admin
@@ -41,7 +41,7 @@ const maxAuditLogLimit = 100
 // @Success      200  {object}  auditLogListResponse
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
-// @Router       /admin/api/v1/audit/log [get]
+// @Router       /admin/audit/log [get]
 func (h *Handler) AuditLog(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
 	// always get a 400 for malformed inputs, regardless of whether audit
@@ -173,7 +173,7 @@ func (h *Handler) auditLogResponse(ctx context.Context, result *auditlog.LogList
 	return response, nil
 }
 
-// AuditConversation handles GET /admin/api/v1/audit/conversation
+// AuditConversation handles GET /admin/audit/conversation
 //
 // @Summary      Get conversation thread around an audit log entry
 // @Tags         admin
@@ -184,7 +184,7 @@ func (h *Handler) auditLogResponse(ctx context.Context, result *auditlog.LogList
 // @Success      200  {object}  auditlog.ConversationResult
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
-// @Router       /admin/api/v1/audit/conversation [get]
+// @Router       /admin/audit/conversation [get]
 func (h *Handler) AuditConversation(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
 	// always get a 400 for missing/invalid params, regardless of whether

@@ -25,7 +25,7 @@ type modelInventoryResponse struct {
 	Access modelAccessResponse `json:"access"`
 }
 
-// ListModels handles GET /admin/api/v1/models
+// ListModels handles GET /admin/models
 // Supports optional ?category= query param for filtering by model category.
 //
 // @Summary      List all registered models with provider info and access state
@@ -36,7 +36,7 @@ type modelInventoryResponse struct {
 // @Success      200  {array}  modelInventoryResponse
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
-// @Router       /admin/api/v1/models [get]
+// @Router       /admin/models [get]
 func (h *Handler) ListModels(c *echo.Context) error {
 	if h.registry == nil {
 		return c.JSON(http.StatusOK, []modelInventoryResponse{})
@@ -110,7 +110,7 @@ func isValidCategory(cat core.ModelCategory) bool {
 	return slices.Contains(core.AllCategories(), cat)
 }
 
-// ListCategories handles GET /admin/api/v1/models/categories
+// ListCategories handles GET /admin/models/categories
 //
 // @Summary      List model categories with counts
 // @Tags         admin
@@ -118,7 +118,7 @@ func isValidCategory(cat core.ModelCategory) bool {
 // @Security     BearerAuth
 // @Success      200  {array}   providers.CategoryCount
 // @Failure      401  {object}  core.GatewayError
-// @Router       /admin/api/v1/models/categories [get]
+// @Router       /admin/models/categories [get]
 func (h *Handler) ListCategories(c *echo.Context) error {
 	if h.registry == nil {
 		return c.JSON(http.StatusOK, []providers.CategoryCount{})
@@ -127,15 +127,15 @@ func (h *Handler) ListCategories(c *echo.Context) error {
 	return c.JSON(http.StatusOK, h.registry.GetCategoryCounts())
 }
 
-// DashboardConfig handles GET /admin/api/v1/dashboard/config
+// DashboardConfig handles GET /admin/runtime/config
 //
-// @Summary      Get dashboard runtime configuration
+// @Summary      Get admin runtime configuration
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
 // @Success      200  {object}  DashboardConfigResponse
 // @Failure      401  {object}  core.GatewayError
-// @Router       /admin/api/v1/dashboard/config [get]
+// @Router       /admin/runtime/config [get]
 func (h *Handler) DashboardConfig(c *echo.Context) error {
 	return c.JSON(http.StatusOK, cloneDashboardRuntimeConfig(h.runtimeConfig))
 }

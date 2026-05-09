@@ -604,7 +604,7 @@ func TestAdminEndpoints_Enabled(t *testing.T) {
 		AdminHandler:          adminHandler,
 	})
 
-	for _, path := range []string{"/admin/api/v1/models", "/admin/api/v1/providers/status", "/admin/api/v1/audit/log", "/admin/api/v1/audit/conversation?log_id=abc"} {
+	for _, path := range []string{"/admin/models", "/admin/providers/status", "/admin/audit/log", "/admin/audit/conversation?log_id=abc"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -627,16 +627,16 @@ func TestAdminWorkflowEndpoints_AreRegistered(t *testing.T) {
 		method string
 		path   string
 	}{
-		{method: http.MethodGet, path: "/admin/api/v1/dashboard/config"},
-		{method: http.MethodGet, path: "/admin/api/v1/providers/status"},
-		{method: http.MethodPost, path: "/admin/api/v1/runtime/refresh"},
-		{method: http.MethodGet, path: "/admin/api/v1/auth-keys"},
-		{method: http.MethodPost, path: "/admin/api/v1/auth-keys"},
-		{method: http.MethodPost, path: "/admin/api/v1/auth-keys/test-key/deactivate"},
-		{method: http.MethodGet, path: "/admin/api/v1/workflows"},
-		{method: http.MethodGet, path: "/admin/api/v1/workflows/guardrails"},
-		{method: http.MethodPost, path: "/admin/api/v1/workflows"},
-		{method: http.MethodPost, path: "/admin/api/v1/workflows/test-workflow/deactivate"},
+		{method: http.MethodGet, path: "/admin/runtime/config"},
+		{method: http.MethodGet, path: "/admin/providers/status"},
+		{method: http.MethodPost, path: "/admin/runtime/refresh"},
+		{method: http.MethodGet, path: "/admin/auth-keys"},
+		{method: http.MethodPost, path: "/admin/auth-keys"},
+		{method: http.MethodPost, path: "/admin/auth-keys/test-key/deactivate"},
+		{method: http.MethodGet, path: "/admin/workflows"},
+		{method: http.MethodGet, path: "/admin/workflows/guardrails"},
+		{method: http.MethodPost, path: "/admin/workflows"},
+		{method: http.MethodPost, path: "/admin/workflows/test-workflow/deactivate"},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		rec := httptest.NewRecorder()
@@ -658,7 +658,7 @@ func TestAdminDashboardConfigEndpoint_ReturnsHandlerResponse(t *testing.T) {
 		AdminHandler:          adminHandler,
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/api/v1/dashboard/config", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/runtime/config", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -670,13 +670,65 @@ func TestAdminDashboardConfigEndpoint_ReturnsHandlerResponse(t *testing.T) {
 	}
 }
 
+func TestAdminLegacyAlias_Deprecation(t *testing.T) {
+	mock := &mockProvider{}
+	adminHandler := admin.NewHandler(nil, nil, admin.WithDashboardRuntimeConfig(admin.DashboardConfigResponse{
+		FeatureFallbackMode: "manual",
+	}))
+	srv := New(mock, &Config{
+		AdminEndpointsEnabled: true,
+		AdminHandler:          adminHandler,
+	})
+
+	cases := []struct {
+		name           string
+		path           string
+		wantDeprecated bool
+	}{
+		{name: "legacy alias serves request", path: "/admin/api/v1/models", wantDeprecated: true},
+		{name: "legacy dashboard/config alias preserved", path: "/admin/api/v1/dashboard/config", wantDeprecated: true},
+		{name: "new path has no deprecation header", path: "/admin/models", wantDeprecated: false},
+		{name: "new runtime/config path has no deprecation header", path: "/admin/runtime/config", wantDeprecated: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s returned %d, want 200; body=%s", tc.path, rec.Code, rec.Body.String())
+			}
+			gotDeprecation := rec.Header().Get("Deprecation")
+			gotSunset := rec.Header().Get("Sunset")
+			gotLink := rec.Header().Get("Link")
+			if tc.wantDeprecated {
+				if gotDeprecation != "true" {
+					t.Errorf("Deprecation header = %q, want %q", gotDeprecation, "true")
+				}
+				if gotSunset == "" {
+					t.Error("Sunset header missing on legacy path")
+				}
+				if !strings.Contains(gotLink, `rel="successor-version"`) {
+					t.Errorf("Link header = %q, want rel=successor-version", gotLink)
+				}
+			} else {
+				if gotDeprecation != "" || gotSunset != "" || gotLink != "" {
+					t.Errorf("non-legacy path leaked deprecation headers: dep=%q sunset=%q link=%q", gotDeprecation, gotSunset, gotLink)
+				}
+			}
+		})
+	}
+}
+
 func TestAdminEndpoints_Disabled(t *testing.T) {
 	mock := &mockProvider{}
 	srv := New(mock, &Config{
 		AdminEndpointsEnabled: false,
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/api/v1/models", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -758,7 +810,7 @@ func TestAdminAPI_RequiresAuth(t *testing.T) {
 	})
 
 	// Admin API should require auth
-	req := httptest.NewRequest(http.MethodGet, "/admin/api/v1/models", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -776,7 +828,7 @@ func TestAdminAPI_SkipsAuthWithoutMasterKey(t *testing.T) {
 		AdminHandler:          adminHandler,
 	})
 
-	adminReq := httptest.NewRequest(http.MethodGet, "/admin/api/v1/models", nil)
+	adminReq := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
 	adminRec := httptest.NewRecorder()
 	srv.ServeHTTP(adminRec, adminReq)
 
@@ -813,7 +865,7 @@ func TestAdminPricingRecalculationSkipsAuthWithoutMasterKey(t *testing.T) {
 				AdminHandler:          adminHandler,
 			})
 
-			req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", strings.NewReader(`{"confirmation":"recalculate"}`))
+			req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", strings.NewReader(`{"confirmation":"recalculate"}`))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
@@ -838,7 +890,7 @@ func TestAdminPricingRecalculationRequiresAuthWithMasterKey(t *testing.T) {
 		AdminHandler:          adminHandler,
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", strings.NewReader(`{"confirmation":"recalculate"}`))
+	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", strings.NewReader(`{"confirmation":"recalculate"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -850,7 +902,7 @@ func TestAdminPricingRecalculationRequiresAuthWithMasterKey(t *testing.T) {
 		t.Fatalf("recalculator calls after unauthorized request = %d, want 0", recalculator.calls)
 	}
 
-	authReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", strings.NewReader(`{"confirmation":"recalculate"}`))
+	authReq := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", strings.NewReader(`{"confirmation":"recalculate"}`))
 	authReq.Header.Set("Content-Type", "application/json")
 	authReq.Header.Set("Authorization", "Bearer test-secret-key")
 	authRec := httptest.NewRecorder()

@@ -18,7 +18,7 @@ import (
 func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 	h := &Handler{}
 	e := echo.New()
-	g := e.Group("/admin/api/v1")
+	g := e.Group("/admin")
 
 	// RegisterRoutes must not panic with a zero-value handler — every endpoint
 	// reads its own dependencies inside the handler body, so route mounting
@@ -31,59 +31,59 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 	h.RegisterRoutes(g)
 
 	want := []string{
-		"GET /admin/api/v1/dashboard/config",
-		"GET /admin/api/v1/cache/overview",
+		"GET /admin/runtime/config",
+		"GET /admin/cache/overview",
 
-		"GET /admin/api/v1/usage/summary",
-		"GET /admin/api/v1/usage/daily",
-		"GET /admin/api/v1/usage/models",
-		"GET /admin/api/v1/usage/user-paths",
-		"GET /admin/api/v1/usage/log",
-		"POST /admin/api/v1/usage/recalculate-pricing",
+		"GET /admin/usage/summary",
+		"GET /admin/usage/daily",
+		"GET /admin/usage/models",
+		"GET /admin/usage/user-paths",
+		"GET /admin/usage/log",
+		"POST /admin/usage/recalculate-pricing",
 
-		"GET /admin/api/v1/audit/log",
-		"GET /admin/api/v1/audit/conversation",
+		"GET /admin/audit/log",
+		"GET /admin/audit/conversation",
 
-		"GET /admin/api/v1/providers/status",
-		"POST /admin/api/v1/runtime/refresh",
+		"GET /admin/providers/status",
+		"POST /admin/runtime/refresh",
 
-		"GET /admin/api/v1/budgets",
-		"PUT /admin/api/v1/budgets",
-		"DELETE /admin/api/v1/budgets",
-		"GET /admin/api/v1/budgets/settings",
-		"PUT /admin/api/v1/budgets/settings",
-		"POST /admin/api/v1/budgets/reset-one",
-		"POST /admin/api/v1/budgets/reset",
+		"GET /admin/budgets",
+		"PUT /admin/budgets",
+		"DELETE /admin/budgets",
+		"GET /admin/budgets/settings",
+		"PUT /admin/budgets/settings",
+		"POST /admin/budgets/reset-one",
+		"POST /admin/budgets/reset",
 
-		"GET /admin/api/v1/models",
-		"GET /admin/api/v1/models/categories",
+		"GET /admin/models",
+		"GET /admin/models/categories",
 
-		"GET /admin/api/v1/model-overrides",
-		"PUT /admin/api/v1/model-overrides",
-		"DELETE /admin/api/v1/model-overrides",
+		"GET /admin/model-overrides",
+		"PUT /admin/model-overrides",
+		"DELETE /admin/model-overrides",
 
-		"GET /admin/api/v1/model-pricing-overrides",
-		"PUT /admin/api/v1/model-pricing-overrides",
-		"DELETE /admin/api/v1/model-pricing-overrides",
+		"GET /admin/model-pricing-overrides",
+		"PUT /admin/model-pricing-overrides",
+		"DELETE /admin/model-pricing-overrides",
 
-		"GET /admin/api/v1/auth-keys",
-		"POST /admin/api/v1/auth-keys",
-		"POST /admin/api/v1/auth-keys/:id/deactivate",
+		"GET /admin/auth-keys",
+		"POST /admin/auth-keys",
+		"POST /admin/auth-keys/:id/deactivate",
 
-		"GET /admin/api/v1/aliases",
-		"PUT /admin/api/v1/aliases",
-		"DELETE /admin/api/v1/aliases",
+		"GET /admin/aliases",
+		"PUT /admin/aliases",
+		"DELETE /admin/aliases",
 
-		"GET /admin/api/v1/guardrails/types",
-		"GET /admin/api/v1/guardrails",
-		"PUT /admin/api/v1/guardrails",
-		"DELETE /admin/api/v1/guardrails",
+		"GET /admin/guardrails/types",
+		"GET /admin/guardrails",
+		"PUT /admin/guardrails",
+		"DELETE /admin/guardrails",
 
-		"GET /admin/api/v1/workflows",
-		"GET /admin/api/v1/workflows/guardrails",
-		"GET /admin/api/v1/workflows/:id",
-		"POST /admin/api/v1/workflows",
-		"POST /admin/api/v1/workflows/:id/deactivate",
+		"GET /admin/workflows",
+		"GET /admin/workflows/guardrails",
+		"GET /admin/workflows/:id",
+		"POST /admin/workflows",
+		"POST /admin/workflows/:id/deactivate",
 	}
 
 	registered := make(map[string]struct{})

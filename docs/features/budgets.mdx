@@ -182,13 +182,13 @@ Budget management is also available through the admin API:
 
 ```bash
 curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
-  http://localhost:8080/admin/api/v1/budgets
+  http://localhost:8080/admin/budgets
 ```
 
 Create or update a budget:
 
 ```bash
-curl -X PUT http://localhost:8080/admin/api/v1/budgets/%2Fteam%2Falpha/daily \
+curl -X PUT http://localhost:8080/admin/budgets/%2Fteam%2Falpha/daily \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -199,7 +199,7 @@ curl -X PUT http://localhost:8080/admin/api/v1/budgets/%2Fteam%2Falpha/daily \
 Delete a budget:
 
 ```bash
-curl -X DELETE http://localhost:8080/admin/api/v1/budgets/%2Fteam%2Falpha/daily \
+curl -X DELETE http://localhost:8080/admin/budgets/%2Fteam%2Falpha/daily \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
 

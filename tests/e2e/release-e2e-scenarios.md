@@ -76,7 +76,7 @@ wait_release_usage_entry() {
   local output_file="$4"
 
   for _ in $(seq 1 15); do
-    curl -fsS "$base_url/admin/api/v1/usage/log?search=$request_id&limit=5" > "$output_file"
+    curl -fsS "$base_url/admin/usage/log?search=$request_id&limit=5" > "$output_file"
     if jq -e --arg request_id "$request_id" --arg user_path "$user_path" '
       any(.entries[]?; .request_id == $request_id and .user_path == $user_path and (.total_cost // 0) > 0 and (.total_tokens // 0) > 0)
     ' "$output_file" >/dev/null; then
@@ -106,7 +106,7 @@ run_release_budget_enforcement() {
   local headers_file="$QA_RUN_DIR/$artifact_prefix.headers"
   local body_file="$QA_RUN_DIR/$artifact_prefix.body"
 
-  curl -fsS -X PUT "$base_url/admin/api/v1/budgets" \
+  curl -fsS -X PUT "$base_url/admin/budgets" \
     -H 'Content-Type: application/json' \
     -d "{\"user_path\":\"$budget_path\",\"budget_key\":{\"period\":\"daily\"},\"amount\":$QA_BUDGET_AMOUNT}" \
     > "$budget_json_file"
@@ -123,7 +123,7 @@ run_release_budget_enforcement() {
 
   wait_release_usage_entry "$base_url" "$req1" "$leaf_path" "$usage_json_file"
 
-  curl -fsS "$base_url/admin/api/v1/budgets" > "$budget_json_file"
+  curl -fsS "$base_url/admin/budgets" > "$budget_json_file"
   jq -e --arg user_path "$budget_path" '
     any(.budgets[]?; .user_path == $user_path and .spent > 0 and .has_usage == true and .remaining < 0 and .usage_ratio > 1)
   ' "$budget_json_file" >/dev/null
@@ -138,7 +138,7 @@ run_release_budget_enforcement() {
   jq -e '.error.type == "rate_limit_error" and .error.code == "budget_exceeded" and (.error.message | test("budget exceeded"))' "$body_file" >/dev/null
 
   for _ in $(seq 1 10); do
-    curl -fsS "$base_url/admin/api/v1/audit/log?search=$req2&limit=5" > "$audit_json_file"
+    curl -fsS "$base_url/admin/audit/log?search=$req2&limit=5" > "$audit_json_file"
     if jq -e --arg request_id "$req2" --arg user_path "$leaf_path" '
       any(.entries[]?; .request_id == $request_id and .user_path == $user_path and .status_code == 429 and .error_type == "rate_limit_error")
     ' "$audit_json_file" >/dev/null; then
@@ -150,7 +150,7 @@ run_release_budget_enforcement() {
     any(.entries[]?; .request_id == $request_id and .user_path == $user_path and .status_code == 429 and .error_type == "rate_limit_error")
   ' "$audit_json_file" >/dev/null
 
-  curl -fsS -X POST "$base_url/admin/api/v1/budgets/reset-one" \
+  curl -fsS -X POST "$base_url/admin/budgets/reset-one" \
     -H 'Content-Type: application/json' \
     -d "{\"user_path\":\"$budget_path\",\"period\":\"daily\"}" \
     > "$budget_json_file"
@@ -158,7 +158,7 @@ run_release_budget_enforcement() {
     any(.budgets[]?; .user_path == $user_path and .last_reset_at != null and .spent == 0 and .has_usage == false)
   ' "$budget_json_file" >/dev/null
 
-  curl -fsS -X DELETE "$base_url/admin/api/v1/budgets" \
+  curl -fsS -X DELETE "$base_url/admin/budgets" \
     -H 'Content-Type: application/json' \
     -d "{\"user_path\":\"$budget_path\",\"budget_key\":{\"period\":\"daily\"}}" \
     > "$budget_json_file"
@@ -261,18 +261,18 @@ curl -fsS "$BASE_URL/v1/models" \
 
 ### S04 Admin model inventory
 
-Checks `/admin/api/v1/models`.
+Checks `/admin/models`.
 
 ```bash
-curl -fsS "$BASE_URL/admin/api/v1/models" | jq -e '.[0:5]'
+curl -fsS "$BASE_URL/admin/models" | jq -e '.[0:5]'
 ```
 
 ### S05 Admin model categories
 
-Checks `/admin/api/v1/models/categories`.
+Checks `/admin/models/categories`.
 
 ```bash
-curl -fsS "$BASE_URL/admin/api/v1/models/categories" | jq -e '.'
+curl -fsS "$BASE_URL/admin/models/categories" | jq -e '.'
 ```
 
 ### S06 Usage summary endpoint
@@ -280,7 +280,7 @@ curl -fsS "$BASE_URL/admin/api/v1/models/categories" | jq -e '.'
 Reads aggregate usage summary.
 
 ```bash
-curl -fsS "$BASE_URL/admin/api/v1/usage/summary" | jq -e '.'
+curl -fsS "$BASE_URL/admin/usage/summary" | jq -e '.'
 ```
 
 ### S07 Usage daily endpoint
@@ -288,7 +288,7 @@ curl -fsS "$BASE_URL/admin/api/v1/usage/summary" | jq -e '.'
 Reads daily usage rollup.
 
 ```bash
-curl -fsS "$BASE_URL/admin/api/v1/usage/daily?days=7" | jq -e '.'
+curl -fsS "$BASE_URL/admin/usage/daily?days=7" | jq -e '.'
 ```
 
 ### S08 Usage by model endpoint
@@ -296,7 +296,7 @@ curl -fsS "$BASE_URL/admin/api/v1/usage/daily?days=7" | jq -e '.'
 Reads per-model usage totals.
 
 ```bash
-curl -fsS "$BASE_URL/admin/api/v1/usage/models?limit=10" | jq -e '.'
+curl -fsS "$BASE_URL/admin/usage/models?limit=10" | jq -e '.'
 ```
 
 ### S09 Filtered usage log
@@ -304,7 +304,7 @@ curl -fsS "$BASE_URL/admin/api/v1/usage/models?limit=10" | jq -e '.'
 Reads recent usage entries for a specific model.
 
 ```bash
-curl -fsS "$BASE_URL/admin/api/v1/usage/log?model=gpt-4.1-nano-2025-04-14&limit=5" \
+curl -fsS "$BASE_URL/admin/usage/log?model=gpt-4.1-nano-2025-04-14&limit=5" \
   | jq -e '.'
 ```
 
@@ -313,7 +313,7 @@ curl -fsS "$BASE_URL/admin/api/v1/usage/log?model=gpt-4.1-nano-2025-04-14&limit=
 Reads recent audit entries.
 
 ```bash
-curl -fsS "$BASE_URL/admin/api/v1/audit/log?limit=5" \
+curl -fsS "$BASE_URL/admin/audit/log?limit=5" \
   | jq -e '{total,entries:(.entries|map({id,request_id,model,provider,path,status_code,stream,error_type}))}'
 ```
 
@@ -322,8 +322,8 @@ curl -fsS "$BASE_URL/admin/api/v1/audit/log?limit=5" \
 Reads a conversation thread anchored to the newest audit entry.
 
 ```bash
-AUDIT_ID=$(curl -fsS "$BASE_URL/admin/api/v1/audit/log?limit=1" | jq -er '.entries[0].id')
-curl -fsS "$BASE_URL/admin/api/v1/audit/conversation?log_id=$AUDIT_ID&limit=5" \
+AUDIT_ID=$(curl -fsS "$BASE_URL/admin/audit/log?limit=1" | jq -er '.entries[0].id')
+curl -fsS "$BASE_URL/admin/audit/conversation?log_id=$AUDIT_ID&limit=5" \
   | jq -e '{anchor_id,entry_count:(.entries|length),entries:(.entries|map({id,request_id,path,status_code}))}'
 ```
 
@@ -332,7 +332,7 @@ curl -fsS "$BASE_URL/admin/api/v1/audit/conversation?log_id=$AUDIT_ID&limit=5" \
 Reads current aliases.
 
 ```bash
-curl -fsS "$BASE_URL/admin/api/v1/aliases" | jq -e '.'
+curl -fsS "$BASE_URL/admin/aliases" | jq -e '.'
 ```
 
 ## 2. Alias administration
@@ -342,7 +342,7 @@ curl -fsS "$BASE_URL/admin/api/v1/aliases" | jq -e '.'
 Creates an alias pointing to the newest cheap OpenAI model.
 
 ```bash
-curl -fsS -X PUT "$BASE_URL/admin/api/v1/aliases" \
+curl -fsS -X PUT "$BASE_URL/admin/aliases" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$QA_OPENAI_ALIAS\",\"target_model\":\"gpt-4.1-nano\",\"target_provider\":\"openai\",\"description\":\"QA alias for release e2e\"}" \
   | jq -e '.'
@@ -353,7 +353,7 @@ curl -fsS -X PUT "$BASE_URL/admin/api/v1/aliases" \
 Creates an alias pointing to `claude-sonnet-4-6`.
 
 ```bash
-curl -fsS -X PUT "$BASE_URL/admin/api/v1/aliases" \
+curl -fsS -X PUT "$BASE_URL/admin/aliases" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$QA_ANTHROPIC_ALIAS\",\"target_model\":\"claude-sonnet-4-6\",\"target_provider\":\"anthropic\",\"description\":\"QA alias for anthropic reasoning\"}" \
   | jq -e '.'
@@ -830,8 +830,8 @@ curl -fsS "$PG_BASE_URL/v1/chat/completions" \
   -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_POSTGRES_OK"}],"max_tokens":20}' \
   | jq -e '{model,provider,answer:.choices[0].message.content}' && echo
 sleep 6
-curl -fsS "$PG_BASE_URL/admin/api/v1/usage/summary" | jq -e '.' && echo
-curl -fsS "$PG_BASE_URL/admin/api/v1/audit/log?limit=3" \
+curl -fsS "$PG_BASE_URL/admin/usage/summary" | jq -e '.' && echo
+curl -fsS "$PG_BASE_URL/admin/audit/log?limit=3" \
   | jq -e '{total,entries:(.entries|map({request_id,path,model,provider,status_code}))}'
 ```
 
@@ -846,9 +846,9 @@ curl -fsS "$MONGO_BASE_URL/v1/chat/completions" \
   -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_MONGO_OK"}],"max_tokens":20}' \
   | jq -e '{model,provider,answer:.choices[0].message.content}' && echo
 sleep 6
-curl -fsS "$MONGO_BASE_URL/admin/api/v1/usage/log?limit=3" \
+curl -fsS "$MONGO_BASE_URL/admin/usage/log?limit=3" \
   | jq -e '{total,entries:(.entries|map({request_id,model,provider,endpoint,total_tokens}))}' && echo
-curl -fsS "$MONGO_BASE_URL/admin/api/v1/audit/log?limit=3" \
+curl -fsS "$MONGO_BASE_URL/admin/audit/log?limit=3" \
   | jq -e '{total,entries:(.entries|map({request_id,path,model,provider,status_code}))}'
 ```
 
@@ -880,9 +880,9 @@ Reads admin evidence after the guardrail requests flush.
 
 ```bash
 sleep 6
-curl -fsS "$GR_BASE_URL/admin/api/v1/audit/log?limit=3" \
+curl -fsS "$GR_BASE_URL/admin/audit/log?limit=3" \
   | jq -e '{total,entries:(.entries|map({request_id,path,model,provider,status_code,stream}))}' && echo
-curl -fsS "$GR_BASE_URL/admin/api/v1/usage/summary" | jq -e '.'
+curl -fsS "$GR_BASE_URL/admin/usage/summary" | jq -e '.'
 ```
 
 ## 10. Alias cleanup
@@ -892,7 +892,7 @@ curl -fsS "$GR_BASE_URL/admin/api/v1/usage/summary" | jq -e '.'
 Removes the per-run OpenAI alias.
 
 ```bash
-curl -fsS -X DELETE -i "$BASE_URL/admin/api/v1/aliases" \
+curl -fsS -X DELETE -i "$BASE_URL/admin/aliases" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$QA_OPENAI_ALIAS\"}"
 ```
@@ -902,7 +902,7 @@ curl -fsS -X DELETE -i "$BASE_URL/admin/api/v1/aliases" \
 Removes the per-run Anthropic alias.
 
 ```bash
-curl -fsS -X DELETE -i "$BASE_URL/admin/api/v1/aliases" \
+curl -fsS -X DELETE -i "$BASE_URL/admin/aliases" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$QA_ANTHROPIC_ALIAS\"}"
 ```
@@ -927,7 +927,7 @@ grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.error.type == "invalid_request_error"' "$BODY_FILE" >/dev/null
 sleep 6
 AUDIT_JSON_FILE="$QA_RUN_DIR/s61.audit.json"
-curl -fsS "$BASE_URL/admin/api/v1/audit/log?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
+curl -fsS "$BASE_URL/admin/audit/log?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
 jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,requested_model,resolved_model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
 jq -e --arg request_id "$REQUEST_ID" '
     any(.entries[]?;
@@ -958,7 +958,7 @@ grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.error.type == "invalid_request_error"' "$BODY_FILE" >/dev/null
 sleep 6
 AUDIT_JSON_FILE="$QA_RUN_DIR/s62.audit.json"
-curl -fsS "$BASE_URL/admin/api/v1/audit/log?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
+curl -fsS "$BASE_URL/admin/audit/log?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
 jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,requested_model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
 jq -e --arg request_id "$REQUEST_ID" '
     any(.entries[]?;
@@ -980,7 +980,7 @@ Reads the allowlisted runtime flags for the dedicated auth-enabled release gatew
 
 ```bash
 CONFIG_JSON_FILE="$QA_RUN_DIR/s63.dashboard-config.json"
-curl -fsS "$AUTH_BASE_URL/admin/api/v1/dashboard/config" \
+curl -fsS "$AUTH_BASE_URL/admin/runtime/config" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$CONFIG_JSON_FILE"
 jq '.' "$CONFIG_JSON_FILE"
@@ -999,7 +999,7 @@ jq -e '
 Creates one managed API key scoped to a release-specific user path and stores the one-time secret under `QA_RUN_DIR`.
 
 ```bash
-curl -fsS -X POST "$AUTH_BASE_URL/admin/api/v1/auth-keys" \
+curl -fsS -X POST "$AUTH_BASE_URL/admin/auth-keys" \
   -H "$ADMIN_AUTH_HEADER" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$QA_AUTH_KEY_NAME\",\"description\":\"Release e2e managed key\",\"user_path\":\"$QA_USER_PATH\"}" \
@@ -1027,7 +1027,7 @@ Checks that the newly issued managed API key is visible and active.
 
 ```bash
 AUTH_KEYS_JSON_FILE="$QA_RUN_DIR/s65.auth-keys.json"
-curl -fsS "$AUTH_BASE_URL/admin/api/v1/auth-keys" \
+curl -fsS "$AUTH_BASE_URL/admin/auth-keys" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$AUTH_KEYS_JSON_FILE"
 jq -e --arg name "$QA_AUTH_KEY_NAME" --arg user_path "$QA_USER_PATH" '
@@ -1041,7 +1041,7 @@ jq -e --arg name "$QA_AUTH_KEY_NAME" --arg user_path "$QA_USER_PATH" '
 Creates a scoped workflow for `openai/gpt-4.1-nano` that disables cache for the managed-key user path.
 
 ```bash
-curl -fsS -X POST "$AUTH_BASE_URL/admin/api/v1/workflows" \
+curl -fsS -X POST "$AUTH_BASE_URL/admin/workflows" \
   -H "$ADMIN_AUTH_HEADER" \
   -H 'Content-Type: application/json' \
   -d "{\"scope_provider\":\"openai\",\"scope_model\":\"gpt-4.1-nano\",\"scope_user_path\":\"$QA_USER_PATH\",\"name\":\"$QA_WORKFLOW_NAME\",\"description\":\"Disable cache for managed-key release e2e scope\",\"workflow_payload\":{\"schema_version\":1,\"features\":{\"cache\":false,\"audit\":true,\"usage\":true,\"guardrails\":false,\"fallback\":false},\"guardrails\":[]}}" \
@@ -1067,7 +1067,7 @@ Reads the created workflow back and confirms the normalized scope and effective 
 require_release_artifact "$QA_WORKFLOW_ID_FILE"
 WORKFLOW_ID=$(<"$QA_WORKFLOW_ID_FILE")
 WORKFLOW_DETAIL_FILE="$QA_RUN_DIR/s67.workflow-detail.json"
-curl -fsS "$AUTH_BASE_URL/admin/api/v1/workflows/$WORKFLOW_ID" \
+curl -fsS "$AUTH_BASE_URL/admin/workflows/$WORKFLOW_ID" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$WORKFLOW_DETAIL_FILE"
 jq '{id,name,scope,workflow_payload,effective_features}' "$WORKFLOW_DETAIL_FILE"
@@ -1140,7 +1140,7 @@ if ! AUTH_KEY_ID=$(jq -er '.id' "$QA_AUTH_KEY_JSON"); then
 fi
 WORKFLOW_ID=$(<"$QA_WORKFLOW_ID_FILE")
 AUDIT_JSON_FILE="$QA_RUN_DIR/s70.audit.json"
-curl -fsS "$AUTH_BASE_URL/admin/api/v1/audit/log?search=$QA_AUTH_REQ2&limit=5" \
+curl -fsS "$AUTH_BASE_URL/admin/audit/log?search=$QA_AUTH_REQ2&limit=5" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$AUDIT_JSON_FILE"
 jq --arg request_id "$QA_AUTH_REQ2" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,status_code,auth_method,auth_key_id,user_path,workflow_version_id,cache_type,answer:.data.response_body.choices[0].message.content}))}' "$AUDIT_JSON_FILE"
@@ -1210,7 +1210,7 @@ Checks cache analytics after the exact-cache hit using the same tracked user pat
 ```bash
 sleep 6
 CACHE_OVERVIEW_JSON_FILE="$QA_RUN_DIR/s73.cache-overview.json"
-curl -fsS "$AUTH_BASE_URL/admin/api/v1/cache/overview?days=1&user_path=$QA_CACHE_USER_PATH" \
+curl -fsS "$AUTH_BASE_URL/admin/cache/overview?days=1&user_path=$QA_CACHE_USER_PATH" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$CACHE_OVERVIEW_JSON_FILE"
 jq '.' "$CACHE_OVERVIEW_JSON_FILE"
@@ -1223,7 +1223,7 @@ Reads cached-only usage entries for the same exact-hit request path.
 
 ```bash
 CACHED_USAGE_JSON_FILE="$QA_RUN_DIR/s74.cached-usage.json"
-curl -fsS "$AUTH_BASE_URL/admin/api/v1/usage/log?days=1&user_path=$QA_CACHE_USER_PATH&cache_mode=cached&limit=5" \
+curl -fsS "$AUTH_BASE_URL/admin/usage/log?days=1&user_path=$QA_CACHE_USER_PATH&cache_mode=cached&limit=5" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$CACHED_USAGE_JSON_FILE"
 jq '{total,entries:(.entries|map({request_id,cache_type,model,provider,endpoint,user_path,total_tokens}))}' "$CACHED_USAGE_JSON_FILE"
@@ -1240,7 +1240,7 @@ Verifies user-path validation for managed API key creation.
 ```bash
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s75.headers.XXXXXX")
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s75.body.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X POST "$AUTH_BASE_URL/admin/api/v1/auth-keys" \
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X POST "$AUTH_BASE_URL/admin/auth-keys" \
   -H "$ADMIN_AUTH_HEADER" \
   -H 'Content-Type: application/json' \
   -d '{"name":"qa-invalid-user-path","user_path":"/team/../alpha"}'
@@ -1257,7 +1257,7 @@ Verifies user-path validation for workflow creation.
 ```bash
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s76.headers.XXXXXX")
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s76.body.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X POST "$AUTH_BASE_URL/admin/api/v1/workflows" \
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X POST "$AUTH_BASE_URL/admin/workflows" \
   -H "$ADMIN_AUTH_HEADER" \
   -H 'Content-Type: application/json' \
   -d '{"scope_provider":"openai","scope_model":"gpt-4.1-nano","scope_user_path":"/team/../alpha","name":"qa-invalid-workflow-path","workflow_payload":{"schema_version":1,"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},"guardrails":[]}}'
@@ -1275,7 +1275,7 @@ Deactivates the managed key created for the auth-enabled release run.
 
 ```bash
 AUTH_KEYS_JSON_FILE="$QA_RUN_DIR/s77.auth-keys.json"
-curl -fsS "$AUTH_BASE_URL/admin/api/v1/auth-keys" \
+curl -fsS "$AUTH_BASE_URL/admin/auth-keys" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$AUTH_KEYS_JSON_FILE"
 if ! AUTH_KEY_ID=$(jq -er --arg name "$QA_AUTH_KEY_NAME" '.[] | select(.name == $name) | .id' "$AUTH_KEYS_JSON_FILE"); then
@@ -1283,7 +1283,7 @@ if ! AUTH_KEY_ID=$(jq -er --arg name "$QA_AUTH_KEY_NAME" '.[] | select(.name == 
   exit 1
 fi
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s77.headers.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o /dev/null -X POST "$AUTH_BASE_URL/admin/api/v1/auth-keys/$AUTH_KEY_ID/deactivate" \
+curl -sS -D "$HEADERS_FILE" -o /dev/null -X POST "$AUTH_BASE_URL/admin/auth-keys/$AUTH_KEY_ID/deactivate" \
   -H "$ADMIN_AUTH_HEADER"
 sed -n '1,20p' "$HEADERS_FILE"
 grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"
@@ -1317,7 +1317,7 @@ Deactivates the workflow created for the scoped managed-key release run.
 require_release_artifact "$QA_WORKFLOW_ID_FILE"
 WORKFLOW_ID=$(<"$QA_WORKFLOW_ID_FILE")
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s79.headers.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o /dev/null -X POST "$AUTH_BASE_URL/admin/api/v1/workflows/$WORKFLOW_ID/deactivate" \
+curl -sS -D "$HEADERS_FILE" -o /dev/null -X POST "$AUTH_BASE_URL/admin/workflows/$WORKFLOW_ID/deactivate" \
   -H "$ADMIN_AUTH_HEADER"
 sed -n '1,20p' "$HEADERS_FILE"
 grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"
@@ -1458,7 +1458,7 @@ BUDGET_PATH="/team/budget/admin/$QA_SUFFIX"
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s86.headers.XXXXXX")
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s86.body.XXXXXX")
 
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/api/v1/budgets/settings" \
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/budgets/settings" \
   -H 'Content-Type: application/json' \
   -d '{"daily_reset_hour":24}'
 sed -n '1,20p' "$HEADERS_FILE"
@@ -1466,12 +1466,12 @@ jq . "$BODY_FILE"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.error.type == "invalid_request_error" and (.error.message | test("daily_reset_hour"))' "$BODY_FILE" >/dev/null
 
-curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets/settings" \
+curl -fsS -X PUT "$BASE_URL/admin/budgets/settings" \
   -H 'Content-Type: application/json' \
   -d '{"daily_reset_hour":1,"daily_reset_minute":15,"weekly_reset_weekday":2,"monthly_reset_day":2}' \
   | jq -e '.daily_reset_hour == 1 and .daily_reset_minute == 15 and .weekly_reset_weekday == 2 and .monthly_reset_day == 2'
 
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/api/v1/budgets" \
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/budgets" \
   -H 'Content-Type: application/json' \
   -d "{\"user_path\":\"$BUDGET_PATH\",\"budget_key\":{\"period\":\"daily\"},\"amount\":-1}"
 sed -n '1,20p' "$HEADERS_FILE"
@@ -1479,19 +1479,19 @@ jq . "$BODY_FILE"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.error.type == "invalid_request_error" and (.error.message | test("amount"))' "$BODY_FILE" >/dev/null
 
-curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets" \
+curl -fsS -X PUT "$BASE_URL/admin/budgets" \
   -H 'Content-Type: application/json' \
   -d "{\"user_path\":\"$BUDGET_PATH\",\"budget_key\":{\"period\":\"weekly\"},\"amount\":12.5}" \
   | jq -e --arg user_path "$BUDGET_PATH" '
       any(.budgets[]?; .user_path == $user_path and .period_seconds == 604800 and .amount == 12.5 and .source == "manual")
     ' >/dev/null
 
-curl -fsS -X DELETE "$BASE_URL/admin/api/v1/budgets" \
+curl -fsS -X DELETE "$BASE_URL/admin/budgets" \
   -H 'Content-Type: application/json' \
   -d "{\"user_path\":\"$BUDGET_PATH\",\"budget_key\":{\"period\":\"weekly\"}}" \
   | jq -e --arg user_path "$BUDGET_PATH" 'all(.budgets[]?; .user_path != $user_path)' >/dev/null
 
-curl -fsS -X PUT "$BASE_URL/admin/api/v1/budgets/settings" \
+curl -fsS -X PUT "$BASE_URL/admin/budgets/settings" \
   -H 'Content-Type: application/json' \
   -d '{"daily_reset_hour":0,"daily_reset_minute":0,"weekly_reset_weekday":1,"weekly_reset_hour":0,"weekly_reset_minute":0,"monthly_reset_day":1,"monthly_reset_hour":0,"monthly_reset_minute":0}' \
   >/dev/null
@@ -1540,7 +1540,7 @@ run_release_budget_enforcement \
 Runs the pricing recalculation action on the main SQLite-backed gateway. The release stack starts this gateway with `GOMODEL_MASTER_KEY` unset, so the request intentionally sends no `Authorization` header.
 
 ```bash
-curl -fsS -X POST "$BASE_URL/admin/api/v1/usage/recalculate-pricing" \
+curl -fsS -X POST "$BASE_URL/admin/usage/recalculate-pricing" \
   -H 'Content-Type: application/json' \
   -d '{"confirmation":"recalculate"}' \
   | jq -e '.status == "ok" and (.matched | type == "number") and (.recalculated | type == "number")'

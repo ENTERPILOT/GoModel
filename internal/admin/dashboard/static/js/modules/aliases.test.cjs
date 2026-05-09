@@ -116,8 +116,8 @@ test('model override mutations send selector in JSON body', async() => {
     await module.deleteModelOverride();
 
     assert.equal(requests.length, 2);
-    assert.equal(requests[0].url, '/admin/api/v1/model-overrides');
-    assert.equal(requests[1].url, '/admin/api/v1/model-overrides');
+    assert.equal(requests[0].url, '/admin/model-overrides');
+    assert.equal(requests[1].url, '/admin/model-overrides');
     assert.deepEqual(JSON.parse(requests[0].request.body), {
         selector: 'openrouter/meta-llama/llama-3.1-8b-instruct',
         user_paths: ['/team/alpha']
@@ -179,9 +179,9 @@ test('alias mutations send alias name in JSON body', async() => {
 
     assert.equal(requests.length, 3);
     assert.deepEqual(requests.map((request) => request.url), [
-        '/admin/api/v1/aliases',
-        '/admin/api/v1/aliases',
-        '/admin/api/v1/aliases'
+        '/admin/aliases',
+        '/admin/aliases',
+        '/admin/aliases'
     ]);
     assert.deepEqual(requests.map((request) => request.request.method), ['PUT', 'PUT', 'DELETE']);
     assert.deepEqual(JSON.parse(requests[0].request.body), {

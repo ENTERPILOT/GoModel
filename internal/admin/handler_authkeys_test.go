@@ -72,7 +72,7 @@ func TestAuthKeyEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	h := NewHandler(nil, nil)
 	e := echo.New()
 
-	listCtx, listRec := newHandlerContext("/admin/api/v1/auth-keys")
+	listCtx, listRec := newHandlerContext("/admin/auth-keys")
 	if err := h.ListAuthKeys(listCtx); err != nil {
 		t.Fatalf("ListAuthKeys() error = %v", err)
 	}
@@ -80,7 +80,7 @@ func TestAuthKeyEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 		t.Fatalf("ListAuthKeys() status = %d, want 503", listRec.Code)
 	}
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/auth-keys", bytes.NewBufferString(`{"name":"primary"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary"}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	createCtx := e.NewContext(createReq, createRec)
@@ -91,7 +91,7 @@ func TestAuthKeyEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 		t.Fatalf("CreateAuthKey() status = %d, want 503", createRec.Code)
 	}
 
-	deactivateReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/auth-keys/test-key/deactivate", nil)
+	deactivateReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys/test-key/deactivate", nil)
 	deactivateRec := httptest.NewRecorder()
 	deactivateCtx := e.NewContext(deactivateReq, deactivateRec)
 	deactivateCtx.SetPathValues(echo.PathValues{{Name: "id", Value: "test-key"}})
@@ -107,7 +107,7 @@ func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
 	e := echo.New()
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/auth-keys", bytes.NewBufferString(`{"name":"primary","description":"prod key","user_path":" team//alpha/service/ "}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary","description":"prod key","user_path":" team//alpha/service/ "}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	createCtx := e.NewContext(createReq, createRec)
@@ -130,7 +130,7 @@ func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 		t.Fatalf("issued.UserPath = %q, want /team/alpha/service", issued.UserPath)
 	}
 
-	listCtx, listRec := newHandlerContext("/admin/api/v1/auth-keys")
+	listCtx, listRec := newHandlerContext("/admin/auth-keys")
 	if err := h.ListAuthKeys(listCtx); err != nil {
 		t.Fatalf("ListAuthKeys() error = %v", err)
 	}
@@ -149,7 +149,7 @@ func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 		t.Fatalf("views[0].UserPath = %q, want /team/alpha/service", views[0].UserPath)
 	}
 
-	deactivateReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/auth-keys/"+issued.ID+"/deactivate", nil)
+	deactivateReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys/"+issued.ID+"/deactivate", nil)
 	deactivateRec := httptest.NewRecorder()
 	deactivateCtx := e.NewContext(deactivateReq, deactivateRec)
 	deactivateCtx.SetPathValues(echo.PathValues{{Name: "id", Value: issued.ID}})
@@ -161,7 +161,7 @@ func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 		t.Fatalf("DeactivateAuthKey() status = %d, want 204", deactivateRec.Code)
 	}
 
-	listCtx, listRec = newHandlerContext("/admin/api/v1/auth-keys")
+	listCtx, listRec = newHandlerContext("/admin/auth-keys")
 	if err := h.ListAuthKeys(listCtx); err != nil {
 		t.Fatalf("ListAuthKeys() error after deactivate = %v", err)
 	}
@@ -177,7 +177,7 @@ func TestCreateAuthKeyRejectsInvalidUserPath(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
 	e := echo.New()
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/auth-keys", bytes.NewBufferString(`{"name":"primary","user_path":"/team/../alpha"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary","user_path":"/team/../alpha"}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	createCtx := e.NewContext(createReq, createRec)
