@@ -113,7 +113,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if !cfg.Server.AllowPassthroughV1Alias {
 		t.Error("expected Server.AllowPassthroughV1Alias=true")
 	}
-	if got, want := cfg.Server.EnabledPassthroughProviders, []string{"openai", "anthropic", "openrouter", "zai", "vllm"}; !reflect.DeepEqual(got, want) {
+	if got, want := cfg.Server.EnabledPassthroughProviders, []string{"openai", "anthropic", "openrouter", "zai", "vllm", "deepseek"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("expected Server.EnabledPassthroughProviders=%v, got %v", want, got)
 	}
 	if cfg.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeFallback {
@@ -1102,7 +1102,7 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 			t.Fatalf("expected Cache.Model.Redis to be nil in example config, got %+v", result.Config.Cache.Model.Redis)
 		}
 		gotProviders := result.Config.Server.EnabledPassthroughProviders
-		wantProviders := []string{"openai", "anthropic", "openrouter", "zai", "vllm"}
+		wantProviders := []string{"openai", "anthropic", "openrouter", "zai", "vllm", "deepseek"}
 		if !reflect.DeepEqual(gotProviders, wantProviders) {
 			t.Fatalf("Server.EnabledPassthroughProviders = %v, want %v", gotProviders, wantProviders)
 		}

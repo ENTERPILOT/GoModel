@@ -519,6 +519,7 @@ func buildDefaultConfig() *Config {
 				"openrouter",
 				"zai",
 				"vllm",
+				"deepseek",
 			},
 		},
 		Models: ModelsConfig{

@@ -95,7 +95,7 @@ Example model identifiers are illustrative and subject to change; consult provid
 | Anthropic     | `ANTHROPIC_API_KEY`                                               | `claude-sonnet-4-20250514`         |  ✅  |      ✅      |  ❌   |  ❌   |   ✅    |    ✅    |
 | Google Gemini | `GEMINI_API_KEY`                                                   | `gemini-2.5-flash`                 |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
 | Vertex AI     | `VERTEX_PROJECT` + `VERTEX_LOCATION`                               | `google/gemini-2.5-flash`          |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ❌    |
-| DeepSeek      | `DEEPSEEK_API_KEY`                                                | `deepseek-v4-pro`                  |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ❌    |
+| DeepSeek      | `DEEPSEEK_API_KEY`                                                | `deepseek-v4-pro`                  |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ✅    |
 | Groq          | `GROQ_API_KEY`                                                    | `llama-3.3-70b-versatile`          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
 | OpenRouter    | `OPENROUTER_API_KEY`                                              | `google/gemini-2.5-flash`          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
 | Z.ai          | `ZAI_API_KEY` (`ZAI_BASE_URL` optional)                           | `glm-5.1`                          |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ✅    |
@@ -263,7 +263,7 @@ Key settings:
 | `GOMODEL_MASTER_KEY`            | (none)                                 | API key for authentication                                                       |
 | `ENABLE_PASSTHROUGH_ROUTES`     | `true`                                 | Enable provider-native passthrough routes under `/p/{provider}/...`              |
 | `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                                 | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |
-| `ENABLED_PASSTHROUGH_PROVIDERS` | `openai,anthropic,openrouter,zai,vllm` | Comma-separated list of enabled passthrough providers                            |
+| `ENABLED_PASSTHROUGH_PROVIDERS` | `openai,anthropic,openrouter,zai,vllm,deepseek` | Comma-separated list of enabled passthrough providers                            |
 | `GEMINI_API_MODE`               | `native`                               | Gemini AI Studio upstream mode: `native` or `openai_compatible`                 |
 | `VERTEX_API_MODE`               | `native`                               | Vertex AI Gemini upstream mode: `native` or `openai_compatible`                 |
 | `USE_GOOGLE_GEMINI_NATIVE_API`  | `true`                                 | Legacy global Gemini mode toggle used when per-provider `*_API_MODE` is unset   |
