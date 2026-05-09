@@ -91,6 +91,10 @@ func adaptChatRequest(req *core.ChatRequest) (any, error) {
 
 	effort, _ := json.Marshal(normalizeReasoningEffort(req.Reasoning.Effort))
 	raw["reasoning_effort"] = effort
+	// Delete the full reasoning object: DeepSeek accepts reasoning_effort as a
+	// top-level string only. Other reasoning fields (e.g. budget_tokens) are not
+	// forwarded because DeepSeek has no equivalent. Update this if DeepSeek
+	// expands its reasoning API surface.
 	delete(raw, "reasoning")
 	return raw, nil
 }
