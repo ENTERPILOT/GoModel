@@ -190,3 +190,26 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 func (p *Provider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
 	return nil, core.NewInvalidRequestError("deepseek does not support embeddings", nil)
 }
+
+// Passthrough forwards a raw request to DeepSeek without any transformation,
+// enabling direct access to provider-native endpoints such as /beta/completions
+// (FIM) that GOModel does not expose as first-class typed operations.
+func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("passthrough request is required", nil)
+	}
+	resp, err := p.client.DoPassthrough(ctx, llmclient.Request{
+		Method:        req.Method,
+		Endpoint:      providers.PassthroughEndpoint(req.Endpoint),
+		RawBodyReader: req.Body,
+		Headers:       req.Headers,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &core.PassthroughResponse{
+		StatusCode: resp.StatusCode,
+		Headers:    providers.CloneHTTPHeaders(resp.Header),
+		Body:       resp.Body,
+	}, nil
+}
