@@ -158,6 +158,34 @@ function applyStringArrayPropertyBounds(schemaName, propertyName, maxItems, item
   property.items.maxLength = itemMaxLength;
 }
 
+// applyPathSidebarTitles sets the API Reference sidebar entry of every
+// operation to its path so endpoints are listed by URL rather than by
+// natural-language summary. Mintlify renders the HTTP method as a colored
+// pill from the spec, so the title itself omits the method to avoid
+// duplicating it.
+function applyPathSidebarTitles() {
+  const httpMethods = new Set([
+    "get",
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "head",
+    "options",
+    "trace",
+  ]);
+  for (const [path, pathItem] of Object.entries(spec.paths || {})) {
+    if (!pathItem || typeof pathItem !== "object") continue;
+    for (const [method, operation] of Object.entries(pathItem)) {
+      if (!httpMethods.has(method)) continue;
+      if (!operation || typeof operation !== "object") continue;
+      operation["x-mint"] ??= {};
+      operation["x-mint"].metadata ??= {};
+      operation["x-mint"].metadata.sidebarTitle = path;
+    }
+  }
+}
+
 function applyPricingSchemaConstraints() {
   schema("pricingoverrides.Pricing").minProperties = 1;
   for (const name of ["core.ModelPricingTier", "pricingoverrides.PricingTier"]) {
@@ -193,6 +221,7 @@ ensureRequiredProperty("admin.deleteModelPricingOverrideRequest", "selector");
 applyBudgetKeySchemaConstraints();
 applyStringArrayPropertyBounds("admin.upsertModelOverrideRequest", "user_paths", 100, 1024);
 applyPricingSchemaConstraints();
+applyPathSidebarTitles();
 
 // Bound the registry-backed admin model listing so OpenAPI consumers (and
 // security scanners like CKV_OPENAPI_21) see an explicit upper limit. The

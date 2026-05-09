@@ -68,7 +68,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/audit/conversation"
+          }
+        }
       }
     },
     "/admin/audit/log": {
@@ -227,7 +232,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/audit/log"
+          }
+        }
       }
     },
     "/admin/budgets": {
@@ -272,7 +282,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets"
+          }
+        }
       },
       "put": {
         "tags": [
@@ -336,7 +351,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets"
+          }
+        }
       },
       "delete": {
         "tags": [
@@ -400,7 +420,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets"
+          }
+        }
       }
     },
     "/admin/budgets/reset": {
@@ -466,7 +491,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets/reset"
+          }
+        }
       }
     },
     "/admin/budgets/reset-one": {
@@ -532,7 +562,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets/reset-one"
+          }
+        }
       }
     },
     "/admin/budgets/settings": {
@@ -577,7 +612,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets/settings"
+          }
+        }
       },
       "put": {
         "tags": [
@@ -641,7 +681,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/budgets/settings"
+          }
+        }
       }
     },
     "/admin/cache/overview": {
@@ -746,7 +791,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/cache/overview"
+          }
+        }
       }
     },
     "/admin/model-overrides": {
@@ -797,7 +847,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-overrides"
+          }
+        }
       },
       "put": {
         "tags": [
@@ -881,7 +936,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-overrides"
+          }
+        }
       },
       "delete": {
         "tags": [
@@ -958,7 +1018,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-overrides"
+          }
+        }
       }
     },
     "/admin/model-pricing-overrides": {
@@ -1009,7 +1074,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-pricing-overrides"
+          }
+        }
       },
       "put": {
         "description": "Stores USD-only pricing for one selector. More precise selectors override broader selectors at runtime.",
@@ -1094,7 +1164,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-pricing-overrides"
+          }
+        }
       },
       "delete": {
         "tags": [
@@ -1171,7 +1246,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/model-pricing-overrides"
+          }
+        }
       }
     },
     "/admin/models": {
@@ -1231,7 +1311,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/models"
+          }
+        }
       }
     },
     "/admin/models/categories": {
@@ -1269,7 +1354,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/models/categories"
+          }
+        }
       }
     },
     "/admin/runtime/config": {
@@ -1304,7 +1394,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/runtime/config"
+          }
+        }
       }
     },
     "/admin/usage/daily": {
@@ -1402,7 +1497,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/daily"
+          }
+        }
       }
     },
     "/admin/usage/log": {
@@ -1529,7 +1629,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/log"
+          }
+        }
       }
     },
     "/admin/usage/models": {
@@ -1619,7 +1724,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/models"
+          }
+        }
       }
     },
     "/admin/usage/recalculate-pricing": {
@@ -1695,7 +1805,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/recalculate-pricing"
+          }
+        }
       }
     },
     "/admin/usage/summary": {
@@ -1782,7 +1897,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/summary"
+          }
+        }
       }
     },
     "/admin/usage/user-paths": {
@@ -1872,7 +1992,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/usage/user-paths"
+          }
+        }
       }
     },
     "/health": {
@@ -1894,6 +2019,11 @@
                 }
               }
             }
+          }
+        },
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/health"
           }
         }
       }
@@ -2080,7 +2210,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       },
       "put": {
         "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_passthrough_routes. The endpoint path is opaque and may proxy JSON, binary, or SSE responses with upstream status codes preserved. For multi-segment provider endpoints, clients that rely on OpenAPI-generated path handling should URL-encode embedded slashes in the endpoint parameter. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
@@ -2263,7 +2398,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       },
       "post": {
         "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_passthrough_routes. The endpoint path is opaque and may proxy JSON, binary, or SSE responses with upstream status codes preserved. For multi-segment provider endpoints, clients that rely on OpenAPI-generated path handling should URL-encode embedded slashes in the endpoint parameter. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
@@ -2446,7 +2586,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       },
       "delete": {
         "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_passthrough_routes. The endpoint path is opaque and may proxy JSON, binary, or SSE responses with upstream status codes preserved. For multi-segment provider endpoints, clients that rely on OpenAPI-generated path handling should URL-encode embedded slashes in the endpoint parameter. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
@@ -2629,7 +2774,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       },
       "options": {
         "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_passthrough_routes. The endpoint path is opaque and may proxy JSON, binary, or SSE responses with upstream status codes preserved. For multi-segment provider endpoints, clients that rely on OpenAPI-generated path handling should URL-encode embedded slashes in the endpoint parameter. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
@@ -2812,7 +2962,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       },
       "head": {
         "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_passthrough_routes. The endpoint path is opaque and may proxy JSON, binary, or SSE responses with upstream status codes preserved. For multi-segment provider endpoints, clients that rely on OpenAPI-generated path handling should URL-encode embedded slashes in the endpoint parameter. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
@@ -2995,7 +3150,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       },
       "patch": {
         "description": "Runtime-configurable passthrough endpoint under /p/{provider}/{endpoint}; enabled by default via server.enable_passthrough_routes. The endpoint path is opaque and may proxy JSON, binary, or SSE responses with upstream status codes preserved. For multi-segment provider endpoints, clients that rely on OpenAPI-generated path handling should URL-encode embedded slashes in the endpoint parameter. A leading v1/ segment is normalized away by default so /p/{provider}/v1/... and /p/{provider}/... map to the same upstream path relative to the provider base URL.",
@@ -3178,7 +3338,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/p/{provider}/{endpoint}"
+          }
+        }
       }
     },
     "/v1/batches": {
@@ -3261,7 +3426,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/batches"
+          }
+        }
       },
       "post": {
         "tags": [
@@ -3325,7 +3495,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/batches"
+          }
+        }
       }
     },
     "/v1/batches/{id}": {
@@ -3411,7 +3586,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/batches/{id}"
+          }
+        }
       }
     },
     "/v1/batches/{id}/cancel": {
@@ -3497,7 +3677,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/batches/{id}/cancel"
+          }
+        }
       }
     },
     "/v1/batches/{id}/results": {
@@ -3593,7 +3778,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/batches/{id}/results"
+          }
+        }
       }
     },
     "/v1/chat/completions": {
@@ -3694,7 +3884,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/chat/completions"
+          }
+        }
       }
     },
     "/v1/embeddings": {
@@ -3770,7 +3965,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/embeddings"
+          }
+        }
       }
     },
     "/v1/files": {
@@ -3869,7 +4069,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/files"
+          }
+        }
       },
       "post": {
         "tags": [
@@ -3957,7 +4162,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/files"
+          }
+        }
       }
     },
     "/v1/files/{id}": {
@@ -4041,7 +4251,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/files/{id}"
+          }
+        }
       },
       "delete": {
         "tags": [
@@ -4123,7 +4338,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/files/{id}"
+          }
+        }
       }
     },
     "/v1/files/{id}/content": {
@@ -4208,7 +4428,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/files/{id}/content"
+          }
+        }
       }
     },
     "/v1/models": {
@@ -4253,7 +4478,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/models"
+          }
+        }
       }
     },
     "/v1/responses": {
@@ -4354,7 +4584,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses"
+          }
+        }
       }
     },
     "/v1/responses/compact": {
@@ -4430,7 +4665,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses/compact"
+          }
+        }
       }
     },
     "/v1/responses/input_tokens": {
@@ -4506,7 +4746,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses/input_tokens"
+          }
+        }
       }
     },
     "/v1/responses/{id}": {
@@ -4640,7 +4885,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses/{id}"
+          }
+        }
       },
       "delete": {
         "tags": [
@@ -4732,7 +4982,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses/{id}"
+          }
+        }
       }
     },
     "/v1/responses/{id}/cancel": {
@@ -4826,7 +5081,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses/{id}/cancel"
+          }
+        }
       }
     },
     "/v1/responses/{id}/input_items": {
@@ -4972,7 +5232,12 @@
           {
             "BearerAuth": []
           }
-        ]
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/responses/{id}/input_items"
+          }
+        }
       }
     }
   },
