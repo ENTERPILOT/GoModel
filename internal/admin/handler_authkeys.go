@@ -31,7 +31,7 @@ func (h *Handler) ListAuthKeys(c *echo.Context) error {
 	return c.JSON(http.StatusOK, views)
 }
 
-// CreateAuthKey handles POST /admin/api/v1/auth-keys
+// CreateAuthKey handles POST /admin/auth-keys
 func (h *Handler) CreateAuthKey(c *echo.Context) error {
 	if h.authKeys == nil {
 		return handleError(c, featureUnavailableError("auth keys feature is unavailable"))
@@ -68,7 +68,7 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 	return c.JSON(http.StatusCreated, issued)
 }
 
-// DeactivateAuthKey handles POST /admin/api/v1/auth-keys/:id/deactivate
+// DeactivateAuthKey handles POST /admin/auth-keys/:id/deactivate
 func (h *Handler) DeactivateAuthKey(c *echo.Context) error {
 	var unavailableErr error
 	var deactivate func(context.Context, string) error

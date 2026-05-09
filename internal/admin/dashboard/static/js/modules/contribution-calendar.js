@@ -25,7 +25,7 @@
                     if (controller) {
                         options.signal = controller.signal;
                     }
-                    const res = await fetch('/admin/api/v1/usage/daily?days=365&interval=daily', options);
+                    const res = await fetch('/admin/usage/daily?days=365&interval=daily', options);
                     if (!isCurrentRequest()) {
                         return;
                     }

@@ -39,11 +39,11 @@ func TestAdminAPI_EndpointsEnabled_E2E(t *testing.T) {
 	defer ts.Close()
 
 	endpoints := []string{
-		"/admin/api/v1/usage/summary",
-		"/admin/api/v1/usage/daily",
-		"/admin/api/v1/audit/log",
-		"/admin/api/v1/audit/conversation?log_id=test",
-		"/admin/api/v1/models",
+		"/admin/usage/summary",
+		"/admin/usage/daily",
+		"/admin/audit/log",
+		"/admin/audit/conversation?log_id=test",
+		"/admin/models",
 	}
 
 	for _, ep := range endpoints {
@@ -68,11 +68,11 @@ func TestAdminAPI_EndpointsDisabled_E2E(t *testing.T) {
 	defer ts.Close()
 
 	endpoints := []string{
-		"/admin/api/v1/usage/summary",
-		"/admin/api/v1/usage/daily",
-		"/admin/api/v1/audit/log",
-		"/admin/api/v1/audit/conversation?log_id=test",
-		"/admin/api/v1/models",
+		"/admin/usage/summary",
+		"/admin/usage/daily",
+		"/admin/audit/log",
+		"/admin/audit/conversation?log_id=test",
+		"/admin/models",
 	}
 
 	for _, ep := range endpoints {
@@ -91,7 +91,7 @@ func TestAdminAPI_RequiresAuth_E2E(t *testing.T) {
 	defer ts.Close()
 
 	t.Run("without auth returns 401", func(t *testing.T) {
-		resp, err := http.Get(ts.URL + "/admin/api/v1/models")
+		resp, err := http.Get(ts.URL + "/admin/models")
 		require.NoError(t, err)
 		defer closeBody(resp)
 
@@ -99,7 +99,7 @@ func TestAdminAPI_RequiresAuth_E2E(t *testing.T) {
 	})
 
 	t.Run("with valid auth returns 200", func(t *testing.T) {
-		req, err := http.NewRequest(http.MethodGet, ts.URL+"/admin/api/v1/models", nil)
+		req, err := http.NewRequest(http.MethodGet, ts.URL+"/admin/models", nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+testMasterKey)
 
@@ -120,7 +120,7 @@ func TestAdminAPI_PricingRecalculationNoMasterKey_E2E(t *testing.T) {
 	})
 	defer ts.Close()
 
-	req, err := http.NewRequest(http.MethodPost, ts.URL+"/admin/api/v1/usage/recalculate-pricing", strings.NewReader(`{
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/admin/usage/recalculate-pricing", strings.NewReader(`{
 		"confirmation": "recalculate",
 		"user_path": "/team/recalc"
 	}`))
@@ -186,7 +186,7 @@ func TestAdminDashboard_SkipsAuth_E2E(t *testing.T) {
 	})
 
 	t.Run("API is protected (401 without auth)", func(t *testing.T) {
-		resp, err := http.Get(ts.URL + "/admin/api/v1/models")
+		resp, err := http.Get(ts.URL + "/admin/models")
 		require.NoError(t, err)
 		defer closeBody(resp)
 
@@ -198,7 +198,7 @@ func TestAdminAPI_ModelsEndpoint_E2E(t *testing.T) {
 	ts := setupAdminServer(t, "", true, false)
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/admin/api/v1/models")
+	resp, err := http.Get(ts.URL + "/admin/models")
 	require.NoError(t, err)
 	defer closeBody(resp)
 
@@ -255,7 +255,7 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 	usageFixture.flush(t)
 
 	t.Run("summary includes persisted usage", func(t *testing.T) {
-		resp, err := http.Get(ts.URL + "/admin/api/v1/usage/summary")
+		resp, err := http.Get(ts.URL + "/admin/usage/summary")
 		require.NoError(t, err)
 		defer closeBody(resp)
 
@@ -270,7 +270,7 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 	})
 
 	t.Run("daily includes persisted usage", func(t *testing.T) {
-		resp, err := http.Get(ts.URL + "/admin/api/v1/usage/daily?days=7")
+		resp, err := http.Get(ts.URL + "/admin/usage/daily?days=7")
 		require.NoError(t, err)
 		defer closeBody(resp)
 
@@ -298,7 +298,7 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 	})
 
 	t.Run("query params accepted", func(t *testing.T) {
-		resp, err := http.Get(ts.URL + "/admin/api/v1/usage/daily?days=7&interval=weekly")
+		resp, err := http.Get(ts.URL + "/admin/usage/daily?days=7&interval=weekly")
 		require.NoError(t, err)
 		defer closeBody(resp)
 

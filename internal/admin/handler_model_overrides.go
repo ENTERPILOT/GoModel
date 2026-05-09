@@ -20,7 +20,7 @@ type deleteModelOverrideRequest struct {
 	Selector string `json:"selector"`
 }
 
-// ListModelOverrides handles GET /admin/api/v1/model-overrides.
+// ListModelOverrides handles GET /admin/model-overrides.
 //
 // @Summary      List model access overrides
 // @Description  Lists persisted model access overrides by global, provider-wide, model-wide, or exact selector.
@@ -31,7 +31,7 @@ type deleteModelOverrideRequest struct {
 // @Success      200  {array}   modeloverrides.View
 // @Failure      401  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
-// @Router       /admin/api/v1/model-overrides [get]
+// @Router       /admin/model-overrides [get]
 func (h *Handler) ListModelOverrides(c *echo.Context) error {
 	if h.modelOverrides == nil {
 		return handleError(c, featureUnavailableError("model overrides feature is unavailable"))
@@ -43,7 +43,7 @@ func (h *Handler) ListModelOverrides(c *echo.Context) error {
 	return c.JSON(http.StatusOK, views)
 }
 
-// UpsertModelOverride handles PUT /admin/api/v1/model-overrides.
+// UpsertModelOverride handles PUT /admin/model-overrides.
 //
 // @Summary      Create or update one model access override
 // @Tags         admin
@@ -57,7 +57,7 @@ func (h *Handler) ListModelOverrides(c *echo.Context) error {
 // @Failure      500       {object}  core.GatewayError
 // @Failure      502       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
-// @Router       /admin/api/v1/model-overrides [put]
+// @Router       /admin/model-overrides [put]
 //
 //nolint:dupl // structurally similar to UpsertModelPricingOverride but operates on different types and stores.
 func (h *Handler) UpsertModelOverride(c *echo.Context) error {
@@ -92,7 +92,7 @@ func (h *Handler) UpsertModelOverride(c *echo.Context) error {
 	})
 }
 
-// DeleteModelOverride handles DELETE /admin/api/v1/model-overrides.
+// DeleteModelOverride handles DELETE /admin/model-overrides.
 //
 // @Summary      Delete one model access override
 // @Tags         admin
@@ -106,7 +106,7 @@ func (h *Handler) UpsertModelOverride(c *echo.Context) error {
 // @Failure      404       {object}  core.GatewayError
 // @Failure      502       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
-// @Router       /admin/api/v1/model-overrides [delete]
+// @Router       /admin/model-overrides [delete]
 //
 //nolint:dupl // structurally similar to DeleteModelPricingOverride but operates on different types and stores.
 func (h *Handler) DeleteModelOverride(c *echo.Context) error {

@@ -139,7 +139,7 @@ func newAliasHandlerWithStore(t *testing.T, store aliases.Store) *Handler {
 
 func TestListAliases(t *testing.T) {
 	h := newAliasHandler(t, aliases.Alias{Name: "smart", TargetModel: "gpt-4o", Enabled: true})
-	c, rec := newHandlerContext("/admin/api/v1/aliases")
+	c, rec := newHandlerContext("/admin/aliases")
 
 	if err := h.ListAliases(c); err != nil {
 		t.Fatalf("ListAliases() error = %v", err)
@@ -179,16 +179,16 @@ func TestAliasesEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 		}
 	}
 
-	listCtx, listRec := newHandlerContext("/admin/api/v1/aliases")
+	listCtx, listRec := newHandlerContext("/admin/aliases")
 	assertUnavailable("ListAliases", h.ListAliases(listCtx), listRec)
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/aliases", bytes.NewBufferString(`{"name":"smart","target_model":"gpt-4o"}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/aliases", bytes.NewBufferString(`{"name":"smart","target_model":"gpt-4o"}`))
 	putReq.Header.Set("Content-Type", "application/json")
 	putRec := httptest.NewRecorder()
 	putCtx := e.NewContext(putReq, putRec)
 	assertUnavailable("UpsertAlias", h.UpsertAlias(putCtx), putRec)
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/aliases", bytes.NewBufferString(`{"name":"smart"}`))
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/aliases", bytes.NewBufferString(`{"name":"smart"}`))
 	deleteReq.Header.Set("Content-Type", "application/json")
 	deleteRec := httptest.NewRecorder()
 	deleteCtx := e.NewContext(deleteReq, deleteRec)
@@ -199,7 +199,7 @@ func TestUpsertAliasAndDeleteAlias(t *testing.T) {
 	h := newAliasHandler(t)
 	e := echo.New()
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/api/v1/aliases", bytes.NewBufferString(`{"name":"smart","target_model":"gpt-4o","description":"primary"}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/aliases", bytes.NewBufferString(`{"name":"smart","target_model":"gpt-4o","description":"primary"}`))
 	putReq.Header.Set("Content-Type", "application/json")
 	putRec := httptest.NewRecorder()
 	putCtx := e.NewContext(putReq, putRec)
@@ -211,7 +211,7 @@ func TestUpsertAliasAndDeleteAlias(t *testing.T) {
 		t.Fatalf("put status = %d, want 200", putRec.Code)
 	}
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/aliases", bytes.NewBufferString(`{"name":"smart"}`))
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/aliases", bytes.NewBufferString(`{"name":"smart"}`))
 	deleteReq.Header.Set("Content-Type", "application/json")
 	deleteRec := httptest.NewRecorder()
 	deleteCtx := e.NewContext(deleteReq, deleteRec)
@@ -228,7 +228,7 @@ func TestUpsertAliasAcceptsQualifiedAliasName(t *testing.T) {
 	h := newAliasHandler(t)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/aliases", bytes.NewBufferString(`{"name":"openai/smart","target_model":"gpt-4o"}`))
+	req := httptest.NewRequest(http.MethodPut, "/admin/aliases", bytes.NewBufferString(`{"name":"openai/smart","target_model":"gpt-4o"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -258,7 +258,7 @@ func TestUpsertAliasPreservesEnabledWhenOmitted(t *testing.T) {
 	})
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/aliases", bytes.NewBufferString(`{"name":"smart","target_model":"gpt-4o","description":"after"}`))
+	req := httptest.NewRequest(http.MethodPut, "/admin/aliases", bytes.NewBufferString(`{"name":"smart","target_model":"gpt-4o","description":"after"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -288,7 +288,7 @@ func TestUpsertAliasReturns500OnStoreFailure(t *testing.T) {
 	})
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/aliases", bytes.NewBufferString(`{"name":"smart","target_model":"gpt-4o"}`))
+	req := httptest.NewRequest(http.MethodPut, "/admin/aliases", bytes.NewBufferString(`{"name":"smart","target_model":"gpt-4o"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -308,7 +308,7 @@ func TestUpsertAliasReturns400OnValidationError(t *testing.T) {
 	h := newAliasHandler(t)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/aliases", bytes.NewBufferString(`{"name":"smart","description":"missing target"}`))
+	req := httptest.NewRequest(http.MethodPut, "/admin/aliases", bytes.NewBufferString(`{"name":"smart","description":"missing target"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -330,7 +330,7 @@ func TestDeleteAliasReturns500OnStoreFailure(t *testing.T) {
 	})
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodDelete, "/admin/api/v1/aliases", bytes.NewBufferString(`{"name":"smart"}`))
+	req := httptest.NewRequest(http.MethodDelete, "/admin/aliases", bytes.NewBufferString(`{"name":"smart"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)

@@ -255,7 +255,7 @@ func TestGuardrailWorkflow_RewritesUpstreamRequestAndPreservesAuditUsage_Postgre
 func createManagedAuthKey(t *testing.T, serverURL, masterKey string, payload map[string]any) authkeys.IssuedKey {
 	t.Helper()
 
-	resp := adminJSONRequest(t, http.MethodPost, serverURL+"/admin/api/v1/auth-keys", masterKey, payload)
+	resp := adminJSONRequest(t, http.MethodPost, serverURL+"/admin/auth-keys", masterKey, payload)
 	defer closeBody(resp)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
@@ -271,7 +271,7 @@ func createManagedAuthKey(t *testing.T, serverURL, masterKey string, payload map
 func createWorkflow(t *testing.T, serverURL, masterKey string, payload map[string]any) workflows.Version {
 	t.Helper()
 
-	resp := adminJSONRequest(t, http.MethodPost, serverURL+"/admin/api/v1/workflows", masterKey, payload)
+	resp := adminJSONRequest(t, http.MethodPost, serverURL+"/admin/workflows", masterKey, payload)
 	defer closeBody(resp)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
@@ -291,7 +291,7 @@ func upsertGuardrail(t *testing.T, serverURL, masterKey, name string, payload ma
 	}
 	body["name"] = name
 
-	resp := adminJSONRequest(t, http.MethodPut, serverURL+"/admin/api/v1/guardrails", masterKey, body)
+	resp := adminJSONRequest(t, http.MethodPut, serverURL+"/admin/guardrails", masterKey, body)
 	defer closeBody(resp)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 

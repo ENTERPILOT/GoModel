@@ -632,7 +632,7 @@ function dashboard() {
         const request = this.requestOptions({
           method: "POST",
         });
-        const res = await fetch("/admin/api/v1/runtime/refresh", request);
+        const res = await fetch("/admin/runtime/refresh", request);
         const handled = this.handleFetchResponse(
           res,
           "runtime refresh",
@@ -802,7 +802,7 @@ function dashboard() {
 
       this.modelsLoading = true;
       try {
-        let url = "/admin/api/v1/models";
+        let url = "/admin/models";
         if (this.activeCategory && this.activeCategory !== "all") {
           url += "?category=" + encodeURIComponent(this.activeCategory);
         }
@@ -853,7 +853,7 @@ function dashboard() {
     async fetchCategories() {
       const request = this.requestOptions();
       try {
-        const res = await fetch("/admin/api/v1/models/categories", request);
+        const res = await fetch("/admin/models/categories", request);
         const handled = this.handleFetchResponse(res, "categories", request);
         if (this.isStaleAuthFetchResult(handled)) {
           return;

@@ -120,7 +120,7 @@ test('fetchBudgets reads budget rows from the list envelope', async () => {
     let renderIconsCalls = 0;
     const module = createBudgetsModule({
         fetch(url) {
-            assert.equal(url, '/admin/api/v1/budgets');
+            assert.equal(url, '/admin/budgets');
             return Promise.resolve({
                 status: 200,
                 ok: true,
@@ -209,7 +209,7 @@ test('confirmBudgetOverride saves the pending create after confirmation', async 
     await module.confirmBudgetOverride();
 
     assert.equal(requests.length, 2);
-    assert.equal(requests[0].url, '/admin/api/v1/budgets');
+    assert.equal(requests[0].url, '/admin/budgets');
     assert.equal(requests[0].request.method, 'PUT');
     assert.equal(requests[0].request.body, JSON.stringify({
         user_path: '/team',
@@ -218,7 +218,7 @@ test('confirmBudgetOverride saves the pending create after confirmation', async 
         },
         amount: 12.5
     }));
-    assert.equal(requests[1].url, '/admin/api/v1/budgets');
+    assert.equal(requests[1].url, '/admin/budgets');
     assert.equal(module.budgetOverrideDialogOpen, false);
     assert.equal(module.budgetFormOpen, false);
     assert.equal(module.budgetNotice, 'Budget saved.');
@@ -342,7 +342,7 @@ test('deleteBudget sends the selected budget key in the body and refreshes from 
     await module.deleteBudget({ user_path: '/team', period_seconds: 86400, period_label: 'daily' });
 
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].url, '/admin/api/v1/budgets');
+    assert.equal(requests[0].url, '/admin/budgets');
     assert.equal(requests[0].request.method, 'DELETE');
     assert.equal(requests[0].request.body, JSON.stringify({
         user_path: '/team',
@@ -383,7 +383,7 @@ test('resetBudgets posts after confirmation and refreshes the budget page', asyn
     });
     module.fetch = (url, request) => {
         requests.push({ url, request });
-        assert.equal(url, '/admin/api/v1/budgets/reset');
+        assert.equal(url, '/admin/budgets/reset');
         assert.equal(request.method, 'POST');
         return Promise.resolve({ status: 200, ok: true });
     };

@@ -157,7 +157,7 @@
                 this.aliasError = '';
                 try {
                     const request = this.adminRequestOptions();
-                    const res = await fetch('/admin/api/v1/aliases', request);
+                    const res = await fetch('/admin/aliases', request);
                     if (res.status === 503) {
                         this.aliasesAvailable = false;
                         this.aliases = [];
@@ -191,7 +191,7 @@
                 this.modelOverrideError = '';
                 try {
                     const request = this.adminRequestOptions();
-                    const res = await fetch('/admin/api/v1/model-overrides', request);
+                    const res = await fetch('/admin/model-overrides', request);
                     if (res.status === 503) {
                         this.modelOverridesAvailable = false;
                         this.modelOverrideViews = [];
@@ -712,7 +712,7 @@
                         method: 'PUT',
                         body: JSON.stringify(payload)
                     });
-                    const res = await fetch('/admin/api/v1/aliases', request);
+                    const res = await fetch('/admin/aliases', request);
                     if (res.status === 503) {
                         this.aliasesAvailable = false;
                         this.aliasError = 'Aliases feature is unavailable.';
@@ -914,7 +914,7 @@
                         method: 'PUT',
                         body: JSON.stringify(payload)
                     });
-                    const saveRes = await fetch('/admin/api/v1/aliases', saveRequest);
+                    const saveRes = await fetch('/admin/aliases', saveRequest);
 
                     if (saveRes.status === 503) {
                         this.aliasesAvailable = false;
@@ -937,7 +937,7 @@
                             method: 'DELETE',
                             body: JSON.stringify({ name: originalName })
                         });
-                        const deleteRes = await fetch('/admin/api/v1/aliases', deleteRequest);
+                        const deleteRes = await fetch('/admin/aliases', deleteRequest);
                         if (deleteRes.status !== 404) {
                             const deleteHandled = this.handleFetchResponse(deleteRes, 'previous alias', deleteRequest);
                             if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(deleteHandled)) {
@@ -980,7 +980,7 @@
                         method: 'DELETE',
                         body: JSON.stringify({ name: alias.name })
                     });
-                    const res = await fetch('/admin/api/v1/aliases', request);
+                    const res = await fetch('/admin/aliases', request);
                     if (res.status === 503) {
                         this.aliasesAvailable = false;
                         this.aliasError = 'Aliases feature is unavailable.';
@@ -1036,7 +1036,7 @@
                         method: 'PUT',
                         body: JSON.stringify(payload)
                     });
-                    const res = await fetch('/admin/api/v1/model-overrides', request);
+                    const res = await fetch('/admin/model-overrides', request);
                     if (res.status === 503) {
                         this.modelOverridesAvailable = false;
                         this.modelOverrideError = 'Model overrides feature is unavailable.';
@@ -1083,7 +1083,7 @@
                         method: 'DELETE',
                         body: JSON.stringify({ selector })
                     });
-                    const res = await fetch('/admin/api/v1/model-overrides', request);
+                    const res = await fetch('/admin/model-overrides', request);
                     if (res.status === 503) {
                         this.modelOverridesAvailable = false;
                         this.modelOverrideError = 'Model overrides feature is unavailable.';

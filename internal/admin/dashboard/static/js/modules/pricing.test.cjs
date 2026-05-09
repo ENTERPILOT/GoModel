@@ -84,7 +84,7 @@ test('recalculatePricing posts after typed confirmation', async () => {
     await module.recalculatePricing();
 
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].url, '/admin/api/v1/usage/recalculate-pricing');
+    assert.equal(requests[0].url, '/admin/usage/recalculate-pricing');
     assert.equal(requests[0].request.method, 'POST');
     assert.equal(requests[0].request.body, JSON.stringify({
         days: 30,

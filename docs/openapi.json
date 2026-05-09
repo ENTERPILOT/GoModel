@@ -7,7 +7,7 @@
     "version": "1.0"
   },
   "paths": {
-    "/admin/api/v1/audit/conversation": {
+    "/admin/audit/conversation": {
       "get": {
         "tags": [
           "admin"
@@ -71,7 +71,7 @@
         ]
       }
     },
-    "/admin/api/v1/audit/log": {
+    "/admin/audit/log": {
       "get": {
         "tags": [
           "admin"
@@ -230,7 +230,7 @@
         ]
       }
     },
-    "/admin/api/v1/budgets": {
+    "/admin/budgets": {
       "get": {
         "tags": [
           "admin"
@@ -403,7 +403,7 @@
         ]
       }
     },
-    "/admin/api/v1/budgets/reset": {
+    "/admin/budgets/reset": {
       "post": {
         "tags": [
           "admin"
@@ -469,7 +469,7 @@
         ]
       }
     },
-    "/admin/api/v1/budgets/reset-one": {
+    "/admin/budgets/reset-one": {
       "post": {
         "tags": [
           "admin"
@@ -535,7 +535,7 @@
         ]
       }
     },
-    "/admin/api/v1/budgets/settings": {
+    "/admin/budgets/settings": {
       "get": {
         "tags": [
           "admin"
@@ -644,7 +644,7 @@
         ]
       }
     },
-    "/admin/api/v1/cache/overview": {
+    "/admin/cache/overview": {
       "get": {
         "tags": [
           "admin"
@@ -749,42 +749,7 @@
         ]
       }
     },
-    "/admin/api/v1/dashboard/config": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "summary": "Get dashboard runtime configuration",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/admin.DashboardConfigResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
-      }
-    },
-    "/admin/api/v1/model-overrides": {
+    "/admin/model-overrides": {
       "get": {
         "description": "Lists persisted model access overrides by global, provider-wide, model-wide, or exact selector.\nSelectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
         "tags": [
@@ -996,7 +961,7 @@
         ]
       }
     },
-    "/admin/api/v1/model-pricing-overrides": {
+    "/admin/model-pricing-overrides": {
       "get": {
         "description": "Lists persisted USD pricing overrides. Selectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
         "tags": [
@@ -1209,7 +1174,7 @@
         ]
       }
     },
-    "/admin/api/v1/models": {
+    "/admin/models": {
       "get": {
         "tags": [
           "admin"
@@ -1269,7 +1234,7 @@
         ]
       }
     },
-    "/admin/api/v1/models/categories": {
+    "/admin/models/categories": {
       "get": {
         "tags": [
           "admin"
@@ -1307,7 +1272,42 @@
         ]
       }
     },
-    "/admin/api/v1/usage/daily": {
+    "/admin/runtime/config": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get admin runtime configuration",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.DashboardConfigResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/usage/daily": {
       "get": {
         "tags": [
           "admin"
@@ -1405,7 +1405,7 @@
         ]
       }
     },
-    "/admin/api/v1/usage/log": {
+    "/admin/usage/log": {
       "get": {
         "tags": [
           "admin"
@@ -1532,7 +1532,7 @@
         ]
       }
     },
-    "/admin/api/v1/usage/models": {
+    "/admin/usage/models": {
       "get": {
         "tags": [
           "admin"
@@ -1622,7 +1622,7 @@
         ]
       }
     },
-    "/admin/api/v1/usage/recalculate-pricing": {
+    "/admin/usage/recalculate-pricing": {
       "post": {
         "tags": [
           "admin"
@@ -1698,7 +1698,7 @@
         ]
       }
     },
-    "/admin/api/v1/usage/summary": {
+    "/admin/usage/summary": {
       "get": {
         "tags": [
           "admin"
@@ -1785,7 +1785,7 @@
         ]
       }
     },
-    "/admin/api/v1/usage/user-paths": {
+    "/admin/usage/user-paths": {
       "get": {
         "tags": [
           "admin"

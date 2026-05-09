@@ -96,7 +96,7 @@ Even though both have provider type `openai`, they are different workflow scopes
 Create a workflow scoped to one configured provider name, one model, and one user-path subtree:
 
 ```bash
-curl -X POST http://localhost:8080/admin/api/v1/workflows \
+curl -X POST http://localhost:8080/admin/workflows \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{

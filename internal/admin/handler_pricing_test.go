@@ -79,7 +79,7 @@ func TestRecalculateUsagePricingResolvesAliasAndFilters(t *testing.T) {
 		"confirmation":"recalculate"
 	}`)
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", body)
+	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", body)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	req.Header.Set(dashboardTimeZoneHeader, "Europe/Warsaw")
 	rec := httptest.NewRecorder()
@@ -130,7 +130,7 @@ func TestRecalculateUsagePricingRequiresConfirmation(t *testing.T) {
 	h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"nope"}`))
+	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"nope"}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -175,7 +175,7 @@ func TestRecalculateUsagePricingAcceptsConfirmAlias(t *testing.T) {
 			h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
 			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", bytes.NewBufferString(test.body))
+			req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(test.body))
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
@@ -221,7 +221,7 @@ func TestRecalculateUsagePricingFeatureUnavailable(t *testing.T) {
 			h := test.handler(recalculator)
 
 			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
+			req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
@@ -247,7 +247,7 @@ func TestRecalculateUsagePricingInvalidSelector(t *testing.T) {
 	h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate","selector":"invalid"}`))
+	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate","selector":"invalid"}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -300,7 +300,7 @@ func TestRecalculateUsagePricingRejectsInvalidDateAndUserPath(t *testing.T) {
 			h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
 			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", bytes.NewBufferString(test.body))
+			req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(test.body))
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
@@ -336,7 +336,7 @@ func TestRecalculateUsagePricingDefaultsDateRange(t *testing.T) {
 	h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
+	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -374,7 +374,7 @@ func TestRecalculateUsagePricingClampsRequestedDays(t *testing.T) {
 	h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate","days":9999}`))
+	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate","days":9999}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -402,7 +402,7 @@ func TestRecalculateUsagePricingReturnsInternalErrorOnRecalculatorFailure(t *tes
 	h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
+	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -454,7 +454,7 @@ func TestRecalculateUsagePricingPreservesExpectedRecalculatorErrors(t *testing.T
 			h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
 			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
+			req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)

@@ -198,9 +198,9 @@ applyPricingSchemaConstraints();
 // security scanners like CKV_OPENAPI_21) see an explicit upper limit. The
 // runtime registry is bounded by configured providers and the backing
 // model list; 10000 leaves substantial headroom for that worst case.
-applyArrayMaxItems("/admin/api/v1/models", "get", "200", 10000);
-applyArrayMaxItems("/admin/api/v1/model-overrides", "get", "200", 10000);
-applyArrayMaxItems("/admin/api/v1/model-pricing-overrides", "get", "200", 10000);
+applyArrayMaxItems("/admin/models", "get", "200", 10000);
+applyArrayMaxItems("/admin/model-overrides", "get", "200", 10000);
+applyArrayMaxItems("/admin/model-pricing-overrides", "get", "200", 10000);
 
 applyStringEnum(
   "modeloverrides.ScopeKind",

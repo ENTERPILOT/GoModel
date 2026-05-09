@@ -320,7 +320,7 @@ start_stack() {
     REDIS_KEY_MODELS="gomodel:release-e2e:models" \
     REDIS_KEY_RESPONSES="gomodel:release-e2e:response:"
 
-  curl -fsS "http://localhost:18084/admin/api/v1/dashboard/config" \
+  curl -fsS "http://localhost:18084/admin/runtime/config" \
     -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
     | jq -e '.CACHE_ENABLED == "on" and .REDIS_URL == "on"' >/dev/null
 

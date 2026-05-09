@@ -225,7 +225,7 @@ func TestListWorkflows(t *testing.T) {
 	}
 
 	h := newWorkflowHandler(t, store, nil)
-	c, rec := newHandlerContext("/admin/api/v1/workflows")
+	c, rec := newHandlerContext("/admin/workflows")
 
 	if err := h.ListWorkflows(c); err != nil {
 		t.Fatalf("ListWorkflows() error = %v", err)
@@ -262,7 +262,7 @@ func TestWorkflowsEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	h := NewHandler(nil, nil)
 	e := echo.New()
 
-	listCtx, listRec := newHandlerContext("/admin/api/v1/workflows")
+	listCtx, listRec := newHandlerContext("/admin/workflows")
 	if err := h.ListWorkflows(listCtx); err != nil {
 		t.Fatalf("ListWorkflows() error = %v", err)
 	}
@@ -283,7 +283,7 @@ func TestWorkflowsEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 		t.Fatalf("list error code = %v, want feature_unavailable", listEnvelope.Error.Code)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -307,10 +307,10 @@ func TestWorkflowsEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 		t.Fatalf("create error code = %v, want feature_unavailable", createEnvelope.Error.Code)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows/test-workflow/deactivate", nil)
+	req = httptest.NewRequest(http.MethodPost, "/admin/workflows/test-workflow/deactivate", nil)
 	rec = httptest.NewRecorder()
 	c = e.NewContext(req, rec)
-	c.SetPath("/admin/api/v1/workflows/:id/deactivate")
+	c.SetPath("/admin/workflows/:id/deactivate")
 	c.SetPathValues(echo.PathValues{{Name: "id", Value: "test-workflow"}})
 	if err := h.DeactivateWorkflow(c); err != nil {
 		t.Fatalf("DeactivateWorkflow() error = %v", err)
@@ -332,8 +332,8 @@ func TestWorkflowsEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 		t.Fatalf("deactivate error code = %v, want feature_unavailable", deactivateEnvelope.Error.Code)
 	}
 
-	getCtx, getRec := newHandlerContext("/admin/api/v1/workflows/test-workflow")
-	getCtx.SetPath("/admin/api/v1/workflows/:id")
+	getCtx, getRec := newHandlerContext("/admin/workflows/test-workflow")
+	getCtx.SetPath("/admin/workflows/:id")
 	getCtx.SetPathValues(echo.PathValues{{Name: "id", Value: "test-workflow"}})
 	if err := h.GetWorkflow(getCtx); err != nil {
 		t.Fatalf("GetWorkflow() error = %v", err)
@@ -402,8 +402,8 @@ func TestGetWorkflow(t *testing.T) {
 
 	registry := newWorkflowRegistry(t)
 	h := newWorkflowHandler(t, store, registry)
-	c, rec := newHandlerContext("/admin/api/v1/workflows/provider-workflow-v1")
-	c.SetPath("/admin/api/v1/workflows/:id")
+	c, rec := newHandlerContext("/admin/workflows/provider-workflow-v1")
+	c.SetPath("/admin/workflows/:id")
 	c.SetPathValues(echo.PathValues{{Name: "id", Value: "provider-workflow-v1"}})
 
 	if err := h.GetWorkflow(c); err != nil {
@@ -472,7 +472,7 @@ func TestCreateWorkflow_NormalizesScopeUserPath(t *testing.T) {
 	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
 		"scope_provider_name":"openai",
 		"scope_model":"gpt-5",
 		"scope_user_path":" team//alpha/user/ ",
@@ -505,7 +505,7 @@ func TestCreateWorkflow_NormalizesScopeUserPath(t *testing.T) {
 func TestListWorkflowGuardrails(t *testing.T) {
 	registry := newWorkflowRegistry(t)
 	h := NewHandler(nil, nil, WithGuardrailsRegistry(registry))
-	c, rec := newHandlerContext("/admin/api/v1/workflows/guardrails")
+	c, rec := newHandlerContext("/admin/workflows/guardrails")
 
 	if err := h.ListWorkflowGuardrails(c); err != nil {
 		t.Fatalf("ListWorkflowGuardrails() error = %v", err)
@@ -545,7 +545,7 @@ func TestCreateWorkflow(t *testing.T) {
 	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
 		"scope_provider":"openai",
 		"scope_model":"gpt-5",
 		"name":"openai gpt-5",
@@ -652,7 +652,7 @@ func TestCreateWorkflow_StoresCanonicalScopeModel(t *testing.T) {
 			h := newWorkflowHandler(t, store, nil)
 			e := echo.New()
 
-			req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(tt.body))
+			req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
@@ -713,7 +713,7 @@ func TestCreateWorkflow_LegacyProviderTypeResolvesToConfiguredProviderName(t *te
 	h := newWorkflowHandlerWithModelRegistry(t, store, modelRegistry, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
 		"scope_provider":"openai",
 		"scope_model":"gpt-5",
 		"name":"legacy provider type scope",
@@ -765,7 +765,7 @@ func TestCreateWorkflow_AllowsEmptyName(t *testing.T) {
 	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
 		"scope_provider":"openai",
 		"scope_model":"gpt-5",
 		"description":"provider-model workflow",
@@ -817,7 +817,7 @@ func TestCreateWorkflowRejectsUnknownGuardrail(t *testing.T) {
 	h := newWorkflowHandler(t, store, registry)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
 		"name":"guardrail workflow",
 		"workflow_payload":{
 			"schema_version":1,
@@ -873,7 +873,7 @@ func TestCreateWorkflowReturnsValidationErrors(t *testing.T) {
 	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
 		"scope_model":"gpt-5",
 		"name":"invalid scope",
 		"workflow_payload":{
@@ -963,7 +963,7 @@ func TestCreateWorkflowRejectsUnknownProviderOrModelScope(t *testing.T) {
 			h := newWorkflowHandler(t, store, nil)
 			e := echo.New()
 
-			req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(tt.body))
+			req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
@@ -1013,7 +1013,7 @@ func TestCreateWorkflow_UsesScopeUserPathInValidationErrors(t *testing.T) {
 	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", bytes.NewBufferString(`{
+	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", bytes.NewBufferString(`{
 		"scope_user_path":"/team/../alpha",
 		"name":"invalid path",
 		"workflow_payload":{
@@ -1075,7 +1075,7 @@ func TestWorkflowViewReflectsFeatureCaps(t *testing.T) {
 	}
 
 	h := NewHandler(nil, nil, WithWorkflows(service))
-	c, rec := newHandlerContext("/admin/api/v1/workflows")
+	c, rec := newHandlerContext("/admin/workflows")
 
 	if err := h.ListWorkflows(c); err != nil {
 		t.Fatalf("ListWorkflows() error = %v", err)
@@ -1134,10 +1134,10 @@ func TestDeactivateWorkflow(t *testing.T) {
 	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows/provider-workflow/deactivate", nil)
+	req := httptest.NewRequest(http.MethodPost, "/admin/workflows/provider-workflow/deactivate", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPath("/admin/api/v1/workflows/:id/deactivate")
+	c.SetPath("/admin/workflows/:id/deactivate")
 	c.SetPathValues(echo.PathValues{{Name: "id", Value: "provider-workflow"}})
 
 	if err := h.DeactivateWorkflow(c); err != nil {
@@ -1181,10 +1181,10 @@ func TestDeactivateWorkflowRejectsGlobalWorkflow(t *testing.T) {
 	h := newWorkflowHandler(t, store, nil)
 	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows/global-workflow/deactivate", nil)
+	req := httptest.NewRequest(http.MethodPost, "/admin/workflows/global-workflow/deactivate", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPath("/admin/api/v1/workflows/:id/deactivate")
+	c.SetPath("/admin/workflows/:id/deactivate")
 	c.SetPathValues(echo.PathValues{{Name: "id", Value: "global-workflow"}})
 
 	if err := h.DeactivateWorkflow(c); err != nil {

@@ -383,8 +383,8 @@ func TestAuthMiddleware_WildcardSkipPaths(t *testing.T) {
 			wantSkip: true,
 		},
 		{
-			name:     "no match /admin/api/v1/models",
-			path:     "/admin/api/v1/models",
+			name:     "no match /admin/models",
+			path:     "/admin/models",
 			wantSkip: false,
 		},
 		{

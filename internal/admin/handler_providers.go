@@ -16,7 +16,7 @@ func (h *Handler) ProviderStatus(c *echo.Context) error {
 	return c.JSON(http.StatusOK, h.buildProviderStatusResponse())
 }
 
-// RefreshRuntime handles POST /admin/api/v1/runtime/refresh
+// RefreshRuntime handles POST /admin/runtime/refresh
 func (h *Handler) RefreshRuntime(c *echo.Context) error {
 	if h.runtimeRefresher == nil {
 		return handleError(c, featureUnavailableError("runtime refresh is unavailable"))

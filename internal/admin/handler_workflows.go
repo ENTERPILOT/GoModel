@@ -39,7 +39,7 @@ func (h *Handler) ListWorkflows(c *echo.Context) error {
 	return c.JSON(http.StatusOK, views)
 }
 
-// GetWorkflow handles GET /admin/api/v1/workflows/:id
+// GetWorkflow handles GET /admin/workflows/:id
 func (h *Handler) GetWorkflow(c *echo.Context) error {
 	if h.workflows == nil {
 		return handleError(c, featureUnavailableError("workflows feature is unavailable"))
@@ -61,7 +61,7 @@ func (h *Handler) GetWorkflow(c *echo.Context) error {
 	return c.JSON(http.StatusOK, view)
 }
 
-// ListWorkflowGuardrails handles GET /admin/api/v1/workflows/guardrails
+// ListWorkflowGuardrails handles GET /admin/workflows/guardrails
 func (h *Handler) ListWorkflowGuardrails(c *echo.Context) error {
 	if h.guardrails == nil {
 		return c.JSON(http.StatusOK, []string{})
@@ -70,7 +70,7 @@ func (h *Handler) ListWorkflowGuardrails(c *echo.Context) error {
 	return c.JSON(http.StatusOK, h.guardrails.Names())
 }
 
-// CreateWorkflow handles POST /admin/api/v1/workflows
+// CreateWorkflow handles POST /admin/workflows
 func (h *Handler) CreateWorkflow(c *echo.Context) error {
 	if h.workflows == nil {
 		return handleError(c, featureUnavailableError("workflows feature is unavailable"))
@@ -123,7 +123,7 @@ func (h *Handler) CreateWorkflow(c *echo.Context) error {
 	return c.JSON(http.StatusCreated, version)
 }
 
-// DeactivateWorkflow handles POST /admin/api/v1/workflows/:id/deactivate
+// DeactivateWorkflow handles POST /admin/workflows/:id/deactivate
 func (h *Handler) DeactivateWorkflow(c *echo.Context) error {
 	if h.workflows == nil {
 		return handleError(c, featureUnavailableError("workflows feature is unavailable"))

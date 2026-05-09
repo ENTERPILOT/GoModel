@@ -34,7 +34,7 @@ func (h *Handler) ListAliases(c *echo.Context) error {
 	return c.JSON(http.StatusOK, views)
 }
 
-// UpsertAlias handles PUT /admin/api/v1/aliases
+// UpsertAlias handles PUT /admin/aliases
 func (h *Handler) UpsertAlias(c *echo.Context) error {
 	if h.aliases == nil {
 		return handleError(c, featureUnavailableError("aliases feature is unavailable"))
@@ -74,7 +74,7 @@ func (h *Handler) UpsertAlias(c *echo.Context) error {
 	return c.JSON(http.StatusOK, alias)
 }
 
-// DeleteAlias handles DELETE /admin/api/v1/aliases
+// DeleteAlias handles DELETE /admin/aliases
 func (h *Handler) DeleteAlias(c *echo.Context) error {
 	if h.aliases == nil {
 		return handleError(c, featureUnavailableError("aliases feature is unavailable"))

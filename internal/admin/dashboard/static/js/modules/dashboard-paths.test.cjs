@@ -85,40 +85,40 @@ test("dashboardUnprefixedPath strips only the configured base path boundary", ()
 test("layout gomodelPath prefixes root-relative dashboard URLs idempotently", () => {
   const { window } = loadLayoutBootstrap();
 
-  assert.equal(window.gomodelPath("/admin/api/v1/models"), "/g/admin/api/v1/models");
-  assert.equal(window.gomodelPath("/g/admin/api/v1/models"), "/g/admin/api/v1/models");
-  assert.equal(window.gomodelPath("https://example.com/admin/api/v1/models"), "https://example.com/admin/api/v1/models");
+  assert.equal(window.gomodelPath("/admin/models"), "/g/admin/models");
+  assert.equal(window.gomodelPath("/g/admin/models"), "/g/admin/models");
+  assert.equal(window.gomodelPath("https://example.com/admin/models"), "https://example.com/admin/models");
 });
 
 test("layout fetch wrapper prefixes string, URL, and Request inputs", async() => {
   const { fetchCalls, window } = loadLayoutBootstrap();
 
-  await window.fetch("/admin/api/v1/models", { headers: { Accept: "application/json" } });
-  assert.equal(fetchCalls[0].input, "/g/admin/api/v1/models");
+  await window.fetch("/admin/models", { headers: { Accept: "application/json" } });
+  assert.equal(fetchCalls[0].input, "/g/admin/models");
   assert.equal(fetchCalls[0].init.headers.Accept, "application/json");
 
-  await window.fetch(new URL("http://localhost/admin/api/v1/models?limit=1"));
-  assert.equal(fetchCalls[1].input.toString(), "http://localhost/g/admin/api/v1/models?limit=1");
+  await window.fetch(new URL("http://localhost/admin/models?limit=1"));
+  assert.equal(fetchCalls[1].input.toString(), "http://localhost/g/admin/models?limit=1");
 
-  const crossOriginURL = new URL("http://other-origin.example.com/admin/api/v1/models?limit=1");
+  const crossOriginURL = new URL("http://other-origin.example.com/admin/models?limit=1");
   await window.fetch(crossOriginURL);
   assert.equal(fetchCalls[2].input.toString(), crossOriginURL.toString());
 
-  await window.fetch(new URL("http://localhost/g/admin/api/v1/models?limit=1"));
-  assert.equal(fetchCalls[3].input.toString(), "http://localhost/g/admin/api/v1/models?limit=1");
+  await window.fetch(new URL("http://localhost/g/admin/models?limit=1"));
+  assert.equal(fetchCalls[3].input.toString(), "http://localhost/g/admin/models?limit=1");
 
-  const request = new Request("http://localhost/admin/api/v1/models?limit=1", {
+  const request = new Request("http://localhost/admin/models?limit=1", {
     headers: { Authorization: "Bearer test" },
   });
   await window.fetch(request);
   assert.ok(fetchCalls[4].input instanceof Request);
-  assert.equal(fetchCalls[4].input.url, "http://localhost/g/admin/api/v1/models?limit=1");
+  assert.equal(fetchCalls[4].input.url, "http://localhost/g/admin/models?limit=1");
   assert.equal(fetchCalls[4].input.headers.get("authorization"), "Bearer test");
 });
 
 test("layout fetch wrapper leaves cross-origin Request inputs unchanged", async() => {
   const { fetchCalls, window } = loadLayoutBootstrap();
-  const request = new Request("http://api.example.com/admin/api/v1/models");
+  const request = new Request("http://api.example.com/admin/models");
 
   await window.fetch(request);
 

@@ -181,7 +181,7 @@ func newHandlerContext(path string) (*echo.Context, *httptest.ResponseRecorder) 
 
 func TestUsageSummary_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/summary")
+	c, rec := newHandlerContext("/admin/usage/summary")
 
 	if err := h.UsageSummary(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -208,7 +208,7 @@ func TestUsageSummary_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/summary?days=30")
+	c, rec := newHandlerContext("/admin/usage/summary?days=30")
 
 	if err := h.UsageSummary(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -233,7 +233,7 @@ func TestUsageSummary_GatewayError(t *testing.T) {
 		summaryErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/summary")
+	c, rec := newHandlerContext("/admin/usage/summary")
 
 	if err := h.UsageSummary(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -252,7 +252,7 @@ func TestUsageSummary_GenericError(t *testing.T) {
 		summaryErr: errors.New("database connection lost"),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/summary")
+	c, rec := newHandlerContext("/admin/usage/summary")
 
 	if err := h.UsageSummary(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -290,7 +290,7 @@ func TestUsageSummary_WithPersistedCosts(t *testing.T) {
 	}
 
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/summary?days=30")
+	c, rec := newHandlerContext("/admin/usage/summary?days=30")
 
 	if err := h.UsageSummary(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -326,7 +326,7 @@ func TestUsageSummary_NilCosts(t *testing.T) {
 	}
 
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/summary?days=30")
+	c, rec := newHandlerContext("/admin/usage/summary?days=30")
 
 	if err := h.UsageSummary(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -353,7 +353,7 @@ func TestUsageSummary_NilCosts(t *testing.T) {
 
 func TestDailyUsage_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/daily")
+	c, rec := newHandlerContext("/admin/usage/daily")
 
 	if err := h.DailyUsage(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -375,7 +375,7 @@ func TestDailyUsage_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/daily?days=7")
+	c, rec := newHandlerContext("/admin/usage/daily?days=7")
 
 	if err := h.DailyUsage(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -397,7 +397,7 @@ func TestDailyUsage_NilResult(t *testing.T) {
 		daily: nil, // reader returns nil slice
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/daily")
+	c, rec := newHandlerContext("/admin/usage/daily")
 
 	if err := h.DailyUsage(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -416,7 +416,7 @@ func TestDailyUsage_Error(t *testing.T) {
 		dailyErr: core.NewRateLimitError("test", "too many requests"),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/daily")
+	c, rec := newHandlerContext("/admin/usage/daily")
 
 	if err := h.DailyUsage(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -434,7 +434,7 @@ func TestDailyUsage_Error(t *testing.T) {
 
 func TestUsageByModel_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/models")
+	c, rec := newHandlerContext("/admin/usage/models")
 
 	if err := h.UsageByModel(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -455,7 +455,7 @@ func TestUsageByModel_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/models?days=30")
+	c, rec := newHandlerContext("/admin/usage/models?days=30")
 
 	if err := h.UsageByModel(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -485,7 +485,7 @@ func TestUsageByModel_PreservesProviderName(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/models?days=30")
+	c, rec := newHandlerContext("/admin/usage/models?days=30")
 
 	if err := h.UsageByModel(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -514,7 +514,7 @@ func TestUsageByModel_Error(t *testing.T) {
 		modelUsageErr: errors.New("db failure"),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/models")
+	c, rec := newHandlerContext("/admin/usage/models")
 
 	if err := h.UsageByModel(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -528,7 +528,7 @@ func TestUsageByModel_Error(t *testing.T) {
 
 func TestUsageByUserPath_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/user-paths")
+	c, rec := newHandlerContext("/admin/usage/user-paths")
 
 	if err := h.UsageByUserPath(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -549,7 +549,7 @@ func TestUsageByUserPath_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/user-paths?days=30")
+	c, rec := newHandlerContext("/admin/usage/user-paths?days=30")
 
 	if err := h.UsageByUserPath(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -580,7 +580,7 @@ func TestUsageByUserPath_Error(t *testing.T) {
 		userPathUsageErr: errors.New("db failure"),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/user-paths")
+	c, rec := newHandlerContext("/admin/usage/user-paths")
 
 	if err := h.UsageByUserPath(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -594,7 +594,7 @@ func TestUsageByUserPath_Error(t *testing.T) {
 
 func TestUsageLog_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/log")
+	c, rec := newHandlerContext("/admin/usage/log")
 
 	if err := h.UsageLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -626,7 +626,7 @@ func TestUsageLog_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/log?days=30&limit=50&offset=0")
+	c, rec := newHandlerContext("/admin/usage/log?days=30&limit=50&offset=0")
 
 	if err := h.UsageLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -680,7 +680,7 @@ func TestUsageLog_PreservesProviderName(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/log?days=30")
+	c, rec := newHandlerContext("/admin/usage/log?days=30")
 
 	if err := h.UsageLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -709,7 +709,7 @@ func TestUsageLog_Error(t *testing.T) {
 		usageLogErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/log")
+	c, rec := newHandlerContext("/admin/usage/log")
 
 	if err := h.UsageLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -729,7 +729,7 @@ func TestUsageLog_WithFilters(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/api/v1/usage/log?model=gpt-4&provider=openai&user_path=/team&search=test&limit=10&offset=5")
+	c, rec := newHandlerContext("/admin/usage/log?model=gpt-4&provider=openai&user_path=/team&search=test&limit=10&offset=5")
 
 	if err := h.UsageLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -746,7 +746,7 @@ func TestUsageLog_WithFilters(t *testing.T) {
 
 func TestAuditLog_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/api/v1/audit/log")
+	c, rec := newHandlerContext("/admin/audit/log")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -796,7 +796,7 @@ func TestAuditLog_Success(t *testing.T) {
 	}
 
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/log?days=7")
+	c, rec := newHandlerContext("/admin/audit/log?days=7")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -846,7 +846,7 @@ func TestAuditLog_EmitsRequestedModel(t *testing.T) {
 	}
 
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/log?search=req-1")
+	c, rec := newHandlerContext("/admin/audit/log?search=req-1")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -909,7 +909,7 @@ func TestAuditLog_EnrichesEntriesWithUsageSummary(t *testing.T) {
 	}
 
 	h := NewHandler(usageReader, nil, WithAuditReader(auditReader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/log?days=7")
+	c, rec := newHandlerContext("/admin/audit/log?days=7")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -962,7 +962,7 @@ func TestAuditLog_PreservesProviderName(t *testing.T) {
 		},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/log?days=7")
+	c, rec := newHandlerContext("/admin/audit/log?days=7")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -997,7 +997,7 @@ func TestAuditLog_WithFilters(t *testing.T) {
 	}
 
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/log?model=gpt-4&provider=openai&method=post&path=/v1/chat/completions&user_path=/team&error_type=provider_error&status_code=502&stream=true&search=timeout&limit=10&offset=5")
+	c, rec := newHandlerContext("/admin/audit/log?model=gpt-4&provider=openai&method=post&path=/v1/chat/completions&user_path=/team&error_type=provider_error&status_code=502&stream=true&search=timeout&limit=10&offset=5")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1043,7 +1043,7 @@ func TestAuditLog_InvalidStatusCode(t *testing.T) {
 		logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/log?status_code=foo")
+	c, rec := newHandlerContext("/admin/audit/log?status_code=foo")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1061,7 +1061,7 @@ func TestAuditLog_InvalidStream(t *testing.T) {
 		logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/log?stream=maybe")
+	c, rec := newHandlerContext("/admin/audit/log?stream=maybe")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1082,7 +1082,7 @@ func TestAuditLog_InvalidLimit(t *testing.T) {
 				logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},
 			}
 			h := NewHandler(nil, nil, WithAuditReader(reader))
-			c, rec := newHandlerContext("/admin/api/v1/audit/log?limit=" + q)
+			c, rec := newHandlerContext("/admin/audit/log?limit=" + q)
 
 			if err := h.AuditLog(c); err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -1105,7 +1105,7 @@ func TestAuditLog_InvalidOffset(t *testing.T) {
 				logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},
 			}
 			h := NewHandler(nil, nil, WithAuditReader(reader))
-			c, rec := newHandlerContext("/admin/api/v1/audit/log?offset=" + q)
+			c, rec := newHandlerContext("/admin/audit/log?offset=" + q)
 
 			if err := h.AuditLog(c); err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -1125,7 +1125,7 @@ func TestAuditLog_Error(t *testing.T) {
 		logErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/log")
+	c, rec := newHandlerContext("/admin/audit/log")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1137,7 +1137,7 @@ func TestAuditLog_Error(t *testing.T) {
 
 func TestAuditConversation_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/api/v1/audit/conversation?log_id=log-1")
+	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-1")
 
 	if err := h.AuditConversation(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1170,7 +1170,7 @@ func TestAuditConversation_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/conversation?log_id=log-2&limit=80")
+	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-2&limit=80")
 
 	if err := h.AuditConversation(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1195,7 +1195,7 @@ func TestAuditConversation_PreservesProviderName(t *testing.T) {
 		},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/conversation?log_id=log-2")
+	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-2")
 
 	if err := h.AuditConversation(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1222,7 +1222,7 @@ func TestAuditConversation_PreservesProviderName(t *testing.T) {
 func TestAuditConversation_MissingLogID(t *testing.T) {
 	reader := &mockAuditReader{}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/conversation")
+	c, rec := newHandlerContext("/admin/audit/conversation")
 
 	if err := h.AuditConversation(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1235,7 +1235,7 @@ func TestAuditConversation_MissingLogID(t *testing.T) {
 func TestAuditConversation_InvalidLimit(t *testing.T) {
 	reader := &mockAuditReader{}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/conversation?log_id=log-1&limit=bad")
+	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-1&limit=bad")
 
 	if err := h.AuditConversation(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1250,7 +1250,7 @@ func TestAuditConversation_Error(t *testing.T) {
 		conversationErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/api/v1/audit/conversation?log_id=log-1")
+	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-1")
 
 	if err := h.AuditConversation(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1270,7 +1270,7 @@ func TestAuditConversation_Error(t *testing.T) {
 
 func TestAuditLog_NilReaderStillValidatesParams(t *testing.T) {
 	h := NewHandler(nil, nil) // no audit reader configured
-	c, rec := newHandlerContext("/admin/api/v1/audit/log?status_code=not-an-int")
+	c, rec := newHandlerContext("/admin/audit/log?status_code=not-an-int")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1285,7 +1285,7 @@ func TestAuditLog_NilReaderStillValidatesParams(t *testing.T) {
 
 func TestAuditConversation_NilReaderStillValidatesParams(t *testing.T) {
 	h := NewHandler(nil, nil)                                       // no audit reader configured
-	c, rec := newHandlerContext("/admin/api/v1/audit/conversation") // missing required log_id
+	c, rec := newHandlerContext("/admin/audit/conversation") // missing required log_id
 
 	if err := h.AuditConversation(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1300,7 +1300,7 @@ func TestAuditConversation_NilReaderStillValidatesParams(t *testing.T) {
 
 func TestUsageLog_NilReaderStillValidatesParams(t *testing.T) {
 	h := NewHandler(nil, nil) // no usage reader configured
-	c, rec := newHandlerContext("/admin/api/v1/usage/log?start_date=not-a-date")
+	c, rec := newHandlerContext("/admin/usage/log?start_date=not-a-date")
 
 	if err := h.UsageLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1317,7 +1317,7 @@ func TestUsageLog_NilReaderStillValidatesParams(t *testing.T) {
 
 func TestListModels_NilRegistry(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/api/v1/models")
+	c, rec := newHandlerContext("/admin/models")
 
 	if err := h.ListModels(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1347,7 +1347,7 @@ func TestListModels_WithModels(t *testing.T) {
 	}
 
 	h := NewHandler(nil, registry)
-	c, rec := newHandlerContext("/admin/api/v1/models")
+	c, rec := newHandlerContext("/admin/models")
 
 	if err := h.ListModels(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1380,7 +1380,7 @@ func TestListModels_EmptyRegistry(t *testing.T) {
 	registry := providers.NewModelRegistry()
 
 	h := NewHandler(nil, registry)
-	c, rec := newHandlerContext("/admin/api/v1/models")
+	c, rec := newHandlerContext("/admin/models")
 
 	if err := h.ListModels(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1433,7 +1433,7 @@ func TestListModels_WithCategoryFilter(t *testing.T) {
 	h := NewHandler(nil, registry)
 
 	t.Run("FilterTextGeneration", func(t *testing.T) {
-		c, rec := newHandlerContext("/admin/api/v1/models?category=text_generation")
+		c, rec := newHandlerContext("/admin/models?category=text_generation")
 		if err := h.ListModels(c); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1453,7 +1453,7 @@ func TestListModels_WithCategoryFilter(t *testing.T) {
 	})
 
 	t.Run("FilterAll", func(t *testing.T) {
-		c, rec := newHandlerContext("/admin/api/v1/models?category=all")
+		c, rec := newHandlerContext("/admin/models?category=all")
 		if err := h.ListModels(c); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1467,7 +1467,7 @@ func TestListModels_WithCategoryFilter(t *testing.T) {
 	})
 
 	t.Run("NoFilter", func(t *testing.T) {
-		c, rec := newHandlerContext("/admin/api/v1/models")
+		c, rec := newHandlerContext("/admin/models")
 		if err := h.ListModels(c); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1497,7 +1497,7 @@ func TestListModels_InvalidCategory(t *testing.T) {
 	}
 
 	h := NewHandler(nil, registry)
-	c, rec := newHandlerContext("/admin/api/v1/models?category=bogus_category")
+	c, rec := newHandlerContext("/admin/models?category=bogus_category")
 
 	if err := h.ListModels(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1539,7 +1539,7 @@ func TestListModels_IncludesSelectorAndProviderName(t *testing.T) {
 	}
 
 	h := NewHandler(nil, registry)
-	c, rec := newHandlerContext("/admin/api/v1/models")
+	c, rec := newHandlerContext("/admin/models")
 
 	if err := h.ListModels(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1574,7 +1574,7 @@ func TestListModels_IncludesSelectorAndProviderName(t *testing.T) {
 
 func TestListCategories_NilRegistry(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/api/v1/models/categories")
+	c, rec := newHandlerContext("/admin/models/categories")
 
 	if err := h.ListCategories(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1610,7 +1610,7 @@ func TestListCategories_WithModels(t *testing.T) {
 	}
 
 	h := NewHandler(nil, registry)
-	c, rec := newHandlerContext("/admin/api/v1/models/categories")
+	c, rec := newHandlerContext("/admin/models/categories")
 
 	if err := h.ListCategories(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1697,7 +1697,7 @@ func TestProviderStatus_DistinguishesProvidersWithSameTypeByName(t *testing.T) {
 			},
 		},
 	}))
-	c, rec := newHandlerContext("/admin/api/v1/providers/status")
+	c, rec := newHandlerContext("/admin/providers/status")
 
 	if err := h.ProviderStatus(c); err != nil {
 		t.Fatalf("ProviderStatus() error = %v", err)
@@ -1950,7 +1950,7 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		SemanticCacheEnabled: "off",
 		PricingRecalculation: "on",
 	}))
-	c, rec := newHandlerContext("/admin/api/v1/dashboard/config")
+	c, rec := newHandlerContext("/admin/runtime/config")
 
 	if err := h.DashboardConfig(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2011,7 +2011,7 @@ func TestRefreshRuntime_ReturnsReport(t *testing.T) {
 		},
 	}
 	h := NewHandler(nil, nil, WithRuntimeRefresher(refresher))
-	c, rec := newHandlerContext("/admin/api/v1/runtime/refresh")
+	c, rec := newHandlerContext("/admin/runtime/refresh")
 	c.Request().Method = http.MethodPost
 
 	if err := h.RefreshRuntime(c); err != nil {
@@ -2041,7 +2041,7 @@ func TestRefreshRuntime_ReturnsReport(t *testing.T) {
 
 func TestRefreshRuntime_FeatureUnavailableWhenNotConfigured(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/api/v1/runtime/refresh")
+	c, rec := newHandlerContext("/admin/runtime/refresh")
 	c.Request().Method = http.MethodPost
 
 	if err := h.RefreshRuntime(c); err != nil {
@@ -2084,7 +2084,7 @@ func TestRefreshRuntime_PreservesGatewayError(t *testing.T) {
 			WithCode("request_canceled"),
 	}
 	h := NewHandler(nil, nil, WithRuntimeRefresher(refresher))
-	c, rec := newHandlerContext("/admin/api/v1/runtime/refresh")
+	c, rec := newHandlerContext("/admin/runtime/refresh")
 	c.Request().Method = http.MethodPost
 
 	if err := h.RefreshRuntime(c); err != nil {
@@ -2125,7 +2125,7 @@ func TestCacheOverview_FeatureUnavailableWhenCacheDisabled(t *testing.T) {
 	h := NewHandler(&mockUsageReader{}, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		CacheEnabled: "off",
 	}))
-	c, rec := newHandlerContext("/admin/api/v1/cache/overview")
+	c, rec := newHandlerContext("/admin/cache/overview")
 
 	if err := h.CacheOverview(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2154,7 +2154,7 @@ func TestCacheOverview_ReturnsPayloadWhenEnabled(t *testing.T) {
 	h := NewHandler(reader, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		CacheEnabled: "on",
 	}))
-	c, rec := newHandlerContext("/admin/api/v1/cache/overview?days=30&user_path=/team")
+	c, rec := newHandlerContext("/admin/cache/overview?days=30&user_path=/team")
 
 	if err := h.CacheOverview(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2186,7 +2186,7 @@ func TestCacheOverview_ReturnsErrorWhenReaderFails(t *testing.T) {
 	h := NewHandler(reader, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		CacheEnabled: "on",
 	}))
-	c, rec := newHandlerContext("/admin/api/v1/cache/overview?days=30")
+	c, rec := newHandlerContext("/admin/cache/overview?days=30")
 
 	if err := h.CacheOverview(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2227,7 +2227,7 @@ func TestCacheOverview_ReturnsClientClosedWhenRequestIsCanceled(t *testing.T) {
 	h := NewHandler(reader, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		CacheEnabled: "on",
 	}))
-	c, rec := newHandlerContext("/admin/api/v1/cache/overview?days=30")
+	c, rec := newHandlerContext("/admin/cache/overview?days=30")
 
 	if err := h.CacheOverview(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2263,7 +2263,7 @@ func TestCacheOverview_ReturnsGatewayTimeoutWhenRequestDeadlineExceeded(t *testi
 	h := NewHandler(reader, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		CacheEnabled: "on",
 	}))
-	c, rec := newHandlerContext("/admin/api/v1/cache/overview?days=30")
+	c, rec := newHandlerContext("/admin/cache/overview?days=30")
 
 	if err := h.CacheOverview(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2377,7 +2377,7 @@ func TestHandleError_DoesNotLogCanceledRequestsAtDefaultLevel(t *testing.T) {
 	})
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/api/v1/cache/overview", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/cache/overview", nil)
 	req = req.WithContext(core.WithRequestID(req.Context(), "admin-canceled-req-789"))
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -2403,7 +2403,7 @@ func TestHandleError_LogsClientErrorsAtWarnLevel(t *testing.T) {
 	})
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/workflows", nil)
+	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", nil)
 	req = req.WithContext(core.WithRequestID(req.Context(), "admin-warn-req-123"))
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -2423,7 +2423,7 @@ func TestHandleError_LogsClientErrorsAtWarnLevel(t *testing.T) {
 	if !strings.Contains(logOutput, `"msg":"admin request failed"`) {
 		t.Fatalf("expected admin request failed log, got %q", logOutput)
 	}
-	if !strings.Contains(logOutput, `"path":"/admin/api/v1/workflows"`) {
+	if !strings.Contains(logOutput, `"path":"/admin/workflows"`) {
 		t.Fatalf("expected admin path in log, got %q", logOutput)
 	}
 	if !strings.Contains(logOutput, `"request_id":"admin-warn-req-123"`) {
@@ -2440,7 +2440,7 @@ func TestHandleError_LogsServerErrorsAtErrorLevel(t *testing.T) {
 	})
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/guardrails", nil)
+	req := httptest.NewRequest(http.MethodPut, "/admin/guardrails", nil)
 	req = req.WithContext(core.WithRequestID(req.Context(), "admin-error-req-456"))
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)

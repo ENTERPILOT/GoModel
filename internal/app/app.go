@@ -445,7 +445,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		} else {
 			serverCfg.AdminEndpointsEnabled = true
 			serverCfg.AdminHandler = adminHandler
-			slog.Info("admin API enabled", "api", config.JoinBasePath(appCfg.Server.BasePath, "/admin/api/v1"))
+			slog.Info("admin API enabled",
+				"api", config.JoinBasePath(appCfg.Server.BasePath, "/admin"),
+				"legacy_alias", config.JoinBasePath(appCfg.Server.BasePath, "/admin/api/v1"),
+				"legacy_sunset", "2026-08-09")
 			if adminCfg.UIEnabled {
 				serverCfg.AdminUIEnabled = true
 				serverCfg.DashboardHandler = dashHandler

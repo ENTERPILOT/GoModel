@@ -306,8 +306,8 @@ test('guardrail mutations send guardrail name in JSON body', async () => {
 
     assert.equal(requests.length, 2);
     assert.deepEqual(requests.map((request) => request.url), [
-        '/admin/api/v1/guardrails',
-        '/admin/api/v1/guardrails'
+        '/admin/guardrails',
+        '/admin/guardrails'
     ]);
     assert.deepEqual(requests.map((request) => request.request.method), ['PUT', 'DELETE']);
     assert.deepEqual(JSON.parse(requests[0].request.body), {

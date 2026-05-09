@@ -91,7 +91,7 @@
                 this.authKeyError = '';
                 try {
                     const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                    const res = await fetch('/admin/api/v1/auth-keys', request);
+                    const res = await fetch('/admin/auth-keys', request);
                     if (res.status === 503) {
                         this.authKeysAvailable = false;
                         this.authKeys = [];
@@ -212,7 +212,7 @@
                             headers: this.headers(),
                             body: JSON.stringify(payload)
                         };
-                    const res = await fetch('/admin/api/v1/auth-keys', request);
+                    const res = await fetch('/admin/auth-keys', request);
                     if (res.status === 503) {
                         this.authKeysAvailable = false;
                         this.authKeyError = 'Auth keys feature is unavailable.';
@@ -277,7 +277,7 @@
                             method: 'POST',
                             headers: this.headers()
                         };
-                    const res = await fetch('/admin/api/v1/auth-keys/' + encodeURIComponent(key.id) + '/deactivate', request);
+                    const res = await fetch('/admin/auth-keys/' + encodeURIComponent(key.id) + '/deactivate', request);
                     if (res.status === 503) {
                         this.authKeysAvailable = false;
                         this.authKeyError = 'Auth keys feature is unavailable.';

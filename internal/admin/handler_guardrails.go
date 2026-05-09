@@ -31,7 +31,7 @@ func (h *Handler) ListGuardrailTypes(c *echo.Context) error {
 	return c.JSON(http.StatusOK, h.guardrailDefs.TypeDefinitions())
 }
 
-// ListGuardrails handles GET /admin/api/v1/guardrails
+// ListGuardrails handles GET /admin/guardrails
 func (h *Handler) ListGuardrails(c *echo.Context) error {
 	if h.guardrailDefs == nil {
 		return handleError(c, featureUnavailableError("guardrails feature is unavailable"))
@@ -43,7 +43,7 @@ func (h *Handler) ListGuardrails(c *echo.Context) error {
 	return c.JSON(http.StatusOK, views)
 }
 
-// UpsertGuardrail handles PUT /admin/api/v1/guardrails
+// UpsertGuardrail handles PUT /admin/guardrails
 func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 	if h.guardrailDefs == nil {
 		return handleError(c, featureUnavailableError("guardrails feature is unavailable"))
@@ -86,7 +86,7 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 	return c.JSON(http.StatusOK, guardrails.ViewFromDefinition(*definition))
 }
 
-// DeleteGuardrail handles DELETE /admin/api/v1/guardrails
+// DeleteGuardrail handles DELETE /admin/guardrails
 func (h *Handler) DeleteGuardrail(c *echo.Context) error {
 	if h.guardrailDefs == nil {
 		return handleError(c, featureUnavailableError("guardrails feature is unavailable"))
