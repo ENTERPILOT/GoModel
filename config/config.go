@@ -408,7 +408,7 @@ type ServerConfig struct {
 	AllowPassthroughV1Alias bool `yaml:"allow_passthrough_v1_alias" env:"ALLOW_PASSTHROUGH_V1_ALIAS"`
 	// EnabledPassthroughProviders lists the provider types enabled on
 	// /p/{provider}/... passthrough routes. Default:
-	// ["openai", "anthropic", "openrouter", "zai", "vllm"].
+	// ["openai", "anthropic", "openrouter", "zai", "vllm", "deepseek"].
 	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
 }
 

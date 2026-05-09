@@ -328,6 +328,61 @@ func TestPassthrough_PreservesNon2xxStatus(t *testing.T) {
 	}
 }
 
+func TestPassthrough_ForwardsQueryString(t *testing.T) {
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.RequestURI()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+
+	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodGet,
+		Endpoint: "/beta/completions?stream=true",
+		Body:     io.NopCloser(strings.NewReader(``)),
+	})
+	if err != nil {
+		t.Fatalf("Passthrough() error = %v", err)
+	}
+	defer resp.Body.Close()
+	if gotPath != "/beta/completions?stream=true" {
+		t.Fatalf("path = %q, want /beta/completions?stream=true", gotPath)
+	}
+}
+
+func TestPassthrough_PreservesResponseBody(t *testing.T) {
+	const upstreamBody = `{"error":{"message":"rate_limit_exceeded","type":"rate_limit_error"}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(upstreamBody))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+
+	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodPost,
+		Endpoint: "/beta/completions",
+		Body:     io.NopCloser(strings.NewReader(`{}`)),
+	})
+	if err != nil {
+		t.Fatalf("Passthrough() error = %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if string(body) != upstreamBody {
+		t.Fatalf("response body = %q, want %q", string(body), upstreamBody)
+	}
+}
+
 func TestProvider_ImplementsPassthroughProvider(t *testing.T) {
 	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
 	var _ core.PassthroughProvider = provider
