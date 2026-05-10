@@ -107,7 +107,9 @@ func parseBaseURL(baseURL string) (region, endpoint string) {
 }
 
 // regionFromHost extracts the region segment from a Bedrock endpoint URL like
-// https://bedrock-runtime.us-east-1.amazonaws.com.
+// https://bedrock-runtime.us-east-1.amazonaws.com. To avoid mis-extracting
+// segments from custom hosts that happen to contain "bedrock." in their name,
+// the host must end with ".amazonaws.com".
 func regionFromHost(rawURL string) string {
 	idx := strings.Index(rawURL, "://")
 	if idx < 0 {
@@ -116,6 +118,9 @@ func regionFromHost(rawURL string) string {
 	host := rawURL[idx+3:]
 	if slash := strings.IndexByte(host, '/'); slash >= 0 {
 		host = host[:slash]
+	}
+	if !strings.HasSuffix(host, ".amazonaws.com") {
+		return ""
 	}
 	parts := strings.Split(host, ".")
 	for i, part := range parts {
@@ -128,9 +133,12 @@ func regionFromHost(rawURL string) string {
 
 // controlPlaneEndpoint rewrites a runtime endpoint host into its control-plane
 // equivalent (bedrock-runtime.<region>... → bedrock.<region>...). When the
-// input is already a control-plane URL, it's returned unchanged.
+// input is already a control-plane URL, it's returned unchanged. The match is
+// anchored to "://bedrock-runtime." (matching the same guard used by
+// runtimePlaneEndpoint) to avoid corrupting custom hostnames such as
+// https://my-bedrock-runtime.internal.example.com.
 func controlPlaneEndpoint(endpoint string) string {
-	return strings.Replace(endpoint, "bedrock-runtime.", "bedrock.", 1)
+	return strings.Replace(endpoint, "://bedrock-runtime.", "://bedrock.", 1)
 }
 
 // runtimePlaneEndpoint rewrites a control-plane endpoint host into its runtime

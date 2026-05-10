@@ -2,6 +2,7 @@ package bedrock
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -25,6 +26,7 @@ func TestParseBaseURL(t *testing.T) {
 		{"runtime endpoint", "https://bedrock-runtime.us-west-2.amazonaws.com", "us-west-2", "https://bedrock-runtime.us-west-2.amazonaws.com"},
 		{"control endpoint", "https://bedrock.eu-west-1.amazonaws.com", "eu-west-1", "https://bedrock.eu-west-1.amazonaws.com"},
 		{"unknown host", "https://internal.example.com/bedrock", "", "https://internal.example.com/bedrock"},
+		{"non-AWS host with bedrock subdomain leaves region empty", "https://bedrock.internal.example.com", "", "https://bedrock.internal.example.com"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -63,6 +65,12 @@ func TestPlaneEndpoint(t *testing.T) {
 			in:          "https://internal.example.com/bedrock",
 			wantRuntime: "https://internal.example.com/bedrock",
 			wantControl: "https://internal.example.com/bedrock",
+		},
+		{
+			name:        "custom hostname containing bedrock-runtime. is not corrupted",
+			in:          "https://my-bedrock-runtime.internal.example.com",
+			wantRuntime: "https://my-bedrock-runtime.internal.example.com",
+			wantControl: "https://my-bedrock-runtime.internal.example.com",
 		},
 	}
 	for _, tc := range cases {
@@ -191,7 +199,90 @@ func TestBuildConverseParts_RejectsEmptyModel(t *testing.T) {
 		t.Fatal("expected error for missing model")
 	}
 	var ge *core.GatewayError
-	if !errorsAs(err, &ge) || ge.Type != core.ErrorTypeInvalidRequest {
+	if !errors.As(err, &ge) || ge.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("expected invalid_request_error, got %v", err)
+	}
+}
+
+func TestBuildConverseParts_MergesParallelToolResults(t *testing.T) {
+	// Caller sends one assistant turn with two parallel tool_calls, then two
+	// consecutive tool-role messages with the results. Bedrock requires
+	// alternating user/assistant turns, so both tool results must collapse
+	// into a single user message holding two ToolResult blocks.
+	req := &core.ChatRequest{
+		Model: "anthropic.claude-3-5-haiku-20241022-v1:0",
+		Messages: []core.Message{
+			{Role: "user", Content: "weather in warsaw and tokyo?"},
+			{
+				Role: "assistant",
+				ToolCalls: []core.ToolCall{
+					{ID: "call_1", Type: "function", Function: core.FunctionCall{Name: "get_weather", Arguments: `{"city":"Warsaw"}`}},
+					{ID: "call_2", Type: "function", Function: core.FunctionCall{Name: "get_weather", Arguments: `{"city":"Tokyo"}`}},
+				},
+			},
+			{Role: "tool", ToolCallID: "call_1", Content: "Warsaw 15C"},
+			{Role: "tool", ToolCallID: "call_2", Content: "Tokyo 22C"},
+		},
+	}
+	parts, err := buildConverseParts(req)
+	if err != nil {
+		t.Fatalf("buildConverseParts: %v", err)
+	}
+	// Expect: user(text), assistant(2 tool_use), user(2 tool_result) — three messages.
+	if len(parts.messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d: %+v", len(parts.messages), parts.messages)
+	}
+	last := parts.messages[2]
+	if last.Role != brtypes.ConversationRoleUser {
+		t.Fatalf("merged tool results must be user-role, got %q", last.Role)
+	}
+	if len(last.Content) != 2 {
+		t.Fatalf("expected 2 ToolResult blocks in merged message, got %d", len(last.Content))
+	}
+	for i, want := range []string{"call_1", "call_2"} {
+		tr, ok := last.Content[i].(*brtypes.ContentBlockMemberToolResult)
+		if !ok {
+			t.Fatalf("block %d not a ToolResult: %T", i, last.Content[i])
+		}
+		if got := awssdk.ToString(tr.Value.ToolUseId); got != want {
+			t.Errorf("block %d ToolUseId = %q, want %q", i, got, want)
+		}
+	}
+}
+
+func TestBuildConverseParts_TopPFromExtraFields(t *testing.T) {
+	req := &core.ChatRequest{
+		Model:    "anthropic.claude-3-5-haiku-20241022-v1:0",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"top_p": json.RawMessage("0.7"),
+		}),
+	}
+	parts, err := buildConverseParts(req)
+	if err != nil {
+		t.Fatalf("buildConverseParts: %v", err)
+	}
+	if parts.infCfg == nil || parts.infCfg.TopP == nil {
+		t.Fatal("top_p was not forwarded to InferenceConfiguration.TopP")
+	}
+	if got := awssdk.ToFloat32(parts.infCfg.TopP); got != 0.7 {
+		t.Errorf("top_p = %v, want 0.7", got)
+	}
+}
+
+func TestBuildConverseParts_RejectsMaxTokensOverflow(t *testing.T) {
+	overflow := int(int64(1) << 33) // 2^33, fits in int64 but not int32
+	req := &core.ChatRequest{
+		Model:     "anthropic.claude-3-5-haiku-20241022-v1:0",
+		MaxTokens: &overflow,
+		Messages:  []core.Message{{Role: "user", Content: "hi"}},
+	}
+	_, err := buildConverseParts(req)
+	if err == nil {
+		t.Fatal("expected invalid_request_error for oversized max_tokens")
+	}
+	var ge *core.GatewayError
+	if !errors.As(err, &ge) || ge.Type != core.ErrorTypeInvalidRequest {
 		t.Fatalf("expected invalid_request_error, got %v", err)
 	}
 }
@@ -553,25 +644,3 @@ func TestStreamConverter_FormatChunkUsage(t *testing.T) {
 		t.Errorf("total_tokens = %v", usage["total_tokens"])
 	}
 }
-
-// errorsAs is a tiny shim around errors.As to avoid importing errors at the
-// top level just for one test.
-func errorsAs(err error, target any) bool {
-	if err == nil {
-		return false
-	}
-	switch t := target.(type) {
-	case **core.GatewayError:
-		ge, ok := err.(*core.GatewayError)
-		if !ok {
-			return false
-		}
-		*t = ge
-		return true
-	}
-	return false
-}
-
-// trimRightAll silences staticcheck for unused strings import in some local
-// builds when test files don't directly reference strings.
-var _ = strings.TrimSpace

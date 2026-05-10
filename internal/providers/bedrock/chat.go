@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -79,11 +80,19 @@ func buildConverseParts(req *core.ChatRequest) (converseParts, error) {
 	infCfg := &brtypes.InferenceConfiguration{}
 	hasInfCfg := false
 	if mt := resolveMaxTokens(req); mt > 0 {
+		if mt > math.MaxInt32 {
+			return converseParts{}, core.NewInvalidRequestError(
+				fmt.Sprintf("max_tokens %d exceeds the maximum of %d", mt, math.MaxInt32), nil)
+		}
 		infCfg.MaxTokens = awssdk.Int32(int32(mt))
 		hasInfCfg = true
 	}
 	if req.Temperature != nil {
 		infCfg.Temperature = awssdk.Float32(float32(*req.Temperature))
+		hasInfCfg = true
+	}
+	if topP, ok := resolveTopP(req); ok {
+		infCfg.TopP = awssdk.Float32(float32(topP))
 		hasInfCfg = true
 	}
 	if hasInfCfg {
@@ -103,7 +112,26 @@ func convertMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []b
 	system := make([]brtypes.SystemContentBlock, 0)
 	out := make([]brtypes.Message, 0, len(messages))
 
+	// Bedrock's Converse API requires strictly alternating user/assistant
+	// turns. When the caller sends N parallel tool results (N consecutive
+	// tool-role messages), they all belong to the same user turn and must be
+	// folded into a single user message with N ToolResult content blocks.
+	flushToolResults := func(blocks []brtypes.ContentBlock) []brtypes.ContentBlock {
+		if len(blocks) == 0 {
+			return blocks
+		}
+		out = append(out, brtypes.Message{
+			Role:    brtypes.ConversationRoleUser,
+			Content: blocks,
+		})
+		return blocks[:0]
+	}
+
+	var pendingToolResults []brtypes.ContentBlock
 	for _, msg := range messages {
+		if msg.Role != "tool" {
+			pendingToolResults = flushToolResults(pendingToolResults)
+		}
 		switch msg.Role {
 		case "system", "developer":
 			text := core.ExtractTextContent(msg.Content)
@@ -116,10 +144,7 @@ func convertMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []b
 			if err != nil {
 				return nil, nil, err
 			}
-			out = append(out, brtypes.Message{
-				Role:    brtypes.ConversationRoleUser,
-				Content: []brtypes.ContentBlock{block},
-			})
+			pendingToolResults = append(pendingToolResults, block)
 		case "user":
 			text := core.ExtractTextContent(msg.Content)
 			if text == "" {
@@ -145,6 +170,7 @@ func convertMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []b
 			return nil, nil, core.NewInvalidRequestError("unsupported message role: "+msg.Role, nil)
 		}
 	}
+	flushToolResults(pendingToolResults)
 
 	return system, out, nil
 }
@@ -318,6 +344,21 @@ func resolveMaxTokens(req *core.ChatRequest) int {
 		}
 	}
 	return 0
+}
+
+// resolveTopP extracts top_p from req.ExtraFields. core.ChatRequest does not
+// surface top_p as a typed field, so we look it up in the catch-all map the
+// JSON decoder populates for unknown OpenAI parameters.
+func resolveTopP(req *core.ChatRequest) (float64, bool) {
+	raw := req.ExtraFields.Lookup("top_p")
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var v float64
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return 0, false
+	}
+	return v, true
 }
 
 func decodeToolArgs(raw string) (any, error) {
