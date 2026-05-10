@@ -70,6 +70,15 @@ func (g *GuardedProvider) NativeFileProviderTypes() []string {
 	return nil
 }
 
+// NativeBatchProviderTypes delegates provider capability inventory to the inner
+// provider when available.
+func (g *GuardedProvider) NativeBatchProviderTypes() []string {
+	if typed, ok := g.inner.(core.NativeBatchProviderTypeLister); ok {
+		return typed.NativeBatchProviderTypes()
+	}
+	return nil
+}
+
 // NativeResponseProviderTypes delegates provider capability inventory to the
 // inner provider when available.
 func (g *GuardedProvider) NativeResponseProviderTypes() []string {
@@ -192,7 +201,6 @@ func (g *GuardedProvider) passthroughRouter() (core.RoutablePassthrough, error) 
 	}
 	return pp, nil
 }
-
 
 // CreateBatch delegates native batch creation and optionally applies guardrails to inline items.
 func (g *GuardedProvider) CreateBatch(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, error) {
@@ -425,8 +433,6 @@ func (g *GuardedProvider) PrepareBatchRequest(ctx context.Context, providerType 
 	}
 	return processGuardedBatchRequest(ctx, providerType, req, g.pipeline, g.batchFileTransport())
 }
-
-
 
 func cloneToolCalls(toolCalls []core.ToolCall) []core.ToolCall {
 	if len(toolCalls) == 0 {

@@ -27,6 +27,7 @@ import (
 	"gomodel/internal/auditlog"
 	batchstore "gomodel/internal/batch"
 	"gomodel/internal/core"
+	"gomodel/internal/filestore"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/observability"
 	provideradapter "gomodel/internal/providers"
@@ -587,6 +588,10 @@ func (m *mockProvider) NativeFileProviderTypes() []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+func (m *mockProvider) NativeBatchProviderTypes() []string {
+	return m.NativeFileProviderTypes()
 }
 
 func (m *mockProvider) NativeResponseProviderTypes() []string {
@@ -3695,6 +3700,76 @@ func TestBatches_UsesExplicitBatchRequestPreparer(t *testing.T) {
 		"prepared-1": "/v1/responses",
 		"provider-1": "/v1/chat/completions",
 	}, stored.RequestEndpointByCustomID)
+}
+
+func TestBatches_InputFileUsesStoredFileProviderWithoutMetadata(t *testing.T) {
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini", "claude-3-haiku"},
+		providerTypes: map[string]string{
+			"gpt-4o-mini":    "openai",
+			"claude-3-haiku": "anthropic",
+		},
+		fileCreateResponse: &core.FileObject{
+			ID:        "file_source",
+			Object:    "file",
+			Bytes:     32,
+			CreatedAt: 1000,
+			Filename:  "requests.jsonl",
+			Purpose:   "batch",
+			Provider:  "openai",
+		},
+		batchCreateResponse: &core.BatchResponse{
+			ID:          "provider-batch-1",
+			Object:      "batch",
+			Status:      "validating",
+			CreatedAt:   1234567890,
+			InputFileID: "file_source",
+		},
+	}
+
+	e := echo.New()
+	fileStore := filestore.NewMemoryStore()
+	handler := NewHandler(mock, nil, nil, nil)
+	handler.SetFileStore(fileStore)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("purpose", "batch"))
+	require.NoError(t, writer.WriteField("provider", "openai"))
+	part, err := writer.CreateFormFile("file", "requests.jsonl")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("{\"custom_id\":\"1\"}\n"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/v1/files", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadFrame := core.NewRequestSnapshot(http.MethodPost, "/v1/files", nil, nil, nil, writer.FormDataContentType(), nil, false, "", nil)
+	uploadReq = withRequestSnapshotAndPrompt(uploadReq, uploadFrame)
+	uploadRec := httptest.NewRecorder()
+	uploadCtx := e.NewContext(uploadReq, uploadRec)
+
+	require.NoError(t, handler.CreateFile(uploadCtx))
+	require.Equal(t, http.StatusOK, uploadRec.Code)
+
+	stored, err := fileStore.Get(context.Background(), "file_source")
+	require.NoError(t, err)
+	require.Equal(t, "openai", stored.ProviderType)
+
+	batchReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{
+	  "input_file_id":"file_source",
+	  "endpoint":"/v1/chat/completions",
+	  "completion_window":"24h"
+	}`))
+	batchReq.Header.Set("Content-Type", "application/json")
+	batchRec := httptest.NewRecorder()
+	batchCtx := e.NewContext(batchReq, batchRec)
+
+	require.NoError(t, handler.Batches(batchCtx))
+	require.Equal(t, http.StatusOK, batchRec.Code)
+	require.Equal(t, "openai", mock.capturedBatchProvider)
+	require.NotNil(t, mock.capturedBatchReq)
+	require.Equal(t, "file_source", mock.capturedBatchReq.InputFileID)
 }
 
 func TestBatches_CleansUpPreparedInputFileOnCreateFailure(t *testing.T) {

@@ -60,6 +60,12 @@ type NativeBatchRoutableProvider interface {
 	GetBatchResults(ctx context.Context, providerType, id string) (*BatchResultsResponse, error)
 }
 
+// NativeBatchProviderTypeLister exposes registered provider types that support
+// native batch operations.
+type NativeBatchProviderTypeLister interface {
+	NativeBatchProviderTypes() []string
+}
+
 // NativeBatchHintRoutableProvider is an optional routing extension for
 // providers that can consume persisted per-item endpoint hints.
 type NativeBatchHintRoutableProvider interface {

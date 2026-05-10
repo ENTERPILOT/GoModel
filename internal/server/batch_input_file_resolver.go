@@ -1,0 +1,134 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"sort"
+	"strings"
+
+	"gomodel/internal/core"
+	"gomodel/internal/filestore"
+	"gomodel/internal/gateway"
+)
+
+type batchInputFileProviderResolver struct {
+	provider  core.RoutableProvider
+	fileStore filestore.Store
+}
+
+func newBatchInputFileProviderResolver(provider core.RoutableProvider, fileStore filestore.Store) gateway.BatchInputFileProviderResolver {
+	if provider == nil && fileStore == nil {
+		return nil
+	}
+	return &batchInputFileProviderResolver{
+		provider:  provider,
+		fileStore: fileStore,
+	}
+}
+
+func (r *batchInputFileProviderResolver) ResolveBatchInputFileProvider(ctx context.Context, fileID string) (string, bool, error) {
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return "", false, nil
+	}
+	if r.fileStore != nil {
+		stored, err := r.fileStore.Get(ctx, fileID)
+		switch {
+		case err == nil && stored != nil && strings.TrimSpace(stored.ProviderType) != "":
+			return strings.TrimSpace(stored.ProviderType), true, nil
+		case err == nil:
+			return "", false, nil
+		case errors.Is(err, filestore.ErrNotFound):
+		default:
+			return "", false, core.NewProviderError("file_store", http.StatusInternalServerError, "failed to look up input file provider", err)
+		}
+	}
+	return r.resolveProviderByFallback(ctx, fileID)
+}
+
+func (r *batchInputFileProviderResolver) resolveProviderByFallback(ctx context.Context, fileID string) (string, bool, error) {
+	candidates := nativeBatchFileProviderCandidates(r.provider)
+	if len(candidates) == 0 {
+		return "", false, nil
+	}
+	if len(candidates) == 1 {
+		return candidates[0], true, nil
+	}
+
+	nativeFiles, ok := r.provider.(core.NativeFileRoutableProvider)
+	if !ok {
+		return "", false, nil
+	}
+
+	var matches []string
+	var firstErr error
+	for _, candidate := range candidates {
+		if _, err := nativeFiles.GetFile(ctx, candidate, fileID); err == nil {
+			matches = append(matches, candidate)
+			continue
+		} else if isNotFoundGatewayError(err) || isUnsupportedNativeFilesError(err) {
+			continue
+		} else if firstErr == nil {
+			firstErr = err
+		}
+	}
+	switch len(matches) {
+	case 0:
+		if firstErr != nil {
+			return "", false, firstErr
+		}
+		return "", false, nil
+	case 1:
+		return matches[0], true, nil
+	default:
+		return "", false, core.NewInvalidRequestError("input_file_id is ambiguous across providers; pass metadata.provider", nil)
+	}
+}
+
+func nativeBatchFileProviderCandidates(provider core.RoutableProvider) []string {
+	fileTypes, ok := provider.(core.NativeFileProviderTypeLister)
+	if !ok {
+		return nil
+	}
+	candidates := normalizeProviderTypeList(fileTypes.NativeFileProviderTypes())
+	if len(candidates) == 0 {
+		return nil
+	}
+	batchTypes, ok := provider.(core.NativeBatchProviderTypeLister)
+	if !ok {
+		return candidates
+	}
+	batchSet := make(map[string]struct{}, len(batchTypes.NativeBatchProviderTypes()))
+	for _, providerType := range batchTypes.NativeBatchProviderTypes() {
+		providerType = strings.TrimSpace(providerType)
+		if providerType != "" {
+			batchSet[providerType] = struct{}{}
+		}
+	}
+	filtered := candidates[:0]
+	for _, candidate := range candidates {
+		if _, ok := batchSet[candidate]; ok {
+			filtered = append(filtered, candidate)
+		}
+	}
+	return filtered
+}
+
+func normalizeProviderTypeList(providerTypes []string) []string {
+	seen := make(map[string]struct{}, len(providerTypes))
+	out := make([]string, 0, len(providerTypes))
+	for _, providerType := range providerTypes {
+		providerType = strings.TrimSpace(providerType)
+		if providerType == "" {
+			continue
+		}
+		if _, ok := seen[providerType]; ok {
+			continue
+		}
+		seen[providerType] = struct{}{}
+		out = append(out, providerType)
+	}
+	sort.Strings(out)
+	return out
+}

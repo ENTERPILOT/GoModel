@@ -21,6 +21,7 @@ type BatchConfig struct {
 	Provider                             core.RoutableProvider
 	ModelResolver                        ModelResolver
 	ModelAuthorizer                      ModelAuthorizer
+	InputFileProviderResolver            BatchInputFileProviderResolver
 	WorkflowPolicyResolver               WorkflowPolicyResolver
 	BatchRequestPreparer                 BatchRequestPreparer
 	BatchStore                           batchstore.Store
@@ -36,6 +37,7 @@ type BatchOrchestrator struct {
 	provider                             core.RoutableProvider
 	modelResolver                        ModelResolver
 	modelAuthorizer                      ModelAuthorizer
+	inputFileProviderResolver            BatchInputFileProviderResolver
 	workflowPolicyResolver               WorkflowPolicyResolver
 	batchRequestPreparer                 BatchRequestPreparer
 	batchStore                           batchstore.Store
@@ -52,6 +54,7 @@ func NewBatchOrchestrator(cfg BatchConfig) *BatchOrchestrator {
 		provider:                             cfg.Provider,
 		modelResolver:                        cfg.ModelResolver,
 		modelAuthorizer:                      cfg.ModelAuthorizer,
+		inputFileProviderResolver:            cfg.InputFileProviderResolver,
 		workflowPolicyResolver:               cfg.WorkflowPolicyResolver,
 		batchRequestPreparer:                 cfg.BatchRequestPreparer,
 		batchStore:                           cfg.BatchStore,
@@ -109,7 +112,7 @@ func (o *BatchOrchestrator) Create(ctx context.Context, req *core.BatchRequest, 
 		return nil, core.NewInvalidRequestError("batch routing is not supported by the current provider router", nil)
 	}
 
-	selection, err := DetermineBatchExecutionSelectionWithAuthorizer(ctx, o.provider, o.modelResolver, o.modelAuthorizer, req)
+	selection, err := DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver(ctx, o.provider, o.modelResolver, o.modelAuthorizer, o.inputFileProviderResolver, req)
 	if err != nil {
 		return nil, err
 	}

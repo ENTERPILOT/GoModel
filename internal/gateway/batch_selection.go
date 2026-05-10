@@ -14,6 +14,12 @@ type BatchExecutionSelection struct {
 	Selector     core.WorkflowSelector
 }
 
+// BatchInputFileProviderResolver resolves provider ownership for an uploaded
+// batch input file.
+type BatchInputFileProviderResolver interface {
+	ResolveBatchInputFileProvider(ctx context.Context, fileID string) (providerType string, ok bool, err error)
+}
+
 // DetermineBatchExecutionSelection resolves a native batch to one provider.
 func DetermineBatchExecutionSelection(
 	provider core.RoutableProvider,
@@ -31,6 +37,20 @@ func DetermineBatchExecutionSelectionWithAuthorizer(
 	authorizer ModelAuthorizer,
 	req *core.BatchRequest,
 ) (BatchExecutionSelection, error) {
+	return DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver(ctx, provider, resolver, authorizer, nil, req)
+}
+
+// DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver resolves
+// and authorizes native batch items, using file ownership metadata for
+// file-backed batches when no explicit provider hint is supplied.
+func DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver(
+	ctx context.Context,
+	provider core.RoutableProvider,
+	resolver ModelResolver,
+	authorizer ModelAuthorizer,
+	inputFileProviderResolver BatchInputFileProviderResolver,
+	req *core.BatchRequest,
+) (BatchExecutionSelection, error) {
 	if req == nil {
 		return BatchExecutionSelection{}, core.NewInvalidRequestError("batch request is required", nil)
 	}
@@ -39,12 +59,21 @@ func DetermineBatchExecutionSelectionWithAuthorizer(
 	}
 
 	if strings.TrimSpace(req.InputFileID) != "" {
-		if req.Metadata == nil {
-			return BatchExecutionSelection{}, core.NewInvalidRequestError("metadata.provider is required for input_file_id batches", nil)
+		providerType := ""
+		if req.Metadata != nil {
+			providerType = strings.TrimSpace(req.Metadata["provider"])
 		}
-		providerType := strings.TrimSpace(req.Metadata["provider"])
+		if providerType == "" && inputFileProviderResolver != nil {
+			resolved, ok, err := inputFileProviderResolver.ResolveBatchInputFileProvider(ctx, req.InputFileID)
+			if err != nil {
+				return BatchExecutionSelection{}, err
+			}
+			if ok {
+				providerType = strings.TrimSpace(resolved)
+			}
+		}
 		if providerType == "" {
-			return BatchExecutionSelection{}, core.NewInvalidRequestError("metadata.provider is required for input_file_id batches", nil)
+			return BatchExecutionSelection{}, core.NewInvalidRequestError("unable to resolve provider for input_file_id batch", nil)
 		}
 		return BatchExecutionSelection{
 			ProviderType: providerType,

@@ -748,6 +748,24 @@ func (r *Router) NativeFileProviderTypes() []string {
 	return result
 }
 
+// NativeBatchProviderTypes returns the registered provider types that support
+// native batch operations.
+func (r *Router) NativeBatchProviderTypes() []string {
+	providerTypes := r.providerTypes()
+	result := make([]string, 0, len(providerTypes))
+	for _, providerType := range providerTypes {
+		provider := r.providerByTypeRegistry(providerType)
+		if provider == nil {
+			continue
+		}
+		if _, ok := provider.(core.NativeBatchProvider); !ok {
+			continue
+		}
+		result = append(result, providerType)
+	}
+	return result
+}
+
 // NativeResponseProviderTypes returns the registered provider types that
 // support native Responses lifecycle operations.
 func (r *Router) NativeResponseProviderTypes() []string {

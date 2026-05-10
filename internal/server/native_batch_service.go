@@ -20,6 +20,7 @@ type nativeBatchService struct {
 	provider                             core.RoutableProvider
 	modelResolver                        RequestModelResolver
 	modelAuthorizer                      RequestModelAuthorizer
+	inputFileProviderResolver            gateway.BatchInputFileProviderResolver
 	workflowPolicyResolver               RequestWorkflowPolicyResolver
 	batchRequestPreparer                 BatchRequestPreparer
 	batchStore                           batchstore.Store
@@ -40,6 +41,7 @@ func (s *nativeBatchService) batch() *gateway.BatchOrchestrator {
 		Provider:                             s.provider,
 		ModelResolver:                        s.modelResolver,
 		ModelAuthorizer:                      s.modelAuthorizer,
+		InputFileProviderResolver:            s.inputFileProviderResolver,
 		WorkflowPolicyResolver:               s.workflowPolicyResolver,
 		BatchRequestPreparer:                 s.batchRequestPreparer,
 		BatchStore:                           s.batchStore,

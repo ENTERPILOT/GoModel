@@ -10,6 +10,7 @@ import (
 	"gomodel/internal/auditlog"
 	batchstore "gomodel/internal/batch"
 	"gomodel/internal/core"
+	"gomodel/internal/filestore"
 	"gomodel/internal/responsecache"
 	"gomodel/internal/responsestore"
 	"gomodel/internal/usage"
@@ -31,6 +32,7 @@ type Handler struct {
 	budgetChecker                   BudgetChecker
 	pricingResolver                 usage.PricingResolver
 	batchStore                      batchstore.Store
+	fileStore                       filestore.Store
 	responseStore                   responsestore.Store
 	responseStoreMu                 sync.RWMutex
 	normalizePassthroughV1Prefix    bool
@@ -92,6 +94,7 @@ func newHandlerWithAuthorizer(
 		usageLogger:              usageLogger,
 		pricingResolver:          pricingResolver,
 		batchStore:               batchstore.NewMemoryStore(),
+		fileStore:                filestore.NewMemoryStore(),
 		responseStore: responsestore.NewMemoryStore(
 			responsestore.WithTTL(responsestore.DefaultMemoryStoreTTL),
 			responsestore.WithMaxEntries(responsestore.DefaultMemoryStoreMaxEntries),
@@ -108,6 +111,15 @@ func (h *Handler) SetBatchStore(store batchstore.Store) {
 		return
 	}
 	h.batchStore = store
+}
+
+// SetFileStore replaces the file provider mapping store.
+// nil is ignored to keep an always-available fallback memory store.
+func (h *Handler) SetFileStore(store filestore.Store) {
+	if store == nil {
+		return
+	}
+	h.fileStore = store
 }
 
 // SetResponseStore replaces the response snapshot store used by lifecycle endpoints.
@@ -157,6 +169,7 @@ func (h *Handler) nativeBatch() *nativeBatchService {
 		provider:                             h.provider,
 		modelResolver:                        h.modelResolver,
 		modelAuthorizer:                      h.modelAuthorizer,
+		inputFileProviderResolver:            newBatchInputFileProviderResolver(h.provider, h.fileStore),
 		workflowPolicyResolver:               h.workflowPolicyResolver,
 		batchRequestPreparer:                 h.batchRequestPreparer,
 		batchStore:                           h.batchStore,
@@ -169,7 +182,7 @@ func (h *Handler) nativeBatch() *nativeBatchService {
 }
 
 func (h *Handler) nativeFiles() *nativeFileService {
-	return &nativeFileService{provider: h.provider}
+	return &nativeFileService{provider: h.provider, fileStore: h.fileStore}
 }
 
 func (h *Handler) nativeResponses() *nativeResponseService {

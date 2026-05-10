@@ -22,6 +22,7 @@ import (
 	"gomodel/internal/auditlog"
 	batchstore "gomodel/internal/batch"
 	"gomodel/internal/core"
+	"gomodel/internal/filestore"
 	"gomodel/internal/responsecache"
 	"gomodel/internal/responsestore"
 	"gomodel/internal/usage"
@@ -64,6 +65,7 @@ type Config struct {
 	KeepOnlyAliasesAtModelsEndpoint bool                                   // Whether GET /v1/models should hide concrete provider models
 	PassthroughSemanticEnrichers    []core.PassthroughSemanticEnricher     // Optional: provider-owned passthrough semantic enrichers before workflow resolution
 	BatchStore                      batchstore.Store                       // Optional: Batch lifecycle persistence store
+	FileStore                       filestore.Store                        // Optional: File provider mapping persistence store
 	ResponseStore                   responsestore.Store                    // Optional: Responses lifecycle persistence store
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
@@ -137,6 +139,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	if cfg != nil && cfg.BatchStore != nil {
 		handler.SetBatchStore(cfg.BatchStore)
+	}
+	if cfg != nil && cfg.FileStore != nil {
+		handler.SetFileStore(cfg.FileStore)
 	}
 	if cfg != nil && cfg.ResponseStore != nil {
 		handler.SetResponseStore(cfg.ResponseStore)

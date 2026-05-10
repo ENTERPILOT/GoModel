@@ -178,6 +178,15 @@ func (p *Provider) NativeFileProviderTypes() []string {
 	return nil
 }
 
+// NativeBatchProviderTypes delegates provider capability inventory to the inner
+// provider when available.
+func (p *Provider) NativeBatchProviderTypes() []string {
+	if typed, ok := p.inner.(core.NativeBatchProviderTypeLister); ok {
+		return typed.NativeBatchProviderTypes()
+	}
+	return nil
+}
+
 // NativeResponseProviderTypes delegates provider capability inventory to the
 // inner provider when available.
 func (p *Provider) NativeResponseProviderTypes() []string {
