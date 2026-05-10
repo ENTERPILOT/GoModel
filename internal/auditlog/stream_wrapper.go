@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"maps"
+	"sort"
 	"strings"
 )
 
@@ -10,12 +11,14 @@ import (
 // streamResponseBuilder accumulates data from SSE events to reconstruct a response
 type streamResponseBuilder struct {
 	// ChatCompletion fields
-	ID           string
-	Model        string
-	Created      int64
-	Role         string
-	FinishReason string
-	Content      strings.Builder // accumulated delta content
+	ID                string
+	Model             string
+	Provider          string
+	SystemFingerprint string
+	Created           int64
+	Usage             map[string]any
+	Choices           map[int]*streamChatChoiceState
+	Content           strings.Builder // accumulated Responses API output text
 
 	// Responses API fields
 	IsResponsesAPI bool
@@ -28,29 +31,144 @@ type streamResponseBuilder struct {
 	truncated  bool
 }
 
+type streamChatToolCallState struct {
+	ID        string
+	Type      string
+	Name      string
+	Arguments strings.Builder
+}
+
+type streamChatChoiceState struct {
+	Role         string
+	Content      strings.Builder
+	FinishReason string
+	ToolCalls    map[int]*streamChatToolCallState
+}
+
 // buildChatCompletionResponse constructs a ChatCompletion response from accumulated data
 func (b *streamResponseBuilder) buildChatCompletionResponse() map[string]any {
-	role := strings.TrimSpace(b.Role)
-	if role == "" {
-		role = "assistant"
-	}
+	choices := b.buildChatChoices()
 
-	return map[string]any{
+	response := map[string]any{
 		"id":      b.ID,
 		"object":  "chat.completion",
 		"model":   b.Model,
 		"created": b.Created,
-		"choices": []map[string]any{
+		"choices": choices,
+	}
+	if b.Provider != "" {
+		response["provider"] = b.Provider
+	}
+	if b.SystemFingerprint != "" {
+		response["system_fingerprint"] = b.SystemFingerprint
+	}
+	if b.Usage != nil {
+		response["usage"] = b.Usage
+	}
+	return response
+}
+
+func (b *streamResponseBuilder) buildChatChoices() []map[string]any {
+	if len(b.Choices) == 0 {
+		return []map[string]any{
 			{
 				"index": 0,
 				"message": map[string]any{
-					"role":    role,
-					"content": b.Content.String(),
+					"role":    "assistant",
+					"content": "",
 				},
-				"finish_reason": b.FinishReason,
+				"finish_reason": "",
 			},
-		},
+		}
 	}
+
+	indexes := make([]int, 0, len(b.Choices))
+	for index := range b.Choices {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+
+	choices := make([]map[string]any, 0, len(indexes))
+	for _, index := range indexes {
+		state := b.Choices[index]
+		message := map[string]any{
+			"role": nonEmptyString(state.Role, "assistant"),
+		}
+
+		content := state.Content.String()
+		toolCalls := buildStreamChatToolCalls(state.ToolCalls)
+		switch {
+		case content != "":
+			message["content"] = content
+		case len(toolCalls) > 0:
+			message["content"] = nil
+		default:
+			message["content"] = ""
+		}
+		if len(toolCalls) > 0 {
+			message["tool_calls"] = toolCalls
+		}
+
+		choices = append(choices, map[string]any{
+			"index":         index,
+			"message":       message,
+			"finish_reason": state.FinishReason,
+		})
+	}
+
+	return choices
+}
+
+func buildStreamChatToolCalls(states map[int]*streamChatToolCallState) []map[string]any {
+	if len(states) == 0 {
+		return nil
+	}
+
+	indexes := make([]int, 0, len(states))
+	for index := range states {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+
+	toolCalls := make([]map[string]any, 0, len(indexes))
+	for _, index := range indexes {
+		state := states[index]
+		toolCalls = append(toolCalls, map[string]any{
+			"id":   state.ID,
+			"type": nonEmptyString(state.Type, "function"),
+			"function": map[string]any{
+				"name":      state.Name,
+				"arguments": state.Arguments.String(),
+			},
+		})
+	}
+	return toolCalls
+}
+
+func (b *streamResponseBuilder) chatChoice(index int) *streamChatChoiceState {
+	if b.Choices == nil {
+		b.Choices = make(map[int]*streamChatChoiceState)
+	}
+	state, ok := b.Choices[index]
+	if ok {
+		return state
+	}
+	state = &streamChatChoiceState{ToolCalls: make(map[int]*streamChatToolCallState)}
+	b.Choices[index] = state
+	return state
+}
+
+func (c *streamChatChoiceState) toolCall(index int) *streamChatToolCallState {
+	if c.ToolCalls == nil {
+		c.ToolCalls = make(map[int]*streamChatToolCallState)
+	}
+	state, ok := c.ToolCalls[index]
+	if ok {
+		return state
+	}
+	state = &streamChatToolCallState{}
+	c.ToolCalls[index] = state
+	return state
 }
 
 // buildResponsesAPIResponse constructs a Responses API response from accumulated data
@@ -139,6 +257,47 @@ func copyMap(m map[string]string) map[string]string {
 	result := make(map[string]string, len(m))
 	maps.Copy(result, m)
 	return result
+}
+
+func copyAnyMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	return maps.Clone(m)
+}
+
+func jsonNumberToInt(value any) (int, bool) {
+	switch v := value.(type) {
+	case float64:
+		return int(v), true
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	default:
+		return 0, false
+	}
+}
+
+func jsonNumberToInt64(value any) (int64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return int64(v), true
+	case int:
+		return int64(v), true
+	case int64:
+		return v, true
+	default:
+		return 0, false
+	}
+}
+
+func nonEmptyString(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value != "" {
+		return value
+	}
+	return strings.TrimSpace(fallback)
 }
 
 // GetStreamEntryFromContext retrieves the log entry from Echo context for streaming.

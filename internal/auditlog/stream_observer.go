@@ -161,34 +161,114 @@ func parseChatCompletionEvent(builder *streamResponseBuilder, event map[string]a
 		return
 	}
 
-	if builder.ID == "" {
-		if id, ok := event["id"].(string); ok {
-			builder.ID = id
-		}
-		if model, ok := event["model"].(string); ok {
-			builder.Model = model
-		}
-		if created, ok := event["created"].(float64); ok {
-			builder.Created = int64(created)
-		}
+	if id, ok := event["id"].(string); ok && id != "" {
+		builder.ID = id
+	}
+	if model, ok := event["model"].(string); ok && model != "" {
+		builder.Model = model
+	}
+	if provider, ok := event["provider"].(string); ok && provider != "" {
+		builder.Provider = provider
+	}
+	if fingerprint, ok := event["system_fingerprint"].(string); ok && fingerprint != "" {
+		builder.SystemFingerprint = fingerprint
+	}
+	if created, ok := jsonNumberToInt64(event["created"]); ok {
+		builder.Created = created
+	}
+	if usage, ok := event["usage"].(map[string]any); ok {
+		builder.Usage = copyAnyMap(usage)
 	}
 
 	if choices, ok := event["choices"].([]any); ok && len(choices) > 0 {
-		if choice, ok := choices[0].(map[string]any); ok {
+		for _, choiceAny := range choices {
+			choice, ok := choiceAny.(map[string]any)
+			if !ok {
+				continue
+			}
+			index, ok := jsonNumberToInt(choice["index"])
+			if !ok {
+				index = defaultChatChoiceIndex(builder.Choices)
+			}
+			state := builder.chatChoice(index)
 			if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
-				builder.FinishReason = fr
+				state.FinishReason = fr
 			}
 
 			if delta, ok := choice["delta"].(map[string]any); ok {
 				if role, ok := delta["role"].(string); ok {
-					builder.Role = role
+					state.Role = role
 				}
 				if content, ok := delta["content"].(string); ok && content != "" {
-					appendStreamContent(builder, content)
+					appendChatContent(builder, state, content)
 				}
+				appendChatToolCalls(builder, state, delta)
 			}
 		}
 	}
+}
+
+func defaultChatChoiceIndex(states map[int]*streamChatChoiceState) int {
+	if len(states) == 1 {
+		for index := range states {
+			return index
+		}
+	}
+	return len(states)
+}
+
+func appendChatContent(builder *streamResponseBuilder, state *streamChatChoiceState, content string) {
+	if state == nil {
+		return
+	}
+	appendLimitedStreamText(builder, &state.Content, content)
+}
+
+func appendChatToolCalls(builder *streamResponseBuilder, state *streamChatChoiceState, delta map[string]any) {
+	if state == nil || delta == nil {
+		return
+	}
+
+	toolCalls, ok := delta["tool_calls"].([]any)
+	if !ok {
+		return
+	}
+	for _, toolAny := range toolCalls {
+		toolMap, ok := toolAny.(map[string]any)
+		if !ok {
+			continue
+		}
+		toolIndex, ok := jsonNumberToInt(toolMap["index"])
+		if !ok {
+			toolIndex = defaultToolCallIndex(state.ToolCalls)
+		}
+		toolState := state.toolCall(toolIndex)
+		if id, ok := toolMap["id"].(string); ok && id != "" && toolState.ID == "" {
+			toolState.ID = id
+		}
+		if typ, ok := toolMap["type"].(string); ok && typ != "" && toolState.Type == "" {
+			toolState.Type = typ
+		}
+		function, ok := toolMap["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, ok := function["name"].(string); ok && name != "" && toolState.Name == "" {
+			toolState.Name = name
+		}
+		if arguments, ok := function["arguments"].(string); ok && arguments != "" {
+			appendLimitedStreamText(builder, &toolState.Arguments, arguments)
+		}
+	}
+}
+
+func defaultToolCallIndex(states map[int]*streamChatToolCallState) int {
+	if len(states) == 1 {
+		for index := range states {
+			return index
+		}
+	}
+	return len(states)
 }
 
 func parseResponsesAPIEvent(builder *streamResponseBuilder, event map[string]any) {
@@ -221,7 +301,14 @@ func parseResponsesAPIEvent(builder *streamResponseBuilder, event map[string]any
 }
 
 func appendStreamContent(builder *streamResponseBuilder, content string) {
-	if builder == nil || builder.truncated || builder.contentLen >= MaxContentCapture {
+	if builder == nil {
+		return
+	}
+	appendLimitedStreamText(builder, &builder.Content, content)
+}
+
+func appendLimitedStreamText(builder *streamResponseBuilder, dst *strings.Builder, content string) {
+	if builder == nil || dst == nil || content == "" || builder.truncated || builder.contentLen >= MaxContentCapture {
 		return
 	}
 
@@ -230,6 +317,6 @@ func appendStreamContent(builder *streamResponseBuilder, content string) {
 		content = content[:remaining]
 		builder.truncated = true
 	}
-	builder.Content.WriteString(content)
+	dst.WriteString(content)
 	builder.contentLen += len(content)
 }
