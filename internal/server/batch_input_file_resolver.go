@@ -32,6 +32,7 @@ func (r *batchInputFileProviderResolver) ResolveBatchInputFileProvider(ctx conte
 	if fileID == "" {
 		return "", false, nil
 	}
+	var lookupErr error
 	if r.fileStore != nil {
 		stored, err := r.fileStore.Get(ctx, fileID)
 		switch {
@@ -41,10 +42,23 @@ func (r *batchInputFileProviderResolver) ResolveBatchInputFileProvider(ctx conte
 			// Legacy rows without provider_type fall through to provider probing.
 		case errors.Is(err, filestore.ErrNotFound):
 		default:
-			return "", false, core.NewProviderError("file_store", http.StatusInternalServerError, "failed to look up input file provider", err)
+			lookupErr = err
 		}
 	}
-	return r.resolveProviderByFallback(ctx, fileID)
+	providerType, ok, fallbackErr := r.resolveProviderByFallback(ctx, fileID)
+	if fallbackErr != nil {
+		if lookupErr != nil {
+			return "", false, core.NewProviderError("file_store", http.StatusBadGateway, "failed to resolve input file provider", errors.Join(lookupErr, fallbackErr))
+		}
+		return "", false, fallbackErr
+	}
+	if ok {
+		return providerType, true, nil
+	}
+	if lookupErr != nil {
+		return "", false, core.NewProviderError("file_store", http.StatusInternalServerError, "failed to look up input file provider and fallback provider probing did not resolve the file", lookupErr)
+	}
+	return "", false, nil
 }
 
 func (r *batchInputFileProviderResolver) resolveProviderByFallback(ctx context.Context, fileID string) (string, bool, error) {

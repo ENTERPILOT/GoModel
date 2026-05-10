@@ -322,16 +322,16 @@ func (s *nativeFileService) storedProviderForFile(ctx context.Context, id string
 		return "", false, nil
 	}
 	stored, err := s.fileStore.Get(ctx, id)
-	switch {
-	case err == nil && stored != nil && strings.TrimSpace(stored.ProviderType) != "":
-		return strings.TrimSpace(stored.ProviderType), true, nil
-	case err == nil:
+	if err != nil {
+		if !errors.Is(err, filestore.ErrNotFound) {
+			slog.Warn("failed to look up file provider mapping", "file_id", id, "error", err)
+		}
 		return "", false, nil
-	case errors.Is(err, filestore.ErrNotFound):
-		return "", false, nil
-	default:
-		return "", false, core.NewProviderError("file_store", http.StatusInternalServerError, "failed to look up file provider mapping", err)
 	}
+	if stored != nil && strings.TrimSpace(stored.ProviderType) != "" {
+		return strings.TrimSpace(stored.ProviderType), true, nil
+	}
+	return "", false, nil
 }
 
 func (s *nativeFileService) deleteStoredFileMapping(ctx context.Context, id string) error {

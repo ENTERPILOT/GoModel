@@ -3,8 +3,12 @@ package filestore
 import (
 	"context"
 	"database/sql"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "modernc.org/sqlite"
 )
 
@@ -28,15 +32,35 @@ func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
 				_ = db.Close()
 			}
 		},
+		"postgres": func(t *testing.T) (Store, func()) {
+			dsn := os.Getenv("TEST_DATABASE_DSN")
+			if dsn == "" {
+				t.Skip("TEST_DATABASE_DSN is not set")
+			}
+			pool, err := pgxpool.New(ctx, dsn)
+			if err != nil {
+				t.Fatalf("pgxpool.New() error = %v", err)
+			}
+			store, err := NewPostgreSQLStore(ctx, pool)
+			if err != nil {
+				pool.Close()
+				t.Fatalf("NewPostgreSQLStore() error = %v", err)
+			}
+			return store, pool.Close
+		},
 	}
 
 	for name, newStore := range stores {
 		t.Run(name, func(t *testing.T) {
 			store, cleanup := newStore(t)
 			defer cleanup()
+			fileID := "file_" + strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().Format("20060102150405.000000000")
+			defer func() {
+				_ = store.Delete(ctx, fileID)
+			}()
 
 			if err := store.Upsert(ctx, &StoredFile{
-				ID:           "file_1",
+				ID:           fileID,
 				ProviderType: "openai",
 				Purpose:      "batch",
 				Filename:     "original.jsonl",
@@ -47,7 +71,7 @@ func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
 				t.Fatalf("initial Upsert() error = %v", err)
 			}
 			if err := store.Upsert(ctx, &StoredFile{
-				ID:           "file_1",
+				ID:           fileID,
 				ProviderType: "anthropic",
 				Purpose:      "fine-tune",
 				Filename:     "updated.jsonl",
@@ -58,7 +82,7 @@ func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
 				t.Fatalf("second Upsert() error = %v", err)
 			}
 
-			stored, err := store.Get(ctx, "file_1")
+			stored, err := store.Get(ctx, fileID)
 			if err != nil {
 				t.Fatalf("Get() error = %v", err)
 			}
