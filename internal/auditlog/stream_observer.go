@@ -314,11 +314,15 @@ func appendStreamContent(builder *streamResponseBuilder, content string) {
 }
 
 func appendLimitedStreamText(builder *streamResponseBuilder, dst *strings.Builder, content string) {
-	if builder == nil || dst == nil || content == "" || builder.truncated || builder.contentLen >= MaxContentCapture {
+	if builder == nil || dst == nil || content == "" || builder.truncated {
 		return
 	}
 
 	remaining := MaxContentCapture - builder.contentLen
+	if remaining <= 0 {
+		builder.truncated = true
+		return
+	}
 	if len(content) > remaining {
 		content = content[:remaining]
 		builder.truncated = true

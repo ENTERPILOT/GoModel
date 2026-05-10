@@ -98,6 +98,10 @@ func (b *streamResponseBuilder) buildChatChoices() []map[string]any {
 
 		content := state.Content.String()
 		toolCalls := buildStreamChatToolCalls(state.ToolCalls)
+		// OpenAI chat messages distinguish tool-only output from an explicitly
+		// empty message: no state.Content.String() plus state.ToolCalls renders
+		// message["content"] as nil; no text and no buildStreamChatToolCalls(...)
+		// result renders message["content"] as "".
 		switch {
 		case content != "":
 			message["content"] = content

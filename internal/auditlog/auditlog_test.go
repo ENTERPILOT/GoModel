@@ -1159,6 +1159,23 @@ func TestStreamResponseBuilderChatCapturesTrailingUsageChunk(t *testing.T) {
 	}
 }
 
+func TestAppendLimitedStreamTextMarksTruncatedWhenBudgetAlreadyFull(t *testing.T) {
+	builder := &streamResponseBuilder{contentLen: MaxContentCapture}
+	var dst strings.Builder
+
+	appendLimitedStreamText(builder, &dst, "x")
+
+	if !builder.truncated {
+		t.Fatal("truncated = false, want true when a non-empty chunk arrives after the capture budget is full")
+	}
+	if got := dst.String(); got != "" {
+		t.Fatalf("captured text = %q, want empty", got)
+	}
+	if got := builder.contentLen; got != MaxContentCapture {
+		t.Fatalf("contentLen = %d, want %d", got, MaxContentCapture)
+	}
+}
+
 func buildChatStreamResponseForTest(t *testing.T, events ...string) map[string]any {
 	t.Helper()
 
