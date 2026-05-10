@@ -287,6 +287,119 @@ func TestBuildConverseParts_RejectsMaxTokensOverflow(t *testing.T) {
 	}
 }
 
+func TestBuildConverseParts_ToolResultBatchesDoNotAliasAcrossTurns(t *testing.T) {
+	// Regression: flushToolResults previously returned blocks[:0], which
+	// shared the backing array with the emitted message's Content. The next
+	// pending tool result then overwrote the first element of the earlier
+	// turn's Content. Verify both turns retain their original tool IDs.
+	req := &core.ChatRequest{
+		Model: "anthropic.claude-3-5-haiku-20241022-v1:0",
+		Messages: []core.Message{
+			{Role: "user", Content: "weather in A and B?"},
+			{Role: "assistant", ToolCalls: []core.ToolCall{
+				{ID: "c1", Type: "function", Function: core.FunctionCall{Name: "get_weather", Arguments: `{"city":"A"}`}},
+				{ID: "c2", Type: "function", Function: core.FunctionCall{Name: "get_weather", Arguments: `{"city":"B"}`}},
+			}},
+			{Role: "tool", ToolCallID: "c1", Content: "A: sunny"},
+			{Role: "tool", ToolCallID: "c2", Content: "B: rainy"},
+			{Role: "assistant", ToolCalls: []core.ToolCall{
+				{ID: "c3", Type: "function", Function: core.FunctionCall{Name: "get_weather", Arguments: `{"city":"C"}`}},
+			}},
+			{Role: "tool", ToolCallID: "c3", Content: "C: snowy"},
+		},
+	}
+	parts, err := buildConverseParts(req)
+	if err != nil {
+		t.Fatalf("buildConverseParts: %v", err)
+	}
+
+	collectIDs := func(content []brtypes.ContentBlock) []string {
+		var ids []string
+		for _, blk := range content {
+			if tr, ok := blk.(*brtypes.ContentBlockMemberToolResult); ok {
+				ids = append(ids, awssdk.ToString(tr.Value.ToolUseId))
+			}
+		}
+		return ids
+	}
+	var firstBatch, secondBatch []string
+	for _, msg := range parts.messages {
+		if msg.Role != brtypes.ConversationRoleUser {
+			continue
+		}
+		ids := collectIDs(msg.Content)
+		if len(ids) == 0 {
+			continue
+		}
+		if firstBatch == nil {
+			firstBatch = ids
+		} else {
+			secondBatch = ids
+		}
+	}
+	if got, want := firstBatch, []string{"c1", "c2"}; !equalStrings(got, want) {
+		t.Errorf("first turn tool result IDs = %v, want %v (aliasing bug overwrote them)", got, want)
+	}
+	if got, want := secondBatch, []string{"c3"}; !equalStrings(got, want) {
+		t.Errorf("second turn tool result IDs = %v, want %v", got, want)
+	}
+}
+
+func TestBuildConverseParts_MergesUserTextAfterToolResult(t *testing.T) {
+	// [user, assistant_tool_call, tool, user_text] would otherwise produce
+	// [user, asst, user_tool_result, user_text] — two consecutive user turns,
+	// which Bedrock rejects with ValidationException. The two adjacent user
+	// blocks must merge into one turn.
+	req := &core.ChatRequest{
+		Model: "anthropic.claude-3-5-haiku-20241022-v1:0",
+		Messages: []core.Message{
+			{Role: "user", Content: "weather in Warsaw?"},
+			{Role: "assistant", ToolCalls: []core.ToolCall{
+				{ID: "c1", Type: "function", Function: core.FunctionCall{Name: "get_weather", Arguments: `{"city":"Warsaw"}`}},
+			}},
+			{Role: "tool", ToolCallID: "c1", Content: "15C sunny"},
+			{Role: "user", Content: "thanks!"},
+		},
+	}
+	parts, err := buildConverseParts(req)
+	if err != nil {
+		t.Fatalf("buildConverseParts: %v", err)
+	}
+	if len(parts.messages) != 3 {
+		t.Fatalf("expected 3 turns (user, asst, merged-user), got %d", len(parts.messages))
+	}
+	last := parts.messages[2]
+	if last.Role != brtypes.ConversationRoleUser {
+		t.Fatalf("last role = %q, want user", last.Role)
+	}
+	// Expect [ToolResult, Text] in the merged user message.
+	if len(last.Content) != 2 {
+		t.Fatalf("merged user message should have 2 blocks, got %d", len(last.Content))
+	}
+	if _, ok := last.Content[0].(*brtypes.ContentBlockMemberToolResult); !ok {
+		t.Errorf("first block should be ToolResult, got %T", last.Content[0])
+	}
+	tb, ok := last.Content[1].(*brtypes.ContentBlockMemberText)
+	if !ok {
+		t.Fatalf("second block should be Text, got %T", last.Content[1])
+	}
+	if tb.Value != "thanks!" {
+		t.Errorf("merged text = %q, want %q", tb.Value, "thanks!")
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestBuildConverseParts_AssistantToolCallsRoundtrip(t *testing.T) {
 	req := &core.ChatRequest{
 		Model: "anthropic.claude-3-5-haiku-20241022-v1:0",

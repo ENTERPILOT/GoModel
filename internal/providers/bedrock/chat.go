@@ -113,18 +113,31 @@ func convertMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []b
 	out := make([]brtypes.Message, 0, len(messages))
 
 	// Bedrock's Converse API requires strictly alternating user/assistant
-	// turns. When the caller sends N parallel tool results (N consecutive
-	// tool-role messages), they all belong to the same user turn and must be
-	// folded into a single user message with N ToolResult content blocks.
+	// turns. Two adjacent inputs with the same role (the common pattern
+	// being a tool result followed by an additional user text message, or N
+	// parallel tool results) must collapse into a single Bedrock turn whose
+	// Content holds the union of their blocks.
+	appendOrMerge := func(role brtypes.ConversationRole, content []brtypes.ContentBlock) {
+		if len(content) == 0 {
+			return
+		}
+		if n := len(out); n > 0 && out[n-1].Role == role {
+			out[n-1].Content = append(out[n-1].Content, content...)
+			return
+		}
+		out = append(out, brtypes.Message{Role: role, Content: content})
+	}
+	// flushToolResults emits the buffered tool-result blocks (if any) as a
+	// user turn and returns nil so the caller's pending slice no longer
+	// aliases the emitted message's Content backing array. Returning
+	// blocks[:0] would let a subsequent append silently overwrite the first
+	// element of the previously emitted message.
 	flushToolResults := func(blocks []brtypes.ContentBlock) []brtypes.ContentBlock {
 		if len(blocks) == 0 {
-			return blocks
+			return nil
 		}
-		out = append(out, brtypes.Message{
-			Role:    brtypes.ConversationRoleUser,
-			Content: blocks,
-		})
-		return blocks[:0]
+		appendOrMerge(brtypes.ConversationRoleUser, blocks)
+		return nil
 	}
 
 	var pendingToolResults []brtypes.ContentBlock
@@ -150,22 +163,14 @@ func convertMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []b
 			if text == "" {
 				continue
 			}
-			out = append(out, brtypes.Message{
-				Role:    brtypes.ConversationRoleUser,
-				Content: []brtypes.ContentBlock{&brtypes.ContentBlockMemberText{Value: text}},
-			})
+			appendOrMerge(brtypes.ConversationRoleUser,
+				[]brtypes.ContentBlock{&brtypes.ContentBlockMemberText{Value: text}})
 		case "assistant":
 			blocks, err := convertAssistantMessage(msg)
 			if err != nil {
 				return nil, nil, err
 			}
-			if len(blocks) == 0 {
-				continue
-			}
-			out = append(out, brtypes.Message{
-				Role:    brtypes.ConversationRoleAssistant,
-				Content: blocks,
-			})
+			appendOrMerge(brtypes.ConversationRoleAssistant, blocks)
 		default:
 			return nil, nil, core.NewInvalidRequestError("unsupported message role: "+msg.Role, nil)
 		}
