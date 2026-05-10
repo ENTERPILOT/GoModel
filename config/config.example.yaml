@@ -291,6 +291,19 @@ providers:
   #   base_url: "https://api.deepseek.com"
   #   api_key: "${DEEPSEEK_API_KEY}"
 
+  # Example: Amazon Bedrock. The provider has no API key — auth is taken from
+  # the standard AWS credential chain (env vars, AWS_PROFILE, IAM Identity
+  # Center, container/instance roles). Set base_url to either an AWS region
+  # ("us-east-1") or a full https endpoint to enable the provider; without it
+  # gomodel falls back to AWS_REGION / AWS_DEFAULT_REGION.
+  # bedrock:
+  #   type: "bedrock"
+  #   base_url: "us-east-1"
+  #   # Optional configured model allowlist (model IDs or inference profiles)
+  #   # models:
+  #   #   - anthropic.claude-3-5-haiku-20241022-v1:0
+  #   #   - amazon.nova-lite-v1:0
+
   # Example: local Ollama server with explicit per-model metadata.
   # Use the rich entry form to declare context_window, pricing, capabilities,
   # etc. for models that aren't in the upstream ai-model-list registry. Plain

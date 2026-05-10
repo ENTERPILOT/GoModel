@@ -104,6 +104,7 @@ Example model identifiers are illustrative and subject to change; consult provid
 | Oracle        | `ORACLE_API_KEY` + `ORACLE_BASE_URL`                              | `openai.gpt-oss-120b`              |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ❌    |
 | Ollama        | `OLLAMA_BASE_URL`                                                 | `llama3.2`                         |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ❌    |
 | vLLM          | `VLLM_BASE_URL` (`VLLM_API_KEY` optional)                         | `meta-llama/Llama-3.1-8B-Instruct` |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ✅    |
+| Amazon Bedrock | `BEDROCK_BASE_URL` (region or endpoint) + AWS credentials        | `anthropic.claude-3-5-haiku-20241022-v1:0` |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ❌    |
 
 ✅ Supported ❌ Unsupported
 

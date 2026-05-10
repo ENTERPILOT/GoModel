@@ -18,6 +18,7 @@ import (
 	"gomodel/internal/providers"
 	"gomodel/internal/providers/anthropic"
 	"gomodel/internal/providers/azure"
+	"gomodel/internal/providers/bedrock"
 	"gomodel/internal/providers/deepseek"
 	"gomodel/internal/providers/gemini"
 	"gomodel/internal/providers/groq"
@@ -121,6 +122,7 @@ func main() {
 	factory.Add(azure.Registration)
 	factory.Add(oracle.Registration)
 	factory.Add(anthropic.Registration)
+	factory.Add(bedrock.Registration)
 	factory.Add(deepseek.Registration)
 	factory.Add(gemini.Registration)
 	factory.Add(vertex.Registration)
