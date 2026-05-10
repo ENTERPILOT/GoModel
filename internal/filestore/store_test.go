@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	_ "modernc.org/sqlite"
 )
 
@@ -47,6 +49,26 @@ func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
 				t.Fatalf("NewPostgreSQLStore() error = %v", err)
 			}
 			return store, pool.Close
+		},
+		"mongo": func(t *testing.T) (Store, func()) {
+			dsn := os.Getenv("MONGO_TEST_DSN")
+			if dsn == "" {
+				t.Skip("MONGO_TEST_DSN is not set")
+			}
+			client, err := mongo.Connect(options.Client().ApplyURI(dsn))
+			if err != nil {
+				t.Fatalf("mongo.Connect() error = %v", err)
+			}
+			db := client.Database("gomodel_filestore_test_" + strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().Format("20060102150405_000000000"))
+			store, err := NewMongoDBStore(db)
+			if err != nil {
+				_ = client.Disconnect(ctx)
+				t.Fatalf("NewMongoDBStore() error = %v", err)
+			}
+			return store, func() {
+				_ = db.Drop(ctx)
+				_ = client.Disconnect(ctx)
+			}
 		},
 	}
 

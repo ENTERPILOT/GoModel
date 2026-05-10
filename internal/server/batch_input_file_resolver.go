@@ -48,6 +48,9 @@ func (r *batchInputFileProviderResolver) ResolveBatchInputFileProvider(ctx conte
 	providerType, ok, fallbackErr := r.resolveProviderByFallback(ctx, fileID)
 	if fallbackErr != nil {
 		if lookupErr != nil {
+			if isClientGatewayError(fallbackErr) {
+				return "", false, fallbackErr
+			}
 			return "", false, core.NewProviderError("file_store", http.StatusBadGateway, "failed to resolve input file provider", errors.Join(lookupErr, fallbackErr))
 		}
 		return "", false, fallbackErr
@@ -59,6 +62,15 @@ func (r *batchInputFileProviderResolver) ResolveBatchInputFileProvider(ctx conte
 		return "", false, core.NewProviderError("file_store", http.StatusInternalServerError, "failed to look up input file provider and fallback provider probing did not resolve the file", lookupErr)
 	}
 	return "", false, nil
+}
+
+func isClientGatewayError(err error) bool {
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		return false
+	}
+	status := gatewayErr.HTTPStatusCode()
+	return status >= http.StatusBadRequest && status < http.StatusInternalServerError
 }
 
 func (r *batchInputFileProviderResolver) resolveProviderByFallback(ctx context.Context, fileID string) (string, bool, error) {

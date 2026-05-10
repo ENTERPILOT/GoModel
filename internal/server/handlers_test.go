@@ -3964,6 +3964,29 @@ func TestBatches_FileStoreLookupErrorFallsBackToProvider(t *testing.T) {
 	require.Equal(t, "file_source", mock.capturedBatchReq.InputFileID)
 }
 
+func TestBatches_FileStoreLookupErrorPreservesClientFallbackError(t *testing.T) {
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini", "claude-3-haiku"},
+		providerTypes: map[string]string{
+			"gpt-4o-mini":    "openai",
+			"claude-3-haiku": "anthropic",
+		},
+		fileErrByProvider: map[string]error{
+			"anthropic": core.NewNotFoundError("file not found"),
+			"openai":    core.NewInvalidRequestError("provider rejected file id", nil),
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+	handler.SetFileStore(failingFileStore{err: errors.New("file store unavailable")})
+
+	batchRec := createInputFileBatchForTest(t, e, handler, "file_source", "")
+	require.Equal(t, http.StatusBadRequest, batchRec.Code)
+	require.Contains(t, batchRec.Body.String(), "provider rejected file id")
+	require.Nil(t, mock.capturedBatchReq)
+}
+
 func TestBatches_CleansUpPreparedInputFileOnCreateFailure(t *testing.T) {
 	mock := &mockProvider{
 		batchErr: errors.New("provider boom"),
