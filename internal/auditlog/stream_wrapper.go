@@ -18,13 +18,13 @@ type streamResponseBuilder struct {
 	Created           int64
 	Usage             map[string]any
 	Choices           map[int]*streamChatChoiceState
-	Content           strings.Builder // accumulated Responses API output text
 
 	// Responses API fields
 	IsResponsesAPI bool
 	ResponseID     string
 	CreatedAt      int64
 	Status         string
+	OutputText     strings.Builder
 
 	// Tracking
 	contentLen int // track content length to enforce limit
@@ -190,7 +190,7 @@ func (b *streamResponseBuilder) buildResponsesAPIResponse() map[string]any {
 				"content": []map[string]any{
 					{
 						"type": "output_text",
-						"text": b.Content.String(),
+						"text": b.OutputText.String(),
 					},
 				},
 			},

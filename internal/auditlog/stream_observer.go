@@ -209,6 +209,10 @@ func parseChatCompletionEvent(builder *streamResponseBuilder, event map[string]a
 }
 
 func defaultChatChoiceIndex(states map[int]*streamChatChoiceState) int {
+	return defaultStreamStateIndex(states)
+}
+
+func defaultStreamStateIndex[T any](states map[int]T) int {
 	if len(states) == 1 {
 		for index := range states {
 			return index
@@ -270,18 +274,7 @@ func appendChatToolCalls(builder *streamResponseBuilder, state *streamChatChoice
 }
 
 func defaultToolCallIndex(states map[int]*streamChatToolCallState) int {
-	if len(states) == 1 {
-		for index := range states {
-			return index
-		}
-	}
-	maxIndex := -1
-	for index := range states {
-		if index > maxIndex {
-			maxIndex = index
-		}
-	}
-	return maxIndex + 1
+	return defaultStreamStateIndex(states)
 }
 
 func parseResponsesAPIEvent(builder *streamResponseBuilder, event map[string]any) {
@@ -317,7 +310,7 @@ func appendStreamContent(builder *streamResponseBuilder, content string) {
 	if builder == nil {
 		return
 	}
-	appendLimitedStreamText(builder, &builder.Content, content)
+	appendLimitedStreamText(builder, &builder.OutputText, content)
 }
 
 func appendLimitedStreamText(builder *streamResponseBuilder, dst *strings.Builder, content string) {
