@@ -331,6 +331,24 @@ func (s *failingBatchStore) Close() error {
 	return nil
 }
 
+type emptyProviderFileStore struct{}
+
+func (emptyProviderFileStore) Upsert(context.Context, *filestore.StoredFile) error {
+	return nil
+}
+
+func (emptyProviderFileStore) Get(_ context.Context, id string) (*filestore.StoredFile, error) {
+	return &filestore.StoredFile{ID: id}, nil
+}
+
+func (emptyProviderFileStore) Delete(context.Context, string) error {
+	return nil
+}
+
+func (emptyProviderFileStore) Close() error {
+	return nil
+}
+
 // mockProvider implements core.RoutableProvider for testing
 type mockProvider struct {
 	err               error
@@ -3702,6 +3720,55 @@ func TestBatches_UsesExplicitBatchRequestPreparer(t *testing.T) {
 	}, stored.RequestEndpointByCustomID)
 }
 
+func uploadBatchInputFileForTest(t *testing.T, e *echo.Echo, handler *Handler, providerType string) {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("purpose", "batch"))
+	if providerType != "" {
+		require.NoError(t, writer.WriteField("provider", providerType))
+	}
+	part, err := writer.CreateFormFile("file", "requests.jsonl")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("{\"custom_id\":\"1\"}\n"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/v1/files", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadFrame := core.NewRequestSnapshot(http.MethodPost, "/v1/files", nil, nil, nil, writer.FormDataContentType(), nil, false, "", nil)
+	uploadReq = withRequestSnapshotAndPrompt(uploadReq, uploadFrame)
+	uploadRec := httptest.NewRecorder()
+	uploadCtx := e.NewContext(uploadReq, uploadRec)
+
+	require.NoError(t, handler.CreateFile(uploadCtx))
+	require.Equal(t, http.StatusOK, uploadRec.Code)
+}
+
+func createInputFileBatchForTest(t *testing.T, e *echo.Echo, handler *Handler, inputFileID, metadataProvider string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	payload := map[string]any{
+		"input_file_id":     inputFileID,
+		"endpoint":          "/v1/chat/completions",
+		"completion_window": "24h",
+	}
+	if metadataProvider != "" {
+		payload["metadata"] = map[string]string{"provider": metadataProvider}
+	}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	batchReq := httptest.NewRequest(http.MethodPost, "/v1/batches", bytes.NewReader(body))
+	batchReq.Header.Set("Content-Type", "application/json")
+	batchRec := httptest.NewRecorder()
+	batchCtx := e.NewContext(batchReq, batchRec)
+
+	require.NoError(t, handler.Batches(batchCtx))
+	return batchRec
+}
+
 func TestBatches_InputFileUsesStoredFileProviderWithoutMetadata(t *testing.T) {
 	mock := &mockProvider{
 		supportedModels: []string{"gpt-4o-mini", "claude-3-haiku"},
@@ -3732,42 +3799,99 @@ func TestBatches_InputFileUsesStoredFileProviderWithoutMetadata(t *testing.T) {
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.SetFileStore(fileStore)
 
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	require.NoError(t, writer.WriteField("purpose", "batch"))
-	require.NoError(t, writer.WriteField("provider", "openai"))
-	part, err := writer.CreateFormFile("file", "requests.jsonl")
-	require.NoError(t, err)
-	_, err = part.Write([]byte("{\"custom_id\":\"1\"}\n"))
-	require.NoError(t, err)
-	require.NoError(t, writer.Close())
-
-	uploadReq := httptest.NewRequest(http.MethodPost, "/v1/files", &body)
-	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
-	uploadFrame := core.NewRequestSnapshot(http.MethodPost, "/v1/files", nil, nil, nil, writer.FormDataContentType(), nil, false, "", nil)
-	uploadReq = withRequestSnapshotAndPrompt(uploadReq, uploadFrame)
-	uploadRec := httptest.NewRecorder()
-	uploadCtx := e.NewContext(uploadReq, uploadRec)
-
-	require.NoError(t, handler.CreateFile(uploadCtx))
-	require.Equal(t, http.StatusOK, uploadRec.Code)
+	uploadBatchInputFileForTest(t, e, handler, "openai")
 
 	stored, err := fileStore.Get(context.Background(), "file_source")
 	require.NoError(t, err)
 	require.Equal(t, "openai", stored.ProviderType)
 
-	batchReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{
-	  "input_file_id":"file_source",
-	  "endpoint":"/v1/chat/completions",
-	  "completion_window":"24h"
-	}`))
-	batchReq.Header.Set("Content-Type", "application/json")
-	batchRec := httptest.NewRecorder()
-	batchCtx := e.NewContext(batchReq, batchRec)
-
-	require.NoError(t, handler.Batches(batchCtx))
+	batchRec := createInputFileBatchForTest(t, e, handler, "file_source", "")
 	require.Equal(t, http.StatusOK, batchRec.Code)
 	require.Equal(t, "openai", mock.capturedBatchProvider)
+	require.NotNil(t, mock.capturedBatchReq)
+	require.Equal(t, "file_source", mock.capturedBatchReq.InputFileID)
+}
+
+func TestBatches_InputFileUsesMetadataProviderOverride(t *testing.T) {
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini", "claude-3-haiku"},
+		providerTypes: map[string]string{
+			"gpt-4o-mini":    "openai",
+			"claude-3-haiku": "anthropic",
+		},
+		fileCreateResponse: &core.FileObject{
+			ID:        "file_source",
+			Object:    "file",
+			Bytes:     32,
+			CreatedAt: 1000,
+			Filename:  "requests.jsonl",
+			Purpose:   "batch",
+			Provider:  "openai",
+		},
+		batchCreateResponse: &core.BatchResponse{
+			ID:          "provider-batch-1",
+			Object:      "batch",
+			Status:      "validating",
+			CreatedAt:   1234567890,
+			InputFileID: "file_source",
+		},
+	}
+
+	e := echo.New()
+	fileStore := filestore.NewMemoryStore()
+	handler := NewHandler(mock, nil, nil, nil)
+	handler.SetFileStore(fileStore)
+
+	uploadBatchInputFileForTest(t, e, handler, "openai")
+
+	stored, err := fileStore.Get(context.Background(), "file_source")
+	require.NoError(t, err)
+	require.Equal(t, "openai", stored.ProviderType)
+
+	batchRec := createInputFileBatchForTest(t, e, handler, "file_source", "anthropic")
+	require.Equal(t, http.StatusOK, batchRec.Code)
+	require.Equal(t, "anthropic", mock.capturedBatchProvider)
+	require.NotNil(t, mock.capturedBatchReq)
+	require.Equal(t, "file_source", mock.capturedBatchReq.InputFileID)
+}
+
+func TestBatches_LegacyFallbackUsesFileProvider(t *testing.T) {
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-4o-mini", "claude-3-haiku"},
+		providerTypes: map[string]string{
+			"gpt-4o-mini":    "openai",
+			"claude-3-haiku": "anthropic",
+		},
+		fileErrByProvider: map[string]error{
+			"openai": core.NewNotFoundError("file not found"),
+		},
+		fileGetByProvider: map[string]*core.FileObject{
+			"anthropic": {
+				ID:        "file_source",
+				Object:    "file",
+				Bytes:     32,
+				CreatedAt: 1000,
+				Filename:  "requests.jsonl",
+				Purpose:   "batch",
+				Provider:  "anthropic",
+			},
+		},
+		batchCreateResponse: &core.BatchResponse{
+			ID:          "provider-batch-1",
+			Object:      "batch",
+			Status:      "validating",
+			CreatedAt:   1234567890,
+			InputFileID: "file_source",
+		},
+	}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+	handler.SetFileStore(emptyProviderFileStore{})
+
+	batchRec := createInputFileBatchForTest(t, e, handler, "file_source", "")
+	require.Equal(t, http.StatusOK, batchRec.Code)
+	require.Equal(t, "anthropic", mock.capturedBatchProvider)
 	require.NotNil(t, mock.capturedBatchReq)
 	require.Equal(t, "file_source", mock.capturedBatchReq.InputFileID)
 }

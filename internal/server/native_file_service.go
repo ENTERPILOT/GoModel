@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -87,7 +88,9 @@ func (s *nativeFileService) fileByID(
 		if !isNotFoundGatewayError(err) && !isUnsupportedNativeFilesError(err) {
 			return handleError(c, err)
 		}
-		_ = s.deleteStoredFileMapping(c.Request().Context(), id)
+		if err := s.deleteStoredFileMapping(c.Request().Context(), id); err != nil {
+			slog.Warn("failed to delete stale file provider mapping", "file_id", id, "provider", providerType, "error", err)
+		}
 	}
 
 	providers, err := s.providerTypes()
@@ -179,7 +182,11 @@ func (s *nativeFileService) CreateFile(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if err := s.recordStoredFile(ctx, resp, providerType); err != nil {
-		return handleError(c, err)
+		fileID := ""
+		if resp != nil {
+			fileID = resp.ID
+		}
+		slog.Warn("failed to persist file provider mapping", "file_id", fileID, "provider", providerType, "error", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -256,8 +263,11 @@ func (s *nativeFileService) DeleteFile(c *echo.Context) error {
 		func(c *echo.Context, result any) error {
 			return c.JSON(http.StatusOK, result)
 		},
-		func(ctx context.Context, _, id string) error {
-			return s.deleteStoredFileMapping(ctx, id)
+		func(ctx context.Context, providerType, id string) error {
+			if err := s.deleteStoredFileMapping(ctx, id); err != nil {
+				slog.Warn("failed to delete file provider mapping", "file_id", id, "provider", providerType, "error", err)
+			}
+			return nil
 		},
 	)
 }

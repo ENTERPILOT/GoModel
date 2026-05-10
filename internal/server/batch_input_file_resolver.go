@@ -38,7 +38,7 @@ func (r *batchInputFileProviderResolver) ResolveBatchInputFileProvider(ctx conte
 		case err == nil && stored != nil && strings.TrimSpace(stored.ProviderType) != "":
 			return strings.TrimSpace(stored.ProviderType), true, nil
 		case err == nil:
-			return "", false, nil
+			// Legacy rows without provider_type fall through to provider probing.
 		case errors.Is(err, filestore.ErrNotFound):
 		default:
 			return "", false, core.NewProviderError("file_store", http.StatusInternalServerError, "failed to look up input file provider", err)
@@ -53,6 +53,7 @@ func (r *batchInputFileProviderResolver) resolveProviderByFallback(ctx context.C
 		return "", false, nil
 	}
 	if len(candidates) == 1 {
+		// Single-provider batches skip the extra GetFile preflight; upstream batch creation still validates the file ID.
 		return candidates[0], true, nil
 	}
 
@@ -106,6 +107,7 @@ func nativeBatchFileProviderCandidates(provider core.RoutableProvider) []string 
 			batchSet[providerType] = struct{}{}
 		}
 	}
+	// Reusing candidates for filtered is safe because append writes only batchSet matches up to the current index while for _, candidate := range candidates reads ahead.
 	filtered := candidates[:0]
 	for _, candidate := range candidates {
 		if _, ok := batchSet[candidate]; ok {

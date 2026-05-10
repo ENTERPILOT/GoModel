@@ -55,7 +55,6 @@ func (s *SQLiteStore) Upsert(ctx context.Context, file *StoredFile) error {
 			purpose = excluded.purpose,
 			filename = excluded.filename,
 			bytes = excluded.bytes,
-			created_at = excluded.created_at,
 			updated_at = excluded.updated_at,
 			user_path = excluded.user_path
 	`, normalized.ID, normalized.ProviderType, normalized.Purpose, normalized.Filename, normalized.Bytes, normalized.CreatedAt, time.Now().Unix(), normalized.UserPath)
