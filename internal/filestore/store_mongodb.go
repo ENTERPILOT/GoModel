@@ -58,11 +58,10 @@ func (s *MongoDBStore) Upsert(ctx context.Context, file *StoredFile) error {
 			"purpose":       normalized.Purpose,
 			"filename":      normalized.Filename,
 			"bytes":         normalized.Bytes,
-			"created_at":    normalized.CreatedAt,
 			"updated_at":    time.Now().Unix(),
 			"user_path":     normalized.UserPath,
 		},
-		"$setOnInsert": bson.M{"_id": normalized.ID},
+		"$setOnInsert": bson.M{"_id": normalized.ID, "created_at": normalized.CreatedAt},
 	}
 	if _, err := s.collection.UpdateOne(ctx, bson.M{"_id": normalized.ID}, update, opts); err != nil {
 		return fmt.Errorf("upsert file mapping: %w", err)

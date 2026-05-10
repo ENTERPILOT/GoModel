@@ -53,7 +53,8 @@ func (r *batchInputFileProviderResolver) resolveProviderByFallback(ctx context.C
 		return "", false, nil
 	}
 	if len(candidates) == 1 {
-		// Single-provider batches skip the extra GetFile preflight; upstream batch creation still validates the file ID.
+		// Single-provider batches skip the extra GetFile preflight; upstream
+		// batch creation still validates the file ID.
 		return candidates[0], true, nil
 	}
 
@@ -100,14 +101,17 @@ func nativeBatchFileProviderCandidates(provider core.RoutableProvider) []string 
 	if !ok {
 		return candidates
 	}
-	batchSet := make(map[string]struct{}, len(batchTypes.NativeBatchProviderTypes()))
-	for _, providerType := range batchTypes.NativeBatchProviderTypes() {
+	batchProviderTypes := batchTypes.NativeBatchProviderTypes()
+	batchSet := make(map[string]struct{}, len(batchProviderTypes))
+	for _, providerType := range batchProviderTypes {
 		providerType = strings.TrimSpace(providerType)
 		if providerType != "" {
 			batchSet[providerType] = struct{}{}
 		}
 	}
-	// Reusing candidates for filtered is safe because append writes only batchSet matches up to the current index while for _, candidate := range candidates reads ahead.
+	// Reusing candidates for filtered is safe because append writes only
+	// batchSet matches up to the current index while
+	// for _, candidate := range candidates reads ahead.
 	filtered := candidates[:0]
 	for _, candidate := range candidates {
 		if _, ok := batchSet[candidate]; ok {

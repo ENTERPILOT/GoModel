@@ -24,6 +24,9 @@ func (s *MemoryStore) Upsert(_ context.Context, file *StoredFile) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if existing, ok := s.items[cloned.ID]; ok {
+		cloned.CreatedAt = existing.CreatedAt
+	}
 	s.items[cloned.ID] = cloned
 	return nil
 }
