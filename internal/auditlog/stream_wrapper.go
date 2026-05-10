@@ -32,10 +32,11 @@ type streamResponseBuilder struct {
 }
 
 type streamChatToolCallState struct {
-	ID        string
-	Type      string
-	Name      string
-	Arguments strings.Builder
+	ID          string
+	Type        string
+	Name        string
+	Arguments   strings.Builder
+	hasFunction bool
 }
 
 type streamChatChoiceState struct {
@@ -133,6 +134,9 @@ func buildStreamChatToolCalls(states map[int]*streamChatToolCallState) []map[str
 	toolCalls := make([]map[string]any, 0, len(indexes))
 	for _, index := range indexes {
 		state := states[index]
+		if !state.hasFunction {
+			continue
+		}
 		toolCalls = append(toolCalls, map[string]any{
 			"id":   state.ID,
 			"type": nonEmptyString(state.Type, "function"),

@@ -1071,6 +1071,73 @@ func TestStreamResponseBuilderChatParallelToolCalls(t *testing.T) {
 	}
 }
 
+func TestStreamResponseBuilderChatSparseChoiceFallbackDoesNotCollide(t *testing.T) {
+	response := buildChatStreamResponseForTest(t,
+		`{"id":"chatcmpl-sparse-choice","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"zero"},"finish_reason":"stop"},{"index":2,"delta":{"role":"assistant","content":"two"},"finish_reason":"stop"}]}`,
+		`{"id":"chatcmpl-sparse-choice","model":"gpt-4o-mini","choices":[{"delta":{"role":"assistant","content":"synthetic"},"finish_reason":"stop"}]}`,
+	)
+
+	choices := chatStreamChoicesForTest(t, response)
+	if len(choices) != 3 {
+		t.Fatalf("len(choices) = %d, want 3", len(choices))
+	}
+	for i, want := range []int{0, 2, 3} {
+		if got := choices[i]["index"]; got != want {
+			t.Fatalf("choices[%d].index = %#v, want %d", i, got, want)
+		}
+	}
+	if got := chatStreamMessageForTest(t, choices[1])["content"]; got != "two" {
+		t.Fatalf("choices[1].message.content = %#v, want two", got)
+	}
+	if got := chatStreamMessageForTest(t, choices[2])["content"]; got != "synthetic" {
+		t.Fatalf("choices[2].message.content = %#v, want synthetic", got)
+	}
+}
+
+func TestStreamResponseBuilderChatSparseToolCallFallbackDoesNotCollide(t *testing.T) {
+	response := buildChatStreamResponseForTest(t,
+		`{"id":"chatcmpl-sparse-tools","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}},{"index":2,"id":"call_c","type":"function","function":{"name":"lookup_time","arguments":"{\"city\":\"Warsaw\"}"}}]},"finish_reason":null}]}`,
+		`{"id":"chatcmpl-sparse-tools","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_synthetic","type":"function","function":{"name":"lookup_air","arguments":"{\"city\":\"Berlin\"}"}}]},"finish_reason":"tool_calls"}]}`,
+	)
+
+	message := chatStreamMessageForTest(t, firstChatStreamChoiceForTest(t, response))
+	toolCalls, ok := message["tool_calls"].([]map[string]any)
+	if !ok || len(toolCalls) != 3 {
+		t.Fatalf("tool_calls = %#v, want three tool calls", message["tool_calls"])
+	}
+	for i, want := range []string{"call_a", "call_c", "call_synthetic"} {
+		if got := toolCalls[i]["id"]; got != want {
+			t.Fatalf("tool_calls[%d].id = %#v, want %s", i, got, want)
+		}
+	}
+	if got := chatStreamFunctionForTest(t, toolCalls[1])["arguments"]; got != `{"city":"Warsaw"}` {
+		t.Fatalf("tool_calls[1].arguments = %#v, want Warsaw JSON", got)
+	}
+	if got := chatStreamFunctionForTest(t, toolCalls[2])["arguments"]; got != `{"city":"Berlin"}` {
+		t.Fatalf("tool_calls[2].arguments = %#v, want Berlin JSON", got)
+	}
+}
+
+func TestStreamResponseBuilderChatSkipsToolCallWithoutFunctionDelta(t *testing.T) {
+	response := buildChatStreamResponseForTest(t,
+		`{"id":"chatcmpl-orphan-tool","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_keep","type":"function"},{"index":1,"id":"call_drop","type":"function"}]},"finish_reason":null}]}`,
+		`{"id":"chatcmpl-orphan-tool","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},"finish_reason":"tool_calls"}]}`,
+	)
+
+	message := chatStreamMessageForTest(t, firstChatStreamChoiceForTest(t, response))
+	toolCall := firstChatStreamToolCallForTest(t, message)
+	if got := toolCall["id"]; got != "call_keep" {
+		t.Fatalf("tool_call.id = %#v, want call_keep", got)
+	}
+	function := chatStreamFunctionForTest(t, toolCall)
+	if got := function["name"]; got != "get_weather" {
+		t.Fatalf("function.name = %#v, want get_weather", got)
+	}
+	if got := function["arguments"]; got != `{"city":"Paris"}` {
+		t.Fatalf("function.arguments = %#v, want Paris JSON", got)
+	}
+}
+
 func TestStreamResponseBuilderChatCapturesTrailingUsageChunk(t *testing.T) {
 	response := buildChatStreamResponseForTest(t,
 		`{"id":"chatcmpl-usage","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}]}`,
@@ -1106,11 +1173,21 @@ func buildChatStreamResponseForTest(t *testing.T, events ...string) map[string]a
 	return builder.buildChatCompletionResponse()
 }
 
-func firstChatStreamChoiceForTest(t *testing.T, response map[string]any) map[string]any {
+func chatStreamChoicesForTest(t *testing.T, response map[string]any) []map[string]any {
 	t.Helper()
 
 	choices, ok := response["choices"].([]map[string]any)
-	if !ok || len(choices) != 1 {
+	if !ok {
+		t.Fatalf("choices = %#v, want choice slice", response["choices"])
+	}
+	return choices
+}
+
+func firstChatStreamChoiceForTest(t *testing.T, response map[string]any) map[string]any {
+	t.Helper()
+
+	choices := chatStreamChoicesForTest(t, response)
+	if len(choices) != 1 {
 		t.Fatalf("choices = %#v, want one choice", response["choices"])
 	}
 	return choices[0]

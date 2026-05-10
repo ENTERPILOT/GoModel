@@ -214,7 +214,13 @@ func defaultChatChoiceIndex(states map[int]*streamChatChoiceState) int {
 			return index
 		}
 	}
-	return len(states)
+	maxIndex := -1
+	for index := range states {
+		if index > maxIndex {
+			maxIndex = index
+		}
+	}
+	return maxIndex + 1
 }
 
 func appendChatContent(builder *streamResponseBuilder, state *streamChatChoiceState, content string) {
@@ -253,6 +259,7 @@ func appendChatToolCalls(builder *streamResponseBuilder, state *streamChatChoice
 		if !ok {
 			continue
 		}
+		toolState.hasFunction = true
 		if name, ok := function["name"].(string); ok && name != "" && toolState.Name == "" {
 			toolState.Name = name
 		}
@@ -268,7 +275,13 @@ func defaultToolCallIndex(states map[int]*streamChatToolCallState) int {
 			return index
 		}
 	}
-	return len(states)
+	maxIndex := -1
+	for index := range states {
+		if index > maxIndex {
+			maxIndex = index
+		}
+	}
+	return maxIndex + 1
 }
 
 func parseResponsesAPIEvent(builder *streamResponseBuilder, event map[string]any) {
