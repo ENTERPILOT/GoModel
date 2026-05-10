@@ -135,7 +135,7 @@ provider `vertex_us`. Vertex requires `VERTEX_PROJECT` and `VERTEX_LOCATION`;
 
 ### Running from Source
 
-**Prerequisites:** Go 1.26.2+
+**Prerequisites:** Go 1.26.3+
 
 1. Create a `.env` file:
 
