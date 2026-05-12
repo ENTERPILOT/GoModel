@@ -53,6 +53,50 @@ func TestUserPathFromContext_PrefersEffectiveOverride(t *testing.T) {
 	}
 }
 
+func TestUserPathHeaderName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty defaults", raw: "", want: UserPathHeader},
+		{name: "default preserves GoModel spelling", raw: "x-gomodel-user-path", want: UserPathHeader},
+		{name: "custom canonicalized", raw: "x-tenant-path", want: "X-Tenant-Path"},
+		{name: "trim custom", raw: " X-Custom-User-Path ", want: "X-Custom-User-Path"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := UserPathHeaderName(tt.raw); got != tt.want {
+				t.Fatalf("UserPathHeaderName(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUserPathHeaderNameFromContext(t *testing.T) {
+	t.Parallel()
+
+	if got := UserPathHeaderNameFromContext(context.Background()); got != UserPathHeader {
+		t.Fatalf("UserPathHeaderNameFromContext(empty) = %q, want %q", got, UserPathHeader)
+	}
+
+	customCtx := WithUserPathHeaderName(context.Background(), "x-tenant-path")
+	if got := UserPathHeaderNameFromContext(customCtx); got != "X-Tenant-Path" {
+		t.Fatalf("UserPathHeaderNameFromContext(custom) = %q, want X-Tenant-Path", got)
+	}
+
+	defaultCtx := WithUserPathHeaderName(customCtx, UserPathHeader)
+	if got := UserPathHeaderNameFromContext(defaultCtx); got != "X-Tenant-Path" {
+		t.Fatalf("UserPathHeaderNameFromContext(default no-op) = %q, want X-Tenant-Path", got)
+	}
+}
+
 func TestUserPathAncestors(t *testing.T) {
 	t.Parallel()
 

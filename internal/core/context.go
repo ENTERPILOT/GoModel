@@ -145,8 +145,9 @@ func GetEffectiveUserPath(ctx context.Context) string {
 	return ""
 }
 
-// WithUserPathHeaderName returns a new context with the configured user-path
-// request header name attached.
+// WithUserPathHeaderName returns a new context with a non-default configured
+// user-path request header name attached. The default header is intentionally a
+// no-op and does not clear an existing value.
 func WithUserPathHeaderName(ctx context.Context, headerName string) context.Context {
 	headerName = UserPathHeaderName(headerName)
 	if headerName == UserPathHeader {
