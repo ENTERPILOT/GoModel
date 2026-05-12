@@ -125,10 +125,10 @@ To register multiple instances of the same provider type without `config.yaml`,
 use suffixed env vars such as `OPENAI_EAST_API_KEY` and
 `OPENAI_EAST_BASE_URL`; add `OPENAI_EAST_MODELS` to configure that instance's
 model list. This registers provider `openai-east` with type `openai`.
-Vertex AI uses the `VERTEX_*` prefix and registers provider `vertex`
-with type `vertex`; suffixed variables such as `VERTEX_US_PROJECT` register
-provider `vertex-us`. Vertex requires `VERTEX_PROJECT` and `VERTEX_LOCATION`;
-`VERTEX_AUTH_TYPE` defaults to Application Default Credentials (`gcp_adc`).
+Vertex AI follows the same suffix pattern — `VERTEX_US_PROJECT` registers
+provider `vertex-us`. Vertex also requires `VERTEX_PROJECT` and
+`VERTEX_LOCATION`; `VERTEX_AUTH_TYPE` defaults to Application Default
+Credentials (`gcp_adc`).
 
 ---
 

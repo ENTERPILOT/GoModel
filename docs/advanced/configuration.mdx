@@ -350,9 +350,8 @@ The same pattern works for every registered provider type:
 suffixed `BASE_URL` values because their endpoints are deployment- or
 region-specific.
 
-Google Vertex AI uses the dedicated `VERTEX_*` prefix and registers provider
-`vertex` with type `vertex`. Suffixed Vertex env vars keep underscores in the
-provider name:
+Google Vertex AI uses the `VERTEX_*` prefix and follows the same
+suffix-to-name rule as other providers:
 
 ```bash
 export VERTEX_PROJECT="prod-ai"
