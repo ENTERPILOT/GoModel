@@ -27,9 +27,7 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"gemini": {
 		DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
 	},
-	"vertex": {
-		NameSeparator: "_",
-	},
+	"vertex": {},
 	"deepseek": {
 		DefaultBaseURL: "https://api.deepseek.com",
 	},
@@ -550,7 +548,7 @@ func TestApplyProviderEnvVars_DiscoversVertexProviderFromEnvAlias(t *testing.T) 
 	}
 }
 
-func TestApplyProviderEnvVars_DiscoversSuffixedVertexProviderWithUnderscoreName(t *testing.T) {
+func TestApplyProviderEnvVars_DiscoversSuffixedVertexProvider(t *testing.T) {
 	t.Setenv("VERTEX_US_PROJECT", "prod-ai")
 	t.Setenv("VERTEX_US_LOCATION", "us-central1")
 	t.Setenv("VERTEX_US_AUTH_TYPE", "gcp_service_account")
@@ -558,9 +556,9 @@ func TestApplyProviderEnvVars_DiscoversSuffixedVertexProviderWithUnderscoreName(
 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
-	p, exists := got["vertex_us"]
+	p, exists := got["vertex-us"]
 	if !exists {
-		t.Fatal("expected vertex_us to be discovered from VERTEX_US_* env vars")
+		t.Fatal("expected vertex-us to be discovered from VERTEX_US_* env vars")
 	}
 	if p.Type != "vertex" {
 		t.Fatalf("Type = %q, want vertex", p.Type)

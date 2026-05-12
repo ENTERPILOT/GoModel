@@ -127,7 +127,7 @@ use suffixed env vars such as `OPENAI_EAST_API_KEY` and
 model list. This registers provider `openai-east` with type `openai`.
 Vertex AI uses the `VERTEX_*` prefix and registers provider `vertex`
 with type `vertex`; suffixed variables such as `VERTEX_US_PROJECT` register
-provider `vertex_us`. Vertex requires `VERTEX_PROJECT` and `VERTEX_LOCATION`;
+provider `vertex-us`. Vertex requires `VERTEX_PROJECT` and `VERTEX_LOCATION`;
 `VERTEX_AUTH_TYPE` defaults to Application Default Credentials (`gcp_adc`).
 
 ---

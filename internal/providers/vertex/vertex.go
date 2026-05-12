@@ -25,9 +25,6 @@ import (
 var Registration = providers.Registration{
 	Type: "vertex",
 	New:  New,
-	Discovery: providers.DiscoveryConfig{
-		NameSeparator: "_",
-	},
 }
 
 const (
