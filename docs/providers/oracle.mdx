@@ -4,72 +4,35 @@ description: "Configure Oracle GenAI's OpenAI-compatible endpoint in GoModel, in
 icon: "/brand/oracle.svg"
 ---
 
-GoModel works with Oracle Generative AI through Oracle's OpenAI-compatible
-endpoint.
-
-Flow:
-
-`Client -> GoModel -> Oracle Generative AI`
-
-## Before you start
-
-- Create an Oracle Generative AI API key.
-- Add an OCI IAM policy for `generativeaiapikey`.
-- Choose a supported Oracle region and model.
-- Decide whether you want env-only `ORACLE_MODELS` or YAML `models:`, and
-  whether configured lists should stay in fallback mode or act as an allowlist.
+GoModel calls Oracle Generative AI through Oracle's OpenAI-compatible inference
+endpoint. Setup needs an OCI IAM policy for `generativeaiapikey`, a
+region-specific base URL, and a configured model list (Oracle's `/models` is
+not reliably available on the API-key flow).
 
 ## 1. Add the OCI policy
-
-For a simple test setup, this tenancy-level policy is enough:
 
 ```text
 Allow any-user to use generative-ai-family in tenancy where ALL {request.principal.type='generativeaiapikey'}
 ```
 
-This allows Oracle Generative AI bearer API keys to call the inference APIs.
+This tenancy-level policy is enough for testing. In production, narrow it to a
+compartment, API key, or specific model.
 
-For production, narrow this policy to a specific compartment, API key, or model
-instead of leaving it tenancy-wide.
-
-## 2. Set the Oracle endpoint and API key
-
-Use Oracle's OpenAI-compatible inference base URL for your region. For Chicago:
+## 2. Configure
 
 ```bash
-export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1"
-export ORACLE_API_KEY="..."
+ORACLE_BASE_URL=https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1
+ORACLE_API_KEY=...
+ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3
+GOMODEL_MASTER_KEY=change-me
 ```
 
-## 3. Configure Oracle in GoModel
+`ORACLE_MODELS` is a comma-separated list (whitespace trimmed). Behavior
+follows the global `CONFIGURED_PROVIDER_MODELS_MODE` — `fallback` (default)
+uses the list when Oracle's `/models` is unavailable or empty; `allowlist`
+exposes only configured models and skips the upstream call.
 
-For the default single `oracle` provider, env-only configuration is enough:
-
-```bash
-export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3"
-```
-
-`ORACLE_MODELS` is a comma-separated list. GoModel trims whitespace around each
-entry. With the default `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, GoModel uses
-the list when Oracle's `/models` endpoint is unavailable, returns nil, or
-returns an empty list. Set `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose
-only the configured Oracle models and skip Oracle's upstream `/models` call.
-
-For multiple Oracle providers without YAML, use suffixed env vars such as
-`ORACLE_US_BASE_URL`, `ORACLE_US_API_KEY`, and `ORACLE_US_MODELS`. For
-example:
-
-```bash
-export ORACLE_US_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1"
-export ORACLE_US_API_KEY="..."
-export ORACLE_US_MODELS="openai.gpt-oss-120b"
-```
-
-This registers provider `oracle-us`.
-
-Use a YAML provider block when you want a custom provider name that does not
-fit the generated suffix pattern, per-provider resilience settings, or prefer
-to keep the model list in `config.yaml`:
+Or in `config.yaml`:
 
 ```yaml
 providers:
@@ -81,54 +44,14 @@ providers:
       - openai.gpt-oss-120b
 ```
 
-Why `models:` matters:
-
-- Oracle inference works through `chat/completions` and `responses`
-- Oracle's `/models` endpoint may not be available for this API-key flow
-- GoModel can use the configured model list consistently with the global
-  `CONFIGURED_PROVIDER_MODELS_MODE`
-
 If both are set, `ORACLE_MODELS` overrides YAML `models:` for the matching
-Oracle provider. For multiple env-only Oracle instances, use suffixed variables
-such as `ORACLE_US_MODELS`.
+provider.
 
-## Current status
-
-What is integrated today:
-
-- Oracle's OpenAI-compatible inference endpoints
-- manual model configuration through `ORACLE_MODELS` or `models:`
-- GoModel `/v1/models` from the configured model list in fallback or allowlist
-  mode
-
-What is not yet validated as reliable:
-
-- Oracle's OpenAI-compatible `/models` endpoint for automatic model discovery
-
-What is not integrated yet:
-
-- native Oracle model auto-discovery through OCI APIs
-- automatic population of the Oracle model inventory without `ORACLE_MODELS` or
-  `models:`
-
-If Oracle later exposes a reliable `/models` endpoint for this API-key flow, or
-GoModel adds a separate OCI-native discovery path, this manual fallback
-configuration requirement can be relaxed.
-
-## 4. Start GoModel
-
-Pick the form that fits your environment. For Docker, prefer `--env-file .env`
-over inline `-e` flags so secrets stay out of shell history and process lists.
+## 3. Run GoModel
 
 <CodeGroup>
 
 ```bash Docker (.env file)
-# Put the ORACLE_* variables from the steps above into a .env file:
-#   ORACLE_BASE_URL=https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1
-#   ORACLE_API_KEY=...
-#   ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3
-#   GOMODEL_MASTER_KEY=change-me
-
 docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
 ```
 
@@ -142,49 +65,13 @@ docker run --rm -p 8080:8080 \
 ```
 
 ```bash Binary (make build)
-# Requires Go 1.26.3+ on PATH; builds bin/gomodel.
 make build
-
-# Reads ORACLE_* from your shell (or `set -a; source .env; set +a` first).
 ./bin/gomodel
 ```
 
 </CodeGroup>
 
-<Tip>
-  A `.env` file is the most effective option once you have more than a couple
-  of variables — copy `.env.template` from the repo, fill in the Oracle values,
-  and reuse the same file for both Docker and the native binary.
-</Tip>
-
-## 5. Verify the model registry
-
-```bash
-curl -s http://localhost:8080/v1/models
-```
-
-Expected result:
-
-- a `200 OK`
-- a model such as `openai.gpt-oss-120b` with `owned_by: "oracle"`
-
-## 6. Verify Responses
-
-```bash
-curl -s http://localhost:8080/v1/responses \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "openai.gpt-oss-120b",
-    "input": "Reply with the single word ok."
-  }'
-```
-
-Expected result:
-
-- a `200 OK`
-- final output text containing `ok`
-
-## 7. Verify Chat Completions
+## 4. Verify
 
 ```bash
 curl -s http://localhost:8080/v1/chat/completions \
@@ -196,24 +83,46 @@ curl -s http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-Use a high enough `max_tokens` budget. Some Oracle-backed reasoning models can
-spend short completions on reasoning content before emitting final assistant
-text.
+`GET /v1/models` returns models such as `openai.gpt-oss-120b` with
+`owned_by: "oracle"`. Responses API works the same way.
+
+<Note>
+  Use a high enough `max_tokens` budget. Some Oracle-backed reasoning models
+  can spend short completions on reasoning content before emitting final
+  assistant text.
+</Note>
+
+## Multiple Oracle providers
+
+Use suffixed env vars to register a second Oracle instance:
+
+```bash
+ORACLE_US_BASE_URL=https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1
+ORACLE_US_API_KEY=...
+ORACLE_US_MODELS=openai.gpt-oss-120b
+```
+
+This registers provider `oracle-us`. Reach for YAML only when generated names
+don't fit or you want per-provider resilience overrides.
+
+## Not yet integrated
+
+- Native OCI-based model auto-discovery (would remove the need for
+  `ORACLE_MODELS` / YAML `models:`).
+- Reliable use of Oracle's OpenAI-compatible `/models` endpoint on the API-key
+  flow.
 
 ## Troubleshooting
 
-- `404 Authorization failed or requested resource not found`
-  Usually means the Generative AI API key policy is missing, the region is
-  wrong, or the model is not available to the account.
-- `model registry has no models`
-  Set `ORACLE_MODELS` or add `models:` to the Oracle provider config so GoModel
-  can use the configured model list.
-- OCI CLI works but Oracle bearer requests fail
-  These are different auth flows. OCI CLI uses API signing keys; Oracle
-  Generative AI inference uses the Generative AI bearer API key.
+- **`404 Authorization failed or requested resource not found`** — missing OCI
+  policy, wrong region, or model not available to the account.
+- **`model registry has no models`** — set `ORACLE_MODELS` or YAML `models:`.
+- **OCI CLI works but Oracle bearer requests fail** — different auth flows.
+  OCI CLI uses API signing keys; Oracle Generative AI inference uses the
+  Generative AI bearer API key.
 
 ## References
 
-- Oracle API keys overview: https://docs.oracle.com/en-us/iaas/Content/generative-ai/api-keys.htm
-- Oracle API key permissions: https://docs.oracle.com/en-us/iaas/Content/generative-ai/add-api-permission.htm
-- Oracle OpenAI-compatible endpoint: https://docs.oracle.com/en-us/iaas/Content/generative-ai/oci-openai.htm
+- [Oracle API keys overview](https://docs.oracle.com/en-us/iaas/Content/generative-ai/api-keys.htm)
+- [Oracle API key permissions](https://docs.oracle.com/en-us/iaas/Content/generative-ai/add-api-permission.htm)
+- [Oracle OpenAI-compatible endpoint](https://docs.oracle.com/en-us/iaas/Content/generative-ai/oci-openai.htm)

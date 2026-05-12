@@ -7,8 +7,9 @@ icon: "/brand/vertex.svg"
 This page covers Gemini hosted on **Google Vertex AI**. For Gemini through
 Google AI Studio API keys, see the [Google Gemini guide](/providers/gemini).
 
-GoModel routes Vertex chat and Responses API requests through Vertex AI's
-native Gemini publisher endpoint by default. You can switch to Vertex's
+Vertex needs a GCP project, a region where the model is available, and either
+Application Default Credentials or a service-account JSON key. GoModel routes
+to Vertex's native Gemini publisher endpoint by default; switch to the
 OpenAI-compatible endpoint when you need its compatibility behavior.
 
 <Note>
@@ -16,30 +17,14 @@ OpenAI-compatible endpoint when you need its compatibility behavior.
   licensed in a future release.
 </Note>
 
-## Before you start
-
-- A Google Cloud project with Vertex AI enabled.
-- A Vertex region where the model you want is available (e.g. `us-central1`,
-  `europe-west4`).
-- Either Application Default Credentials (via `gcloud auth
-  application-default login`, GKE Workload Identity, or a metadata server) or
-  a service-account JSON key.
-
-## Configure Vertex AI
-
-Use the `VERTEX_*` prefix. Vertex providers use the dedicated `vertex`
-provider type:
+## Configure
 
 ```bash
-export VERTEX_PROJECT="my-gcp-project"
-export VERTEX_LOCATION="us-central1"
-export VERTEX_AUTH_TYPE="gcp_adc"
-export VERTEX_API_MODE="native"
+VERTEX_PROJECT=my-gcp-project
+VERTEX_LOCATION=us-central1
+VERTEX_AUTH_TYPE=gcp_adc       # default; ADC via gcloud, GKE Workload Identity, or metadata server
+VERTEX_API_MODE=native         # or openai_compatible
 ```
-
-This registers provider `vertex`, type `vertex`. Vertex requires both project
-and location. `VERTEX_AUTH_TYPE` defaults to Application Default Credentials
-(`gcp_adc`) when service-account fields are not set.
 
 Or in `config.yaml`:
 
@@ -53,87 +38,55 @@ providers:
     api_mode: native
 ```
 
-## Service-account authentication
-
-Use service-account JSON directly when ADC is not appropriate:
+### Service-account authentication
 
 ```bash
-export VERTEX_AUTH_TYPE="gcp_service_account"
-export VERTEX_SERVICE_ACCOUNT_FILE="/secrets/service-account.json"
+VERTEX_AUTH_TYPE=gcp_service_account
+VERTEX_SERVICE_ACCOUNT_FILE=/secrets/service-account.json
 # or VERTEX_SERVICE_ACCOUNT_JSON / VERTEX_SERVICE_ACCOUNT_JSON_BASE64
 ```
 
-## Multiple regions or accounts
+### Multiple regions or accounts
 
-For multiple Vertex regions or accounts, use suffixed env vars:
-
-```bash
-export VERTEX_US_PROJECT="prod-ai"
-export VERTEX_US_LOCATION="us-central1"
-export VERTEX_US_AUTH_TYPE="gcp_adc"
-
-export VERTEX_EU_PROJECT="prod-ai"
-export VERTEX_EU_LOCATION="europe-west4"
-export VERTEX_EU_AUTH_TYPE="gcp_service_account"
-export VERTEX_EU_SERVICE_ACCOUNT_FILE="/secrets/vertex-eu.json"
-```
-
-These register providers `vertex_us` and `vertex_eu`.
-
-## Native versus OpenAI-compatible mode
-
-Vertex native mode is enabled by default:
+Use suffixed env vars to register additional Vertex providers:
 
 ```bash
-export VERTEX_API_MODE="native"
+VERTEX_US_PROJECT=prod-ai
+VERTEX_US_LOCATION=us-central1
+VERTEX_US_AUTH_TYPE=gcp_adc
+
+VERTEX_EU_PROJECT=prod-ai
+VERTEX_EU_LOCATION=europe-west4
+VERTEX_EU_AUTH_TYPE=gcp_service_account
+VERTEX_EU_SERVICE_ACCOUNT_FILE=/secrets/vertex-eu.json
 ```
 
-Set `VERTEX_API_MODE=openai_compatible` to route chat and Responses API
-requests through Vertex's OpenAI-compatible endpoint instead.
+This registers `vertex_us` and `vertex_eu`.
 
-The default Vertex bases are derived from project and location:
+## Base URLs and modes
 
-- OpenAI-compatible: `https://aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/endpoints/openapi`
-- native Gemini: `https://aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google`
+Default bases are derived from project and location:
 
-Vertex embeddings use Vertex AI native prediction regardless of `VERTEX_API_MODE`.
-Vertex does not expose Gemini Files or OpenAI-compatible batch operations.
+- OpenAI-compatible: `.../projects/{project}/locations/{location}/endpoints/openapi`
+- native Gemini: `.../projects/{project}/locations/{location}/publishers/google`
 
-## Image URL behavior
+Vertex embeddings use Vertex AI native prediction regardless of
+`VERTEX_API_MODE`. Vertex does not expose Gemini Files or OpenAI-compatible
+batch operations.
 
-Like AI Studio Gemini, native mode supports inline image data only:
+## Image input
 
-```json
-{
-  "type": "image_url",
-  "image_url": {
-    "url": "data:image/jpeg;base64,..."
-  }
-}
-```
+| Mode | OpenAI-style `image_url` |
+| ---- | ----- |
+| `native` (default) | inline `data:` URLs only — remote `https://...` URLs are rejected |
+| `openai_compatible` | OpenAI-style remote URLs pass through to Vertex's OpenAI-compatible endpoint |
 
-Remote `https://...` image URLs are rejected in native mode. Set
-`VERTEX_API_MODE=openai_compatible` to pass the OpenAI-compatible `image_url`
-shape through to Vertex's OpenAI-compatible endpoint instead.
+## Not yet integrated
 
-## Current support
+- Automatic fetching of remote `image_url` values in native mode.
+- Vertex Files and batch prediction APIs.
 
-Integrated:
-
-- chat completions and streaming
-- Responses API and streaming
-- model listing via Vertex publisher models
-- Vertex embeddings through native prediction
-- usage metadata normalization for native responses
-- tool calls and function-call results
-- inline image data via `data:` URLs in native mode
-
-Not integrated yet:
-
-- fetching remote `image_url` values
-- Vertex Files and batch prediction APIs
-
-References:
+## References
 
 - [Vertex AI OpenAI compatibility](https://cloud.google.com/vertex-ai/generative-ai/docs/start/openai)
 - [Gemini API in Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference)

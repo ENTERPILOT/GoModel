@@ -4,16 +4,12 @@ description: "Supported AI providers in GoModel and which ones have dedicated co
 icon: "list"
 ---
 
-GoModel routes OpenAI-compatible requests to many AI providers through a single
-gateway. Most providers work out of the box once you set their API key — set
-the env var, start GoModel, and call `/v1/chat/completions` or `/v1/responses`
-as usual.
-
-The pages in this section exist for providers whose setup is **not** purely
-"set an API key": auth flows that pull from cloud credentials, deployment-based
-URLs, region/project requirements, dual native + OpenAI-compatible API
-surfaces, or other quirks worth documenting. If a provider isn't listed
-separately, its default configuration is enough.
+GoModel routes OpenAI-compatible requests to many AI providers through one
+gateway. For most providers, setting the API key is the whole setup. The pages
+in this section exist for the ones whose setup is **not** purely "set an API
+key" — auth flows from cloud credentials, deployment-based URLs, region or
+project requirements, dual native + OpenAI-compatible API surfaces, or other
+quirks.
 
 ## Supported providers
 
@@ -43,29 +39,29 @@ passthrough).
 
 These are the providers most users hit friction on:
 
-- **Google Vertex AI** — needs a GCP project, region, and either Application Default
-  Credentials or a service-account JSON key. Multi-region or multi-account
-  setups use suffixed env vars.
-- **Amazon Bedrock** — no API key of its own; authenticates through the AWS
-  credential chain (env, profile, IAM Identity Center, instance/container
-  roles). Requires explicit model access in the Bedrock console.
+- **Google Vertex AI** — needs a GCP project, region, and either Application
+  Default Credentials or a service-account JSON key.
+- **Amazon Bedrock** — no API key of its own; uses the AWS credential chain
+  and requires explicit model access in the Bedrock console.
 - **Azure OpenAI** — deployment-scoped base URLs, the `api-version` query
   parameter, and the `api-key` header instead of `Authorization: Bearer`.
 - **Oracle GenAI** — requires an OCI IAM policy for `generativeaiapikey` and a
   region-specific OpenAI-compatible endpoint URL.
-- **Google Gemini (AI Studio)** — two routing modes (native
-  `generateContent` vs OpenAI-compatible) with different image-input behavior.
+- **Google Gemini (AI Studio)** — two routing modes (native `generateContent`
+  vs OpenAI-compatible) with different image-input behavior.
 - **DeepSeek** — reasoning effort mapping quirks for DeepSeek V4.
 - **Ollama / vLLM** — local-model hosting with optional multi-instance setup
   through suffixed env vars and provider-qualified model IDs.
 
-## Providers without a dedicated page
+<Tip>
+  Every provider page shows three launch forms in one CodeGroup: Docker with
+  `--env-file .env` (recommended), Docker with inline `-e` flags, and a
+  prebuilt binary from `make build`. Once you have more than a couple of
+  variables, copy `.env.template`, fill in the values you need, and reuse the
+  same file for both Docker and the native binary.
+</Tip>
 
-OpenAI, Anthropic, Groq, OpenRouter, Z.ai, xAI, and MiniMax follow the same
-pattern: set the API key (and optional base URL where supported), start
-GoModel, and route by model ID. The full env-var reference for every provider
-lives in
-[Configuration](/advanced/configuration).
-
-If you hit something unexpected with a provider that doesn't have a guide
-here, that's worth a bug report — chances are it's a quirk we should document.
+Providers without a dedicated page (OpenAI, Anthropic, Groq, OpenRouter, Z.ai,
+xAI, MiniMax) follow the same pattern: set the API key (and optional base URL
+where supported), start GoModel, route by model ID. The full env-var reference
+lives in [Configuration](/advanced/configuration).

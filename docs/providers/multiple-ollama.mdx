@@ -4,53 +4,49 @@ description: "Use one GoModel instance with multiple Ollama providers through su
 icon: "network"
 ---
 
-GoModel can register multiple Ollama providers through suffixed environment
-variables.
+GoModel registers Ollama through `OLLAMA_BASE_URL`. To run multiple Ollama
+instances behind one gateway, use suffixed env vars.
 
-Flow:
-
-`Client -> GoModel -> ollama-a / ollama-b`
-
-## 1. Run GoModel with multiple Ollama base URLs
+## Configure
 
 ```bash
-docker run --rm --name gomodel \
-  -p 8080:8080 \
+OLLAMA_A_BASE_URL=http://host.docker.internal:11434/v1
+OLLAMA_B_BASE_URL=http://host.docker.internal:11435/v1
+GOMODEL_MASTER_KEY=change-me
+```
+
+`OLLAMA_A_BASE_URL` registers provider `ollama-a`; `OLLAMA_B_BASE_URL`
+registers `ollama-b`. Use different ports or hostnames per instance.
+
+<Tip>
+  On Linux, add `--add-host=host.docker.internal:host-gateway` to the
+  `docker run` command so the container can reach Ollama on the host.
+</Tip>
+
+## Run GoModel
+
+<CodeGroup>
+
+```bash Docker (.env file)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
   -e GOMODEL_MASTER_KEY="change-me" \
   -e OLLAMA_A_BASE_URL="http://host.docker.internal:11434/v1" \
   -e OLLAMA_B_BASE_URL="http://host.docker.internal:11435/v1" \
-  enterpilot/gomodel:latest
+  enterpilot/gomodel
 ```
 
-`OLLAMA_A_BASE_URL` registers provider `ollama-a`. `OLLAMA_B_BASE_URL`
-registers provider `ollama-b`.
-
-Use different ports or hostnames for each Ollama instance.
-
-<Tip>
-  On Linux, you may need to add
-  `--add-host=host.docker.internal:host-gateway` so the container can reach
-  Ollama running on the host.
-</Tip>
-
-<Note>
-  Use YAML only when generated provider names such as `ollama-a` and
-  `ollama-b` are not enough or you need a larger structured provider block.
-</Note>
-
-## 2. Verify the model registry
-
-```bash
-curl -s http://localhost:8080/v1/models \
-  -H "Authorization: Bearer change-me"
+```bash Binary (make build)
+make build
+./bin/gomodel
 ```
 
-Expected model IDs will be provider-qualified, for example:
+</CodeGroup>
 
-- `ollama-a/llama3.2`
-- `ollama-b/llama3.2`
-
-## 3. Route to a specific Ollama backend
+## Route to a specific backend
 
 ```bash
 curl -s http://localhost:8080/v1/chat/completions \
@@ -62,15 +58,15 @@ curl -s http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-If you send only the bare model name such as `llama3.2` and both providers
-expose it, GoModel will route the request to one provider based on provider
-registration order. To choose a specific Ollama backend, use the qualified form
-such as `ollama-a/llama3.2` or `ollama-b/llama3.2`.
+`GET /v1/models` returns provider-qualified IDs such as `ollama-a/llama3.2`
+and `ollama-b/llama3.2`. A bare model name is routed to whichever provider
+exposes it first by registration order — use the qualified form to pick
+explicitly.
 
-## 4. When YAML still makes sense
+## When YAML still helps
 
-Use `config.yaml` when you need custom provider names, per-provider resilience
-overrides, or a larger structured config:
+Reach for `config.yaml` only when generated names like `ollama-a` are not
+enough, or when you want per-provider resilience overrides:
 
 ```yaml
 providers:
@@ -82,7 +78,3 @@ providers:
     type: ollama
     base_url: "http://ollama-large:11434/v1"
 ```
-
-This pattern relies on the same suffixed env auto-discovery used across GoModel
-providers: `OLLAMA_A_BASE_URL` registers `ollama-a`, and `OLLAMA_B_BASE_URL`
-registers `ollama-b`.

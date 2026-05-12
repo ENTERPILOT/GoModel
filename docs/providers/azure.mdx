@@ -4,33 +4,18 @@ description: "Configure Azure OpenAI in GoModel using deployment-based URLs and 
 icon: "/brand/azure.svg"
 ---
 
-GoModel routes Azure OpenAI requests through the deployment URL you provision
-in the Azure portal. Azure speaks the OpenAI API shape with two differences
-GoModel handles transparently: an `api-key` header instead of `Authorization:
-Bearer`, and a required `api-version` query parameter on every request.
+Azure OpenAI speaks the OpenAI API shape with two GoModel-handled differences:
+an `api-key` header instead of `Authorization: Bearer`, and a required
+`api-version` query parameter on every request.
 
-Flow:
-
-`Client -> GoModel -> Azure OpenAI`
-
-## Before you start
-
-- An Azure OpenAI resource in your subscription.
-- At least one deployment created for a model (e.g. `gpt-5`, `gpt-4o`,
-  `text-embedding-3-small`).
-- The deployment's base URL and resource API key from the Azure portal.
-
-## 1. Set the deployment URL and API key
+## Configure
 
 ```bash
-export AZURE_API_KEY="..."
-export AZURE_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment"
-export AZURE_API_VERSION="2024-10-21"
+AZURE_API_KEY=...
+AZURE_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/your-deployment
+AZURE_API_VERSION=2024-10-21   # optional, defaults to 2024-10-21
+GOMODEL_MASTER_KEY=change-me
 ```
-
-`AZURE_API_VERSION` is optional. GoModel defaults to `2024-10-21` when unset.
-Set it explicitly when you need a different stable or preview version (for
-example, a newer Responses API surface).
 
 Or in `config.yaml`:
 
@@ -43,40 +28,11 @@ providers:
     api_version: "2024-10-21"
 ```
 
-## 2. (Optional) Multiple deployments
-
-Each Azure deployment is its own model endpoint. Register them as separate
-providers using suffixed env vars:
-
-```bash
-export AZURE_GPT5_API_KEY="..."
-export AZURE_GPT5_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/gpt-5"
-
-export AZURE_EMBED_API_KEY="..."
-export AZURE_EMBED_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/text-embedding-3-small"
-```
-
-These register providers `azure-gpt5` and `azure-embed`.
-
-When you want all deployments under one Azure resource to share an API key and
-expose every deployment as a model, point `AZURE_BASE_URL` at the resource
-root (without the `/deployments/...` segment) and use aliases or
-`AZURE_MODELS` to advertise specific deployment names.
-
-## 3. Start GoModel
-
-Pick the form that fits your environment. For Docker, prefer `--env-file .env`
-over inline `-e` flags so secrets stay out of shell history and process lists.
+## Run GoModel
 
 <CodeGroup>
 
 ```bash Docker (.env file)
-# Put the AZURE_* variables from the step above into a .env file:
-#   AZURE_API_KEY=...
-#   AZURE_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/your-deployment
-#   AZURE_API_VERSION=2024-10-21
-#   GOMODEL_MASTER_KEY=change-me
-
 docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
 ```
 
@@ -85,39 +41,17 @@ docker run --rm -p 8080:8080 \
   -e GOMODEL_MASTER_KEY="change-me" \
   -e AZURE_API_KEY="..." \
   -e AZURE_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment" \
-  -e AZURE_API_VERSION="2024-10-21" \
   enterpilot/gomodel
 ```
 
 ```bash Binary (make build)
-# Requires Go 1.26.3+ on PATH; builds bin/gomodel.
 make build
-
-# Reads AZURE_* from your shell (or `set -a; source .env; set +a` first).
 ./bin/gomodel
 ```
 
 </CodeGroup>
 
-<Tip>
-  A `.env` file is the most effective option once you have more than a couple
-  of variables — copy `.env.template` from the repo, fill in the Azure values,
-  and reuse the same file for both Docker and the native binary.
-</Tip>
-
-## 4. Verify the model registry
-
-```bash
-curl -s http://localhost:8080/v1/models
-```
-
-Expected result:
-
-- a `200 OK`
-- the deployments the Azure resource exposes via `/openai/models`, with
-  `owned_by: "azure"`.
-
-## 5. Verify Chat Completions
+## Verify
 
 ```bash
 curl -s http://localhost:8080/v1/chat/completions \
@@ -129,40 +63,46 @@ curl -s http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-Expected result:
+`GET /v1/models` returns the deployments the Azure resource exposes with
+`owned_by: "azure"`. Streaming, Responses, embeddings, and batches all work the
+same way; batch results route through the `/openai/batches` resource path.
 
-- a `200 OK`
-- assistant content containing `ok`
+## Multiple deployments
 
-Streaming, the Responses API, embeddings, and batch operations are wired up;
-batch results route through the `/openai/batches` resource path under your
-Azure resource.
+Each Azure deployment is its own endpoint. Register them as separate providers
+with suffixed env vars:
 
-## Notes on URLs
+```bash
+AZURE_GPT5_API_KEY=...
+AZURE_GPT5_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/gpt-5
 
-GoModel accepts the deployment-scoped URL most users copy from the portal:
-
+AZURE_EMBED_API_KEY=...
+AZURE_EMBED_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/text-embedding-3-small
 ```
-https://<resource>.openai.azure.com/openai/deployments/<deployment>
-```
 
-For account-wide operations (model listing, batches) GoModel automatically
-strips the `/openai/deployments/<deployment>` suffix and talks to the resource
-root, so a single `AZURE_BASE_URL` works for both chat and resource-level
-calls.
+This registers `azure-gpt5` and `azure-embed`. To expose every deployment under
+one resource through a single provider, point `AZURE_BASE_URL` at the resource
+root (no `/deployments/...`) and use aliases or `AZURE_MODELS` to advertise
+specific deployment names.
+
+## Notes
+
+- GoModel accepts the deployment-scoped URL the portal hands you. For
+  account-wide operations (model listing, batches) GoModel strips the
+  `/openai/deployments/<deployment>` suffix automatically, so one
+  `AZURE_BASE_URL` covers both chat and resource-level calls.
+- `AZURE_API_VERSION` only needs to be set explicitly when you need a different
+  stable or preview version — for example a newer Responses API surface.
 
 ## Troubleshooting
 
-- `401 Unauthorized` / `403`
-  Check `AZURE_API_KEY` matches the resource that hosts the deployment, and
-  that the deployment name in the URL is correct.
-- `Resource not found` or `DeploymentNotFound`
-  Azure returns 404 when the deployment name in the URL does not match. The
-  model name in the request body must be the deployment name, not the
-  underlying base model.
-- `unsupported api version` or `invalid api-version`
-  Bump `AZURE_API_VERSION` to a version the feature you're calling supports.
-  Newer Responses API features require recent preview API versions.
+- **`401 Unauthorized` / `403`** — `AZURE_API_KEY` does not match the resource
+  hosting the deployment, or the deployment name in the URL is wrong.
+- **`Resource not found` / `DeploymentNotFound`** — the model in the request
+  body must be the deployment name, not the underlying base model.
+- **`unsupported api version`** — bump `AZURE_API_VERSION` to a version the
+  feature you're calling supports. Newer Responses API features require recent
+  preview versions.
 
 ## References
 
