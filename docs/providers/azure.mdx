@@ -1,0 +1,135 @@
+---
+title: "Azure OpenAI"
+description: "Configure Azure OpenAI in GoModel using deployment-based URLs and the api-version query parameter."
+icon: "/brand/azure.svg"
+---
+
+GoModel routes Azure OpenAI requests through the deployment URL you provision
+in the Azure portal. Azure speaks the OpenAI API shape with two differences
+GoModel handles transparently: an `api-key` header instead of `Authorization:
+Bearer`, and a required `api-version` query parameter on every request.
+
+Flow:
+
+`Client -> GoModel -> Azure OpenAI`
+
+## Before you start
+
+- An Azure OpenAI resource in your subscription.
+- At least one deployment created for a model (e.g. `gpt-5`, `gpt-4o`,
+  `text-embedding-3-small`).
+- The deployment's base URL and resource API key from the Azure portal.
+
+## 1. Set the deployment URL and API key
+
+```bash
+export AZURE_API_KEY="..."
+export AZURE_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment"
+export AZURE_API_VERSION="2024-10-21"
+```
+
+`AZURE_API_VERSION` is optional. GoModel defaults to `2024-10-21` when unset.
+Set it explicitly when you need a different stable or preview version (for
+example, a newer Responses API surface).
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  azure:
+    type: azure
+    base_url: "${AZURE_BASE_URL}"
+    api_key: "${AZURE_API_KEY}"
+    api_version: "2024-10-21"
+```
+
+## 2. (Optional) Multiple deployments
+
+Each Azure deployment is its own model endpoint. Register them as separate
+providers using suffixed env vars:
+
+```bash
+export AZURE_GPT5_API_KEY="..."
+export AZURE_GPT5_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/gpt-5"
+
+export AZURE_EMBED_API_KEY="..."
+export AZURE_EMBED_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/text-embedding-3-small"
+```
+
+These register providers `azure_gpt5` and `azure_embed`.
+
+When you want all deployments under one Azure resource to share an API key and
+expose every deployment as a model, point `AZURE_BASE_URL` at the resource
+root (without the `/deployments/...` segment) and use aliases or
+`AZURE_MODELS` to advertise specific deployment names.
+
+## 3. Start GoModel
+
+```bash
+go run ./cmd/gomodel
+```
+
+## 4. Verify the model registry
+
+```bash
+curl -s http://localhost:8080/v1/models
+```
+
+Expected result:
+
+- a `200 OK`
+- the deployments the Azure resource exposes via `/openai/models`, with
+  `owned_by: "azure"`.
+
+## 5. Verify Chat Completions
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5",
+    "messages": [{"role": "user", "content": "Reply with the single word ok."}],
+    "max_tokens": 80
+  }'
+```
+
+Expected result:
+
+- a `200 OK`
+- assistant content containing `ok`
+
+Streaming, the Responses API, embeddings, and batch operations are wired up;
+batch results route through the `/openai/batches` resource path under your
+Azure resource.
+
+## Notes on URLs
+
+GoModel accepts the deployment-scoped URL most users copy from the portal:
+
+```
+https://<resource>.openai.azure.com/openai/deployments/<deployment>
+```
+
+For account-wide operations (model listing, batches) GoModel automatically
+strips the `/openai/deployments/<deployment>` suffix and talks to the resource
+root, so a single `AZURE_BASE_URL` works for both chat and resource-level
+calls.
+
+## Troubleshooting
+
+- `401 Unauthorized` / `403`
+  Check `AZURE_API_KEY` matches the resource that hosts the deployment, and
+  that the deployment name in the URL is correct.
+- `Resource not found` or `DeploymentNotFound`
+  Azure returns 404 when the deployment name in the URL does not match. The
+  model name in the request body must be the deployment name, not the
+  underlying base model.
+- `unsupported api version` or `invalid api-version`
+  Bump `AZURE_API_VERSION` to a version the feature you're calling supports.
+  Newer Responses API features require recent preview API versions.
+
+## References
+
+- [Azure OpenAI REST API versioning](https://learn.microsoft.com/azure/ai-services/openai/reference)
+- [Azure OpenAI deployments](https://learn.microsoft.com/azure/ai-services/openai/how-to/create-resource)
+- [Azure OpenAI authentication](https://learn.microsoft.com/azure/ai-services/openai/how-to/managed-identity)

@@ -95,11 +95,21 @@
                 "tab": "Providers",
                 "icon": "plug",
                 "pages": [
-                    "guides/gemini",
-                    "guides/oracle",
-                    "guides/deepseek",
-                    "guides/vllm",
-                    "guides/multiple-ollama"
+                    "providers/overview",
+                    "providers/gemini",
+                    "providers/deepseek",
+                    "providers/vllm",
+                    "providers/multiple-ollama",
+                    {
+                        "group": "Cloud Platforms",
+                        "icon": "cloud",
+                        "pages": [
+                            "providers/vertex",
+                            "providers/bedrock",
+                            "providers/azure",
+                            "providers/oracle"
+                        ]
+                    }
                 ]
             },
             {

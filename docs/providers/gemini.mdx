@@ -1,0 +1,117 @@
+---
+title: "Google Gemini"
+description: "Configure Google Gemini via AI Studio in GoModel, choose native or OpenAI-compatible routing, and understand image_url behavior."
+icon: "sparkles"
+---
+
+This page covers Gemini through **Google AI Studio** API keys. For Gemini on
+Google Cloud's Vertex AI, see the [Google Vertex AI guide](/providers/vertex).
+
+GoModel routes Gemini chat and Responses API requests through Gemini's native
+`generateContent` API by default. You can switch those requests back to
+Gemini's OpenAI-compatible API when you need compatibility behavior that the
+native adapter does not implement yet.
+
+## Configure AI Studio
+
+Use the `GEMINI_*` prefix for Gemini API keys from AI Studio:
+
+```bash
+export GEMINI_API_KEY="..."
+export GEMINI_API_MODE="native"
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  gemini:
+    type: gemini
+    api_key: "${GEMINI_API_KEY}"
+    api_mode: native
+```
+
+## Native versus OpenAI-compatible mode
+
+Gemini native mode is enabled by default:
+
+```bash
+export GEMINI_API_MODE="native"
+```
+
+Set the per-provider API mode to `openai_compatible` to route chat and
+Responses API requests through the upstream OpenAI-compatible
+`/chat/completions` endpoint:
+
+```bash
+export GEMINI_API_MODE="openai_compatible"
+```
+
+`GEMINI_BASE_URL` configures the Gemini base. GoModel keeps separate internal
+bases for native Gemini and the OpenAI-compatible API:
+
+- native chat/models default: `https://generativelanguage.googleapis.com/v1beta`
+- OpenAI-compatible default: `https://generativelanguage.googleapis.com/v1beta/openai`
+
+When `GEMINI_BASE_URL` ends in `/openai`, GoModel uses that value for the
+OpenAI-compatible client and derives the native base by stripping `/openai`.
+Gemini embeddings, files, and batches still use the OpenAI-compatible surface.
+
+```bash
+export GEMINI_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai"
+```
+
+<Note>
+  `USE_GOOGLE_GEMINI_NATIVE_API` is still supported as a legacy global toggle
+  when per-provider `GEMINI_API_MODE` is unset. Prefer `GEMINI_API_MODE` for
+  new deployments.
+</Note>
+
+## Image URL behavior
+
+Gemini models support image input, but the two GoModel routing modes handle
+OpenAI-style `image_url` values differently.
+
+In native mode, GoModel converts OpenAI-compatible messages to Gemini
+`generateContent` requests. That adapter currently supports inline image data
+only:
+
+```json
+{
+  "type": "image_url",
+  "image_url": {
+    "url": "data:image/jpeg;base64,..."
+  }
+}
+```
+
+Remote image URLs such as `https://example.com/image.png` are rejected in
+native mode. Google's native Gemini API supports inline image data and Files
+API references; for URL-hosted images, Google's examples fetch the URL first
+and send the bytes to `generateContent`.
+
+Set `GEMINI_API_MODE=openai_compatible` when you need GoModel to pass the
+OpenAI-compatible `image_url` request shape through to Google's
+OpenAI-compatible endpoint instead. Google documents image input for that
+endpoint using the OpenAI `image_url` field.
+
+## Current support
+
+Integrated:
+
+- chat completions and streaming
+- Responses API and streaming
+- model listing through AI Studio `/models`
+- usage metadata normalization for native responses
+- tool calls and function-call results
+- inline image data via `data:` URLs in native mode
+
+Not integrated yet:
+
+- fetching remote `image_url` values
+- uploading remote images through the Gemini Files API before a chat request
+
+References:
+
+- [Gemini image understanding](https://ai.google.dev/gemini-api/docs/image-understanding)
+- [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)

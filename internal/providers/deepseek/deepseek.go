@@ -104,7 +104,7 @@ func adaptChatRequest(req *core.ChatRequest) (any, error) {
 // levels DeepSeek V4 accepts ("high" and "max"). "low" and "medium" are mapped
 // up to "high" because DeepSeek does not support lower levels; clients that
 // want to disable reasoning should omit the field entirely. See
-// docs/guides/deepseek.mdx for the user-facing table.
+// docs/providers/deepseek.mdx for the user-facing table.
 func normalizeReasoningEffort(effort string) string {
 	normalized := strings.ToLower(strings.TrimSpace(effort))
 	switch normalized {

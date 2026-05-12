@@ -1,0 +1,71 @@
+---
+title: "Providers Overview"
+description: "Supported AI providers in GoModel and which ones have dedicated configuration guides."
+icon: "list"
+---
+
+GoModel routes OpenAI-compatible requests to many AI providers through a single
+gateway. Most providers work out of the box once you set their API key — set
+the env var, start GoModel, and call `/v1/chat/completions` or `/v1/responses`
+as usual.
+
+The pages in this section exist for providers whose setup is **not** purely
+"set an API key": auth flows that pull from cloud credentials, deployment-based
+URLs, region/project requirements, dual native + OpenAI-compatible API
+surfaces, or other quirks worth documenting. If a provider isn't listed
+separately, its default configuration is enough.
+
+## Supported providers
+
+| Provider | Credential | Guide |
+| -------- | ---------- | ----- |
+| OpenAI | `OPENAI_API_KEY` | — |
+| Anthropic | `ANTHROPIC_API_KEY` | — |
+| Google Gemini | `GEMINI_API_KEY` | [Google Gemini](/providers/gemini) |
+| Google Vertex AI | `VERTEX_PROJECT` + `VERTEX_LOCATION` + GCP credentials | [Google Vertex AI](/providers/vertex) |
+| DeepSeek | `DEEPSEEK_API_KEY` | [DeepSeek](/providers/deepseek) |
+| Groq | `GROQ_API_KEY` | — |
+| OpenRouter | `OPENROUTER_API_KEY` | — |
+| Z.ai | `ZAI_API_KEY` (`ZAI_BASE_URL` optional) | — |
+| xAI (Grok) | `XAI_API_KEY` | — |
+| MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | — |
+| Azure OpenAI | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | [Azure OpenAI](/providers/azure) |
+| Amazon Bedrock | `BEDROCK_BASE_URL` (region or endpoint) + AWS credentials | [Amazon Bedrock](/providers/bedrock) |
+| Oracle GenAI | `ORACLE_API_KEY` + `ORACLE_BASE_URL` | [Oracle GenAI](/providers/oracle) |
+| Ollama | `OLLAMA_BASE_URL` | [Ollama](/providers/multiple-ollama) |
+| vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` optional) | [vLLM](/providers/vllm) |
+
+See the [README provider table](https://github.com/ENTERPILOT/GoModel#supported-llm-providers)
+for per-provider feature support (chat, Responses, embeddings, files, batches,
+passthrough).
+
+## Why some providers have dedicated pages
+
+These are the providers most users hit friction on:
+
+- **Google Vertex AI** — needs a GCP project, region, and either Application Default
+  Credentials or a service-account JSON key. Multi-region or multi-account
+  setups use suffixed env vars.
+- **Amazon Bedrock** — no API key of its own; authenticates through the AWS
+  credential chain (env, profile, IAM Identity Center, instance/container
+  roles). Requires explicit model access in the Bedrock console.
+- **Azure OpenAI** — deployment-scoped base URLs, the `api-version` query
+  parameter, and the `api-key` header instead of `Authorization: Bearer`.
+- **Oracle GenAI** — requires an OCI IAM policy for `generativeaiapikey` and a
+  region-specific OpenAI-compatible endpoint URL.
+- **Google Gemini (AI Studio)** — two routing modes (native
+  `generateContent` vs OpenAI-compatible) with different image-input behavior.
+- **DeepSeek** — reasoning effort mapping quirks for DeepSeek V4.
+- **Ollama / vLLM** — local-model hosting with optional multi-instance setup
+  through suffixed env vars and provider-qualified model IDs.
+
+## Providers without a dedicated page
+
+OpenAI, Anthropic, Groq, OpenRouter, Z.ai, xAI, and MiniMax follow the same
+pattern: set the API key (and optional base URL where supported), start
+GoModel, and route by model ID. The full env-var reference for every provider
+lives in
+[Configuration](/advanced/configuration).
+
+If you hit something unexpected with a provider that doesn't have a guide
+here, that's worth a bug report — chances are it's a quirk we should document.

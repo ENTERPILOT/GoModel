@@ -1,0 +1,155 @@
+---
+title: "Amazon Bedrock"
+description: "Configure Amazon Bedrock in GoModel using AWS credentials and the Bedrock Runtime Converse API."
+icon: "/brand/bedrock.svg"
+---
+
+GoModel routes Bedrock requests through the Bedrock Runtime Converse and
+ConverseStream APIs, which present a uniform request and response shape across
+the model families Bedrock hosts (Anthropic, Amazon Nova, Meta Llama, Mistral,
+Cohere, AI21, and others). Responses are normalized into OpenAI-compatible
+chat completions.
+
+Flow:
+
+`Client -> GoModel -> Amazon Bedrock`
+
+## Before you start
+
+- An AWS account with Bedrock access in your chosen region.
+- Model access granted for the foundation models you want to call (Bedrock
+  console → **Model access**).
+- AWS credentials reachable through the standard AWS credential chain: env
+  vars, `AWS_PROFILE`, IAM Identity Center, container or instance roles.
+
+Bedrock has no API key of its own. GoModel does not store AWS credentials —
+they are resolved at runtime by the AWS SDK.
+
+## 1. Set the AWS region
+
+Set `BEDROCK_BASE_URL` to either an AWS region (recommended) or a fully
+qualified Bedrock endpoint URL:
+
+```bash
+export BEDROCK_BASE_URL="us-east-1"
+```
+
+When `BEDROCK_BASE_URL` is empty, GoModel falls back to `AWS_REGION` or
+`AWS_DEFAULT_REGION` from the standard AWS environment.
+
+## 2. Make AWS credentials available
+
+Any method the AWS SDK supports works. The simplest for local testing:
+
+```bash
+export AWS_ACCESS_KEY_ID="..."
+export AWS_SECRET_ACCESS_KEY="..."
+# export AWS_SESSION_TOKEN="..."   # if using temporary credentials
+```
+
+In production, prefer instance roles, IRSA, or IAM Identity Center over
+long-lived access keys.
+
+## 3. (Optional) Configure a model list
+
+By default GoModel queries Bedrock's control plane and lists all on-demand
+text models the account has access to. To restrict or extend the list — for
+example to pin inference profile IDs or custom model ARNs — set
+`BEDROCK_MODELS`:
+
+```bash
+export BEDROCK_MODELS="anthropic.claude-3-5-haiku-20241022-v1:0,amazon.nova-lite-v1:0"
+```
+
+Or use a YAML provider block:
+
+```yaml
+providers:
+  bedrock:
+    type: bedrock
+    base_url: "us-east-1"
+    models:
+      - anthropic.claude-3-5-haiku-20241022-v1:0
+      - amazon.nova-lite-v1:0
+```
+
+With the default `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, the configured
+list is used when Bedrock's listing call is unavailable or empty. Set
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only the configured
+models and skip the upstream `ListFoundationModels` call.
+
+## 4. Start GoModel
+
+```bash
+go run ./cmd/gomodel
+```
+
+## 5. Verify the model registry
+
+```bash
+curl -s http://localhost:8080/v1/models
+```
+
+Expected result:
+
+- a `200 OK`
+- Bedrock models with `owned_by` set to the originating model vendor (e.g.
+  `anthropic`, `amazon`), reflecting Bedrock's `ProviderName` field.
+
+## 6. Verify Chat Completions
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "anthropic.claude-3-5-haiku-20241022-v1:0",
+    "messages": [{"role": "user", "content": "Reply with the single word ok."}],
+    "max_tokens": 80
+  }'
+```
+
+Expected result:
+
+- a `200 OK`
+- assistant content containing `ok`
+
+Streaming (`stream: true`) and the Responses API (`/v1/responses`) work the
+same way — Responses requests are bridged onto Converse internally.
+
+## Current status
+
+What is integrated today:
+
+- Bedrock Runtime Converse and ConverseStream for chat and Responses
+- automatic model discovery via `ListFoundationModels` (on-demand text models)
+- configured model lists through `BEDROCK_MODELS` or YAML `models:` in
+  fallback or allowlist mode
+
+What is not integrated yet:
+
+- Bedrock embeddings (the InvokeModel embedding path is model-specific and
+  not yet wired up)
+
+## Troubleshooting
+
+- `AccessDeniedException` or `403`
+  The AWS principal lacks Bedrock permissions, or model access has not been
+  granted in the Bedrock console for the requested model.
+- `ValidationException: ... on-demand throughput isn't supported`
+  The model requires an inference profile or provisioned throughput. Set
+  `BEDROCK_MODELS` (or YAML `models:`) to the inference profile ID instead of
+  the base model ID.
+- `model registry has no models`
+  Either the region has no on-demand text models for the account, or the
+  control-plane call failed. Set `BEDROCK_MODELS` to populate the registry
+  from configuration, or check the IAM policy attached to the credentials.
+- Wrong region inferred
+  Set `BEDROCK_BASE_URL` explicitly. When passed a full endpoint URL, GoModel
+  only extracts the region segment if the host ends in `.amazonaws.com`;
+  custom endpoints should be paired with `AWS_REGION`.
+
+## References
+
+- Bedrock Runtime Converse API: https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html
+- Model access in the Bedrock console: https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html
+- AWS credential chain: https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html
