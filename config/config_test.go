@@ -37,7 +37,7 @@ func clearProviderEnvVars(t *testing.T) {
 func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "ENABLED_PASSTHROUGH_PROVIDERS",
+		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"RESPONSE_CACHE_SIMPLE_ENABLED",
@@ -100,6 +100,9 @@ func TestBuildDefaultConfig(t *testing.T) {
 	}
 	if cfg.Server.BasePath != "/" {
 		t.Errorf("expected Server.BasePath=/, got %s", cfg.Server.BasePath)
+	}
+	if cfg.Server.UserPathHeader != "X-GoModel-User-Path" {
+		t.Errorf("expected Server.UserPathHeader=X-GoModel-User-Path, got %s", cfg.Server.UserPathHeader)
 	}
 	if cfg.Server.PprofEnabled {
 		t.Error("expected Server.PprofEnabled=false")
@@ -1134,6 +1137,64 @@ server:
 		want := []string{"groq", "gemini"}
 		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 			t.Fatalf("EnabledPassthroughProviders = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestLoad_UserPathHeaderConfig(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+server:
+  user_path_header: "x-tenant-path"
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		if got := result.Config.Server.UserPathHeader; got != "X-Tenant-Path" {
+			t.Fatalf("Server.UserPathHeader = %q, want X-Tenant-Path", got)
+		}
+	})
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+server:
+  user_path_header: "X-Yaml-Path"
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		t.Setenv("USER_PATH_HEADER", "x-env-path")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		if got := result.Config.Server.UserPathHeader; got != "X-Env-Path" {
+			t.Fatalf("Server.UserPathHeader = %q, want X-Env-Path", got)
+		}
+	})
+}
+
+func TestLoad_UserPathHeaderRejectsInvalidName(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(_ string) {
+		t.Setenv("USER_PATH_HEADER", "Bad Header")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("expected Load() to reject invalid USER_PATH_HEADER")
+		}
+		if !strings.Contains(err.Error(), "invalid server.user_path_header") {
+			t.Fatalf("Load() error = %v, want invalid server.user_path_header", err)
 		}
 	})
 }

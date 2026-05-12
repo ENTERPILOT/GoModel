@@ -19,7 +19,8 @@ const requestSnapshotInlineBodyLimit int64 = 64 * 1024
 // model-facing endpoints. Known-small JSON bodies are captured once for the
 // hot path; larger or unknown-size bodies only get a bounded selector peek and
 // stay on the live request stream until the handler actually decodes them.
-func RequestSnapshotCapture() echo.MiddlewareFunc {
+func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
+	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			req, requestID := ensureRequestID(c.Request())
@@ -30,12 +31,12 @@ func RequestSnapshotCapture() echo.MiddlewareFunc {
 				return next(c)
 			}
 
-			userPath, err := core.NormalizeUserPath(req.Header.Get(core.UserPathHeader))
+			userPath, err := core.NormalizeUserPath(req.Header.Get(userPathHeaderName))
 			if err != nil {
-				return handleError(c, core.NewInvalidRequestError("invalid X-GoModel-User-Path header", err))
+				return handleError(c, core.NewInvalidRequestError("invalid "+userPathHeaderName+" header", err))
 			}
 			if userPath != "" {
-				req.Header.Set(core.UserPathHeader, userPath)
+				req.Header.Set(userPathHeaderName, userPath)
 			}
 
 			bodyBytes, bodyNotCaptured, bodyCaptured, err := captureSmallRequestBodyForSnapshot(req, desc.BodyMode)
@@ -57,7 +58,8 @@ func RequestSnapshotCapture() echo.MiddlewareFunc {
 				userPath,
 			)
 
-			ctx := core.WithRequestSnapshot(req.Context(), snapshot)
+			ctx := core.WithUserPathHeaderName(req.Context(), userPathHeaderName)
+			ctx = core.WithRequestSnapshot(ctx, snapshot)
 			if semantics := core.DeriveWhiteBoxPrompt(snapshot); semantics != nil {
 				if !bodyCaptured {
 					seedRequestBodySelectorHints(req, desc.BodyMode, semantics)
@@ -69,6 +71,13 @@ func RequestSnapshotCapture() echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+func configuredUserPathHeaderName(headerNames ...string) string {
+	if len(headerNames) == 0 {
+		return core.UserPathHeader
+	}
+	return core.UserPathHeaderName(headerNames[0])
 }
 
 func ensureRequestID(req *http.Request) (*http.Request, string) {

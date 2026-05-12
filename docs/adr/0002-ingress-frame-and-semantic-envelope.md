@@ -23,7 +23,7 @@ GoModel needs a model that preserves the original request faithfully while still
 
 ## Flow Diagram
 
-![RequestSnapshot and WhiteBoxPrompt request flow](assets/0002-ingress-frame-flow.svg)
+![RequestSnapshot and WhiteBoxPrompt request flow](/adr/assets/0002-ingress-frame-flow.svg)
 
 ## Decision
 

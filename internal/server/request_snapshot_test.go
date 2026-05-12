@@ -195,6 +195,30 @@ func TestRequestSnapshotCapture_NormalizesUserPathHeader(t *testing.T) {
 	assert.Equal(t, "/team/alpha/user", c.Request().Header.Get(core.UserPathHeader))
 }
 
+func TestRequestSnapshotCapture_UsesConfiguredUserPathHeader(t *testing.T) {
+	e := echo.New()
+	const headerName = "X-Tenant-Path"
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerName, " team//alpha/user/ ")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	var capturedFrame *core.RequestSnapshot
+	handler := RequestSnapshotCapture(headerName)(func(c *echo.Context) error {
+		capturedFrame = core.GetRequestSnapshot(c.Request().Context())
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	require.NotNil(t, capturedFrame)
+	assert.Equal(t, "/team/alpha/user", capturedFrame.UserPath)
+	assert.Equal(t, "/team/alpha/user", c.Request().Header.Get(headerName))
+	assert.Equal(t, headerName, core.UserPathHeaderNameFromContext(c.Request().Context()))
+}
+
 func TestRequestSnapshotCapture_PreservesPassthroughRouteParams(t *testing.T) {
 	e := echo.New()
 

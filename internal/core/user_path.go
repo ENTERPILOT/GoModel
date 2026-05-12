@@ -3,10 +3,34 @@ package core
 import (
 	"context"
 	"fmt"
+	"net/textproto"
 	"strings"
 )
 
 const UserPathHeader = "X-GoModel-User-Path"
+
+// UserPathHeaderName canonicalizes the configured user-path header name.
+func UserPathHeaderName(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return UserPathHeader
+	}
+	if strings.EqualFold(raw, UserPathHeader) {
+		return UserPathHeader
+	}
+	return textproto.CanonicalMIMEHeaderKey(raw)
+}
+
+// UserPathHeaderNameFromContext returns the request-scoped user-path header
+// name, falling back to the default public header.
+func UserPathHeaderNameFromContext(ctx context.Context) string {
+	if ctx != nil {
+		if value, ok := ctx.Value(userPathHeaderNameKey).(string); ok {
+			return UserPathHeaderName(value)
+		}
+	}
+	return UserPathHeader
+}
 
 // NormalizeUserPath canonicalizes one user hierarchy path from request ingress.
 func NormalizeUserPath(raw string) (string, error) {

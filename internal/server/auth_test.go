@@ -263,6 +263,46 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathOverridesHeader(t *te
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
+func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathUsesConfiguredHeader(t *testing.T) {
+	e := echo.New()
+	const headerName = "X-Tenant-Path"
+	testHandler := func(c *echo.Context) error {
+		if got := core.UserPathFromContext(c.Request().Context()); got != "/team/auth-key" {
+			t.Fatalf("effective user path = %q, want /team/auth-key", got)
+		}
+		snapshot := core.GetRequestSnapshot(c.Request().Context())
+		if snapshot == nil {
+			t.Fatal("request snapshot missing from context")
+		}
+		if got := snapshot.GetHeaders()[headerName][0]; got != "/team/auth-key" {
+			t.Fatalf("snapshot header = %q, want /team/auth-key", got)
+		}
+		if got := c.Request().Header.Get(headerName); got != "/team/auth-key" {
+			t.Fatalf("%s = %q, want /team/auth-key", headerName, got)
+		}
+		if got := c.Request().Header.Get(core.UserPathHeader); got != "" {
+			t.Fatalf("%s = %q, want empty", core.UserPathHeader, got)
+		}
+		return c.String(http.StatusOK, "ok")
+	}
+
+	handler := RequestSnapshotCapture(headerName)(AuthMiddlewareWithAuthenticator("", mockAuthenticator{
+		enabled:   true,
+		tokenToID: map[string]string{"sk_gom_token": "key-123"},
+		tokenPath: map[string]string{"sk_gom_token": "/team/auth-key"},
+	}, nil, headerName)(testHandler))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk_gom_token")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
 func TestAuthMiddlewareWithAuthenticator_ManagedKeyFailureUsesGenericClientMessage(t *testing.T) {
 	e := echo.New()
 	handler := AuthMiddlewareWithAuthenticator("", mockAuthenticator{

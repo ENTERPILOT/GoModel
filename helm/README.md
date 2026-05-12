@@ -51,6 +51,7 @@ helm install gomodel ./helm \
 | `image.tag`                      | Image tag                                                                                      | `""` (uses appVersion) |
 | `server.port`                    | Server port                                                                                    | `8080`                 |
 | `server.basePath`                | URL path prefix where GoModel is mounted                                                       | `"/"`                  |
+| `server.userPathHeader`          | Header used to read/write request user_path values                                             | `"X-GoModel-User-Path"` |
 | `server.bodySizeLimit`           | Max request body size                                                                          | `"10M"`                |
 | `auth.masterKey`                 | Master key for auth                                                                            | `""`                   |
 | `auth.existingSecret`            | Existing secret for auth                                                                       | `""`                   |

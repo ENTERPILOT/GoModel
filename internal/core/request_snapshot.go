@@ -14,8 +14,8 @@ type RequestSnapshot struct {
 	Method string
 	// Path is the request URL path as received at ingress.
 	Path string
-	// UserPath is the canonical business hierarchy path sourced from
-	// X-GoModel-User-Path when provided.
+	// UserPath is the canonical business hierarchy path sourced from the
+	// configured user-path request header when provided.
 	UserPath string
 	// RouteParams contains resolved router parameters such as provider or file id.
 	routeParams map[string]string
@@ -80,24 +80,31 @@ func firstUserPath(values []string) string {
 }
 
 // WithUserPath returns a shallow-cloned snapshot with UserPath and the captured
-// X-GoModel-User-Path header rewritten to the provided canonical value.
+// default user-path header rewritten to the provided canonical value.
 func (s *RequestSnapshot) WithUserPath(userPath string) *RequestSnapshot {
+	return s.WithUserPathHeader(userPath, UserPathHeader)
+}
+
+// WithUserPathHeader returns a shallow-cloned snapshot with UserPath and the
+// captured configured user-path header rewritten to the provided canonical value.
+func (s *RequestSnapshot) WithUserPathHeader(userPath, headerName string) *RequestSnapshot {
 	if s == nil {
 		return nil
 	}
+	headerName = UserPathHeaderName(headerName)
 	cloned := *s
 	cloned.UserPath = strings.TrimSpace(userPath)
 	cloned.headers = cloneMultiMap(s.headers)
 	if cloned.UserPath == "" {
 		if cloned.headers != nil {
-			delete(cloned.headers, UserPathHeader)
+			delete(cloned.headers, headerName)
 		}
 		return &cloned
 	}
 	if cloned.headers == nil {
 		cloned.headers = make(map[string][]string, 1)
 	}
-	cloned.headers[UserPathHeader] = []string{cloned.UserPath}
+	cloned.headers[headerName] = []string{cloned.UserPath}
 	return &cloned
 }
 

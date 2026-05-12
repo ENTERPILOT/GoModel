@@ -71,6 +71,7 @@ type Config struct {
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
 	EnabledPassthroughProviders     []string                               // Provider types enabled on /p/{provider}/... passthrough routes
 	AllowPassthroughV1Alias         *bool                                  // Allow /p/{provider}/v1/... aliases; nil defaults to true
+	UserPathHeader                  string                                 // Header carrying the request user path (default: X-GoModel-User-Path)
 	AdminEndpointsEnabled           bool                                   // Whether admin API endpoints are enabled
 	AdminUIEnabled                  bool                                   // Whether admin dashboard UI is enabled
 	AdminHandler                    *admin.Handler                         // Admin API handler (nil if disabled)
@@ -244,7 +245,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.Use(modelInteractionWriteDeadlineMiddleware())
 
 	// Ingress capture (before auth/audit/model validation so they can consume shared raw request state)
-	e.Use(RequestSnapshotCapture())
+	userPathHeaderName := configuredUserPathHeader(cfg)
+	e.Use(RequestSnapshotCapture(userPathHeaderName))
 
 	if cfg != nil && len(cfg.PassthroughSemanticEnrichers) > 0 {
 		e.Use(PassthroughSemanticEnrichment(provider, cfg.PassthroughSemanticEnrichers, passthroughV1PrefixNormalizationEnabled(cfg)))
@@ -260,7 +262,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// Authentication (skips public paths)
 	if cfg != nil && (cfg.MasterKey != "" || cfg.Authenticator != nil) {
-		e.Use(AuthMiddlewareWithAuthenticator(cfg.MasterKey, cfg.Authenticator, authSkipPaths))
+		e.Use(AuthMiddlewareWithAuthenticator(cfg.MasterKey, cfg.Authenticator, authSkipPaths, userPathHeaderName))
 	}
 
 	// Workflow resolution resolves the request-scoped workflow after auth so

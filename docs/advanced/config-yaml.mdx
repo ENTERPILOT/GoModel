@@ -61,6 +61,9 @@ For deployments mounted below a domain root, set `server.base_path` or
 `BASE_PATH`. For example, `BASE_PATH=/g` serves the gateway at `/g/v1/...`,
 `/g/admin/...`, and `/g/health`.
 
+To change the inbound user path header, set `server.user_path_header` or
+`USER_PATH_HEADER`. The default remains `X-GoModel-User-Path`.
+
 ## Docker
 
 GoModel reads `config/config.yaml` first, then `config.yaml`.

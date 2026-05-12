@@ -29,7 +29,8 @@ func AuthMiddleware(masterKey string, skipPaths []string) echo.MiddlewareFunc {
 
 // AuthMiddlewareWithAuthenticator validates the legacy master key and, when
 // configured, managed auth keys from the auth key service.
-func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerTokenAuthenticator, skipPaths []string) echo.MiddlewareFunc {
+func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerTokenAuthenticator, skipPaths []string, userPathHeader ...string) echo.MiddlewareFunc {
+	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			// If no auth mechanism is configured, allow all requests.
@@ -81,10 +82,11 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 					ctx := core.WithAuthKeyID(c.Request().Context(), authResult.ID)
 					if userPath := strings.TrimSpace(authResult.UserPath); userPath != "" {
 						ctx = core.WithEffectiveUserPath(ctx, userPath)
+						ctx = core.WithUserPathHeaderName(ctx, userPathHeaderName)
 						if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
-							ctx = core.WithRequestSnapshot(ctx, snapshot.WithUserPath(userPath))
+							ctx = core.WithRequestSnapshot(ctx, snapshot.WithUserPathHeader(userPath, userPathHeaderName))
 						}
-						c.Request().Header.Set(core.UserPathHeader, userPath)
+						c.Request().Header.Set(userPathHeaderName, userPath)
 						auditlog.EnrichEntryWithUserPath(c, userPath)
 					}
 					c.SetRequest(c.Request().WithContext(ctx))

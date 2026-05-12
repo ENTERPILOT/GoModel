@@ -51,7 +51,7 @@ Unified `Embedder` interface with a single implementation: an **HTTP client** ca
 
 ### Vector Store
 
-`VecStore` interface + `type`-switched factory in [`internal/responsecache/vecstore.go`](../../internal/responsecache/vecstore.go). When semantic caching is enabled, **`vector_store.type` is required** (no default). Supported values:
+`VecStore` interface + `type`-switched factory in [`internal/responsecache/vecstore.go`](https://github.com/ENTERPILOT/GoModel/blob/main/internal/responsecache/vecstore.go). When semantic caching is enabled, **`vector_store.type` is required** (no default). Supported values:
 
 | Type       | Notes                                                                                                                                                                                                                     |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

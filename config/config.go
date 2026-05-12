@@ -43,6 +43,7 @@ func buildDefaultConfig() *Config {
 		Server: ServerConfig{
 			Port:                    "8080",
 			BasePath:                "/",
+			UserPathHeader:          "X-GoModel-User-Path",
 			SwaggerEnabled:          false,
 			PprofEnabled:            false,
 			EnablePassthroughRoutes: true,
@@ -160,6 +161,10 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)
+	cfg.Server.UserPathHeader, err = NormalizeHeaderName(cfg.Server.UserPathHeader, "X-GoModel-User-Path")
+	if err != nil {
+		return nil, fmt.Errorf("invalid server.user_path_header: %w", err)
+	}
 	cfg.Models.ConfiguredProviderModelsMode = ResolveConfiguredProviderModelsMode(cfg.Models.ConfiguredProviderModelsMode)
 	if !cfg.Models.ConfiguredProviderModelsMode.Valid() {
 		return nil, fmt.Errorf("models.configured_provider_models_mode must be one of: fallback, allowlist")

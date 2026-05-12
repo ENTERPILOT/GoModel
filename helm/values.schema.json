@@ -325,6 +325,7 @@
       "properties": {
         "port": { "type": "integer" },
         "basePath": { "type": "string" },
+        "userPathHeader": { "type": "string" },
         "bodySizeLimit": { "type": "string" }
       }
     },

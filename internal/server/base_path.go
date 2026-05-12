@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"gomodel/config"
+	"gomodel/internal/core"
 
 	"github.com/labstack/echo/v5"
 )
@@ -15,6 +16,13 @@ func configuredBasePath(cfg *Config) string {
 		return "/"
 	}
 	return config.NormalizeBasePath(cfg.BasePath)
+}
+
+func configuredUserPathHeader(cfg *Config) string {
+	if cfg == nil {
+		return core.UserPathHeader
+	}
+	return core.UserPathHeaderName(cfg.UserPathHeader)
 }
 
 func stripBasePathMiddleware(basePath string) echo.MiddlewareFunc {

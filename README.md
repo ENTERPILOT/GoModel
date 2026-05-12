@@ -264,6 +264,7 @@ Key settings:
 | `PORT`                          | `8080`                                 | Server port                                                                      |
 | `BASE_PATH`                     | `/`                                    | Mount the gateway under a path prefix such as `/g`                               |
 | `GOMODEL_MASTER_KEY`            | (none)                                 | API key for authentication                                                       |
+| `USER_PATH_HEADER`              | `X-GoModel-User-Path`                  | Header used to read/write request `user_path` values                             |
 | `ENABLE_PASSTHROUGH_ROUTES`     | `true`                                 | Enable provider-native passthrough routes under `/p/{provider}/...`              |
 | `ALLOW_PASSTHROUGH_V1_ALIAS`    | `true`                                 | Allow `/p/{provider}/v1/...` aliases while keeping `/p/{provider}/...` canonical |
 | `ENABLED_PASSTHROUGH_PROVIDERS` | `openai,anthropic,openrouter,zai,vllm,deepseek` | Comma-separated list of enabled passthrough providers                            |

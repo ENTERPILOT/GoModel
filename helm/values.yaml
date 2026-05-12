@@ -25,6 +25,8 @@ server:
   port: 8080
   # -- URL path prefix where GoModel is mounted (for example, "/g")
   basePath: "/"
+  # -- Header used to read/write request user_path values
+  userPathHeader: "X-GoModel-User-Path"
   # -- Maximum request body size (e.g., "10M", "1G", "500K")
   bodySizeLimit: "10M"
 

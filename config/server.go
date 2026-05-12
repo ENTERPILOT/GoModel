@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/textproto"
 	"path"
 	"regexp"
 	"strconv"
@@ -31,10 +32,31 @@ type ServerConfig struct {
 	// AllowPassthroughV1Alias allows /p/{provider}/v1/... style passthrough routes
 	// while keeping /p/{provider}/... as the canonical form. Default: true.
 	AllowPassthroughV1Alias bool `yaml:"allow_passthrough_v1_alias" env:"ALLOW_PASSTHROUGH_V1_ALIAS"`
+	// UserPathHeader is the inbound HTTP header used to read/write user paths.
+	// Default: X-GoModel-User-Path.
+	UserPathHeader string `yaml:"user_path_header" env:"USER_PATH_HEADER"`
 	// EnabledPassthroughProviders lists the provider types enabled on
 	// /p/{provider}/... passthrough routes. Default:
 	// ["openai", "anthropic", "openrouter", "zai", "vllm", "deepseek"].
 	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
+}
+
+var headerNameRegex = regexp.MustCompile(`^[!#$%&'*+\-.^_` + "`" + `|~0-9A-Za-z]+$`)
+
+// NormalizeHeaderName canonicalizes an HTTP header field name. Empty values
+// fall back to fallback.
+func NormalizeHeaderName(value, fallback string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = fallback
+	}
+	if !headerNameRegex.MatchString(value) {
+		return "", fmt.Errorf("invalid HTTP header name %q", value)
+	}
+	if strings.EqualFold(value, fallback) {
+		return fallback, nil
+	}
+	return textproto.CanonicalMIMEHeaderKey(value), nil
 }
 
 // NormalizeBasePath canonicalizes the public mount path for the HTTP server.

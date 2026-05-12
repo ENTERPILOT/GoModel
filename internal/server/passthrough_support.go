@@ -83,10 +83,11 @@ func normalizePassthroughEndpoint(endpoint string, enabled bool) (string, error)
 
 func buildPassthroughHeaders(ctx context.Context, src http.Header) http.Header {
 	connectionHeaders := passthroughConnectionHeaders(src)
+	userPathHeaderName := core.UserPathHeaderNameFromContext(ctx)
 	dst := make(http.Header)
 	for key, values := range src {
 		canonicalKey := http.CanonicalHeaderKey(strings.TrimSpace(key))
-		if skipPassthroughRequestHeader(canonicalKey) || len(values) == 0 {
+		if skipPassthroughRequestHeader(canonicalKey, userPathHeaderName) || len(values) == 0 {
 			continue
 		}
 		if _, hopByHop := connectionHeaders[canonicalKey]; hopByHop {
@@ -121,8 +122,17 @@ func skipPassthroughHeader(key string) bool {
 	}
 }
 
-func skipPassthroughRequestHeader(key string) bool {
-	if http.CanonicalHeaderKey(strings.TrimSpace(key)) == http.CanonicalHeaderKey(core.UserPathHeader) {
+func skipPassthroughRequestHeader(key string, userPathHeader ...string) bool {
+	canonicalKey := http.CanonicalHeaderKey(strings.TrimSpace(key))
+	if canonicalKey == http.CanonicalHeaderKey(core.UserPathHeader) {
+		return true
+	}
+	for _, headerName := range userPathHeader {
+		if canonicalKey == http.CanonicalHeaderKey(core.UserPathHeaderName(headerName)) {
+			return true
+		}
+	}
+	if canonicalKey == "" {
 		return true
 	}
 	return skipPassthroughHeader(key)

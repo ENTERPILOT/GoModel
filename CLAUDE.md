@@ -110,6 +110,7 @@ Full reference: `.env.template` and `config/config.yaml`
   - `PORT` (8080)
   - `GOMODEL_MASTER_KEY` (empty = unsafe mode)
   - `BODY_SIZE_LIMIT` ("10M")
+  - `USER_PATH_HEADER` (`X-GoModel-User-Path`: Header used to read/write request `user_path` values)
   - `ENABLE_PASSTHROUGH_ROUTES` (true: Enable provider-native passthrough routes under /p/{provider}/...)
   - `ALLOW_PASSTHROUGH_V1_ALIAS` (true: Allow /p/{provider}/v1/... aliases while keeping /p/{provider}/... canonical)
   - `ENABLED_PASSTHROUGH_PROVIDERS` (openai,anthropic,openrouter,zai,vllm: Comma-separated list of enabled passthrough providers)

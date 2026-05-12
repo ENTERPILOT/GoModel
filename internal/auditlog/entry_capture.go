@@ -193,7 +193,7 @@ func internalJSONAuditHeaders(ctx context.Context, requestID string) http.Header
 		headers.Set("X-Request-ID", requestID)
 	}
 	if userPath := strings.TrimSpace(core.UserPathFromContext(ctx)); userPath != "" {
-		headers.Set(core.UserPathHeader, userPath)
+		headers.Set(core.UserPathHeaderNameFromContext(ctx), userPath)
 	}
 	if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
 		snapshotHeaders := snapshot.GetHeaders()

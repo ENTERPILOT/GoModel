@@ -497,7 +497,7 @@ test("auth key expirations render as a UTC date with the full UTC timestamp in t
   assert.match(authKeyForm, /copyId: 'auth-key-user-path-help-copy'/);
   assert.match(
     authKeyForm,
-    /When set, this key overrides X-GoModel-User-Path for audit logging and downstream request context\./,
+    /When set, this key overrides the configured user path request header for audit logging and downstream request context\./,
   );
   assert.doesNotMatch(authKeyForm, /id="auth-key-user-path"[^>]*aria-label=/);
   assert.doesNotMatch(authKeyForm, /User Path Override/);
@@ -507,7 +507,7 @@ test("auth key expirations render as a UTC date with the full UTC timestamp in t
     /<p class="form-hint">\s*When set, this key overrides <code>X-GoModel-User-Path<\/code> for audit logging and downstream request context\.\s*<\/p>/,
   );
   assert.match(indexTemplate, /x-text="key\.user_path \|\| '\\u2014'"/);
-  assert.match(indexTemplate, /X-GoModel-User-Path/);
+  assert.match(indexTemplate, /configured user path request header/);
   assert.match(indexTemplate, /:disabled="authKeyFormSubmitting"/);
   assert.match(
     indexTemplate,
@@ -1071,7 +1071,7 @@ test("model category tables lazy mount only the active table body", () => {
   );
   assert.match(
     modelsBlock,
-    /The selector uses <code>\/<\/code> for all providers and models, <code>\{provider_name\}\/<\/code> for one provider, or <code>\{provider_name\}\/\{model\}<\/code> for one model\.[\s\S]*managed API key <code>user_path<\/code> when present, otherwise the <code>X-GoModel-User-Path<\/code> request header\./,
+    /The selector uses <code>\/<\/code> for all providers and models, <code>\{provider_name\}\/<\/code> for one provider, or <code>\{provider_name\}\/\{model\}<\/code> for one model\.[\s\S]*managed API key <code>user_path<\/code> when present, otherwise the configured user path request header\./,
   );
 
   const loadingRule = readCSSRule(css, ".loading-state");

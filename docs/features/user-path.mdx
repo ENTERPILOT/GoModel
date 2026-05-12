@@ -29,6 +29,10 @@ Clients can also send a user path directly:
 X-GoModel-User-Path: /team/alpha
 ```
 
+The header name is configurable with `USER_PATH_HEADER` or
+`server.user_path_header` in `config.yaml`. If unset, GoModel uses
+`X-GoModel-User-Path`.
+
 If the API key has its own `user_path`, the key wins. GoModel overwrites the
 header value with the key-bound path before workflow matching, audit logging,
 usage tracking, and model access checks run.

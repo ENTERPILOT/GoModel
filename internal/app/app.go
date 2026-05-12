@@ -434,6 +434,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		DisablePassthroughRoutes:        !appCfg.Server.EnablePassthroughRoutes,
 		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,
 		AllowPassthroughV1Alias:         &allowPassthroughV1Alias,
+		UserPathHeader:                  appCfg.Server.UserPathHeader,
 		SwaggerEnabled:                  swaggerEnabled,
 	}
 

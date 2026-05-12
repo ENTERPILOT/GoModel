@@ -53,6 +53,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "gomodel.fullname" . }}
                   key: BASE_PATH
+            - name: USER_PATH_HEADER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "gomodel.fullname" . }}
+                  key: USER_PATH_HEADER
             - name: BODY_SIZE_LIMIT
               valueFrom:
                 configMapKeyRef:
