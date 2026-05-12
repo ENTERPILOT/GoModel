@@ -354,10 +354,15 @@ func authedTestClient(base *http.Client) *http.Client {
 	return googleauth.HTTPClient(base, oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: "vertex-token",
 		TokenType:   "Bearer",
-	}))
+	}), "")
 }
 
 func vertexADCCredentialsFile(t *testing.T, tokenURL string) string {
+	t.Helper()
+	return vertexADCCredentialsFileWithQuotaProject(t, tokenURL, "")
+}
+
+func vertexADCCredentialsFileWithQuotaProject(t *testing.T, tokenURL, quotaProject string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "adc.json")
 	contents := map[string]string{
@@ -367,6 +372,9 @@ func vertexADCCredentialsFile(t *testing.T, tokenURL string) string {
 		"refresh_token": "adc-refresh-token",
 		"token_uri":     tokenURL,
 	}
+	if quotaProject != "" {
+		contents["quota_project_id"] = quotaProject
+	}
 	encoded, err := json.Marshal(contents)
 	if err != nil {
 		t.Fatalf("failed to marshal ADC credentials: %v", err)
@@ -375,6 +383,69 @@ func vertexADCCredentialsFile(t *testing.T, tokenURL string) string {
 		t.Fatalf("failed to write ADC credentials: %v", err)
 	}
 	return path
+}
+
+func TestNewSetsQuotaProjectHeaderOnVertexRequests(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(t *testing.T, cfg *providers.ProviderConfig, tokenURL string)
+		wantProj  string
+	}{
+		{
+			name: "ADC quota project wins over VERTEX_PROJECT",
+			configure: func(t *testing.T, cfg *providers.ProviderConfig, tokenURL string) {
+				t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", vertexADCCredentialsFileWithQuotaProject(t, tokenURL, "billing-project"))
+				cfg.AuthType = "gcp_adc"
+			},
+			wantProj: "billing-project",
+		},
+		{
+			name: "ADC without quota project falls back to VERTEX_PROJECT",
+			configure: func(t *testing.T, cfg *providers.ProviderConfig, tokenURL string) {
+				t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", vertexADCCredentialsFile(t, tokenURL))
+				cfg.AuthType = "gcp_adc"
+			},
+			wantProj: "prod-ai",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"access_token": "token",
+					"token_type":   "Bearer",
+					"expires_in":   3600,
+				})
+			}))
+			defer tokenServer.Close()
+
+			var gotProj string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotProj = r.Header.Get("X-Goog-User-Project")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"responseId":"r","candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`))
+			}))
+			defer upstream.Close()
+
+			cfg := testConfig()
+			cfg.APIMode = "native"
+			cfg.BaseURL = upstream.URL + "/v1/projects/prod-ai/locations/us-central1/publishers/google"
+			tt.configure(t, &cfg, tokenServer.URL)
+
+			provider := New(cfg, providers.ProviderOptions{})
+			if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    "google/gemini-2.5-flash",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+			}); err != nil {
+				t.Fatalf("ChatCompletion() error = %v", err)
+			}
+			if gotProj != tt.wantProj {
+				t.Fatalf("X-Goog-User-Project = %q, want %q", gotProj, tt.wantProj)
+			}
+		})
+	}
 }
 
 func vertexServiceAccountCredentialsFile(t *testing.T, tokenURL string) string {

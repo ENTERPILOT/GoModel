@@ -751,7 +751,7 @@ func newVertexTestProvider(server *httptest.Server, native bool) *Provider {
 	tokenClient := googleauth.HTTPClient(server.Client(), oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: "vertex-token",
 		TokenType:   "Bearer",
-	}))
+	}), "")
 	p := &Provider{
 		backend:      geminiBackendVertex,
 		authType:     geminiAuthTypeGCPADC,

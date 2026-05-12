@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/oauth2"
 )
 
 func TestServiceAccountJSONDecodesURLSafeBase64(t *testing.T) {
@@ -121,7 +123,7 @@ func TestTokenSourceAndHTTPClientAuthSelection(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			client := HTTPClient(upstream.Client(), source)
+			client := HTTPClient(upstream.Client(), source, "")
 			resp, err := client.Get(upstream.URL)
 			if err != nil {
 				t.Fatalf("HTTPClient request error = %v", err)
@@ -143,6 +145,11 @@ func TestTokenSourceAndHTTPClientAuthSelection(t *testing.T) {
 
 func adcCredentialsFile(t *testing.T, tokenURL string) string {
 	t.Helper()
+	return adcCredentialsFileWithQuotaProject(t, tokenURL, "")
+}
+
+func adcCredentialsFileWithQuotaProject(t *testing.T, tokenURL, quotaProject string) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "adc.json")
 	contents := map[string]string{
 		"type":          "authorized_user",
@@ -150,6 +157,9 @@ func adcCredentialsFile(t *testing.T, tokenURL string) string {
 		"client_secret": "adc-client-secret",
 		"refresh_token": "adc-refresh-token",
 		"token_uri":     tokenURL,
+	}
+	if quotaProject != "" {
+		contents["quota_project_id"] = quotaProject
 	}
 	encoded, err := json.Marshal(contents)
 	if err != nil {
@@ -159,6 +169,118 @@ func adcCredentialsFile(t *testing.T, tokenURL string) string {
 		t.Fatalf("failed to write ADC credentials: %v", err)
 	}
 	return path
+}
+
+func TestFindCredentialsReadsADCQuotaProject(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "adc-token",
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+		})
+	}))
+	defer tokenServer.Close()
+
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", adcCredentialsFileWithQuotaProject(t, tokenServer.URL, "billing-target"))
+
+	creds, err := FindCredentials(context.Background(), Config{})
+	if err != nil {
+		t.Fatalf("FindCredentials() error = %v", err)
+	}
+	if creds.QuotaProjectID != "billing-target" {
+		t.Fatalf("QuotaProjectID = %q, want billing-target", creds.QuotaProjectID)
+	}
+}
+
+func TestFindCredentialsReadsServiceAccountProject(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "sa-token",
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+		})
+	}))
+	defer tokenServer.Close()
+
+	saJSON := serviceAccountCredentialsWithProject(t, tokenServer.URL, "sa-home-project")
+	creds, err := FindCredentials(context.Background(), Config{ServiceAccountJSON: saJSON})
+	if err != nil {
+		t.Fatalf("FindCredentials() error = %v", err)
+	}
+	if creds.QuotaProjectID != "sa-home-project" {
+		t.Fatalf("QuotaProjectID = %q, want sa-home-project", creds.QuotaProjectID)
+	}
+}
+
+func TestHTTPClientSetsQuotaProjectHeader(t *testing.T) {
+	var gotHeader string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get(QuotaProjectHeader)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	source := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test-token", TokenType: "Bearer"})
+	client := HTTPClient(upstream.Client(), source, "billing-target")
+	resp, err := client.Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("HTTPClient request error = %v", err)
+	}
+	_ = resp.Body.Close()
+	if gotHeader != "billing-target" {
+		t.Fatalf("%s header = %q, want billing-target", QuotaProjectHeader, gotHeader)
+	}
+}
+
+func TestHTTPClientOmitsQuotaProjectHeaderWhenEmpty(t *testing.T) {
+	var hasHeader bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, hasHeader = r.Header[QuotaProjectHeader]
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	source := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test-token", TokenType: "Bearer"})
+	client := HTTPClient(upstream.Client(), source, "")
+	resp, err := client.Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("HTTPClient request error = %v", err)
+	}
+	_ = resp.Body.Close()
+	if hasHeader {
+		t.Fatalf("upstream saw %s header; expected it to be omitted", QuotaProjectHeader)
+	}
+}
+
+func serviceAccountCredentialsWithProject(t *testing.T, tokenURL, projectID string) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate test RSA key: %v", err)
+	}
+	keyBytes, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("failed to marshal test RSA key: %v", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: keyBytes,
+	})
+	contents := map[string]string{
+		"type":           "service_account",
+		"client_email":   "service@example.com",
+		"private_key_id": "test-key-id",
+		"private_key":    string(keyPEM),
+		"token_uri":      tokenURL,
+		"project_id":     projectID,
+	}
+	encoded, err := json.Marshal(contents)
+	if err != nil {
+		t.Fatalf("failed to marshal service account credentials: %v", err)
+	}
+	return string(encoded)
 }
 
 func serviceAccountCredentials(t *testing.T, tokenURL string) string {

@@ -190,7 +190,7 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	if p.configErr != nil || p.authType == geminiAuthTypeAPIKey {
 		return base
 	}
-	source, err := googleauth.TokenSource(context.Background(), googleauth.Config{
+	creds, err := googleauth.FindCredentials(context.Background(), googleauth.Config{
 		AuthType:                 p.authType,
 		ServiceAccountFile:       providerCfg.ServiceAccountFile,
 		ServiceAccountJSON:       providerCfg.ServiceAccountJSON,
@@ -204,7 +204,11 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	if base == nil {
 		base = httpclient.NewDefaultHTTPClient()
 	}
-	return googleauth.HTTPClient(base, source)
+	quotaProject := creds.QuotaProjectID
+	if strings.TrimSpace(quotaProject) == "" {
+		quotaProject = strings.TrimSpace(providerCfg.VertexProject)
+	}
+	return googleauth.HTTPClient(base, creds.TokenSource, quotaProject)
 }
 
 func (p *Provider) ready() error {

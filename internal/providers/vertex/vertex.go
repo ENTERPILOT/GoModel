@@ -124,7 +124,7 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	}
 	authCfg := buildGoogleAuthConfig(providerCfg)
 	authCfg.AuthType = p.authType
-	source, err := googleauth.TokenSource(context.Background(), authCfg)
+	creds, err := googleauth.FindCredentials(context.Background(), authCfg)
 	if err != nil {
 		p.configErr = err
 		return base
@@ -132,7 +132,11 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	if base == nil {
 		base = httpclient.NewDefaultHTTPClient()
 	}
-	return googleauth.HTTPClient(base, source)
+	quotaProject := creds.QuotaProjectID
+	if strings.TrimSpace(quotaProject) == "" {
+		quotaProject = strings.TrimSpace(providerCfg.VertexProject)
+	}
+	return googleauth.HTTPClient(base, creds.TokenSource, quotaProject)
 }
 
 func buildGoogleAuthConfig(providerCfg providers.ProviderConfig) googleauth.Config {
