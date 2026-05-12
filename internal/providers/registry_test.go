@@ -257,8 +257,14 @@ func TestModelRegistry(t *testing.T) {
 		if len(snapshots) != 1 {
 			t.Fatalf("expected 1 provider runtime snapshot, got %d", len(snapshots))
 		}
-		if snapshots[0].LastModelFetchSuccessAt != nil {
-			t.Fatalf("LastModelFetchSuccessAt = %v, want nil when allowlist skips upstream ListModels", snapshots[0].LastModelFetchSuccessAt)
+		if snapshots[0].LastModelFetchSuccessAt == nil {
+			t.Fatal("LastModelFetchSuccessAt = nil, want set when allowlist mode authoritatively populates inventory")
+		}
+		if snapshots[0].DiscoveredModelCount == 0 {
+			t.Fatalf("DiscoveredModelCount = 0, want allowlist models counted")
+		}
+		if snapshots[0].UsingCachedModels {
+			t.Fatal("UsingCachedModels = true, want false when inventory came from allowlist (not stale cache)")
 		}
 		missing := registry.GetModel("missing-configured")
 		if missing == nil {
@@ -1348,9 +1354,9 @@ func (c *countingRegistryMockProvider) ListModels(ctx context.Context) (*core.Mo
 // TestApplyProviderRuntimeUpdates_ClearsStaleErrorOnSuccessfulRefresh locks the
 // behavior that a successful refresh (non-zero fetchAt + empty fetch error)
 // clears any error left over from a previous failed refresh, regardless of
-// whether the success bumps lastModelFetchSuccessAt. The allowlist case is
-// the original motivator: SuccessAt stays nil because upstream is never
-// called, but a stale error must not survive into runtime status.
+// whether the success bumps lastModelFetchSuccessAt. This protects against any
+// future fetch path that produces a refresh result without touching SuccessAt —
+// a stale error must not survive into runtime status.
 func TestApplyProviderRuntimeUpdates_ClearsStaleErrorOnSuccessfulRefresh(t *testing.T) {
 	registry := NewModelRegistry()
 

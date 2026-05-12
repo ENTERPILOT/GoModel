@@ -184,7 +184,17 @@ func (r *ModelRegistry) fetchAllProviderModels(
 			lastModelFetchAt:    fetchAt,
 			lastModelFetchError: configuredUpstreamError,
 		}
-		if configuredReason == configuredProviderModelsNotApplied {
+		// Mark the inventory as authoritatively populated when this fetch is the
+		// last word on the provider's model list. That covers two cases:
+		//  - upstream succeeded (no allowlist, or allowlist overlaid on a real
+		//    response) — reason is configuredProviderModelsNotApplied
+		//  - allowlist mode intentionally skipped upstream and produced the
+		//    inventory from configuration — reason is configuredProviderModelsAllowlist
+		// Fallback cases (configured*UpstreamError, *Nil, *Empty) keep
+		// lastModelFetchSuccessAt unset so health surfaces "live refresh failed,
+		// serving configured fallback".
+		if configuredReason == configuredProviderModelsNotApplied ||
+			configuredReason == configuredProviderModelsAllowlist {
 			runtimeUpdate.lastModelFetchSuccessAt = fetchAt
 		}
 		out.runtimeUpdates[providerName] = runtimeUpdate
