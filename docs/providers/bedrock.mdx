@@ -80,9 +80,52 @@ models and skip the upstream `ListFoundationModels` call.
 
 ## 4. Start GoModel
 
-```bash
-go run ./cmd/gomodel
+Pick the form that fits your environment. For Docker, prefer `--env-file .env`
+over inline `-e` flags so AWS credentials stay out of shell history and process
+lists.
+
+<CodeGroup>
+
+```bash Docker (.env file)
+# Put the Bedrock + AWS variables from the steps above into a .env file:
+#   BEDROCK_BASE_URL=us-east-1
+#   AWS_ACCESS_KEY_ID=...
+#   AWS_SECRET_ACCESS_KEY=...
+#   # AWS_SESSION_TOKEN=...           # only if using temporary credentials
+#   # BEDROCK_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0,amazon.nova-lite-v1:0
+#   GOMODEL_MASTER_KEY=change-me
+
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
 ```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e BEDROCK_BASE_URL="us-east-1" \
+  -e AWS_ACCESS_KEY_ID="..." \
+  -e AWS_SECRET_ACCESS_KEY="..." \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+# Requires Go 1.26.3+ on PATH; builds bin/gomodel.
+make build
+
+# Reads BEDROCK_BASE_URL and AWS_* from your shell (or
+# `set -a; source .env; set +a` first). Instance roles / IAM Identity Center
+# work the same way as for any AWS SDK consumer.
+./bin/gomodel
+```
+
+</CodeGroup>
+
+<Tip>
+  A `.env` file is the most effective option once you have more than a couple
+  of variables — copy `.env.template` from the repo, fill in the Bedrock and
+  AWS values, and reuse the same file for both Docker and the native binary.
+  In production, prefer instance roles or IRSA over long-lived access keys in
+  any file.
+</Tip>
 
 ## 5. Verify the model registry
 

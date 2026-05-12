@@ -65,9 +65,45 @@ root (without the `/deployments/...` segment) and use aliases or
 
 ## 3. Start GoModel
 
-```bash
-go run ./cmd/gomodel
+Pick the form that fits your environment. For Docker, prefer `--env-file .env`
+over inline `-e` flags so secrets stay out of shell history and process lists.
+
+<CodeGroup>
+
+```bash Docker (.env file)
+# Put the AZURE_* variables from the step above into a .env file:
+#   AZURE_API_KEY=...
+#   AZURE_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/your-deployment
+#   AZURE_API_VERSION=2024-10-21
+#   GOMODEL_MASTER_KEY=change-me
+
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
 ```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e AZURE_API_KEY="..." \
+  -e AZURE_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment" \
+  -e AZURE_API_VERSION="2024-10-21" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+# Requires Go 1.26.3+ on PATH; builds bin/gomodel.
+make build
+
+# Reads AZURE_* from your shell (or `set -a; source .env; set +a` first).
+./bin/gomodel
+```
+
+</CodeGroup>
+
+<Tip>
+  A `.env` file is the most effective option once you have more than a couple
+  of variables — copy `.env.template` from the repo, fill in the Azure values,
+  and reuse the same file for both Docker and the native binary.
+</Tip>
 
 ## 4. Verify the model registry
 

@@ -117,9 +117,45 @@ configuration requirement can be relaxed.
 
 ## 4. Start GoModel
 
-```bash
-go run ./cmd/gomodel
+Pick the form that fits your environment. For Docker, prefer `--env-file .env`
+over inline `-e` flags so secrets stay out of shell history and process lists.
+
+<CodeGroup>
+
+```bash Docker (.env file)
+# Put the ORACLE_* variables from the steps above into a .env file:
+#   ORACLE_BASE_URL=https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1
+#   ORACLE_API_KEY=...
+#   ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3
+#   GOMODEL_MASTER_KEY=change-me
+
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
 ```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1" \
+  -e ORACLE_API_KEY="..." \
+  -e ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+# Requires Go 1.26.3+ on PATH; builds bin/gomodel.
+make build
+
+# Reads ORACLE_* from your shell (or `set -a; source .env; set +a` first).
+./bin/gomodel
+```
+
+</CodeGroup>
+
+<Tip>
+  A `.env` file is the most effective option once you have more than a couple
+  of variables — copy `.env.template` from the repo, fill in the Oracle values,
+  and reuse the same file for both Docker and the native binary.
+</Tip>
 
 ## 5. Verify the model registry
 
