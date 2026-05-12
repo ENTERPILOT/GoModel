@@ -194,4 +194,19 @@ type ModelLookup interface {
 
 	// ModelCount returns the number of registered models
 	ModelCount() int
+
+	// GetProviderName maps a model selector back to the concrete configured
+	// provider instance name. Implementations that have no such mapping return
+	// an empty string. Same shape as the optional ProviderNameResolver
+	// interface used elsewhere for provider-side type assertions.
+	GetProviderName(model string) string
+
+	// GetProviderNameForType maps a provider type such as "openai" to the
+	// concrete configured instance name chosen for routing, e.g.
+	// "openai-primary". Returns empty when no mapping exists.
+	GetProviderNameForType(providerType string) string
+
+	// GetProviderTypeForName maps a concrete configured instance name back to
+	// its provider type. Returns empty when no mapping exists.
+	GetProviderTypeForName(providerName string) string
 }

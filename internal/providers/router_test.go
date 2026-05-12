@@ -104,6 +104,13 @@ func (m *mockModelLookup) ModelCount() int {
 	return len(m.models)
 }
 
+// The mock keeps no provider-name <-> type mapping, so the three resolver
+// methods always return empty. Tests that need provider-name routing use the
+// real ModelRegistry via newTestRegistryWithModels instead of this mock.
+func (m *mockModelLookup) GetProviderName(_ string) string             { return "" }
+func (m *mockModelLookup) GetProviderNameForType(_ string) string      { return "" }
+func (m *mockModelLookup) GetProviderTypeForName(_ string) string      { return "" }
+
 // mockProvider is a simple mock implementation of core.Provider for testing
 type mockProvider struct {
 	name              string

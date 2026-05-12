@@ -112,12 +112,7 @@ func (r *Router) resolveUnqualifiedSelector(selector core.ModelSelector) (core.M
 	if selector.Provider != "" || strings.TrimSpace(selector.Model) == "" {
 		return core.ModelSelector{}, false
 	}
-
-	named, ok := r.lookup.(core.ProviderNameResolver)
-	if !ok {
-		return core.ModelSelector{}, false
-	}
-	providerName := strings.TrimSpace(named.GetProviderName(selector.Model))
+	providerName := strings.TrimSpace(r.lookup.GetProviderName(selector.Model))
 	if providerName == "" {
 		return core.ModelSelector{}, false
 	}
@@ -613,19 +608,13 @@ func (r *Router) GetProviderName(model string) string {
 	if selector.Provider != "" {
 		return selector.Provider
 	}
-	if named, ok := r.lookup.(core.ProviderNameResolver); ok {
-		return named.GetProviderName(selector.QualifiedModel())
-	}
-	return ""
+	return r.lookup.GetProviderName(selector.QualifiedModel())
 }
 
 // GetProviderNameForType returns the concrete configured provider instance name
 // chosen for a provider-typed route.
 func (r *Router) GetProviderNameForType(providerType string) string {
-	if named, ok := r.lookup.(core.ProviderTypeNameResolver); ok {
-		return strings.TrimSpace(named.GetProviderNameForType(providerType))
-	}
-	return ""
+	return strings.TrimSpace(r.lookup.GetProviderNameForType(providerType))
 }
 
 // GetProviderTypeForName returns the provider type for a concrete configured
@@ -635,20 +624,7 @@ func (r *Router) GetProviderTypeForName(providerName string) string {
 	if providerName == "" {
 		return ""
 	}
-	if typed, ok := r.lookup.(core.ProviderNameTypeResolver); ok {
-		return strings.TrimSpace(typed.GetProviderTypeForName(providerName))
-	}
-	if models, ok := r.lookup.(modelWithProviderLister); ok {
-		for _, entry := range models.ListModelsWithProvider() {
-			if strings.TrimSpace(entry.ProviderName) != providerName {
-				continue
-			}
-			if providerType := strings.TrimSpace(entry.ProviderType); providerType != "" {
-				return providerType
-			}
-		}
-	}
-	return ""
+	return strings.TrimSpace(r.lookup.GetProviderTypeForName(providerName))
 }
 
 func (r *Router) providerByType(providerType string) core.Provider {
