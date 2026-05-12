@@ -33,17 +33,19 @@ providers:
 ## Reasoning effort mapping
 
 DeepSeek V4 reasoning models accept `reasoning_effort` as a top-level string
-with two levels: `high` and `max`.
+with two permitted levels: `high` and `max`.
 
-| Client sends    | DeepSeek receives |
-| --------------- | ----------------- |
+| Client sends | DeepSeek receives |
+| ------------ | ----------------- |
 | `low` / `medium` / `high` | `high` |
-| `xhigh` / `max` | `max`             |
-| anything else   | passed through    |
+| `xhigh` / `max` | `max` |
+| anything else | passed through by GoModel, then rejected by DeepSeek |
 
 GoModel rewrites the OpenAI-shaped `"reasoning": {"effort": "..."}` into
-DeepSeek's top-level `reasoning_effort` — no client change required. To skip
-reasoning entirely, omit the `reasoning` field; don't pass `low`.
+DeepSeek's top-level `reasoning_effort` — no client change required. Validate
+or normalize custom client values to `high` or `max` before calling GoModel.
+To disable reasoning, omit the `reasoning` field entirely; any provided
+`reasoning.effort`, including `low`, is mapped and enables reasoning.
 
 ## Not supported by DeepSeek
 

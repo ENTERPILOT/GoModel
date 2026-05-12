@@ -55,6 +55,7 @@ make build
 
 ```bash
 curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-5",

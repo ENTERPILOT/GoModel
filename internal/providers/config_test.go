@@ -51,6 +51,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 		RequireBaseURL:     true,
 		SupportsAPIVersion: true,
 	},
+	"bedrock": {
+		AllowAPIKeyless: true,
+	},
 	"oracle": {
 		RequireBaseURL: true,
 	},
@@ -553,6 +556,8 @@ func TestApplyProviderEnvVars_DiscoversSuffixedVertexProvider(t *testing.T) {
 	t.Setenv("VERTEX_US_LOCATION", "us-central1")
 	t.Setenv("VERTEX_US_AUTH_TYPE", "gcp_service_account")
 	t.Setenv("VERTEX_US_SERVICE_ACCOUNT_FILE", "/secrets/vertex.json")
+	t.Setenv("BEDROCK_US_BASE_URL", "us-east-1")
+	t.Setenv("BEDROCK_US_MODELS", "anthropic.claude-3-5-haiku-20241022-v1:0")
 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
@@ -565,6 +570,20 @@ func TestApplyProviderEnvVars_DiscoversSuffixedVertexProvider(t *testing.T) {
 	}
 	if p.ServiceAccountFile != "/secrets/vertex.json" {
 		t.Fatalf("ServiceAccountFile = %q, want /secrets/vertex.json", p.ServiceAccountFile)
+	}
+
+	bedrock, exists := got["bedrock-us"]
+	if !exists {
+		t.Fatal("expected bedrock-us to be discovered from BEDROCK_US_* env vars")
+	}
+	if bedrock.Type != "bedrock" {
+		t.Fatalf("Bedrock Type = %q, want bedrock", bedrock.Type)
+	}
+	if bedrock.BaseURL != "us-east-1" {
+		t.Fatalf("Bedrock BaseURL = %q, want us-east-1", bedrock.BaseURL)
+	}
+	if len(bedrock.Models) != 1 || bedrock.Models[0].ID != "anthropic.claude-3-5-haiku-20241022-v1:0" {
+		t.Fatalf("Bedrock Models = %v, want [anthropic.claude-3-5-haiku-20241022-v1:0]", bedrock.Models)
 	}
 }
 

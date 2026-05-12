@@ -126,9 +126,11 @@ use suffixed env vars such as `OPENAI_EAST_API_KEY` and
 `OPENAI_EAST_BASE_URL`; add `OPENAI_EAST_MODELS` to configure that instance's
 model list. This registers provider `openai-east` with type `openai`.
 Vertex AI follows the same suffix pattern — `VERTEX_US_PROJECT` registers
-provider `vertex-us`. Vertex also requires `VERTEX_PROJECT` and
-`VERTEX_LOCATION`; `VERTEX_AUTH_TYPE` defaults to Application Default
-Credentials (`gcp_adc`).
+provider `vertex-us`. Vertex project and location env vars must match the
+instance prefix: for a suffixed instance such as `VERTEX_US_PROJECT`, also set
+`VERTEX_US_LOCATION` and any other suffixed settings for that instance, rather
+than the generic `VERTEX_PROJECT` / `VERTEX_LOCATION`. `VERTEX_AUTH_TYPE`
+defaults to Application Default Credentials (`gcp_adc`).
 
 ---
 

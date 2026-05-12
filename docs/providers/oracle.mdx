@@ -75,6 +75,7 @@ make build
 
 ```bash
 curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai.gpt-oss-120b",

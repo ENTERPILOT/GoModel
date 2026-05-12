@@ -55,6 +55,7 @@ make build
 
 ```bash
 curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "anthropic.claude-3-5-haiku-20241022-v1:0",
@@ -92,6 +93,21 @@ providers:
 Behavior follows the global `CONFIGURED_PROVIDER_MODELS_MODE` — `fallback`
 (default) uses the list only when `ListFoundationModels` is unavailable or
 empty; `allowlist` exposes only configured models and skips the upstream call.
+
+## Multiple Bedrock providers
+
+Use suffixed env vars to register separate Bedrock instances:
+
+```bash
+BEDROCK_US_BASE_URL=us-east-1
+BEDROCK_US_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0
+
+BEDROCK_EU_BASE_URL=eu-west-1
+BEDROCK_EU_MODELS=amazon.nova-lite-v1:0
+```
+
+This registers providers `bedrock-us` and `bedrock-eu`. Bedrock credentials
+still come from the standard AWS credential chain.
 
 ## Not yet integrated
 
