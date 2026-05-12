@@ -19,7 +19,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/echo-swagger v1.5.0
 	github.com/swaggo/swag/v2 v2.0.0-rc5
-	github.com/tidwall/gjson v1.18.0
+	github.com/tidwall/gjson v1.19.0
 	go.mongodb.org/mongo-driver/v2 v2.6.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
