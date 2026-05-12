@@ -18,7 +18,7 @@ import (
 	"gomodel/internal/llmclient"
 	"gomodel/internal/providers"
 	"gomodel/internal/providers/gemini"
-	"gomodel/internal/providers/googleauth"
+	"gomodel/internal/providers/googlecommon"
 )
 
 // Registration provides factory registration for the Vertex AI provider.
@@ -88,7 +88,7 @@ func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
 	case authTypeGCPADC:
 		return
 	case authTypeServiceAccount:
-		if googleauth.HasServiceAccount(buildGoogleAuthConfig(providerCfg)) {
+		if googlecommon.HasServiceAccount(buildGoogleAuthConfig(providerCfg)) {
 			return
 		}
 		p.configErr = fmt.Errorf("vertex AI service account auth requires service_account_file, service_account_json, or service_account_json_base64")
@@ -112,7 +112,7 @@ func hasResolvedProviderValue(value string) bool {
 }
 
 func normalizeAuthType(providerCfg providers.ProviderConfig) string {
-	return googleauth.NormalizeAuthType(providerCfg.AuthType, googleauth.HasServiceAccount(buildGoogleAuthConfig(providerCfg)))
+	return googlecommon.NormalizeAuthType(providerCfg.AuthType, googlecommon.HasServiceAccount(buildGoogleAuthConfig(providerCfg)))
 }
 
 func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *http.Client) *http.Client {
@@ -121,7 +121,7 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	}
 	authCfg := buildGoogleAuthConfig(providerCfg)
 	authCfg.AuthType = p.authType
-	creds, err := googleauth.FindCredentials(context.Background(), authCfg)
+	creds, err := googlecommon.FindCredentials(context.Background(), authCfg)
 	if err != nil {
 		p.configErr = err
 		return base
@@ -133,11 +133,11 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	if strings.TrimSpace(quotaProject) == "" {
 		quotaProject = strings.TrimSpace(providerCfg.VertexProject)
 	}
-	return googleauth.HTTPClient(base, creds.TokenSource, quotaProject)
+	return googlecommon.HTTPClient(base, creds.TokenSource, quotaProject)
 }
 
-func buildGoogleAuthConfig(providerCfg providers.ProviderConfig) googleauth.Config {
-	return googleauth.Config{
+func buildGoogleAuthConfig(providerCfg providers.ProviderConfig) googlecommon.Config {
+	return googlecommon.Config{
 		AuthType:                 providerCfg.AuthType,
 		ServiceAccountFile:       providerCfg.ServiceAccountFile,
 		ServiceAccountJSON:       providerCfg.ServiceAccountJSON,
@@ -344,52 +344,8 @@ func encodeEmbedding(values []float64, encodingFormat string) (json.RawMessage, 
 }
 
 func vertexNativeBaseURL(providerCfg providers.ProviderConfig) string {
-	_, nativeBaseURL := vertexBaseURLs(providerCfg)
+	_, nativeBaseURL := googlecommon.VertexBaseURLs(providerCfg.BaseURL, providerCfg.VertexProject, providerCfg.VertexLocation)
 	return nativeBaseURL
-}
-
-// TODO: Share Vertex URL derivation with the Gemini Vertex path if this logic
-// changes again. It is intentionally duplicated today to keep provider package
-// boundaries simple.
-func vertexBaseURLs(providerCfg providers.ProviderConfig) (openAICompatibleBaseURL, nativeBaseURL string) {
-	baseURL := strings.TrimRight(strings.TrimSpace(providerCfg.BaseURL), "/")
-	if baseURL == "" {
-		project := strings.TrimSpace(providerCfg.VertexProject)
-		location := strings.TrimSpace(providerCfg.VertexLocation)
-		root := "https://aiplatform.googleapis.com/v1/projects/" + url.PathEscape(project) + "/locations/" + url.PathEscape(location)
-		return root + "/endpoints/openapi", root + "/publishers/google"
-	}
-	if nativeBaseURL, ok := vertexNativeBaseURLFromOpenAICompatibleBaseURL(baseURL); ok {
-		return baseURL, nativeBaseURL
-	}
-	if openAIBaseURL, ok := vertexOpenAICompatibleBaseURLFromNativeBaseURL(baseURL); ok {
-		return openAIBaseURL, baseURL
-	}
-	return baseURL, baseURL
-}
-
-func vertexNativeBaseURLFromOpenAICompatibleBaseURL(baseURL string) (string, bool) {
-	const suffix = "/endpoints/openapi"
-	if !strings.HasSuffix(baseURL, suffix) {
-		return "", false
-	}
-	root := strings.TrimRight(strings.TrimSuffix(baseURL, suffix), "/")
-	if root == "" {
-		return "", false
-	}
-	return root + "/publishers/google", true
-}
-
-func vertexOpenAICompatibleBaseURLFromNativeBaseURL(baseURL string) (string, bool) {
-	const suffix = "/publishers/google"
-	if !strings.HasSuffix(baseURL, suffix) {
-		return "", false
-	}
-	root := strings.TrimRight(strings.TrimSuffix(baseURL, suffix), "/")
-	if root == "" {
-		return "", false
-	}
-	return root + "/endpoints/openapi", true
 }
 
 func vertexPredictEndpoint(model string) string {

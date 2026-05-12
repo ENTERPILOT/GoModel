@@ -13,7 +13,7 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
 	"gomodel/internal/providers"
-	"gomodel/internal/providers/googleauth"
+	"gomodel/internal/providers/googlecommon"
 
 	"golang.org/x/oauth2"
 )
@@ -748,7 +748,7 @@ func TestVertexListModelsErrorsUseVertexProviderName(t *testing.T) {
 }
 
 func newVertexTestProvider(server *httptest.Server, native bool) *Provider {
-	tokenClient := googleauth.HTTPClient(server.Client(), oauth2.StaticTokenSource(&oauth2.Token{
+	tokenClient := googlecommon.HTTPClient(server.Client(), oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: "vertex-token",
 		TokenType:   "Bearer",
 	}), "")

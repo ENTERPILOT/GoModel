@@ -18,7 +18,7 @@ import (
 	"gomodel/internal/httpclient"
 	"gomodel/internal/llmclient"
 	"gomodel/internal/providers"
-	"gomodel/internal/providers/googleauth"
+	"gomodel/internal/providers/googlecommon"
 )
 
 // Registration provides factory registration for the Gemini provider.
@@ -190,7 +190,7 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	if p.configErr != nil || p.authType == geminiAuthTypeAPIKey {
 		return base
 	}
-	creds, err := googleauth.FindCredentials(context.Background(), googleauth.Config{
+	creds, err := googlecommon.FindCredentials(context.Background(), googlecommon.Config{
 		AuthType:                 p.authType,
 		ServiceAccountFile:       providerCfg.ServiceAccountFile,
 		ServiceAccountJSON:       providerCfg.ServiceAccountJSON,
@@ -208,7 +208,7 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	if strings.TrimSpace(quotaProject) == "" {
 		quotaProject = strings.TrimSpace(providerCfg.VertexProject)
 	}
-	return googleauth.HTTPClient(base, creds.TokenSource, quotaProject)
+	return googlecommon.HTTPClient(base, creds.TokenSource, quotaProject)
 }
 
 func (p *Provider) ready() error {
@@ -273,7 +273,7 @@ func normalizeGeminiAuthType(backend string, cfg providers.ProviderConfig) strin
 	switch authType {
 	case "":
 		if backend == geminiBackendVertex {
-			return googleauth.NormalizeAuthType(authType, googleauth.HasServiceAccount(googleauth.Config{
+			return googlecommon.NormalizeAuthType(authType, googlecommon.HasServiceAccount(googlecommon.Config{
 				ServiceAccountFile:       cfg.ServiceAccountFile,
 				ServiceAccountJSON:       cfg.ServiceAccountJSON,
 				ServiceAccountJSONBase64: cfg.ServiceAccountJSONBase64,
@@ -319,7 +319,7 @@ func useNativeAPIFromEnv() bool {
 
 func geminiBaseURLs(providerCfg providers.ProviderConfig, backend string) (openAICompatibleBaseURL, nativeBaseURL string) {
 	if backend == geminiBackendVertex {
-		return vertexBaseURLs(providerCfg)
+		return googlecommon.VertexBaseURLs(providerCfg.BaseURL, providerCfg.VertexProject, providerCfg.VertexLocation)
 	}
 	configuredBaseURL := providerCfg.BaseURL
 	baseURL := strings.TrimRight(strings.TrimSpace(configuredBaseURL), "/")
@@ -347,47 +347,6 @@ func geminiModelsBaseURL(backend, nativeBaseURL string) string {
 		return modelsURL
 	}
 	return nativeBaseURL
-}
-
-func vertexBaseURLs(providerCfg providers.ProviderConfig) (openAICompatibleBaseURL, nativeBaseURL string) {
-	baseURL := strings.TrimRight(strings.TrimSpace(providerCfg.BaseURL), "/")
-	if baseURL == "" {
-		project := strings.TrimSpace(providerCfg.VertexProject)
-		location := strings.TrimSpace(providerCfg.VertexLocation)
-		root := "https://aiplatform.googleapis.com/v1/projects/" + url.PathEscape(project) + "/locations/" + url.PathEscape(location)
-		return root + "/endpoints/openapi", root + "/publishers/google"
-	}
-	if nativeBaseURL, ok := vertexNativeBaseURLFromOpenAICompatibleBaseURL(baseURL); ok {
-		return baseURL, nativeBaseURL
-	}
-	if openAIBaseURL, ok := vertexOpenAICompatibleBaseURLFromNativeBaseURL(baseURL); ok {
-		return openAIBaseURL, baseURL
-	}
-	return baseURL, baseURL
-}
-
-func vertexNativeBaseURLFromOpenAICompatibleBaseURL(baseURL string) (string, bool) {
-	const suffix = "/endpoints/openapi"
-	if !strings.HasSuffix(baseURL, suffix) {
-		return "", false
-	}
-	root := strings.TrimRight(strings.TrimSuffix(baseURL, suffix), "/")
-	if root == "" {
-		return "", false
-	}
-	return root + "/publishers/google", true
-}
-
-func vertexOpenAICompatibleBaseURLFromNativeBaseURL(baseURL string) (string, bool) {
-	const suffix = "/publishers/google"
-	if !strings.HasSuffix(baseURL, suffix) {
-		return "", false
-	}
-	root := strings.TrimRight(strings.TrimSuffix(baseURL, suffix), "/")
-	if root == "" {
-		return "", false
-	}
-	return root + "/endpoints/openapi", true
 }
 
 func vertexPublisherModelsBaseURL(nativeBaseURL string) (string, bool) {

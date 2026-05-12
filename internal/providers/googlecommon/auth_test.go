@@ -1,4 +1,4 @@
-package googleauth
+package googlecommon
 
 import (
 	"context"
@@ -55,7 +55,7 @@ func TestServiceAccountJSONReportsOriginalBase64DecodeError(t *testing.T) {
 	}
 }
 
-func TestTokenSourceAndHTTPClientAuthSelection(t *testing.T) {
+func TestFindCredentialsAndHTTPClientAuthSelection(t *testing.T) {
 	tests := []struct {
 		name        string
 		cfg         func(t *testing.T, tokenURL string) Config
@@ -110,10 +110,11 @@ func TestTokenSourceAndHTTPClientAuthSelection(t *testing.T) {
 			}))
 			defer tokenServer.Close()
 
-			source, err := TokenSource(context.Background(), tt.cfg(t, tokenServer.URL))
+			creds, err := FindCredentials(context.Background(), tt.cfg(t, tokenServer.URL))
 			if err != nil {
-				t.Fatalf("TokenSource() error = %v", err)
+				t.Fatalf("FindCredentials() error = %v", err)
 			}
+			source := creds.TokenSource
 
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if got := r.Header.Get("Authorization"); got != "Bearer "+tt.wantToken {

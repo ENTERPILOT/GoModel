@@ -1,4 +1,9 @@
-package googleauth
+// Package googlecommon holds infrastructure shared by GoModel's Google-backed
+// providers (Gemini AI Studio + Vertex AI). It currently covers authentication
+// (ADC / service-account TokenSource resolution + quota project propagation
+// via X-Goog-User-Project) and Vertex URL transformations between the native
+// publisher endpoint and the OpenAI-compatible endpoint.
+package googlecommon
 
 import (
 	"context"
@@ -120,17 +125,6 @@ func resolveQuotaProject(creds *google.Credentials) string {
 		return ""
 	}
 	return strings.TrimSpace(raw.QuotaProjectID)
-}
-
-// TokenSource returns just the OAuth2 token source for the given config. It is
-// a thin wrapper around FindCredentials kept for callers that do not need the
-// resolved quota project.
-func TokenSource(ctx context.Context, cfg Config) (oauth2.TokenSource, error) {
-	creds, err := FindCredentials(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-	return creds.TokenSource, nil
 }
 
 func serviceAccountJSON(cfg Config) ([]byte, error) {

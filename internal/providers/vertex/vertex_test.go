@@ -19,7 +19,7 @@ import (
 
 	"gomodel/internal/core"
 	"gomodel/internal/providers"
-	"gomodel/internal/providers/googleauth"
+	"gomodel/internal/providers/googlecommon"
 
 	"golang.org/x/oauth2"
 )
@@ -330,7 +330,7 @@ func TestVertexBaseURLs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotCompat, gotNative := vertexBaseURLs(tt.cfg)
+			gotCompat, gotNative := googlecommon.VertexBaseURLs(tt.cfg.BaseURL, tt.cfg.VertexProject, tt.cfg.VertexLocation)
 			if gotCompat != tt.wantCompat {
 				t.Fatalf("OpenAI-compatible base = %q, want %q", gotCompat, tt.wantCompat)
 			}
@@ -351,7 +351,7 @@ func testConfig() providers.ProviderConfig {
 }
 
 func authedTestClient(base *http.Client) *http.Client {
-	return googleauth.HTTPClient(base, oauth2.StaticTokenSource(&oauth2.Token{
+	return googlecommon.HTTPClient(base, oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: "vertex-token",
 		TokenType:   "Bearer",
 	}), "")
