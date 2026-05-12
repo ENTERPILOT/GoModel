@@ -75,8 +75,8 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 }
 
 func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
-	if !hasResolvedProviderValue(providerCfg.BaseURL) &&
-		(!hasResolvedProviderValue(providerCfg.VertexProject) || !hasResolvedProviderValue(providerCfg.VertexLocation)) {
+	if !providers.HasResolvedProviderValue(providerCfg.BaseURL) &&
+		(!providers.HasResolvedProviderValue(providerCfg.VertexProject) || !providers.HasResolvedProviderValue(providerCfg.VertexLocation)) {
 		p.configErr = fmt.Errorf("vertex AI requires base_url or vertex_project and vertex_location")
 		return
 	}
@@ -104,11 +104,6 @@ func validAuthType(authType string) bool {
 	default:
 		return false
 	}
-}
-
-func hasResolvedProviderValue(value string) bool {
-	value = strings.TrimSpace(value)
-	return value != "" && !strings.Contains(value, "${")
 }
 
 func normalizeAuthType(providerCfg providers.ProviderConfig) string {

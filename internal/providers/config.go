@@ -580,8 +580,8 @@ func isVertexProviderConfig(p config.RawProviderConfig) bool {
 }
 
 func validVertexProviderConfig(p config.RawProviderConfig) bool {
-	if !hasResolvedProviderValue(p.BaseURL) &&
-		(!hasResolvedProviderValue(p.VertexProject) || !hasResolvedProviderValue(p.VertexLocation)) {
+	if !HasResolvedProviderValue(p.BaseURL) &&
+		(!HasResolvedProviderValue(p.VertexProject) || !HasResolvedProviderValue(p.VertexLocation)) {
 		return false
 	}
 	authType := strings.ToLower(strings.TrimSpace(p.AuthType))
@@ -589,15 +589,21 @@ func validVertexProviderConfig(p config.RawProviderConfig) bool {
 	case "", "gcp_adc", "adc", "google_adc":
 		return true
 	case "gcp_service_account", "service_account":
-		return hasResolvedProviderValue(p.ServiceAccountFile) ||
-			hasResolvedProviderValue(p.ServiceAccountJSON) ||
-			hasResolvedProviderValue(p.ServiceAccountJSONBase64)
+		return HasResolvedProviderValue(p.ServiceAccountFile) ||
+			HasResolvedProviderValue(p.ServiceAccountJSON) ||
+			HasResolvedProviderValue(p.ServiceAccountJSONBase64)
 	default:
 		return false
 	}
 }
 
-func hasResolvedProviderValue(value string) bool {
+// HasResolvedProviderValue reports whether a provider-config field carries a
+// usable string value. It returns false for empty/whitespace input and false
+// when the value still contains a literal `${` substring — that signals an
+// unresolved YAML environment-variable placeholder such as `${OPENAI_API_KEY}`
+// which the env-substitution pass failed to fill in. Provider builders use
+// this to drop providers whose credentials never resolved.
+func HasResolvedProviderValue(value string) bool {
 	value = strings.TrimSpace(value)
 	return value != "" && !strings.Contains(value, "${")
 }

@@ -172,8 +172,8 @@ func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
 		p.configErr = fmt.Errorf("vertex Gemini requires gcp_adc or gcp_service_account auth")
 		return
 	}
-	if p.backend == geminiBackendVertex && !hasResolvedProviderValue(providerCfg.BaseURL) &&
-		(!hasResolvedProviderValue(providerCfg.VertexProject) || !hasResolvedProviderValue(providerCfg.VertexLocation)) {
+	if p.backend == geminiBackendVertex && !providers.HasResolvedProviderValue(providerCfg.BaseURL) &&
+		(!providers.HasResolvedProviderValue(providerCfg.VertexProject) || !providers.HasResolvedProviderValue(providerCfg.VertexLocation)) {
 		p.configErr = fmt.Errorf("vertex Gemini requires base_url or vertex_project and vertex_location")
 		return
 	}
@@ -261,11 +261,6 @@ func normalizeGeminiBackend(cfg providers.ProviderConfig) string {
 		return geminiBackendVertex
 	}
 	return geminiBackendAIStudio
-}
-
-func hasResolvedProviderValue(value string) bool {
-	value = strings.TrimSpace(value)
-	return value != "" && !strings.Contains(value, "${")
 }
 
 func normalizeGeminiAuthType(backend string, cfg providers.ProviderConfig) string {
