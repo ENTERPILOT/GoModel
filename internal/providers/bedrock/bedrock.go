@@ -39,7 +39,6 @@ var Registration = providers.Registration{
 	New:  New,
 	Discovery: providers.DiscoveryConfig{
 		AllowAPIKeyless: true,
-		NameSeparator:   "_",
 	},
 }
 
