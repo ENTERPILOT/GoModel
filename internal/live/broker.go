@@ -76,6 +76,7 @@ type Broker struct {
 	mu          sync.Mutex
 	nextSeq     uint64
 	nextSubID   uint64
+	closed      bool
 	events      []Event
 	subscribers map[uint64]chan Event
 }
@@ -106,7 +107,12 @@ func NewBroker(cfg Config) *Broker {
 
 // Enabled reports whether this broker should accept dashboard subscriptions.
 func (b *Broker) Enabled() bool {
-	return b != nil && b.enabled
+	if b == nil || !b.enabled {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return !b.closed
 }
 
 // Heartbeat returns the stream heartbeat interval.
@@ -135,6 +141,9 @@ func (b *Broker) Subscribe(cursor uint64) *Subscription {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.closed {
+		return nil
+	}
 
 	replay, reset := b.replayAfterLocked(cursor)
 	b.nextSubID++
@@ -182,6 +191,26 @@ func (b *Broker) unsubscribe(id uint64) {
 	close(ch)
 }
 
+// Close terminates all active subscribers and prevents future live events.
+func (b *Broker) Close() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return
+	}
+	b.closed = true
+	subscribers := b.subscribers
+	b.subscribers = make(map[uint64]chan Event)
+	b.mu.Unlock()
+
+	for _, ch := range subscribers {
+		close(ch)
+	}
+}
+
 func (b *Broker) publish(eventType, requestID string, timestamp time.Time, payload any) {
 	if b == nil || !b.enabled {
 		return
@@ -200,6 +229,9 @@ func (b *Broker) publish(eventType, requestID string, timestamp time.Time, paylo
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
 
 	b.nextSeq++
 	event := Event{

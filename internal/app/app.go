@@ -682,7 +682,7 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 
 // Shutdown gracefully tears down app components in dependency order.
 // Order:
-// 1. Cancel HTTP server context and wait for the server to stop.
+// 1. Cancel HTTP server context, close live streams, and wait for the server to stop.
 // 2. Provider subsystem close (stops model refresh loop and cache resources).
 // 3. Batch store close.
 // 4. Usage logger close (flushes pending usage records).
@@ -710,6 +710,9 @@ func (a *App) Shutdown(ctx context.Context) error {
 	a.serverMu.Unlock()
 	if serverStop != nil {
 		serverStop()
+	}
+	if a.live != nil {
+		a.live.Close()
 	}
 	if serverDone != nil {
 		select {

@@ -93,6 +93,43 @@ func TestBrokerDropsSlowSubscribers(t *testing.T) {
 	}
 }
 
+func TestBrokerCloseStopsSubscribersAndRejectsNewSubscriptions(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	sub := b.Subscribe(0)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+
+	b.Close()
+
+	select {
+	case _, ok := <-sub.Events:
+		if ok {
+			t.Fatal("subscriber channel remained open after broker close")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("subscriber channel was not closed")
+	}
+	if b.Enabled() {
+		t.Fatal("Enabled() = true after broker close, want false")
+	}
+	if got := b.Subscribe(0); got != nil {
+		t.Fatal("Subscribe returned a subscription after broker close")
+	}
+
+	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
+		ID:        "audit-closed",
+		RequestID: "req-closed",
+		Timestamp: time.Now(),
+	})
+	if got := b.LatestSeq(); got != 0 {
+		t.Fatalf("LatestSeq() = %d after close publish, want 0", got)
+	}
+
+	sub.Close()
+	b.Close()
+}
+
 func TestBrokerAuditPreviewOmitsAdvancedData(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	b.PublishAuditEvent(EventAuditCompleted, &auditlog.LogEntry{
