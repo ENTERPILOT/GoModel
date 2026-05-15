@@ -26,6 +26,7 @@ import (
 	"gomodel/internal/fallback"
 	"gomodel/internal/filestore"
 	"gomodel/internal/guardrails"
+	"gomodel/internal/live"
 	"gomodel/internal/modeloverrides"
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
@@ -52,6 +53,7 @@ type App struct {
 	authKeys         *authkeys.Result
 	guardrails       *guardrails.Result
 	workflows        *workflows.Result
+	live             *live.Broker
 	server           *server.Server
 
 	shutdownMu  sync.Mutex
@@ -101,6 +103,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	app := &App{
 		config: appCfg,
 	}
+	app.live = live.NewBroker(live.Config{
+		Enabled:     appCfg.Admin.LiveLogsEnabled,
+		BufferSize:  appCfg.Admin.LiveLogsBufferSize,
+		ReplayLimit: appCfg.Admin.LiveLogsReplayLimit,
+		Heartbeat:   time.Duration(appCfg.Admin.LiveLogsHeartbeatSeconds) * time.Second,
+	})
 
 	providerResult, err := providers.Init(ctx, cfg.AppConfig, cfg.Factory)
 	if err != nil {
@@ -118,6 +126,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize audit logging: %w", err)
 	}
 	app.audit = auditResult
+	if logger, ok := auditResult.Logger.(interface {
+		SetLivePublisher(auditlog.LiveEventPublisher)
+	}); ok {
+		logger.SetLivePublisher(app.live)
+	}
 
 	// Initialize usage tracking
 	// Use shared storage if both audit logging and usage tracking use the same backend
@@ -148,6 +161,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, fmt.Errorf("usage tracking initialization returned nil result")
 	}
 	app.usage = usageResult
+	if logger, ok := usageResult.Logger.(interface {
+		SetLivePublisher(usage.LiveEventPublisher)
+	}); ok {
+		logger.SetLivePublisher(app.live)
+	}
 
 	var budgetResult *budget.Result
 	if appCfg.Budgets.Enabled {
@@ -460,6 +478,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			budgetResult.Service,
 			app,
 			dashboardRuntimeConfig(appCfg, usageEnabledForDashboard),
+			app.live,
 			usagePricingRecalculationConfigured(appCfg),
 			appCfg.Server.BasePath,
 			adminCfg.UIEnabled,
@@ -881,6 +900,7 @@ func initAdmin(
 	budgetService *budget.Service,
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
+	liveBroker *live.Broker,
 	usagePricingRecalculationEnabled bool,
 	basePath string,
 	uiEnabled bool,
@@ -939,6 +959,7 @@ func initAdmin(
 		admin.WithBudgets(budgetService),
 		admin.WithRuntimeRefresher(runtimeRefresher),
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
+		admin.WithLiveBroker(liveBroker),
 	)
 
 	var dashHandler *dashboard.Handler
@@ -1069,6 +1090,7 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled bool) admin.Dashboa
 		CacheEnabled:         dashboardEnabledValue(cacheAnalyticsConfigured(cfg, usageEnabled)),
 		RedisURL:             dashboardEnabledValue(simpleResponseCacheConfigured(cfg)),
 		SemanticCacheEnabled: dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
+		LiveLogsEnabled:      dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
 	}
 }
 

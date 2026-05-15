@@ -435,7 +435,8 @@ test('workflowAuditChart returns the shared chart contract for audit runtime ent
             cache_type: 'semantic',
             provider: 'openai',
             model: 'gpt-5',
-            status_code: 200
+            status_code: 200,
+            usage: { entries: 1 }
         })),
         JSON.stringify({
             showBudget: true,
@@ -621,6 +622,7 @@ test('workflowAuditChart highlights configured failover redirects and exposes th
             provider: 'azure',
             requested_model: 'gpt-5',
             status_code: 200,
+            usage: { entries: 1 },
             data: {
                 workflow_features: {
                     cache: false,
@@ -717,6 +719,86 @@ test('workflowAsyncNodeClass only marks async nodes green when the audit-log ove
     assert.equal(module.workflowAsyncNodeClass(true, false), '');
     assert.equal(module.workflowAsyncNodeClass(false, true), '');
     assert.equal(module.workflowAsyncNodeClass(true, true), 'workflow-node-success');
+    assert.equal(module.workflowAsyncNodeClass(true, false, true), 'workflow-node-current');
+});
+
+test('workflowAuditChart marks live current steps blue and waits for async flushes', () => {
+    const module = createWorkflowsModule();
+
+    const started = module.workflowAuditChart({
+        id: 'audit-live-1',
+        request_id: 'req-live-1',
+        _live: true,
+        _live_state: 'audit.started',
+        _live_pending: true
+    });
+    assert.equal(started.authNodeClass, 'workflow-node-current');
+    assert.equal(started.auditNodeClass, '');
+
+    const inAi = module.workflowAuditChart({
+        id: 'audit-live-1',
+        request_id: 'req-live-1',
+        provider: 'openai',
+        requested_model: 'gpt-5',
+        _live: true,
+        _live_state: 'audit.updated',
+        _live_pending: true
+    });
+    assert.equal(inAi.aiNodeClass, 'workflow-node-current');
+
+    const auditQueued = module.workflowAuditChart({
+        id: 'audit-live-1',
+        request_id: 'req-live-1',
+        provider: 'openai',
+        requested_model: 'gpt-5',
+        status_code: 200,
+        _live: true,
+        _live_state: 'audit.completed',
+        _live_pending: true,
+        data: {
+            workflow_features: {
+                audit: true,
+                usage: true
+            }
+        }
+    });
+    assert.equal(auditQueued.responseNodeClass, 'workflow-node-success');
+    assert.equal(auditQueued.auditNodeClass, 'workflow-node-current');
+    assert.equal(auditQueued.usageNodeClass, '');
+
+    const auditFlushedUsageQueuedEntry = {
+        id: 'audit-live-1',
+        request_id: 'req-live-1',
+        provider: 'openai',
+        requested_model: 'gpt-5',
+        status_code: 200,
+        usage: { entries: 1 },
+        _live: true,
+        _live_state: 'audit.flushed',
+        _live_pending: false,
+        _audit_flushed: true,
+        _usage_live_state: 'usage.completed',
+        _usage_live_pending: true,
+        _usage_flushed: false,
+        data: {
+            workflow_features: {
+                audit: true,
+                usage: true
+            }
+        }
+    };
+    const auditFlushedUsageQueued = module.workflowAuditChart(auditFlushedUsageQueuedEntry);
+    assert.equal(auditFlushedUsageQueued.auditNodeClass, 'workflow-node-success');
+    assert.equal(auditFlushedUsageQueued.usageNodeClass, 'workflow-node-current');
+
+    const fullyFlushed = module.workflowAuditChart({
+        ...auditFlushedUsageQueuedEntry,
+        _usage_live_state: 'usage.flushed',
+        _usage_live_pending: false,
+        _usage_flushed: true
+    });
+    assert.equal(fullyFlushed.auditNodeClass, 'workflow-node-success');
+    assert.equal(fullyFlushed.usageNodeClass, 'workflow-node-success');
 });
 
 test('workflowSubmitMode switches to save when an active workflow already matches the selected scope', () => {

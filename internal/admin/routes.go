@@ -18,6 +18,7 @@ type RouteRegistrar interface {
 func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/runtime/config", h.DashboardConfig)
 	g.GET("/cache/overview", h.CacheOverview)
+	g.GET("/live/logs", h.LiveLogs)
 
 	g.GET("/usage/summary", h.UsageSummary)
 	g.GET("/usage/daily", h.DailyUsage)
@@ -27,6 +28,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.POST("/usage/recalculate-pricing", h.RecalculateUsagePricing)
 
 	g.GET("/audit/log", h.AuditLog)
+	g.GET("/audit/detail", h.AuditLogDetail)
 	g.GET("/audit/conversation", h.AuditConversation)
 
 	g.GET("/providers/status", h.ProviderStatus)

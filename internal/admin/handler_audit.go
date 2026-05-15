@@ -173,6 +173,38 @@ func (h *Handler) auditLogResponse(ctx context.Context, result *auditlog.LogList
 	return response, nil
 }
 
+// AuditLogDetail handles GET /admin/audit/detail.
+func (h *Handler) AuditLogDetail(c *echo.Context) error {
+	logID := strings.TrimSpace(c.QueryParam("log_id"))
+	if logID == "" {
+		return handleError(c, core.NewInvalidRequestError("log_id is required", nil))
+	}
+	if h.auditReader == nil {
+		return handleError(c, featureUnavailableError("audit log detail is unavailable"))
+	}
+
+	entry, err := h.auditReader.GetLogByID(c.Request().Context(), logID)
+	if err != nil {
+		return handleError(c, err)
+	}
+	if entry == nil {
+		return handleError(c, core.NewNotFoundError("audit log not found: "+logID))
+	}
+
+	response, err := h.auditLogResponse(c.Request().Context(), &auditlog.LogListResult{
+		Entries: []auditlog.LogEntry{*entry},
+		Total:   1,
+		Limit:   1,
+	})
+	if err != nil {
+		return handleError(c, err)
+	}
+	if len(response.Entries) == 0 {
+		return handleError(c, core.NewNotFoundError("audit log not found: "+logID))
+	}
+	return c.JSON(http.StatusOK, response.Entries[0])
+}
+
 // AuditConversation handles GET /admin/audit/conversation
 //
 // @Summary      Get conversation thread around an audit log entry

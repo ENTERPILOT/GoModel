@@ -34,6 +34,26 @@ const (
 	AuthMethodNoKey     = "no_key"
 )
 
+const (
+	LiveEventAuditStarted   = "audit.started"
+	LiveEventAuditUpdated   = "audit.updated"
+	LiveEventAuditCompleted = "audit.completed"
+	LiveEventAuditFlushed   = "audit.flushed"
+	LiveEventAuditRemoved   = "audit.removed"
+)
+
+// LiveEventPublisher receives compact audit lifecycle snapshots for realtime
+// dashboard preview. Implementations must not block request handling.
+type LiveEventPublisher interface {
+	PublishAuditEvent(eventType string, entry *LogEntry)
+}
+
+// LiveEventEmitter is implemented by loggers that can publish audit lifecycle
+// previews before the entry is persisted.
+type LiveEventEmitter interface {
+	PublishLiveEvent(eventType string, entry *LogEntry)
+}
+
 // LogEntry represents a single audit log entry.
 // Core fields are indexed for efficient queries.
 type LogEntry struct {

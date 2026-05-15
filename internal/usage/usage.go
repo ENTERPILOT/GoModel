@@ -22,6 +22,17 @@ type UsageStore interface {
 	Close() error
 }
 
+const (
+	LiveEventUsageCompleted = "usage.completed"
+	LiveEventUsageFlushed   = "usage.flushed"
+)
+
+// LiveEventPublisher receives compact usage snapshots for realtime dashboard
+// preview. Implementations must not block request handling.
+type LiveEventPublisher interface {
+	PublishUsageEvent(eventType string, entry *UsageEntry)
+}
+
 // UsageEntry represents a single token usage record.
 type UsageEntry struct {
 	// ID is a unique identifier for this usage entry (UUID)

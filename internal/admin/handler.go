@@ -19,6 +19,7 @@ import (
 	"gomodel/internal/budget"
 	"gomodel/internal/core"
 	"gomodel/internal/guardrails"
+	"gomodel/internal/live"
 	"gomodel/internal/modeloverrides"
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
@@ -41,6 +42,7 @@ type Handler struct {
 	budgets             *budget.Service
 	guardrails          guardrails.Catalog
 	guardrailDefs       *guardrails.Service
+	liveBroker          *live.Broker
 	runtimeConfig       DashboardConfigResponse
 	runtimeRefresher    RuntimeRefresher
 	configuredProviders []providers.SanitizedProviderConfig
@@ -62,6 +64,7 @@ const (
 	DashboardConfigRedisURL             = "REDIS_URL"
 	DashboardConfigSemanticCacheEnabled = "SEMANTIC_CACHE_ENABLED"
 	DashboardConfigPricingRecalculation = "USAGE_PRICING_RECALCULATION_ENABLED"
+	DashboardConfigLiveLogsEnabled      = "DASHBOARD_LIVE_LOGS_ENABLED"
 )
 
 // statusClientClosedRequest is the de facto status used by proxies for client-aborted requests.
@@ -78,6 +81,7 @@ type DashboardConfigResponse struct {
 	RedisURL             string `json:"REDIS_URL,omitempty"`
 	SemanticCacheEnabled string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
 	PricingRecalculation string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
+	LiveLogsEnabled      string `json:"DASHBOARD_LIVE_LOGS_ENABLED,omitempty"`
 }
 
 type providerStatusSummaryResponse struct {
@@ -226,6 +230,13 @@ func WithGuardrailService(service *guardrails.Service) Option {
 	}
 }
 
+// WithLiveBroker enables realtime dashboard log previews.
+func WithLiveBroker(broker *live.Broker) Option {
+	return func(h *Handler) {
+		h.liveBroker = broker
+	}
+}
+
 // WithDashboardRuntimeConfig enables the allowlisted dashboard runtime config endpoint.
 func WithDashboardRuntimeConfig(values DashboardConfigResponse) Option {
 	return func(h *Handler) {
@@ -279,6 +290,7 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		RedisURL:             strings.TrimSpace(values.RedisURL),
 		SemanticCacheEnabled: strings.TrimSpace(values.SemanticCacheEnabled),
 		PricingRecalculation: strings.TrimSpace(values.PricingRecalculation),
+		LiveLogsEnabled:      strings.TrimSpace(values.LiveLogsEnabled),
 	}
 }
 

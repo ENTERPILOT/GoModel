@@ -89,7 +89,8 @@
 	                    'CACHE_ENABLED',
 	                    'REDIS_URL',
 	                    'SEMANTIC_CACHE_ENABLED',
-	                    'USAGE_PRICING_RECALCULATION_ENABLED'
+	                    'USAGE_PRICING_RECALCULATION_ENABLED',
+	                    'DASHBOARD_LIVE_LOGS_ENABLED'
 	                ];
 	            },
 
@@ -1223,14 +1224,17 @@
                 const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
                 const showFailover = !!features.fallback || this.workflowRuntimeUsedFailover(runtime);
                 const workflowID = this.workflowChartWorkflowID(source, config.entry);
+                const liveStep = this.workflowLiveCurrentStep(config.entry, runtime, features);
+                const auditFlushed = this.workflowAuditFlushed(config.entry, highlightAsyncPresent);
+                const usageFlushed = this.workflowUsageFlushed(config.entry, highlightAsyncPresent);
                 return {
                     showBudget,
-                    budgetNodeClass: this.workflowBudgetNodeClass(showBudget, runtime, highlightAsyncPresent),
+                    budgetNodeClass: this.workflowBudgetNodeClass(showBudget, runtime, highlightAsyncPresent, liveStep === 'budget'),
                     budgetStatusLabel: this.workflowBudgetStatusLabel(runtime),
                     showGuardrails,
                     guardrailLabel: showGuardrails ? this.workflowGuardrailLabel(source) : '',
                     showCache: !!config.forceCache || !!features.cache || this.workflowRuntimeHasCache(runtime),
-                    cacheNodeClass: this.workflowCacheNodeClass(runtime),
+                    cacheNodeClass: this.workflowCacheNodeClass(runtime, liveStep === 'cache'),
                     cacheConnClass: this.workflowCacheConnClass(runtime),
                     cacheStatusLabel: this.workflowCacheStatusLabel(runtime),
                     showFailover,
@@ -1241,14 +1245,14 @@
                     aiLabel: this.workflowAiLabel(source, runtime),
                     aiSublabel: this.workflowAiSublabel(source, runtime),
                     aiConnClass: this.workflowAiConnClass(runtime),
-                    aiNodeClass: this.workflowAiNodeClass(runtime),
+                    aiNodeClass: this.workflowAiNodeClass(runtime, liveStep === 'ai'),
                     responseConnClass: this.workflowResponseConnClass(runtime),
-                    responseNodeClass: this.workflowResponseNodeClass(runtime),
+                    responseNodeClass: this.workflowResponseNodeClass(runtime, liveStep === 'response'),
                     responseNodeSublabel: this.workflowResponseNodeSublabel(runtime),
-                    authNodeClass: this.workflowAuthNodeClass(runtime),
+                    authNodeClass: this.workflowAuthNodeClass(runtime, liveStep === 'auth'),
                     authNodeSublabel: this.workflowAuthNodeSublabel(runtime),
-                    usageNodeClass: this.workflowAsyncNodeClass(showUsage, highlightAsyncPresent),
-                    auditNodeClass: this.workflowAsyncNodeClass(showAudit, highlightAsyncPresent),
+                    usageNodeClass: this.workflowAsyncNodeClass(showUsage, usageFlushed, liveStep === 'usage'),
+                    auditNodeClass: this.workflowAsyncNodeClass(showAudit, auditFlushed, liveStep === 'audit'),
                     showAsync,
                     showUsage,
                     showAudit,
@@ -1283,6 +1287,38 @@
                 });
             },
 
+            workflowAuditFlushed(entry, fallback) {
+                if (!entry || !entry._live) return !!fallback;
+                const state = String(entry._live_state || '').trim();
+                return !!entry._audit_flushed || state === 'audit.flushed' || state === 'audit.detail';
+            },
+
+            workflowUsageFlushed(entry, fallback) {
+                if (!entry) return !!fallback;
+                const usage = entry.usage || {};
+                const hasUsage = Number(usage.entries || 0) > 0;
+                if (!entry._live) return hasUsage;
+                const state = String(entry._usage_live_state || '').trim();
+                if (entry._usage_flushed || state === 'usage.flushed') return true;
+                if (entry._usage_live_pending) return false;
+                return hasUsage && !entry._live_pending;
+            },
+
+            workflowLiveCurrentStep(entry, runtime, features) {
+                if (!entry || !entry._live) return '';
+                if (entry._usage_live_pending && !entry._usage_flushed) return 'usage';
+                if (this.workflowAuditFlushed(entry, false) && !entry._live_pending) return '';
+
+                const state = String(entry._live_state || '').trim();
+                if (state === 'audit.completed') return 'audit';
+                if (runtime && Number.isFinite(runtime.statusCode)) return 'audit';
+                if (runtime && runtime.cacheHit) return 'cache';
+                if (runtime && (runtime.provider || runtime.model)) return 'ai';
+                if (features && features.budget && (entry.workflow_version_id || entry.requested_model)) return 'budget';
+                if (runtime && runtime.authMethod) return '';
+                return 'auth';
+            },
+
             // runtime shape: {
             //   cacheHit: bool,
             //   cacheType: 'exact'|'semantic'|null,
@@ -1310,7 +1346,8 @@
                 return this.workflowHasCache(source) || this.workflowRuntimeHasCache(runtime);
             },
 
-            workflowCacheNodeClass(runtime) {
+            workflowCacheNodeClass(runtime, current) {
+                if (current) return 'workflow-node-current';
                 return runtime && runtime.cacheHit ? 'workflow-node-success' : '';
             },
 
@@ -1324,9 +1361,10 @@
                 return 'Hit (Exact)';
             },
 
-            workflowBudgetNodeClass(visible, runtime, highlightPresent) {
+            workflowBudgetNodeClass(visible, runtime, highlightPresent, current) {
                 if (!visible) return '';
                 if (this.workflowRuntimeBudgetExceeded(runtime)) return 'workflow-node-error';
+                if (current) return 'workflow-node-current';
                 return highlightPresent ? 'workflow-node-success' : '';
             },
 
@@ -1358,9 +1396,10 @@
                 return '';
             },
 
-            workflowAiNodeClass(runtime) {
+            workflowAiNodeClass(runtime, current) {
                 if (!runtime) return '';
                 if (runtime.cacheHit) return 'workflow-node-skipped';
+                if (current) return 'workflow-node-current';
                 return runtime.aiSuccess ? 'workflow-node-success' : '';
             },
 
@@ -1370,9 +1409,10 @@
                 return '';
             },
 
-            workflowResponseNodeClass(runtime) {
+            workflowResponseNodeClass(runtime, current) {
                 if (!runtime) return '';
                 const statusCode = runtime.statusCode;
+                if (!Number.isFinite(statusCode) && current) return 'workflow-node-current';
                 if (!Number.isFinite(statusCode)) return '';
                 if (statusCode >= 500) return 'workflow-node-error';
                 if (statusCode >= 400) return 'workflow-node-warning';
@@ -1386,9 +1426,10 @@
                 return String(runtime.statusCode);
             },
 
-            workflowAuthNodeClass(runtime) {
+            workflowAuthNodeClass(runtime, current) {
                 if (!runtime) return '';
                 if (runtime.authError) return 'workflow-node-error';
+                if (current) return 'workflow-node-current';
                 if (runtime.authMethod === 'api_key' || runtime.authMethod === 'master_key') return 'workflow-node-success';
                 return '';
             },
@@ -1440,8 +1481,10 @@
                 return '';
             },
 
-            workflowAsyncNodeClass(visible, highlightPresent) {
-                return visible && highlightPresent ? 'workflow-node-success' : '';
+            workflowAsyncNodeClass(visible, highlightPresent, current) {
+                if (!visible) return '';
+                if (current) return 'workflow-node-current';
+                return highlightPresent ? 'workflow-node-success' : '';
             },
 
             workflowQualifiedSelectorParts(selector) {

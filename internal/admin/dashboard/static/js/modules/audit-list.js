@@ -237,6 +237,7 @@
 
             formatDurationNs(ns) {
                 if (ns == null) return '-';
+                if (Number(ns) <= 0) return 'pending';
                 if (ns < 1000000) return Math.round(ns / 1000) + ' \u00b5s';
                 if (ns < 1000000000) return (ns / 1000000).toFixed(2) + ' ms';
                 return (ns / 1000000000).toFixed(2) + ' s';
@@ -248,6 +249,9 @@
 
                 if (detailsEl.open) {
                     this.markAuditEntryExpanded(entry);
+                    if (typeof this.fetchAuditEntryDetail === 'function') {
+                        this.fetchAuditEntryDetail(entry);
+                    }
                 }
             },
 

@@ -122,7 +122,14 @@ func buildDefaultConfig() *Config {
 			Retry:          DefaultRetryConfig(),
 			CircuitBreaker: DefaultCircuitBreakerConfig(),
 		},
-		Admin:      AdminConfig{EndpointsEnabled: true, UIEnabled: true},
+		Admin: AdminConfig{
+			EndpointsEnabled:         true,
+			UIEnabled:                true,
+			LiveLogsEnabled:          true,
+			LiveLogsBufferSize:       10000,
+			LiveLogsReplayLimit:      1000,
+			LiveLogsHeartbeatSeconds: 15,
+		},
 		Guardrails: GuardrailsConfig{},
 	}
 }

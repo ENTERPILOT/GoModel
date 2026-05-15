@@ -197,6 +197,24 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Workflows.RefreshInterval != time.Minute {
 		t.Errorf("expected Workflows.RefreshInterval=%s, got %s", time.Minute, cfg.Workflows.RefreshInterval)
 	}
+	if !cfg.Admin.EndpointsEnabled {
+		t.Error("expected Admin.EndpointsEnabled=true")
+	}
+	if !cfg.Admin.UIEnabled {
+		t.Error("expected Admin.UIEnabled=true")
+	}
+	if !cfg.Admin.LiveLogsEnabled {
+		t.Error("expected Admin.LiveLogsEnabled=true")
+	}
+	if cfg.Admin.LiveLogsBufferSize != 10000 {
+		t.Errorf("expected Admin.LiveLogsBufferSize=10000, got %d", cfg.Admin.LiveLogsBufferSize)
+	}
+	if cfg.Admin.LiveLogsReplayLimit != 1000 {
+		t.Errorf("expected Admin.LiveLogsReplayLimit=1000, got %d", cfg.Admin.LiveLogsReplayLimit)
+	}
+	if cfg.Admin.LiveLogsHeartbeatSeconds != 15 {
+		t.Errorf("expected Admin.LiveLogsHeartbeatSeconds=15, got %d", cfg.Admin.LiveLogsHeartbeatSeconds)
+	}
 	if !cfg.Models.EnabledByDefault {
 		t.Error("expected Models.EnabledByDefault=true")
 	}

@@ -30,4 +30,7 @@ const (
 	// When true, the middleware skips logging because the stream observer path
 	// handles streaming audit logging.
 	LogEntryStreamingKey contextKey = "auditlog_entry_streaming"
+
+	// LogEntryLivePublisherKey stores an optional realtime dashboard publisher.
+	LogEntryLivePublisherKey contextKey = "auditlog_live_publisher"
 )

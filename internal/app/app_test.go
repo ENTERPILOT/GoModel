@@ -446,6 +446,9 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 		Guardrails: config.GuardrailsConfig{
 			Enabled: true,
 		},
+		Admin: config.AdminConfig{
+			LiveLogsEnabled: true,
+		},
 		Cache: config.CacheConfig{
 			Response: config.ResponseCacheConfig{
 				Simple: &config.SimpleCacheConfig{
@@ -479,6 +482,9 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 	}
 	if got := values.SemanticCacheEnabled; got != "off" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want off", admin.DashboardConfigSemanticCacheEnabled, got)
+	}
+	if got := values.LiveLogsEnabled; got != "on" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigLiveLogsEnabled, got)
 	}
 }
 

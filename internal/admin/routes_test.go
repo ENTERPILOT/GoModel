@@ -33,6 +33,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 	want := []string{
 		"GET /admin/runtime/config",
 		"GET /admin/cache/overview",
+		"GET /admin/live/logs",
 
 		"GET /admin/usage/summary",
 		"GET /admin/usage/daily",
@@ -42,6 +43,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"POST /admin/usage/recalculate-pricing",
 
 		"GET /admin/audit/log",
+		"GET /admin/audit/detail",
 		"GET /admin/audit/conversation",
 
 		"GET /admin/providers/status",

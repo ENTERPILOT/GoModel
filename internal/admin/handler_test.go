@@ -1284,7 +1284,7 @@ func TestAuditLog_NilReaderStillValidatesParams(t *testing.T) {
 }
 
 func TestAuditConversation_NilReaderStillValidatesParams(t *testing.T) {
-	h := NewHandler(nil, nil)                                       // no audit reader configured
+	h := NewHandler(nil, nil)                                // no audit reader configured
 	c, rec := newHandlerContext("/admin/audit/conversation") // missing required log_id
 
 	if err := h.AuditConversation(c); err != nil {
@@ -1949,6 +1949,7 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		RedisURL:             "on",
 		SemanticCacheEnabled: "off",
 		PricingRecalculation: "on",
+		LiveLogsEnabled:      "on",
 	}))
 	c, rec := newHandlerContext("/admin/runtime/config")
 
@@ -1989,6 +1990,9 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	}
 	if got := body.PricingRecalculation; got != "on" {
 		t.Fatalf("USAGE_PRICING_RECALCULATION_ENABLED = %q, want on", got)
+	}
+	if got := body.LiveLogsEnabled; got != "on" {
+		t.Fatalf("DASHBOARD_LIVE_LOGS_ENABLED = %q, want on", got)
 	}
 	if rec.Body.String() == "" || strings.Contains(rec.Body.String(), "UNRELATED_FLAG") {
 		t.Fatal("UNRELATED_FLAG should not be exposed")

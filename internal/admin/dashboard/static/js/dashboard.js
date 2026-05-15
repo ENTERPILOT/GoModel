@@ -285,7 +285,14 @@ function dashboard() {
           }
         });
 
-      this.fetchAll();
+      const initialFetch = this.fetchAll();
+      if (initialFetch && typeof initialFetch.finally === "function") {
+        initialFetch.finally(() => {
+          if (typeof this.startLiveLogs === "function") {
+            this.startLiveLogs();
+          }
+        });
+      }
     },
 
     toggleSidebar() {
@@ -516,7 +523,17 @@ function dashboard() {
       this.authError = false;
       this.needsAuth = false;
       this.closeAuthDialog();
-      this.fetchAll();
+      if (typeof this.stopLiveLogs === "function") {
+        this.stopLiveLogs();
+      }
+      const refresh = this.fetchAll();
+      if (refresh && typeof refresh.finally === "function") {
+        refresh.finally(() => {
+          if (typeof this.startLiveLogs === "function") {
+            this.startLiveLogs();
+          }
+        });
+      }
     },
 
     headers() {
@@ -1066,6 +1083,12 @@ function dashboard() {
         ? dashboardAuditListModule
         : null,
       "dashboardAuditListModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardLiveLogsModule === "function"
+        ? dashboardLiveLogsModule
+        : null,
+      "dashboardLiveLogsModule",
     ),
     resolveModuleFactory(
       typeof dashboardAliasesModule === "function"

@@ -83,6 +83,10 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 
 			// Store entry in context for potential enrichment by handlers
 			c.Set(string(LogEntryKey), entry)
+			if publisher, ok := logger.(LiveEventEmitter); ok {
+				c.Set(string(LogEntryLivePublisherKey), publisher)
+				publisher.PublishLiveEvent(LiveEventAuditStarted, entry)
+			}
 
 			// Create response body capture if logging bodies
 			var responseCapture *responseBodyCapture
@@ -104,6 +108,9 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			applyAuthentication(entry, c.Request().Context())
 
 			if !auditEnabledForContext(c.Request().Context()) {
+				if publisher, ok := c.Get(string(LogEntryLivePublisherKey)).(LiveEventEmitter); ok && publisher != nil {
+					publisher.PublishLiveEvent(LiveEventAuditRemoved, entry)
+				}
 				return err
 			}
 
@@ -387,6 +394,7 @@ func EnrichEntry(c *echo.Context, model, provider string) {
 
 	entry.RequestedModel = model
 	entry.Provider = provider
+	publishLiveAuditUpdate(c, entry)
 }
 
 // EnrichEntryWithWorkflow attaches workflow metadata to the live
@@ -404,6 +412,7 @@ func EnrichEntryWithWorkflow(c *echo.Context, workflow *core.Workflow) {
 	}
 
 	enrichEntryWithWorkflow(entry, workflow)
+	publishLiveAuditUpdate(c, entry)
 }
 
 // EnrichLogEntryWithWorkflow attaches workflow metadata directly to
@@ -427,6 +436,7 @@ func EnrichEntryWithResolvedRoute(c *echo.Context, resolvedModel, providerType, 
 	}
 
 	enrichEntryWithResolvedRoute(entry, resolvedModel, providerType, providerName)
+	publishLiveAuditUpdate(c, entry)
 }
 
 // EnrichLogEntryWithResolvedRoute attaches the final executed route directly to
@@ -450,6 +460,7 @@ func EnrichEntryWithFailover(c *echo.Context, targetModel string) {
 	}
 
 	enrichEntryWithFailover(entry, targetModel)
+	publishLiveAuditUpdate(c, entry)
 }
 
 // EnrichLogEntryWithFailover attaches failover redirect metadata directly to an
@@ -508,6 +519,7 @@ func EnrichEntryWithCacheType(c *echo.Context, cacheType string) {
 	}
 
 	entry.CacheType = cacheType
+	publishLiveAuditUpdate(c, entry)
 }
 
 // EnrichEntryWithAuthMethod records which authentication mechanism was used for the request.
@@ -527,6 +539,7 @@ func EnrichEntryWithAuthMethod(c *echo.Context, method string) {
 		return
 	}
 	entry.AuthMethod = method
+	publishLiveAuditUpdate(c, entry)
 }
 
 // EnrichEntryWithAuthKeyID attaches the authenticated managed auth key id to the live audit entry.
@@ -546,6 +559,7 @@ func EnrichEntryWithAuthKeyID(c *echo.Context, authKeyID string) {
 		return
 	}
 	entry.AuthKeyID = authKeyID
+	publishLiveAuditUpdate(c, entry)
 }
 
 // EnrichEntryWithUserPath attaches the effective user path to the live audit entry.
@@ -565,12 +579,24 @@ func EnrichEntryWithUserPath(c *echo.Context, userPath string) {
 		return
 	}
 	entry.UserPath = userPath
+	publishLiveAuditUpdate(c, entry)
 }
 
 // EnrichLogEntryWithRequestContext attaches auth and effective user-path
 // metadata from context directly to an existing log entry.
 func EnrichLogEntryWithRequestContext(entry *LogEntry, ctx context.Context) {
 	applyAuthentication(entry, ctx)
+}
+
+func publishLiveAuditUpdate(c *echo.Context, entry *LogEntry) {
+	if c == nil || entry == nil {
+		return
+	}
+	publisher, ok := c.Get(string(LogEntryLivePublisherKey)).(LiveEventEmitter)
+	if !ok || publisher == nil {
+		return
+	}
+	publisher.PublishLiveEvent(LiveEventAuditUpdated, entry)
 }
 
 func auditEnabledForContext(ctx context.Context) bool {
@@ -599,6 +625,7 @@ func EnrichEntryWithError(c *echo.Context, errorType, errorMessage string, error
 			}
 		}
 	}
+	publishLiveAuditUpdate(c, entry)
 }
 
 // EnrichEntryWithStream marks the log entry as a streaming request.
@@ -614,6 +641,7 @@ func EnrichEntryWithStream(c *echo.Context, stream bool) {
 	}
 
 	entry.Stream = stream
+	publishLiveAuditUpdate(c, entry)
 }
 
 // toValidUTF8String converts bytes to a valid UTF-8 string.
