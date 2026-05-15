@@ -160,10 +160,19 @@ workflow enforcement.
 
 #### Admin
 
-| Variable                  | Description                   | Default |
-| ------------------------- | ----------------------------- | ------- |
-| `ADMIN_ENDPOINTS_ENABLED` | Enable the admin REST API     | `true`  |
-| `ADMIN_UI_ENABLED`        | Enable the admin dashboard UI | `true`  |
+| Variable                              | Description                                      | Default |
+| ------------------------------------- | ------------------------------------------------ | ------- |
+| `ADMIN_ENDPOINTS_ENABLED`             | Enable the admin REST API                        | `true`  |
+| `ADMIN_UI_ENABLED`                    | Enable the admin dashboard UI                    | `true`  |
+| `DASHBOARD_LIVE_LOGS_ENABLED`         | Stream realtime dashboard audit/usage previews   | `true`  |
+| `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | In-memory replay window for live dashboard events | `10000` |
+| `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Max events replayed to one reconnecting client   | `1000`  |
+| `DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS` | Idle stream heartbeat interval in seconds      | `15`    |
+
+Live dashboard logs are compact previews for the Audit Logs and Usage pages.
+They update rows before the async database flush finishes. The stored audit and
+usage tables remain the source of truth; if a browser reconnects with a cursor
+outside the replay window, the dashboard reloads from the normal REST APIs.
 
 #### HTTP Client
 

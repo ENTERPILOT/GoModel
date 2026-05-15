@@ -17,10 +17,14 @@ Both are on by default because observability shouldn't be opt-in. If you don't n
 
 ## Configuration
 
-| Variable                  | Description                          | Default |
-| ------------------------- | ------------------------------------ | ------- |
-| `ADMIN_ENDPOINTS_ENABLED` | Enable the admin REST API            | `true`  |
-| `ADMIN_UI_ENABLED`        | Enable the admin dashboard UI        | `true`  |
+| Variable                              | Description                                      | Default |
+| ------------------------------------- | ------------------------------------------------ | ------- |
+| `ADMIN_ENDPOINTS_ENABLED`             | Enable the admin REST API                        | `true`  |
+| `ADMIN_UI_ENABLED`                    | Enable the admin dashboard UI                    | `true`  |
+| `DASHBOARD_LIVE_LOGS_ENABLED`         | Stream realtime dashboard audit/usage previews   | `true`  |
+| `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | In-memory replay window for live dashboard events | `10000` |
+| `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Max events replayed to one reconnecting client   | `1000`  |
+| `DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS` | Idle stream heartbeat interval in seconds      | `15`    |
 
 Or in YAML:
 
@@ -28,6 +32,10 @@ Or in YAML:
 admin:
   endpoints_enabled: true
   ui_enabled: true
+  live_logs_enabled: true
+  live_logs_buffer_size: 10000
+  live_logs_replay_limit: 1000
+  live_logs_heartbeat_seconds: 15
 ```
 
 <Note>
@@ -198,6 +206,17 @@ http://localhost:8080/admin/dashboard
 ```
 
 It provides a visual overview of usage statistics and registered models using the same data as the REST API endpoints above.
+
+When `DASHBOARD_LIVE_LOGS_ENABLED=true`, the dashboard opens
+`GET /admin/live/logs` and streams compact audit/usage lifecycle previews. This
+lets the Audit Logs and Usage pages show a request as it moves through the
+workflow before the async database flush finishes. The stream uses sequence
+cursors, bounded replay, and heartbeat events so reconnecting browsers can catch
+up after short network drops.
+
+The persisted audit and usage tables remain the source of truth. If the
+browser's cursor falls outside the replay buffer, the stream sends a reset event
+and the dashboard reloads from the normal REST endpoints.
 
 ## Disabling Admin Features
 
