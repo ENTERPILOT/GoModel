@@ -60,7 +60,7 @@
         <div class="audit-log-list" x-show="auditLog.entries.length > 0">
             <template x-for="entry in auditLog.entries" :key="entry.id">
                 <details class="audit-entry" @toggle="handleAuditEntryToggle($event, entry)">
-                        <summary class="audit-entry-summary">
+                        <summary class="audit-entry-summary" :class="auditEntrySummaryClass(entry)">
                             <div class="audit-entry-left">
                                 <span class="audit-status-badge" :class="statusCodeClass(entry.status_code)" x-text="entry.status_code || '-'"></span>
                             <span class="audit-method-badge" x-text="entry.method || '-'"></span>

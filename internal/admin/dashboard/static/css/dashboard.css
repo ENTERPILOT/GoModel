@@ -2530,8 +2530,40 @@ textarea:focus {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 5px 14px;
+  position: relative;
   cursor: pointer;
+}
+
+.audit-entry-summary-live-in-progress {
+  background: color-mix(in srgb, var(--info) 7%, var(--bg));
+}
+
+.audit-entry-summary-live-in-progress::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--info);
+  pointer-events: none;
+  animation: audit-live-summary-stripe-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes audit-live-summary-stripe-blink {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.28;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audit-entry-summary-live-in-progress::before {
+    animation: none;
+    opacity: 0.78;
+  }
 }
 
 .audit-entry-summary::-webkit-details-marker {

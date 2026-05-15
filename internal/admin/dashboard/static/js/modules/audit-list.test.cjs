@@ -168,6 +168,38 @@ test('conversation body rendering darkens the estimated cached prompt text in re
     assert.doesNotMatch(rendered, /Fresh question\.<\/span>/);
 });
 
+test('auditEntrySummaryClass marks only live rows still waiting for a response', () => {
+    const module = createAuditListModule();
+
+    assert.equal(
+        module.auditEntrySummaryClass({
+            _live: true,
+            _live_pending: true,
+            _live_state: 'audit.started'
+        })['audit-entry-summary-live-in-progress'],
+        true
+    );
+
+    assert.equal(
+        module.auditEntrySummaryClass({
+            _live: true,
+            _live_pending: true,
+            _live_state: 'audit.completed',
+            status_code: 200,
+            duration_ns: 123000000
+        })['audit-entry-summary-live-in-progress'],
+        false
+    );
+
+    assert.equal(
+        module.auditEntrySummaryClass({
+            _live: false,
+            _live_pending: false
+        })['audit-entry-summary-live-in-progress'],
+        false
+    );
+});
+
 
 test('auditResponsePane surfaces error message from captured error body', () => {
     const module = createAuditListModule();

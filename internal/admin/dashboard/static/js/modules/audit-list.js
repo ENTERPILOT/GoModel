@@ -243,6 +243,26 @@
                 return (ns / 1000000000).toFixed(2) + ' s';
             },
 
+            auditEntrySummaryClass(entry) {
+                return {
+                    'audit-entry-summary-live-in-progress': this.auditEntryLiveInProgress(entry)
+                };
+            },
+
+            auditEntryLiveInProgress(entry) {
+                if (!entry || !entry._live || !entry._live_pending) return false;
+                const liveState = String(entry._live_state || '').trim();
+                if (liveState === 'audit.completed' || liveState === 'audit.flushed' || liveState === 'audit.detail') {
+                    return false;
+                }
+                if (entry.status_code !== null && entry.status_code !== undefined && entry.status_code !== '') return false;
+                if (Number(entry.duration_ns || 0) > 0) return false;
+                if (entry.error_type || entry.error_message) return false;
+
+                const data = entry.data || {};
+                return !(data.response_headers || data.response_body || data.error_message);
+            },
+
             handleAuditEntryToggle(event, entry) {
                 const detailsEl = event && event.currentTarget;
                 if (!detailsEl) return;
