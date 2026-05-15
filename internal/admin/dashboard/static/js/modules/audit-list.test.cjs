@@ -329,6 +329,91 @@ test('fetchAuditLog preserves a successful payload when workflow prefetch fails'
     assert.match(String(loggedErrors[0][0]), /Failed to prefetch audit workflows:/);
 });
 
+test('fetchAuditLog preserves live preview rows that are not flushed yet', async () => {
+    const module = createAuditListModule({
+        fetch() {
+            return Promise.resolve({
+                ok: true,
+                json: async () => ({
+                    entries: [{ id: 'audit-db', request_id: 'req-db' }],
+                    total: 1,
+                    limit: 25,
+                    offset: 0
+                })
+            });
+        }
+    });
+    module.auditFetchToken = 0;
+    module.auditLog = {
+        entries: [{
+            id: 'audit-live',
+            request_id: 'req-live',
+            _live: true,
+            _live_pending: true,
+            _audit_flushed: false
+        }],
+        total: 1,
+        limit: 25,
+        offset: 0
+    };
+    module.days = 7;
+    module.auditSearch = '';
+    module.auditMethod = '';
+    module.auditStatusCode = '';
+    module.auditStream = '';
+    module.headers = () => ({ authorization: 'Bearer token' });
+    module.handleFetchResponse = () => true;
+
+    await module.fetchAuditLog(true);
+
+    assert.equal(module.auditLog.entries.length, 2);
+    assert.equal(module.auditLog.entries[0].id, 'audit-live');
+    assert.equal(module.auditLog.entries[1].id, 'audit-db');
+    assert.equal(module.auditLog.total, 2);
+});
+
+test('fetchAuditLog lets persisted rows replace matching live previews', async () => {
+    const module = createAuditListModule({
+        fetch() {
+            return Promise.resolve({
+                ok: true,
+                json: async () => ({
+                    entries: [{ id: 'audit-db', request_id: 'req-live' }],
+                    total: 1,
+                    limit: 25,
+                    offset: 0
+                })
+            });
+        }
+    });
+    module.auditFetchToken = 0;
+    module.auditLog = {
+        entries: [{
+            id: 'audit-live',
+            request_id: 'req-live',
+            _live: true,
+            _live_pending: true,
+            _audit_flushed: false
+        }],
+        total: 1,
+        limit: 25,
+        offset: 0
+    };
+    module.days = 7;
+    module.auditSearch = '';
+    module.auditMethod = '';
+    module.auditStatusCode = '';
+    module.auditStream = '';
+    module.headers = () => ({ authorization: 'Bearer token' });
+    module.handleFetchResponse = () => true;
+
+    await module.fetchAuditLog(true);
+
+    assert.equal(module.auditLog.entries.length, 1);
+    assert.equal(module.auditLog.entries[0].id, 'audit-db');
+    assert.equal(module.auditLog.total, 1);
+});
+
 test('fetchAuditLog sends the consolidated audit search and select filters only', async () => {
     const requests = [];
     const module = createAuditListModule({

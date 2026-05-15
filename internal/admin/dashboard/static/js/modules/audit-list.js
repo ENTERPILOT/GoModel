@@ -155,7 +155,7 @@
                     }
                     const payload = await res.json();
                     if (requestToken !== this.auditFetchToken) return;
-                    this.auditLog = payload;
+                    this.auditLog = this.auditLogWithLiveEntries(payload, this.auditLog && this.auditLog.entries);
                     if (!this.auditLog.entries) this.auditLog.entries = [];
                     this.pruneAuditExpandedEntries(this.auditLog.entries);
                     if (typeof this.prefetchAuditWorkflows === 'function') {
@@ -170,6 +170,53 @@
                     if (requestToken !== this.auditFetchToken) return;
                     this.auditLog = { entries: [], total: 0, limit: 25, offset: 0 };
                 }
+            },
+
+            auditLogWithLiveEntries(payload, currentEntries) {
+                const next = payload && typeof payload === 'object'
+                    ? { ...payload }
+                    : { entries: [], total: 0, limit: 25, offset: 0 };
+                const entries = Array.isArray(next.entries) ? next.entries : [];
+                next.entries = entries;
+                if (!this.auditLogAllowsLiveEntries(next)) return next;
+
+                const liveEntries = (Array.isArray(currentEntries) ? currentEntries : [])
+                    .filter((entry) => this.auditEntryLivePreviewPending(entry));
+                if (liveEntries.length === 0) return next;
+
+                const persistedKeys = new Set(entries.flatMap((entry) => this.auditEntryIdentityKeys(entry)));
+                const prepend = [];
+                liveEntries.forEach((entry) => {
+                    const keys = this.auditEntryIdentityKeys(entry);
+                    if (keys.length === 0) return;
+                    if (keys.some((key) => persistedKeys.has(key))) return;
+                    keys.forEach((key) => persistedKeys.add(key));
+                    prepend.push(entry);
+                });
+                if (prepend.length === 0) return next;
+
+                next.entries = [...prepend, ...entries].slice(0, next.limit || 25);
+                next.total = Number(next.total || 0) + prepend.length;
+                return next;
+            },
+
+            auditLogAllowsLiveEntries(payload) {
+                return payload && Number(payload.offset || 0) === 0 &&
+                    !this.auditSearch && !this.auditMethod && !this.auditStatusCode && !this.auditStream;
+            },
+
+            auditEntryLivePreviewPending(entry) {
+                return !!(entry && entry._live && entry._live_pending && !entry._audit_flushed);
+            },
+
+            auditEntryIdentityKeys(entry) {
+                if (!entry) return [];
+                const keys = [];
+                const id = String(entry.id || '').trim();
+                const requestID = String(entry.request_id || '').trim();
+                if (id) keys.push('id:' + id);
+                if (requestID) keys.push('request:' + requestID);
+                return keys;
             },
 
             auditEntryKey(entry) {

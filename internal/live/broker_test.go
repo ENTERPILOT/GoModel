@@ -48,6 +48,123 @@ func TestBrokerPublishesAndReplaysBySequence(t *testing.T) {
 	}
 }
 
+func TestBrokerReplaysActiveSnapshotsForFreshSubscribers(t *testing.T) {
+	b := NewBroker(Config{Enabled: true, BufferSize: 1, ReplayLimit: 1})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+
+	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: now,
+		Method:    "POST",
+		Path:      "/v1/chat/completions",
+	})
+	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
+		ID:             "audit-1",
+		RequestID:      "req-1",
+		Timestamp:      now.Add(time.Second),
+		RequestedModel: "gpt-test",
+		Provider:       "openai",
+	})
+	b.PublishUsageEvent(EventUsageCompleted, &usage.UsageEntry{
+		ID:        "usage-1",
+		RequestID: "req-1",
+		Timestamp: now.Add(2 * time.Second),
+		Model:     "gpt-test",
+		Provider:  "openai",
+	})
+
+	sub := b.Subscribe(0)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+	defer sub.Close()
+
+	if sub.Reset {
+		t.Fatal("Subscribe reset = true, want false")
+	}
+	if len(sub.Replay) != 2 {
+		t.Fatalf("replay len = %d, want 2", len(sub.Replay))
+	}
+	if got := sub.Replay[0].Type; got != EventAuditUpdated {
+		t.Fatalf("audit snapshot type = %q, want %q", got, EventAuditUpdated)
+	}
+	payload := eventPayload(t, sub.Replay[0])
+	if got := payload["method"]; got != "POST" {
+		t.Fatalf("snapshot method = %v, want POST", got)
+	}
+	if got := payload["provider"]; got != "openai" {
+		t.Fatalf("snapshot provider = %v, want openai", got)
+	}
+	if got := sub.Replay[1].Type; got != EventUsageCompleted {
+		t.Fatalf("usage snapshot type = %q, want %q", got, EventUsageCompleted)
+	}
+}
+
+func TestBrokerOmitsFlushedSnapshotsForFreshSubscribers(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+
+	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: now,
+	})
+	b.PublishAuditEvent(EventAuditFlushed, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: now.Add(time.Second),
+	})
+	b.PublishUsageEvent(EventUsageCompleted, &usage.UsageEntry{
+		ID:        "usage-1",
+		RequestID: "req-1",
+		Timestamp: now,
+	})
+	b.PublishUsageEvent(EventUsageFlushed, &usage.UsageEntry{
+		ID:        "usage-1",
+		RequestID: "req-1",
+		Timestamp: now.Add(time.Second),
+	})
+
+	sub := b.Subscribe(0)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+	defer sub.Close()
+	if len(sub.Replay) != 0 {
+		t.Fatalf("replay len = %d, want 0", len(sub.Replay))
+	}
+}
+
+func TestBrokerStaleCursorReceivesResetAndActiveSnapshots(t *testing.T) {
+	b := NewBroker(Config{Enabled: true, BufferSize: 1, ReplayLimit: 1})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+
+	for i := 0; i < 3; i++ {
+		b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
+			ID:        "audit-1",
+			RequestID: "req-1",
+			Timestamp: now.Add(time.Duration(i) * time.Second),
+			Method:    "POST",
+		})
+	}
+
+	sub := b.Subscribe(1)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+	defer sub.Close()
+	if !sub.Reset {
+		t.Fatal("Subscribe reset = false, want true")
+	}
+	if len(sub.Replay) != 1 {
+		t.Fatalf("replay len = %d, want 1", len(sub.Replay))
+	}
+	if got := sub.Replay[0].Seq; got != 3 {
+		t.Fatalf("snapshot seq = %d, want 3", got)
+	}
+}
+
 func TestBrokerSignalsResetWhenCursorFallsOutOfReplayWindow(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 1, ReplayLimit: 1})
 	for i := 0; i < 3; i++ {
@@ -175,4 +292,13 @@ func TestAuditPreviewRemainsPendingUntilFlush(t *testing.T) {
 	if flushed.LivePending {
 		t.Fatal("flushed audit preview pending = true, want false")
 	}
+}
+
+func eventPayload(t *testing.T, event Event) map[string]any {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(event.Data, &payload); err != nil {
+		t.Fatalf("unmarshal event payload: %v", err)
+	}
+	return payload
 }

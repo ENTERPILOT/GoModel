@@ -3,6 +3,7 @@ package live
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -79,6 +80,8 @@ type Broker struct {
 	closed      bool
 	events      []Event
 	subscribers map[uint64]chan Event
+	activeAudit map[string]Event
+	activeUsage map[string]Event
 }
 
 // NewBroker creates a live event broker. A disabled broker is safe to use.
@@ -102,6 +105,8 @@ func NewBroker(cfg Config) *Broker {
 		subscriberBuffer: cfg.SubscriberBuffer,
 		heartbeat:        cfg.Heartbeat,
 		subscribers:      make(map[uint64]chan Event),
+		activeAudit:      make(map[string]Event),
+		activeUsage:      make(map[string]Event),
 	}
 }
 
@@ -162,11 +167,11 @@ func (b *Broker) Subscribe(cursor uint64) *Subscription {
 
 func (b *Broker) replayAfterLocked(cursor uint64) ([]Event, bool) {
 	if cursor == 0 || len(b.events) == 0 {
-		return nil, false
+		return b.activeSnapshotsLocked(), false
 	}
 	oldest := b.events[0].Seq
 	if cursor < oldest-1 {
-		return nil, true
+		return b.activeSnapshotsLocked(), true
 	}
 	replay := make([]Event, 0, min(len(b.events), b.replayLimit))
 	for _, event := range b.events {
@@ -178,6 +183,20 @@ func (b *Broker) replayAfterLocked(cursor uint64) ([]Event, bool) {
 		replay = replay[len(replay)-b.replayLimit:]
 	}
 	return replay, false
+}
+
+func (b *Broker) activeSnapshotsLocked() []Event {
+	snapshots := make([]Event, 0, len(b.activeAudit)+len(b.activeUsage))
+	for _, event := range b.activeAudit {
+		snapshots = append(snapshots, event)
+	}
+	for _, event := range b.activeUsage {
+		snapshots = append(snapshots, event)
+	}
+	sort.Slice(snapshots, func(i, j int) bool {
+		return snapshots[i].Seq < snapshots[j].Seq
+	})
+	return snapshots
 }
 
 func (b *Broker) unsubscribe(id uint64) {
@@ -241,6 +260,7 @@ func (b *Broker) publish(eventType, requestID string, timestamp time.Time, paylo
 		Timestamp: timestamp.UTC(),
 		Data:      data,
 	}
+	b.updateActiveSnapshotsLocked(&event)
 	b.events = append(b.events, event)
 	if len(b.events) > b.bufferSize {
 		drop := len(b.events) - b.bufferSize
@@ -255,6 +275,104 @@ func (b *Broker) publish(eventType, requestID string, timestamp time.Time, paylo
 			close(ch)
 		}
 	}
+}
+
+func (b *Broker) updateActiveSnapshotsLocked(event *Event) {
+	if event == nil {
+		return
+	}
+	switch event.Type {
+	case EventAuditFlushed, EventAuditRemoved:
+		if key := auditActiveKey(*event); key != "" {
+			delete(b.activeAudit, key)
+		}
+		return
+	case EventUsageFlushed:
+		if key := usageActiveKey(*event); key != "" {
+			delete(b.activeUsage, key)
+		}
+		return
+	}
+
+	if strings.HasPrefix(event.Type, "audit.") {
+		key := auditActiveKey(*event)
+		if key == "" {
+			return
+		}
+		if previous, ok := b.activeAudit[key]; ok {
+			event.Data = mergeEventData(previous.Data, event.Data)
+		}
+		b.activeAudit[key] = *event
+		return
+	}
+	if strings.HasPrefix(event.Type, "usage.") {
+		key := usageActiveKey(*event)
+		if key == "" {
+			return
+		}
+		if previous, ok := b.activeUsage[key]; ok {
+			event.Data = mergeEventData(previous.Data, event.Data)
+		}
+		b.activeUsage[key] = *event
+	}
+}
+
+type eventIdentity struct {
+	ID        string `json:"id"`
+	RequestID string `json:"request_id"`
+}
+
+func auditActiveKey(event Event) string {
+	if requestID := strings.TrimSpace(event.RequestID); requestID != "" {
+		return "request:" + requestID
+	}
+	identity := eventIdentityFromData(event.Data)
+	if requestID := strings.TrimSpace(identity.RequestID); requestID != "" {
+		return "request:" + requestID
+	}
+	if id := strings.TrimSpace(identity.ID); id != "" {
+		return "id:" + id
+	}
+	return ""
+}
+
+func usageActiveKey(event Event) string {
+	identity := eventIdentityFromData(event.Data)
+	if id := strings.TrimSpace(identity.ID); id != "" {
+		return "id:" + id
+	}
+	if requestID := strings.TrimSpace(event.RequestID); requestID != "" {
+		return "request:" + requestID
+	}
+	if requestID := strings.TrimSpace(identity.RequestID); requestID != "" {
+		return "request:" + requestID
+	}
+	return ""
+}
+
+func eventIdentityFromData(data json.RawMessage) eventIdentity {
+	var identity eventIdentity
+	_ = json.Unmarshal(data, &identity)
+	return identity
+}
+
+func mergeEventData(base, patch json.RawMessage) json.RawMessage {
+	var baseObject map[string]json.RawMessage
+	var patchObject map[string]json.RawMessage
+	if err := json.Unmarshal(base, &baseObject); err != nil || baseObject == nil {
+		return append(json.RawMessage(nil), patch...)
+	}
+	if err := json.Unmarshal(patch, &patchObject); err != nil || patchObject == nil {
+		return append(json.RawMessage(nil), patch...)
+	}
+	for key, value := range patchObject {
+		baseObject[key] = value
+	}
+	merged, err := json.Marshal(baseObject)
+	if err != nil {
+		return append(json.RawMessage(nil), patch...)
+	}
+	return merged
 }
 
 // PublishAuditEvent publishes a compact audit log preview event.
