@@ -238,6 +238,11 @@
             mergeLiveUsageEntry(incoming, eventType) {
                 if (!incoming || typeof incoming !== 'object') return;
                 incoming = { ...incoming, _live_state: eventType || incoming._live_state || 'usage.completed' };
+                if (this.liveUsageEntryCached(incoming)) {
+                    this.removeLiveUsageEntry(incoming);
+                    this.clearLiveUsageFromAudit(incoming);
+                    return;
+                }
                 const id = String(incoming.id || '').trim();
                 if (!id) return;
                 this.applyLiveUsageToAudit(incoming);
@@ -271,6 +276,46 @@
                 this.usageLog.total = Number(this.usageLog.total || 0) + 1;
             },
 
+            liveUsageEntryCached(entry) {
+                const cacheType = String(entry && entry.cache_type || '').trim().toLowerCase();
+                return cacheType === 'exact' || cacheType === 'semantic' || !!(entry && entry.cache_hit);
+            },
+
+            removeLiveUsageEntry(incoming) {
+                if (!incoming || !this.usageLog || !Array.isArray(this.usageLog.entries)) return;
+                const id = String(incoming.id || '').trim();
+                const requestID = String(incoming.request_id || '').trim();
+                if (!id && !requestID) return;
+                const next = this.usageLog.entries.filter((entry) => {
+                    if (id && String(entry.id || '').trim() === id) return false;
+                    if (requestID && String(entry.request_id || '').trim() === requestID) return false;
+                    return true;
+                });
+                const removed = this.usageLog.entries.length - next.length;
+                if (removed > 0) {
+                    this.usageLog.entries = next;
+                    this.usageLog.total = Math.max(0, Number(this.usageLog.total || 0) - removed);
+                }
+            },
+
+            clearLiveUsageFromAudit(incoming) {
+                const requestID = String(incoming && incoming.request_id || '').trim();
+                if (!requestID || !this.auditLog || !Array.isArray(this.auditLog.entries)) return;
+                const index = this.auditLog.entries.findIndex((entry) => String(entry.request_id || '').trim() === requestID);
+                if (index < 0) return;
+                const entry = this.auditLog.entries[index];
+                if (!entry._usage_live_state && !entry._usage_live_pending && !entry._usage_flushed) return;
+                const next = { ...entry };
+                if (next._usage_live_pending || next._usage_live_state) {
+                    delete next.usage;
+                }
+                delete next._usage_live_state;
+                delete next._usage_live_pending;
+                delete next._usage_flushed;
+                this.auditLog.entries.splice(index, 1, next);
+                this.auditLog.entries = [...this.auditLog.entries];
+            },
+
             liveUsageEventFlushed(entry) {
                 return !!(entry && entry._usage_flushed) || String(entry && entry._live_state || '').trim() === 'usage.flushed';
             },
@@ -293,6 +338,7 @@
             },
 
             applyLiveUsageToAudit(usageEntry) {
+                if (this.liveUsageEntryCached(usageEntry)) return;
                 const requestID = String(usageEntry && usageEntry.request_id || '').trim();
                 if (!requestID || !this.auditLog || !Array.isArray(this.auditLog.entries)) return;
                 const index = this.auditLog.entries.findIndex((entry) => String(entry.request_id || '').trim() === requestID);

@@ -140,6 +140,76 @@ test('live usage event updates usage log and enriches matching audit row', () =>
     assert.equal(app.auditLog.entries[0]._usage_flushed, true);
 });
 
+test('cached live usage events do not enter default usage preview', () => {
+    const app = createLiveLogsApp();
+    app.auditLog.entries = [{
+        id: 'audit-cache',
+        request_id: 'req-cache',
+        cache_type: 'exact',
+        _live: true
+    }];
+
+    app.applyLiveLogEvent({
+        seq: 7,
+        type: 'usage.completed',
+        data: {
+            id: 'usage-cache',
+            request_id: 'req-cache',
+            cache_type: 'exact',
+            model: 'gpt-test',
+            provider: 'openai',
+            input_tokens: 10,
+            output_tokens: 4,
+            total_tokens: 14,
+            total_cost: 0
+        }
+    });
+
+    assert.equal(app.liveLogsLastSeq, 7);
+    assert.equal(app.usageLog.entries.length, 0);
+    assert.equal(app.usageLog.total, 0);
+    assert.equal(app.auditLog.entries[0].usage, undefined);
+    assert.equal(app.auditLog.entries[0]._usage_live_pending, undefined);
+    assert.equal(app.auditLog.entries[0]._usage_live_state, undefined);
+});
+
+test('cached live usage events remove stale cached previews', () => {
+    const app = createLiveLogsApp();
+    app.usageLog.entries = [{
+        id: 'usage-cache',
+        request_id: 'req-cache',
+        cache_type: 'exact',
+        _live: true,
+        _live_pending: true
+    }];
+    app.usageLog.total = 1;
+    app.auditLog.entries = [{
+        id: 'audit-cache',
+        request_id: 'req-cache',
+        _live: true,
+        usage: { entries: 1, total_tokens: 14 },
+        _usage_live_state: 'usage.completed',
+        _usage_live_pending: true
+    }];
+
+    app.applyLiveLogEvent({
+        seq: 8,
+        type: 'usage.flushed',
+        data: {
+            id: 'usage-cache',
+            request_id: 'req-cache',
+            cache_type: 'exact'
+        }
+    });
+
+    assert.equal(app.usageLog.entries.length, 0);
+    assert.equal(app.usageLog.total, 0);
+    assert.equal(app.auditLog.entries[0].usage, undefined);
+    assert.equal(app.auditLog.entries[0]._usage_live_pending, undefined);
+    assert.equal(app.auditLog.entries[0]._usage_live_state, undefined);
+    assert.equal(app.auditLog.entries[0]._usage_flushed, undefined);
+});
+
 test('late queued events do not regress flushed live rows to pending', () => {
     const app = createLiveLogsApp();
 
