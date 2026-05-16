@@ -48,6 +48,37 @@ func TestBrokerPublishesAndReplaysBySequence(t *testing.T) {
 	}
 }
 
+func TestBrokerSkipsCachedUsageEvents(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+
+	b.PublishUsageEvent(EventUsageCompleted, &usage.UsageEntry{
+		ID:        "usage-exact",
+		RequestID: "req-exact",
+		Timestamp: now,
+		CacheType: " EXACT ",
+	})
+	b.PublishUsageEvent(EventUsageFlushed, &usage.UsageEntry{
+		ID:        "usage-semantic",
+		RequestID: "req-semantic",
+		Timestamp: now.Add(time.Second),
+		CacheType: usage.CacheTypeSemantic,
+	})
+
+	if got := b.LatestSeq(); got != 0 {
+		t.Fatalf("latest seq = %d, want 0", got)
+	}
+
+	sub := b.Subscribe(0)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+	defer sub.Close()
+	if len(sub.Replay) != 0 {
+		t.Fatalf("replay len = %d, want 0", len(sub.Replay))
+	}
+}
+
 func TestBrokerReplaysActiveSnapshotsForFreshSubscribers(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 1, ReplayLimit: 1})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
