@@ -200,6 +200,17 @@ test('auditEntrySummaryClass marks only live rows still waiting for a response',
     );
 });
 
+test('formatDurationNs rejects non-finite values', () => {
+    const module = createAuditListModule();
+
+    assert.equal(module.formatDurationNs('not-a-number'), '-');
+    assert.equal(module.formatDurationNs(Number.NaN), '-');
+    assert.equal(module.formatDurationNs(Number.POSITIVE_INFINITY), '-');
+    assert.equal(module.formatDurationNs(0), 'pending');
+    assert.equal(module.formatDurationNs('1500'), '2 \u00b5s');
+    assert.equal(module.formatDurationNs(1230000000), '1.23 s');
+});
+
 
 test('auditResponsePane surfaces error message from captured error body', () => {
     const module = createAuditListModule();

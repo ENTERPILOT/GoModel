@@ -75,10 +75,11 @@
                     const chunk = await reader.read();
                     if (chunk.done) break;
                     buffer += decoder.decode(chunk.value, { stream: true });
-                    let splitAt;
-                    while ((splitAt = buffer.indexOf('\n\n')) >= 0) {
+                    let delimiter;
+                    while ((delimiter = buffer.match(/\r?\n\r?\n/))) {
+                        const splitAt = delimiter.index;
                         const frame = buffer.slice(0, splitAt);
-                        buffer = buffer.slice(splitAt + 2);
+                        buffer = buffer.slice(splitAt + delimiter[0].length);
                         this.handleLiveLogsFrame(frame);
                     }
                 }
@@ -230,9 +231,10 @@
                     if (requestID && String(entry.request_id || '').trim() === requestID) return false;
                     return true;
                 });
-                if (next.length !== this.auditLog.entries.length) {
+                const removedCount = this.auditLog.entries.length - next.length;
+                if (removedCount > 0) {
                     this.auditLog.entries = next;
-                    this.auditLog.total = Math.max(0, Number(this.auditLog.total || 0) - 1);
+                    this.auditLog.total = Math.max(0, Number(this.auditLog.total || 0) - removedCount);
                 }
             },
 

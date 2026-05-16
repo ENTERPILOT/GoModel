@@ -942,6 +942,128 @@ func TestAuditLog_EnrichesEntriesWithUsageSummary(t *testing.T) {
 	}
 }
 
+func TestAuditLogDetail_MissingLogID(t *testing.T) {
+	h := NewHandler(nil, nil, WithAuditReader(&mockAuditReader{}))
+	c, rec := newHandlerContext("/admin/audit/detail")
+
+	if err := h.AuditLogDetail(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(rec.Body.String(), "log_id is required") {
+		t.Fatalf("body = %q, want log_id error", rec.Body.String())
+	}
+}
+
+func TestAuditLogDetail_NilReader(t *testing.T) {
+	h := NewHandler(nil, nil)
+	c, rec := newHandlerContext("/admin/audit/detail?log_id=log-1")
+
+	if err := h.AuditLogDetail(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if !strings.Contains(rec.Body.String(), "audit log detail is unavailable") {
+		t.Fatalf("body = %q, want unavailable error", rec.Body.String())
+	}
+}
+
+func TestAuditLogDetail_NotFound(t *testing.T) {
+	h := NewHandler(nil, nil, WithAuditReader(&mockAuditReader{}))
+	c, rec := newHandlerContext("/admin/audit/detail?log_id=missing")
+
+	if err := h.AuditLogDetail(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if !strings.Contains(rec.Body.String(), "audit log not found: missing") {
+		t.Fatalf("body = %q, want not found error", rec.Body.String())
+	}
+}
+
+func TestAuditLogDetail_PropagatesReaderError(t *testing.T) {
+	h := NewHandler(nil, nil, WithAuditReader(&mockAuditReader{
+		logByIDErr: core.NewProviderError("audit", http.StatusServiceUnavailable, "audit reader unavailable", nil),
+	}))
+	c, rec := newHandlerContext("/admin/audit/detail?log_id=log-1")
+
+	if err := h.AuditLogDetail(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if !strings.Contains(rec.Body.String(), "audit reader unavailable") {
+		t.Fatalf("body = %q, want propagated reader error", rec.Body.String())
+	}
+}
+
+func TestAuditLogDetail_SuccessEnrichesUsage(t *testing.T) {
+	now := time.Now().UTC()
+	usageReader := &mockUsageReader{
+		usageByRequestID: map[string][]usage.UsageLogEntry{
+			"req-1": {
+				{
+					RequestID:    "req-1",
+					Provider:     "openai",
+					InputTokens:  200,
+					OutputTokens: 40,
+					RawData: map[string]any{
+						"prompt_cached_tokens": 150,
+					},
+				},
+			},
+		},
+	}
+	auditReader := &mockAuditReader{
+		logByID: &auditlog.LogEntry{
+			ID:             "log-1",
+			Timestamp:      now,
+			RequestedModel: "gpt-4o",
+			Provider:       "openai",
+			StatusCode:     http.StatusOK,
+			RequestID:      "req-1",
+			Method:         http.MethodPost,
+			Path:           "/v1/chat/completions",
+		},
+	}
+	h := NewHandler(usageReader, nil, WithAuditReader(auditReader))
+	c, rec := newHandlerContext("/admin/audit/detail?log_id=log-1")
+
+	if err := h.AuditLogDetail(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var result auditLogEntryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if result.ID != "log-1" {
+		t.Fatalf("ID = %q, want log-1", result.ID)
+	}
+	if len(usageReader.lastRequestIDs) != 1 || usageReader.lastRequestIDs[0] != "req-1" {
+		t.Fatalf("lastRequestIDs = %#v, want [req-1]", usageReader.lastRequestIDs)
+	}
+	if result.Usage == nil {
+		t.Fatal("expected usage summary")
+	}
+	if result.Usage.CachedInputTokens != 150 {
+		t.Fatalf("CachedInputTokens = %d, want 150", result.Usage.CachedInputTokens)
+	}
+	if result.Usage.TotalTokens != 240 {
+		t.Fatalf("TotalTokens = %d, want 240", result.Usage.TotalTokens)
+	}
+}
+
 func TestAuditLog_PreservesProviderName(t *testing.T) {
 	now := time.Now().UTC()
 	reader := &mockAuditReader{

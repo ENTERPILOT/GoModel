@@ -280,6 +280,19 @@ func (p *capturingAuditLivePublisher) snapshot() []capturedAuditLiveEvent {
 	return events
 }
 
+type blockingAuditLivePublisher struct {
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *blockingAuditLivePublisher) PublishAuditEvent(string, *LogEntry) {
+	p.once.Do(func() {
+		close(p.started)
+	})
+	<-p.release
+}
+
 type capturingLogger struct {
 	cfg     Config
 	entries []*LogEntry
@@ -390,6 +403,35 @@ func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {
 	}
 	if events[0].entry != entry {
 		t.Fatal("failed event entry does not match flushed entry")
+	}
+}
+
+func TestLoggerWriteDoesNotBlockOnLivePublisher(t *testing.T) {
+	store := &mockStore{}
+	logger := NewLogger(store, Config{Enabled: true, BufferSize: 1, FlushInterval: time.Hour})
+	publisher := &blockingAuditLivePublisher{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	logger.SetLivePublisher(publisher)
+
+	done := make(chan struct{})
+	go func() {
+		logger.Write(&LogEntry{ID: "audit-1", RequestID: "req-1", Timestamp: time.Now()})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		close(publisher.release)
+		_ = logger.Close()
+		t.Fatal("Write blocked on live publisher")
+	}
+
+	close(publisher.release)
+	if err := logger.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
 	}
 }
 

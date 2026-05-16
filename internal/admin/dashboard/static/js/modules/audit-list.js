@@ -284,10 +284,12 @@
 
             formatDurationNs(ns) {
                 if (ns == null) return '-';
-                if (Number(ns) <= 0) return 'pending';
-                if (ns < 1000000) return Math.round(ns / 1000) + ' \u00b5s';
-                if (ns < 1000000000) return (ns / 1000000).toFixed(2) + ' ms';
-                return (ns / 1000000000).toFixed(2) + ' s';
+                const v = Number(ns);
+                if (!Number.isFinite(v)) return '-';
+                if (v <= 0) return 'pending';
+                if (v < 1000000) return Math.round(v / 1000) + ' \u00b5s';
+                if (v < 1000000000) return (v / 1000000).toFixed(2) + ' ms';
+                return (v / 1000000000).toFixed(2) + ' s';
             },
 
             auditEntrySummaryClass(entry) {

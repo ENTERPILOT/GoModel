@@ -51,6 +51,19 @@ function createLiveLogsApp() {
     };
 }
 
+function liveReaderFromChunks(chunks) {
+    const values = chunks.map((chunk) => Buffer.from(chunk));
+    let index = 0;
+    return {
+        async read() {
+            if (index >= values.length) {
+                return { done: true };
+            }
+            return { done: false, value: values[index++] };
+        }
+    };
+}
+
 test('live audit lifecycle events merge into one dashboard row by request id', () => {
     const app = createLiveLogsApp();
 
@@ -97,6 +110,38 @@ test('live audit removed event drops suppressed preview rows', () => {
 
     assert.deepEqual(app.auditLog.entries, []);
     assert.equal(app.auditLog.total, 0);
+});
+
+test('live audit removed event decrements total by removed row count', () => {
+    const app = createLiveLogsApp();
+    app.auditLog.entries = [
+        { id: 'audit-1', request_id: 'req-1' },
+        { id: 'audit-2', request_id: 'req-1' },
+        { id: 'audit-3', request_id: 'req-3' }
+    ];
+    app.auditLog.total = 3;
+
+    app.applyLiveLogEvent({
+        seq: 5,
+        type: 'audit.removed',
+        data: { request_id: 'req-1' }
+    });
+
+    assert.deepEqual(app.auditLog.entries, [{ id: 'audit-3', request_id: 'req-3' }]);
+    assert.equal(app.auditLog.total, 1);
+});
+
+test('live logs parser handles CRLF-separated SSE frames', async () => {
+    const app = createLiveLogsApp();
+
+    await app.consumeLiveLogsBody(liveReaderFromChunks([
+        'data: {"seq":1,"type":"heartbeat"}\r\n\r\n',
+        'data: {"seq":2,"type":"audit.started","data":{"id":"audit-1","request_id":"req-1"}}\r\n\r\n'
+    ]));
+
+    assert.equal(app.liveLogsLastSeq, 2);
+    assert.equal(app.auditLog.entries.length, 1);
+    assert.equal(app.auditLog.entries[0].id, 'audit-1');
 });
 
 test('live usage event updates usage log and enriches matching audit row', () => {

@@ -51,6 +51,19 @@ func (p *capturingUsageLivePublisher) snapshot() []capturedUsageLiveEvent {
 	return events
 }
 
+type blockingUsageLivePublisher struct {
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *blockingUsageLivePublisher) PublishUsageEvent(string, *UsageEntry) {
+	p.once.Do(func() {
+		close(p.started)
+	})
+	<-p.release
+}
+
 func (m *mockStore) Flush(ctx context.Context) error {
 	return nil
 }
@@ -140,6 +153,35 @@ func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {
 	}
 	if events[0].entry != entry {
 		t.Fatal("failed event entry does not match flushed entry")
+	}
+}
+
+func TestLoggerWriteDoesNotBlockOnLivePublisher(t *testing.T) {
+	store := &mockStore{}
+	logger := NewLogger(store, Config{Enabled: true, BufferSize: 1, FlushInterval: time.Hour})
+	publisher := &blockingUsageLivePublisher{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	logger.SetLivePublisher(publisher)
+
+	done := make(chan struct{})
+	go func() {
+		logger.Write(&UsageEntry{ID: "usage-1", RequestID: "req-1"})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		close(publisher.release)
+		_ = logger.Close()
+		t.Fatal("Write blocked on live publisher")
+	}
+
+	close(publisher.release)
+	if err := logger.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
 	}
 }
 
