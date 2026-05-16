@@ -383,6 +383,34 @@ test('fetchAuditLog preserves live preview rows that are not flushed yet', async
     assert.equal(module.auditLog.total, 2);
 });
 
+test('auditLogAllowsLiveEntries respects custom date ranges', () => {
+    const module = createAuditListModule();
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+
+    module.auditSearch = '';
+    module.auditMethod = '';
+    module.auditStatusCode = '';
+    module.auditStream = '';
+
+    assert.equal(module.auditLogAllowsLiveEntries({ offset: 0 }), true);
+
+    module.customStartDate = tomorrow;
+    module.customEndDate = null;
+    assert.equal(module.auditLogAllowsLiveEntries({ offset: 0 }), false);
+
+    module.customStartDate = null;
+    module.customEndDate = yesterday;
+    assert.equal(module.auditLogAllowsLiveEntries({ offset: 0 }), false);
+
+    module.customStartDate = yesterday;
+    module.customEndDate = tomorrow;
+    assert.equal(module.auditLogAllowsLiveEntries({ offset: 0 }), true);
+});
+
 test('fetchAuditLog lets persisted rows replace matching live previews', async () => {
     const module = createAuditListModule({
         fetch() {

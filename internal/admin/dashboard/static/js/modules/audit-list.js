@@ -202,7 +202,24 @@
 
             auditLogAllowsLiveEntries(payload) {
                 return payload && Number(payload.offset || 0) === 0 &&
-                    !this.auditSearch && !this.auditMethod && !this.auditStatusCode && !this.auditStream;
+                    !this.auditSearch && !this.auditMethod && !this.auditStatusCode && !this.auditStream &&
+                    this.auditLiveDateRangeAllowsNow();
+            },
+
+            auditLiveDateRangeAllowsNow() {
+                if (!this.customStartDate && !this.customEndDate) return true;
+                const now = new Date();
+                if (this.customStartDate) {
+                    const start = new Date(this.customStartDate);
+                    start.setHours(0, 0, 0, 0);
+                    if (Number.isFinite(start.getTime()) && now < start) return false;
+                }
+                if (this.customEndDate) {
+                    const end = new Date(this.customEndDate);
+                    end.setHours(23, 59, 59, 999);
+                    if (Number.isFinite(end.getTime()) && now > end) return false;
+                }
+                return true;
             },
 
             auditEntryLivePreviewPending(entry) {

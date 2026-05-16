@@ -101,6 +101,96 @@ func TestBrokerReplaysActiveSnapshotsForFreshSubscribers(t *testing.T) {
 	}
 }
 
+func TestBrokerNormalizesAuditActiveSnapshotAliases(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+
+	b.publish(EventAuditUpdated, "", now, map[string]any{
+		"id":     "audit-1",
+		"method": "POST",
+	})
+	b.publish(EventAuditUpdated, "req-1", now.Add(time.Second), map[string]any{
+		"id":         "audit-1",
+		"request_id": "req-1",
+		"provider":   "openai",
+	})
+
+	sub := b.Subscribe(0)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+	defer sub.Close()
+
+	if len(sub.Replay) != 1 {
+		t.Fatalf("replay len = %d, want 1", len(sub.Replay))
+	}
+	payload := eventPayload(t, sub.Replay[0])
+	if got := payload["method"]; got != "POST" {
+		t.Fatalf("snapshot method = %v, want POST", got)
+	}
+	if got := payload["provider"]; got != "openai" {
+		t.Fatalf("snapshot provider = %v, want openai", got)
+	}
+
+	b.publish(EventAuditFlushed, "", now.Add(2*time.Second), map[string]any{
+		"id":         "audit-1",
+		"request_id": "req-1",
+	})
+	subAfterFlush := b.Subscribe(0)
+	if subAfterFlush == nil {
+		t.Fatal("Subscribe returned nil after flush")
+	}
+	defer subAfterFlush.Close()
+	if len(subAfterFlush.Replay) != 0 {
+		t.Fatalf("post-flush replay len = %d, want 0", len(subAfterFlush.Replay))
+	}
+}
+
+func TestBrokerNormalizesUsageActiveSnapshotAliases(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+
+	b.publish(EventUsageCompleted, "req-1", now, map[string]any{
+		"request_id":   "req-1",
+		"total_tokens": 14,
+	})
+	b.publish(EventUsageCompleted, "", now.Add(time.Second), map[string]any{
+		"id":         "usage-1",
+		"request_id": "req-1",
+		"model":      "gpt-test",
+	})
+
+	sub := b.Subscribe(0)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+	defer sub.Close()
+
+	if len(sub.Replay) != 1 {
+		t.Fatalf("replay len = %d, want 1", len(sub.Replay))
+	}
+	payload := eventPayload(t, sub.Replay[0])
+	if got := payload["total_tokens"]; got != float64(14) {
+		t.Fatalf("snapshot total_tokens = %v, want 14", got)
+	}
+	if got := payload["model"]; got != "gpt-test" {
+		t.Fatalf("snapshot model = %v, want gpt-test", got)
+	}
+
+	b.publish(EventUsageFlushed, "", now.Add(2*time.Second), map[string]any{
+		"id":         "usage-1",
+		"request_id": "req-1",
+	})
+	subAfterFlush := b.Subscribe(0)
+	if subAfterFlush == nil {
+		t.Fatal("Subscribe returned nil after flush")
+	}
+	defer subAfterFlush.Close()
+	if len(subAfterFlush.Replay) != 0 {
+		t.Fatalf("post-flush replay len = %d, want 0", len(subAfterFlush.Replay))
+	}
+}
+
 func TestBrokerOmitsFlushedSnapshotsForFreshSubscribers(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
@@ -232,11 +322,19 @@ func TestBrokerDropsSlowSubscribers(t *testing.T) {
 	}
 
 	received := 0
-	for range sub.Events {
-		received++
-	}
-	if received == 0 {
-		t.Fatal("slow subscriber received no buffered event before close")
+	for {
+		select {
+		case _, ok := <-sub.Events:
+			if !ok {
+				if received == 0 {
+					t.Fatal("slow subscriber received no buffered event before close")
+				}
+				return
+			}
+			received++
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for slow subscriber to close")
+		}
 	}
 }
 

@@ -290,37 +290,35 @@ func (b *Broker) updateActiveSnapshotsLocked(event *Event) {
 	}
 	switch event.Type {
 	case EventAuditFailed, EventAuditFlushed, EventAuditRemoved:
-		if key := auditActiveKey(*event); key != "" {
-			delete(b.activeAudit, key)
-		}
+		deleteActiveSnapshot(b.activeAudit, auditActiveKeys(*event))
 		return
 	case EventUsageFailed, EventUsageFlushed:
-		if key := usageActiveKey(*event); key != "" {
-			delete(b.activeUsage, key)
-		}
+		deleteActiveSnapshot(b.activeUsage, usageActiveKeys(*event))
 		return
 	}
 
 	if strings.HasPrefix(event.Type, "audit.") {
-		key := auditActiveKey(*event)
-		if key == "" {
+		keys := auditActiveKeys(*event)
+		if keys.canonical == "" {
 			return
 		}
-		if previous, ok := b.activeAudit[key]; ok {
+		if previous, ok := findActiveSnapshot(b.activeAudit, keys); ok {
 			event.Data = mergeEventData(previous.Data, event.Data)
 		}
-		b.activeAudit[key] = *event
+		b.activeAudit[keys.canonical] = *event
+		deleteActiveSnapshotAliases(b.activeAudit, keys)
 		return
 	}
 	if strings.HasPrefix(event.Type, "usage.") {
-		key := usageActiveKey(*event)
-		if key == "" {
+		keys := usageActiveKeys(*event)
+		if keys.canonical == "" {
 			return
 		}
-		if previous, ok := b.activeUsage[key]; ok {
+		if previous, ok := findActiveSnapshot(b.activeUsage, keys); ok {
 			event.Data = mergeEventData(previous.Data, event.Data)
 		}
-		b.activeUsage[key] = *event
+		b.activeUsage[keys.canonical] = *event
+		deleteActiveSnapshotAliases(b.activeUsage, keys)
 	}
 }
 
@@ -329,32 +327,78 @@ type eventIdentity struct {
 	RequestID string `json:"request_id"`
 }
 
-func auditActiveKey(event Event) string {
-	if requestID := strings.TrimSpace(event.RequestID); requestID != "" {
-		return "request:" + requestID
-	}
-	identity := eventIdentityFromData(event.Data)
-	if requestID := strings.TrimSpace(identity.RequestID); requestID != "" {
-		return "request:" + requestID
-	}
-	if id := strings.TrimSpace(identity.ID); id != "" {
-		return "id:" + id
-	}
-	return ""
+type activeSnapshotKeys struct {
+	canonical string
+	aliases   []string
 }
 
-func usageActiveKey(event Event) string {
+func auditActiveKeys(event Event) activeSnapshotKeys {
 	identity := eventIdentityFromData(event.Data)
-	if id := strings.TrimSpace(identity.ID); id != "" {
-		return "id:" + id
+	requestID := strings.TrimSpace(event.RequestID)
+	if requestID == "" {
+		requestID = strings.TrimSpace(identity.RequestID)
 	}
-	if requestID := strings.TrimSpace(event.RequestID); requestID != "" {
-		return "request:" + requestID
+	id := strings.TrimSpace(identity.ID)
+	keys := activeSnapshotKeys{}
+	if requestID != "" {
+		keys.canonical = "request:" + requestID
+		if id != "" {
+			keys.aliases = append(keys.aliases, "id:"+id)
+		}
+		return keys
 	}
-	if requestID := strings.TrimSpace(identity.RequestID); requestID != "" {
-		return "request:" + requestID
+	if id != "" {
+		keys.canonical = "id:" + id
 	}
-	return ""
+	return keys
+}
+
+func usageActiveKeys(event Event) activeSnapshotKeys {
+	identity := eventIdentityFromData(event.Data)
+	id := strings.TrimSpace(identity.ID)
+	requestID := strings.TrimSpace(event.RequestID)
+	if requestID == "" {
+		requestID = strings.TrimSpace(identity.RequestID)
+	}
+	keys := activeSnapshotKeys{}
+	if id != "" {
+		keys.canonical = "id:" + id
+		if requestID != "" {
+			keys.aliases = append(keys.aliases, "request:"+requestID)
+		}
+		return keys
+	}
+	if requestID != "" {
+		keys.canonical = "request:" + requestID
+	}
+	return keys
+}
+
+func findActiveSnapshot(snapshots map[string]Event, keys activeSnapshotKeys) (Event, bool) {
+	if event, ok := snapshots[keys.canonical]; ok {
+		return event, true
+	}
+	for _, key := range keys.aliases {
+		if event, ok := snapshots[key]; ok {
+			return event, true
+		}
+	}
+	return Event{}, false
+}
+
+func deleteActiveSnapshot(snapshots map[string]Event, keys activeSnapshotKeys) {
+	if keys.canonical != "" {
+		delete(snapshots, keys.canonical)
+	}
+	for _, key := range keys.aliases {
+		delete(snapshots, key)
+	}
+}
+
+func deleteActiveSnapshotAliases(snapshots map[string]Event, keys activeSnapshotKeys) {
+	for _, key := range keys.aliases {
+		delete(snapshots, key)
+	}
 }
 
 func eventIdentityFromData(data json.RawMessage) eventIdentity {

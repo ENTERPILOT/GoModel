@@ -176,6 +176,9 @@
                 const liveState = this.liveAuditStateAfter(previous._live_state, eventType);
                 const auditFlushed = this.liveAuditEventFlushed(previous._live_state) || this.liveAuditEventFlushed(liveState);
                 const patch = { ...incoming, _live: true, _live_state: liveState, _audit_flushed: auditFlushed };
+                if (eventType === 'audit.detail') {
+                    patch._detail_loaded = true;
+                }
                 if (!auditFlushed) {
                     patch._live_pending = true;
                 } else {
@@ -186,11 +189,12 @@
                     if (!patch.data && previous.data) merged.data = previous.data;
                     currentEntries.splice(index, 1, merged);
                     this.auditLog.entries = [...currentEntries];
-                    return;
+                    return merged;
                 }
                 if (!this.auditLiveInsertAllowed()) return;
                 this.auditLog.entries = [patch, ...currentEntries].slice(0, this.auditLog.limit || 25);
                 this.auditLog.total = Number(this.auditLog.total || 0) + 1;
+                return this.auditLog.entries[0];
             },
 
             liveAuditStateRank(state) {
@@ -241,11 +245,6 @@
             mergeLiveUsageEntry(incoming, eventType) {
                 if (!incoming || typeof incoming !== 'object') return;
                 incoming = { ...incoming, _live_state: eventType || incoming._live_state || 'usage.completed' };
-                if (this.liveUsageEntryCached(incoming)) {
-                    this.removeLiveUsageEntry(incoming);
-                    this.clearLiveUsageFromAudit(incoming);
-                    return;
-                }
                 const id = String(incoming.id || '').trim();
                 if (!id) return;
                 this.applyLiveUsageToAudit(incoming);
@@ -282,41 +281,6 @@
             liveUsageEntryCached(entry) {
                 const cacheType = String(entry && entry.cache_type || '').trim().toLowerCase();
                 return cacheType === 'exact' || cacheType === 'semantic' || !!(entry && entry.cache_hit);
-            },
-
-            removeLiveUsageEntry(incoming) {
-                if (!incoming || !this.usageLog || !Array.isArray(this.usageLog.entries)) return;
-                const id = String(incoming.id || '').trim();
-                const requestID = String(incoming.request_id || '').trim();
-                if (!id && !requestID) return;
-                const next = this.usageLog.entries.filter((entry) => {
-                    if (id && String(entry.id || '').trim() === id) return false;
-                    if (requestID && String(entry.request_id || '').trim() === requestID) return false;
-                    return true;
-                });
-                const removed = this.usageLog.entries.length - next.length;
-                if (removed > 0) {
-                    this.usageLog.entries = next;
-                    this.usageLog.total = Math.max(0, Number(this.usageLog.total || 0) - removed);
-                }
-            },
-
-            clearLiveUsageFromAudit(incoming) {
-                const requestID = String(incoming && incoming.request_id || '').trim();
-                if (!requestID || !this.auditLog || !Array.isArray(this.auditLog.entries)) return;
-                const index = this.auditLog.entries.findIndex((entry) => String(entry.request_id || '').trim() === requestID);
-                if (index < 0) return;
-                const entry = this.auditLog.entries[index];
-                if (!entry._usage_live_state && !entry._usage_live_pending && !entry._usage_flushed) return;
-                const next = { ...entry };
-                if (next._usage_live_pending || next._usage_live_state) {
-                    delete next.usage;
-                }
-                delete next._usage_live_state;
-                delete next._usage_live_pending;
-                delete next._usage_flushed;
-                this.auditLog.entries.splice(index, 1, next);
-                this.auditLog.entries = [...this.auditLog.entries];
             },
 
             liveUsageEventFlushed(entry) {
@@ -376,10 +340,11 @@
             },
 
             async fetchAuditEntryDetail(entry) {
-                if (!entry || entry.data || entry._detail_loading) return;
+                if (!entry || entry._detail_loading || entry._detail_loaded || this.auditEntryHasDetailData(entry)) return;
                 const id = String(entry.id || '').trim();
                 if (!id) return;
                 entry._detail_loading = true;
+                let detailEntry = entry;
                 try {
                     const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
                     const res = await fetch('/admin/audit/detail?log_id=' + encodeURIComponent(id), request);
@@ -389,11 +354,44 @@
                     }
                     if (!handled) return;
                     const payload = await res.json();
-                    this.mergeLiveAuditEntry(payload, 'audit.detail');
+                    detailEntry = this.mergeLiveAuditEntry(payload, 'audit.detail') || detailEntry;
                 } catch (e) {
                     console.error('Failed to fetch audit detail:', e);
                 } finally {
-                    entry._detail_loading = false;
+                    this.clearAuditDetailLoading(detailEntry);
+                }
+            },
+
+            auditEntryHasDetailData(entry) {
+                const data = entry && entry.data;
+                if (!data || typeof data !== 'object') return false;
+                return data.request_headers !== undefined ||
+                    data.response_headers !== undefined ||
+                    data.request_body !== undefined ||
+                    data.response_body !== undefined ||
+                    data.request_body_too_big_to_handle !== undefined ||
+                    data.response_body_too_big_to_handle !== undefined ||
+                    data.user_agent !== undefined ||
+                    data.api_key_hash !== undefined ||
+                    data.temperature !== undefined ||
+                    data.max_tokens !== undefined ||
+                    data.error_message !== undefined ||
+                    data.error_code !== undefined;
+            },
+
+            clearAuditDetailLoading(entry) {
+                if (!entry) return;
+                const id = String(entry.id || '').trim();
+                const requestID = String(entry.request_id || '').trim();
+                const entries = this.auditLog && Array.isArray(this.auditLog.entries) ? this.auditLog.entries : [];
+                const current = entries.find((candidate) => {
+                    if (id && String(candidate.id || '').trim() === id) return true;
+                    return !!(requestID && String(candidate.request_id || '').trim() === requestID);
+                });
+                const target = current || entry;
+                target._detail_loading = false;
+                if (current) {
+                    this.auditLog.entries = [...entries];
                 }
             }
         };

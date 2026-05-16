@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadLiveLogsModuleFactory() {
+function loadLiveLogsModuleFactory(overrides = {}) {
     const source = fs.readFileSync(path.join(__dirname, 'live-logs.js'), 'utf8');
     const context = {
         console,
@@ -12,6 +12,7 @@ function loadLiveLogsModuleFactory() {
         clearTimeout,
         TextDecoder,
         ReadableStream,
+        ...overrides,
         window: {}
     };
     vm.createContext(context);
@@ -19,8 +20,8 @@ function loadLiveLogsModuleFactory() {
     return context.window.dashboardLiveLogsModule;
 }
 
-function createLiveLogsApp() {
-    const factory = loadLiveLogsModuleFactory();
+function createLiveLogsApp(overrides = {}) {
+    const factory = loadLiveLogsModuleFactory(overrides);
     return {
         auditLog: { entries: [], total: 0, limit: 25, offset: 0 },
         usageLog: { entries: [], total: 0, limit: 50, offset: 0 },
@@ -185,7 +186,7 @@ test('live usage event updates usage log and enriches matching audit row', () =>
     assert.equal(app.auditLog.entries[0]._usage_flushed, true);
 });
 
-test('cached live usage events do not enter default usage preview', () => {
+test('cached live usage events stay visible in default usage preview', () => {
     const app = createLiveLogsApp();
     app.auditLog.entries = [{
         id: 'audit-cache',
@@ -211,14 +212,16 @@ test('cached live usage events do not enter default usage preview', () => {
     });
 
     assert.equal(app.liveLogsLastSeq, 7);
-    assert.equal(app.usageLog.entries.length, 0);
-    assert.equal(app.usageLog.total, 0);
+    assert.equal(app.usageLog.entries.length, 1);
+    assert.equal(app.usageLog.total, 1);
+    assert.equal(app.usageLog.entries[0].id, 'usage-cache');
+    assert.equal(app.usageLog.entries[0]._live_pending, true);
     assert.equal(app.auditLog.entries[0].usage, undefined);
     assert.equal(app.auditLog.entries[0]._usage_live_pending, undefined);
     assert.equal(app.auditLog.entries[0]._usage_live_state, undefined);
 });
 
-test('cached live usage events remove stale cached previews', () => {
+test('cached live usage flushed events keep and settle existing previews', () => {
     const app = createLiveLogsApp();
     app.usageLog.entries = [{
         id: 'usage-cache',
@@ -228,14 +231,6 @@ test('cached live usage events remove stale cached previews', () => {
         _live_pending: true
     }];
     app.usageLog.total = 1;
-    app.auditLog.entries = [{
-        id: 'audit-cache',
-        request_id: 'req-cache',
-        _live: true,
-        usage: { entries: 1, total_tokens: 14 },
-        _usage_live_state: 'usage.completed',
-        _usage_live_pending: true
-    }];
 
     app.applyLiveLogEvent({
         seq: 8,
@@ -247,12 +242,65 @@ test('cached live usage events remove stale cached previews', () => {
         }
     });
 
-    assert.equal(app.usageLog.entries.length, 0);
-    assert.equal(app.usageLog.total, 0);
-    assert.equal(app.auditLog.entries[0].usage, undefined);
-    assert.equal(app.auditLog.entries[0]._usage_live_pending, undefined);
-    assert.equal(app.auditLog.entries[0]._usage_live_state, undefined);
-    assert.equal(app.auditLog.entries[0]._usage_flushed, undefined);
+    assert.equal(app.usageLog.entries.length, 1);
+    assert.equal(app.usageLog.total, 1);
+    assert.equal(app.usageLog.entries[0]._live_state, 'usage.flushed');
+    assert.equal(app.usageLog.entries[0]._live_pending, false);
+    assert.equal(app.usageLog.entries[0]._usage_flushed, true);
+});
+
+test('audit detail fetch runs for compact live workflow data and clears stored row loading state', async () => {
+    const requests = [];
+    const app = createLiveLogsApp({
+        fetch(url) {
+            requests.push(url);
+            return Promise.resolve({
+                json: async () => ({
+                    id: 'audit-1',
+                    request_id: 'req-1',
+                    data: {
+                        request_headers: { authorization: 'Bearer redacted' }
+                    }
+                })
+            });
+        }
+    });
+    app.auditLog.entries = [{
+        id: 'audit-1',
+        request_id: 'req-1',
+        data: {
+            workflow_features: { cache: true }
+        }
+    }];
+
+    await app.fetchAuditEntryDetail(app.auditLog.entries[0]);
+
+    assert.equal(requests.length, 1);
+    assert.match(requests[0], /log_id=audit-1/);
+    assert.deepEqual(app.auditLog.entries[0].data.request_headers, { authorization: 'Bearer redacted' });
+    assert.equal(app.auditLog.entries[0]._detail_loading, false);
+    assert.equal(app.auditLog.entries[0]._detail_loaded, true);
+});
+
+test('audit detail fetch skips rows that already have captured detail data', async () => {
+    let requests = 0;
+    const app = createLiveLogsApp({
+        fetch() {
+            requests++;
+            return Promise.reject(new Error('fetch should not run'));
+        }
+    });
+    app.auditLog.entries = [{
+        id: 'audit-1',
+        request_id: 'req-1',
+        data: {
+            request_headers: { authorization: 'Bearer redacted' }
+        }
+    }];
+
+    await app.fetchAuditEntryDetail(app.auditLog.entries[0]);
+
+    assert.equal(requests, 0);
 });
 
 test('late queued events do not regress flushed live rows to pending', () => {
