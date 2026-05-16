@@ -118,11 +118,12 @@ func (l *Logger) enqueueLiveEvent(eventType string, entry *LogEntry) {
 	if l == nil || entry == nil {
 		return
 	}
+	snapshot := snapshotLiveLogEntry(entry)
 	if l.liveEvents == nil {
-		l.publishLiveEventNow(eventType, entry)
+		l.publishLiveEventNow(eventType, snapshot)
 		return
 	}
-	event := auditLiveEvent{eventType: eventType, entry: entry}
+	event := auditLiveEvent{eventType: eventType, entry: snapshot}
 	select {
 	case l.liveEvents <- event:
 	default:
@@ -131,6 +132,36 @@ func (l *Logger) enqueueLiveEvent(eventType string, entry *LogEntry) {
 			"request_id", entry.RequestID,
 		)
 	}
+}
+
+func snapshotLiveLogEntry(entry *LogEntry) *LogEntry {
+	if entry == nil {
+		return nil
+	}
+	snapshot := *entry
+	if entry.Data != nil {
+		snapshot.Data = snapshotLiveLogData(entry.Data)
+	}
+	return &snapshot
+}
+
+func snapshotLiveLogData(data *LogData) *LogData {
+	if data == nil {
+		return nil
+	}
+	snapshot := &LogData{
+		ErrorMessage: data.ErrorMessage,
+		ErrorCode:    data.ErrorCode,
+	}
+	if data.WorkflowFeatures != nil {
+		features := *data.WorkflowFeatures
+		snapshot.WorkflowFeatures = &features
+	}
+	if data.Failover != nil {
+		failover := *data.Failover
+		snapshot.Failover = &failover
+	}
+	return snapshot
 }
 
 func (l *Logger) liveLoop() {

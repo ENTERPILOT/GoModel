@@ -175,14 +175,15 @@ func (b *Broker) replayAfterLocked(cursor uint64) ([]Event, bool) {
 	if cursor < oldest-1 {
 		return b.activeSnapshotsLocked(), true
 	}
+	latest := b.events[len(b.events)-1].Seq
+	if cursor < latest && latest-cursor > uint64(b.replayLimit) {
+		return b.activeSnapshotsLocked(), true
+	}
 	replay := make([]Event, 0, min(len(b.events), b.replayLimit))
 	for _, event := range b.events {
 		if event.Seq > cursor {
 			replay = append(replay, event)
 		}
-	}
-	if len(replay) > b.replayLimit {
-		replay = replay[len(replay)-b.replayLimit:]
 	}
 	return replay, false
 }

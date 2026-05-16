@@ -401,8 +401,11 @@ func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {
 	if events[0].eventType != LiveEventAuditFailed {
 		t.Fatalf("event type = %q, want %q", events[0].eventType, LiveEventAuditFailed)
 	}
-	if events[0].entry != entry {
-		t.Fatal("failed event entry does not match flushed entry")
+	if events[0].entry == entry {
+		t.Fatal("failed event kept original entry pointer")
+	}
+	if events[0].entry.ID != entry.ID || events[0].entry.RequestID != entry.RequestID {
+		t.Fatalf("failed event entry = %#v, want id/request_id from flushed entry", events[0].entry)
 	}
 }
 
@@ -432,6 +435,68 @@ func TestLoggerWriteDoesNotBlockOnLivePublisher(t *testing.T) {
 	close(publisher.release)
 	if err := logger.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestLoggerLiveEventQueueSnapshotsEntry(t *testing.T) {
+	store := &mockStore{}
+	publisher := &capturingAuditLivePublisher{}
+	logger := NewLogger(store, Config{Enabled: true, BufferSize: 10, FlushInterval: time.Hour})
+	logger.SetLivePublisher(publisher)
+
+	entry := &LogEntry{
+		ID:             "audit-1",
+		RequestID:      "req-1",
+		RequestedModel: "before",
+		Data: &LogData{
+			ErrorMessage: "before error",
+			WorkflowFeatures: &WorkflowFeaturesSnapshot{
+				Cache: true,
+				Audit: true,
+			},
+			Failover: &FailoverSnapshot{TargetModel: "before-fallback"},
+			RequestBody: map[string]any{
+				"secret": "body",
+			},
+		},
+	}
+
+	logger.PublishLiveEvent(LiveEventAuditStarted, entry)
+	entry.RequestedModel = "after"
+	entry.Data.ErrorMessage = "after error"
+	entry.Data.WorkflowFeatures.Cache = false
+	entry.Data.Failover.TargetModel = "after-fallback"
+	entry.Data.RequestBody.(map[string]any)["secret"] = "changed"
+
+	if err := logger.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	events := publisher.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("live events len = %d, want 1", len(events))
+	}
+	snapshot := events[0].entry
+	if snapshot == entry {
+		t.Fatal("live event kept original entry pointer")
+	}
+	if snapshot.RequestedModel != "before" {
+		t.Fatalf("snapshot RequestedModel = %q, want before", snapshot.RequestedModel)
+	}
+	if snapshot.Data == nil {
+		t.Fatal("snapshot Data is nil")
+	}
+	if snapshot.Data.ErrorMessage != "before error" {
+		t.Fatalf("snapshot ErrorMessage = %q, want before error", snapshot.Data.ErrorMessage)
+	}
+	if snapshot.Data.WorkflowFeatures == nil || !snapshot.Data.WorkflowFeatures.Cache {
+		t.Fatalf("snapshot WorkflowFeatures = %#v, want original cache=true", snapshot.Data.WorkflowFeatures)
+	}
+	if snapshot.Data.Failover == nil || snapshot.Data.Failover.TargetModel != "before-fallback" {
+		t.Fatalf("snapshot Failover = %#v, want original failover", snapshot.Data.Failover)
+	}
+	if snapshot.Data.RequestBody != nil {
+		t.Fatal("live snapshot retained request body")
 	}
 }
 

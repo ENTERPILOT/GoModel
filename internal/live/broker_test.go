@@ -185,6 +185,36 @@ func TestBrokerSignalsResetWhenCursorFallsOutOfReplayWindow(t *testing.T) {
 	}
 }
 
+func TestBrokerSignalsResetWhenReplayGapExceedsLimit(t *testing.T) {
+	b := NewBroker(Config{Enabled: true, BufferSize: 10, ReplayLimit: 2})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+
+	for i := 0; i < 5; i++ {
+		b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
+			ID:             "audit-1",
+			RequestID:      "req-1",
+			Timestamp:      now.Add(time.Duration(i) * time.Second),
+			RequestedModel: "gpt-test",
+			Provider:       "openai",
+		})
+	}
+
+	sub := b.Subscribe(1)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+	defer sub.Close()
+	if !sub.Reset {
+		t.Fatal("Subscribe reset = false, want true")
+	}
+	if len(sub.Replay) != 1 {
+		t.Fatalf("replay len = %d, want active snapshot only", len(sub.Replay))
+	}
+	if got := sub.Replay[0].Seq; got != 5 {
+		t.Fatalf("snapshot seq = %d, want 5", got)
+	}
+}
+
 func TestBrokerDropsSlowSubscribers(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 10, SubscriberBuffer: 1})
 	sub := b.Subscribe(0)
