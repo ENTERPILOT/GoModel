@@ -132,6 +132,28 @@ test('live audit removed event decrements total by removed row count', () => {
     assert.equal(app.auditLog.total, 1);
 });
 
+test('live audit inserts are blocked while a custom audit date range is active', () => {
+    const app = createLiveLogsApp();
+
+    app.customStartDate = new Date();
+    app.applyLiveLogEvent({
+        seq: 1,
+        type: 'audit.started',
+        data: { id: 'audit-start', request_id: 'req-start' }
+    });
+
+    app.customStartDate = null;
+    app.customEndDate = new Date();
+    app.applyLiveLogEvent({
+        seq: 2,
+        type: 'audit.started',
+        data: { id: 'audit-end', request_id: 'req-end' }
+    });
+
+    assert.equal(app.auditLog.entries.length, 0);
+    assert.equal(app.auditLog.total, 0);
+});
+
 test('live logs parser handles CRLF-separated SSE frames', async () => {
     const app = createLiveLogsApp();
 
@@ -247,6 +269,61 @@ test('cached live usage flushed events keep and settle existing previews', () =>
     assert.equal(app.usageLog.entries[0]._live_state, 'usage.flushed');
     assert.equal(app.usageLog.entries[0]._live_pending, false);
     assert.equal(app.usageLog.entries[0]._usage_flushed, true);
+});
+
+test('audit detail merge preserves existing live lifecycle state', () => {
+    const app = createLiveLogsApp();
+    app.auditLog.entries = [{
+        id: 'audit-1',
+        request_id: 'req-1',
+        _live: true,
+        _live_state: 'audit.completed',
+        _live_pending: true,
+        _audit_flushed: false,
+        data: {
+            workflow_features: { cache: true }
+        }
+    }];
+
+    const merged = app.mergeLiveAuditEntry({
+        id: 'audit-1',
+        request_id: 'req-1',
+        data: {
+            request_headers: { authorization: 'Bearer redacted' }
+        }
+    }, 'audit.detail');
+
+    assert.equal(merged._live, true);
+    assert.equal(merged._live_state, 'audit.completed');
+    assert.equal(merged._live_pending, true);
+    assert.equal(merged._audit_flushed, false);
+    assert.equal(merged._detail_loaded, true);
+    assert.deepEqual(merged.data.request_headers, { authorization: 'Bearer redacted' });
+});
+
+test('live audit lifecycle patches preserve detail data when no data patch is sent', () => {
+    const app = createLiveLogsApp();
+    app.auditLog.entries = [{
+        id: 'audit-1',
+        request_id: 'req-1',
+        _detail_loaded: true,
+        data: {
+            request_headers: { authorization: 'Bearer redacted' },
+            response_body: { id: 'chatcmpl_123' }
+        }
+    }];
+
+    app.applyLiveLogEvent({
+        seq: 9,
+        type: 'audit.flushed',
+        data: { id: 'audit-1', request_id: 'req-1', status_code: 200 }
+    });
+
+    assert.equal(app.auditLog.entries[0].status_code, 200);
+    assert.equal(app.auditLog.entries[0]._live_state, 'audit.flushed');
+    assert.equal(app.auditLog.entries[0]._live_pending, false);
+    assert.deepEqual(app.auditLog.entries[0].data.request_headers, { authorization: 'Bearer redacted' });
+    assert.deepEqual(app.auditLog.entries[0].data.response_body, { id: 'chatcmpl_123' });
 });
 
 test('audit detail fetch runs for compact live workflow data and clears stored row loading state', async () => {

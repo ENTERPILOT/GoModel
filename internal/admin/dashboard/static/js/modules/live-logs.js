@@ -155,7 +155,8 @@
 
             auditLiveInsertAllowed() {
                 return this.auditLog && this.auditLog.offset === 0 &&
-                    !this.auditSearch && !this.auditMethod && !this.auditStatusCode && !this.auditStream;
+                    !this.auditSearch && !this.auditMethod && !this.auditStatusCode && !this.auditStream &&
+                    !this.customStartDate && !this.customEndDate;
             },
 
             usageLiveInsertAllowed() {
@@ -173,12 +174,23 @@
                         (incoming.request_id && String(entry.request_id || '').trim() === String(incoming.request_id).trim());
                 });
                 const previous = index >= 0 ? currentEntries[index] || {} : {};
+                if (eventType === 'audit.detail') {
+                    const patch = { ...incoming, _detail_loaded: true };
+                    if (index >= 0) {
+                        const merged = { ...previous, ...patch };
+                        if (patch.data === undefined && previous.data !== undefined) merged.data = previous.data;
+                        currentEntries.splice(index, 1, merged);
+                        this.auditLog.entries = [...currentEntries];
+                        return merged;
+                    }
+                    if (!this.auditLiveInsertAllowed()) return;
+                    this.auditLog.entries = [patch, ...currentEntries].slice(0, this.auditLog.limit || 25);
+                    this.auditLog.total = Number(this.auditLog.total || 0) + 1;
+                    return this.auditLog.entries[0];
+                }
                 const liveState = this.liveAuditStateAfter(previous._live_state, eventType);
                 const auditFlushed = this.liveAuditEventFlushed(previous._live_state) || this.liveAuditEventFlushed(liveState);
                 const patch = { ...incoming, _live: true, _live_state: liveState, _audit_flushed: auditFlushed };
-                if (eventType === 'audit.detail') {
-                    patch._detail_loaded = true;
-                }
                 if (!auditFlushed) {
                     patch._live_pending = true;
                 } else {
@@ -186,7 +198,7 @@
                 }
                 if (index >= 0) {
                     const merged = { ...previous, ...patch };
-                    if (!patch.data && previous.data) merged.data = previous.data;
+                    if (patch.data === undefined && previous.data !== undefined) merged.data = previous.data;
                     currentEntries.splice(index, 1, merged);
                     this.auditLog.entries = [...currentEntries];
                     return merged;
