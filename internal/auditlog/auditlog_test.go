@@ -409,6 +409,22 @@ func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {
 	}
 }
 
+func TestLoggerPublishLiveEventSkipsQueueWithoutPublisher(t *testing.T) {
+	store := &mockStore{}
+	logger := NewLogger(store, Config{Enabled: true, BufferSize: 10, FlushInterval: time.Hour})
+	defer func() {
+		if err := logger.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+
+	logger.PublishLiveEvent(LiveEventAuditStarted, &LogEntry{ID: "audit-1", RequestID: "req-1"})
+
+	if got := len(logger.liveEvents); got != 0 {
+		t.Fatalf("live event queue len = %d, want 0 without publisher", got)
+	}
+}
+
 func TestLoggerWriteDoesNotBlockOnLivePublisher(t *testing.T) {
 	store := &mockStore{}
 	logger := NewLogger(store, Config{Enabled: true, BufferSize: 1, FlushInterval: time.Hour})

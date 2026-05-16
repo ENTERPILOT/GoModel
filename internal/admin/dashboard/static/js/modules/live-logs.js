@@ -5,7 +5,6 @@
             liveLogsReconnectAttempts: 0,
             liveLogsReconnectTimer: null,
             liveLogsController: null,
-            liveLogsConnecting: false,
 
             liveLogsEnabled() {
                 return typeof this.workflowRuntimeBooleanFlag === 'function'
@@ -18,7 +17,6 @@
                     return;
                 }
                 this.stopLiveLogs();
-                this.liveLogsConnecting = true;
                 this.liveLogsController = typeof AbortController === 'function' ? new AbortController() : null;
                 this.readLiveLogsStream(this.liveLogsController);
             },
@@ -32,7 +30,6 @@
                     this.liveLogsController.abort();
                 }
                 this.liveLogsController = null;
-                this.liveLogsConnecting = false;
             },
 
             async readLiveLogsStream(controller) {
@@ -55,7 +52,6 @@
                         this.scheduleLiveLogsReconnect();
                         return;
                     }
-                    this.liveLogsConnecting = false;
                     this.liveLogsReconnectAttempts = 0;
                     await this.consumeLiveLogsBody(res.body.getReader());
                     this.scheduleLiveLogsReconnect();

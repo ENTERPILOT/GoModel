@@ -119,6 +119,9 @@ func (l *Logger) enqueueLiveEvent(eventType string, entry *LogEntry) {
 	if l == nil || entry == nil {
 		return
 	}
+	if !l.hasLivePublisher() {
+		return
+	}
 	snapshot := snapshotLiveLogEntry(entry)
 	if l.liveEvents == nil {
 		l.publishLiveEventNow(eventType, snapshot)
@@ -133,6 +136,12 @@ func (l *Logger) enqueueLiveEvent(eventType string, entry *LogEntry) {
 			"request_id", entry.RequestID,
 		)
 	}
+}
+
+func (l *Logger) hasLivePublisher() bool {
+	l.liveMu.RLock()
+	defer l.liveMu.RUnlock()
+	return l.livePublisher != nil
 }
 
 func snapshotLiveLogEntry(entry *LogEntry) *LogEntry {

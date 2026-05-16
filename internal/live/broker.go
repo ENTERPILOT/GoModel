@@ -13,15 +13,15 @@ import (
 )
 
 const (
-	EventAuditStarted   = "audit.started"
-	EventAuditUpdated   = "audit.updated"
-	EventAuditCompleted = "audit.completed"
-	EventAuditFailed    = "audit.failed"
-	EventAuditFlushed   = "audit.flushed"
-	EventAuditRemoved   = "audit.removed"
-	EventUsageCompleted = "usage.completed"
-	EventUsageFailed    = "usage.failed"
-	EventUsageFlushed   = "usage.flushed"
+	EventAuditStarted   = auditlog.LiveEventAuditStarted
+	EventAuditUpdated   = auditlog.LiveEventAuditUpdated
+	EventAuditCompleted = auditlog.LiveEventAuditCompleted
+	EventAuditFailed    = auditlog.LiveEventAuditFailed
+	EventAuditFlushed   = auditlog.LiveEventAuditFlushed
+	EventAuditRemoved   = auditlog.LiveEventAuditRemoved
+	EventUsageCompleted = usage.LiveEventUsageCompleted
+	EventUsageFailed    = usage.LiveEventUsageFailed
+	EventUsageFlushed   = usage.LiveEventUsageFlushed
 	EventHeartbeat      = "heartbeat"
 	EventReset          = "reset"
 )
