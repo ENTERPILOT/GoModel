@@ -276,6 +276,48 @@ func TestBrokerAuditPreviewOmitsAdvancedData(t *testing.T) {
 	}
 }
 
+func TestBrokerAuditPreviewIncludesCompactWorkflowData(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: time.Now(),
+		Data: &auditlog.LogData{
+			WorkflowFeatures: &auditlog.WorkflowFeaturesSnapshot{
+				Cache:    true,
+				Audit:    true,
+				Usage:    true,
+				Fallback: true,
+			},
+			Failover:    &auditlog.FailoverSnapshot{TargetModel: "fallback-model"},
+			RequestBody: map[string]any{"messages": []any{"sensitive"}},
+		},
+	})
+
+	payload := eventPayload(t, b.events[0])
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("preview data = %T, want object", payload["data"])
+	}
+	if _, ok := data["request_body"]; ok {
+		t.Fatal("preview data contains request body")
+	}
+	features, ok := data["workflow_features"].(map[string]any)
+	if !ok {
+		t.Fatalf("workflow_features = %T, want object", data["workflow_features"])
+	}
+	if features["cache"] != true || features["fallback"] != true {
+		t.Fatalf("workflow_features = %#v, want compact workflow flags", features)
+	}
+	failover, ok := data["failover"].(map[string]any)
+	if !ok {
+		t.Fatalf("failover = %T, want object", data["failover"])
+	}
+	if failover["target_model"] != "fallback-model" {
+		t.Fatalf("failover target = %v, want fallback-model", failover["target_model"])
+	}
+}
+
 func TestAuditPreviewRemainsPendingUntilFlush(t *testing.T) {
 	entry := &auditlog.LogEntry{
 		ID:        "audit-1",
@@ -291,6 +333,29 @@ func TestAuditPreviewRemainsPendingUntilFlush(t *testing.T) {
 	flushed := auditPreviewFromEntry(EventAuditFlushed, entry)
 	if flushed.LivePending {
 		t.Fatal("flushed audit preview pending = true, want false")
+	}
+
+	failed := auditPreviewFromEntry(EventAuditFailed, entry)
+	if failed.LivePending {
+		t.Fatal("failed audit preview pending = true, want false")
+	}
+}
+
+func TestUsagePreviewIncludesRawData(t *testing.T) {
+	rawData := map[string]any{"prompt_cached_tokens": 150}
+	preview := usagePreviewFromEntry(&usage.UsageEntry{
+		ID:        "usage-1",
+		RequestID: "req-1",
+		Timestamp: time.Now(),
+		RawData:   rawData,
+	})
+
+	if preview.RawData["prompt_cached_tokens"] != 150 {
+		t.Fatalf("raw_data[prompt_cached_tokens] = %v, want 150", preview.RawData["prompt_cached_tokens"])
+	}
+	rawData["prompt_cached_tokens"] = 200
+	if preview.RawData["prompt_cached_tokens"] != 150 {
+		t.Fatalf("raw_data was not copied, got %v", preview.RawData["prompt_cached_tokens"])
 	}
 }
 

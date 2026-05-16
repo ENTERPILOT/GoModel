@@ -24,6 +24,7 @@ type UsageStore interface {
 
 const (
 	LiveEventUsageCompleted = "usage.completed"
+	LiveEventUsageFailed    = "usage.failed"
 	LiveEventUsageFlushed   = "usage.flushed"
 )
 

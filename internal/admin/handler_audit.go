@@ -174,6 +174,19 @@ func (h *Handler) auditLogResponse(ctx context.Context, result *auditlog.LogList
 }
 
 // AuditLogDetail handles GET /admin/audit/detail.
+//
+// @Summary      Get audit log entry detail
+// @Description  Returns one audit log entry enriched with usage summary when available.
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Param        log_id  query     string  true  "Audit log entry ID"
+// @Success      200  {object}  auditLogEntryResponse
+// @Failure      400  {object}  core.GatewayError
+// @Failure      401  {object}  core.GatewayError
+// @Failure      404  {object}  core.GatewayError
+// @Failure      500  {object}  core.GatewayError
+// @Router       /admin/audit/detail [get]
 func (h *Handler) AuditLogDetail(c *echo.Context) error {
 	logID := strings.TrimSpace(c.QueryParam("log_id"))
 	if logID == "" {

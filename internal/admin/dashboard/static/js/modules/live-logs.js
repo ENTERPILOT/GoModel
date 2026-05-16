@@ -200,6 +200,7 @@
                     return 20;
                 case 'audit.completed':
                     return 30;
+                case 'audit.failed':
                 case 'audit.flushed':
                 case 'audit.detail':
                     return 40;
@@ -216,7 +217,7 @@
 
             liveAuditEventFlushed(state) {
                 const normalized = String(state || '').trim();
-                return normalized === 'audit.flushed' || normalized === 'audit.detail';
+                return normalized === 'audit.failed' || normalized === 'audit.flushed' || normalized === 'audit.detail';
             },
 
             removeLiveAuditEntry(incoming) {
@@ -317,13 +318,15 @@
             },
 
             liveUsageEventFlushed(entry) {
-                return !!(entry && entry._usage_flushed) || String(entry && entry._live_state || '').trim() === 'usage.flushed';
+                const state = String(entry && entry._live_state || '').trim();
+                return !!(entry && entry._usage_flushed) || state === 'usage.failed' || state === 'usage.flushed';
             },
 
             liveUsageStateRank(state) {
                 switch (String(state || '').trim()) {
                 case 'usage.completed':
                     return 10;
+                case 'usage.failed':
                 case 'usage.flushed':
                     return 20;
                 default:

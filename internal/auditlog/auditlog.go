@@ -38,6 +38,7 @@ const (
 	LiveEventAuditStarted   = "audit.started"
 	LiveEventAuditUpdated   = "audit.updated"
 	LiveEventAuditCompleted = "audit.completed"
+	LiveEventAuditFailed    = "audit.failed"
 	LiveEventAuditFlushed   = "audit.flushed"
 	LiveEventAuditRemoved   = "audit.removed"
 )

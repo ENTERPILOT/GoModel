@@ -275,6 +275,9 @@ Key settings:
 | `METRICS_ENABLED`               | `false`                                | Enable Prometheus metrics (experimental)                                         |
 | `LOGGING_ENABLED`               | `false`                                | Enable audit logging                                                             |
 | `DASHBOARD_LIVE_LOGS_ENABLED`   | `true`                                 | Stream realtime dashboard log previews with bounded replay                       |
+| `DASHBOARD_LIVE_LOGS_BUFFER_SIZE` | `10000`                              | Max in-memory live events retained; increase above ~1000 msgs/sec or bursty traffic |
+| `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT` | `1000`                               | Max events replayed after reconnect; increase for longer reconnect windows       |
+| `DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS` | `15`                           | SSE heartbeat interval; lower when proxies need faster liveness checks           |
 | `GUARDRAILS_ENABLED`            | `false`                                | Enable the configured guardrails pipeline                                        |
 
 **Quick Start - Authentication:** By default `GOMODEL_MASTER_KEY` is unset. Without this key, API endpoints are unprotected and anyone can call them. This is insecure for production. **Strongly recommend** setting a strong secret before exposing the service. Add `GOMODEL_MASTER_KEY` to your `.env` or environment for production deployments.

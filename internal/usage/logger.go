@@ -70,10 +70,11 @@ func (l *Logger) Write(entry *UsageEntry) {
 		return
 	}
 
+	l.publishLiveEvent(LiveEventUsageCompleted, entry)
 	select {
 	case l.buffer <- entry:
-		l.publishLiveEvent(LiveEventUsageCompleted, entry)
 	default:
+		l.publishLiveEvent(LiveEventUsageFailed, entry)
 		// Buffer full - drop entry and log warning
 		requestID := entry.RequestID
 		if requestID == "" {
@@ -205,6 +206,9 @@ func (l *Logger) flushBatch(batch []*UsageEntry) {
 			"error", err,
 			"count", len(batch),
 		)
+		for _, entry := range batch {
+			l.publishLiveEvent(LiveEventUsageFailed, entry)
+		}
 		return
 	}
 

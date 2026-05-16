@@ -248,6 +248,38 @@ test('late queued events do not regress flushed live rows to pending', () => {
     assert.equal(app.auditLog.entries[0]._usage_flushed, true);
 });
 
+test('failed live events clear pending state', () => {
+    const app = createLiveLogsApp();
+
+    app.applyLiveLogEvent({
+        seq: 1,
+        type: 'audit.completed',
+        data: { id: 'audit-1', request_id: 'req-1' }
+    });
+    app.applyLiveLogEvent({
+        seq: 2,
+        type: 'audit.failed',
+        data: { id: 'audit-1', request_id: 'req-1' }
+    });
+    app.applyLiveLogEvent({
+        seq: 3,
+        type: 'usage.completed',
+        data: { id: 'usage-1', request_id: 'req-1', total_tokens: 14 }
+    });
+    app.applyLiveLogEvent({
+        seq: 4,
+        type: 'usage.failed',
+        data: { id: 'usage-1', request_id: 'req-1', total_tokens: 14 }
+    });
+
+    assert.equal(app.auditLog.entries[0]._live_state, 'audit.failed');
+    assert.equal(app.auditLog.entries[0]._live_pending, false);
+    assert.equal(app.usageLog.entries[0]._live_state, 'usage.failed');
+    assert.equal(app.usageLog.entries[0]._live_pending, false);
+    assert.equal(app.auditLog.entries[0]._usage_live_state, 'usage.failed');
+    assert.equal(app.auditLog.entries[0]._usage_live_pending, false);
+});
+
 test('live reset asks normal REST endpoints to resync source of truth', () => {
     const app = createLiveLogsApp();
 

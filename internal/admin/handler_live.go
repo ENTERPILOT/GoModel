@@ -98,29 +98,42 @@ func liveCursor(raw string) (uint64, error) {
 	return cursor, nil
 }
 
-type liveLogTypeFilter map[string]struct{}
+type liveLogTypeFilter struct {
+	provided bool
+	types    map[string]struct{}
+}
 
 func liveTypeFilter(raw string) liveLogTypeFilter {
-	filter := liveLogTypeFilter{}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return liveLogTypeFilter{}
+	}
+	filter := liveLogTypeFilter{
+		provided: true,
+		types:    map[string]struct{}{},
+	}
 	for _, item := range strings.Split(raw, ",") {
 		item = strings.ToLower(strings.TrimSpace(item))
 		switch item {
 		case "audit", "usage":
-			filter[item] = struct{}{}
+			filter.types[item] = struct{}{}
 		}
 	}
 	return filter
 }
 
 func (f liveLogTypeFilter) matches(eventType string) bool {
-	if len(f) == 0 {
+	if !f.provided {
 		return true
+	}
+	if len(f.types) == 0 {
+		return false
 	}
 	prefix, _, ok := strings.Cut(eventType, ".")
 	if !ok {
 		prefix = eventType
 	}
-	_, matched := f[prefix]
+	_, matched := f.types[prefix]
 	return matched
 }
 

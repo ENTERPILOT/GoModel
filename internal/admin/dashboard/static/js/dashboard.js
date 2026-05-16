@@ -254,7 +254,7 @@ function dashboard() {
       }
     },
 
-    init() {
+    async init() {
       if (typeof this.initTimeZoneState === "function") {
         this.initTimeZoneState();
       }
@@ -285,13 +285,12 @@ function dashboard() {
           }
         });
 
-      const initialFetch = this.fetchAll();
-      if (initialFetch && typeof initialFetch.finally === "function") {
-        initialFetch.finally(() => {
-          if (typeof this.startLiveLogs === "function") {
-            this.startLiveLogs();
-          }
-        });
+      try {
+        await this.fetchAll();
+      } finally {
+        if (typeof this.startLiveLogs === "function") {
+          this.startLiveLogs();
+        }
       }
     },
 
@@ -508,7 +507,7 @@ function dashboard() {
       }
     },
 
-    submitApiKey() {
+    async submitApiKey() {
       const apiKey = this.normalizeApiKey(this.apiKey);
       if (!apiKey) {
         this.apiKey = "";
@@ -526,13 +525,12 @@ function dashboard() {
       if (typeof this.stopLiveLogs === "function") {
         this.stopLiveLogs();
       }
-      const refresh = this.fetchAll();
-      if (refresh && typeof refresh.finally === "function") {
-        refresh.finally(() => {
-          if (typeof this.startLiveLogs === "function") {
-            this.startLiveLogs();
-          }
-        });
+      try {
+        await this.fetchAll();
+      } finally {
+        if (typeof this.startLiveLogs === "function") {
+          this.startLiveLogs();
+        }
       }
     },
 

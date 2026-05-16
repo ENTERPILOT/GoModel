@@ -70,9 +70,9 @@ func (l *Logger) Write(entry *LogEntry) {
 		return
 	}
 
+	l.PublishLiveEvent(LiveEventAuditCompleted, entry)
 	select {
 	case l.buffer <- entry:
-		l.PublishLiveEvent(LiveEventAuditCompleted, entry)
 	default:
 		l.PublishLiveEvent(LiveEventAuditRemoved, entry)
 		// Buffer full - drop entry and log warning
@@ -207,6 +207,9 @@ func (l *Logger) flushBatch(batch []*LogEntry) {
 			"error", err,
 			"count", len(batch),
 		)
+		for _, entry := range batch {
+			l.PublishLiveEvent(LiveEventAuditFailed, entry)
+		}
 		return
 	}
 

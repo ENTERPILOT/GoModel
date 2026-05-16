@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,16 +11,44 @@ import (
 
 // mockStore implements UsageStore for testing
 type mockStore struct {
-	entries []*UsageEntry
-	mu      sync.Mutex
-	closed  bool
+	entries  []*UsageEntry
+	writeErr error
+	mu       sync.Mutex
+	closed   bool
 }
 
 func (m *mockStore) WriteBatch(ctx context.Context, entries []*UsageEntry) error {
+	if m.writeErr != nil {
+		return m.writeErr
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.entries = append(m.entries, entries...)
 	return nil
+}
+
+type capturedUsageLiveEvent struct {
+	eventType string
+	entry     *UsageEntry
+}
+
+type capturingUsageLivePublisher struct {
+	mu     sync.Mutex
+	events []capturedUsageLiveEvent
+}
+
+func (p *capturingUsageLivePublisher) PublishUsageEvent(eventType string, entry *UsageEntry) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, capturedUsageLiveEvent{eventType: eventType, entry: entry})
+}
+
+func (p *capturingUsageLivePublisher) snapshot() []capturedUsageLiveEvent {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	events := make([]capturedUsageLiveEvent, len(p.events))
+	copy(events, p.events)
+	return events
 }
 
 func (m *mockStore) Flush(ctx context.Context) error {
@@ -91,6 +120,26 @@ entriesReady:
 	// Verify store was closed
 	if !store.closed {
 		t.Error("store should be closed")
+	}
+}
+
+func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {
+	entry := &UsageEntry{ID: "usage-1", RequestID: "req-1"}
+	publisher := &capturingUsageLivePublisher{}
+	logger := &Logger{store: &mockStore{writeErr: errors.New("write failed")}}
+	logger.SetLivePublisher(publisher)
+
+	logger.flushBatch([]*UsageEntry{entry})
+
+	events := publisher.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("live events len = %d, want 1", len(events))
+	}
+	if events[0].eventType != LiveEventUsageFailed {
+		t.Fatalf("event type = %q, want %q", events[0].eventType, LiveEventUsageFailed)
+	}
+	if events[0].entry != entry {
+		t.Fatal("failed event entry does not match flushed entry")
 	}
 }
 

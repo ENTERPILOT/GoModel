@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"gomodel/internal/core"
 	"gomodel/internal/streaming"
@@ -239,6 +240,46 @@ type mockStore struct {
 	closed  bool
 }
 
+type failingStore struct {
+	err error
+}
+
+func (s failingStore) WriteBatch(context.Context, []*LogEntry) error {
+	return s.err
+}
+
+func (s failingStore) Flush(context.Context) error {
+	return nil
+}
+
+func (s failingStore) Close() error {
+	return nil
+}
+
+type capturedAuditLiveEvent struct {
+	eventType string
+	entry     *LogEntry
+}
+
+type capturingAuditLivePublisher struct {
+	mu     sync.Mutex
+	events []capturedAuditLiveEvent
+}
+
+func (p *capturingAuditLivePublisher) PublishAuditEvent(eventType string, entry *LogEntry) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, capturedAuditLiveEvent{eventType: eventType, entry: entry})
+}
+
+func (p *capturingAuditLivePublisher) snapshot() []capturedAuditLiveEvent {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	events := make([]capturedAuditLiveEvent, len(p.events))
+	copy(events, p.events)
+	return events
+}
+
 type capturingLogger struct {
 	cfg     Config
 	entries []*LogEntry
@@ -329,6 +370,26 @@ func TestLogger(t *testing.T) {
 	// Verify entries were written
 	if len(store.getEntries()) != 5 {
 		t.Errorf("expected 5 entries, got %d", len(store.getEntries()))
+	}
+}
+
+func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {
+	publisher := &capturingAuditLivePublisher{}
+	logger := &Logger{store: failingStore{err: errors.New("write failed")}}
+	logger.SetLivePublisher(publisher)
+
+	entry := &LogEntry{ID: "audit-1", RequestID: "req-1", Timestamp: time.Now()}
+	logger.flushBatch([]*LogEntry{entry})
+
+	events := publisher.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("live events len = %d, want 1", len(events))
+	}
+	if events[0].eventType != LiveEventAuditFailed {
+		t.Fatalf("event type = %q, want %q", events[0].eventType, LiveEventAuditFailed)
+	}
+	if events[0].entry != entry {
+		t.Fatal("failed event entry does not match flushed entry")
 	}
 }
 

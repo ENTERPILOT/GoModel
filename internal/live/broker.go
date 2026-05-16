@@ -16,9 +16,11 @@ const (
 	EventAuditStarted   = "audit.started"
 	EventAuditUpdated   = "audit.updated"
 	EventAuditCompleted = "audit.completed"
+	EventAuditFailed    = "audit.failed"
 	EventAuditFlushed   = "audit.flushed"
 	EventAuditRemoved   = "audit.removed"
 	EventUsageCompleted = "usage.completed"
+	EventUsageFailed    = "usage.failed"
 	EventUsageFlushed   = "usage.flushed"
 	EventHeartbeat      = "heartbeat"
 	EventReset          = "reset"
@@ -264,7 +266,11 @@ func (b *Broker) publish(eventType, requestID string, timestamp time.Time, paylo
 	b.events = append(b.events, event)
 	if len(b.events) > b.bufferSize {
 		drop := len(b.events) - b.bufferSize
-		b.events = append([]Event(nil), b.events[drop:]...)
+		copy(b.events, b.events[drop:])
+		for i := b.bufferSize; i < len(b.events); i++ {
+			b.events[i] = Event{}
+		}
+		b.events = b.events[:b.bufferSize]
 	}
 
 	for id, ch := range b.subscribers {
@@ -282,12 +288,12 @@ func (b *Broker) updateActiveSnapshotsLocked(event *Event) {
 		return
 	}
 	switch event.Type {
-	case EventAuditFlushed, EventAuditRemoved:
+	case EventAuditFailed, EventAuditFlushed, EventAuditRemoved:
 		if key := auditActiveKey(*event); key != "" {
 			delete(b.activeAudit, key)
 		}
 		return
-	case EventUsageFlushed:
+	case EventUsageFailed, EventUsageFlushed:
 		if key := usageActiveKey(*event); key != "" {
 			delete(b.activeUsage, key)
 		}
@@ -394,29 +400,35 @@ func (b *Broker) PublishUsageEvent(eventType string, entry *usage.UsageEntry) {
 }
 
 type auditPreview struct {
-	ID                string    `json:"id"`
-	RequestID         string    `json:"request_id,omitempty"`
-	Timestamp         time.Time `json:"timestamp"`
-	DurationNs        *int64    `json:"duration_ns,omitempty"`
-	RequestedModel    string    `json:"requested_model,omitempty"`
-	ResolvedModel     string    `json:"resolved_model,omitempty"`
-	Provider          string    `json:"provider,omitempty"`
-	ProviderName      string    `json:"provider_name,omitempty"`
-	AliasUsed         bool      `json:"alias_used,omitempty"`
-	WorkflowVersionID string    `json:"workflow_version_id,omitempty"`
-	CacheType         string    `json:"cache_type,omitempty"`
-	StatusCode        *int      `json:"status_code,omitempty"`
-	AuthKeyID         string    `json:"auth_key_id,omitempty"`
-	AuthMethod        string    `json:"auth_method,omitempty"`
-	ClientIP          string    `json:"client_ip,omitempty"`
-	Method            string    `json:"method,omitempty"`
-	Path              string    `json:"path,omitempty"`
-	UserPath          string    `json:"user_path,omitempty"`
-	Stream            bool      `json:"stream,omitempty"`
-	ErrorType         string    `json:"error_type,omitempty"`
-	ErrorMessage      string    `json:"error_message,omitempty"`
-	LiveState         string    `json:"_live_state,omitempty"`
-	LivePending       bool      `json:"_live_pending,omitempty"`
+	ID                string            `json:"id"`
+	RequestID         string            `json:"request_id,omitempty"`
+	Timestamp         time.Time         `json:"timestamp"`
+	DurationNs        *int64            `json:"duration_ns,omitempty"`
+	RequestedModel    string            `json:"requested_model,omitempty"`
+	ResolvedModel     string            `json:"resolved_model,omitempty"`
+	Provider          string            `json:"provider,omitempty"`
+	ProviderName      string            `json:"provider_name,omitempty"`
+	AliasUsed         bool              `json:"alias_used,omitempty"`
+	WorkflowVersionID string            `json:"workflow_version_id,omitempty"`
+	CacheType         string            `json:"cache_type,omitempty"`
+	StatusCode        *int              `json:"status_code,omitempty"`
+	AuthKeyID         string            `json:"auth_key_id,omitempty"`
+	AuthMethod        string            `json:"auth_method,omitempty"`
+	ClientIP          string            `json:"client_ip,omitempty"`
+	Method            string            `json:"method,omitempty"`
+	Path              string            `json:"path,omitempty"`
+	UserPath          string            `json:"user_path,omitempty"`
+	Stream            bool              `json:"stream,omitempty"`
+	ErrorType         string            `json:"error_type,omitempty"`
+	ErrorMessage      string            `json:"error_message,omitempty"`
+	Data              *auditPreviewData `json:"data,omitempty"`
+	LiveState         string            `json:"_live_state,omitempty"`
+	LivePending       bool              `json:"_live_pending,omitempty"`
+}
+
+type auditPreviewData struct {
+	WorkflowFeatures *auditlog.WorkflowFeaturesSnapshot `json:"workflow_features,omitempty"`
+	Failover         *auditlog.FailoverSnapshot         `json:"failover,omitempty"`
 }
 
 func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPreview {
@@ -440,7 +452,7 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 		Stream:            entry.Stream,
 		ErrorType:         entry.ErrorType,
 		LiveState:         eventType,
-		LivePending:       eventType != EventAuditFlushed,
+		LivePending:       !auditEventTerminal(eventType),
 	}
 	if entry.DurationNs > 0 {
 		duration := entry.DurationNs
@@ -452,8 +464,19 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 	}
 	if entry.Data != nil {
 		preview.ErrorMessage = entry.Data.ErrorMessage
+		data := auditPreviewData{
+			WorkflowFeatures: entry.Data.WorkflowFeatures,
+			Failover:         entry.Data.Failover,
+		}
+		if data.WorkflowFeatures != nil || data.Failover != nil {
+			preview.Data = &data
+		}
 	}
 	return preview
+}
+
+func auditEventTerminal(eventType string) bool {
+	return eventType == EventAuditFailed || eventType == EventAuditFlushed || eventType == EventAuditRemoved
 }
 
 func usagePreviewFromEntry(entry *usage.UsageEntry) usage.UsageLogEntry {
@@ -475,6 +498,18 @@ func usagePreviewFromEntry(entry *usage.UsageEntry) usage.UsageLogEntry {
 		OutputCost:             entry.OutputCost,
 		TotalCost:              entry.TotalCost,
 		CostSource:             entry.CostSource,
+		RawData:                copyRawData(entry.RawData),
 		CostsCalculationCaveat: entry.CostsCalculationCaveat,
 	}
+}
+
+func copyRawData(src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]any, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }
