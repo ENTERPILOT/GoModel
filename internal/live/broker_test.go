@@ -375,9 +375,9 @@ func TestBrokerCloseStopsSubscribersAndRejectsNewSubscriptions(t *testing.T) {
 	b.Close()
 }
 
-func TestBrokerAuditPreviewOmitsAdvancedData(t *testing.T) {
+func TestBrokerAuditUpdatedPreviewOmitsCapturedDetailData(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
-	b.PublishAuditEvent(EventAuditCompleted, &auditlog.LogEntry{
+	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
 		ID:         "audit-1",
 		RequestID:  "req-1",
 		Timestamp:  time.Now(),
@@ -401,6 +401,40 @@ func TestBrokerAuditPreviewOmitsAdvancedData(t *testing.T) {
 	}
 	if _, ok := payload["request_body"]; ok {
 		t.Fatal("preview payload contains request body")
+	}
+}
+
+func TestBrokerAuditCompletedPreviewIncludesCapturedDetailData(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	b.PublishAuditEvent(EventAuditCompleted, &auditlog.LogEntry{
+		ID:         "audit-1",
+		RequestID:  "req-1",
+		Timestamp:  time.Now(),
+		StatusCode: 200,
+		Data: &auditlog.LogData{
+			RequestHeaders:  map[string]string{"Authorization": "Bearer redacted"},
+			ResponseHeaders: map[string]string{"X-Request-ID": "req-1"},
+			RequestBody:     map[string]any{"model": "gpt-test"},
+			ResponseBody:    map[string]any{"id": "chatcmpl-test"},
+		},
+	})
+
+	payload := eventPayload(t, b.events[0])
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("preview data = %T, want object", payload["data"])
+	}
+	if headers, ok := data["request_headers"].(map[string]any); !ok || headers["Authorization"] != "Bearer redacted" {
+		t.Fatalf("request_headers = %#v, want redacted authorization", data["request_headers"])
+	}
+	if headers, ok := data["response_headers"].(map[string]any); !ok || headers["X-Request-ID"] != "req-1" {
+		t.Fatalf("response_headers = %#v, want x-request-id", data["response_headers"])
+	}
+	if body, ok := data["request_body"].(map[string]any); !ok || body["model"] != "gpt-test" {
+		t.Fatalf("request_body = %#v, want model", data["request_body"])
+	}
+	if body, ok := data["response_body"].(map[string]any); !ok || body["id"] != "chatcmpl-test" {
+		t.Fatalf("response_body = %#v, want response id", data["response_body"])
 	}
 }
 

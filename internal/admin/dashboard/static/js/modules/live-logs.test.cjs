@@ -298,10 +298,11 @@ test('audit detail merge preserves existing live lifecycle state', () => {
     assert.equal(merged._live_pending, true);
     assert.equal(merged._audit_flushed, false);
     assert.equal(merged._detail_loaded, true);
+    assert.deepEqual(merged.data.workflow_features, { cache: true });
     assert.deepEqual(merged.data.request_headers, { authorization: 'Bearer redacted' });
 });
 
-test('live audit lifecycle patches preserve detail data when no data patch is sent', () => {
+test('live audit lifecycle patches merge captured detail data', () => {
     const app = createLiveLogsApp();
     app.auditLog.entries = [{
         id: 'audit-1',
@@ -316,13 +317,21 @@ test('live audit lifecycle patches preserve detail data when no data patch is se
     app.applyLiveLogEvent({
         seq: 9,
         type: 'audit.flushed',
-        data: { id: 'audit-1', request_id: 'req-1', status_code: 200 }
+        data: {
+            id: 'audit-1',
+            request_id: 'req-1',
+            status_code: 200,
+            data: {
+                response_headers: { 'x-request-id': 'req-1' }
+            }
+        }
     });
 
     assert.equal(app.auditLog.entries[0].status_code, 200);
     assert.equal(app.auditLog.entries[0]._live_state, 'audit.flushed');
     assert.equal(app.auditLog.entries[0]._live_pending, false);
     assert.deepEqual(app.auditLog.entries[0].data.request_headers, { authorization: 'Bearer redacted' });
+    assert.deepEqual(app.auditLog.entries[0].data.response_headers, { 'x-request-id': 'req-1' });
     assert.deepEqual(app.auditLog.entries[0].data.response_body, { id: 'chatcmpl_123' });
 });
 
@@ -416,6 +425,33 @@ test('late queued events do not regress flushed live rows to pending', () => {
     assert.equal(app.auditLog.entries[0]._usage_live_state, 'usage.flushed');
     assert.equal(app.auditLog.entries[0]._usage_live_pending, false);
     assert.equal(app.auditLog.entries[0]._usage_flushed, true);
+});
+
+test('flushed expanded live audit rows retry detail fetch', () => {
+    const app = createLiveLogsApp();
+    let detailFetches = 0;
+    app.auditLog.entries = [{
+        id: 'audit-1',
+        request_id: 'req-1',
+        _live: true,
+        _live_state: 'audit.completed',
+        _live_pending: true,
+        _audit_flushed: false
+    }];
+    app.isAuditEntryExpanded = (entry) => String(entry && entry.id || '') === 'audit-1';
+    app.fetchAuditEntryDetail = (entry) => {
+        detailFetches++;
+        assert.equal(entry.id, 'audit-1');
+        assert.equal(entry._live_state, 'audit.flushed');
+    };
+
+    app.applyLiveLogEvent({
+        seq: 5,
+        type: 'audit.flushed',
+        data: { id: 'audit-1', request_id: 'req-1', status_code: 200 }
+    });
+
+    assert.equal(detailFetches, 1);
 });
 
 test('failed live events clear pending state', () => {

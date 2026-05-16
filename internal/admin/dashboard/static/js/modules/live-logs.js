@@ -177,8 +177,7 @@
                 if (eventType === 'audit.detail') {
                     const patch = { ...incoming, _detail_loaded: true };
                     if (index >= 0) {
-                        const merged = { ...previous, ...patch };
-                        if (patch.data === undefined && previous.data !== undefined) merged.data = previous.data;
+                        const merged = this.mergeLiveAuditPatch(previous, patch);
                         currentEntries.splice(index, 1, merged);
                         this.auditLog.entries = [...currentEntries];
                         return merged;
@@ -197,16 +196,39 @@
                     patch._live_pending = false;
                 }
                 if (index >= 0) {
-                    const merged = { ...previous, ...patch };
-                    if (patch.data === undefined && previous.data !== undefined) merged.data = previous.data;
+                    const merged = this.mergeLiveAuditPatch(previous, patch);
                     currentEntries.splice(index, 1, merged);
                     this.auditLog.entries = [...currentEntries];
+                    this.fetchExpandedAuditDetailIfReady(merged);
                     return merged;
                 }
                 if (!this.auditLiveInsertAllowed()) return;
                 this.auditLog.entries = [patch, ...currentEntries].slice(0, this.auditLog.limit || 25);
                 this.auditLog.total = Number(this.auditLog.total || 0) + 1;
-                return this.auditLog.entries[0];
+                const inserted = this.auditLog.entries[0];
+                this.fetchExpandedAuditDetailIfReady(inserted);
+                return inserted;
+            },
+
+            mergeLiveAuditPatch(previous, patch) {
+                const merged = { ...previous, ...patch };
+                if (patch.data === undefined && previous.data !== undefined) {
+                    merged.data = previous.data;
+                } else if (previous.data && patch.data &&
+                    typeof previous.data === 'object' && typeof patch.data === 'object' &&
+                    !Array.isArray(previous.data) && !Array.isArray(patch.data)) {
+                    merged.data = { ...previous.data, ...patch.data };
+                }
+                return merged;
+            },
+
+            fetchExpandedAuditDetailIfReady(entry) {
+                if (!entry || !this.isAuditEntryExpanded || !this.isAuditEntryExpanded(entry)) return;
+                const state = String(entry._live_state || '').trim();
+                if (state !== 'audit.flushed' && !entry._audit_flushed) return;
+                if (typeof this.fetchAuditEntryDetail === 'function') {
+                    this.fetchAuditEntryDetail(entry);
+                }
             },
 
             liveAuditStateRank(state) {

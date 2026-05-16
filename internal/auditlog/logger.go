@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -150,8 +151,24 @@ func snapshotLiveLogData(data *LogData) *LogData {
 		return nil
 	}
 	snapshot := &LogData{
-		ErrorMessage: data.ErrorMessage,
-		ErrorCode:    data.ErrorCode,
+		UserAgent:                  data.UserAgent,
+		APIKeyHash:                 data.APIKeyHash,
+		ErrorMessage:               data.ErrorMessage,
+		ErrorCode:                  data.ErrorCode,
+		RequestHeaders:             copyStringMap(data.RequestHeaders),
+		ResponseHeaders:            copyStringMap(data.ResponseHeaders),
+		RequestBody:                cloneLiveJSONValue(data.RequestBody),
+		ResponseBody:               cloneLiveJSONValue(data.ResponseBody),
+		RequestBodyTooBigToHandle:  data.RequestBodyTooBigToHandle,
+		ResponseBodyTooBigToHandle: data.ResponseBodyTooBigToHandle,
+	}
+	if data.Temperature != nil {
+		temperature := *data.Temperature
+		snapshot.Temperature = &temperature
+	}
+	if data.MaxTokens != nil {
+		maxTokens := *data.MaxTokens
+		snapshot.MaxTokens = &maxTokens
 	}
 	if data.WorkflowFeatures != nil {
 		features := *data.WorkflowFeatures
@@ -162,6 +179,32 @@ func snapshotLiveLogData(data *LogData) *LogData {
 		snapshot.Failover = &failover
 	}
 	return snapshot
+}
+
+func copyStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func cloneLiveJSONValue(value any) any {
+	if value == nil {
+		return nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+	var cloned any
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return value
+	}
+	return cloned
 }
 
 func (l *Logger) liveLoop() {

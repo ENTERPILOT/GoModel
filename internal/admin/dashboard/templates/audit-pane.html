@@ -1,5 +1,5 @@
 {{define "audit-pane"}}
-<section class="audit-pane" x-data="auditPaneState({{.}})">
+<section class="audit-pane" x-data="auditPaneState({{.}})" x-effect="syncPane({{.}})">
     <div class="audit-pane-head">
         <h4 x-text="pane.title"></h4>
     </div>

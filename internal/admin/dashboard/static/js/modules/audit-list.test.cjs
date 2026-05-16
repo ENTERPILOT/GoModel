@@ -531,7 +531,7 @@ test('pruneAuditExpandedEntries drops expanded state for rows no longer on the p
     assert.equal(JSON.stringify(module.auditExpandedEntries), JSON.stringify({ 'audit-2': true }));
 });
 
-test('auditPaneState formats pane content once for template rendering', () => {
+test('auditPaneState formats initial pane content for template rendering', () => {
     const module = createAuditListModule();
     const entry = { id: 'audit-1' };
     let renderCalls = 0;
@@ -557,6 +557,45 @@ test('auditPaneState formats pane content once for template rendering', () => {
 
     assert.equal(paneState.formattedHeaders, '{\n  "authorization": "Bearer redacted"\n}');
     assert.equal(paneState.renderedBody, 'rendered:body-1');
+    assert.equal(renderCalls, 1);
+});
+
+test('auditPaneState syncs pane content when live detail data arrives', () => {
+    const module = createAuditListModule();
+    const entry = { id: 'audit-1' };
+    let renderCalls = 0;
+    module.renderBodyWithConversationHighlights = (renderEntry, body) => {
+        renderCalls++;
+        assert.equal(renderEntry, entry);
+        return 'rendered:' + body.id;
+    };
+
+    const paneState = module.auditPaneState({
+        title: 'Response',
+        entry,
+        showEmpty: true,
+        emptyMessage: 'Response details were not captured.'
+    });
+
+    assert.equal(paneState.pane.showEmpty, true);
+    assert.equal(paneState.formattedHeaders, '');
+    assert.equal(paneState.renderedBody, '');
+
+    paneState.syncPane({
+        title: 'Response',
+        entry,
+        showHeaders: true,
+        headers: { 'x-request-id': 'req-123' },
+        copyHeaders: { 'x-request-id': 'req-123' },
+        showBody: true,
+        body: { id: 'resp-123' },
+        copyBody: { id: 'resp-123' },
+        showEmpty: false
+    });
+
+    assert.equal(paneState.pane.showEmpty, false);
+    assert.equal(paneState.formattedHeaders, '{\n  "x-request-id": "req-123"\n}');
+    assert.equal(paneState.renderedBody, 'rendered:resp-123');
     assert.equal(renderCalls, 1);
 });
 

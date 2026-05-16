@@ -455,8 +455,17 @@ func TestLoggerLiveEventQueueSnapshotsEntry(t *testing.T) {
 				Audit: true,
 			},
 			Failover: &FailoverSnapshot{TargetModel: "before-fallback"},
+			RequestHeaders: map[string]string{
+				"Authorization": "Bearer redacted",
+			},
+			ResponseHeaders: map[string]string{
+				"X-Request-ID": "req-1",
+			},
 			RequestBody: map[string]any{
 				"secret": "body",
+			},
+			ResponseBody: map[string]any{
+				"id": "chatcmpl-before",
 			},
 		},
 	}
@@ -466,7 +475,10 @@ func TestLoggerLiveEventQueueSnapshotsEntry(t *testing.T) {
 	entry.Data.ErrorMessage = "after error"
 	entry.Data.WorkflowFeatures.Cache = false
 	entry.Data.Failover.TargetModel = "after-fallback"
+	entry.Data.RequestHeaders["Authorization"] = "Bearer changed"
+	entry.Data.ResponseHeaders["X-Request-ID"] = "changed"
 	entry.Data.RequestBody.(map[string]any)["secret"] = "changed"
+	entry.Data.ResponseBody.(map[string]any)["id"] = "changed"
 
 	if err := logger.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -495,8 +507,19 @@ func TestLoggerLiveEventQueueSnapshotsEntry(t *testing.T) {
 	if snapshot.Data.Failover == nil || snapshot.Data.Failover.TargetModel != "before-fallback" {
 		t.Fatalf("snapshot Failover = %#v, want original failover", snapshot.Data.Failover)
 	}
-	if snapshot.Data.RequestBody != nil {
-		t.Fatal("live snapshot retained request body")
+	if snapshot.Data.RequestHeaders["Authorization"] != "Bearer redacted" {
+		t.Fatalf("snapshot RequestHeaders = %#v, want original authorization", snapshot.Data.RequestHeaders)
+	}
+	if snapshot.Data.ResponseHeaders["X-Request-ID"] != "req-1" {
+		t.Fatalf("snapshot ResponseHeaders = %#v, want original x-request-id", snapshot.Data.ResponseHeaders)
+	}
+	requestBody, ok := snapshot.Data.RequestBody.(map[string]any)
+	if !ok || requestBody["secret"] != "body" {
+		t.Fatalf("snapshot RequestBody = %#v, want original body", snapshot.Data.RequestBody)
+	}
+	responseBody, ok := snapshot.Data.ResponseBody.(map[string]any)
+	if !ok || responseBody["id"] != "chatcmpl-before" {
+		t.Fatalf("snapshot ResponseBody = %#v, want original response body", snapshot.Data.ResponseBody)
 	}
 }
 

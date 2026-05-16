@@ -522,6 +522,14 @@
 
                     copyHeaders() {
                         return this.copyHeadersState.copy(this.pane.copyHeaders, formatJSON);
+                    },
+
+                    syncPane(nextPane) {
+                        this.pane = nextPane;
+                        this.formattedHeaders = nextPane && nextPane.showHeaders ? formatJSON(nextPane.headers) : '';
+                        this.renderedBody = nextPane && nextPane.showBody
+                            ? renderBody(nextPane.entry, nextPane.body, { promptCacheHighlight: nextPane.promptCacheHighlight })
+                            : '';
                     }
                 };
             }

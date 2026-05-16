@@ -1329,7 +1329,7 @@ test("audit request and response sections reuse a shared audit pane template", (
 
   assert.match(
     auditPaneTemplate,
-    /{{define "audit-pane"}}[\s\S]*x-data="auditPaneState\({{\.\}}\)"[\s\S]*x-text="pane\.title"[\s\S]*x-show="pane\.showHeaders"[\s\S]*@click\.prevent="copyHeaders\(\)"[\s\S]*x-text="formattedHeaders"[\s\S]*x-show="pane\.showBody"[\s\S]*@click\.prevent="copyBody\(\)"[\s\S]*x-html="renderedBody"[\s\S]*x-text="pane\.emptyMessage"[\s\S]*x-text="pane\.tooLargeMessage"[\s\S]*{{end}}/,
+    /{{define "audit-pane"}}[\s\S]*x-data="auditPaneState\({{\.\}}\)"[\s\S]*x-effect="syncPane\({{\.\}}\)"[\s\S]*x-text="pane\.title"[\s\S]*x-show="pane\.showHeaders"[\s\S]*@click\.prevent="copyHeaders\(\)"[\s\S]*x-text="formattedHeaders"[\s\S]*x-show="pane\.showBody"[\s\S]*@click\.prevent="copyBody\(\)"[\s\S]*x-html="renderedBody"[\s\S]*x-text="pane\.emptyMessage"[\s\S]*x-text="pane\.tooLargeMessage"[\s\S]*{{end}}/,
   );
   assert.match(
     auditPaneTemplate,

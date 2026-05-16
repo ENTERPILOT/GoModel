@@ -472,8 +472,20 @@ type auditPreview struct {
 }
 
 type auditPreviewData struct {
-	WorkflowFeatures *auditlog.WorkflowFeaturesSnapshot `json:"workflow_features,omitempty"`
-	Failover         *auditlog.FailoverSnapshot         `json:"failover,omitempty"`
+	UserAgent                  string                             `json:"user_agent,omitempty"`
+	APIKeyHash                 string                             `json:"api_key_hash,omitempty"`
+	WorkflowFeatures           *auditlog.WorkflowFeaturesSnapshot `json:"workflow_features,omitempty"`
+	Failover                   *auditlog.FailoverSnapshot         `json:"failover,omitempty"`
+	Temperature                *float64                           `json:"temperature,omitempty"`
+	MaxTokens                  *int                               `json:"max_tokens,omitempty"`
+	ErrorMessage               string                             `json:"error_message,omitempty"`
+	ErrorCode                  string                             `json:"error_code,omitempty"`
+	RequestHeaders             map[string]string                  `json:"request_headers,omitempty"`
+	ResponseHeaders            map[string]string                  `json:"response_headers,omitempty"`
+	RequestBody                any                                `json:"request_body,omitempty"`
+	ResponseBody               any                                `json:"response_body,omitempty"`
+	RequestBodyTooBigToHandle  bool                               `json:"request_body_too_big_to_handle,omitempty"`
+	ResponseBodyTooBigToHandle bool                               `json:"response_body_too_big_to_handle,omitempty"`
 }
 
 func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPreview {
@@ -513,11 +525,46 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 			WorkflowFeatures: entry.Data.WorkflowFeatures,
 			Failover:         entry.Data.Failover,
 		}
-		if data.WorkflowFeatures != nil || data.Failover != nil {
+		if auditPreviewIncludesCapturedData(eventType) {
+			data.UserAgent = entry.Data.UserAgent
+			data.APIKeyHash = entry.Data.APIKeyHash
+			data.Temperature = entry.Data.Temperature
+			data.MaxTokens = entry.Data.MaxTokens
+			data.ErrorMessage = entry.Data.ErrorMessage
+			data.ErrorCode = entry.Data.ErrorCode
+			data.RequestHeaders = entry.Data.RequestHeaders
+			data.ResponseHeaders = entry.Data.ResponseHeaders
+			data.RequestBody = entry.Data.RequestBody
+			data.ResponseBody = entry.Data.ResponseBody
+			data.RequestBodyTooBigToHandle = entry.Data.RequestBodyTooBigToHandle
+			data.ResponseBodyTooBigToHandle = entry.Data.ResponseBodyTooBigToHandle
+		}
+		if data.hasValues() {
 			preview.Data = &data
 		}
 	}
 	return preview
+}
+
+func auditPreviewIncludesCapturedData(eventType string) bool {
+	return eventType == EventAuditCompleted || eventType == EventAuditFlushed || eventType == EventAuditFailed
+}
+
+func (d auditPreviewData) hasValues() bool {
+	return d.UserAgent != "" ||
+		d.APIKeyHash != "" ||
+		d.WorkflowFeatures != nil ||
+		d.Failover != nil ||
+		d.Temperature != nil ||
+		d.MaxTokens != nil ||
+		d.ErrorMessage != "" ||
+		d.ErrorCode != "" ||
+		len(d.RequestHeaders) > 0 ||
+		len(d.ResponseHeaders) > 0 ||
+		d.RequestBody != nil ||
+		d.ResponseBody != nil ||
+		d.RequestBodyTooBigToHandle ||
+		d.ResponseBodyTooBigToHandle
 }
 
 func auditEventTerminal(eventType string) bool {
