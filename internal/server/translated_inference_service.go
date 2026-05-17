@@ -523,16 +523,29 @@ func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path,
 		errorType = "client_disconnected"
 	}
 
+	// The nil-err branch in isClientDisconnect is reachable for callers that
+	// only have a canceled context to report. Fall back to the context error
+	// in that case so we never dereference a nil error.
+	logErr := err
+	errorMessage := ""
+	switch {
+	case err != nil:
+		errorMessage = err.Error()
+	case ctx != nil && ctx.Err() != nil:
+		logErr = ctx.Err()
+		errorMessage = logErr.Error()
+	}
+
 	if streamEntry != nil {
 		streamEntry.ErrorType = errorType
 		if streamEntry.Data == nil {
 			streamEntry.Data = &auditlog.LogData{}
 		}
-		streamEntry.Data.ErrorMessage = err.Error()
+		streamEntry.Data.ErrorMessage = errorMessage
 	}
 
 	slog.Warn("stream terminated abnormally",
-		"error", err,
+		"error", logErr,
 		"error_type", errorType,
 		"model", model,
 		"provider", provider,

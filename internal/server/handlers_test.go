@@ -2739,6 +2739,15 @@ func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
 			err:      errors.New("upstream malformed"),
 			wantType: "stream_error",
 		},
+		{
+			// Exercises the err==nil branch of isClientDisconnect and the
+			// matching nil-guard fallback in recordStreamingError. Must not
+			// panic and must record the context error as the message.
+			name:     "canceled ctx with nil err",
+			ctx:      canceledCtx,
+			err:      nil,
+			wantType: "client_disconnected",
+		},
 	}
 
 	for _, tt := range tests {
@@ -2747,6 +2756,17 @@ func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
 			recordStreamingError(entry, "gpt-4o-mini", "openai", "/v1/chat/completions", "req-"+tt.name, tt.ctx, tt.err)
 			if entry.ErrorType != tt.wantType {
 				t.Fatalf("error_type = %q, want %q", entry.ErrorType, tt.wantType)
+			}
+
+			wantMessage := ""
+			switch {
+			case tt.err != nil:
+				wantMessage = tt.err.Error()
+			case tt.ctx != nil && tt.ctx.Err() != nil:
+				wantMessage = tt.ctx.Err().Error()
+			}
+			if entry.Data.ErrorMessage != wantMessage {
+				t.Fatalf("error_message = %q, want %q", entry.Data.ErrorMessage, wantMessage)
 			}
 		})
 	}
