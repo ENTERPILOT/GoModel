@@ -2651,6 +2651,56 @@ func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 	}
 }
 
+func TestHandleStreamingResponse_ClientDisconnectBeforeUpstream(t *testing.T) {
+	e := echo.New()
+	handler := NewHandler(&mockProvider{}, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel() // simulate client gone before streamFn returns
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	entry := &auditlog.LogEntry{
+		ID:        "entry-cancel",
+		Timestamp: time.Now(),
+		Method:    http.MethodPost,
+		Path:      "/v1/chat/completions",
+		Data:      &auditlog.LogData{},
+	}
+	c.Set(string(auditlog.LogEntryKey), entry)
+
+	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", "primary-openai", func() (io.ReadCloser, error) {
+		return nil, context.Canceled
+	})
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	if !entry.Stream {
+		t.Fatalf("expected entry.Stream=true, got false")
+	}
+	if entry.ErrorType != "client_disconnected" {
+		t.Fatalf("expected error_type client_disconnected, got %q", entry.ErrorType)
+	}
+}
+
+func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	recordStreamingError(entry, "gpt-4o-mini", "openai", "/v1/chat/completions", "req-1", ctx, errors.New("broken pipe"))
+	if entry.ErrorType != "client_disconnected" {
+		t.Fatalf("expected client_disconnected, got %q", entry.ErrorType)
+	}
+
+	entry2 := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	recordStreamingError(entry2, "gpt-4o-mini", "openai", "/v1/chat/completions", "req-2", context.Background(), errors.New("upstream malformed"))
+	if entry2.ErrorType != "stream_error" {
+		t.Fatalf("expected stream_error, got %q", entry2.ErrorType)
+	}
+}
+
 func TestChatCompletionStreaming_FlushesBeforeNextChunkArrives(t *testing.T) {
 	secondChunkStarted := make(chan struct{})
 	releaseSecondChunk := make(chan struct{})

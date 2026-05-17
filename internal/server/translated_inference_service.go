@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/labstack/echo/v5"
 
@@ -94,7 +95,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 		}
 		result, err := s.inference().StreamChatCompletion(ctx, workflow, req)
 		if err != nil {
-			return handleError(c, err)
+			return handleStreamingDispatchError(c, err)
 		}
 		if result.Meta.UsedFallback {
 			markRequestFallbackUsed(c)
@@ -237,7 +238,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	if req.Stream {
 		result, err := s.inference().StreamResponses(ctx, workflow, req)
 		if err != nil {
-			return handleError(c, err)
+			return handleStreamingDispatchError(c, err)
 		}
 		if result.Meta.UsedFallback {
 			markRequestFallbackUsed(c)
@@ -485,7 +486,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 
 	c.Response().WriteHeader(http.StatusOK)
 	if err := flushStream(c.Response(), wrappedStream); err != nil {
-		recordStreamingError(streamEntry, model, provider, c.Request().URL.Path, requestID, err)
+		recordStreamingError(streamEntry, model, provider, c.Request().URL.Path, requestID, c.Request().Context(), err)
 	}
 	return nil
 }
@@ -498,14 +499,32 @@ func (s *translatedInferenceService) handleStreamingResponse(
 ) error {
 	stream, err := streamFn()
 	if err != nil {
-		return handleError(c, err)
+		return handleStreamingDispatchError(c, err)
 	}
 	return s.handleStreamingReadCloser(c, workflow, model, provider, providerName, "", stream)
 }
 
-func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, err error) {
+// handleStreamingDispatchError records audit context for a streaming request
+// that failed before any chunks could be flushed. It marks the entry as
+// streaming and distinguishes client cancellations from upstream failures so
+// the audit log reflects the actual cause.
+func handleStreamingDispatchError(c *echo.Context, err error) error {
+	auditlog.EnrichEntryWithStream(c, true)
+	if isClientDisconnect(c.Request().Context(), err) {
+		auditlog.EnrichEntryWithError(c, "client_disconnected", err.Error(), "")
+		return nil
+	}
+	return handleError(c, err)
+}
+
+func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, ctx context.Context, err error) {
+	errorType := "stream_error"
+	if isClientDisconnect(ctx, err) {
+		errorType = "client_disconnected"
+	}
+
 	if streamEntry != nil {
-		streamEntry.ErrorType = "stream_error"
+		streamEntry.ErrorType = errorType
 		if streamEntry.Data == nil {
 			streamEntry.Data = &auditlog.LogData{}
 		}
@@ -514,11 +533,21 @@ func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path,
 
 	slog.Warn("stream terminated abnormally",
 		"error", err,
+		"error_type", errorType,
 		"model", model,
 		"provider", provider,
 		"path", path,
 		"request_id", requestID,
 	)
+}
+
+// isClientDisconnect reports whether the streaming error was caused by the
+// client closing the connection rather than an upstream failure.
+func isClientDisconnect(ctx context.Context, err error) bool {
+	if ctx != nil && ctx.Err() != nil {
+		return true
+	}
+	return errors.Is(err, context.Canceled) || errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET)
 }
 
 func providerNameFromWorkflow(workflow *core.Workflow) string {

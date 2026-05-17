@@ -305,7 +305,7 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 
 		c.Response().WriteHeader(resp.StatusCode)
 		if err := flushStream(c.Response(), wrappedStream); err != nil {
-			recordStreamingError(streamEntry, model, providerType, c.Request().URL.Path, requestID, err)
+			recordStreamingError(streamEntry, model, providerType, c.Request().URL.Path, requestID, c.Request().Context(), err)
 			return err
 		}
 		return nil
