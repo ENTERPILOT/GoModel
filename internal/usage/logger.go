@@ -16,20 +16,12 @@ type Logger struct {
 	config        Config
 	buffer        chan *UsageEntry
 	done          chan struct{}
-	liveDone      chan struct{}
 	wg            sync.WaitGroup
-	liveWG        sync.WaitGroup
 	writes        sync.WaitGroup // tracks in-flight Write calls
 	flushInterval time.Duration
 	closed        atomic.Bool
-	liveEvents    chan usageLiveEvent
 	liveMu        sync.RWMutex
 	livePublisher LiveEventPublisher
-}
-
-type usageLiveEvent struct {
-	eventType string
-	entry     *UsageEntry
 }
 
 // NewLogger creates a new async buffered Logger.
@@ -47,15 +39,11 @@ func NewLogger(store UsageStore, cfg Config) *Logger {
 		config:        cfg,
 		buffer:        make(chan *UsageEntry, cfg.BufferSize),
 		done:          make(chan struct{}),
-		liveDone:      make(chan struct{}),
 		flushInterval: cfg.FlushInterval,
-		liveEvents:    make(chan usageLiveEvent, cfg.BufferSize),
 	}
 
 	l.wg.Add(1)
 	go l.flushLoop()
-	l.liveWG.Add(1)
-	go l.liveLoop()
 
 	return l
 }
@@ -110,57 +98,6 @@ func (l *Logger) SetLivePublisher(p LiveEventPublisher) {
 }
 
 func (l *Logger) publishLiveEvent(eventType string, entry *UsageEntry) {
-	l.enqueueLiveEvent(eventType, entry)
-}
-
-func (l *Logger) enqueueLiveEvent(eventType string, entry *UsageEntry) {
-	if l == nil || entry == nil {
-		return
-	}
-	if !l.hasLivePublisher() {
-		return
-	}
-	if l.liveEvents == nil {
-		l.publishLiveEventNow(eventType, entry)
-		return
-	}
-	event := usageLiveEvent{eventType: eventType, entry: entry}
-	select {
-	case l.liveEvents <- event:
-	default:
-		slog.Warn("usage live event queue full, dropping event",
-			"event_type", eventType,
-			"request_id", entry.RequestID,
-		)
-	}
-}
-
-func (l *Logger) hasLivePublisher() bool {
-	l.liveMu.RLock()
-	defer l.liveMu.RUnlock()
-	return l.livePublisher != nil
-}
-
-func (l *Logger) liveLoop() {
-	defer l.liveWG.Done()
-	for {
-		select {
-		case event := <-l.liveEvents:
-			l.publishLiveEventNow(event.eventType, event.entry)
-		case <-l.liveDone:
-			for {
-				select {
-				case event := <-l.liveEvents:
-					l.publishLiveEventNow(event.eventType, event.entry)
-				default:
-					return
-				}
-			}
-		}
-	}
-}
-
-func (l *Logger) publishLiveEventNow(eventType string, entry *UsageEntry) {
 	if l == nil || entry == nil {
 		return
 	}
@@ -195,9 +132,6 @@ func (l *Logger) Close() error {
 
 	// Wait for the flush loop to finish
 	l.wg.Wait()
-
-	close(l.liveDone)
-	l.liveWG.Wait()
 
 	// Close the store
 	return l.store.Close()

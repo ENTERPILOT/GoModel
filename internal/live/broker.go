@@ -168,14 +168,20 @@ func (b *Broker) Subscribe(cursor uint64) *Subscription {
 }
 
 func (b *Broker) replayAfterLocked(cursor uint64) ([]Event, bool) {
-	if cursor == 0 || len(b.events) == 0 {
+	if cursor == 0 {
 		return b.activeSnapshotsLocked(), false
+	}
+	if len(b.events) == 0 {
+		return b.activeSnapshotsLocked(), true
+	}
+	latest := b.events[len(b.events)-1].Seq
+	if cursor > latest {
+		return b.activeSnapshotsLocked(), true
 	}
 	oldest := b.events[0].Seq
 	if cursor < oldest-1 {
 		return b.activeSnapshotsLocked(), true
 	}
-	latest := b.events[len(b.events)-1].Seq
 	if cursor < latest && latest-cursor > uint64(b.replayLimit) {
 		return b.activeSnapshotsLocked(), true
 	}

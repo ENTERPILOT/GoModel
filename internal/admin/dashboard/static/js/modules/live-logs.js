@@ -1,5 +1,12 @@
 (function(global) {
     function dashboardLiveLogsModule() {
+        function liveLogsPath(path) {
+            if (typeof window !== 'undefined' && typeof window.gomodelPath === 'function') {
+                return window.gomodelPath(path);
+            }
+            return path;
+        }
+
         return {
             liveLogsLastSeq: 0,
             liveLogsReconnectAttempts: 0,
@@ -37,7 +44,7 @@
                 if (controller) {
                     request.signal = controller.signal;
                 }
-                let url = '/admin/live/logs?types=audit,usage';
+                let url = liveLogsPath('/admin/live/logs?types=audit,usage');
                 if (this.liveLogsLastSeq > 0) {
                     url += '&cursor=' + encodeURIComponent(String(this.liveLogsLastSeq));
                 }
@@ -377,7 +384,7 @@
                 let detailEntry = entry;
                 try {
                     const request = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
-                    const res = await fetch('/admin/audit/detail?log_id=' + encodeURIComponent(id), request);
+                    const res = await fetch(liveLogsPath('/admin/audit/detail?log_id=' + encodeURIComponent(id)), request);
                     const handled = this.handleFetchResponse(res, 'audit detail', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;

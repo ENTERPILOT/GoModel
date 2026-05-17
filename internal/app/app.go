@@ -109,7 +109,6 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		ReplayLimit: appCfg.Admin.LiveLogsReplayLimit,
 		Heartbeat:   time.Duration(appCfg.Admin.LiveLogsHeartbeatSeconds) * time.Second,
 	})
-	liveLogsEnabled := app.live.Enabled()
 
 	providerResult, err := providers.Init(ctx, cfg.AppConfig, cfg.Factory)
 	if err != nil {
@@ -127,13 +126,6 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize audit logging: %w", err)
 	}
 	app.audit = auditResult
-	if liveLogsEnabled {
-		if logger, ok := auditResult.Logger.(interface {
-			SetLivePublisher(auditlog.LiveEventPublisher)
-		}); ok {
-			logger.SetLivePublisher(app.live)
-		}
-	}
 
 	// Initialize usage tracking
 	// Use shared storage if both audit logging and usage tracking use the same backend
@@ -164,13 +156,6 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, fmt.Errorf("usage tracking initialization returned nil result")
 	}
 	app.usage = usageResult
-	if liveLogsEnabled {
-		if logger, ok := usageResult.Logger.(interface {
-			SetLivePublisher(usage.LiveEventPublisher)
-		}); ok {
-			logger.SetLivePublisher(app.live)
-		}
-	}
 
 	var budgetResult *budget.Result
 	if appCfg.Budgets.Enabled {
@@ -467,6 +452,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		slog.Warn("ADMIN_UI_ENABLED=true requires ADMIN_ENDPOINTS_ENABLED=true — forcing UI to disabled")
 		adminCfg.UIEnabled = false
 	}
+	livePublishersEnabled := false
 	usageEnabledForDashboard := usageResult.Logger.Config().Enabled
 	if adminCfg.EndpointsEnabled {
 		adminHandler, dashHandler, adminErr := initAdmin(
@@ -493,6 +479,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		} else {
 			serverCfg.AdminEndpointsEnabled = true
 			serverCfg.AdminHandler = adminHandler
+			livePublishersEnabled = true
 			slog.Info("admin API enabled",
 				"api", config.JoinBasePath(appCfg.Server.BasePath, "/admin"),
 				"legacy_alias", config.JoinBasePath(appCfg.Server.BasePath, "/admin/api/v1"),
@@ -591,6 +578,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, fmt.Errorf("failed to refresh workflows after wiring internal guardrail executor: %w", err)
 	}
 
+	if livePublishersEnabled {
+		app.attachLivePublishers()
+	}
 	app.server = server.New(provider, serverCfg)
 
 	return app, nil
@@ -618,6 +608,26 @@ func (a *App) UsageLogger() usage.LoggerInterface {
 		return nil
 	}
 	return a.usage.Logger
+}
+
+func (a *App) attachLivePublishers() {
+	if a == nil || a.live == nil || !a.live.Enabled() {
+		return
+	}
+	if a.audit != nil {
+		if logger, ok := a.audit.Logger.(interface {
+			SetLivePublisher(auditlog.LiveEventPublisher)
+		}); ok {
+			logger.SetLivePublisher(a.live)
+		}
+	}
+	if a.usage != nil {
+		if logger, ok := a.usage.Logger.(interface {
+			SetLivePublisher(usage.LiveEventPublisher)
+		}); ok {
+			logger.SetLivePublisher(a.live)
+		}
+	}
 }
 
 func providerAsNativeFileRouter(provider core.RoutableProvider) core.NativeFileRoutableProvider {

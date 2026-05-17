@@ -336,6 +336,33 @@ func TestBrokerSignalsResetWhenReplayGapExceedsLimit(t *testing.T) {
 	}
 }
 
+func TestBrokerSignalsResetWhenCursorIsAheadOfLatest(t *testing.T) {
+	b := NewBroker(Config{Enabled: true, BufferSize: 10, ReplayLimit: 10})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+
+	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: now,
+		Method:    "POST",
+	})
+
+	sub := b.Subscribe(99)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+	defer sub.Close()
+	if !sub.Reset {
+		t.Fatal("Subscribe reset = false, want true")
+	}
+	if len(sub.Replay) != 1 {
+		t.Fatalf("replay len = %d, want active snapshot only", len(sub.Replay))
+	}
+	if got := sub.Replay[0].Seq; got != 1 {
+		t.Fatalf("snapshot seq = %d, want 1", got)
+	}
+}
+
 func TestBrokerDropsSlowSubscribers(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 10, SubscriberBuffer: 1})
 	sub := b.Subscribe(0)
@@ -437,7 +464,7 @@ func TestBrokerAuditUpdatedPreviewOmitsCapturedDetailData(t *testing.T) {
 
 func TestBrokerAuditCompletedPreviewIncludesCapturedDetailData(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
-	b.PublishAuditEvent(EventAuditCompleted, &auditlog.LogEntry{
+	entry := &auditlog.LogEntry{
 		ID:         "audit-1",
 		RequestID:  "req-1",
 		Timestamp:  time.Now(),
@@ -445,10 +472,17 @@ func TestBrokerAuditCompletedPreviewIncludesCapturedDetailData(t *testing.T) {
 		Data: &auditlog.LogData{
 			RequestHeaders:  map[string]string{"Authorization": "Bearer redacted"},
 			ResponseHeaders: map[string]string{"X-Request-ID": "req-1"},
-			RequestBody:     map[string]any{"model": "gpt-test"},
-			ResponseBody:    map[string]any{"id": "chatcmpl-test"},
+			RequestBody:     map[string]any{"model": "gpt-test", "nested": map[string]any{"token": "before"}},
+			ResponseBody:    map[string]any{"id": "chatcmpl-test", "usage": map[string]any{"total_tokens": 150}},
 		},
-	})
+	}
+	b.PublishAuditEvent(EventAuditCompleted, entry)
+	entry.Data.RequestHeaders["Authorization"] = "Bearer changed"
+	entry.Data.ResponseHeaders["X-Request-ID"] = "changed"
+	entry.Data.RequestBody.(map[string]any)["model"] = "changed"
+	entry.Data.RequestBody.(map[string]any)["nested"].(map[string]any)["token"] = "changed"
+	entry.Data.ResponseBody.(map[string]any)["id"] = "changed"
+	entry.Data.ResponseBody.(map[string]any)["usage"].(map[string]any)["total_tokens"] = 999
 
 	payload := eventPayload(t, b.events[0])
 	data, ok := payload["data"].(map[string]any)
@@ -464,8 +498,14 @@ func TestBrokerAuditCompletedPreviewIncludesCapturedDetailData(t *testing.T) {
 	if body, ok := data["request_body"].(map[string]any); !ok || body["model"] != "gpt-test" {
 		t.Fatalf("request_body = %#v, want model", data["request_body"])
 	}
+	if body := data["request_body"].(map[string]any); body["nested"].(map[string]any)["token"] != "before" {
+		t.Fatalf("request_body nested = %#v, want original nested token", body["nested"])
+	}
 	if body, ok := data["response_body"].(map[string]any); !ok || body["id"] != "chatcmpl-test" {
 		t.Fatalf("response_body = %#v, want response id", data["response_body"])
+	}
+	if body := data["response_body"].(map[string]any); body["usage"].(map[string]any)["total_tokens"] != float64(150) {
+		t.Fatalf("response_body usage = %#v, want original usage", body["usage"])
 	}
 }
 

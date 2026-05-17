@@ -2,7 +2,6 @@ package auditlog
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -17,20 +16,12 @@ type Logger struct {
 	config        Config
 	buffer        chan *LogEntry
 	done          chan struct{}
-	liveDone      chan struct{}
 	wg            sync.WaitGroup
-	liveWG        sync.WaitGroup
 	writes        sync.WaitGroup // tracks in-flight Write calls
 	flushInterval time.Duration
 	closed        atomic.Bool
-	liveEvents    chan auditLiveEvent
 	liveMu        sync.RWMutex
 	livePublisher LiveEventPublisher
-}
-
-type auditLiveEvent struct {
-	eventType string
-	entry     *LogEntry
 }
 
 // NewLogger creates a new async buffered Logger.
@@ -48,15 +39,11 @@ func NewLogger(store LogStore, cfg Config) *Logger {
 		config:        cfg,
 		buffer:        make(chan *LogEntry, cfg.BufferSize),
 		done:          make(chan struct{}),
-		liveDone:      make(chan struct{}),
 		flushInterval: cfg.FlushInterval,
-		liveEvents:    make(chan auditLiveEvent, cfg.BufferSize),
 	}
 
 	l.wg.Add(1)
 	go l.flushLoop()
-	l.liveWG.Add(1)
-	go l.liveLoop()
 
 	return l
 }
@@ -110,159 +97,8 @@ func (l *Logger) SetLivePublisher(p LiveEventPublisher) {
 	l.livePublisher = p
 }
 
-// PublishLiveEvent enqueues a compact lifecycle preview when live logs are enabled.
+// PublishLiveEvent publishes a compact lifecycle preview when live logs are enabled.
 func (l *Logger) PublishLiveEvent(eventType string, entry *LogEntry) {
-	l.enqueueLiveEvent(eventType, entry)
-}
-
-func (l *Logger) enqueueLiveEvent(eventType string, entry *LogEntry) {
-	if l == nil || entry == nil {
-		return
-	}
-	if !l.hasLivePublisher() {
-		return
-	}
-	snapshot := snapshotLiveLogEntry(entry)
-	if l.liveEvents == nil {
-		l.publishLiveEventNow(eventType, snapshot)
-		return
-	}
-	event := auditLiveEvent{eventType: eventType, entry: snapshot}
-	select {
-	case l.liveEvents <- event:
-	default:
-		slog.Warn("audit live event queue full, dropping event",
-			"event_type", eventType,
-			"request_id", entry.RequestID,
-		)
-	}
-}
-
-func (l *Logger) hasLivePublisher() bool {
-	l.liveMu.RLock()
-	defer l.liveMu.RUnlock()
-	return l.livePublisher != nil
-}
-
-func snapshotLiveLogEntry(entry *LogEntry) *LogEntry {
-	if entry == nil {
-		return nil
-	}
-	snapshot := *entry
-	if entry.Data != nil {
-		snapshot.Data = snapshotLiveLogData(entry.Data)
-	}
-	return &snapshot
-}
-
-func snapshotLiveLogData(data *LogData) *LogData {
-	if data == nil {
-		return nil
-	}
-	snapshot := &LogData{
-		UserAgent:                  data.UserAgent,
-		APIKeyHash:                 data.APIKeyHash,
-		ErrorMessage:               data.ErrorMessage,
-		ErrorCode:                  data.ErrorCode,
-		RequestHeaders:             copyStringMap(data.RequestHeaders),
-		ResponseHeaders:            copyStringMap(data.ResponseHeaders),
-		RequestBody:                cloneLiveJSONValue(data.RequestBody),
-		ResponseBody:               cloneLiveJSONValue(data.ResponseBody),
-		RequestBodyTooBigToHandle:  data.RequestBodyTooBigToHandle,
-		ResponseBodyTooBigToHandle: data.ResponseBodyTooBigToHandle,
-	}
-	if data.Temperature != nil {
-		temperature := *data.Temperature
-		snapshot.Temperature = &temperature
-	}
-	if data.MaxTokens != nil {
-		maxTokens := *data.MaxTokens
-		snapshot.MaxTokens = &maxTokens
-	}
-	if data.WorkflowFeatures != nil {
-		features := *data.WorkflowFeatures
-		snapshot.WorkflowFeatures = &features
-	}
-	if data.Failover != nil {
-		failover := *data.Failover
-		snapshot.Failover = &failover
-	}
-	return snapshot
-}
-
-func copyStringMap(src map[string]string) map[string]string {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make(map[string]string, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
-	return dst
-}
-
-func cloneLiveJSONValue(value any) any {
-	if value == nil {
-		return nil
-	}
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneLiveJSONMap(typed)
-	case []any:
-		return cloneLiveJSONSlice(typed)
-	case string, bool, float64, float32,
-		int, int8, int16, int32, int64,
-		uint, uint8, uint16, uint32, uint64,
-		json.Number:
-		return value
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return value
-	}
-	var cloned any
-	if err := json.Unmarshal(data, &cloned); err != nil {
-		return value
-	}
-	return cloned
-}
-
-func cloneLiveJSONMap(src map[string]any) map[string]any {
-	dst := make(map[string]any, len(src))
-	for key, value := range src {
-		dst[key] = cloneLiveJSONValue(value)
-	}
-	return dst
-}
-
-func cloneLiveJSONSlice(src []any) []any {
-	dst := make([]any, len(src))
-	for i, value := range src {
-		dst[i] = cloneLiveJSONValue(value)
-	}
-	return dst
-}
-
-func (l *Logger) liveLoop() {
-	defer l.liveWG.Done()
-	for {
-		select {
-		case event := <-l.liveEvents:
-			l.publishLiveEventNow(event.eventType, event.entry)
-		case <-l.liveDone:
-			for {
-				select {
-				case event := <-l.liveEvents:
-					l.publishLiveEventNow(event.eventType, event.entry)
-				default:
-					return
-				}
-			}
-		}
-	}
-}
-
-func (l *Logger) publishLiveEventNow(eventType string, entry *LogEntry) {
 	if l == nil || entry == nil {
 		return
 	}
@@ -297,9 +133,6 @@ func (l *Logger) Close() error {
 
 	// Wait for the flush loop to finish
 	l.wg.Wait()
-
-	close(l.liveDone)
-	l.liveWG.Wait()
 
 	// Close the store
 	return l.store.Close()

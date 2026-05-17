@@ -12,8 +12,8 @@ function loadLiveLogsModuleFactory(overrides = {}) {
         clearTimeout,
         TextDecoder,
         ReadableStream,
-        ...overrides,
-        window: {}
+        window: {},
+        ...overrides
     };
     vm.createContext(context);
     vm.runInContext(source, context);
@@ -165,6 +165,82 @@ test('live logs parser handles CRLF-separated SSE frames', async () => {
     assert.equal(app.liveLogsLastSeq, 2);
     assert.equal(app.auditLog.entries.length, 1);
     assert.equal(app.auditLog.entries[0].id, 'audit-1');
+});
+
+test('live stream fetch uses dashboard base path helper', async () => {
+    const urls = [];
+    const factory = loadLiveLogsModuleFactory({
+        window: {
+            gomodelPath(pathValue) {
+                return '/base' + pathValue;
+            }
+        },
+        fetch: async (url) => {
+            urls.push(url);
+            return { body: null };
+        }
+    });
+    const app = {
+        ...factory(),
+        liveLogsLastSeq: 42,
+        requestOptions() {
+            return { headers: {} };
+        },
+        handleFetchResponse() {
+            return true;
+        },
+        scheduleLiveLogsReconnect() {}
+    };
+
+    await app.readLiveLogsStream(null);
+
+    assert.deepEqual(urls, ['/base/admin/live/logs?types=audit,usage&cursor=42']);
+});
+
+test('audit detail fetch uses dashboard base path helper', async () => {
+    const urls = [];
+    const factory = loadLiveLogsModuleFactory({
+        window: {
+            gomodelPath(pathValue) {
+                return '/base' + pathValue;
+            }
+        },
+        fetch: async (url) => {
+            urls.push(url);
+            return {
+                async json() {
+                    return {
+                        id: 'audit-1',
+                        request_id: 'req-1',
+                        data: {
+                            request_headers: { 'content-type': 'application/json' }
+                        }
+                    };
+                }
+            };
+        }
+    });
+    const entry = { id: 'audit-1', request_id: 'req-1' };
+    const app = {
+        ...factory(),
+        auditLog: { entries: [entry], total: 1, limit: 25, offset: 0 },
+        auditSearch: '',
+        auditMethod: '',
+        auditStatusCode: '',
+        auditStream: '',
+        requestOptions() {
+            return { headers: {} };
+        },
+        handleFetchResponse() {
+            return true;
+        }
+    };
+
+    await app.fetchAuditEntryDetail(entry);
+
+    assert.deepEqual(urls, ['/base/admin/audit/detail?log_id=audit-1']);
+    assert.equal(app.auditLog.entries[0]._detail_loaded, true);
+    assert.equal(app.auditLog.entries[0].data.request_headers['content-type'], 'application/json');
 });
 
 test('live usage event updates usage log and enriches matching audit row', () => {
