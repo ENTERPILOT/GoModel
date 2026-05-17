@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"mime/multipart"
@@ -15,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -2686,18 +2688,67 @@ func TestHandleStreamingResponse_ClientDisconnectBeforeUpstream(t *testing.T) {
 }
 
 func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	canceledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	recordStreamingError(entry, "gpt-4o-mini", "openai", "/v1/chat/completions", "req-1", ctx, errors.New("broken pipe"))
-	if entry.ErrorType != "client_disconnected" {
-		t.Fatalf("expected client_disconnected, got %q", entry.ErrorType)
+
+	tests := []struct {
+		name      string
+		ctx       context.Context
+		err       error
+		wantType  string
+	}{
+		{
+			name:     "explicit context.Canceled",
+			ctx:      context.Background(),
+			err:      context.Canceled,
+			wantType: "client_disconnected",
+		},
+		{
+			name:     "wrapped context.Canceled",
+			ctx:      context.Background(),
+			err:      fmt.Errorf("upstream send failed: %w", context.Canceled),
+			wantType: "client_disconnected",
+		},
+		{
+			name:     "syscall.EPIPE",
+			ctx:      context.Background(),
+			err:      syscall.EPIPE,
+			wantType: "client_disconnected",
+		},
+		{
+			name:     "wrapped syscall.EPIPE",
+			ctx:      context.Background(),
+			err:      fmt.Errorf("write to client: %w", syscall.EPIPE),
+			wantType: "client_disconnected",
+		},
+		{
+			name:     "syscall.ECONNRESET",
+			ctx:      context.Background(),
+			err:      syscall.ECONNRESET,
+			wantType: "client_disconnected",
+		},
+		{
+			name:     "canceled ctx racing real upstream error stays stream_error",
+			ctx:      canceledCtx,
+			err:      errors.New("upstream malformed"),
+			wantType: "stream_error",
+		},
+		{
+			name:     "clean ctx and generic error",
+			ctx:      context.Background(),
+			err:      errors.New("upstream malformed"),
+			wantType: "stream_error",
+		},
 	}
 
-	entry2 := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	recordStreamingError(entry2, "gpt-4o-mini", "openai", "/v1/chat/completions", "req-2", context.Background(), errors.New("upstream malformed"))
-	if entry2.ErrorType != "stream_error" {
-		t.Fatalf("expected stream_error, got %q", entry2.ErrorType)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+			recordStreamingError(entry, "gpt-4o-mini", "openai", "/v1/chat/completions", "req-"+tt.name, tt.ctx, tt.err)
+			if entry.ErrorType != tt.wantType {
+				t.Fatalf("error_type = %q, want %q", entry.ErrorType, tt.wantType)
+			}
+		})
 	}
 }
 

@@ -542,12 +542,15 @@ func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path,
 }
 
 // isClientDisconnect reports whether the streaming error was caused by the
-// client closing the connection rather than an upstream failure.
+// client closing the connection rather than an upstream failure. A real
+// upstream error that races with a cancellation must still be classified as a
+// provider/stream error, so the context-only path only fires when no concrete
+// error was returned by the call path.
 func isClientDisconnect(ctx context.Context, err error) bool {
-	if ctx != nil && ctx.Err() != nil {
+	if errors.Is(err, context.Canceled) || errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
 		return true
 	}
-	return errors.Is(err, context.Canceled) || errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET)
+	return err == nil && ctx != nil && ctx.Err() == context.Canceled
 }
 
 func providerNameFromWorkflow(workflow *core.Workflow) string {
