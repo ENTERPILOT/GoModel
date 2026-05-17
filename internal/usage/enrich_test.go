@@ -117,6 +117,25 @@ func TestEnrichUsageLogEntry_BedrockCacheWriteOnly(t *testing.T) {
 	}
 }
 
+func TestEnrichUsageLogEntry_CoalescesCacheWriteFieldsByMax(t *testing.T) {
+	// If a provider's raw_data ever carries both Anthropic-style
+	// cache_creation_input_tokens and Bedrock-style cache_write_input_tokens,
+	// EntryInputSegments must pick the larger value so the displayed
+	// provider-cache totals are not undercounted.
+	entry := UsageLogEntry{
+		Provider:    "bedrock",
+		InputTokens: 40,
+		RawData: map[string]any{
+			"cache_creation_input_tokens": 30,
+			"cache_write_input_tokens":    60,
+		},
+	}
+	EnrichUsageLogEntry(&entry)
+	if entry.CacheWriteInputTokens != 60 {
+		t.Fatalf("CacheWriteInputTokens = %d, want 60", entry.CacheWriteInputTokens)
+	}
+}
+
 func TestEnrichUsageLogEntry_NilSafe(t *testing.T) {
 	EnrichUsageLogEntry(nil)
 }
