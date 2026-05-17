@@ -535,7 +535,13 @@ func TestAuditPreviewRemainsPendingUntilFlush(t *testing.T) {
 }
 
 func TestUsagePreviewIncludesRawData(t *testing.T) {
-	rawData := map[string]any{"prompt_cached_tokens": 150}
+	rawData := map[string]any{
+		"prompt_cached_tokens": 150,
+		"details": map[string]any{
+			"cache_read_tokens": 125,
+		},
+		"segments": []any{map[string]any{"kind": "cached"}},
+	}
 	preview := usagePreviewFromEntry(&usage.UsageEntry{
 		ID:        "usage-1",
 		RequestID: "req-1",
@@ -549,6 +555,14 @@ func TestUsagePreviewIncludesRawData(t *testing.T) {
 	rawData["prompt_cached_tokens"] = 200
 	if preview.RawData["prompt_cached_tokens"] != 150 {
 		t.Fatalf("raw_data was not copied, got %v", preview.RawData["prompt_cached_tokens"])
+	}
+	rawData["details"].(map[string]any)["cache_read_tokens"] = 999
+	if details, ok := preview.RawData["details"].(map[string]any); !ok || details["cache_read_tokens"] != 125 {
+		t.Fatalf("raw_data details = %#v, want original nested details", preview.RawData["details"])
+	}
+	rawData["segments"].([]any)[0].(map[string]any)["kind"] = "changed"
+	if segments, ok := preview.RawData["segments"].([]any); !ok || len(segments) != 1 || segments[0].(map[string]any)["kind"] != "cached" {
+		t.Fatalf("raw_data segments = %#v, want original nested segment", preview.RawData["segments"])
 	}
 }
 

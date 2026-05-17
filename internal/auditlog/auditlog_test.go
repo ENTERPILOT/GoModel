@@ -432,6 +432,10 @@ func TestLoggerWriteDoesNotBlockOnLivePublisher(t *testing.T) {
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
+	var releaseOnce sync.Once
+	releasePublisher := func() {
+		releaseOnce.Do(func() { close(publisher.release) })
+	}
 	logger.SetLivePublisher(publisher)
 
 	done := make(chan struct{})
@@ -443,12 +447,12 @@ func TestLoggerWriteDoesNotBlockOnLivePublisher(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(100 * time.Millisecond):
-		close(publisher.release)
+		releasePublisher()
 		_ = logger.Close()
 		t.Fatal("Write blocked on live publisher")
 	}
 
-	close(publisher.release)
+	releasePublisher()
 	if err := logger.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
@@ -479,9 +483,17 @@ func TestLoggerLiveEventQueueSnapshotsEntry(t *testing.T) {
 			},
 			RequestBody: map[string]any{
 				"secret": "body",
+				"nested": map[string]any{
+					"token": "before",
+				},
+				"items": []any{map[string]any{"id": "before"}},
 			},
 			ResponseBody: map[string]any{
 				"id": "chatcmpl-before",
+				"usage": map[string]any{
+					"total_tokens": 150,
+				},
+				"choices": []any{map[string]any{"finish_reason": "stop"}},
 			},
 		},
 	}
@@ -494,7 +506,11 @@ func TestLoggerLiveEventQueueSnapshotsEntry(t *testing.T) {
 	entry.Data.RequestHeaders["Authorization"] = "Bearer changed"
 	entry.Data.ResponseHeaders["X-Request-ID"] = "changed"
 	entry.Data.RequestBody.(map[string]any)["secret"] = "changed"
+	entry.Data.RequestBody.(map[string]any)["nested"].(map[string]any)["token"] = "changed"
+	entry.Data.RequestBody.(map[string]any)["items"].([]any)[0].(map[string]any)["id"] = "changed"
 	entry.Data.ResponseBody.(map[string]any)["id"] = "changed"
+	entry.Data.ResponseBody.(map[string]any)["usage"].(map[string]any)["total_tokens"] = 999
+	entry.Data.ResponseBody.(map[string]any)["choices"].([]any)[0].(map[string]any)["finish_reason"] = "changed"
 
 	if err := logger.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -533,9 +549,21 @@ func TestLoggerLiveEventQueueSnapshotsEntry(t *testing.T) {
 	if !ok || requestBody["secret"] != "body" {
 		t.Fatalf("snapshot RequestBody = %#v, want original body", snapshot.Data.RequestBody)
 	}
+	if nested, ok := requestBody["nested"].(map[string]any); !ok || nested["token"] != "before" {
+		t.Fatalf("snapshot RequestBody nested = %#v, want original nested token", requestBody["nested"])
+	}
+	if items, ok := requestBody["items"].([]any); !ok || len(items) != 1 || items[0].(map[string]any)["id"] != "before" {
+		t.Fatalf("snapshot RequestBody items = %#v, want original item id", requestBody["items"])
+	}
 	responseBody, ok := snapshot.Data.ResponseBody.(map[string]any)
 	if !ok || responseBody["id"] != "chatcmpl-before" {
 		t.Fatalf("snapshot ResponseBody = %#v, want original response body", snapshot.Data.ResponseBody)
+	}
+	if usage, ok := responseBody["usage"].(map[string]any); !ok || usage["total_tokens"] != 150 {
+		t.Fatalf("snapshot ResponseBody usage = %#v, want original usage", responseBody["usage"])
+	}
+	if choices, ok := responseBody["choices"].([]any); !ok || len(choices) != 1 || choices[0].(map[string]any)["finish_reason"] != "stop" {
+		t.Fatalf("snapshot ResponseBody choices = %#v, want original choice", responseBody["choices"])
 	}
 }
 

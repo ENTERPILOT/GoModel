@@ -610,7 +610,26 @@ func copyRawData(src map[string]any) map[string]any {
 	}
 	dst := make(map[string]any, len(src))
 	for key, value := range src {
-		dst[key] = value
+		dst[key] = copyRawValue(value)
 	}
 	return dst
+}
+
+func copyRawValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		dst := make(map[string]any, len(typed))
+		for key, value := range typed {
+			dst[key] = copyRawValue(value)
+		}
+		return dst
+	case []any:
+		dst := make([]any, len(typed))
+		for i, value := range typed {
+			dst[i] = copyRawValue(value)
+		}
+		return dst
+	default:
+		return value
+	}
 }

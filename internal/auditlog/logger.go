@@ -205,6 +205,17 @@ func cloneLiveJSONValue(value any) any {
 	if value == nil {
 		return nil
 	}
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneLiveJSONMap(typed)
+	case []any:
+		return cloneLiveJSONSlice(typed)
+	case string, bool, float64, float32,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		json.Number:
+		return value
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return value
@@ -214,6 +225,22 @@ func cloneLiveJSONValue(value any) any {
 		return value
 	}
 	return cloned
+}
+
+func cloneLiveJSONMap(src map[string]any) map[string]any {
+	dst := make(map[string]any, len(src))
+	for key, value := range src {
+		dst[key] = cloneLiveJSONValue(value)
+	}
+	return dst
+}
+
+func cloneLiveJSONSlice(src []any) []any {
+	dst := make([]any, len(src))
+	for i, value := range src {
+		dst[i] = cloneLiveJSONValue(value)
+	}
+	return dst
 }
 
 func (l *Logger) liveLoop() {
