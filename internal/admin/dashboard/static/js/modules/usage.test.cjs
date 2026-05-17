@@ -61,6 +61,37 @@ test('usageEntryCacheLabel returns capitalized cache type or dash', () => {
     assert.equal(module.usageEntryCacheLabel({ cache_type: 'other' }), '-');
 });
 
+test('hasProviderCache detects positive cached_input_tokens', () => {
+    const module = createUsageModule();
+
+    assert.equal(module.hasProviderCache({ cached_input_tokens: 100 }), true);
+    assert.equal(module.hasProviderCache({ cached_input_tokens: 0 }), false);
+    assert.equal(module.hasProviderCache({}), false);
+    assert.equal(module.hasProviderCache(null), false);
+});
+
+test('providerCacheLabel renders percentage with one decimal', () => {
+    const module = createUsageModule();
+
+    assert.equal(module.providerCacheLabel({ cached_input_tokens: 50, cached_input_ratio: 0.25 }), '25.0%');
+    assert.equal(module.providerCacheLabel({ cached_input_tokens: 1, cached_input_ratio: 0.1234 }), '12.3%');
+    assert.equal(module.providerCacheLabel({}), '');
+});
+
+test('providerCacheTitle reports cached and total input tokens, with cache write when present', () => {
+    const module = Object.assign({ formatNumber: (n) => String(n) }, createUsageModule());
+
+    assert.equal(
+        module.providerCacheTitle({ cached_input_tokens: 90, uncached_input_tokens: 50, cache_write_input_tokens: 0 }),
+        '90 cached / 140 input tokens'
+    );
+    assert.equal(
+        module.providerCacheTitle({ cached_input_tokens: 90, uncached_input_tokens: 50, cache_write_input_tokens: 30 }),
+        '90 cached / 170 input tokens\n30 cache write'
+    );
+    assert.equal(module.providerCacheTitle({}), '');
+});
+
 test('cachedCostTitle prepends savings note for cached entries and passes through otherwise', () => {
     const module = createUsageModule();
 

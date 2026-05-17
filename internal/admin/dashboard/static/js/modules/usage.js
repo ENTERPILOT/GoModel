@@ -383,6 +383,35 @@
                 return base ? prefix + '\n' + base : prefix;
             },
 
+            providerCacheRatio(entry) {
+                const ratio = Number(entry && entry.cached_input_ratio);
+                if (!Number.isFinite(ratio) || ratio <= 0) return 0;
+                return Math.min(1, ratio);
+            },
+
+            hasProviderCache(entry) {
+                return Number(entry && entry.cached_input_tokens || 0) > 0;
+            },
+
+            providerCacheLabel(entry) {
+                if (!this.hasProviderCache(entry)) return '';
+                const pct = this.providerCacheRatio(entry) * 100;
+                return pct.toFixed(1) + '%';
+            },
+
+            providerCacheTitle(entry) {
+                if (!this.hasProviderCache(entry)) return '';
+                const cached = Number(entry.cached_input_tokens || 0);
+                const uncached = Number(entry.uncached_input_tokens || 0);
+                const write = Number(entry.cache_write_input_tokens || 0);
+                const total = cached + uncached + write;
+                const parts = [this.formatNumber(cached) + ' cached / ' + this.formatNumber(total) + ' input tokens'];
+                if (write > 0) {
+                    parts.push(this.formatNumber(write) + ' cache write');
+                }
+                return parts.join('\n');
+            },
+
             usesOpenRouterCreditPricing(entry) {
                 return costSource(entry) === 'openrouter_credits';
             },

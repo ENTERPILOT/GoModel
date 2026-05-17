@@ -614,7 +614,7 @@ body.dashboard-modal-open {
   flex: 1 1 0;
   min-width: 0;
   width: 100%;
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 32px;
   transition: width 0.2s;
@@ -1485,6 +1485,7 @@ td.col-price {
   font-family: "SF Mono", Menlo, Consolas, monospace;
   font-size: 13px;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .provider-badge {

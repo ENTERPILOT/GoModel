@@ -75,6 +75,10 @@ type UsageLogParams struct {
 }
 
 // UsageLogEntry represents a single usage record in the request log.
+//
+// The cached_input_tokens, uncached_input_tokens, cache_write_input_tokens,
+// and cached_input_ratio fields are derived from RawData at read time by
+// EnrichUsageLogEntry; storage layers never populate them.
 type UsageLogEntry struct {
 	ID                     string         `json:"id"`
 	RequestID              string         `json:"request_id"`
@@ -89,12 +93,35 @@ type UsageLogEntry struct {
 	InputTokens            int            `json:"input_tokens"`
 	OutputTokens           int            `json:"output_tokens"`
 	TotalTokens            int            `json:"total_tokens"`
+	UncachedInputTokens    int64          `json:"uncached_input_tokens,omitempty"`
+	CachedInputTokens      int64          `json:"cached_input_tokens,omitempty"`
+	CacheWriteInputTokens  int64          `json:"cache_write_input_tokens,omitempty"`
+	CachedInputRatio       float64        `json:"cached_input_ratio,omitempty"`
 	InputCost              *float64       `json:"input_cost"`
 	OutputCost             *float64       `json:"output_cost"`
 	TotalCost              *float64       `json:"total_cost"`
 	CostSource             string         `json:"cost_source,omitempty"`
 	RawData                map[string]any `json:"raw_data,omitempty"`
 	CostsCalculationCaveat string         `json:"costs_calculation_caveat,omitempty"`
+}
+
+// EnrichUsageLogEntry populates the derived provider-cache fields on entry
+// (uncached/cached/write split and the cached ratio) from RawData. Safe to
+// call on entries whose RawData does not contain provider cache fields.
+func EnrichUsageLogEntry(entry *UsageLogEntry) {
+	if entry == nil {
+		return
+	}
+	uncached, cached, cacheWrite := EntryInputSegments(*entry)
+	entry.UncachedInputTokens = uncached
+	entry.CachedInputTokens = cached
+	entry.CacheWriteInputTokens = cacheWrite
+	total := uncached + cached + cacheWrite
+	if total > 0 && cached > 0 {
+		entry.CachedInputRatio = float64(cached) / float64(total)
+	} else {
+		entry.CachedInputRatio = 0
+	}
 }
 
 // UsageLogResult holds a paginated list of usage log entries.

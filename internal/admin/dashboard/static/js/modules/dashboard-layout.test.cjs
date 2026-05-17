@@ -83,7 +83,7 @@ test("sidebar and main content share the flex layout without manual content offs
   const contentRule = readCSSRule(css, ".content");
   assert.match(contentRule, /flex:\s*1 1 0/);
   assert.match(contentRule, /width:\s*100%/);
-  assert.match(contentRule, /max-width:\s*1200px/);
+  assert.match(contentRule, /max-width:\s*1400px/);
   assert.match(contentRule, /margin:\s*0 auto/);
   assert.doesNotMatch(contentRule, /margin-left:\s*max\(/);
 

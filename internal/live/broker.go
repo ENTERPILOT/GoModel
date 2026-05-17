@@ -580,7 +580,7 @@ func auditEventTerminal(eventType string) bool {
 }
 
 func usagePreviewFromEntry(entry *usage.UsageEntry) usage.UsageLogEntry {
-	return usage.UsageLogEntry{
+	preview := usage.UsageLogEntry{
 		ID:                     entry.ID,
 		RequestID:              entry.RequestID,
 		ProviderID:             entry.ProviderID,
@@ -601,6 +601,8 @@ func usagePreviewFromEntry(entry *usage.UsageEntry) usage.UsageLogEntry {
 		RawData:                copyRawData(entry.RawData),
 		CostsCalculationCaveat: entry.CostsCalculationCaveat,
 	}
+	usage.EnrichUsageLogEntry(&preview)
+	return preview
 }
 
 func copyRawData(src map[string]any) map[string]any {

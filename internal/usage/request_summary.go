@@ -32,7 +32,7 @@ func SummarizeRequestUsage(entries []UsageLogEntry) *RequestUsageSummary {
 
 	summary := &RequestUsageSummary{}
 	for _, entry := range entries {
-		uncachedInput, cachedInput, cacheWriteInput := requestInputSegments(entry)
+		uncachedInput, cachedInput, cacheWriteInput := EntryInputSegments(entry)
 		totalInput := uncachedInput + cachedInput + cacheWriteInput
 
 		summary.Entries++
@@ -52,7 +52,13 @@ func SummarizeRequestUsage(entries []UsageLogEntry) *RequestUsageSummary {
 	return summary
 }
 
-func requestInputSegments(entry UsageLogEntry) (uncachedInput, cachedInput, cacheWriteInput int64) {
+// EntryInputSegments splits one usage log entry's input tokens into the
+// provider-uncached prompt, the provider-cached read, and the provider cache
+// write portions. Provider-specific quirks (e.g. Anthropic reporting cached
+// reads/writes as separate counts on top of input_tokens) are handled here so
+// callers — request summaries, the admin usage log, and the live SSE preview —
+// stay in sync.
+func EntryInputSegments(entry UsageLogEntry) (uncachedInput, cachedInput, cacheWriteInput int64) {
 	cacheReadTopLevel := int64(extractInt(entry.RawData, "cache_read_input_tokens"))
 	cacheReadNormalized := int64(extractInt(entry.RawData, "prompt_cached_tokens"))
 	cacheReadGeneric := int64(extractInt(entry.RawData, "cached_tokens"))
@@ -61,7 +67,7 @@ func requestInputSegments(entry UsageLogEntry) (uncachedInput, cachedInput, cach
 	cachedInput = maxInt64(cacheReadTopLevel, cacheReadNormalized, cacheReadGeneric)
 	baseInput := int64(entry.InputTokens)
 
-	if requestUsesSplitPromptCacheAccounting(entry, cacheReadTopLevel, cacheWriteInput) {
+	if entryUsesSplitPromptCacheAccounting(entry, cacheReadTopLevel, cacheWriteInput) {
 		return baseInput, cachedInput, cacheWriteInput
 	}
 
@@ -72,7 +78,7 @@ func requestInputSegments(entry UsageLogEntry) (uncachedInput, cachedInput, cach
 	return uncachedInput, cachedInput, cacheWriteInput
 }
 
-func requestUsesSplitPromptCacheAccounting(entry UsageLogEntry, cacheReadInput, cacheWriteInput int64) bool {
+func entryUsesSplitPromptCacheAccounting(entry UsageLogEntry, cacheReadInput, cacheWriteInput int64) bool {
 	if cacheReadInput > 0 || cacheWriteInput > 0 {
 		return true
 	}

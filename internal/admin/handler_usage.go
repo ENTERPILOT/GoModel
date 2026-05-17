@@ -215,6 +215,9 @@ func (h *Handler) UsageLog(c *echo.Context) error {
 	if result.Entries == nil {
 		result.Entries = []usage.UsageLogEntry{}
 	}
+	for i := range result.Entries {
+		usage.EnrichUsageLogEntry(&result.Entries[i])
+	}
 
 	return c.JSON(http.StatusOK, result)
 }
