@@ -2439,9 +2439,38 @@ textarea:focus {
   min-width: 0;
 }
 
+.usage-filter-row-options {
+  grid-template-columns: 1fr;
+}
+
+.usage-log-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.usage-log-checkbox input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
 .usage-ts {
   white-space: nowrap;
   font-size: 12px;
+}
+
+.usage-log-row-cached td {
+  opacity: 0.75;
+  font-style: italic;
+}
+
+.usage-log-row-cached .usage-log-cache-cell {
+  font-weight: 700;
 }
 
 /* Audit Log Section */
@@ -3156,6 +3185,16 @@ body.conversation-drawer-open {
   height: 14px;
   margin-left: 4px;
   color: var(--success);
+  cursor: help;
+  vertical-align: -2px;
+  stroke-width: 2;
+}
+
+.cache-savings-icon {
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  color: var(--accent);
   cursor: help;
   vertical-align: -2px;
   stroke-width: 2;

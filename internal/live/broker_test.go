@@ -48,7 +48,7 @@ func TestBrokerPublishesAndReplaysBySequence(t *testing.T) {
 	}
 }
 
-func TestBrokerSkipsCachedUsageEvents(t *testing.T) {
+func TestBrokerBroadcastsCachedUsageEvents(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
@@ -58,15 +58,15 @@ func TestBrokerSkipsCachedUsageEvents(t *testing.T) {
 		Timestamp: now,
 		CacheType: " EXACT ",
 	})
-	b.PublishUsageEvent(EventUsageFlushed, &usage.UsageEntry{
+	b.PublishUsageEvent(EventUsageCompleted, &usage.UsageEntry{
 		ID:        "usage-semantic",
 		RequestID: "req-semantic",
 		Timestamp: now.Add(time.Second),
 		CacheType: usage.CacheTypeSemantic,
 	})
 
-	if got := b.LatestSeq(); got != 0 {
-		t.Fatalf("latest seq = %d, want 0", got)
+	if got := b.LatestSeq(); got != 2 {
+		t.Fatalf("latest seq = %d, want 2", got)
 	}
 
 	sub := b.Subscribe(0)
@@ -74,8 +74,13 @@ func TestBrokerSkipsCachedUsageEvents(t *testing.T) {
 		t.Fatal("Subscribe returned nil")
 	}
 	defer sub.Close()
-	if len(sub.Replay) != 0 {
-		t.Fatalf("replay len = %d, want 0", len(sub.Replay))
+	if len(sub.Replay) != 2 {
+		t.Fatalf("replay len = %d, want 2", len(sub.Replay))
+	}
+	for i, event := range sub.Replay {
+		if event.Type != EventUsageCompleted {
+			t.Fatalf("replay[%d] type = %q, want %q", i, event.Type, EventUsageCompleted)
+		}
 	}
 }
 

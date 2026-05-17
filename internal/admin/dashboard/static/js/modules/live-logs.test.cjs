@@ -562,6 +562,46 @@ test('failed live events clear pending state', () => {
     assert.equal(app.auditLog.entries[0]._usage_live_pending, false);
 });
 
+test('cached live usage events are suppressed when hide-cached toggle is on', () => {
+    const app = createLiveLogsApp();
+    app.usageLogHideCached = true;
+
+    app.applyLiveLogEvent({
+        seq: 10,
+        type: 'usage.completed',
+        data: {
+            id: 'usage-cache',
+            request_id: 'req-cache',
+            cache_type: 'exact',
+            model: 'gpt-test',
+            provider: 'openai',
+            input_tokens: 10,
+            output_tokens: 4,
+            total_tokens: 14
+        }
+    });
+
+    assert.equal(app.usageLog.entries.length, 0);
+    assert.equal(app.usageLog.total, 0);
+
+    app.applyLiveLogEvent({
+        seq: 11,
+        type: 'usage.completed',
+        data: {
+            id: 'usage-fresh',
+            request_id: 'req-fresh',
+            model: 'gpt-test',
+            provider: 'openai',
+            input_tokens: 10,
+            output_tokens: 4,
+            total_tokens: 14
+        }
+    });
+
+    assert.equal(app.usageLog.entries.length, 1);
+    assert.equal(app.usageLog.entries[0].id, 'usage-fresh');
+});
+
 test('live reset asks normal REST endpoints to resync source of truth', () => {
     const app = createLiveLogsApp();
 

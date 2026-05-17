@@ -282,6 +282,7 @@
                     if (resetOffset) this.usageLog.offset = 0;
                     let qs = this._usageQueryStr();
                     qs += '&limit=' + this.usageLog.limit + '&offset=' + this.usageLog.offset;
+                    qs += '&cache_mode=' + (this.usageLogHideCached ? 'uncached' : 'all');
                     if (this.usageLogSearch) qs += '&search=' + encodeURIComponent(this.usageLogSearch);
                     if (this.usageLogModel) qs += '&model=' + encodeURIComponent(this.usageLogModel);
                     if (this.usageLogProvider) qs += '&provider=' + encodeURIComponent(this.usageLogProvider);
@@ -357,6 +358,29 @@
                     }
                 });
                 return [...set].sort();
+            },
+
+            usageEntryCacheType(entry) {
+                return String((entry && entry.cache_type) || '').trim().toLowerCase();
+            },
+
+            usageEntryCached(entry) {
+                const type = this.usageEntryCacheType(entry);
+                return type === 'exact' || type === 'semantic';
+            },
+
+            usageEntryCacheLabel(entry) {
+                const type = this.usageEntryCacheType(entry);
+                if (type === 'exact') return 'Exact';
+                if (type === 'semantic') return 'Semantic';
+                return '-';
+            },
+
+            cachedCostTitle(entry, baseTitle) {
+                const base = baseTitle ? String(baseTitle) : '';
+                if (!this.usageEntryCached(entry)) return base;
+                const prefix = 'Saved by cache — not charged';
+                return base ? prefix + '\n' + base : prefix;
             },
 
             usesOpenRouterCreditPricing(entry) {

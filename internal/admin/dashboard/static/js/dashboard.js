@@ -162,6 +162,7 @@ function dashboard() {
     usageLogModel: "",
     usageLogProvider: "",
     usageLogUserPath: "",
+    usageLogHideCached: false,
     usageBarChart: null,
     usageUserPathChart: null,
 

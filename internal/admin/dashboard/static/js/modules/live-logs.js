@@ -287,6 +287,9 @@
                 this.applyLiveUsageToAudit(incoming);
                 const currentEntries = (this.usageLog && Array.isArray(this.usageLog.entries)) ? this.usageLog.entries : [];
                 const index = currentEntries.findIndex((entry) => String(entry.id || '').trim() === id);
+                if (this.usageLogHideCached && this.liveUsageEntryCached(incoming) && index < 0) {
+                    return;
+                }
                 if (index >= 0) {
                     const previous = currentEntries[index] || {};
                     const liveState = this.liveUsageStateAfter(previous._live_state, incoming._live_state);
