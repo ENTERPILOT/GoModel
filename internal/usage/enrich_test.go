@@ -71,6 +71,52 @@ func TestEnrichUsageLogEntry_NoCacheData(t *testing.T) {
 	}
 }
 
+func TestEnrichUsageLogEntry_BedrockCacheWriteField(t *testing.T) {
+	entry := UsageLogEntry{
+		Provider:    "bedrock",
+		InputTokens: 40,
+		RawData: map[string]any{
+			"cache_read_input_tokens":  120,
+			"cache_write_input_tokens": 60,
+		},
+	}
+	EnrichUsageLogEntry(&entry)
+	if entry.UncachedInputTokens != 40 {
+		t.Fatalf("UncachedInputTokens = %d, want 40", entry.UncachedInputTokens)
+	}
+	if entry.CachedInputTokens != 120 {
+		t.Fatalf("CachedInputTokens = %d, want 120", entry.CachedInputTokens)
+	}
+	if entry.CacheWriteInputTokens != 60 {
+		t.Fatalf("CacheWriteInputTokens = %d, want 60", entry.CacheWriteInputTokens)
+	}
+	want := 120.0 / 220.0
+	if math.Abs(entry.CachedInputRatio-want) > 1e-9 {
+		t.Fatalf("CachedInputRatio = %f, want %f", entry.CachedInputRatio, want)
+	}
+}
+
+func TestEnrichUsageLogEntry_BedrockCacheWriteOnly(t *testing.T) {
+	// First request that writes to the cache reports only cache_write_input_tokens.
+	entry := UsageLogEntry{
+		Provider:    "bedrock",
+		InputTokens: 100,
+		RawData: map[string]any{
+			"cache_write_input_tokens": 80,
+		},
+	}
+	EnrichUsageLogEntry(&entry)
+	if entry.UncachedInputTokens != 100 {
+		t.Fatalf("UncachedInputTokens = %d, want 100", entry.UncachedInputTokens)
+	}
+	if entry.CachedInputTokens != 0 {
+		t.Fatalf("CachedInputTokens = %d, want 0", entry.CachedInputTokens)
+	}
+	if entry.CacheWriteInputTokens != 80 {
+		t.Fatalf("CacheWriteInputTokens = %d, want 80", entry.CacheWriteInputTokens)
+	}
+}
+
 func TestEnrichUsageLogEntry_NilSafe(t *testing.T) {
 	EnrichUsageLogEntry(nil)
 }
