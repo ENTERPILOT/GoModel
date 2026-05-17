@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 89 end-to-end curl scenarios for release validation.
+This file contains 95 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -445,7 +445,7 @@ Checks translated chat on xAI and reasoning-token accounting.
 ```bash
 curl -fsS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"grok-3-mini","messages":[{"role":"user","content":"Reply with exactly QA_XAI_OK"}],"max_tokens":20}' \
+  -d '{"model":"xai/grok-4.3","messages":[{"role":"user","content":"Reply with exactly QA_XAI_OK"}],"max_tokens":20}' \
   | jq -e '{model,provider,usage,answer:.choices[0].message.content}'
 ```
 
@@ -1547,4 +1547,121 @@ curl -fsS -X POST "$BASE_URL/admin/usage/recalculate-pricing" \
   -H 'Content-Type: application/json' \
   -d '{"confirmation":"recalculate"}' \
   | jq -e '.status == "ok" and (.matched | type == "number") and (.recalculated | type == "number")'
+```
+
+## 17. Dashboard live preview
+
+These scenarios exercise the `/admin/live/logs` SSE feed that powers the
+dashboard's realtime audit/usage panel. The auth/cache gateway is used because
+it serves the dashboard and requires master-key authentication for admin
+routes.
+
+### S91 Live preview heartbeat from an idle subscriber
+
+Subscribes with a future cursor (no replay), waits past one heartbeat interval, and asserts the SSE stream emits `event: reset` followed by at least one `event: heartbeat`.
+
+```bash
+LIVE_OUT="$QA_RUN_DIR/s91.live.sse"
+curl -sS --no-buffer -N "$AUTH_BASE_URL/admin/live/logs?types=audit,usage&cursor=999999999" \
+  -H "$ADMIN_AUTH_HEADER" \
+  --max-time 20 > "$LIVE_OUT" || true
+grep -cE '^event: reset' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
+grep -cE '^event: heartbeat' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
+```
+
+### S92 Live preview emits audit + usage events for a fresh chat
+
+Opens an SSE subscription, triggers one chat completion with a unique request id, then asserts the captured stream contains an `audit.*` event whose JSON payload references that request id and at least one `usage.*` event.
+
+```bash
+LIVE_OUT="$QA_RUN_DIR/s92.live.sse"
+RID="qa-live-preview-$QA_SUFFIX"
+curl -sS --no-buffer -N "$AUTH_BASE_URL/admin/live/logs?types=audit,usage" \
+  -H "$ADMIN_AUTH_HEADER" \
+  --max-time 18 > "$LIVE_OUT" &
+LIVE_PID=$!
+sleep 1
+curl -fsS "$AUTH_BASE_URL/v1/chat/completions" \
+  -H "$ADMIN_AUTH_HEADER" \
+  -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" \
+  -d '{"model":"openai/gpt-4.1-nano","messages":[{"role":"user","content":"reply OK"}],"max_tokens":12}' \
+  > "$QA_RUN_DIR/s92.chat.json"
+sleep 8
+kill "$LIVE_PID" 2>/dev/null || true
+wait "$LIVE_PID" 2>/dev/null || true
+jq -e '.choices[0].message.content | type == "string" and length > 0' "$QA_RUN_DIR/s92.chat.json" >/dev/null
+grep -cE '^event: audit\.' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
+grep -cE '^event: usage\.' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
+grep '^data: {' "$LIVE_OUT" | sed 's/^data: //' \
+  | jq -e --arg rid "$RID" 'select(.. | strings? | tostring | contains($rid)) | .seq | type == "number"' \
+  | head -n1 >/dev/null
+```
+
+### S93 Live preview type filter excludes off-list categories
+
+Subscribes with `types=usage` only, fires another chat, and asserts the captured stream contains `usage.*` events with no `audit.*` events leaking through.
+
+```bash
+LIVE_OUT="$QA_RUN_DIR/s93.live.sse"
+RID="qa-live-filter-$QA_SUFFIX"
+curl -sS --no-buffer -N "$AUTH_BASE_URL/admin/live/logs?types=usage" \
+  -H "$ADMIN_AUTH_HEADER" \
+  --max-time 18 > "$LIVE_OUT" &
+LIVE_PID=$!
+sleep 1
+curl -fsS "$AUTH_BASE_URL/v1/chat/completions" \
+  -H "$ADMIN_AUTH_HEADER" \
+  -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" \
+  -d '{"model":"openai/gpt-4.1-nano","messages":[{"role":"user","content":"reply OK"}],"max_tokens":12}' \
+  > "$QA_RUN_DIR/s93.chat.json"
+sleep 8
+kill "$LIVE_PID" 2>/dev/null || true
+wait "$LIVE_PID" 2>/dev/null || true
+grep -cE '^event: usage\.' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
+if grep -qE '^event: audit\.' "$LIVE_OUT"; then
+  echo "error: audit.* event leaked through types=usage filter" >&2
+  exit 1
+fi
+```
+
+### S94 Live preview rejects invalid cursor with 400
+
+Verifies the endpoint validates the `cursor` query parameter rather than silently dropping it.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s94.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s94.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$AUTH_BASE_URL/admin/live/logs?cursor=not-a-number" \
+  -H "$ADMIN_AUTH_HEADER"
+sed -n '1,10p' "$HEADERS_FILE"
+jq . "$BODY_FILE"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("cursor"; "i"))' "$BODY_FILE" >/dev/null
+```
+
+### S95 Streaming client disconnect is audited as `client_disconnected`
+
+Starts a streaming chat completion, aborts it within 400 ms (before the upstream connection completes), then asserts the audit row reflects the request as a streaming request that was cancelled by the client rather than as an upstream provider failure.
+
+```bash
+RID="qa-stream-cancel-$QA_SUFFIX"
+timeout 0.4 curl -sS --no-buffer "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" \
+  -d '{"model":"gpt-4.1-nano","stream":true,"messages":[{"role":"user","content":"Write a 200 word poem about caches."}],"max_tokens":256}' \
+  > "$QA_RUN_DIR/s95.partial.sse" 2>/dev/null || true
+sleep 6
+AUDIT_JSON_FILE="$QA_RUN_DIR/s95.audit.json"
+curl -fsS "$BASE_URL/admin/audit/log?search=$RID&limit=5" > "$AUDIT_JSON_FILE"
+jq --arg rid "$RID" '{entries:(.entries|map(select(.request_id==$rid))|map({request_id,status_code,stream,error_type,path}))}' "$AUDIT_JSON_FILE"
+jq -e --arg rid "$RID" '
+    any(.entries[]?;
+      .request_id == $rid
+      and .path == "/v1/chat/completions"
+      and .stream == true
+      and .error_type == "client_disconnected"
+    )
+  ' "$AUDIT_JSON_FILE" >/dev/null
 ```
