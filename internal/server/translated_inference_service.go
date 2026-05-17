@@ -510,7 +510,7 @@ func (s *translatedInferenceService) handleStreamingResponse(
 // the audit log reflects the actual cause.
 func handleStreamingDispatchError(c *echo.Context, err error) error {
 	auditlog.EnrichEntryWithStream(c, true)
-	if isClientDisconnect(c.Request().Context(), err) {
+	if isClientDisconnectDuringDispatch(c.Request().Context(), err) {
 		auditlog.EnrichEntryWithError(c, "client_disconnected", err.Error(), "")
 		return nil
 	}
@@ -554,13 +554,29 @@ func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path,
 	)
 }
 
-// isClientDisconnect reports whether the streaming error was caused by the
-// client closing the connection rather than an upstream failure. A real
-// upstream error that races with a cancellation must still be classified as a
-// provider/stream error, so the context-only path only fires when no concrete
-// error was returned by the call path.
+// isClientDisconnect classifies write-phase streaming errors (errors returned
+// after the gateway has begun writing the SSE response back to the client). At
+// this phase EPIPE / ECONNRESET on the response writer can only come from the
+// downstream client connection, so they are treated as client disconnects. The
+// nil-err / canceled-context branch supports callers that only have a context
+// signal to report.
 func isClientDisconnect(ctx context.Context, err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	return err == nil && ctx != nil && ctx.Err() == context.Canceled
+}
+
+// isClientDisconnectDuringDispatch classifies a streaming dispatch error - one
+// that happened before any response bytes were flushed to the client. At this
+// phase the only socket in play is the upstream provider connection, so
+// EPIPE / ECONNRESET on err belong to the provider and must NOT be swallowed
+// as client disconnects. Only a cancellation of the request context proves
+// the client is gone. The ctx-only branch still requires err == nil so a
+// concrete upstream failure racing with a cancellation surfaces as a real
+// upstream error.
+func isClientDisconnectDuringDispatch(ctx context.Context, err error) bool {
+	if errors.Is(err, context.Canceled) {
 		return true
 	}
 	return err == nil && ctx != nil && ctx.Err() == context.Canceled

@@ -2687,6 +2687,61 @@ func TestHandleStreamingResponse_ClientDisconnectBeforeUpstream(t *testing.T) {
 	}
 }
 
+// At pre-flush dispatch time the only socket in play is the upstream
+// provider connection, so EPIPE / ECONNRESET on the error from streamFn
+// belong to the provider and must surface as upstream failures rather than
+// be swallowed as client disconnects.
+func TestHandleStreamingResponse_UpstreamResetIsNotClassifiedAsClientDisconnect(t *testing.T) {
+	logger := &capturingAuditLogger{
+		config: auditlog.Config{Enabled: true},
+	}
+
+	e := echo.New()
+	handler := NewHandler(&mockProvider{}, logger, nil, nil)
+
+	for _, tt := range []struct {
+		name string
+		err  error
+	}{
+		{name: "bare syscall.ECONNRESET", err: syscall.ECONNRESET},
+		{name: "wrapped syscall.EPIPE", err: fmt.Errorf("dial upstream: %w", syscall.EPIPE)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			entry := &auditlog.LogEntry{
+				ID:        "entry-upstream-reset",
+				Timestamp: time.Now(),
+				Method:    http.MethodPost,
+				Path:      "/v1/chat/completions",
+				Data:      &auditlog.LogData{},
+			}
+			c.Set(string(auditlog.LogEntryKey), entry)
+
+			err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", "primary-openai", func() (io.ReadCloser, error) {
+				return nil, tt.err
+			})
+
+			// handleStreamingResponse always swallows the error by writing a
+			// JSON response via handleError; the gateway response must be the
+			// upstream failure, not an empty 200.
+			if err != nil {
+				t.Fatalf("handler returned error: %v", err)
+			}
+			if rec.Code == http.StatusOK {
+				t.Fatalf("upstream reset surfaced as 200 OK; want non-2xx, got body=%q", rec.Body.String())
+			}
+			if entry.ErrorType == "client_disconnected" {
+				t.Fatalf("upstream reset misclassified as client_disconnected (err=%v)", tt.err)
+			}
+			if !entry.Stream {
+				t.Fatalf("expected entry.Stream=true regardless of classification, got false")
+			}
+		})
+	}
+}
+
 func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
 	canceledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
