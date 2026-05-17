@@ -12,6 +12,7 @@
             liveLogsReconnectAttempts: 0,
             liveLogsReconnectTimer: null,
             liveLogsController: null,
+            skippedLiveUsageByRequestId: null,
 
             liveLogsEnabled() {
                 return typeof this.workflowRuntimeBooleanFlag === 'function'
@@ -232,10 +233,13 @@
 
             liveUsageEntryForAudit(entry) {
                 const requestID = String(entry && entry.request_id || '').trim();
-                if (!requestID || !this.usageLog || !Array.isArray(this.usageLog.entries)) return null;
-                return this.usageLog.entries.find((usageEntry) => {
+                if (!requestID) return null;
+                const entries = this.usageLog && Array.isArray(this.usageLog.entries) ? this.usageLog.entries : [];
+                const visible = entries.find((usageEntry) => {
                     return String(usageEntry && usageEntry.request_id || '').trim() === requestID;
-                }) || null;
+                });
+                if (visible) return visible;
+                return this.skippedLiveUsageByRequestId && this.skippedLiveUsageByRequestId[requestID] || null;
             },
 
             fetchExpandedAuditDetailIfReady(entry) {
@@ -301,35 +305,61 @@
                 const index = currentEntries.findIndex((entry) => String(entry.id || '').trim() === id);
                 if (index >= 0) {
                     const previous = currentEntries[index] || {};
-                    const liveState = this.liveUsageStateAfter(previous._live_state, incoming._live_state);
-                    const usageFlushed = this.liveUsageEventFlushed(previous) || this.liveUsageEventFlushed({ ...incoming, _live_state: liveState });
-                    const merged = {
-                        ...previous,
-                        ...incoming,
-                        _live: true,
-                        _live_state: liveState || 'usage.completed',
-                        _live_pending: !usageFlushed,
-                        _usage_flushed: usageFlushed
-                    };
+                    const merged = this.mergeLiveUsagePatch(previous, incoming);
                     currentEntries.splice(index, 1, merged);
                     this.usageLog.entries = [...currentEntries];
+                    this.removeSkippedLiveUsage(merged);
                     this.applyLiveUsageToAudit(merged);
                     return;
                 }
-                const liveState = this.liveUsageStateAfter('', incoming._live_state);
-                const usageFlushed = this.liveUsageEventFlushed({ ...incoming, _live_state: liveState });
-                const liveEntry = {
+                const liveEntry = this.mergeLiveUsagePatch(this.skippedLiveUsageForEntry(incoming), incoming);
+                this.applyLiveUsageToAudit(liveEntry);
+                if (this.usageLogHideCached && this.liveUsageEntryCached(liveEntry)) {
+                    this.storeSkippedLiveUsage(liveEntry);
+                    return;
+                }
+                if (!this.usageLiveInsertAllowed()) {
+                    this.storeSkippedLiveUsage(liveEntry);
+                    return;
+                }
+                this.removeSkippedLiveUsage(liveEntry);
+                this.usageLog.entries = [liveEntry, ...currentEntries].slice(0, this.usageLog.limit || 50);
+                this.usageLog.total = Number(this.usageLog.total || 0) + 1;
+            },
+
+            mergeLiveUsagePatch(previous, incoming) {
+                previous = previous && typeof previous === 'object' ? previous : {};
+                const liveState = this.liveUsageStateAfter(previous._live_state, incoming && incoming._live_state);
+                const usageFlushed = this.liveUsageEventFlushed(previous) || this.liveUsageEventFlushed({ ...incoming, _live_state: liveState });
+                return {
+                    ...previous,
                     ...incoming,
                     _live: true,
                     _live_state: liveState || 'usage.completed',
                     _live_pending: !usageFlushed,
                     _usage_flushed: usageFlushed
                 };
-                this.applyLiveUsageToAudit(liveEntry);
-                if (this.usageLogHideCached && this.liveUsageEntryCached(liveEntry)) return;
-                if (!this.usageLiveInsertAllowed()) return;
-                this.usageLog.entries = [liveEntry, ...currentEntries].slice(0, this.usageLog.limit || 50);
-                this.usageLog.total = Number(this.usageLog.total || 0) + 1;
+            },
+
+            skippedLiveUsageForEntry(entry) {
+                const requestID = String(entry && entry.request_id || '').trim();
+                return requestID && this.skippedLiveUsageByRequestId ? this.skippedLiveUsageByRequestId[requestID] : null;
+            },
+
+            storeSkippedLiveUsage(entry) {
+                const requestID = String(entry && entry.request_id || '').trim();
+                if (!requestID) return;
+                if (!this.skippedLiveUsageByRequestId || typeof this.skippedLiveUsageByRequestId !== 'object' || Array.isArray(this.skippedLiveUsageByRequestId)) {
+                    this.skippedLiveUsageByRequestId = {};
+                }
+                this.skippedLiveUsageByRequestId[requestID] = entry;
+            },
+
+            removeSkippedLiveUsage(entry) {
+                const requestID = String(entry && entry.request_id || '').trim();
+                if (requestID && this.skippedLiveUsageByRequestId) {
+                    delete this.skippedLiveUsageByRequestId[requestID];
+                }
             },
 
             liveUsageEntryCached(entry) {
@@ -395,10 +425,12 @@
                 if (inputTokens > 0 && uncachedInputTokens + cachedInputTokens + cacheWriteInputTokens === 0) {
                     uncachedInputTokens = inputTokens;
                 }
-                const normalizedInputTokens = inputTokens || uncachedInputTokens + cachedInputTokens + cacheWriteInputTokens;
-                const totalTokens = this.liveNumber(
+                const segmentedInputTokens = uncachedInputTokens + cachedInputTokens + cacheWriteInputTokens;
+                const normalizedInputTokens = segmentedInputTokens || inputTokens;
+                const computedTotalTokens = normalizedInputTokens + outputTokens;
+                const totalTokens = computedTotalTokens || this.liveNumber(
                     usageEntry.total_tokens,
-                    this.liveNumber(previous.total_tokens, normalizedInputTokens + outputTokens)
+                    this.liveNumber(previous.total_tokens, 0)
                 );
                 const cachedInputRatio = this.liveNumber(
                     usageEntry.cached_input_ratio,
