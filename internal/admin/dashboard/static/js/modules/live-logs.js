@@ -228,7 +228,10 @@
 
             mergeLiveAuditUsagePatch(entry) {
                 const usageEntry = this.liveUsageEntryForAudit(entry);
-                return usageEntry ? this.auditEntryWithLiveUsage(entry, usageEntry) : entry;
+                if (!usageEntry) return entry;
+                const merged = this.auditEntryWithLiveUsage(entry, usageEntry);
+                this.removeSkippedLiveUsage(usageEntry);
+                return merged;
             },
 
             liveUsageEntryForAudit(entry) {
@@ -306,19 +309,22 @@
                 if (index >= 0) {
                     const previous = currentEntries[index] || {};
                     const merged = this.mergeLiveUsagePatch(previous, incoming);
+                    this.applyLiveUsageToAudit(merged);
+                    if (this.liveUsageShouldSkip(merged)) {
+                        currentEntries.splice(index, 1);
+                        this.usageLog.entries = [...currentEntries];
+                        this.usageLog.total = Math.max(0, Number(this.usageLog.total || 0) - 1);
+                        this.storeSkippedLiveUsage(merged);
+                        return;
+                    }
                     currentEntries.splice(index, 1, merged);
                     this.usageLog.entries = [...currentEntries];
                     this.removeSkippedLiveUsage(merged);
-                    this.applyLiveUsageToAudit(merged);
                     return;
                 }
-                const liveEntry = this.mergeLiveUsagePatch(this.skippedLiveUsageForEntry(incoming), incoming);
+                const liveEntry = this.mergeLiveUsagePatch(this.liveUsageSeedForEntry(incoming), incoming);
                 this.applyLiveUsageToAudit(liveEntry);
-                if (this.usageLogHideCached && this.liveUsageEntryCached(liveEntry)) {
-                    this.storeSkippedLiveUsage(liveEntry);
-                    return;
-                }
-                if (!this.usageLiveInsertAllowed()) {
+                if (this.liveUsageShouldSkip(liveEntry)) {
                     this.storeSkippedLiveUsage(liveEntry);
                     return;
                 }
@@ -341,9 +347,43 @@
                 };
             },
 
+            liveUsageShouldSkip(entry) {
+                return !!(this.usageLogHideCached && this.liveUsageEntryCached(entry)) || !this.usageLiveInsertAllowed();
+            },
+
+            liveUsageSeedForEntry(entry) {
+                return this.skippedLiveUsageForEntry(entry) || this.auditLiveUsageForEntry(entry);
+            },
+
             skippedLiveUsageForEntry(entry) {
                 const requestID = String(entry && entry.request_id || '').trim();
                 return requestID && this.skippedLiveUsageByRequestId ? this.skippedLiveUsageByRequestId[requestID] : null;
+            },
+
+            auditLiveUsageForEntry(entry) {
+                const requestID = String(entry && entry.request_id || '').trim();
+                if (!requestID || !this.auditLog || !Array.isArray(this.auditLog.entries)) return null;
+                const auditEntry = this.auditLog.entries.find((candidate) => String(candidate && candidate.request_id || '').trim() === requestID);
+                const usage = auditEntry && auditEntry.usage && typeof auditEntry.usage === 'object' && !Array.isArray(auditEntry.usage)
+                    ? auditEntry.usage
+                    : null;
+                if (!usage) return null;
+                return {
+                    id: entry && entry.id,
+                    request_id: requestID,
+                    entries: usage.entries,
+                    input_tokens: usage.input_tokens,
+                    uncached_input_tokens: usage.uncached_input_tokens,
+                    cached_input_tokens: usage.cached_input_tokens,
+                    cache_write_input_tokens: usage.cache_write_input_tokens,
+                    output_tokens: usage.output_tokens,
+                    total_tokens: usage.total_tokens,
+                    cached_input_ratio: usage.cached_input_ratio,
+                    estimated_cached_characters: usage.estimated_cached_characters,
+                    _live_state: auditEntry._usage_live_state,
+                    _live_pending: auditEntry._usage_live_pending,
+                    _usage_flushed: auditEntry._usage_flushed
+                };
             },
 
             storeSkippedLiveUsage(entry) {

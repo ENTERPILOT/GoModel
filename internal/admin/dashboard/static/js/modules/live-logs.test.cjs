@@ -437,6 +437,7 @@ test('hidden cached live usage attaches to later audit previews', () => {
     assert.equal(app.auditLog.entries[0].usage.total_tokens, 14);
     assert.equal(app.auditLog.entries[0]._usage_live_state, 'usage.completed');
     assert.equal(app.auditLog.entries[0]._usage_live_pending, true);
+    assert.equal(app.skippedLiveUsageByRequestId['req-cache'], undefined);
 
     app.applyLiveLogEvent({
         seq: 13,
@@ -469,12 +470,51 @@ test('hidden cached live usage attaches to later audit previews', () => {
     assert.equal(app.skippedLiveUsageByRequestId['req-cache'], undefined);
 });
 
-test('live usage audit summary uses normalized split prompt-cache tokens', () => {
+test('cached updates to visible live usage rows move to skipped when cached rows are hidden', () => {
     const app = createLiveLogsApp();
     app.auditLog.entries = [{ id: 'audit-cache', request_id: 'req-cache' }];
 
     app.applyLiveLogEvent({
         seq: 15,
+        type: 'usage.completed',
+        data: {
+            id: 'usage-cache',
+            request_id: 'req-cache',
+            model: 'gpt-test',
+            provider: 'openai',
+            input_tokens: 10,
+            output_tokens: 4,
+            total_tokens: 14
+        }
+    });
+
+    assert.equal(app.usageLog.entries.length, 1);
+    assert.equal(app.usageLog.total, 1);
+
+    app.usageLogHideCached = true;
+    app.applyLiveLogEvent({
+        seq: 16,
+        type: 'usage.flushed',
+        data: {
+            id: 'usage-cache',
+            request_id: 'req-cache',
+            cache_type: 'exact'
+        }
+    });
+
+    assert.equal(app.usageLog.entries.length, 0);
+    assert.equal(app.usageLog.total, 0);
+    assert.equal(app.auditLog.entries[0]._usage_flushed, true);
+    assert.equal(app.auditLog.entries[0].usage.total_tokens, 14);
+    assert.equal(app.skippedLiveUsageByRequestId['req-cache'].total_tokens, 14);
+});
+
+test('live usage audit summary uses normalized split prompt-cache tokens', () => {
+    const app = createLiveLogsApp();
+    app.auditLog.entries = [{ id: 'audit-cache', request_id: 'req-cache' }];
+
+    app.applyLiveLogEvent({
+        seq: 17,
         type: 'usage.completed',
         data: {
             id: 'usage-cache',
