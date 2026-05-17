@@ -1225,6 +1225,8 @@
                 const showFailover = !!features.fallback || this.workflowRuntimeUsedFailover(runtime);
                 const workflowID = this.workflowChartWorkflowID(source, config.entry);
                 const liveStep = this.workflowLiveCurrentStep(config.entry, runtime, features);
+                const usagePending = this.workflowLiveUsagePending(config.entry);
+                const auditPending = this.workflowLiveAuditPending(config.entry, runtime);
                 const auditFlushed = this.workflowAuditFlushed(config.entry, highlightAsyncPresent);
                 const usageFlushed = this.workflowUsageFlushed(config.entry, highlightAsyncPresent);
                 return {
@@ -1251,8 +1253,8 @@
                     responseNodeSublabel: this.workflowResponseNodeSublabel(runtime),
                     authNodeClass: this.workflowAuthNodeClass(runtime, liveStep === 'auth'),
                     authNodeSublabel: this.workflowAuthNodeSublabel(runtime),
-                    usageNodeClass: this.workflowAsyncNodeClass(showUsage, usageFlushed, liveStep === 'usage'),
-                    auditNodeClass: this.workflowAsyncNodeClass(showAudit, auditFlushed, liveStep === 'audit'),
+                    usageNodeClass: this.workflowAsyncNodeClass(showUsage, usageFlushed, usagePending),
+                    auditNodeClass: this.workflowAsyncNodeClass(showAudit, auditFlushed, auditPending),
                     showAsync,
                     showUsage,
                     showAudit,
@@ -1304,14 +1306,22 @@
                 return hasUsage && !entry._live_pending;
             },
 
+            workflowLiveUsagePending(entry) {
+                return !!(entry && entry._live && entry._usage_live_pending && !entry._usage_flushed);
+            },
+
+            workflowLiveAuditPending(entry, runtime) {
+                if (!entry || !entry._live || this.workflowAuditFlushed(entry, false)) return false;
+                const state = String(entry._live_state || '').trim();
+                return state === 'audit.completed' || !!(runtime && Number.isFinite(runtime.statusCode));
+            },
+
             workflowLiveCurrentStep(entry, runtime, features) {
                 if (!entry || !entry._live) return '';
-                if (entry._usage_live_pending && !entry._usage_flushed) return 'usage';
+                if (this.workflowLiveUsagePending(entry)) return 'usage';
+                if (this.workflowLiveAuditPending(entry, runtime)) return 'audit';
                 if (this.workflowAuditFlushed(entry, false) && !entry._live_pending) return '';
 
-                const state = String(entry._live_state || '').trim();
-                if (state === 'audit.completed') return 'audit';
-                if (runtime && Number.isFinite(runtime.statusCode)) return 'audit';
                 if (runtime && runtime.cacheHit) return 'cache';
                 if (runtime && (runtime.provider || runtime.model)) return 'ai';
                 if (features && features.budget && (entry.workflow_version_id || entry.requested_model)) return 'budget';

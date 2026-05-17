@@ -314,17 +314,28 @@ test('cached live usage events stay visible in default usage preview', () => {
     assert.equal(app.usageLog.total, 1);
     assert.equal(app.usageLog.entries[0].id, 'usage-cache');
     assert.equal(app.usageLog.entries[0]._live_pending, true);
-    assert.equal(app.auditLog.entries[0].usage, undefined);
-    assert.equal(app.auditLog.entries[0]._usage_live_pending, undefined);
-    assert.equal(app.auditLog.entries[0]._usage_live_state, undefined);
+    assert.equal(app.auditLog.entries[0].usage.total_tokens, 14);
+    assert.equal(app.auditLog.entries[0]._usage_live_pending, true);
+    assert.equal(app.auditLog.entries[0]._usage_live_state, 'usage.completed');
 });
 
 test('cached live usage flushed events keep and settle existing previews', () => {
     const app = createLiveLogsApp();
+    app.auditLog.entries = [{
+        id: 'audit-cache',
+        request_id: 'req-cache',
+        cache_type: 'exact',
+        usage: { entries: 1, input_tokens: 10, uncached_input_tokens: 10, output_tokens: 4, total_tokens: 14 },
+        _usage_live_state: 'usage.completed',
+        _usage_live_pending: true
+    }];
     app.usageLog.entries = [{
         id: 'usage-cache',
         request_id: 'req-cache',
         cache_type: 'exact',
+        input_tokens: 10,
+        output_tokens: 4,
+        total_tokens: 14,
         _live: true,
         _live_pending: true
     }];
@@ -345,6 +356,50 @@ test('cached live usage flushed events keep and settle existing previews', () =>
     assert.equal(app.usageLog.entries[0]._live_state, 'usage.flushed');
     assert.equal(app.usageLog.entries[0]._live_pending, false);
     assert.equal(app.usageLog.entries[0]._usage_flushed, true);
+    assert.equal(app.auditLog.entries[0]._usage_flushed, true);
+    assert.equal(app.auditLog.entries[0]._usage_live_pending, false);
+    assert.equal(app.auditLog.entries[0].usage.total_tokens, 14);
+});
+
+test('cached live usage attaches when the audit preview arrives later', () => {
+    const app = createLiveLogsApp();
+
+    app.applyLiveLogEvent({
+        seq: 9,
+        type: 'usage.completed',
+        data: {
+            id: 'usage-cache',
+            request_id: 'req-cache',
+            cache_type: 'exact',
+            model: 'gpt-test',
+            provider: 'openai',
+            input_tokens: 10,
+            output_tokens: 4,
+            total_tokens: 14
+        }
+    });
+    app.applyLiveLogEvent({
+        seq: 10,
+        type: 'audit.completed',
+        data: {
+            id: 'audit-cache',
+            request_id: 'req-cache',
+            cache_type: 'exact',
+            status_code: 200,
+            data: {
+                workflow_features: {
+                    cache: true,
+                    audit: true,
+                    usage: true
+                }
+            }
+        }
+    });
+
+    assert.equal(app.auditLog.entries.length, 1);
+    assert.equal(app.auditLog.entries[0].usage.total_tokens, 14);
+    assert.equal(app.auditLog.entries[0]._usage_live_state, 'usage.completed');
+    assert.equal(app.auditLog.entries[0]._usage_live_pending, true);
 });
 
 test('audit detail merge preserves existing live lifecycle state', () => {

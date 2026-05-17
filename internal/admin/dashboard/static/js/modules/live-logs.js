@@ -186,7 +186,7 @@
                         return merged;
                     }
                     if (!this.auditLiveInsertAllowed()) return;
-                    this.auditLog.entries = [patch, ...currentEntries].slice(0, this.auditLog.limit || 25);
+                    this.auditLog.entries = [this.mergeLiveAuditUsagePatch(patch), ...currentEntries].slice(0, this.auditLog.limit || 25);
                     this.auditLog.total = Number(this.auditLog.total || 0) + 1;
                     return this.auditLog.entries[0];
                 }
@@ -206,7 +206,7 @@
                     return merged;
                 }
                 if (!this.auditLiveInsertAllowed()) return;
-                this.auditLog.entries = [patch, ...currentEntries].slice(0, this.auditLog.limit || 25);
+                this.auditLog.entries = [this.mergeLiveAuditUsagePatch(patch), ...currentEntries].slice(0, this.auditLog.limit || 25);
                 this.auditLog.total = Number(this.auditLog.total || 0) + 1;
                 const inserted = this.auditLog.entries[0];
                 this.fetchExpandedAuditDetailIfReady(inserted);
@@ -222,7 +222,20 @@
                     !Array.isArray(previous.data) && !Array.isArray(patch.data)) {
                     merged.data = { ...previous.data, ...patch.data };
                 }
-                return merged;
+                return this.mergeLiveAuditUsagePatch(merged);
+            },
+
+            mergeLiveAuditUsagePatch(entry) {
+                const usageEntry = this.liveUsageEntryForAudit(entry);
+                return usageEntry ? this.auditEntryWithLiveUsage(entry, usageEntry) : entry;
+            },
+
+            liveUsageEntryForAudit(entry) {
+                const requestID = String(entry && entry.request_id || '').trim();
+                if (!requestID || !this.usageLog || !Array.isArray(this.usageLog.entries)) return null;
+                return this.usageLog.entries.find((usageEntry) => {
+                    return String(usageEntry && usageEntry.request_id || '').trim() === requestID;
+                }) || null;
             },
 
             fetchExpandedAuditDetailIfReady(entry) {
@@ -284,37 +297,38 @@
                 incoming = { ...incoming, _live_state: eventType || incoming._live_state || 'usage.completed' };
                 const id = String(incoming.id || '').trim();
                 if (!id) return;
-                this.applyLiveUsageToAudit(incoming);
                 const currentEntries = (this.usageLog && Array.isArray(this.usageLog.entries)) ? this.usageLog.entries : [];
                 const index = currentEntries.findIndex((entry) => String(entry.id || '').trim() === id);
-                if (this.usageLogHideCached && this.liveUsageEntryCached(incoming) && index < 0) {
-                    return;
-                }
                 if (index >= 0) {
                     const previous = currentEntries[index] || {};
                     const liveState = this.liveUsageStateAfter(previous._live_state, incoming._live_state);
                     const usageFlushed = this.liveUsageEventFlushed(previous) || this.liveUsageEventFlushed({ ...incoming, _live_state: liveState });
-                    currentEntries.splice(index, 1, {
+                    const merged = {
                         ...previous,
                         ...incoming,
                         _live: true,
                         _live_state: liveState || 'usage.completed',
                         _live_pending: !usageFlushed,
                         _usage_flushed: usageFlushed
-                    });
+                    };
+                    currentEntries.splice(index, 1, merged);
                     this.usageLog.entries = [...currentEntries];
+                    this.applyLiveUsageToAudit(merged);
                     return;
                 }
-                if (!this.usageLiveInsertAllowed()) return;
                 const liveState = this.liveUsageStateAfter('', incoming._live_state);
                 const usageFlushed = this.liveUsageEventFlushed({ ...incoming, _live_state: liveState });
-                this.usageLog.entries = [{
+                const liveEntry = {
                     ...incoming,
                     _live: true,
                     _live_state: liveState || 'usage.completed',
                     _live_pending: !usageFlushed,
                     _usage_flushed: usageFlushed
-                }, ...currentEntries].slice(0, this.usageLog.limit || 50);
+                };
+                this.applyLiveUsageToAudit(liveEntry);
+                if (this.usageLogHideCached && this.liveUsageEntryCached(liveEntry)) return;
+                if (!this.usageLiveInsertAllowed()) return;
+                this.usageLog.entries = [liveEntry, ...currentEntries].slice(0, this.usageLog.limit || 50);
                 this.usageLog.total = Number(this.usageLog.total || 0) + 1;
             },
 
@@ -347,36 +361,68 @@
             },
 
             applyLiveUsageToAudit(usageEntry) {
-                if (this.liveUsageEntryCached(usageEntry)) return;
                 const requestID = String(usageEntry && usageEntry.request_id || '').trim();
                 if (!requestID || !this.auditLog || !Array.isArray(this.auditLog.entries)) return;
                 const index = this.auditLog.entries.findIndex((entry) => String(entry.request_id || '').trim() === requestID);
                 if (index < 0) return;
                 const entry = this.auditLog.entries[index];
+                this.auditLog.entries.splice(index, 1, this.auditEntryWithLiveUsage(entry, usageEntry));
+                this.auditLog.entries = [...this.auditLog.entries];
+            },
+
+            auditEntryWithLiveUsage(entry, usageEntry) {
                 const usageLiveState = this.liveUsageStateAfter(entry._usage_live_state, usageEntry._live_state || 'usage.completed');
                 const usageFlushed = this.liveUsageEventFlushed({
                     _live_state: usageLiveState,
                     _usage_flushed: entry._usage_flushed || usageEntry._usage_flushed
                 });
-                const usage = {
-                    entries: 1,
-                    input_tokens: Number(usageEntry.input_tokens || 0),
-                    uncached_input_tokens: Number(usageEntry.input_tokens || 0),
-                    cached_input_tokens: 0,
-                    cache_write_input_tokens: 0,
-                    output_tokens: Number(usageEntry.output_tokens || 0),
-                    total_tokens: Number(usageEntry.total_tokens || 0),
-                    cached_input_ratio: 0,
-                    estimated_cached_characters: 0
-                };
-                this.auditLog.entries.splice(index, 1, {
+                return {
                     ...entry,
-                    usage,
+                    usage: this.liveUsageSummary(usageEntry, entry.usage),
                     _usage_live_state: usageLiveState || 'usage.completed',
                     _usage_live_pending: !usageFlushed,
                     _usage_flushed: usageFlushed
-                });
-                this.auditLog.entries = [...this.auditLog.entries];
+                };
+            },
+
+            liveUsageSummary(usageEntry, previousUsage) {
+                const previous = previousUsage && typeof previousUsage === 'object' && !Array.isArray(previousUsage) ? previousUsage : {};
+                const inputTokens = this.liveNumber(usageEntry.input_tokens, this.liveNumber(previous.input_tokens, 0));
+                const outputTokens = this.liveNumber(usageEntry.output_tokens, this.liveNumber(previous.output_tokens, 0));
+                let uncachedInputTokens = this.liveNumber(usageEntry.uncached_input_tokens, this.liveNumber(previous.uncached_input_tokens, 0));
+                const cachedInputTokens = this.liveNumber(usageEntry.cached_input_tokens, this.liveNumber(previous.cached_input_tokens, 0));
+                const cacheWriteInputTokens = this.liveNumber(usageEntry.cache_write_input_tokens, this.liveNumber(previous.cache_write_input_tokens, 0));
+                if (inputTokens > 0 && uncachedInputTokens + cachedInputTokens + cacheWriteInputTokens === 0) {
+                    uncachedInputTokens = inputTokens;
+                }
+                const normalizedInputTokens = inputTokens || uncachedInputTokens + cachedInputTokens + cacheWriteInputTokens;
+                const totalTokens = this.liveNumber(
+                    usageEntry.total_tokens,
+                    this.liveNumber(previous.total_tokens, normalizedInputTokens + outputTokens)
+                );
+                const cachedInputRatio = this.liveNumber(
+                    usageEntry.cached_input_ratio,
+                    this.liveNumber(previous.cached_input_ratio, normalizedInputTokens > 0 ? cachedInputTokens / normalizedInputTokens : 0)
+                );
+                return {
+                    entries: Math.max(1, this.liveNumber(usageEntry.entries, this.liveNumber(previous.entries, 1))),
+                    input_tokens: normalizedInputTokens,
+                    uncached_input_tokens: uncachedInputTokens,
+                    cached_input_tokens: cachedInputTokens,
+                    cache_write_input_tokens: cacheWriteInputTokens,
+                    output_tokens: outputTokens,
+                    total_tokens: totalTokens,
+                    cached_input_ratio: cachedInputRatio,
+                    estimated_cached_characters: this.liveNumber(
+                        usageEntry.estimated_cached_characters,
+                        this.liveNumber(previous.estimated_cached_characters, cachedInputTokens * 4)
+                    )
+                };
+            },
+
+            liveNumber(value, fallback) {
+                const number = Number(value);
+                return Number.isFinite(number) ? number : fallback;
             },
 
             async fetchAuditEntryDetail(entry) {

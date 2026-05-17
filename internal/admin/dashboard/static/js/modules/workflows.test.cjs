@@ -755,6 +755,9 @@ test('workflowAuditChart marks live current steps blue and waits for async flush
         _live: true,
         _live_state: 'audit.completed',
         _live_pending: true,
+        _usage_live_state: 'usage.completed',
+        _usage_live_pending: true,
+        _usage_flushed: false,
         data: {
             workflow_features: {
                 audit: true,
@@ -764,7 +767,7 @@ test('workflowAuditChart marks live current steps blue and waits for async flush
     });
     assert.equal(auditQueued.responseNodeClass, 'workflow-node-success');
     assert.equal(auditQueued.auditNodeClass, 'workflow-node-current');
-    assert.equal(auditQueued.usageNodeClass, '');
+    assert.equal(auditQueued.usageNodeClass, 'workflow-node-current');
 
     const auditFlushedUsageQueuedEntry = {
         id: 'audit-live-1',
