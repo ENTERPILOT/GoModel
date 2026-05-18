@@ -76,9 +76,10 @@ type geminiTool struct {
 }
 
 type geminiFunctionDeclaration struct {
-	Name        string          `json:"name,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Name                 string          `json:"name,omitempty"`
+	Description          string          `json:"description,omitempty"`
+	Parameters           json.RawMessage `json:"parameters,omitempty"`
+	ParametersJSONSchema json.RawMessage `json:"parametersJsonSchema,omitempty"`
 }
 
 type geminiToolConfig struct {
@@ -358,24 +359,77 @@ func geminiToolsFromOpenAI(tools []map[string]any) ([]geminiTool, error) {
 			continue
 		}
 		description, _ := fn["description"].(string)
-		var parameters json.RawMessage
+		var parametersJSONSchema json.RawMessage
 		if raw, ok := fn["parameters"]; ok {
-			encoded, err := json.Marshal(raw)
+			encoded, err := geminiParametersJSONSchema(raw)
 			if err != nil {
-				return nil, core.NewInvalidRequestError("failed to marshal Gemini tool parameters", err)
+				return nil, err
 			}
-			parameters = encoded
+			parametersJSONSchema = encoded
 		}
 		declarations = append(declarations, geminiFunctionDeclaration{
-			Name:        name,
-			Description: description,
-			Parameters:  parameters,
+			Name:                 name,
+			Description:          description,
+			ParametersJSONSchema: parametersJSONSchema,
 		})
 	}
 	if len(declarations) == 0 {
 		return nil, nil
 	}
 	return []geminiTool{{FunctionDeclarations: declarations}}, nil
+}
+
+func geminiParametersJSONSchema(raw any) (json.RawMessage, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, core.NewInvalidRequestError("failed to marshal Gemini tool parameters", err)
+	}
+	if bytes.Equal(encoded, []byte("null")) {
+		return nil, nil
+	}
+	stripped, err := validateGeminiParametersJSONSchema(encoded)
+	if err != nil {
+		return nil, err
+	}
+	return stripped, nil
+}
+
+func validateGeminiParametersJSONSchema(encoded json.RawMessage) (json.RawMessage, error) {
+	var schema map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &schema); err != nil {
+		return nil, core.NewInvalidRequestError("tool.function.parameters must be an object", nil)
+	}
+	if schema == nil {
+		return nil, core.NewInvalidRequestError("tool.function.parameters must be an object", nil)
+	}
+	addedType := false
+	if rawType, ok := schema["type"]; ok {
+		if bytes.Equal(rawType, []byte("null")) {
+			return nil, core.NewInvalidRequestError("tool.function.parameters must define an object schema", nil)
+		}
+		var schemaType string
+		if err := json.Unmarshal(rawType, &schemaType); err != nil {
+			return nil, core.NewInvalidRequestError("tool.function.parameters must define an object schema", nil)
+		}
+		if schemaType == "" || schemaType != "object" {
+			return nil, core.NewInvalidRequestError("tool.function.parameters must define an object schema", nil)
+		}
+	} else {
+		schema["type"] = json.RawMessage(`"object"`)
+		addedType = true
+	}
+	if _, ok := schema["$schema"]; !ok && !addedType {
+		return encoded, nil
+	}
+	delete(schema, "$schema")
+	stripped, err := json.Marshal(schema)
+	if err != nil {
+		return nil, core.NewInvalidRequestError("failed to marshal Gemini tool parameters", err)
+	}
+	return stripped, nil
 }
 
 func geminiToolConfigFromOpenAI(choice any) *geminiToolConfig {
