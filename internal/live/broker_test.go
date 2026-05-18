@@ -438,7 +438,95 @@ func TestBrokerCloseStopsSubscribersAndRejectsNewSubscriptions(t *testing.T) {
 	b.Close()
 }
 
-func TestBrokerAuditUpdatedPreviewOmitsCapturedDetailData(t *testing.T) {
+func TestBrokerAuditStartedPreviewIncludesRequestHeadersOnly(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: time.Now(),
+		Data: &auditlog.LogData{
+			UserAgent:       "test-agent",
+			APIKeyHash:      "hash123",
+			RequestHeaders:  map[string]string{"Authorization": "[REDACTED]", "Content-Type": "application/json"},
+			ResponseHeaders: map[string]string{"X-Request-ID": "req-1"},
+			RequestBody:     map[string]any{"model": "gpt-test"},
+			ResponseBody:    map[string]any{"id": "chatcmpl-test"},
+		},
+	})
+
+	payload := eventPayload(t, b.events[0])
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("preview data = %T, want object", payload["data"])
+	}
+	headers, ok := data["request_headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("request_headers = %T, want object", data["request_headers"])
+	}
+	if got := headers["Authorization"]; got != "[REDACTED]" {
+		t.Fatalf("request_headers[Authorization] = %v, want [REDACTED]", got)
+	}
+	if got := data["user_agent"]; got != "test-agent" {
+		t.Fatalf("user_agent = %v, want test-agent", got)
+	}
+	if got := data["api_key_hash"]; got != "hash123" {
+		t.Fatalf("api_key_hash = %v, want hash123", got)
+	}
+	if _, ok := data["request_body"]; ok {
+		t.Fatal("started preview data contains request body")
+	}
+	if _, ok := data["response_headers"]; ok {
+		t.Fatal("started preview data contains response headers")
+	}
+	if _, ok := data["response_body"]; ok {
+		t.Fatal("started preview data contains response body")
+	}
+}
+
+func TestBrokerAuditActiveSnapshotMergesNestedPreviewData(t *testing.T) {
+	b := NewBroker(Config{Enabled: true, BufferSize: 1, ReplayLimit: 1})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+
+	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: now,
+		Data: &auditlog.LogData{
+			RequestHeaders: map[string]string{"Authorization": "[REDACTED]"},
+		},
+	})
+	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: now.Add(time.Second),
+		Data: &auditlog.LogData{
+			WorkflowFeatures: &auditlog.WorkflowFeaturesSnapshot{Audit: true, Usage: true},
+		},
+	})
+
+	sub := b.Subscribe(0)
+	if sub == nil {
+		t.Fatal("Subscribe returned nil")
+	}
+	defer sub.Close()
+	if len(sub.Replay) != 1 {
+		t.Fatalf("replay len = %d, want 1", len(sub.Replay))
+	}
+
+	payload := eventPayload(t, sub.Replay[0])
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("preview data = %T, want object", payload["data"])
+	}
+	if headers, ok := data["request_headers"].(map[string]any); !ok || headers["Authorization"] != "[REDACTED]" {
+		t.Fatalf("request_headers = %#v, want redacted authorization", data["request_headers"])
+	}
+	if features, ok := data["workflow_features"].(map[string]any); !ok || features["audit"] != true || features["usage"] != true {
+		t.Fatalf("workflow_features = %#v, want audit and usage flags", data["workflow_features"])
+	}
+}
+
+func TestBrokerAuditUpdatedPreviewIncludesRequestBodyOnly(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
 		ID:         "audit-1",
@@ -446,7 +534,10 @@ func TestBrokerAuditUpdatedPreviewOmitsCapturedDetailData(t *testing.T) {
 		Timestamp:  time.Now(),
 		StatusCode: 200,
 		Data: &auditlog.LogData{
-			RequestBody: map[string]any{"secret": "large body"},
+			RequestHeaders:  map[string]string{"Authorization": "[REDACTED]"},
+			RequestBody:     map[string]any{"model": "gpt-test"},
+			ResponseHeaders: map[string]string{"X-Request-ID": "req-1"},
+			ResponseBody:    map[string]any{"id": "chatcmpl-test"},
 		},
 	})
 	sub := b.Subscribe(0)
@@ -459,11 +550,18 @@ func TestBrokerAuditUpdatedPreviewOmitsCapturedDetailData(t *testing.T) {
 	if err := json.Unmarshal(b.events[0].Data, &payload); err != nil {
 		t.Fatalf("unmarshal preview: %v", err)
 	}
-	if _, ok := payload["data"]; ok {
-		t.Fatal("preview payload contains advanced data")
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("preview data = %T, want object", payload["data"])
 	}
-	if _, ok := payload["request_body"]; ok {
-		t.Fatal("preview payload contains request body")
+	if body, ok := data["request_body"].(map[string]any); !ok || body["model"] != "gpt-test" {
+		t.Fatalf("request_body = %#v, want model", data["request_body"])
+	}
+	if _, ok := data["response_headers"]; ok {
+		t.Fatal("updated preview data contains response headers")
+	}
+	if _, ok := data["response_body"]; ok {
+		t.Fatal("updated preview data contains response body")
 	}
 }
 
@@ -527,8 +625,7 @@ func TestBrokerAuditPreviewIncludesCompactWorkflowData(t *testing.T) {
 				Usage:    true,
 				Fallback: true,
 			},
-			Failover:    &auditlog.FailoverSnapshot{TargetModel: "fallback-model"},
-			RequestBody: map[string]any{"messages": []any{"sensitive"}},
+			Failover: &auditlog.FailoverSnapshot{TargetModel: "fallback-model"},
 		},
 	})
 
@@ -536,9 +633,6 @@ func TestBrokerAuditPreviewIncludesCompactWorkflowData(t *testing.T) {
 	data, ok := payload["data"].(map[string]any)
 	if !ok {
 		t.Fatalf("preview data = %T, want object", payload["data"])
-	}
-	if _, ok := data["request_body"]; ok {
-		t.Fatal("preview data contains request body")
 	}
 	features, ok := data["workflow_features"].(map[string]any)
 	if !ok {

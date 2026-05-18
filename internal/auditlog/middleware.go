@@ -80,6 +80,9 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			if authHeader := req.Header.Get("Authorization"); authHeader != "" {
 				entry.Data.APIKeyHash = hashAPIKey(authHeader)
 			}
+			if cfg.LogHeaders {
+				PopulateRequestHeaders(entry, req.Header)
+			}
 
 			// Store entry in context for potential enrichment by handlers
 			c.Set(string(LogEntryKey), entry)
@@ -412,6 +415,7 @@ func EnrichEntryWithWorkflow(c *echo.Context, workflow *core.Workflow) {
 	}
 
 	enrichEntryWithWorkflow(entry, workflow)
+	populateLiveRequestDataAfterWorkflow(c, entry, workflow)
 	publishLiveAuditUpdate(c, entry)
 }
 
@@ -597,6 +601,21 @@ func publishLiveAuditUpdate(c *echo.Context, entry *LogEntry) {
 		return
 	}
 	publisher.PublishLiveEvent(LiveEventAuditUpdated, entry)
+}
+
+func populateLiveRequestDataAfterWorkflow(c *echo.Context, entry *LogEntry, workflow *core.Workflow) {
+	if c == nil || entry == nil || workflow == nil || !workflow.AuditEnabled() {
+		return
+	}
+	logger, ok := c.Get(string(LogEntryLivePublisherKey)).(LoggerInterface)
+	if !ok || logger == nil {
+		return
+	}
+	cfg := logger.Config()
+	if !cfg.Enabled || !cfg.LogBodies {
+		return
+	}
+	PopulateRequestData(entry, c.Request(), cfg)
 }
 
 func auditEnabledForContext(ctx context.Context) bool {

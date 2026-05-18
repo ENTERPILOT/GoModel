@@ -19,27 +19,42 @@ func PopulateRequestData(entry *LogEntry, req *http.Request, cfg Config) {
 		return
 	}
 
-	data := ensureLogData(entry)
-
 	if cfg.LogHeaders {
-		data.RequestHeaders = extractHeaders(req.Header)
+		PopulateRequestHeaders(entry, req.Header)
 	}
 
 	if !cfg.LogBodies {
 		return
 	}
 
-	snapshot := core.GetRequestSnapshot(req.Context())
-	if snapshot == nil {
+	populateRequestBodyFromSnapshot(entry, core.GetRequestSnapshot(req.Context()))
+}
+
+func populateRequestBodyFromSnapshot(entry *LogEntry, snapshot *core.RequestSnapshot) {
+	if entry == nil || snapshot == nil {
+		return
+	}
+	data := ensureLogData(entry)
+	if data.RequestBody != nil || data.RequestBodyTooBigToHandle {
 		return
 	}
 
-	switch body := snapshot.CapturedBody(); {
+	switch body := snapshot.CapturedBodyView(); {
 	case snapshot.BodyNotCaptured:
 		data.RequestBodyTooBigToHandle = true
 	case body != nil:
 		captureLoggedRequestBody(entry, body)
 	}
+}
+
+// PopulateRequestHeaders copies redacted request headers into the log entry.
+func PopulateRequestHeaders(entry *LogEntry, headers http.Header) {
+	if entry == nil || headers == nil {
+		return
+	}
+
+	data := ensureLogData(entry)
+	data.RequestHeaders = extractHeaders(headers)
 }
 
 // PopulateResponseHeaders copies response headers into the log entry when header logging is enabled.

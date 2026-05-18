@@ -3,6 +3,7 @@ package auditlog
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -39,4 +40,190 @@ func TestEnrichEntryWithWorkflow_PrefersProviderNameForResolvedModel(t *testing.
 	if got := entry.ResolvedModel; got != "openai_test/gpt-5-nano" {
 		t.Fatalf("ResolvedModel = %q, want %q", got, "openai_test/gpt-5-nano")
 	}
+}
+
+func TestMiddlewarePublishesStartedEventWithRedactedRequestHeaders(t *testing.T) {
+	logger := &captureLiveLogger{
+		cfg: Config{
+			Enabled:    true,
+			LogHeaders: true,
+		},
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("X-Request-ID", "req-started")
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("X-Test", "visible")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		if len(logger.events) != 1 {
+			t.Fatalf("live events before handler = %d, want 1", len(logger.events))
+		}
+		return nil
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if len(logger.events) == 0 {
+		t.Fatal("no live events were published")
+	}
+
+	started := logger.events[0]
+	if started.eventType != LiveEventAuditStarted {
+		t.Fatalf("first event type = %q, want %q", started.eventType, LiveEventAuditStarted)
+	}
+	if got := started.requestHeaders["Authorization"]; got != "[REDACTED]" {
+		t.Fatalf("Authorization header = %q, want [REDACTED]", got)
+	}
+	if got := started.requestHeaders["X-Test"]; got != "visible" {
+		t.Fatalf("X-Test header = %q, want visible", got)
+	}
+}
+
+func TestMiddlewarePublishesWorkflowUpdateWithCapturedRequestBody(t *testing.T) {
+	logger := &captureLiveLogger{
+		cfg: Config{
+			Enabled:   true,
+			LogBodies: true,
+		},
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	trackedBody := &readCountCloser{reader: strings.NewReader(`{"model":"from-stream"}`)}
+	req.Body = trackedBody
+	req = req.WithContext(core.WithRequestSnapshot(req.Context(), core.NewRequestSnapshot(
+		http.MethodPost,
+		"/v1/chat/completions",
+		nil,
+		nil,
+		nil,
+		"application/json",
+		[]byte(`{"model":"from-snapshot"}`),
+		false,
+		"req-body",
+		nil,
+	)))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		EnrichEntryWithWorkflow(c, &core.Workflow{})
+		if len(logger.events) != 2 {
+			t.Fatalf("live events before handler completes = %d, want 2", len(logger.events))
+		}
+		return nil
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if trackedBody.readCalls != 0 {
+		t.Fatalf("request body was read %d times, want 0", trackedBody.readCalls)
+	}
+	updated := logger.events[1]
+	if updated.eventType != LiveEventAuditUpdated {
+		t.Fatalf("second event type = %q, want %q", updated.eventType, LiveEventAuditUpdated)
+	}
+	body, ok := updated.requestBody.(map[string]any)
+	if !ok {
+		t.Fatalf("request body = %T, want map[string]any", updated.requestBody)
+	}
+	if got := body["model"]; got != "from-snapshot" {
+		t.Fatalf("request body model = %#v, want from-snapshot", got)
+	}
+}
+
+func TestMiddlewareDoesNotPublishRequestBodyForAuditDisabledWorkflow(t *testing.T) {
+	logger := &captureLiveLogger{
+		cfg: Config{
+			Enabled:   true,
+			LogBodies: true,
+		},
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req = req.WithContext(core.WithRequestSnapshot(req.Context(), core.NewRequestSnapshot(
+		http.MethodPost,
+		"/v1/chat/completions",
+		nil,
+		nil,
+		nil,
+		"application/json",
+		[]byte(`{"model":"hidden"}`),
+		false,
+		"req-hidden",
+		nil,
+	)))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		workflow := &core.Workflow{
+			Policy: &core.ResolvedWorkflowPolicy{
+				VersionID: "audit-disabled",
+				Features: core.WorkflowFeatures{
+					Audit: false,
+				},
+			},
+		}
+		c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), workflow)))
+		EnrichEntryWithWorkflow(c, workflow)
+		if len(logger.events) != 2 {
+			t.Fatalf("live events before handler completes = %d, want 2", len(logger.events))
+		}
+		return nil
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if body := logger.events[1].requestBody; body != nil {
+		t.Fatalf("audit-disabled workflow request body = %#v, want nil", body)
+	}
+}
+
+type capturedLiveEvent struct {
+	eventType      string
+	requestHeaders map[string]string
+	requestBody    any
+}
+
+type captureLiveLogger struct {
+	cfg    Config
+	events []capturedLiveEvent
+}
+
+func (l *captureLiveLogger) Write(_ *LogEntry) {}
+
+func (l *captureLiveLogger) Config() Config {
+	return l.cfg
+}
+
+func (l *captureLiveLogger) Close() error {
+	return nil
+}
+
+func (l *captureLiveLogger) PublishLiveEvent(eventType string, entry *LogEntry) {
+	headers := map[string]string(nil)
+	if entry != nil && entry.Data != nil && entry.Data.RequestHeaders != nil {
+		headers = make(map[string]string, len(entry.Data.RequestHeaders))
+		for key, value := range entry.Data.RequestHeaders {
+			headers[key] = value
+		}
+	}
+	var requestBody any
+	if entry != nil && entry.Data != nil {
+		requestBody = entry.Data.RequestBody
+	}
+	l.events = append(l.events, capturedLiveEvent{
+		eventType:      eventType,
+		requestHeaders: headers,
+		requestBody:    requestBody,
+	})
 }

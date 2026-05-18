@@ -423,7 +423,29 @@ func mergeEventData(base, patch json.RawMessage) json.RawMessage {
 		return append(json.RawMessage(nil), patch...)
 	}
 	for key, value := range patchObject {
-		baseObject[key] = value
+		baseObject[key] = mergeEventDataValue(baseObject[key], value)
+	}
+	merged, err := json.Marshal(baseObject)
+	if err != nil {
+		return append(json.RawMessage(nil), patch...)
+	}
+	return merged
+}
+
+func mergeEventDataValue(base, patch json.RawMessage) json.RawMessage {
+	if len(base) == 0 || len(patch) == 0 {
+		return append(json.RawMessage(nil), patch...)
+	}
+	var baseObject map[string]json.RawMessage
+	var patchObject map[string]json.RawMessage
+	if err := json.Unmarshal(base, &baseObject); err != nil || baseObject == nil {
+		return append(json.RawMessage(nil), patch...)
+	}
+	if err := json.Unmarshal(patch, &patchObject); err != nil || patchObject == nil {
+		return append(json.RawMessage(nil), patch...)
+	}
+	for key, value := range patchObject {
+		baseObject[key] = mergeEventDataValue(baseObject[key], value)
 	}
 	merged, err := json.Marshal(baseObject)
 	if err != nil {
@@ -533,6 +555,15 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 			WorkflowFeatures: entry.Data.WorkflowFeatures,
 			Failover:         entry.Data.Failover,
 		}
+		if auditPreviewIncludesLiveRequestMetadata(eventType) {
+			data.UserAgent = entry.Data.UserAgent
+			data.APIKeyHash = entry.Data.APIKeyHash
+			data.RequestHeaders = entry.Data.RequestHeaders
+		}
+		if auditPreviewIncludesLiveRequestBody(eventType) {
+			data.RequestBody = entry.Data.RequestBody
+			data.RequestBodyTooBigToHandle = entry.Data.RequestBodyTooBigToHandle
+		}
 		if auditPreviewIncludesCapturedData(eventType) {
 			data.UserAgent = entry.Data.UserAgent
 			data.APIKeyHash = entry.Data.APIKeyHash
@@ -552,6 +583,14 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 		}
 	}
 	return preview
+}
+
+func auditPreviewIncludesLiveRequestMetadata(eventType string) bool {
+	return eventType == EventAuditStarted || eventType == EventAuditUpdated
+}
+
+func auditPreviewIncludesLiveRequestBody(eventType string) bool {
+	return eventType == EventAuditUpdated
 }
 
 func auditPreviewIncludesCapturedData(eventType string) bool {
