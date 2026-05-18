@@ -426,6 +426,8 @@ func EnrichEntryWithRequestedModel(c *echo.Context, requestedModel string) {
 // audit entry. This is preferred over requested-model-only enrichment once workflow
 // resolution has completed for the request.
 func EnrichEntryWithWorkflow(c *echo.Context, workflow *core.Workflow) {
+	syncRequestWorkflow(c, workflow)
+
 	entryVal := c.Get(string(LogEntryKey))
 	if entryVal == nil {
 		return
@@ -439,6 +441,21 @@ func EnrichEntryWithWorkflow(c *echo.Context, workflow *core.Workflow) {
 	enrichEntryWithWorkflow(entry, workflow)
 	populateLiveRequestDataAfterWorkflow(c, entry, workflow)
 	publishLiveAuditUpdate(c, entry)
+}
+
+func syncRequestWorkflow(c *echo.Context, workflow *core.Workflow) {
+	if c == nil || workflow == nil {
+		return
+	}
+	req := c.Request()
+	if req == nil {
+		return
+	}
+	ctx := req.Context()
+	if core.GetWorkflow(ctx) == workflow {
+		return
+	}
+	c.SetRequest(req.WithContext(core.WithWorkflow(ctx, workflow)))
 }
 
 // EnrichLogEntryWithWorkflow attaches workflow metadata directly to

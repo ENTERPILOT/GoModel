@@ -136,9 +136,9 @@ func storeWorkflow(c *echo.Context, workflow *core.Workflow) {
 	if c == nil || workflow == nil {
 		return
 	}
-	auditlog.EnrichEntryWithWorkflow(c, workflow)
 	ctx := core.WithWorkflow(c.Request().Context(), workflow)
 	c.SetRequest(c.Request().WithContext(ctx))
+	auditlog.EnrichEntryWithWorkflow(c, workflow)
 }
 
 func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed bool, err error) {

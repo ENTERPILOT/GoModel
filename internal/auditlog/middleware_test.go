@@ -179,8 +179,10 @@ func TestMiddlewareDoesNotPublishRequestBodyForAuditDisabledWorkflow(t *testing.
 				},
 			},
 		}
-		c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), workflow)))
 		EnrichEntryWithWorkflow(c, workflow)
+		if got := core.GetWorkflow(c.Request().Context()); got != workflow {
+			t.Fatal("request context workflow was not synchronized")
+		}
 		if len(logger.events) != 2 {
 			t.Fatalf("live events before handler completes = %d, want 2", len(logger.events))
 		}
@@ -190,8 +192,19 @@ func TestMiddlewareDoesNotPublishRequestBodyForAuditDisabledWorkflow(t *testing.
 	if err := handler(c); err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
+	if len(logger.events) != 3 {
+		t.Fatalf("live events after handler completes = %d, want 3", len(logger.events))
+	}
 	if body := logger.events[1].requestBody; body != nil {
 		t.Fatalf("audit-disabled workflow request body = %#v, want nil", body)
+	}
+	if removed := logger.events[2]; removed.eventType != LiveEventAuditRemoved {
+		t.Fatalf("third event type = %q, want %q", removed.eventType, LiveEventAuditRemoved)
+	} else if removed.requestBody != nil {
+		t.Fatalf("audit removed request body = %#v, want nil", removed.requestBody)
+	}
+	if logger.writes != 0 {
+		t.Fatalf("audit writes = %d, want 0", logger.writes)
 	}
 }
 
@@ -204,9 +217,12 @@ type capturedLiveEvent struct {
 type captureLiveLogger struct {
 	cfg    Config
 	events []capturedLiveEvent
+	writes int
 }
 
-func (l *captureLiveLogger) Write(_ *LogEntry) {}
+func (l *captureLiveLogger) Write(_ *LogEntry) {
+	l.writes++
+}
 
 func (l *captureLiveLogger) Config() Config {
 	return l.cfg
