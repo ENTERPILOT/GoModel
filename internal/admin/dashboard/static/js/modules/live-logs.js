@@ -498,7 +498,7 @@
             },
 
             async fetchAuditEntryDetail(entry) {
-                if (!entry || entry._detail_loading || entry._detail_loaded || this.auditEntryHasDetailData(entry)) return;
+                if (!this.auditEntryShouldFetchDetail(entry)) return;
                 const id = String(entry.id || '').trim();
                 if (!id) return;
                 entry._detail_loading = true;
@@ -518,6 +518,24 @@
                 } finally {
                     this.clearAuditDetailLoading(detailEntry);
                 }
+            },
+
+            auditEntryShouldFetchDetail(entry) {
+                if (!entry || entry._detail_loading || entry._detail_loaded) return false;
+                if (this.auditEntryLiveDetailPending(entry)) return false;
+                if (this.auditEntryNeedsPersistedLiveDetail(entry)) return true;
+                return !this.auditEntryHasDetailData(entry);
+            },
+
+            auditEntryLiveDetailPending(entry) {
+                if (!entry || !entry._live) return false;
+                const state = String(entry._live_state || '').trim();
+                if (state === 'audit.failed') return true;
+                return !entry._audit_flushed && state !== 'audit.flushed' && state !== 'audit.detail';
+            },
+
+            auditEntryNeedsPersistedLiveDetail(entry) {
+                return !!(entry && entry._live && !entry._detail_loaded);
             },
 
             auditEntryHasDetailData(entry) {

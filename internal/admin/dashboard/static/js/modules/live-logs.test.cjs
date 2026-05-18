@@ -657,6 +657,73 @@ test('audit detail fetch skips rows that already have captured detail data', asy
     assert.equal(requests, 0);
 });
 
+test('audit detail fetch waits for live audit rows to flush before loading persisted detail', async () => {
+    let requests = 0;
+    const app = createLiveLogsApp({
+        fetch() {
+            requests++;
+            return Promise.reject(new Error('fetch should not run before flush'));
+        }
+    });
+    const entry = {
+        id: 'audit-1',
+        request_id: 'req-1',
+        _live: true,
+        _live_state: 'audit.updated',
+        _live_pending: true,
+        _audit_flushed: false,
+        data: {
+            request_headers: { authorization: 'Bearer redacted' },
+            request_body: { model: 'gpt-test' }
+        }
+    };
+
+    await app.fetchAuditEntryDetail(entry);
+
+    assert.equal(requests, 0);
+});
+
+test('flushed live audit rows fetch persisted detail even with preview request data', async () => {
+    const requests = [];
+    const app = createLiveLogsApp({
+        fetch(url) {
+            requests.push(url);
+            return Promise.resolve({
+                json: async () => ({
+                    id: 'audit-1',
+                    request_id: 'req-1',
+                    data: {
+                        response_headers: { 'x-request-id': 'req-1' },
+                        response_body: { id: 'chatcmpl-test' }
+                    }
+                })
+            });
+        }
+    });
+    app.auditLog.entries = [{
+        id: 'audit-1',
+        request_id: 'req-1',
+        _live: true,
+        _live_state: 'audit.flushed',
+        _live_pending: false,
+        _audit_flushed: true,
+        data: {
+            request_headers: { authorization: 'Bearer redacted' },
+            request_body: { model: 'gpt-test' }
+        }
+    }];
+
+    await app.fetchAuditEntryDetail(app.auditLog.entries[0]);
+
+    assert.equal(requests.length, 1);
+    assert.match(requests[0], /log_id=audit-1/);
+    assert.equal(app.auditLog.entries[0]._detail_loaded, true);
+    assert.deepEqual(app.auditLog.entries[0].data.request_headers, { authorization: 'Bearer redacted' });
+    assert.deepEqual(app.auditLog.entries[0].data.request_body, { model: 'gpt-test' });
+    assert.deepEqual(app.auditLog.entries[0].data.response_headers, { 'x-request-id': 'req-1' });
+    assert.deepEqual(app.auditLog.entries[0].data.response_body, { id: 'chatcmpl-test' });
+});
+
 test('late queued events do not regress flushed live rows to pending', () => {
     const app = createLiveLogsApp();
 
