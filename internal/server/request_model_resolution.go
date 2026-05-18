@@ -108,13 +108,13 @@ func enrichAuditEntryWithRequestedModel(c *echo.Context, requested core.Requeste
 	if requested.Model == "" {
 		return
 	}
-	workflow := &core.Workflow{}
 	if existing := core.GetWorkflow(c.Request().Context()); existing != nil {
 		cloned := *existing
-		workflow = &cloned
+		cloned.Resolution = &core.RequestModelResolution{
+			Requested: requested,
+		}
+		auditlog.EnrichEntryWithWorkflow(c, &cloned)
+		return
 	}
-	workflow.Resolution = &core.RequestModelResolution{
-		Requested: requested,
-	}
-	auditlog.EnrichEntryWithWorkflow(c, workflow)
+	auditlog.EnrichEntryWithRequestedModel(c, requested.RequestedQualifiedModel())
 }

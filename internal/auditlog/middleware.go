@@ -400,8 +400,30 @@ func EnrichEntry(c *echo.Context, model, provider string) {
 	publishLiveAuditUpdate(c, entry)
 }
 
+// EnrichEntryWithRequestedModel attaches early requested-model metadata to the
+// live audit entry before the final workflow policy has been resolved.
+func EnrichEntryWithRequestedModel(c *echo.Context, requestedModel string) {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return
+	}
+
+	entry, ok := entryVal.(*LogEntry)
+	if !ok || entry == nil {
+		return
+	}
+
+	requestedModel = strings.TrimSpace(requestedModel)
+	if requestedModel == "" {
+		return
+	}
+
+	entry.RequestedModel = requestedModel
+	publishLiveAuditUpdate(c, entry)
+}
+
 // EnrichEntryWithWorkflow attaches workflow metadata to the live
-// audit entry. This is preferred over resolution-only enrichment once workflow
+// audit entry. This is preferred over requested-model-only enrichment once workflow
 // resolution has completed for the request.
 func EnrichEntryWithWorkflow(c *echo.Context, workflow *core.Workflow) {
 	entryVal := c.Get(string(LogEntryKey))

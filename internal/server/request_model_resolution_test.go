@@ -3,9 +3,14 @@ package server
 import (
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/labstack/echo/v5"
+
+	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 )
 
@@ -168,4 +173,110 @@ func TestResolveRequestModel_CanonicalizesAliasOutputThroughProviderResolver(t *
 	if got := resolution.ProviderName; got != "openai_test" {
 		t.Fatalf("ProviderName = %q, want %q", got, "openai_test")
 	}
+}
+
+func TestEnrichAuditEntryWithRequestedModelDoesNotPublishBodyBeforePolicy(t *testing.T) {
+	logger := &requestModelLiveLogger{
+		cfg: auditlog.Config{
+			Enabled:   true,
+			LogBodies: true,
+		},
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req = req.WithContext(core.WithRequestSnapshot(req.Context(), core.NewRequestSnapshot(
+		http.MethodPost,
+		"/v1/chat/completions",
+		nil,
+		nil,
+		nil,
+		"application/json",
+		[]byte(`{"model":"hidden"}`),
+		false,
+		"req-hidden",
+		nil,
+	)))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
+		enrichAuditEntryWithRequestedModel(c, core.NewRequestedModelSelector("gpt-test", ""))
+		if len(logger.events) != 2 {
+			t.Fatalf("live events before policy resolution = %d, want 2", len(logger.events))
+		}
+		updated := logger.events[1]
+		if updated.eventType != auditlog.LiveEventAuditUpdated {
+			t.Fatalf("second event type = %q, want %q", updated.eventType, auditlog.LiveEventAuditUpdated)
+		}
+		if updated.requestedModel != "gpt-test" {
+			t.Fatalf("requested model = %q, want gpt-test", updated.requestedModel)
+		}
+		if updated.requestBody != nil {
+			t.Fatalf("request body before policy resolution = %#v, want nil", updated.requestBody)
+		}
+
+		workflow := &core.Workflow{
+			Policy: &core.ResolvedWorkflowPolicy{
+				VersionID: "audit-disabled",
+				Features: core.WorkflowFeatures{
+					Audit: false,
+				},
+			},
+		}
+		c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), workflow)))
+		return nil
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if len(logger.events) != 3 {
+		t.Fatalf("live events after audit removal = %d, want 3", len(logger.events))
+	}
+	removed := logger.events[2]
+	if removed.eventType != auditlog.LiveEventAuditRemoved {
+		t.Fatalf("third event type = %q, want %q", removed.eventType, auditlog.LiveEventAuditRemoved)
+	}
+	if removed.requestBody != nil {
+		t.Fatalf("removed event request body = %#v, want nil", removed.requestBody)
+	}
+	if logger.writes != 0 {
+		t.Fatalf("audit writes = %d, want 0", logger.writes)
+	}
+}
+
+type requestModelLiveEvent struct {
+	eventType      string
+	requestedModel string
+	requestBody    any
+}
+
+type requestModelLiveLogger struct {
+	cfg    auditlog.Config
+	events []requestModelLiveEvent
+	writes int
+}
+
+func (l *requestModelLiveLogger) Write(_ *auditlog.LogEntry) {
+	l.writes++
+}
+
+func (l *requestModelLiveLogger) Config() auditlog.Config {
+	return l.cfg
+}
+
+func (l *requestModelLiveLogger) Close() error {
+	return nil
+}
+
+func (l *requestModelLiveLogger) PublishLiveEvent(eventType string, entry *auditlog.LogEntry) {
+	event := requestModelLiveEvent{eventType: eventType}
+	if entry != nil {
+		event.requestedModel = entry.RequestedModel
+		if entry.Data != nil {
+			event.requestBody = entry.Data.RequestBody
+		}
+	}
+	l.events = append(l.events, event)
 }

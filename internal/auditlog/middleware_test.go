@@ -112,7 +112,14 @@ func TestMiddlewarePublishesWorkflowUpdateWithCapturedRequestBody(t *testing.T) 
 	c := e.NewContext(req, rec)
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
-		EnrichEntryWithWorkflow(c, &core.Workflow{})
+		EnrichEntryWithWorkflow(c, &core.Workflow{
+			Policy: &core.ResolvedWorkflowPolicy{
+				VersionID: "audit-enabled",
+				Features: core.WorkflowFeatures{
+					Audit: true,
+				},
+			},
+		})
 		if len(logger.events) != 2 {
 			t.Fatalf("live events before handler completes = %d, want 2", len(logger.events))
 		}
