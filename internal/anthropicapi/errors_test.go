@@ -21,10 +21,22 @@ func TestErrorFromGateway(t *testing.T) {
 			wantType:   "invalid_request_error",
 		},
 		{
+			name:       "request too large",
+			err:        core.NewInvalidRequestErrorWithStatus(http.StatusRequestEntityTooLarge, "payload too large", nil),
+			wantStatus: http.StatusRequestEntityTooLarge,
+			wantType:   "request_too_large",
+		},
+		{
 			name:       "authentication",
 			err:        core.NewAuthenticationError("p", "no key"),
 			wantStatus: http.StatusUnauthorized,
 			wantType:   "authentication_error",
+		},
+		{
+			name:       "forbidden maps to permission error",
+			err:        core.ParseProviderError("p", http.StatusForbidden, []byte("forbidden"), nil),
+			wantStatus: http.StatusForbidden,
+			wantType:   "permission_error",
 		},
 		{
 			name:       "not found",

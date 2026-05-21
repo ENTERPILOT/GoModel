@@ -26,6 +26,8 @@ func TestDecodeMessagesRequest(t *testing.T) {
 		{name: "valid", body: `{"model":"m","max_tokens":10,"messages":[]}`},
 		{name: "empty", body: "  ", wantErr: true},
 		{name: "malformed", body: `{"model":`, wantErr: true},
+		{name: "trailing object", body: `{"model":"m","max_tokens":10,"messages":[]}{"x":1}`, wantErr: true},
+		{name: "trailing garbage", body: `{"model":"m","max_tokens":10,"messages":[]} oops`, wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -45,6 +47,31 @@ func TestToChatRequestValidation(t *testing.T) {
 		{name: "missing model", body: `{"max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`},
 		{name: "zero max_tokens", body: `{"model":"m","max_tokens":0,"messages":[{"role":"user","content":"hi"}]}`},
 		{name: "empty messages", body: `{"model":"m","max_tokens":10,"messages":[]}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ToChatRequest(mustDecode(t, tc.body))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if _, ok := err.(*core.GatewayError); !ok {
+				t.Fatalf("expected *core.GatewayError, got %T", err)
+			}
+		})
+	}
+}
+
+func TestToChatRequestRejectsInvalidShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "unsupported role", body: `{"model":"m","max_tokens":10,"messages":[{"role":"system","content":"hi"}]}`},
+		{name: "typo role", body: `{"model":"m","max_tokens":10,"messages":[{"role":"assisstant","content":"hi"}]}`},
+		{name: "malformed system", body: `{"model":"m","max_tokens":10,"system":42,"messages":[{"role":"user","content":"hi"}]}`},
+		{name: "non-text system block", body: `{"model":"m","max_tokens":10,"system":[{"type":"image"}],"messages":[{"role":"user","content":"hi"}]}`},
+		{name: "malformed tool_result content", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":42}]}]}`},
+		{name: "non-text tool_result block", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"image"}]}]}]}`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

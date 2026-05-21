@@ -80,7 +80,7 @@ by the **actual** provider that served the request, so they work without changes
 
 For streaming, the observer ordering is the key decision:
 
-```
+```text
 provider chat SSE
   → ObservedSSEStream(audit + usage observers)   # observers see canonical OpenAI chat chunks
     → anthropicapi.StreamConverter               # outermost: chat SSE → Anthropic SSE

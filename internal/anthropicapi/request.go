@@ -20,6 +20,11 @@ func DecodeMessagesRequest(body []byte) (*MessagesRequest, error) {
 	if err := dec.Decode(&req); err != nil {
 		return nil, err
 	}
+	// Reject trailing bytes after the JSON object so a malformed body cannot
+	// look valid while audit/cache inputs disagree with the parsed request.
+	if dec.More() {
+		return nil, fmt.Errorf("request body must contain a single JSON object")
+	}
 	return &req, nil
 }
 
@@ -79,17 +84,25 @@ func ToChatRequest(req *MessagesRequest) (*core.ChatRequest, error) {
 func convertMessages(req *MessagesRequest) ([]core.Message, error) {
 	out := make([]core.Message, 0, len(req.Messages)+1)
 
-	if system := systemText(req.System); system != "" {
+	system, err := systemText(req.System)
+	if err != nil {
+		return nil, core.NewInvalidRequestError(err.Error(), err)
+	}
+	if system != "" {
 		out = append(out, core.Message{Role: "system", Content: system})
 	}
 
 	for i, msg := range req.Messages {
+		if msg.Role != "user" && msg.Role != "assistant" {
+			return nil, core.NewInvalidRequestError(
+				fmt.Sprintf("messages[%d].role must be \"user\" or \"assistant\"", i), nil)
+		}
 		text, blocks, err := parseContent(msg.Content)
 		if err != nil {
 			return nil, core.NewInvalidRequestError(fmt.Sprintf("messages[%d].content: %v", i, err), err)
 		}
 		if blocks == nil {
-			out = append(out, core.Message{Role: normalizeRole(msg.Role), Content: text})
+			out = append(out, core.Message{Role: msg.Role, Content: text})
 			continue
 		}
 		converted, err := convertBlockMessage(msg.Role, blocks)
@@ -140,10 +153,14 @@ func convertBlockMessage(role string, blocks []ContentBlock) ([]core.Message, er
 			if id == "" {
 				return nil, fmt.Errorf("tool_result block is missing tool_use_id")
 			}
+			content, err := toolResultText(block.Content)
+			if err != nil {
+				return nil, err
+			}
 			toolMessages = append(toolMessages, core.Message{
 				Role:       "tool",
 				ToolCallID: id,
-				Content:    toolResultText(block.Content),
+				Content:    content,
 			})
 		case "thinking", "redacted_thinking":
 			// Extended-thinking history has no canonical chat equivalent; drop
@@ -154,14 +171,14 @@ func convertBlockMessage(role string, blocks []ContentBlock) ([]core.Message, er
 			// canonical chat equivalent. Reject them rather than silently
 			// dropping the data, which would make the model answer as if the
 			// attachment were never sent.
-			return nil, fmt.Errorf("unsupported content block type %q; use the /p/anthropic passthrough for provider-native features", block.Type)
+			return nil, fmt.Errorf("unsupported content block type %q; use the /p/anthropic/v1/messages passthrough for provider-native features", block.Type)
 		}
 	}
 
 	messages := toolMessages
 	if content := collapseParts(parts); content != nil || len(toolCalls) > 0 {
 		messages = append(messages, core.Message{
-			Role:      normalizeRole(role),
+			Role:      role,
 			Content:   content,
 			ToolCalls: toolCalls,
 		})
@@ -193,13 +210,6 @@ func collapseParts(parts []core.ContentPart) core.MessageContent {
 	return parts
 }
 
-func normalizeRole(role string) string {
-	if role == "assistant" {
-		return "assistant"
-	}
-	return "user"
-}
-
 // parseContent decodes a polymorphic Anthropic content value. When the value is
 // a string, blocks is nil and text holds the string. When it is an array,
 // blocks is non-nil (possibly empty).
@@ -226,41 +236,51 @@ func parseContent(raw json.RawMessage) (text string, blocks []ContentBlock, err 
 }
 
 // systemText flattens the Anthropic system field (string or text-block array)
-// into a single string.
-func systemText(raw json.RawMessage) string {
+// into a single string. A present but malformed system value is an error
+// rather than silently dropped: the model must not run without the caller's
+// instructions.
+func systemText(raw json.RawMessage) (string, error) {
 	text, blocks, err := parseContent(raw)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("system: %v", err)
 	}
 	if blocks == nil {
-		return strings.TrimSpace(text)
+		return strings.TrimSpace(text), nil
 	}
 	parts := make([]string, 0, len(blocks))
 	for _, block := range blocks {
-		if block.Type == "text" && block.Text != "" {
+		if block.Type != "text" {
+			return "", fmt.Errorf("system block type %q is not supported; only text is allowed", block.Type)
+		}
+		if block.Text != "" {
 			parts = append(parts, block.Text)
 		}
 	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+	return strings.TrimSpace(strings.Join(parts, "\n\n")), nil
 }
 
 // toolResultText extracts the text payload of a tool_result block content,
-// which itself may be a string or an array of (text) blocks.
-func toolResultText(raw json.RawMessage) string {
+// which itself may be a string or an array of text blocks. A present but
+// malformed or non-text tool_result content is an error rather than silently
+// dropped: the downstream provider must not receive an empty tool response.
+func toolResultText(raw json.RawMessage) (string, error) {
 	text, blocks, err := parseContent(raw)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("tool_result content: %v", err)
 	}
 	if blocks == nil {
-		return text
+		return text, nil
 	}
 	parts := make([]string, 0, len(blocks))
 	for _, block := range blocks {
-		if block.Type == "text" && block.Text != "" {
+		if block.Type != "text" {
+			return "", fmt.Errorf("tool_result content block type %q is not supported; only text is allowed", block.Type)
+		}
+		if block.Text != "" {
 			parts = append(parts, block.Text)
 		}
 	}
-	return strings.Join(parts, "\n")
+	return strings.Join(parts, "\n"), nil
 }
 
 func imageURLFromSource(source *Source) (string, error) {
@@ -308,7 +328,7 @@ func convertTools(tools []Tool) ([]map[string]any, error) {
 		// canonical chat equivalent; reject them rather than mistranslating
 		// them into a phantom custom function the gateway cannot execute.
 		if t := strings.TrimSpace(tool.Type); t != "" && t != "custom" {
-			return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d]: server tool type %q is not supported; use the /p/anthropic passthrough for provider-native tools", i, tool.Type), nil)
+			return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d]: server tool type %q is not supported; use the /p/anthropic/v1/messages passthrough for provider-native tools", i, tool.Type), nil)
 		}
 		if strings.TrimSpace(tool.Name) == "" {
 			return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d].name is required", i), nil)
@@ -413,7 +433,10 @@ func EstimateInputTokens(req *MessagesRequest) int {
 	if req == nil {
 		return 0
 	}
-	chars := len(systemText(req.System))
+	// Errors are ignored here: count_tokens is a best-effort heuristic and
+	// must not fail on malformed sub-fields that ToChatRequest would reject.
+	system, _ := systemText(req.System)
+	chars := len(system)
 	for _, msg := range req.Messages {
 		text, blocks, err := parseContent(msg.Content)
 		if err != nil {
@@ -423,7 +446,8 @@ func EstimateInputTokens(req *MessagesRequest) int {
 		for _, block := range blocks {
 			chars += len(block.Text) + len(block.Thinking)
 			chars += len(bytes.TrimSpace(block.Input))
-			chars += len(toolResultText(block.Content))
+			result, _ := toolResultText(block.Content)
+			chars += len(result)
 		}
 	}
 	for _, tool := range req.Tools {
