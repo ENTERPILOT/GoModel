@@ -65,8 +65,11 @@ features that have no canonical equivalent are not preserved end to end:
 - **`cache_control` breakpoints** are dropped — prompt-caching cost benefits are not
   carried through the canonical hop.
 - **Extended-thinking signatures** and `thinking` blocks on input messages are dropped.
-- **Server/built-in tools** (web search, code execution, …) are not supported; only
-  custom tools (`name` + `input_schema`) translate.
+- **Server/built-in tools** (web search, code execution, …) are rejected with a clear
+  `400`; only custom tools (`type` absent or `"custom"`) translate.
+- **`top_k`** is dropped — it has no portable OpenAI-compatible equivalent, and
+  OpenAI-family providers reject unknown request fields. `temperature` and `top_p`
+  are forwarded.
 - **`document` and other non-text/image content blocks** are rejected with a clear
   `400` error rather than silently dropped.
 - **`stop_sequences`** are honored, but a stop-sequence-triggered completion reports

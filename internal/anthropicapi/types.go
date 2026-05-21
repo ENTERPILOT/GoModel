@@ -64,8 +64,11 @@ type Source struct {
 	URL       string `json:"url,omitempty"`
 }
 
-// Tool is an Anthropic custom tool definition.
+// Tool is an Anthropic tool definition. A custom tool has no Type (or Type
+// "custom"); a server/built-in tool (web search, code execution, …) carries a
+// versioned Type and is rejected during translation — see convertTools.
 type Tool struct {
+	Type        string          `json:"type,omitempty"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"input_schema,omitempty"`

@@ -154,10 +154,11 @@ func TestToChatRequestToolUseAndResult(t *testing.T) {
 }
 
 func TestToChatRequestTools(t *testing.T) {
+	// An explicit type of "custom" is accepted alongside the typeless form.
 	chat, err := ToChatRequest(mustDecode(t, `{
 		"model":"m","max_tokens":10,
 		"messages":[{"role":"user","content":"hi"}],
-		"tools":[{"name":"get_weather","description":"weather","input_schema":{"type":"object","properties":{}}}],
+		"tools":[{"type":"custom","name":"get_weather","description":"weather","input_schema":{"type":"object","properties":{}}}],
 		"tool_choice":{"type":"tool","name":"get_weather"}
 	}`))
 	if err != nil {
@@ -176,6 +177,21 @@ func TestToChatRequestTools(t *testing.T) {
 	choice, ok := chat.ToolChoice.(map[string]any)
 	if !ok || choice["type"] != "function" {
 		t.Fatalf("tool_choice = %#v", chat.ToolChoice)
+	}
+}
+
+func TestToChatRequestRejectsServerTool(t *testing.T) {
+	_, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[{"type":"web_search_20250305","name":"web_search"}]
+	}`))
+	if err == nil {
+		t.Fatal("expected error for Anthropic server tool")
+	}
+	gatewayErr, ok := err.(*core.GatewayError)
+	if !ok || gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("err = %#v, want invalid_request_error", err)
 	}
 }
 
@@ -259,13 +275,17 @@ func TestToChatRequestExtraFields(t *testing.T) {
 	for key, want := range map[string]string{
 		"stop":  `["STOP"]`,
 		"top_p": `0.9`,
-		"top_k": `40`,
 		"user":  `"u-123"`,
 	} {
 		raw := chat.ExtraFields.Lookup(key)
 		if string(raw) != want {
 			t.Errorf("ExtraFields[%q] = %s, want %s", key, raw, want)
 		}
+	}
+	// top_k has no portable OpenAI-compatible equivalent and OpenAI-family
+	// providers reject unknown request fields; it must be dropped, not carried.
+	if raw := chat.ExtraFields.Lookup("top_k"); len(raw) > 0 {
+		t.Errorf("ExtraFields[top_k] = %s, want dropped", raw)
 	}
 }
 

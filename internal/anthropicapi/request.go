@@ -303,6 +303,13 @@ func convertTools(tools []Tool) ([]map[string]any, error) {
 	}
 	out := make([]map[string]any, 0, len(tools))
 	for i, tool := range tools {
+		// A non-empty type other than "custom" marks an Anthropic server/
+		// built-in tool (web search, code execution, …). These have no
+		// canonical chat equivalent; reject them rather than mistranslating
+		// them into a phantom custom function the gateway cannot execute.
+		if t := strings.TrimSpace(tool.Type); t != "" && t != "custom" {
+			return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d]: server tool type %q is not supported; use the /p/anthropic passthrough for provider-native tools", i, tool.Type), nil)
+		}
 		if strings.TrimSpace(tool.Name) == "" {
 			return nil, core.NewInvalidRequestError(fmt.Sprintf("tools[%d].name is required", i), nil)
 		}
@@ -372,8 +379,14 @@ func thinkingToReasoning(thinking *Thinking) *core.Reasoning {
 	return &core.Reasoning{Effort: effort}
 }
 
-// buildExtraFields carries Anthropic request fields that have no first-class
-// canonical field through as OpenAI-compatible extra fields.
+// buildExtraFields carries Anthropic request fields that have a portable
+// OpenAI-compatible equivalent through as extra fields.
+//
+// top_k is deliberately not carried: it is not a valid OpenAI Chat Completions
+// parameter, and the OpenAI-family providers forward request fields verbatim
+// and reject unknown ones with a 400. Carrying it would make any request with
+// top_k fail when routed to those providers, so it is dropped (see ADR-0007).
+// stop, top_p, and user are all portable across OpenAI-compatible providers.
 func buildExtraFields(req *MessagesRequest) core.UnknownJSONFields {
 	fields := map[string]json.RawMessage{}
 	add := func(key string, value any) {
@@ -386,9 +399,6 @@ func buildExtraFields(req *MessagesRequest) core.UnknownJSONFields {
 	}
 	if req.TopP != nil {
 		add("top_p", *req.TopP)
-	}
-	if req.TopK != nil {
-		add("top_k", *req.TopK)
 	}
 	if req.Metadata != nil && strings.TrimSpace(req.Metadata.UserID) != "" {
 		add("user", req.Metadata.UserID)

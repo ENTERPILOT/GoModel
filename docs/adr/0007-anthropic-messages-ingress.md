@@ -116,8 +116,14 @@ end to end, including request-validation and upstream errors.
   benefits are not preserved when translating through `core.ChatRequest`.
 - **Extended-thinking signatures and `thinking` blocks on input messages** — dropped; the
   canonical chat type has no first-class field for them.
-- **Server/built-in tools** (web search, code execution, etc.) — only custom tools
-  (`name` + `input_schema`) translate; server tools are not supported.
+- **Server/built-in tools** (web search, code execution, etc.) — a `tools[]` entry
+  with a versioned `type` (e.g. `web_search_20250305`) is **rejected with a clear
+  `400`** rather than mistranslated into a phantom custom function the gateway cannot
+  execute. Only custom tools (`type` absent or `"custom"`) translate.
+- **`top_k`** — dropped. It is not a valid OpenAI Chat Completions parameter, and the
+  OpenAI-family providers forward request fields verbatim and reject unknown ones with
+  a `400`; carrying it would make any `top_k` request fail when routed to those
+  providers. `temperature` and `top_p` are portable and are carried.
 - **`document` and other non-text/image content blocks** — these carry caller payload
   with no canonical chat equivalent, so they are rejected with a clear `400` error
   rather than silently dropped (which would make the model answer as if the attachment
