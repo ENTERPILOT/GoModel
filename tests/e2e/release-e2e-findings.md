@@ -12,8 +12,8 @@ virtual model IDs` #344).
    API ingress endpoints (`POST /v1/messages`, `POST /v1/messages/count_tokens`)
    and ran them.
 
-The runner only parsed 2-digit scenario IDs (`^### S[0-9][0-9] `). It was
-widened to `^### S[0-9][0-9]+ ` in `run-release-e2e.sh` so `S96`–`S109` (and
+The runner only parsed 2-digit scenario IDs (`/^### S[0-9][0-9] /`). It was
+widened to `/^### S[0-9][0-9]+ /` in `run-release-e2e.sh` so `S96`–`S109` (and
 any future 3-digit IDs) parse. No other runner behavior changed.
 
 ## Stack
@@ -88,7 +88,7 @@ When a tool is forced via `tool_choice`, OpenAI (`gpt-4.1-nano`) returns
 `finish_reason: "stop"` **with** a non-empty `tool_calls` list — confirmed with a
 direct `/v1/chat/completions` call:
 
-```
+```json
 { "finish_reason": "stop", "has_tool_calls": 1 }
 ```
 
