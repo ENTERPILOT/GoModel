@@ -52,6 +52,15 @@ function freeFormObjectSchema() {
   };
 }
 
+function stringOrFreeFormObjectSchema() {
+  return {
+    oneOf: [
+      { type: "string" },
+      freeFormObjectSchema(),
+    ],
+  };
+}
+
 function ensureAnthropicContentBlockSchema() {
   if (!spec.definitions) {
     throw new Error("missing Swagger definitions");
@@ -64,7 +73,7 @@ function ensureAnthropicContentBlockSchema() {
       input: freeFormObjectSchema(),
       is_error: { type: "boolean" },
       name: { type: "string" },
-      source: freeFormObjectSchema(),
+      source: stringOrFreeFormObjectSchema(),
       text: { type: "string" },
       thinking: { type: "string" },
       tool_use_id: { type: "string" },

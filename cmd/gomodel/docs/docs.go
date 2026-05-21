@@ -6293,8 +6293,15 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "source": {
-                    "type": "object",
-                    "additionalProperties": true
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    ]
                 },
                 "text": {
                     "type": "string"
