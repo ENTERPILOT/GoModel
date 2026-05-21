@@ -7,23 +7,42 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"gomodel/internal/anthropicapi"
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 )
 
-// handleError converts gateway errors to appropriate HTTP responses.
+// handleError converts gateway errors to an HTTP response, rendered in the wire
+// dialect of the request path (Anthropic envelope for /v1/messages, otherwise
+// the OpenAI-compatible envelope).
 func handleError(c *echo.Context, err error) error {
-	if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
-		logHandledError(c, gatewayErr)
-		auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message, gatewayErrorCode(gatewayErr))
-		applyErrorResponseHeaders(c, err)
-		return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
+	gatewayErr, ok := errors.AsType[*core.GatewayError](err)
+	if !ok {
+		gatewayErr = core.NewProviderError("", http.StatusInternalServerError, "an unexpected error occurred", err)
 	}
-
-	gatewayErr := core.NewProviderError("", http.StatusInternalServerError, "an unexpected error occurred", err)
 	logHandledError(c, gatewayErr)
 	auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message, gatewayErrorCode(gatewayErr))
+	applyErrorResponseHeaders(c, err)
+	return writeGatewayError(c, gatewayErr)
+}
+
+// writeGatewayError renders a gateway error in the request's wire dialect
+// without logging or audit enrichment, for callers that already recorded it.
+func writeGatewayError(c *echo.Context, gatewayErr *core.GatewayError) error {
+	if requestDialect(c) == "anthropic" {
+		status, body := anthropicapi.ErrorFromGateway(gatewayErr)
+		return c.JSON(status, body)
+	}
 	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
+}
+
+// requestDialect reports the ingress wire dialect classified for the request
+// path (e.g. "anthropic", "openai_compat"), or "" when unclassified.
+func requestDialect(c *echo.Context) string {
+	if c == nil || c.Request() == nil {
+		return ""
+	}
+	return core.DescribeEndpointPath(c.Request().URL.Path).Dialect
 }
 
 type responseHeaderError interface {

@@ -285,10 +285,11 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	}
 
 	anthropicReq := &anthropicRequest{
-		Model:       req.Model,
-		Messages:    make([]anthropicMessage, 0, len(req.Messages)),
-		Temperature: req.Temperature,
-		Stream:      req.Stream,
+		Model:         req.Model,
+		Messages:      make([]anthropicMessage, 0, len(req.Messages)),
+		Temperature:   req.Temperature,
+		Stream:        req.Stream,
+		StopSequences: stopSequencesFromExtra(req.ExtraFields),
 	}
 
 	if req.MaxTokens != nil {
@@ -526,6 +527,42 @@ func anthropicCacheControlFromExtra(extraFields core.UnknownJSONFields) (json.Ra
 		return nil, core.NewInvalidRequestError("anthropic cache_control must be an object", nil)
 	}
 	return core.CloneRawJSON(trimmed), nil
+}
+
+// stopSequencesFromExtra maps the OpenAI-compatible stop field (a string or an
+// array of strings, carried in the request's extra fields) to Anthropic's
+// stop_sequences. Empty or malformed values yield no sequences.
+func stopSequencesFromExtra(extraFields core.UnknownJSONFields) []string {
+	raw := bytes.TrimSpace(extraFields.Lookup("stop"))
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+
+	switch raw[0] {
+	case '"':
+		var single string
+		if err := json.Unmarshal(raw, &single); err != nil || single == "" {
+			return nil
+		}
+		return []string{single}
+	case '[':
+		var list []string
+		if err := json.Unmarshal(raw, &list); err != nil {
+			return nil
+		}
+		sequences := make([]string, 0, len(list))
+		for _, item := range list {
+			if item != "" {
+				sequences = append(sequences, item)
+			}
+		}
+		if len(sequences) == 0 {
+			return nil
+		}
+		return sequences
+	default:
+		return nil
+	}
 }
 
 func convertMessageContentToAnthropic(content any) (any, error) {

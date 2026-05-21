@@ -75,6 +75,16 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationEmbeddings,
 		}
+	case path == "/v1/messages" || path == "/v1/messages/count_tokens":
+		// Anthropic Messages dialect. It is translated to the canonical chat
+		// type at ingress and runs through the chat-completions pipeline, so it
+		// is classified as a chat-completions operation (see ADR-0007).
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			IngressManaged:   true,
+			Dialect:          "anthropic",
+			Operation:        OperationChatCompletions,
+		}
 	case path == "/v1/batches" || strings.HasPrefix(path, "/v1/batches/"):
 		return EndpointDescriptor{
 			ModelInteraction: true,

@@ -17,16 +17,17 @@ type anthropicOutputConfig struct {
 
 // anthropicRequest represents the Anthropic API request format
 type anthropicRequest struct {
-	Model        string                 `json:"model"`
-	Messages     []anthropicMessage     `json:"messages"`
-	Tools        []anthropicTool        `json:"tools,omitempty"`
-	ToolChoice   *anthropicToolChoice   `json:"tool_choice,omitempty"`
-	MaxTokens    int                    `json:"max_tokens"`
-	Temperature  *float64               `json:"temperature,omitempty"`
-	System       any                    `json:"system,omitempty"`
-	Stream       bool                   `json:"stream,omitempty"`
-	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
-	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+	Model         string                 `json:"model"`
+	Messages      []anthropicMessage     `json:"messages"`
+	Tools         []anthropicTool        `json:"tools,omitempty"`
+	ToolChoice    *anthropicToolChoice   `json:"tool_choice,omitempty"`
+	MaxTokens     int                    `json:"max_tokens"`
+	Temperature   *float64               `json:"temperature,omitempty"`
+	System        any                    `json:"system,omitempty"`
+	Stream        bool                   `json:"stream,omitempty"`
+	StopSequences []string               `json:"stop_sequences,omitempty"`
+	Thinking      *anthropicThinking     `json:"thinking,omitempty"`
+	OutputConfig  *anthropicOutputConfig `json:"output_config,omitempty"`
 }
 
 type anthropicTool struct {

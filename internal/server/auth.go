@@ -59,14 +59,14 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 			authHeader := c.Request().Header.Get("Authorization")
 			if authHeader == "" {
 				authErr := authenticationError(c, "missing authorization header")
-				return c.JSON(authErr.HTTPStatusCode(), authErr.ToJSON())
+				return writeGatewayError(c, authErr)
 			}
 
 			// Extract Bearer token
 			const prefix = "Bearer "
 			if !strings.HasPrefix(authHeader, prefix) {
 				authErr := authenticationError(c, "invalid authorization header format, expected 'Bearer <token>'")
-				return c.JSON(authErr.HTTPStatusCode(), authErr.ToJSON())
+				return writeGatewayError(c, authErr)
 			}
 
 			token := strings.TrimPrefix(authHeader, prefix)
@@ -95,11 +95,11 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 				}
 
 				authErr := authenticationErrorWithAudit(c, authFailureMessage(err), "authentication failed")
-				return c.JSON(authErr.HTTPStatusCode(), authErr.ToJSON())
+				return writeGatewayError(c, authErr)
 			}
 
 			authErr := authenticationError(c, "invalid master key")
-			return c.JSON(authErr.HTTPStatusCode(), authErr.ToJSON())
+			return writeGatewayError(c, authErr)
 		}
 	}
 }

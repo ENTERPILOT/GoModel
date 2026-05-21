@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1306,6 +1307,37 @@ func TestConvertToAnthropicRequest(t *testing.T) {
 				t.Fatalf("convertToAnthropicRequest() error = %v", err)
 			}
 			tt.checkFn(t, result)
+		})
+	}
+}
+
+func TestConvertToAnthropicRequest_MapsStopSequences(t *testing.T) {
+	tests := []struct {
+		name string
+		stop string
+		want []string
+	}{
+		{name: "array", stop: `["FOO","BAR"]`, want: []string{"FOO", "BAR"}},
+		{name: "single string", stop: `"END"`, want: []string{"END"}},
+		{name: "empty entries dropped", stop: `["",""]`, want: nil},
+		{name: "null", stop: `null`, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &core.ChatRequest{
+				Model:    "claude-sonnet-4-5-20250929",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"stop": json.RawMessage(tt.stop),
+				}),
+			}
+			result, err := convertToAnthropicRequest(req)
+			if err != nil {
+				t.Fatalf("convertToAnthropicRequest() error = %v", err)
+			}
+			if !slices.Equal(result.StopSequences, tt.want) {
+				t.Errorf("StopSequences = %v, want %v", result.StopSequences, tt.want)
+			}
 		})
 	}
 }

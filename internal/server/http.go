@@ -301,6 +301,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	e.GET("/v1/models", handler.ListModels)
 	e.POST("/v1/chat/completions", handler.ChatCompletion)
+	e.POST("/v1/messages", handler.Messages)
+	e.POST("/v1/messages/count_tokens", handler.CountMessageTokens)
 	e.POST("/v1/responses/input_tokens", handler.ResponseInputTokens)
 	e.POST("/v1/responses/compact", handler.CompactResponse)
 	e.GET("/v1/responses/:id/input_items", handler.ListResponseInputItems)

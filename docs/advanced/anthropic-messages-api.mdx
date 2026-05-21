@@ -1,0 +1,83 @@
+---
+title: "Anthropic Messages API"
+description: "Accept Anthropic-style /v1/messages requests and route them to any provider."
+icon: "message-square-code"
+tag: "Beta"
+---
+
+## Overview
+
+GoModel accepts the **Anthropic Messages API** request dialect at `POST /v1/messages`,
+in addition to its OpenAI-compatible API. Clients and SDKs that speak the Anthropic
+format can point at GoModel unchanged.
+
+The request is translated to GoModel's canonical chat type at ingress and runs through
+the same pipeline as `/v1/chat/completions` — so model aliases, workflow policy,
+budgets, failover, the response cache, usage/cost tracking, and audit logging all
+apply. Because every provider implements chat completion, an Anthropic-format request
+can be routed to **any** configured provider (OpenAI, Gemini, Bedrock, and others),
+not only Anthropic.
+
+This differs from the [passthrough API](/features/passthrough-api): `/p/anthropic/v1/messages`
+forwards bytes verbatim to the Anthropic upstream only, while the managed `/v1/messages`
+endpoint routes anywhere and is fully managed.
+
+## Supported endpoints
+
+| Endpoint | Behavior |
+| --- | --- |
+| `POST /v1/messages` | Creates a message through translated model routing. Supports streaming (`stream: true`) with Anthropic-format SSE events. |
+| `POST /v1/messages/count_tokens` | Returns a heuristic input token estimate. |
+
+## Example
+
+```bash
+curl https://your-gateway/v1/messages \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-6",
+    "max_tokens": 256,
+    "system": "Be concise.",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
+
+The response uses the Anthropic Messages shape (`type: "message"`, `content` blocks,
+`stop_reason`, `usage`). Errors use the Anthropic error envelope
+(`{"type": "error", "error": {...}}`). `max_tokens` is required, as in the Anthropic API.
+
+Streaming responses emit the Anthropic SSE event sequence (`message_start`,
+`content_block_start`/`content_block_delta`/`content_block_stop`, `message_delta`,
+`message_stop`).
+
+## Cost tracking and audit logs
+
+`/v1/messages` requests are tracked and audited exactly like the OpenAI-compatible
+routes. Cost is computed from the actual provider that served the request, and usage
+is recorded under the `/v1/messages` endpoint so it can be filtered in the dashboard.
+
+## Limitations
+
+`/v1/messages` translates through GoModel's canonical chat type. Anthropic-specific
+features that have no canonical equivalent are not preserved end to end:
+
+- **`cache_control` breakpoints** are dropped — prompt-caching cost benefits are not
+  carried through the canonical hop.
+- **Extended-thinking signatures** and `thinking` blocks on input messages are dropped.
+- **Server/built-in tools** (web search, code execution, …) are not supported; only
+  custom tools (`name` + `input_schema`) translate.
+- **`document` and other non-text/image content blocks** are rejected with a clear
+  `400` error rather than silently dropped.
+- **`stop_sequences`** are honored, but a stop-sequence-triggered completion reports
+  `stop_reason: "end_turn"` instead of `"stop_sequence"` (the output is still truncated
+  correctly).
+- **`count_tokens`** returns a provider-agnostic heuristic estimate (≈ characters / 4),
+  not a tokenizer-exact count. Use it for budgeting and UX sizing, not hard
+  context-limit decisions.
+
+For byte-exact Anthropic fidelity (including prompt-cache breakpoints), use the
+`/p/anthropic/v1/messages` passthrough route instead.
+
+See [ADR-0007](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0007-anthropic-messages-ingress.md)
+for the design rationale and tradeoffs.

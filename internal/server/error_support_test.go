@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,54 @@ import (
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 )
+
+func TestHandleError_RendersDialectSpecificEnvelope(t *testing.T) {
+	tests := []struct {
+		name          string
+		path          string
+		wantAnthropic bool
+	}{
+		{name: "anthropic dialect", path: "/v1/messages", wantAnthropic: true},
+		{name: "anthropic count_tokens", path: "/v1/messages/count_tokens", wantAnthropic: true},
+		{name: "openai dialect", path: "/v1/chat/completions", wantAnthropic: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, tc.path, nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			_ = handleError(c, core.NewInvalidRequestError("bad input", nil))
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", rec.Code)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			// Anthropic envelope: {"type":"error","error":{...}}.
+			// OpenAI envelope:    {"error":{...}} with no top-level "type".
+			if tc.wantAnthropic {
+				if body["type"] != "error" {
+					t.Errorf("expected Anthropic envelope, got %v", body)
+				}
+				errObj, _ := body["error"].(map[string]any)
+				if errObj["type"] != "invalid_request_error" {
+					t.Errorf("error.type = %v", errObj["type"])
+				}
+			} else {
+				if _, hasType := body["type"]; hasType {
+					t.Errorf("expected OpenAI envelope without top-level type, got %v", body)
+				}
+				if _, hasErr := body["error"]; !hasErr {
+					t.Errorf("expected OpenAI error envelope, got %v", body)
+				}
+			}
+		})
+	}
+}
 
 func TestHandleError_LogsClientErrorsAtWarnLevel(t *testing.T) {
 	var buf bytes.Buffer

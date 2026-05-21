@@ -108,6 +108,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 			result.Meta.ProviderName,
 			result.Meta.FailoverModel,
 			result.Stream,
+			nil,
 		)
 	}
 
@@ -251,6 +252,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			result.Meta.ProviderName,
 			result.Meta.FailoverModel,
 			result.Stream,
+			nil,
 		)
 	}
 
@@ -435,12 +437,18 @@ func cacheWorkflowResolutionHints(c *echo.Context, workflow *core.Workflow) {
 	}
 }
 
+// handleStreamingReadCloser flushes a provider SSE stream to the client while
+// fanning audit and usage observers off the canonical (OpenAI-shaped) stream.
+// outerWrap, when non-nil, wraps the observed stream as the outermost layer —
+// used by the Anthropic /v1/messages dialect to re-encode the SSE events after
+// the observers have already seen the canonical form.
 func (s *translatedInferenceService) handleStreamingReadCloser(
 	c *echo.Context,
 	workflow *core.Workflow,
 	model, provider, providerName string,
 	failoverModel string,
 	stream io.ReadCloser,
+	outerWrap func(io.ReadCloser) io.ReadCloser,
 ) error {
 	auditlog.MarkEntryAsStreaming(c, true)
 	auditlog.EnrichEntryWithStream(c, true)
@@ -471,6 +479,9 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		}
 	}
 	wrappedStream := streaming.NewObservedSSEStream(stream, observers...)
+	if outerWrap != nil {
+		wrappedStream = outerWrap(wrappedStream)
+	}
 
 	defer func() {
 		_ = wrappedStream.Close() //nolint:errcheck
@@ -501,7 +512,7 @@ func (s *translatedInferenceService) handleStreamingResponse(
 	if err != nil {
 		return handleStreamingDispatchError(c, err)
 	}
-	return s.handleStreamingReadCloser(c, workflow, model, provider, providerName, "", stream)
+	return s.handleStreamingReadCloser(c, workflow, model, provider, providerName, "", stream, nil)
 }
 
 // handleStreamingDispatchError records audit context for a streaming request
