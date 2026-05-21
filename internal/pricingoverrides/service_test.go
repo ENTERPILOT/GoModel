@@ -76,6 +76,12 @@ func (r staticPricingResolver) ResolvePricing(_, _ string) *core.ModelPricing {
 	return r.pricing
 }
 
+type selectivePricingResolver map[string]*core.ModelPricing
+
+func (r selectivePricingResolver) ResolvePricing(model, provider string) *core.ModelPricing {
+	return r[provider+"/"+model]
+}
+
 func ptr(v float64) *float64 {
 	return &v
 }
@@ -165,6 +171,28 @@ func TestServiceResolvePricingPreservesSlashShapedModelIDs(t *testing.T) {
 	pricing = service.ResolvePricing("openrouter/anthropic/claude-sonnet", "openrouter")
 	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 40 {
 		t.Fatalf("ResolvePricing(redundant provider prefix) = %+v, want exact input rate 40", pricing)
+	}
+}
+
+func TestServiceResolvePricingFallsBackToRawProviderOwnedModelForBasePricing(t *testing.T) {
+	baseInput := 1.0
+	service, err := NewService(
+		newTestStore(),
+		testCatalog{providerNames: []string{"openrouter"}},
+		selectivePricingResolver{
+			"openrouter/openrouter/free": {InputPerMtok: &baseInput},
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	pricing := service.ResolvePricing("openrouter/free", "openrouter")
+	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != baseInput {
+		t.Fatalf("ResolvePricing(raw provider-owned base) = %+v, want base input rate %v", pricing, baseInput)
 	}
 }
 

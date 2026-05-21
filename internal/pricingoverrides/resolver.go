@@ -12,11 +12,15 @@ func (s *Service) ResolvePricing(model, providerName string) *core.ModelPricing 
 		return nil
 	}
 	providerName = strings.TrimSpace(providerName)
-	model = modelIDFromSelector(model, providerName)
+	rawModel := strings.TrimSpace(model)
+	model = modelIDFromSelector(rawModel, providerName)
 
 	var basePricing *core.ModelPricing
 	if s.base != nil {
 		basePricing = s.base.ResolvePricing(model, providerName)
+		if basePricing == nil && rawModel != "" && rawModel != model {
+			basePricing = s.base.ResolvePricing(rawModel, providerName)
+		}
 	}
 
 	if rule, ok := s.snapshot().matchingOverride(providerName, model); ok {

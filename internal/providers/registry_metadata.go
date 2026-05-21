@@ -126,7 +126,7 @@ func (r *ModelRegistry) getProviderModelMetadata(providerSelector, model string)
 	defer r.mu.RUnlock()
 
 	if modelProviderName != "" {
-		if meta := metadataFromProviderModel(r.modelsByProvider[modelProviderName], modelID); meta != nil {
+		if meta := metadataFromProviderModel(r.modelsByProvider[modelProviderName], modelID, model); meta != nil {
 			return meta
 		}
 		if r.hasConfiguredProviderNameLocked(modelProviderName) {
@@ -143,15 +143,19 @@ func (r *ModelRegistry) getProviderModelMetadata(providerSelector, model string)
 	return nil
 }
 
-func metadataFromProviderModel(providerModels map[string]*ModelInfo, model string) *core.ModelMetadata {
+func metadataFromProviderModel(providerModels map[string]*ModelInfo, model string, alternates ...string) *core.ModelMetadata {
 	if len(providerModels) == 0 {
 		return nil
 	}
-	info := providerModels[strings.TrimSpace(model)]
-	if info == nil {
-		return nil
+	candidates := append([]string{model}, alternates...)
+	for _, candidate := range candidates {
+		info := providerModels[strings.TrimSpace(candidate)]
+		if info == nil {
+			continue
+		}
+		return info.Model.Metadata
 	}
-	return info.Model.Metadata
+	return nil
 }
 
 func (r *ModelRegistry) metadataProviderType(providerSelector string) string {
@@ -174,6 +178,13 @@ func (r *ModelRegistry) metadataModelID(model string) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.hasConfiguredProviderNameLocked(providerName) {
+		providerModels := r.modelsByProvider[providerName]
+		if _, ok := providerModels[modelID]; ok {
+			return modelID
+		}
+		if _, ok := providerModels[model]; ok {
+			return model
+		}
 		return modelID
 	}
 	return model

@@ -188,6 +188,56 @@ func TestResolvePricingPrefersProviderSpecificMetadata(t *testing.T) {
 	}
 }
 
+func TestResolvePricingPrefersProviderOwnedRawSlashMetadata(t *testing.T) {
+	registry := NewModelRegistry()
+
+	other := &registryMockProvider{
+		name: "provider-other",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "openrouter/free", Object: "model", OwnedBy: "other"},
+			},
+		},
+	}
+	openRouter := &registryMockProvider{
+		name: "provider-openrouter",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "openrouter/free", Object: "model", OwnedBy: "openrouter"},
+			},
+		},
+	}
+	registry.RegisterProviderWithNameAndType(other, "other", "other")
+	registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
+
+	raw := []byte(`{"version":1,"updated_at":"2025-01-01T00:00:00Z","providers":{},"models":{},"provider_models":{}}`)
+	list, err := modeldata.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	registry.SetModelList(list, raw)
+
+	otherRate := 1.0
+	openRouterRate := 2.0
+	registry.SetProviderMetadataOverrides("other", map[string]*core.ModelMetadata{
+		"openrouter/free": {Pricing: &core.ModelPricing{InputPerMtok: &otherRate}},
+	})
+	registry.SetProviderMetadataOverrides("openrouter", map[string]*core.ModelMetadata{
+		"openrouter/free": {Pricing: &core.ModelPricing{InputPerMtok: &openRouterRate}},
+	})
+
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+
+	pricing := registry.ResolvePricing("openrouter/free", "openrouter")
+	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != openRouterRate {
+		t.Fatalf("ResolvePricing(openrouter/free, openrouter) = %+v, want openrouter pricing", pricing)
+	}
+}
+
 func TestApplyConfigMetadataOverrides_MergesPricingSourcesPerField(t *testing.T) {
 	baseInput := 1.0
 	baseOutput := 2.0
