@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"gomodel/internal/core"
@@ -20,9 +21,11 @@ func DecodeMessagesRequest(body []byte) (*MessagesRequest, error) {
 	if err := dec.Decode(&req); err != nil {
 		return nil, err
 	}
-	// Reject trailing bytes after the JSON object so a malformed body cannot
-	// look valid while audit/cache inputs disagree with the parsed request.
-	if dec.More() {
+	// Require the body to hold exactly one JSON value: decoding again must
+	// reach EOF. This rejects any trailing bytes (a second object, stray
+	// brackets, garbage) so a malformed body cannot look valid while
+	// audit/cache inputs disagree with the parsed request.
+	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
 		return nil, fmt.Errorf("request body must contain a single JSON object")
 	}
 	return &req, nil

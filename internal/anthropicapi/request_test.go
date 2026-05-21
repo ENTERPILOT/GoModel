@@ -28,6 +28,7 @@ func TestDecodeMessagesRequest(t *testing.T) {
 		{name: "malformed", body: `{"model":`, wantErr: true},
 		{name: "trailing object", body: `{"model":"m","max_tokens":10,"messages":[]}{"x":1}`, wantErr: true},
 		{name: "trailing garbage", body: `{"model":"m","max_tokens":10,"messages":[]} oops`, wantErr: true},
+		{name: "trailing brace", body: `{"model":"m","max_tokens":10,"messages":[]}}`, wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,8 +80,9 @@ func TestToChatRequestRejectsInvalidShapes(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if _, ok := err.(*core.GatewayError); !ok {
-				t.Fatalf("expected *core.GatewayError, got %T", err)
+			gatewayErr, ok := err.(*core.GatewayError)
+			if !ok || gatewayErr.Type != core.ErrorTypeInvalidRequest {
+				t.Fatalf("expected invalid_request_error, got %T: %v", err, err)
 			}
 		})
 	}
