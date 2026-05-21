@@ -111,6 +111,55 @@ function ensureResponsesInputElementSchema() {
   };
 }
 
+function anthropicContentSchema() {
+  return {
+    oneOf: [
+      { type: "string" },
+      {
+        type: "array",
+        items: { $ref: "#/components/schemas/anthropicapi.ContentBlock" },
+      },
+    ],
+  };
+}
+
+function freeFormObjectSchema() {
+  return {
+    type: "object",
+    additionalProperties: true,
+  };
+}
+
+function ensureAnthropicContentBlockSchema() {
+  const schemas = spec.components?.schemas;
+  if (!schemas) {
+    throw new Error("missing OpenAPI components.schemas");
+  }
+  schemas["anthropicapi.ContentBlock"] = {
+    type: "object",
+    properties: {
+      content: anthropicContentSchema(),
+      id: { type: "string" },
+      input: freeFormObjectSchema(),
+      is_error: { type: "boolean" },
+      name: { type: "string" },
+      source: freeFormObjectSchema(),
+      text: { type: "string" },
+      thinking: { type: "string" },
+      tool_use_id: { type: "string" },
+      type: { type: "string" },
+    },
+  };
+}
+
+function applyAnthropicMessageSchemas() {
+  ensureAnthropicContentBlockSchema();
+  schema("anthropicapi.Message").properties.content = anthropicContentSchema();
+  schema("anthropicapi.MessagesRequest").properties.system = anthropicContentSchema();
+  schema("anthropicapi.ResponseContentBlock").properties.input = freeFormObjectSchema();
+  schema("anthropicapi.Tool").properties.input_schema = freeFormObjectSchema();
+}
+
 function ensureBearerAuthSecurityScheme() {
   const securitySchemes = spec.components?.securitySchemes;
   if (!securitySchemes?.BearerAuth) {
@@ -222,6 +271,7 @@ function applyBudgetKeySchemaConstraints() {
 
 spec.servers = parseServers(process.env.DOCS_API_SERVERS);
 ensureResponsesInputElementSchema();
+applyAnthropicMessageSchemas();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
 ensureRequiredProperty("admin.upsertBudgetRequest", "amount");

@@ -5989,10 +5989,17 @@
         "type": "object",
         "properties": {
           "content": {
-            "type": "array",
-            "items": {
-              "type": "integer"
-            }
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/anthropicapi.ContentBlock"
+                }
+              }
+            ]
           },
           "role": {
             "type": "string"
@@ -6027,10 +6034,17 @@
             "type": "boolean"
           },
           "system": {
-            "type": "array",
-            "items": {
-              "type": "integer"
-            }
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/anthropicapi.ContentBlock"
+                }
+              }
+            ]
           },
           "temperature": {
             "type": "number"
@@ -6102,10 +6116,8 @@
             "type": "string"
           },
           "input": {
-            "type": "array",
-            "items": {
-              "type": "integer"
-            }
+            "type": "object",
+            "additionalProperties": true
           },
           "name": {
             "type": "string"
@@ -6139,10 +6151,8 @@
             "type": "string"
           },
           "input_schema": {
-            "type": "array",
-            "items": {
-              "type": "integer"
-            }
+            "type": "object",
+            "additionalProperties": true
           },
           "name": {
             "type": "string"
@@ -8263,6 +8273,53 @@
           },
           "type": {
             "description": "\"message\", \"function_call\", \"function_call_output\"",
+            "type": "string"
+          }
+        }
+      },
+      "anthropicapi.ContentBlock": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/anthropicapi.ContentBlock"
+                }
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "is_error": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "text": {
+            "type": "string"
+          },
+          "thinking": {
+            "type": "string"
+          },
+          "tool_use_id": {
+            "type": "string"
+          },
+          "type": {
             "type": "string"
           }
         }

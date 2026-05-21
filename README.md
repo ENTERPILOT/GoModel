@@ -233,6 +233,7 @@ docker run --rm -p 8080:8080 --env-file .env gomodel
 | `/admin/usage/models`               | GET    | Usage breakdown by model                   |
 | `/admin/usage/user-paths`           | GET    | Usage breakdown by user path               |
 | `/admin/usage/log`                  | GET    | Paginated usage log entries                |
+| `/admin/audit/detail`               | GET    | Detailed audit entry information           |
 | `/admin/audit/log`                  | GET    | Paginated audit log entries                |
 | `/admin/audit/conversation`         | GET    | Conversation thread around one audit entry |
 | `/admin/providers/status`           | GET    | Provider availability status               |

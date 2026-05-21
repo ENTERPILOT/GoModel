@@ -4055,10 +4055,17 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "content": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/anthropicapi.ContentBlock"
+                            }
+                        }
+                    ]
                 },
                 "role": {
                     "type": "string"
@@ -4093,10 +4100,17 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "system": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/anthropicapi.ContentBlock"
+                            }
+                        }
+                    ]
                 },
                 "temperature": {
                     "type": "number"
@@ -4168,10 +4182,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "input": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "name": {
                     "type": "string"
@@ -4205,10 +4217,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "input_schema": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "name": {
                     "type": "string"
@@ -6249,6 +6259,53 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "user_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "anthropicapi.ContentBlock": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/anthropicapi.ContentBlock"
+                            }
+                        }
+                    ]
+                },
+                "id": {
+                    "type": "string"
+                },
+                "input": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "is_error": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "text": {
+                    "type": "string"
+                },
+                "thinking": {
+                    "type": "string"
+                },
+                "tool_use_id": {
+                    "type": "string"
+                },
+                "type": {
                     "type": "string"
                 }
             }

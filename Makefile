@@ -92,6 +92,8 @@ swagger:
 		--output cmd/gomodel/docs \
 		--outputTypes go \
 		--parseDependency
+	@command -v node >/dev/null 2>&1 || { echo "node is required to build docs; install from https://nodejs.org" >&2; exit 1; }
+	node tools/swagger-postprocess.mjs cmd/gomodel/docs/docs.go
 	$(MAKE) docs-openapi
 
 docs-openapi:
