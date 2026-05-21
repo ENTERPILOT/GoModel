@@ -9,6 +9,7 @@ import (
 
 	"gomodel/internal/auditlog"
 	batchstore "gomodel/internal/batch"
+	"gomodel/internal/conversationstore"
 	"gomodel/internal/core"
 	"gomodel/internal/filestore"
 	"gomodel/internal/responsecache"
@@ -35,6 +36,7 @@ type Handler struct {
 	fileStore                       filestore.Store
 	responseStore                   responsestore.Store
 	responseStoreMu                 sync.RWMutex
+	conversationStore               conversationstore.Store
 	normalizePassthroughV1Prefix    bool
 	enabledPassthroughProviders     map[string]struct{}
 	responseCache                   *responsecache.ResponseCacheMiddleware
@@ -99,6 +101,10 @@ func newHandlerWithAuthorizer(
 			responsestore.WithTTL(responsestore.DefaultMemoryStoreTTL),
 			responsestore.WithMaxEntries(responsestore.DefaultMemoryStoreMaxEntries),
 		),
+		conversationStore: conversationstore.NewMemoryStore(
+			conversationstore.WithTTL(conversationstore.DefaultMemoryStoreTTL),
+			conversationstore.WithMaxEntries(conversationstore.DefaultMemoryStoreMaxEntries),
+		),
 		normalizePassthroughV1Prefix: true,
 		enabledPassthroughProviders:  normalizeEnabledPassthroughProviders(defaultEnabledPassthroughProviders),
 	}
@@ -134,6 +140,16 @@ func (h *Handler) SetResponseStore(store responsestore.Store) {
 	if h.translatedSvc != nil {
 		h.translatedSvc.setResponseStore(store)
 	}
+}
+
+// SetConversationStore replaces the conversation store used by the
+// Conversations lifecycle endpoints.
+// nil is ignored to keep an always-available fallback memory store.
+func (h *Handler) SetConversationStore(store conversationstore.Store) {
+	if store == nil {
+		return
+	}
+	h.conversationStore = store
 }
 
 func (h *Handler) translatedInference() *translatedInferenceService {
@@ -194,6 +210,10 @@ func (h *Handler) nativeResponses() *nativeResponseService {
 		translatedRequestPatcher: h.translatedRequestPatcher,
 		responseStore:            h.currentResponseStore(),
 	}
+}
+
+func (h *Handler) conversations() *conversationService {
+	return &conversationService{conversationStore: h.conversationStore}
 }
 
 func (h *Handler) currentResponseStore() responsestore.Store {

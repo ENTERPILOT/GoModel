@@ -195,6 +195,10 @@ docker run --rm -p 8080:8080 --env-file .env gomodel
 | --------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
 | `/v1/chat/completions`      | POST   | Chat completions (streaming supported)                                                                       |
 | `/v1/responses`             | POST   | OpenAI Responses API                                                                                         |
+| `/v1/conversations`         | POST   | Create a conversation (gateway-managed)                                                                      |
+| `/v1/conversations/{id}`    | GET    | Retrieve a conversation                                                                                      |
+| `/v1/conversations/{id}`    | POST   | Update conversation metadata                                                                                 |
+| `/v1/conversations/{id}`    | DELETE | Delete a conversation                                                                                        |
 | `/v1/embeddings`            | POST   | Text embeddings                                                                                              |
 | `/v1/models`                | GET    | List available models                                                                                        |
 | `/v1/files`                 | POST   | Upload a file (OpenAI-compatible multipart)                                                                  |

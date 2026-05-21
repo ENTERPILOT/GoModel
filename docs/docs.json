@@ -61,6 +61,7 @@
                             "advanced/config-yaml",
                             "advanced/resilience",
                             "advanced/responses-api",
+                            "advanced/conversations-api",
                             "advanced/anthropic-messages-api",
                             "advanced/guardrails",
                             "advanced/workflows",

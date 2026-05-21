@@ -21,6 +21,7 @@ type Operation string
 const (
 	OperationChatCompletions     Operation = "chat_completions"
 	OperationResponses           Operation = "responses"
+	OperationConversations       Operation = "conversations"
 	OperationEmbeddings          Operation = "embeddings"
 	OperationBatches             Operation = "batches"
 	OperationFiles               Operation = "files"
@@ -67,6 +68,17 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			IngressManaged:   true,
 			Dialect:          "openai_compat",
 			Operation:        OperationResponses,
+		}
+	case path == "/v1/conversations" || strings.HasPrefix(path, "/v1/conversations/"):
+		// Conversations are a gateway-managed resource store (no provider
+		// call), but they are an ingress-managed /v1 endpoint and are
+		// classified as a model interaction path so they appear in request
+		// and audit logs alongside the other /v1 endpoints.
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			IngressManaged:   true,
+			Dialect:          "openai_compat",
+			Operation:        OperationConversations,
 		}
 	case path == "/v1/embeddings":
 		return EndpointDescriptor{
@@ -120,6 +132,12 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 		return BodyModeJSON
 	case OperationResponses:
 		if method == http.MethodPost && (path == "/v1/responses" || path == "/v1/responses/input_tokens" || path == "/v1/responses/compact") {
+			return BodyModeJSON
+		}
+		return BodyModeNone
+	case OperationConversations:
+		// POST creates (/v1/conversations) or updates (/v1/conversations/{id}).
+		if method == http.MethodPost {
 			return BodyModeJSON
 		}
 		return BodyModeNone

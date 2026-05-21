@@ -21,6 +21,7 @@ import (
 	"gomodel/internal/admin/dashboard"
 	"gomodel/internal/auditlog"
 	batchstore "gomodel/internal/batch"
+	"gomodel/internal/conversationstore"
 	"gomodel/internal/core"
 	"gomodel/internal/filestore"
 	"gomodel/internal/responsecache"
@@ -34,6 +35,7 @@ type Server struct {
 	handler                 *Handler
 	responseCacheMiddleware *responsecache.ResponseCacheMiddleware
 	responseStore           responsestore.Store
+	conversationStore       conversationstore.Store
 }
 
 const (
@@ -67,6 +69,7 @@ type Config struct {
 	BatchStore                      batchstore.Store                       // Optional: Batch lifecycle persistence store
 	FileStore                       filestore.Store                        // Optional: File provider mapping persistence store
 	ResponseStore                   responsestore.Store                    // Optional: Responses lifecycle persistence store
+	ConversationStore               conversationstore.Store                // Optional: Conversations lifecycle persistence store
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
 	EnabledPassthroughProviders     []string                               // Provider types enabled on /p/{provider}/... passthrough routes
@@ -146,6 +149,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	if cfg != nil && cfg.ResponseStore != nil {
 		handler.SetResponseStore(cfg.ResponseStore)
+	}
+	if cfg != nil && cfg.ConversationStore != nil {
+		handler.SetConversationStore(cfg.ConversationStore)
 	}
 
 	// Build list of paths that skip authentication
@@ -310,6 +316,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.GET("/v1/responses/:id", handler.GetResponse)
 	e.DELETE("/v1/responses/:id", handler.DeleteResponse)
 	e.POST("/v1/responses", handler.Responses)
+	e.POST("/v1/conversations", handler.CreateConversation)
+	e.GET("/v1/conversations/:id", handler.GetConversation)
+	e.POST("/v1/conversations/:id", handler.UpdateConversation)
+	e.DELETE("/v1/conversations/:id", handler.DeleteConversation)
 	e.POST("/v1/embeddings", handler.Embeddings)
 	e.POST("/v1/files", handler.CreateFile)
 	e.GET("/v1/files", handler.ListFiles)
@@ -352,6 +362,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		handler:                 handler,
 		responseCacheMiddleware: rcm,
 		responseStore:           handler.currentResponseStore(),
+		conversationStore:       handler.conversationStore,
 	}
 }
 
@@ -395,7 +406,8 @@ func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) e
 
 // Shutdown releases server resources. The HTTP server itself is stopped by
 // cancelling the context passed to Start; this method drains any in-flight
-// response cache writes, closes the cache store, and closes the response store.
+// response cache writes, closes the cache store, and closes the response and
+// conversation stores.
 func (s *Server) Shutdown(_ context.Context) error {
 	var firstErr error
 	if s.responseCacheMiddleware != nil {
@@ -409,6 +421,15 @@ func (s *Server) Shutdown(_ context.Context) error {
 				firstErr = err
 			} else {
 				slog.Warn("response store close failed during shutdown", "error", err)
+			}
+		}
+	}
+	if s.conversationStore != nil {
+		if err := s.conversationStore.Close(); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			} else {
+				slog.Warn("conversation store close failed during shutdown", "error", err)
 			}
 		}
 	}
