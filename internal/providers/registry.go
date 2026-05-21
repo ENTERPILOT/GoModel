@@ -191,9 +191,6 @@ func (r *ModelRegistry) RegisterProviderWithNameAndType(provider core.Provider, 
 	r.providerRuntime[providerName] = state
 }
 
-
-
-
 // GetProvider returns the provider for the given model, or nil if not found
 func (r *ModelRegistry) GetProvider(model string) core.Provider {
 	r.mu.RLock()
@@ -202,7 +199,7 @@ func (r *ModelRegistry) GetProvider(model string) core.Provider {
 	providerName, modelID := splitModelSelector(model)
 	if providerName != "" {
 		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModels[modelID]; exists {
+			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
 				return info.Provider
 			}
 		}
@@ -227,7 +224,7 @@ func (r *ModelRegistry) GetModel(model string) *ModelInfo {
 	providerName, modelID := splitModelSelector(model)
 	if providerName != "" {
 		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModels[modelID]; exists {
+			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
 				return info
 			}
 		}
@@ -252,7 +249,7 @@ func (r *ModelRegistry) LookupModel(model string) (*core.Model, bool) {
 	providerName, modelID := splitModelSelector(model)
 	if providerName != "" {
 		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModels[modelID]; exists {
+			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
 				cloned := info.Model
 				return &cloned, true
 			}
@@ -278,7 +275,7 @@ func (r *ModelRegistry) Supports(model string) bool {
 	providerName, modelID := splitModelSelector(model)
 	if providerName != "" {
 		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if _, exists := providerModels[modelID]; exists {
+			if _, exists := providerModelInfo(providerModels, modelID, model); exists {
 				return true
 			}
 		}
@@ -360,7 +357,7 @@ func (r *ModelRegistry) GetProviderType(model string) string {
 	providerName, modelID := splitModelSelector(model)
 	if providerName != "" {
 		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModels[modelID]; exists {
+			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
 				return info.ProviderType
 			}
 		}
@@ -385,7 +382,7 @@ func (r *ModelRegistry) GetProviderName(model string) string {
 	providerName, modelID := splitModelSelector(model)
 	if providerName != "" {
 		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModels[modelID]; exists {
+			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
 				return strings.TrimSpace(info.ProviderName)
 			}
 		}
@@ -530,6 +527,20 @@ func splitModelSelector(model string) (providerName, modelID string) {
 		return "", model
 	}
 	return providerName, modelID
+}
+
+func providerModelInfo(providerModels map[string]*ModelInfo, modelID, rawModel string) (*ModelInfo, bool) {
+	modelID = strings.TrimSpace(modelID)
+	rawModel = strings.TrimSpace(rawModel)
+	if info, exists := providerModels[modelID]; exists {
+		return info, true
+	}
+	if rawModel != "" && rawModel != modelID {
+		if info, exists := providerModels[rawModel]; exists {
+			return info, true
+		}
+	}
+	return nil, false
 }
 
 func qualifyPublicModelID(providerName, modelID string) string {

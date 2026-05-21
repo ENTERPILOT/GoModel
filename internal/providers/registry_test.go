@@ -361,6 +361,41 @@ func TestModelRegistry(t *testing.T) {
 		}
 	})
 
+	t.Run("ProviderOwnedRawSlashModel", func(t *testing.T) {
+		registry := NewModelRegistry()
+		openRouter := &registryMockProvider{
+			name: "openrouter",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{ID: "openrouter/free", Object: "model", OwnedBy: "openrouter"},
+				},
+			},
+		}
+		registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
+		_ = registry.Initialize(context.Background())
+
+		if !registry.Supports("openrouter/free") {
+			t.Fatal("expected provider-owned raw slash model to be supported")
+		}
+		if provider := registry.GetProvider("openrouter/free"); provider != openRouter {
+			t.Fatal("expected raw slash model to resolve to openrouter provider")
+		}
+		model, ok := registry.LookupModel("openrouter/free")
+		if !ok || model == nil {
+			t.Fatal("expected raw slash model lookup to succeed")
+		}
+		if model.ID != "openrouter/free" {
+			t.Fatalf("model.ID = %q, want openrouter/free", model.ID)
+		}
+		if got := registry.GetProviderType("openrouter/free"); got != "openrouter" {
+			t.Fatalf("GetProviderType() = %q, want openrouter", got)
+		}
+		if got := registry.GetProviderName("openrouter/free"); got != "openrouter" {
+			t.Fatalf("GetProviderName() = %q, want openrouter", got)
+		}
+	})
+
 	t.Run("GetModel", func(t *testing.T) {
 		registry := NewModelRegistry()
 		expectedModel := core.Model{

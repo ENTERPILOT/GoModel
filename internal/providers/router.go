@@ -153,6 +153,10 @@ func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector,
 		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
 	}
 
+	if concrete, ok := resolveProviderOwnedRawSelector(entries, providerSegment, requested.Model); ok {
+		return concrete, true
+	}
+
 	if requested.ExplicitProvider {
 		return core.ModelSelector{}, false
 	}
@@ -168,6 +172,36 @@ func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector,
 		return core.ModelSelector{}, false
 	}
 	for _, entry := range entries {
+		if strings.TrimSpace(entry.Model.ID) != rawModelID {
+			continue
+		}
+		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
+	}
+
+	return core.ModelSelector{}, false
+}
+
+func resolveProviderOwnedRawSelector(entries []ModelWithProvider, providerSegment, rawModelID string) (core.ModelSelector, bool) {
+	providerSegment = strings.TrimSpace(providerSegment)
+	rawModelID = strings.TrimSpace(rawModelID)
+	if providerSegment == "" || rawModelID == "" {
+		return core.ModelSelector{}, false
+	}
+
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.ProviderName) != providerSegment {
+			continue
+		}
+		if strings.TrimSpace(entry.Model.ID) != rawModelID {
+			continue
+		}
+		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
+	}
+
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.ProviderType) != providerSegment {
+			continue
+		}
 		if strings.TrimSpace(entry.Model.ID) != rawModelID {
 			continue
 		}

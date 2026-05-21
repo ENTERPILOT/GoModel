@@ -107,9 +107,9 @@ func (m *mockModelLookup) ModelCount() int {
 // The mock keeps no provider-name <-> type mapping, so the three resolver
 // methods always return empty. Tests that need provider-name routing use the
 // real ModelRegistry via newTestRegistryWithModels instead of this mock.
-func (m *mockModelLookup) GetProviderName(_ string) string             { return "" }
-func (m *mockModelLookup) GetProviderNameForType(_ string) string      { return "" }
-func (m *mockModelLookup) GetProviderTypeForName(_ string) string      { return "" }
+func (m *mockModelLookup) GetProviderName(_ string) string        { return "" }
+func (m *mockModelLookup) GetProviderNameForType(_ string) string { return "" }
+func (m *mockModelLookup) GetProviderTypeForName(_ string) string { return "" }
 
 // mockProvider is a simple mock implementation of core.Provider for testing
 type mockProvider struct {
@@ -641,6 +641,71 @@ func TestRouterChatCompletion_ProviderQualifiedRawSlashModelStillWorks(t *testin
 	}
 	if openRouter.lastChatReq.Provider != "" {
 		t.Fatalf("expected provider field to be stripped upstream, got %q", openRouter.lastChatReq.Provider)
+	}
+}
+
+func TestRouterChatCompletion_ProviderOwnedRawSlashModelStillWorks(t *testing.T) {
+	openRouterResp := &core.ChatResponse{ID: "openrouter", Model: "openrouter/free"}
+	openRouter := &mockProvider{name: "openrouter", chatResponse: openRouterResp}
+
+	registry := newTestRegistryWithModels(registryModelEntry{
+		provider:     openRouter,
+		providerName: "openrouter",
+		providerType: "openrouter",
+		modelID:      "openrouter/free",
+	})
+
+	router, _ := NewRouter(registry)
+
+	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "openrouter/free"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != "openrouter" {
+		t.Fatalf("expected openrouter response, got %q", resp.ID)
+	}
+	if openRouter.lastChatReq == nil || openRouter.lastChatReq.Model != "openrouter/free" {
+		t.Fatalf("expected openrouter provider to receive raw slash model, got %#v", openRouter.lastChatReq)
+	}
+	if openRouter.lastChatReq.Provider != "" {
+		t.Fatalf("expected provider field to be stripped upstream, got %q", openRouter.lastChatReq.Provider)
+	}
+	if got := router.GetProviderType("openrouter/free"); got != "openrouter" {
+		t.Fatalf("GetProviderType() = %q, want openrouter", got)
+	}
+	if got := router.GetProviderName("openrouter/free"); got != "openrouter" {
+		t.Fatalf("GetProviderName() = %q, want openrouter", got)
+	}
+}
+
+func TestRouterChatCompletion_ProviderTypeOwnedRawSlashModelStillWorks(t *testing.T) {
+	openRouterResp := &core.ChatResponse{ID: "openrouter", Model: "openrouter/auto"}
+	openRouter := &mockProvider{name: "openrouter-main", chatResponse: openRouterResp}
+
+	registry := newTestRegistryWithModels(registryModelEntry{
+		provider:     openRouter,
+		providerName: "openrouter-main",
+		providerType: "openrouter",
+		modelID:      "openrouter/auto",
+	})
+
+	router, _ := NewRouter(registry)
+
+	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "openrouter/auto"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != "openrouter" {
+		t.Fatalf("expected openrouter response, got %q", resp.ID)
+	}
+	if openRouter.lastChatReq == nil || openRouter.lastChatReq.Model != "openrouter/auto" {
+		t.Fatalf("expected openrouter provider to receive raw slash model, got %#v", openRouter.lastChatReq)
+	}
+	if openRouter.lastChatReq.Provider != "" {
+		t.Fatalf("expected provider field to be stripped upstream, got %q", openRouter.lastChatReq.Provider)
+	}
+	if got := router.GetProviderName("openrouter/auto"); got != "openrouter-main" {
+		t.Fatalf("GetProviderName() = %q, want openrouter-main", got)
 	}
 }
 
