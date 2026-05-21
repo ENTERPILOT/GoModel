@@ -163,8 +163,16 @@ func (s *MemoryStore) Update(_ context.Context, conversation *StoredConversation
 func (s *MemoryStore) Delete(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.cleanupExpiredLocked(time.Now().UTC())
-	if _, exists := s.items[id]; !exists {
+	now := time.Now().UTC()
+	s.cleanupExpiredLocked(now)
+	conversation, exists := s.items[id]
+	if !exists {
+		return ErrNotFound
+	}
+	// Expired entries report as not found, matching Get and Update, even when
+	// the throttled cleanup sweep has not removed them yet.
+	if conversationExpired(conversation, now) {
+		delete(s.items, id)
 		return ErrNotFound
 	}
 	delete(s.items, id)

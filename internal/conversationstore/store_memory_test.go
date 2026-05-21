@@ -83,6 +83,18 @@ func TestMemoryStoreDeleteMissingReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreDeleteExpiredReturnsNotFound(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(WithTTL(time.Second))
+
+	if err := store.Create(ctx, storedConversation("conv_expired", time.Now().UTC().Add(-2*time.Second))); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if err := store.Delete(ctx, "conv_expired"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Delete() error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestMemoryStoreExpiresConversations(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore(WithTTL(time.Second))

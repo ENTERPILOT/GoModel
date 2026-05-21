@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 )
 
 // ConversationObject is the value of the "object" field on a conversation.
@@ -92,12 +93,14 @@ func ValidateConversationMetadata(metadata map[string]string) *GatewayError {
 		).WithParam("metadata")
 	}
 	for key, value := range metadata {
-		if len(key) > maxConversationMetadataKeyLength {
+		// Limits are character (rune) counts, not byte lengths, so multi-byte
+		// keys and values are not rejected prematurely.
+		if utf8.RuneCountInString(key) > maxConversationMetadataKeyLength {
 			return NewInvalidRequestError(
 				fmt.Sprintf("metadata keys support at most %d characters", maxConversationMetadataKeyLength), nil,
 			).WithParam("metadata")
 		}
-		if len(value) > maxConversationMetadataValueLength {
+		if utf8.RuneCountInString(value) > maxConversationMetadataValueLength {
 			return NewInvalidRequestError(
 				fmt.Sprintf("metadata values support at most %d characters", maxConversationMetadataValueLength), nil,
 			).WithParam("metadata")

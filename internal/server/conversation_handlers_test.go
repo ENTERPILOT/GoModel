@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -55,9 +56,13 @@ func TestConversationCreateEmptyBodyYieldsEmptyMetadataObject(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create status = %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
-	// metadata must serialize as {} rather than null to match OpenAI.
-	if !strings.Contains(rec.Body.String(), `"metadata":{}`) {
-		t.Fatalf("body = %s, want metadata {}", rec.Body.String())
+	var conversation core.Conversation
+	if err := json.Unmarshal(rec.Body.Bytes(), &conversation); err != nil {
+		t.Fatalf("decode conversation: %v", err)
+	}
+	// metadata must be an empty object rather than null, matching OpenAI.
+	if conversation.Metadata == nil || len(conversation.Metadata) != 0 {
+		t.Fatalf("metadata = %#v, want empty object", conversation.Metadata)
 	}
 }
 
@@ -90,24 +95,6 @@ func TestConversationGetRoundTrip(t *testing.T) {
 	}
 }
 
-func TestConversationGetMissingReturnsNotFound(t *testing.T) {
-	srv := New(&mockProvider{}, nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/conversations/conv_missing", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("get status = %d, want 404 (%s)", rec.Code, rec.Body.String())
-	}
-	var envelope core.OpenAIErrorEnvelope
-	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if envelope.Error.Type != core.ErrorTypeNotFound {
-		t.Fatalf("error type = %q, want not_found_error", envelope.Error.Type)
-	}
-}
-
 func TestConversationUpdateReplacesMetadata(t *testing.T) {
 	srv := New(&mockProvider{}, nil)
 	created := createConversation(t, srv, `{"metadata":{"old":"value","keep":"gone"}}`)
@@ -129,40 +116,6 @@ func TestConversationUpdateReplacesMetadata(t *testing.T) {
 	}
 	if _, ok := updated.Metadata["old"]; ok {
 		t.Fatal("metadata still carries replaced key 'old'")
-	}
-}
-
-func TestConversationUpdateRequiresMetadata(t *testing.T) {
-	srv := New(&mockProvider{}, nil)
-	created := createConversation(t, srv, `{}`)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/conversations/"+created.ID,
-		strings.NewReader(`{}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("update status = %d, want 400 (%s)", rec.Code, rec.Body.String())
-	}
-	var envelope core.OpenAIErrorEnvelope
-	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if envelope.Error.Param == nil || *envelope.Error.Param != "metadata" {
-		t.Fatalf("error param = %v, want metadata", envelope.Error.Param)
-	}
-}
-
-func TestConversationUpdateMissingReturnsNotFound(t *testing.T) {
-	srv := New(&mockProvider{}, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/conversations/conv_missing",
-		strings.NewReader(`{"metadata":{}}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("update status = %d, want 404 (%s)", rec.Code, rec.Body.String())
 	}
 }
 
@@ -192,68 +145,118 @@ func TestConversationDeleteRemovesConversation(t *testing.T) {
 	}
 }
 
-func TestConversationDeleteMissingReturnsNotFound(t *testing.T) {
-	srv := New(&mockProvider{}, nil)
-
-	req := httptest.NewRequest(http.MethodDelete, "/v1/conversations/conv_missing", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("delete status = %d, want 404 (%s)", rec.Code, rec.Body.String())
+// TestConversationEndpointErrors covers the validation and not-found error
+// paths. Each case is independent of stored state: update metadata validation
+// runs before the conversation is loaded, so a missing id still exercises it.
+func TestConversationEndpointErrors(t *testing.T) {
+	bigItems := make([]string, core.MaxConversationInitialItems+1)
+	for i := range bigItems {
+		bigItems[i] = `{"type":"message","role":"user","content":"x"}`
 	}
-}
-
-func TestConversationCreateRejectsTooManyItems(t *testing.T) {
-	srv := New(&mockProvider{}, nil)
-
-	items := make([]string, core.MaxConversationInitialItems+1)
-	for i := range items {
-		items[i] = `{"type":"message","role":"user","content":"x"}`
+	bigMetadata := make([]string, 17)
+	for i := range bigMetadata {
+		bigMetadata[i] = fmt.Sprintf(`"key%d":"value"`, i)
 	}
-	body := fmt.Sprintf(`{"items":[%s]}`, strings.Join(items, ","))
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/conversations", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("create status = %d, want 400 (%s)", rec.Code, rec.Body.String())
+	tests := []struct {
+		name           string
+		method         string
+		path           string
+		body           string
+		wantStatus     int
+		wantErrorType  core.ErrorType
+		wantErrorParam string
+	}{
+		{
+			name:          "get missing conversation",
+			method:        http.MethodGet,
+			path:          "/v1/conversations/conv_missing",
+			wantStatus:    http.StatusNotFound,
+			wantErrorType: core.ErrorTypeNotFound,
+		},
+		{
+			name:          "update missing conversation",
+			method:        http.MethodPost,
+			path:          "/v1/conversations/conv_missing",
+			body:          `{"metadata":{}}`,
+			wantStatus:    http.StatusNotFound,
+			wantErrorType: core.ErrorTypeNotFound,
+		},
+		{
+			name:          "delete missing conversation",
+			method:        http.MethodDelete,
+			path:          "/v1/conversations/conv_missing",
+			wantStatus:    http.StatusNotFound,
+			wantErrorType: core.ErrorTypeNotFound,
+		},
+		{
+			name:           "update without metadata",
+			method:         http.MethodPost,
+			path:           "/v1/conversations/conv_missing",
+			body:           `{}`,
+			wantStatus:     http.StatusBadRequest,
+			wantErrorType:  core.ErrorTypeInvalidRequest,
+			wantErrorParam: "metadata",
+		},
+		{
+			name:           "create with too many items",
+			method:         http.MethodPost,
+			path:           "/v1/conversations",
+			body:           fmt.Sprintf(`{"items":[%s]}`, strings.Join(bigItems, ",")),
+			wantStatus:     http.StatusBadRequest,
+			wantErrorType:  core.ErrorTypeInvalidRequest,
+			wantErrorParam: "items",
+		},
+		{
+			name:           "create with too much metadata",
+			method:         http.MethodPost,
+			path:           "/v1/conversations",
+			body:           fmt.Sprintf(`{"metadata":{%s}}`, strings.Join(bigMetadata, ",")),
+			wantStatus:     http.StatusBadRequest,
+			wantErrorType:  core.ErrorTypeInvalidRequest,
+			wantErrorParam: "metadata",
+		},
+		{
+			name:          "create with invalid json",
+			method:        http.MethodPost,
+			path:          "/v1/conversations",
+			body:          `{`,
+			wantStatus:    http.StatusBadRequest,
+			wantErrorType: core.ErrorTypeInvalidRequest,
+		},
 	}
-	var envelope core.OpenAIErrorEnvelope
-	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if envelope.Error.Param == nil || *envelope.Error.Param != "items" {
-		t.Fatalf("error param = %v, want items", envelope.Error.Param)
-	}
-}
 
-func TestConversationCreateRejectsTooMuchMetadata(t *testing.T) {
-	srv := New(&mockProvider{}, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := New(&mockProvider{}, nil)
 
-	pairs := make([]string, 17)
-	for i := range pairs {
-		pairs[i] = fmt.Sprintf(`"key%d":"value"`, i)
-	}
-	body := fmt.Sprintf(`{"metadata":{%s}}`, strings.Join(pairs, ","))
+			var body io.Reader
+			if tt.body != "" {
+				body = strings.NewReader(tt.body)
+			}
+			req := httptest.NewRequest(tt.method, tt.path, body)
+			if tt.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/conversations", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("create status = %d, want 400 (%s)", rec.Code, rec.Body.String())
-	}
-}
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d (%s)", rec.Code, tt.wantStatus, rec.Body.String())
+			}
 
-func TestConversationCreateRejectsInvalidJSON(t *testing.T) {
-	srv := New(&mockProvider{}, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/conversations", strings.NewReader(`{`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("create status = %d, want 400 (%s)", rec.Code, rec.Body.String())
+			var envelope core.OpenAIErrorEnvelope
+			if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+				t.Fatalf("decode error envelope: %v", err)
+			}
+			if tt.wantErrorType != "" && envelope.Error.Type != tt.wantErrorType {
+				t.Fatalf("error type = %q, want %q", envelope.Error.Type, tt.wantErrorType)
+			}
+			if tt.wantErrorParam != "" {
+				if envelope.Error.Param == nil || *envelope.Error.Param != tt.wantErrorParam {
+					t.Fatalf("error param = %v, want %q", envelope.Error.Param, tt.wantErrorParam)
+				}
+			}
+		})
 	}
 }
