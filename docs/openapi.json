@@ -4538,7 +4538,7 @@
               },
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/anthropicapi.MessagesResponse"
+                  "$ref": "#/components/schemas/anthropicapi.SSEEventFrame"
                 }
               }
             }
@@ -8330,6 +8330,184 @@
             "type": "string"
           }
         }
+      },
+      "anthropicapi.SSEMessageStartEvent": {
+        "type": "object",
+        "required": [
+          "message",
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "message_start"
+            ]
+          },
+          "message": {
+            "$ref": "#/components/schemas/anthropicapi.MessagesResponse"
+          }
+        }
+      },
+      "anthropicapi.SSEContentBlockStartEvent": {
+        "type": "object",
+        "required": [
+          "content_block",
+          "index",
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "content_block_start"
+            ]
+          },
+          "index": {
+            "type": "integer"
+          },
+          "content_block": {
+            "$ref": "#/components/schemas/anthropicapi.ResponseContentBlock"
+          }
+        }
+      },
+      "anthropicapi.SSEContentBlockDeltaEvent": {
+        "type": "object",
+        "required": [
+          "delta",
+          "index",
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "content_block_delta"
+            ]
+          },
+          "index": {
+            "type": "integer"
+          },
+          "delta": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "anthropicapi.SSEContentBlockStopEvent": {
+        "type": "object",
+        "required": [
+          "index",
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "content_block_stop"
+            ]
+          },
+          "index": {
+            "type": "integer"
+          }
+        }
+      },
+      "anthropicapi.SSEMessageDeltaEvent": {
+        "type": "object",
+        "required": [
+          "delta",
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "message_delta"
+            ]
+          },
+          "delta": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "usage": {
+            "$ref": "#/components/schemas/anthropicapi.Usage"
+          }
+        }
+      },
+      "anthropicapi.SSEMessageStopEvent": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "message_stop"
+            ]
+          }
+        }
+      },
+      "anthropicapi.SSEPingEvent": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "ping"
+            ]
+          }
+        }
+      },
+      "anthropicapi.SSEErrorEvent": {
+        "type": "object",
+        "required": [
+          "error",
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "error"
+            ]
+          },
+          "error": {
+            "$ref": "#/components/schemas/anthropicapi.ErrorObject"
+          }
+        }
+      },
+      "anthropicapi.SSEEventFrame": {
+        "description": "One server-sent event frame emitted by streaming /v1/messages. On the wire each frame is sent as event: <name> and data: <JSON payload>.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/anthropicapi.SSEMessageStartEvent"
+          },
+          {
+            "$ref": "#/components/schemas/anthropicapi.SSEContentBlockStartEvent"
+          },
+          {
+            "$ref": "#/components/schemas/anthropicapi.SSEContentBlockDeltaEvent"
+          },
+          {
+            "$ref": "#/components/schemas/anthropicapi.SSEContentBlockStopEvent"
+          },
+          {
+            "$ref": "#/components/schemas/anthropicapi.SSEMessageDeltaEvent"
+          },
+          {
+            "$ref": "#/components/schemas/anthropicapi.SSEMessageStopEvent"
+          },
+          {
+            "$ref": "#/components/schemas/anthropicapi.SSEPingEvent"
+          },
+          {
+            "$ref": "#/components/schemas/anthropicapi.SSEErrorEvent"
+          }
+        ]
       }
     }
   }

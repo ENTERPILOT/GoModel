@@ -169,6 +169,109 @@ function applyAnthropicMessageSchemas() {
   schema("anthropicapi.Tool").properties.input_schema = freeFormObjectSchema();
 }
 
+function constStringSchema(value) {
+  return {
+    type: "string",
+    enum: [value],
+  };
+}
+
+function ensureAnthropicSSEEventSchemas() {
+  const schemas = spec.components?.schemas;
+  if (!schemas) {
+    throw new Error("missing OpenAPI components.schemas");
+  }
+  schemas["anthropicapi.SSEMessageStartEvent"] = {
+    type: "object",
+    required: ["message", "type"],
+    properties: {
+      type: constStringSchema("message_start"),
+      message: { $ref: "#/components/schemas/anthropicapi.MessagesResponse" },
+    },
+  };
+  schemas["anthropicapi.SSEContentBlockStartEvent"] = {
+    type: "object",
+    required: ["content_block", "index", "type"],
+    properties: {
+      type: constStringSchema("content_block_start"),
+      index: { type: "integer" },
+      content_block: { $ref: "#/components/schemas/anthropicapi.ResponseContentBlock" },
+    },
+  };
+  schemas["anthropicapi.SSEContentBlockDeltaEvent"] = {
+    type: "object",
+    required: ["delta", "index", "type"],
+    properties: {
+      type: constStringSchema("content_block_delta"),
+      index: { type: "integer" },
+      delta: freeFormObjectSchema(),
+    },
+  };
+  schemas["anthropicapi.SSEContentBlockStopEvent"] = {
+    type: "object",
+    required: ["index", "type"],
+    properties: {
+      type: constStringSchema("content_block_stop"),
+      index: { type: "integer" },
+    },
+  };
+  schemas["anthropicapi.SSEMessageDeltaEvent"] = {
+    type: "object",
+    required: ["delta", "type"],
+    properties: {
+      type: constStringSchema("message_delta"),
+      delta: freeFormObjectSchema(),
+      usage: { $ref: "#/components/schemas/anthropicapi.Usage" },
+    },
+  };
+  schemas["anthropicapi.SSEMessageStopEvent"] = {
+    type: "object",
+    required: ["type"],
+    properties: {
+      type: constStringSchema("message_stop"),
+    },
+  };
+  schemas["anthropicapi.SSEPingEvent"] = {
+    type: "object",
+    required: ["type"],
+    properties: {
+      type: constStringSchema("ping"),
+    },
+  };
+  schemas["anthropicapi.SSEErrorEvent"] = {
+    type: "object",
+    required: ["error", "type"],
+    properties: {
+      type: constStringSchema("error"),
+      error: { $ref: "#/components/schemas/anthropicapi.ErrorObject" },
+    },
+  };
+  schemas["anthropicapi.SSEEventFrame"] = {
+    description: "One server-sent event frame emitted by streaming /v1/messages. On the wire each frame is sent as event: <name> and data: <JSON payload>.",
+    oneOf: [
+      { $ref: "#/components/schemas/anthropicapi.SSEMessageStartEvent" },
+      { $ref: "#/components/schemas/anthropicapi.SSEContentBlockStartEvent" },
+      { $ref: "#/components/schemas/anthropicapi.SSEContentBlockDeltaEvent" },
+      { $ref: "#/components/schemas/anthropicapi.SSEContentBlockStopEvent" },
+      { $ref: "#/components/schemas/anthropicapi.SSEMessageDeltaEvent" },
+      { $ref: "#/components/schemas/anthropicapi.SSEMessageStopEvent" },
+      { $ref: "#/components/schemas/anthropicapi.SSEPingEvent" },
+      { $ref: "#/components/schemas/anthropicapi.SSEErrorEvent" },
+    ],
+  };
+}
+
+function applyAnthropicMessagesStreamSchema() {
+  ensureAnthropicSSEEventSchemas();
+  const streamResponse = spec.paths?.["/v1/messages"]?.post?.responses?.["200"]?.content?.["text/event-stream"];
+  if (!streamResponse) {
+    throw new Error("missing OpenAPI text/event-stream response: POST /v1/messages 200");
+  }
+  streamResponse.schema = {
+    $ref: "#/components/schemas/anthropicapi.SSEEventFrame",
+  };
+}
+
 function ensureBearerAuthSecurityScheme() {
   const securitySchemes = spec.components?.securitySchemes;
   if (!securitySchemes?.BearerAuth) {
@@ -281,6 +384,7 @@ function applyBudgetKeySchemaConstraints() {
 spec.servers = parseServers(process.env.DOCS_API_SERVERS);
 ensureResponsesInputElementSchema();
 applyAnthropicMessageSchemas();
+applyAnthropicMessagesStreamSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
 ensureRequiredProperty("admin.upsertBudgetRequest", "amount");
