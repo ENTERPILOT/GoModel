@@ -17,19 +17,17 @@
 # Data (runtime-created by SQLite storage)
 /data/
 
-# Others
-/*.bck.yml
-/repomix-output.*
-/coverage.out
-
 # Helm chart dependencies
 **/charts/*.tgz
 
 # OpenCode config - ignore because it might contain private servers URLs
 /opencode.json
 
-# Claude Code local settings (user-specific)
-/.claude/settings.local.json
-
 # Local git worktrees
 /.worktrees/
+
+# Others
+/*.bck.yml
+/repomix-output.*
+/coverage.out
+/.claude/
