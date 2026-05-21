@@ -37,6 +37,9 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+release:
+  replace_existing_draft: true
+
 snapshot:
   version_template: "{{ .Tag }}-next"
 
