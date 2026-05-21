@@ -150,7 +150,7 @@ func metadataFromProviderModel(providerModels map[string]*ModelInfo, model strin
 	candidates := append([]string{model}, alternates...)
 	for _, candidate := range candidates {
 		info := providerModels[strings.TrimSpace(candidate)]
-		if info == nil {
+		if info == nil || info.Model.Metadata == nil {
 			continue
 		}
 		return info.Model.Metadata

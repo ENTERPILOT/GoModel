@@ -205,6 +205,7 @@ func TestResolvePricingPrefersProviderOwnedRawSlashMetadata(t *testing.T) {
 		modelsResponse: &core.ModelsResponse{
 			Object: "list",
 			Data: []core.Model{
+				{ID: "free", Object: "model", OwnedBy: "openrouter"},
 				{ID: "openrouter/free", Object: "model", OwnedBy: "openrouter"},
 			},
 		},
