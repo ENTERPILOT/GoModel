@@ -247,7 +247,7 @@ awk -v parsed_dir="$PARSED_DIR" -v manifest="$MANIFEST" -v setup_manifest="$SETU
     if (!in_code && $0 ~ /^## /) {
       current_h2 = substr($0, 4)
     }
-    if (!in_code && $0 ~ /^### S[0-9][0-9] /) {
+    if (!in_code && $0 ~ /^### S[0-9][0-9]+ /) {
       current_id = $2
       current_title = substr($0, length(current_id) + 5)
       next

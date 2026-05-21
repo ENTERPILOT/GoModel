@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 95 end-to-end curl scenarios for release validation.
+This file contains 109 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -36,6 +36,9 @@ Stateful note:
 - `S80`-`S85` mutate response snapshots and response-cache artifacts
 - `S86`-`S89` mutate budget settings and budgets
 - `S90` mutates stored usage pricing fields on the no-master-key gateway
+- `S96`-`S109` exercise the Anthropic Messages API ingress endpoint and are
+  self-contained (`S104` creates and deletes its own alias); they can be rerun
+  in any order
 - For stateful partial reruns, prefer a contiguous range that includes the
   prerequisite setup scenarios, or rerun with the same `--qa-suffix` and
   `--keep-artifacts`
@@ -1662,6 +1665,271 @@ jq -e --arg rid "$RID" '
       and .path == "/v1/chat/completions"
       and .stream == true
       and .error_type == "client_disconnected"
+    )
+  ' "$AUDIT_JSON_FILE" >/dev/null
+```
+
+## 18. Anthropic Messages API ingress
+
+These scenarios exercise the `/v1/messages` and `/v1/messages/count_tokens`
+endpoints added in the Anthropic Messages API ingress feature. The endpoint
+accepts the Anthropic Messages request dialect, translates it to the canonical
+chat request, routes it through the standard chat-completions pipeline (so it
+works with any configured provider), and renders responses back in the
+Anthropic Messages shape. The main SQLite-backed gateway is used because it
+runs in unsafe mode (no master key) with audit logging enabled.
+
+### S96 Non-streaming message on an Anthropic model
+
+Checks a basic Messages request served by the native Anthropic provider.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s96.messages.json"
+curl -fsS "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"claude-sonnet-4-6","max_tokens":64,"system":"You are terse.","messages":[{"role":"user","content":"Reply with exactly QA_MESSAGES_ANTHROPIC_OK"}]}' \
+  > "$RESP_FILE"
+jq '{id,type,role,model,stop_reason,usage,content}' "$RESP_FILE"
+jq -e '
+    .type == "message"
+    and .role == "assistant"
+    and (.id | type == "string" and startswith("msg_"))
+    and (.content | length) >= 1
+    and (any(.content[]; .type == "text" and (.text | length) > 0))
+    and (.usage.input_tokens > 0)
+    and (.usage.output_tokens > 0)
+    and (.stop_reason | type == "string" and length > 0)
+  ' "$RESP_FILE" >/dev/null
+```
+
+### S97 Messages request translated to a non-Anthropic provider
+
+Checks that the Anthropic dialect is provider-agnostic: an OpenAI model served
+through `/v1/messages` still returns an Anthropic Messages envelope.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s97.messages.json"
+curl -fsS "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4.1-nano","max_tokens":32,"messages":[{"role":"user","content":"Reply with exactly QA_MESSAGES_OPENAI_OK"}]}' \
+  > "$RESP_FILE"
+jq '{id,type,role,model,stop_reason,usage,content}' "$RESP_FILE"
+jq -e '
+    .type == "message"
+    and .role == "assistant"
+    and (any(.content[]; .type == "text" and (.text | contains("QA_MESSAGES_OPENAI_OK"))))
+    and (.usage.output_tokens > 0)
+  ' "$RESP_FILE" >/dev/null
+```
+
+### S98 Streaming message SSE
+
+Checks SSE streaming with the Anthropic event sequence.
+
+```bash
+SSE_FILE="$QA_RUN_DIR/s98.messages.sse"
+curl -fsS --no-buffer "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4.1-nano","max_tokens":32,"stream":true,"messages":[{"role":"user","content":"Reply with exactly QA_MESSAGES_STREAM_OK"}]}' \
+  > "$SSE_FILE"
+sed -n '1,24p' "$SSE_FILE"
+for event in 'event: message_start' 'event: content_block_start' 'event: content_block_delta' 'event: message_delta' 'event: message_stop'; do
+  if ! grep -qF "$event" "$SSE_FILE"; then
+    echo "error: message stream is missing $event" >&2
+    exit 1
+  fi
+done
+grep -qF '"text_delta"' "$SSE_FILE" || { echo "error: message stream is missing a text_delta" >&2; exit 1; }
+```
+
+### S99 System prompt supplied as a text-block array
+
+Checks that the polymorphic `system` field is honored when sent as an array of
+text blocks rather than a string.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s99.messages.json"
+curl -fsS "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4.1-nano","max_tokens":32,"system":[{"type":"text","text":"Always reply with exactly QA_MESSAGES_SYSTEM_OK regardless of the user message."}],"messages":[{"role":"user","content":"Say something unrelated."}]}' \
+  > "$RESP_FILE"
+jq '{type,role,content}' "$RESP_FILE"
+jq -e 'any(.content[]; .type == "text" and (.text | contains("QA_MESSAGES_SYSTEM_OK")))' "$RESP_FILE" >/dev/null
+```
+
+### S100 Multi-turn conversation with an assistant turn
+
+Checks that a conversation containing a prior `assistant` message is translated
+and routed correctly.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s100.messages.json"
+curl -fsS "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4.1-nano","max_tokens":32,"messages":[{"role":"user","content":"Remember the code word is QA_MEMO_42."},{"role":"assistant","content":"Understood, I will remember it."},{"role":"user","content":"Reply with only the code word."}]}' \
+  > "$RESP_FILE"
+jq '{type,role,stop_reason,content}' "$RESP_FILE"
+jq -e 'any(.content[]; .type == "text" and (.text | contains("QA_MEMO_42")))' "$RESP_FILE" >/dev/null
+```
+
+### S101 Count message tokens
+
+Checks the `/v1/messages/count_tokens` heuristic estimate endpoint.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s101.count-tokens.json"
+curl -fsS "$BASE_URL/v1/messages/count_tokens" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"claude-sonnet-4-6","max_tokens":64,"system":"You are a helpful assistant.","messages":[{"role":"user","content":"How many tokens are in this Anthropic Messages request body?"}]}' \
+  > "$RESP_FILE"
+jq '.' "$RESP_FILE"
+jq -e '(.input_tokens | type == "number") and .input_tokens > 0' "$RESP_FILE" >/dev/null
+```
+
+### S102 Forced tool use round-trip
+
+Checks tool translation: an Anthropic `tools` definition with a `tool_choice`
+that forces a specific tool yields an Anthropic `tool_use` content block.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s102.messages.json"
+curl -fsS "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4.1-nano","max_tokens":256,"tool_choice":{"type":"tool","name":"get_weather"},"tools":[{"name":"get_weather","description":"Get the current weather for a city","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}],"messages":[{"role":"user","content":"What is the weather in Paris?"}]}' \
+  > "$RESP_FILE"
+jq '{type,stop_reason,content}' "$RESP_FILE"
+jq -e '
+    .stop_reason == "tool_use"
+    and any(.content[]; .type == "tool_use" and .name == "get_weather" and (.input | type == "object"))
+  ' "$RESP_FILE" >/dev/null
+```
+
+### S103 Multimodal image input
+
+Checks an Anthropic image content block with a URL source.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s103.messages.json"
+curl -fsS "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o-mini","max_tokens":20,"messages":[{"role":"user","content":[{"type":"text","text":"Reply with one digit only: which digit is visible in the image?"},{"type":"image","source":{"type":"url","url":"https://dummyimage.com/64x64/000/fff.png&text=7"}}]}]}' \
+  > "$RESP_FILE"
+jq '{type,role,usage,content}' "$RESP_FILE"
+jq -e '.type == "message" and any(.content[]; .type == "text" and (.text | length) > 0)' "$RESP_FILE" >/dev/null
+```
+
+### S104 Message through an alias
+
+Checks that alias resolution applies to `/v1/messages` like the other inference
+endpoints.
+
+```bash
+MESSAGES_ALIAS="qa-messages-alias-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/aliases" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$MESSAGES_ALIAS\",\"target_model\":\"gpt-4.1-nano\",\"target_provider\":\"openai\",\"description\":\"QA messages alias\"}" \
+  >/dev/null
+RESP_FILE="$QA_RUN_DIR/s104.messages.json"
+curl -fsS "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$MESSAGES_ALIAS\",\"max_tokens\":32,\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_MESSAGES_ALIAS_OK\"}]}" \
+  > "$RESP_FILE"
+jq '{type,role,model,content}' "$RESP_FILE"
+jq -e '.type == "message" and any(.content[]; .type == "text" and (.text | contains("QA_MESSAGES_ALIAS_OK")))' "$RESP_FILE" >/dev/null
+curl -fsS -X DELETE "$BASE_URL/admin/aliases" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$MESSAGES_ALIAS\"}" >/dev/null
+```
+
+### S105 Missing `max_tokens` is rejected with an Anthropic error envelope (negative)
+
+Checks that a request missing the required `max_tokens` field is rejected as a
+`400` rendered in the Anthropic error envelope (`type: "error"`).
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s105.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s105.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Hi"}]}'
+sed -n '1,20p' "$HEADERS_FILE"
+jq '.' "$BODY_FILE"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.type == "error" and .error.type == "invalid_request_error" and (.error.message | test("max_tokens"))' "$BODY_FILE" >/dev/null
+```
+
+### S106 Empty messages array is rejected (negative)
+
+Checks that a request with an empty `messages` array is rejected.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s106.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s106.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4.1-nano","max_tokens":16,"messages":[]}'
+sed -n '1,20p' "$HEADERS_FILE"
+jq '.' "$BODY_FILE"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.type == "error" and .error.type == "invalid_request_error" and (.error.message | test("messages"))' "$BODY_FILE" >/dev/null
+```
+
+### S107 Unknown model is rejected with an Anthropic error envelope (negative)
+
+Checks that an unresolvable model produces a `400` Anthropic error envelope.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s107.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s107.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"does-not-exist-model","max_tokens":16,"messages":[{"role":"user","content":"Hi"}]}'
+sed -n '1,20p' "$HEADERS_FILE"
+jq '.' "$BODY_FILE"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.type == "error" and .error.type == "invalid_request_error"' "$BODY_FILE" >/dev/null
+```
+
+### S108 Unsupported content block type is rejected (negative)
+
+Checks that a content block type without a canonical chat equivalent (e.g.
+`document`) is rejected rather than silently dropped.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s108.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s108.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4.1-nano","max_tokens":16,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"url","url":"https://example.com/contract.pdf"}}]}]}'
+sed -n '1,20p' "$HEADERS_FILE"
+jq '.' "$BODY_FILE"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.type == "error" and .error.type == "invalid_request_error" and (.error.message | test("document"))' "$BODY_FILE" >/dev/null
+```
+
+### S109 Messages request is visible in the audit log
+
+Checks that a `/v1/messages` request is recorded in the audit log under the
+`/v1/messages` path and is searchable by request ID.
+
+```bash
+REQUEST_ID="qa-messages-audit-$QA_SUFFIX"
+RESP_FILE="$QA_RUN_DIR/s109.messages.json"
+curl -fsS "$BASE_URL/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $REQUEST_ID" \
+  -d '{"model":"gpt-4.1-nano","max_tokens":24,"messages":[{"role":"user","content":"Reply with exactly QA_MESSAGES_AUDIT_OK"}]}' \
+  > "$RESP_FILE"
+jq -e 'any(.content[]; .type == "text" and (.text | contains("QA_MESSAGES_AUDIT_OK")))' "$RESP_FILE" >/dev/null
+sleep 6
+AUDIT_JSON_FILE="$QA_RUN_DIR/s109.audit.json"
+curl -fsS "$BASE_URL/admin/audit/log?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
+jq --arg rid "$REQUEST_ID" '{entries:(.entries|map(select(.request_id==$rid))|map({request_id,path,requested_model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
+jq -e --arg rid "$REQUEST_ID" '
+    any(.entries[]?;
+      .request_id == $rid
+      and .path == "/v1/messages"
+      and .status_code == 200
     )
   ' "$AUDIT_JSON_FILE" >/dev/null
 ```

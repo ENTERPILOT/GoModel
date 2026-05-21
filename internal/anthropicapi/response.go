@@ -99,7 +99,16 @@ func argumentsToRaw(arguments string) json.RawMessage {
 }
 
 // stopReasonFromFinish maps an OpenAI finish_reason to an Anthropic stop_reason.
+//
+// A response carrying tool calls always reports "tool_use" regardless of the
+// upstream finish_reason: OpenAI-family providers report finish_reason "stop"
+// alongside tool calls when a tool is forced via tool_choice, and the Anthropic
+// Messages API contract guarantees "tool_use" whenever the content holds
+// tool_use blocks.
 func stopReasonFromFinish(finish string, hasToolCalls bool) string {
+	if hasToolCalls {
+		return "tool_use"
+	}
 	switch finish {
 	case "stop":
 		return "end_turn"
@@ -110,9 +119,6 @@ func stopReasonFromFinish(finish string, hasToolCalls bool) string {
 	case "content_filter":
 		return "end_turn"
 	case "":
-		if hasToolCalls {
-			return "tool_use"
-		}
 		return ""
 	default:
 		return finish

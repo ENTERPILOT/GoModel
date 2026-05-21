@@ -94,20 +94,35 @@ func TestFromChatResponseThinking(t *testing.T) {
 
 func TestFromChatResponseStopReasons(t *testing.T) {
 	tests := []struct {
-		finish string
-		want   string
+		name      string
+		finish    string
+		toolCalls bool
+		want      string
 	}{
-		{finish: "stop", want: "end_turn"},
-		{finish: "length", want: "max_tokens"},
-		{finish: "tool_calls", want: "tool_use"},
-		{finish: "content_filter", want: "end_turn"},
-		{finish: "", want: "end_turn"},
+		{name: "stop", finish: "stop", want: "end_turn"},
+		{name: "length", finish: "length", want: "max_tokens"},
+		{name: "tool_calls", finish: "tool_calls", want: "tool_use"},
+		{name: "content_filter", finish: "content_filter", want: "end_turn"},
+		{name: "empty", finish: "", want: "end_turn"},
+		// A response carrying tool calls always reports "tool_use". OpenAI-family
+		// providers report finish_reason "stop" alongside tool calls when a tool
+		// is forced via tool_choice.
+		{name: "stop_with_tool_calls", finish: "stop", toolCalls: true, want: "tool_use"},
+		{name: "empty_with_tool_calls", finish: "", toolCalls: true, want: "tool_use"},
 	}
 	for _, tc := range tests {
-		t.Run(tc.finish, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
+			message := core.ResponseMessage{Content: "x"}
+			if tc.toolCalls {
+				message.ToolCalls = []core.ToolCall{{
+					ID:       "tu_1",
+					Type:     "function",
+					Function: core.FunctionCall{Name: "get_weather", Arguments: `{"city":"paris"}`},
+				}}
+			}
 			resp := FromChatResponse(&core.ChatResponse{
 				Choices: []core.Choice{{
-					Message:      core.ResponseMessage{Content: "x"},
+					Message:      message,
 					FinishReason: tc.finish,
 				}},
 			})
