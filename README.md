@@ -208,6 +208,13 @@ docker run --rm -p 8080:8080 --env-file .env gomodel
 | `/v1/batches/{id}/cancel`   | POST   | Cancel a pending batch                                                                                       |
 | `/v1/batches/{id}/results`  | GET    | Retrieve native batch results when available                                                                 |
 
+### Anthropic-Compatible API
+
+| Endpoint                    | Method | Description                                                                                                  |
+| --------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| `/v1/messages`              | POST   | Anthropic Messages API through translated model routing (streaming supported)                                 |
+| `/v1/messages/count_tokens` | POST   | Heuristic Anthropic Messages input token estimate                                                            |
+
 ### Provider Passthrough
 
 | Endpoint            | Method                                       | Description                                        |
@@ -318,13 +325,15 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for testing, linting, and pre-commit s
 
 - [ ] Intelligent routing
 - [ ] Broader provider support: Cohere, Command A, and Operational
-- [ ] Budget management with limits per `user_path` and/or API key
-- [ ] Editable model pricing for accurate cost tracking and budgeting
-- [ ] Full support for the OpenAI `/responses` and `/conversations` lifecycle
-- [ ] Prompt cache visibility showing how much of each prompt was cached by the provider
+- [x] Budget management with limits per `user_path` and/or API key
+- [x] Editable model pricing for accurate cost tracking and budgeting
+- [x] Full support for the OpenAI `/responses` lifecycle
+- [x] Anthropic-compatible `/messages` ingress and `/messages/count_tokens`
+- [ ] Full support for the OpenAI `/conversations` lifecycle
+- [x] Prompt cache visibility showing how much of each prompt was cached by the provider
 - [ ] Guardrails hardening: better UI, simpler architecture, easier custom guardrails, and response-side guardrails before output reaches the client
 - [ ] Passthrough for all providers, beyond the current OpenAI and Anthropic beta
-- [ ] Fix failover charts in the dashboard
+- [x] Fix failover charts in the dashboard
 
 ### Should Have
 

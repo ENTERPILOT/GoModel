@@ -67,6 +67,64 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/audit/detail": {
+            "get": {
+                "description": "Returns one audit log entry enriched with usage summary when available.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get audit log entry detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Audit log entry ID",
+                        "name": "log_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.auditLogEntryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/audit/log": {
             "get": {
                 "produces": [
@@ -2867,6 +2925,120 @@ const docTemplate = `{
                 ]
             }
         },
+        "/v1/messages": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json",
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "Create a message (Anthropic Messages API)",
+                "parameters": [
+                    {
+                        "description": "Anthropic Messages request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/anthropicapi.MessagesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "JSON response or SSE stream when stream=true",
+                        "schema": {
+                            "$ref": "#/definitions/anthropicapi.MessagesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/anthropicapi.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/anthropicapi.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/anthropicapi.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/anthropicapi.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/messages/count_tokens": {
+            "post": {
+                "description": "Returns a provider-agnostic heuristic estimate of the input token count.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "Count message tokens (Anthropic Messages API)",
+                "parameters": [
+                    {
+                        "description": "Anthropic Messages request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/anthropicapi.MessagesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/anthropicapi.CountTokensResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/anthropicapi.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/anthropicapi.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/models": {
             "get": {
                 "produces": [
@@ -3449,6 +3621,9 @@ const docTemplate = `{
                 "CACHE_ENABLED": {
                     "type": "string"
                 },
+                "DASHBOARD_LIVE_LOGS_ENABLED": {
+                    "type": "string"
+                },
                 "FEATURE_FALLBACK_MODE": {
                     "type": "string"
                 },
@@ -3843,6 +4018,234 @@ const docTemplate = `{
                 },
                 "selector": {
                     "type": "string"
+                }
+            }
+        },
+        "anthropicapi.CountTokensResponse": {
+            "type": "object",
+            "properties": {
+                "input_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "anthropicapi.ErrorObject": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "anthropicapi.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/anthropicapi.ErrorObject"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "anthropicapi.Message": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "anthropicapi.MessagesRequest": {
+            "type": "object",
+            "properties": {
+                "max_tokens": {
+                    "type": "integer"
+                },
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/anthropicapi.Message"
+                    }
+                },
+                "metadata": {
+                    "$ref": "#/definitions/anthropicapi.Metadata"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "stop_sequences": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "stream": {
+                    "type": "boolean"
+                },
+                "system": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "temperature": {
+                    "type": "number"
+                },
+                "thinking": {
+                    "$ref": "#/definitions/anthropicapi.Thinking"
+                },
+                "tool_choice": {
+                    "$ref": "#/definitions/anthropicapi.ToolChoice"
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/anthropicapi.Tool"
+                    }
+                },
+                "top_k": {
+                    "type": "integer"
+                },
+                "top_p": {
+                    "type": "number"
+                }
+            }
+        },
+        "anthropicapi.MessagesResponse": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/anthropicapi.ResponseContentBlock"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "stop_reason": {
+                    "type": "string"
+                },
+                "stop_sequence": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "usage": {
+                    "$ref": "#/definitions/anthropicapi.Usage"
+                }
+            }
+        },
+        "anthropicapi.Metadata": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "anthropicapi.ResponseContentBlock": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "input": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "thinking": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "anthropicapi.Thinking": {
+            "type": "object",
+            "properties": {
+                "budget_tokens": {
+                    "type": "integer"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "anthropicapi.Tool": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "input_schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "anthropicapi.ToolChoice": {
+            "type": "object",
+            "properties": {
+                "disable_parallel_tool_use": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "anthropicapi.Usage": {
+            "type": "object",
+            "properties": {
+                "cache_creation_input_tokens": {
+                    "type": "integer"
+                },
+                "cache_read_input_tokens": {
+                    "type": "integer"
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "output_tokens": {
+                    "type": "integer"
                 }
             }
         },
@@ -5706,6 +6109,15 @@ const docTemplate = `{
                 "cache_type": {
                     "type": "string"
                 },
+                "cache_write_input_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_ratio": {
+                    "type": "number"
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
                 "cost_source": {
                     "type": "string"
                 },
@@ -5756,6 +6168,9 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "total_tokens": {
+                    "type": "integer"
+                },
+                "uncached_input_tokens": {
                     "type": "integer"
                 },
                 "user_path": {
@@ -5855,7 +6270,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{"http"},
 	Title:            "GoModel API",
-	Description:      "High-performance AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, DeepSeek, Z.ai, xAI, MiniMax, Oracle, Ollama). Drop-in OpenAI-compatible API.",
+	Description:      "AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, DeepSeek, Z.ai, xAI, MiniMax, Oracle, Ollama). Drop-in OpenAI-compatible API.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

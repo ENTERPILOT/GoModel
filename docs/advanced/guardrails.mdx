@@ -12,6 +12,7 @@ Guardrails work across all text-based endpoints:
 
 - `/v1/chat/completions`
 - `/v1/responses`
+- `/v1/messages`
 
 <Note>
   Guardrails for images, TTS, STT, and video models are planned as a separate
@@ -53,7 +54,7 @@ flowchart LR
 3. Modified messages are **applied back** to the original request
 4. The request continues to the LLM provider
 
-Guardrails never see the raw API request types — they operate on a normalized message list. This means the same guardrail works identically for `/chat/completions` and `/responses`.
+Guardrails never see the raw API request types — they operate on a normalized message list. This means the same guardrail works identically for `/chat/completions`, `/responses`, and `/messages`.
 
 ## Execution Order
 
@@ -341,10 +342,11 @@ Guardrails operate on a normalized message format internally. The adaptation bet
 | --------------------- | ------------------------ | -------------------- |
 | `/v1/chat/completions`| `messages` with `role: "system"` | `messages` array     |
 | `/v1/responses`       | `instructions` field     | `input` field        |
+| `/v1/messages`        | `system` field           | `messages` array     |
 
 <Tip>
   You don't need to think about which endpoint your users call. A single
-  guardrail rule works identically for both.
+  guardrail rule works identically for all supported text endpoints.
 </Tip>
 
 ## Errors and Rejection

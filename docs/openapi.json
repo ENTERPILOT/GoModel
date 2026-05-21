@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "description": "High-performance AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, DeepSeek, Z.ai, xAI, MiniMax, Oracle, Ollama). Drop-in OpenAI-compatible API.",
+    "description": "AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, DeepSeek, Z.ai, xAI, MiniMax, Oracle, Ollama). Drop-in OpenAI-compatible API.",
     "title": "GoModel API",
     "contact": {},
     "version": "1.0"
@@ -72,6 +72,88 @@
         "x-mint": {
           "metadata": {
             "sidebarTitle": "/admin/audit/conversation"
+          }
+        }
+      }
+    },
+    "/admin/audit/detail": {
+      "get": {
+        "description": "Returns one audit log entry enriched with usage summary when available.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get audit log entry detail",
+        "parameters": [
+          {
+            "description": "Audit log entry ID",
+            "name": "log_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.auditLogEntryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/audit/detail"
           }
         }
       }
@@ -4436,6 +4518,158 @@
         }
       }
     },
+    "/v1/messages": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Create a message (Anthropic Messages API)",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/anthropicapi.MessagesRequest"
+        },
+        "responses": {
+          "200": {
+            "description": "JSON response or SSE stream when stream=true",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.MessagesResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.MessagesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/messages"
+          }
+        }
+      }
+    },
+    "/v1/messages/count_tokens": {
+      "post": {
+        "description": "Returns a provider-agnostic heuristic estimate of the input token count.",
+        "tags": [
+          "messages"
+        ],
+        "summary": "Count message tokens (Anthropic Messages API)",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/anthropicapi.MessagesRequest"
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.CountTokensResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/messages/count_tokens"
+          }
+        }
+      }
+    },
     "/v1/models": {
       "get": {
         "tags": [
@@ -5254,6 +5488,19 @@
     }
   ],
   "components": {
+    "requestBodies": {
+      "anthropicapi.MessagesRequest": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/anthropicapi.MessagesRequest"
+            }
+          }
+        },
+        "description": "Anthropic Messages request",
+        "required": true
+      }
+    },
     "securitySchemes": {
       "BearerAuth": {
         "type": "http",
@@ -5269,6 +5516,9 @@
             "type": "string"
           },
           "CACHE_ENABLED": {
+            "type": "string"
+          },
+          "DASHBOARD_LIVE_LOGS_ENABLED": {
             "type": "string"
           },
           "FEATURE_FALLBACK_MODE": {
@@ -5704,6 +5954,234 @@
           "pricing",
           "selector"
         ]
+      },
+      "anthropicapi.CountTokensResponse": {
+        "type": "object",
+        "properties": {
+          "input_tokens": {
+            "type": "integer"
+          }
+        }
+      },
+      "anthropicapi.ErrorObject": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "anthropicapi.ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/anthropicapi.ErrorObject"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "anthropicapi.Message": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "role": {
+            "type": "string"
+          }
+        }
+      },
+      "anthropicapi.MessagesRequest": {
+        "type": "object",
+        "properties": {
+          "max_tokens": {
+            "type": "integer"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/anthropicapi.Message"
+            }
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/anthropicapi.Metadata"
+          },
+          "model": {
+            "type": "string"
+          },
+          "stop_sequences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stream": {
+            "type": "boolean"
+          },
+          "system": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "temperature": {
+            "type": "number"
+          },
+          "thinking": {
+            "$ref": "#/components/schemas/anthropicapi.Thinking"
+          },
+          "tool_choice": {
+            "$ref": "#/components/schemas/anthropicapi.ToolChoice"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/anthropicapi.Tool"
+            }
+          },
+          "top_k": {
+            "type": "integer"
+          },
+          "top_p": {
+            "type": "number"
+          }
+        }
+      },
+      "anthropicapi.MessagesResponse": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/anthropicapi.ResponseContentBlock"
+            }
+          },
+          "id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "stop_reason": {
+            "type": "string"
+          },
+          "stop_sequence": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/anthropicapi.Usage"
+          }
+        }
+      },
+      "anthropicapi.Metadata": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
+      "anthropicapi.ResponseContentBlock": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "input": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "thinking": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "anthropicapi.Thinking": {
+        "type": "object",
+        "properties": {
+          "budget_tokens": {
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "anthropicapi.Tool": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "input_schema": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "anthropicapi.ToolChoice": {
+        "type": "object",
+        "properties": {
+          "disable_parallel_tool_use": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "anthropicapi.Usage": {
+        "type": "object",
+        "properties": {
+          "cache_creation_input_tokens": {
+            "type": "integer"
+          },
+          "cache_read_input_tokens": {
+            "type": "integer"
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "output_tokens": {
+            "type": "integer"
+          }
+        }
       },
       "auditlog.ConversationResult": {
         "type": "object",
@@ -7601,6 +8079,15 @@
           "cache_type": {
             "type": "string"
           },
+          "cache_write_input_tokens": {
+            "type": "integer"
+          },
+          "cached_input_ratio": {
+            "type": "number"
+          },
+          "cached_input_tokens": {
+            "type": "integer"
+          },
           "cost_source": {
             "type": "string"
           },
@@ -7651,6 +8138,9 @@
             "type": "number"
           },
           "total_tokens": {
+            "type": "integer"
+          },
+          "uncached_input_tokens": {
             "type": "integer"
           },
           "user_path": {
