@@ -246,9 +246,18 @@ function ensureAnthropicSSEEventSchemas() {
       error: { $ref: "#/components/schemas/anthropicapi.ErrorObject" },
     },
   };
+  schemas["anthropicapi.SSEUnknownEvent"] = {
+    description: "Fallback for future Anthropic streaming event payloads.",
+    type: "object",
+    required: ["type"],
+    properties: {
+      type: { type: "string" },
+    },
+    additionalProperties: true,
+  };
   schemas["anthropicapi.SSEEventFrame"] = {
-    description: "One server-sent event frame emitted by streaming /v1/messages. On the wire each frame is sent as event: <name> and data: <JSON payload>.",
-    oneOf: [
+    description: "One server-sent event frame emitted by streaming /v1/messages. On the wire each frame is sent as event: <name> and data: <JSON payload>. Unknown event payloads are accepted for forward compatibility.",
+    anyOf: [
       { $ref: "#/components/schemas/anthropicapi.SSEMessageStartEvent" },
       { $ref: "#/components/schemas/anthropicapi.SSEContentBlockStartEvent" },
       { $ref: "#/components/schemas/anthropicapi.SSEContentBlockDeltaEvent" },
@@ -257,6 +266,7 @@ function ensureAnthropicSSEEventSchemas() {
       { $ref: "#/components/schemas/anthropicapi.SSEMessageStopEvent" },
       { $ref: "#/components/schemas/anthropicapi.SSEPingEvent" },
       { $ref: "#/components/schemas/anthropicapi.SSEErrorEvent" },
+      { $ref: "#/components/schemas/anthropicapi.SSEUnknownEvent" },
     ],
   };
 }
