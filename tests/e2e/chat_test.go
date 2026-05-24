@@ -3,7 +3,9 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -27,15 +29,18 @@ func TestChatCompletion(t *testing.T) {
 		var chatResp core.ChatResponse
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&chatResp))
 
-		assert.NotEmpty(t, chatResp.ID)
+		require.NotEmpty(t, chatResp.ID)
 		assert.Equal(t, "chat.completion", chatResp.Object)
 		assert.Equal(t, "gpt-4", chatResp.Model)
-		assert.Len(t, chatResp.Choices, 1)
+		require.Len(t, chatResp.Choices, 1)
 		assert.Equal(t, "assistant", chatResp.Choices[0].Message.Role)
+		assert.Contains(t, chatResp.Choices[0].Message.Content, "Hello, how are you?")
 		assert.Equal(t, "stop", chatResp.Choices[0].FinishReason)
 	})
 
 	t.Run("conversation history", func(t *testing.T) {
+		mockServer.ResetRequests()
+
 		payload := core.ChatRequest{
 			Model: "gpt-4",
 			Messages: []core.Message{
@@ -53,7 +58,19 @@ func TestChatCompletion(t *testing.T) {
 
 		var chatResp core.ChatResponse
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&chatResp))
+		require.Len(t, chatResp.Choices, 1)
 		assert.Contains(t, chatResp.Choices[0].Message.Content, "And what is 3+3?")
+
+		upstream := requireRecordedChatRequest(t)
+		require.Len(t, upstream.Messages, 4)
+		assert.Equal(t, "system", upstream.Messages[0].Role)
+		assert.Equal(t, "You are a helpful assistant.", upstream.Messages[0].Content)
+		assert.Equal(t, "user", upstream.Messages[1].Role)
+		assert.Equal(t, "What is 2+2?", upstream.Messages[1].Content)
+		assert.Equal(t, "assistant", upstream.Messages[2].Role)
+		assert.Equal(t, "4", upstream.Messages[2].Content)
+		assert.Equal(t, "user", upstream.Messages[3].Role)
+		assert.Equal(t, "And what is 3+3?", upstream.Messages[3].Content)
 	})
 
 	t.Run("empty messages", func(t *testing.T) {
@@ -63,6 +80,12 @@ func TestChatCompletion(t *testing.T) {
 		defer closeBody(resp)
 
 		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var chatResp core.ChatResponse
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&chatResp))
+		require.Len(t, chatResp.Choices, 1)
+		assert.Equal(t, "assistant", chatResp.Choices[0].Message.Role)
+		assert.Contains(t, chatResp.Choices[0].Message.Content, "How can I help you today?")
 	})
 
 	t.Run("multimodal content array", func(t *testing.T) {
@@ -93,6 +116,7 @@ func TestChatCompletion(t *testing.T) {
 
 		var chatResp core.ChatResponse
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&chatResp))
+		require.Len(t, chatResp.Choices, 1)
 		assert.Contains(t, chatResp.Choices[0].Message.Content, "What is in this image?")
 
 		recorded := mockServer.Requests()
@@ -251,7 +275,8 @@ func TestChatCompletionParameters(t *testing.T) {
 
 			var chatResp core.ChatResponse
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&chatResp))
-			assert.NotEmpty(t, chatResp.Choices[0].Message.Content)
+			require.Len(t, chatResp.Choices, 1)
+			assert.Contains(t, chatResp.Choices[0].Message.Content, "Hello")
 
 			upstream := requireRecordedChatRequest(t)
 			assert.Equal(t, "gpt-4", upstream.Model)
@@ -287,7 +312,7 @@ func TestChatCompletionStreaming(t *testing.T) {
 
 		chunks := readStreamingResponse(t, resp.Body)
 		content := extractStreamContent(chunks)
-		assert.NotEmpty(t, content)
+		assert.Contains(t, content, "Hello")
 	})
 
 	t.Run("streaming tool calls", func(t *testing.T) {
@@ -451,18 +476,49 @@ func TestChatCompletionConcurrency(t *testing.T) {
 }
 
 func TestChatCompletionTimeout(t *testing.T) {
-	client := &http.Client{Timeout: 10 * time.Second}
+	t.Run("client timeout fires while upstream is slow", func(t *testing.T) {
+		const (
+			upstreamDelay = 2 * time.Second
+			clientTimeout = 150 * time.Millisecond
+		)
 
-	payload := defaultChatReq("Quick test")
+		mockServer.SetResponseDelay(upstreamDelay)
+		t.Cleanup(func() { mockServer.SetResponseDelay(0) })
 
-	body, _ := json.Marshal(payload)
-	start := time.Now()
-	resp, err := client.Post(gatewayURL+chatCompletionsPath, "application/json", strings.NewReader(string(body)))
-	elapsed := time.Since(start)
+		client := &http.Client{Timeout: clientTimeout}
+		body, err := json.Marshal(defaultChatReq("Slow request"))
+		require.NoError(t, err)
 
-	require.NoError(t, err)
-	defer closeBody(resp)
+		start := time.Now()
+		resp, err := client.Post(gatewayURL+chatCompletionsPath, "application/json", strings.NewReader(string(body)))
+		elapsed := time.Since(start)
 
-	assert.Less(t, elapsed, 5*time.Second)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+		// Expected: client-side timeout fires before the upstream returns.
+		if resp != nil {
+			closeBody(resp)
+		}
+		require.Error(t, err, "expected client timeout while upstream is delayed by %s", upstreamDelay)
+		assert.True(t,
+			errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "Client.Timeout"),
+			"expected deadline-exceeded / Client.Timeout error, got: %v", err)
+		assert.Less(t, elapsed, upstreamDelay,
+			"client timeout (%s) should fire before upstream delay (%s) completes", clientTimeout, upstreamDelay)
+	})
+
+	t.Run("fast request succeeds when upstream is responsive", func(t *testing.T) {
+		// Sanity check that the delay was cleared and the gateway round-trip is fast.
+		client := &http.Client{Timeout: 10 * time.Second}
+		body, err := json.Marshal(defaultChatReq("Quick test"))
+		require.NoError(t, err)
+
+		start := time.Now()
+		resp, err := client.Post(gatewayURL+chatCompletionsPath, "application/json", strings.NewReader(string(body)))
+		elapsed := time.Since(start)
+
+		require.NoError(t, err)
+		defer closeBody(resp)
+
+		assert.Less(t, elapsed, 5*time.Second)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
 }
