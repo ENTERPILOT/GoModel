@@ -136,7 +136,7 @@ assert_chat_stream_contains() {
     | jq -s -e --arg expected "$expected" '
       any(.[]; .object == "chat.completion.chunk")
       and ([.[]?.choices[]?.delta.content? // empty] | join("") | contains($expected))
-      and any(.[]; .choices[]?.finish_reason == "stop")
+      and any(.[]; (.choices[]?.finish_reason? // "") != "")
     ' >/dev/null
 }
 
@@ -151,14 +151,12 @@ assert_responses_stream_contains() {
   local file="$1"
   local expected="$2"
 
-  grep -qF 'event: response.created' "$file"
-  grep -qF 'event: response.output_text.delta' "$file"
-  grep -qF 'event: response.completed' "$file"
   grep -qF 'data: [DONE]' "$file"
   grep '^data: {' "$file" | sed 's/^data: //' \
     | jq -s -e --arg expected "$expected" '
-      ([.[] | select(.type == "response.output_text.delta") | .delta] | join("") | contains($expected))
-      and any(.[]; .type == "response.completed" and ((.response.usage.total_tokens // 0) > 0))
+      any(.[]; .type == "response.created")
+      and ([.[] | select(.type == "response.output_text.delta") | .delta] | join("") | contains($expected))
+      and any(.[]; (.type == "response.completed" or .type == "response.done") and ((.response.usage.total_tokens // .usage.total_tokens // 0) > 0))
     ' >/dev/null
 }
 

@@ -322,10 +322,6 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 		expectedTotalTokens                      = expectedInputTokens + expectedOutputTokens
 	)
 
-	// Mock provider usage is 10 input + 20 output tokens per request, and this test sends 2 requests.
-	requestDate := time.Now().UTC()
-	today := requestDate.Format("2006-01-02")
-
 	usageFixture := setupSQLiteUsageFixture(t)
 	ts := setupE2EAdminServer(t, e2eServerOptions{
 		adminUsageReader: usageFixture.reader,
@@ -333,12 +329,19 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 	})
 	defer ts.Close()
 
+	// Mock provider usage is 10 input + 20 output tokens per request, and this test sends 2 requests.
+	requestWindowStart := time.Now().UTC()
 	for i := 0; i < expectedRequests; i++ {
 		resp := sendJSONRequest(t, ts.URL+chatCompletionsPath, defaultChatReq("Hello usage"))
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		closeBody(resp)
 	}
 	usageFixture.flush(t)
+	requestWindowEnd := time.Now().UTC()
+	expectedDailyDates := []string{requestWindowStart.Format("2006-01-02")}
+	if endDate := requestWindowEnd.Format("2006-01-02"); endDate != expectedDailyDates[0] {
+		expectedDailyDates = append(expectedDailyDates, endDate)
+	}
 
 	t.Run("summary includes persisted usage", func(t *testing.T) {
 		resp, err := http.Get(ts.URL + "/admin/usage/summary")
@@ -369,18 +372,32 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 		require.NoError(t, json.Unmarshal(body, &daily))
 		require.NotEmpty(t, daily)
 
-		var todayEntry *usage.DailyUsage
+		var matchedEntries []usage.DailyUsage
 		for i := range daily {
-			if daily[i].Date == today {
-				todayEntry = &daily[i]
-				break
+			for _, expectedDate := range expectedDailyDates {
+				if daily[i].Date == expectedDate {
+					matchedEntries = append(matchedEntries, daily[i])
+					break
+				}
 			}
 		}
-		require.NotNil(t, todayEntry, "expected daily usage entry for %s", today)
-		assert.Equal(t, expectedRequests, todayEntry.Requests)
-		assert.Equal(t, expectedInputTokens, todayEntry.InputTokens)
-		assert.Equal(t, expectedOutputTokens, todayEntry.OutputTokens)
-		assert.Equal(t, expectedTotalTokens, todayEntry.TotalTokens)
+		require.NotEmpty(t, matchedEntries, "expected daily usage entry for one of %v", expectedDailyDates)
+
+		var actualRequests int
+		var actualInputTokens int64
+		var actualOutputTokens int64
+		var actualTotalTokens int64
+		for _, entry := range matchedEntries {
+			actualRequests += entry.Requests
+			actualInputTokens += entry.InputTokens
+			actualOutputTokens += entry.OutputTokens
+			actualTotalTokens += entry.TotalTokens
+		}
+
+		assert.Equal(t, expectedRequests, actualRequests)
+		assert.Equal(t, expectedInputTokens, actualInputTokens)
+		assert.Equal(t, expectedOutputTokens, actualOutputTokens)
+		assert.Equal(t, expectedTotalTokens, actualTotalTokens)
 	})
 
 	t.Run("query params accepted", func(t *testing.T) {

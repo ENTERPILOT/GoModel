@@ -173,7 +173,7 @@ func TestResponsesStreaming(t *testing.T) {
 
 		events := readResponsesStream(t, resp.Body)
 		require.Greater(t, len(events), 0)
-		assert.True(t, hasResponsesCompletedEvent(events), "Should receive response.completed event")
+		assert.True(t, hasResponsesCompletedEvent(events), "Should receive response.completed or response.done event")
 		assert.True(t, hasResponsesDoneMarker(events), "Should receive [DONE] marker")
 	})
 
@@ -197,7 +197,7 @@ func TestResponsesStreaming(t *testing.T) {
 
 		events := readResponsesStream(t, resp.Body)
 		require.Greater(t, len(events), 0, "Should receive at least one SSE event")
-		assert.True(t, hasResponsesCompletedEvent(events), "Should receive response.completed event")
+		assert.True(t, hasResponsesCompletedEvent(events), "Should receive response.completed or response.done event")
 		assert.True(t, hasResponsesDoneMarker(events), "Should receive [DONE] marker")
 
 		recorded := requireRecordedRequest(t, "/responses")

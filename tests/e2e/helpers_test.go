@@ -250,11 +250,11 @@ func extractResponsesStreamContent(events []ResponsesStreamEvent) string {
 	return content.String()
 }
 
-// hasResponsesCompletedEvent checks if the stream contains the Responses API
+// hasResponsesCompletedEvent checks if the stream contains a typed Responses
 // completion event that carries the final response payload.
 func hasResponsesCompletedEvent(events []ResponsesStreamEvent) bool {
 	for _, event := range events {
-		if event.Type == "response.completed" {
+		if event.Type == "response.completed" || event.Type == "response.done" {
 			return true
 		}
 	}

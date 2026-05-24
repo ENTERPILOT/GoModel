@@ -245,7 +245,8 @@ func TestAuditLogMiddleware(t *testing.T) {
 		msg, ok := choice0["message"].(map[string]interface{})
 		require.True(t, ok)
 		assert.Equal(t, "assistant", msg["role"])
-		content, _ := msg["content"].(string)
+		content, ok := msg["content"].(string)
+		require.True(t, ok, "message.content should be a string, got %T", msg["content"])
 		assert.Contains(t, content, "Test message", "captured response body should echo our input via the mock")
 	})
 
