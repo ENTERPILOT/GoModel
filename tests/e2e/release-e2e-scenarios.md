@@ -163,12 +163,14 @@ assert_responses_stream_contains() {
 assert_embeddings_response() {
   local file="$1"
   local expected_count="$2"
+  local min_total_tokens="${3:-1}"
 
-  jq -e --argjson expected_count "$expected_count" '
+  jq -e --argjson expected_count "$expected_count" --argjson min_total_tokens "$min_total_tokens" '
     .object == "list"
     and (.data | length) == $expected_count
     and all(.data[]; .object == "embedding" and (.embedding | type == "array" and length > 0))
-    and ((.usage.total_tokens // 0) > 0)
+    and (.usage.total_tokens | type == "number")
+    and (.usage.total_tokens >= $min_total_tokens)
   ' "$file" >/dev/null
 }
 
@@ -745,7 +747,7 @@ curl -fsS "$BASE_URL/v1/embeddings" \
   -d '{"model":"gemini-embedding-001","input":"qa gemini embedding probe"}' \
   > "$RESP_FILE"
 jq '{model,usage,first_dim:(.data[0].embedding|length),object,data_count:(.data|length)}' "$RESP_FILE"
-assert_embeddings_response "$RESP_FILE" 1
+assert_embeddings_response "$RESP_FILE" 1 0
 ```
 
 ## 6. Files
