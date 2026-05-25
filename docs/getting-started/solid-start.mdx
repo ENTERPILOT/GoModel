@@ -63,6 +63,13 @@ ADMIN_ENDPOINTS_ENABLED=true
 ADMIN_UI_ENABLED=true
 ```
 
+`SQLITE_PATH` uses `/app/data/gomodel.db` for Docker because that path exists
+inside the GoModel image. The image runs from `/app`, creates `/app/data` as a
+writable directory for the nonroot container user, and the examples below mount
+the host directory `/opt/gomodel/data` into that container path. This keeps
+runtime state out of the image while preserving it on the host. The executable
+stays at `/gomodel`, so mounting `/app/data` cannot replace the binary.
+
 Protect the file on the host:
 
 ```bash
