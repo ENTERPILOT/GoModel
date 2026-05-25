@@ -36,6 +36,38 @@ func TestCompatibleProvider_ListModels_ReturnsUpstreamOnSuccess(t *testing.T) {
 	}
 }
 
+func TestCompatibleProvider_ListModels_DefaultsMissingObjectFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"openrouter/model","object":"","owned_by":"openrouter"}]}`))
+	}))
+	defer server.Close()
+
+	provider := NewCompatibleProviderWithHTTPClient(
+		"test-key",
+		server.Client(),
+		llmclient.Hooks{},
+		CompatibleProviderConfig{
+			ProviderName: "openrouter",
+			BaseURL:      server.URL,
+		},
+	)
+
+	resp, err := provider.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels() error = %v", err)
+	}
+	if resp.Object != "list" {
+		t.Fatalf("response object = %q, want list", resp.Object)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("model count = %d, want 1", len(resp.Data))
+	}
+	if resp.Data[0].Object != "model" {
+		t.Fatalf("model object = %q, want model", resp.Data[0].Object)
+	}
+}
+
 func TestCompatibleProvider_ListModels_ReturnsUpstreamError(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()

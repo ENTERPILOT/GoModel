@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
@@ -135,7 +136,22 @@ func (p *CompatibleProvider) ListModels(ctx context.Context) (*core.ModelsRespon
 	if err != nil {
 		return nil, err
 	}
+	normalizeModelsResponse(&resp)
 	return &resp, nil
+}
+
+func normalizeModelsResponse(resp *core.ModelsResponse) {
+	if resp == nil {
+		return
+	}
+	if strings.TrimSpace(resp.Object) == "" {
+		resp.Object = "list"
+	}
+	for i := range resp.Data {
+		if strings.TrimSpace(resp.Data[i].Object) == "" {
+			resp.Data[i].Object = "model"
+		}
+	}
 }
 
 func (p *CompatibleProvider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
