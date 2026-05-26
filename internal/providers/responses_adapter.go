@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"maps"
 	"strings"
@@ -24,6 +25,9 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 	if req == nil {
 		return nil, core.NewInvalidRequestError("responses request is required", nil)
 	}
+	if err := validateResponsesRequestForChatTranslation(req); err != nil {
+		return nil, err
+	}
 
 	chatReq := &core.ChatRequest{
 		Model:             req.Model,
@@ -33,9 +37,12 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 		ToolChoice:        normalizeResponsesToolChoiceForChat(req.ToolChoice),
 		ParallelToolCalls: req.ParallelToolCalls,
 		Temperature:       req.Temperature,
+		TopP:              req.TopP,
 		Stream:            req.Stream,
 		StreamOptions:     cloneStreamOptions(req.StreamOptions),
 		Reasoning:         req.Reasoning,
+		User:              req.User,
+		ServiceTier:       req.ServiceTier,
 		ExtraFields:       core.CloneUnknownJSONFields(req.ExtraFields),
 	}
 
@@ -57,6 +64,47 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 	chatReq.Messages = append(chatReq.Messages, messages...)
 
 	return chatReq, nil
+}
+
+func validateResponsesRequestForChatTranslation(req *core.ResponsesRequest) error {
+	if strings.TrimSpace(req.PreviousResponseID) != "" {
+		return unsupportedResponsesChatTranslationField("previous_response_id")
+	}
+	if req.Conversation != nil {
+		return unsupportedResponsesChatTranslationField("conversation")
+	}
+	if len(req.Include) > 0 {
+		return unsupportedResponsesChatTranslationField("include")
+	}
+	if req.Prompt != nil {
+		return unsupportedResponsesChatTranslationField("prompt")
+	}
+	if strings.TrimSpace(req.Truncation) != "" {
+		return unsupportedResponsesChatTranslationField("truncation")
+	}
+	if req.Text != nil {
+		return unsupportedResponsesChatTranslationField("text")
+	}
+	if strings.TrimSpace(req.PromptCacheRetention) != "" {
+		return unsupportedResponsesChatTranslationField("prompt_cache_retention")
+	}
+	if req.ContextManagement != nil {
+		return unsupportedResponsesChatTranslationField("context_management")
+	}
+	if req.TopLogprobs != nil {
+		return unsupportedResponsesChatTranslationField("top_logprobs")
+	}
+	if strings.TrimSpace(req.SafetyIdentifier) != "" {
+		return unsupportedResponsesChatTranslationField("safety_identifier")
+	}
+	return nil
+}
+
+func unsupportedResponsesChatTranslationField(field string) error {
+	return core.NewInvalidRequestError(
+		fmt.Sprintf("responses field %q is only supported by native Responses providers; use an OpenAI-compatible provider or passthrough for this request", field),
+		nil,
+	)
 }
 
 func cloneStreamOptions(src *core.StreamOptions) *core.StreamOptions {

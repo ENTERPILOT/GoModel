@@ -5,6 +5,7 @@ import "encoding/json"
 func (r *ChatRequest) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		Temperature       *float64         `json:"temperature,omitempty"`
+		TopP              *float64         `json:"top_p,omitempty"`
 		MaxTokens         *int             `json:"max_tokens,omitempty"`
 		Model             string           `json:"model"`
 		Provider          string           `json:"provider,omitempty"`
@@ -15,6 +16,8 @@ func (r *ChatRequest) UnmarshalJSON(data []byte) error {
 		Stream            bool             `json:"stream,omitempty"`
 		StreamOptions     *StreamOptions   `json:"stream_options,omitempty"`
 		Reasoning         *Reasoning       `json:"reasoning,omitempty"`
+		User              string           `json:"user,omitempty"`
+		ServiceTier       string           `json:"service_tier,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -22,6 +25,7 @@ func (r *ChatRequest) UnmarshalJSON(data []byte) error {
 
 	extraFields, err := extractUnknownJSONFields(data,
 		"temperature",
+		"top_p",
 		"max_tokens",
 		"model",
 		"provider",
@@ -32,12 +36,15 @@ func (r *ChatRequest) UnmarshalJSON(data []byte) error {
 		"stream",
 		"stream_options",
 		"reasoning",
+		"user",
+		"service_tier",
 	)
 	if err != nil {
 		return err
 	}
 
 	r.Temperature = raw.Temperature
+	r.TopP = raw.TopP
 	r.MaxTokens = raw.MaxTokens
 	r.Model = raw.Model
 	r.Provider = raw.Provider
@@ -48,6 +55,8 @@ func (r *ChatRequest) UnmarshalJSON(data []byte) error {
 	r.Stream = raw.Stream
 	r.StreamOptions = raw.StreamOptions
 	r.Reasoning = raw.Reasoning
+	r.User = raw.User
+	r.ServiceTier = raw.ServiceTier
 	r.ExtraFields = extraFields
 	return nil
 }
@@ -55,6 +64,7 @@ func (r *ChatRequest) UnmarshalJSON(data []byte) error {
 func (r ChatRequest) MarshalJSON() ([]byte, error) {
 	type chatRequestAlias struct {
 		Temperature       *float64         `json:"temperature,omitempty"`
+		TopP              *float64         `json:"top_p,omitempty"`
 		MaxTokens         *int             `json:"max_tokens,omitempty"`
 		Model             string           `json:"model"`
 		Provider          string           `json:"provider,omitempty"`
@@ -65,10 +75,13 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 		Stream            bool             `json:"stream,omitempty"`
 		StreamOptions     *StreamOptions   `json:"stream_options,omitempty"`
 		Reasoning         *Reasoning       `json:"reasoning,omitempty"`
+		User              string           `json:"user,omitempty"`
+		ServiceTier       string           `json:"service_tier,omitempty"`
 	}
 
 	return marshalWithUnknownJSONFields(chatRequestAlias{
 		Temperature:       r.Temperature,
+		TopP:              r.TopP,
 		MaxTokens:         r.MaxTokens,
 		Model:             r.Model,
 		Provider:          r.Provider,
@@ -79,5 +92,7 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 		Stream:            r.Stream,
 		StreamOptions:     r.StreamOptions,
 		Reasoning:         r.Reasoning,
+		User:              r.User,
+		ServiceTier:       r.ServiceTier,
 	}, r.ExtraFields)
 }

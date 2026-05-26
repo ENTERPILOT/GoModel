@@ -9,20 +9,34 @@ import "encoding/json"
 // can round-trip extensions; Swagger ignores ExtraFields, and typed fields
 // should be preferred when available.
 type ResponsesRequest struct {
-	Model             string            `json:"model"`
-	Provider          string            `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
-	Input             any               `json:"input"`              // string or []ResponsesInputElement — see docs for array form
-	Instructions      string            `json:"instructions,omitempty"`
-	Tools             []map[string]any  `json:"tools,omitempty"`
-	ToolChoice        any               `json:"tool_choice,omitempty"` // string or object
-	ParallelToolCalls *bool             `json:"parallel_tool_calls,omitempty"`
-	Temperature       *float64          `json:"temperature,omitempty"`
-	MaxOutputTokens   *int              `json:"max_output_tokens,omitempty"`
-	Stream            bool              `json:"stream,omitempty"`
-	StreamOptions     *StreamOptions    `json:"stream_options,omitempty"`
-	Metadata          map[string]string `json:"metadata,omitempty"`
-	Reasoning         *Reasoning        `json:"reasoning,omitempty"`
-	ExtraFields       UnknownJSONFields `json:"-" swaggerignore:"true"`
+	Model                string            `json:"model"`
+	Provider             string            `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
+	Input                any               `json:"input"`              // string or []ResponsesInputElement — see docs for array form
+	Instructions         string            `json:"instructions,omitempty"`
+	Tools                []map[string]any  `json:"tools,omitempty"`
+	ToolChoice           any               `json:"tool_choice,omitempty"` // string or object
+	ParallelToolCalls    *bool             `json:"parallel_tool_calls,omitempty"`
+	Temperature          *float64          `json:"temperature,omitempty"`
+	TopP                 *float64          `json:"top_p,omitempty"`
+	TopLogprobs          *int              `json:"top_logprobs,omitempty"`
+	MaxOutputTokens      *int              `json:"max_output_tokens,omitempty"`
+	Stream               bool              `json:"stream,omitempty"`
+	StreamOptions        *StreamOptions    `json:"stream_options,omitempty"`
+	Metadata             map[string]string `json:"metadata,omitempty"`
+	Reasoning            *Reasoning        `json:"reasoning,omitempty"`
+	Text                 any               `json:"text,omitempty"`
+	Include              []string          `json:"include,omitempty"`
+	Truncation           string            `json:"truncation,omitempty"`
+	Store                *bool             `json:"store,omitempty"`
+	PreviousResponseID   string            `json:"previous_response_id,omitempty"`
+	Conversation         any               `json:"conversation,omitempty"`
+	Prompt               any               `json:"prompt,omitempty"`
+	PromptCacheRetention string            `json:"prompt_cache_retention,omitempty"`
+	ContextManagement    any               `json:"context_management,omitempty"`
+	User                 string            `json:"user,omitempty"`
+	ServiceTier          string            `json:"service_tier,omitempty"`
+	SafetyIdentifier     string            `json:"safety_identifier,omitempty"`
+	ExtraFields          UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
 // ResponseInputTokensRequest documents the request body accepted by
@@ -89,6 +103,7 @@ type ResponsesInputElement struct {
 
 	// Function call output fields (type="function_call_output") — CallID shared above
 	Output      string            `json:"output,omitempty"`
+	Raw         json.RawMessage   `json:"-" swaggerignore:"true"`
 	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 

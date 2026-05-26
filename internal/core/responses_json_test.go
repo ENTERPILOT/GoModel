@@ -362,6 +362,57 @@ func TestResponsesRequestJSON_PreservesUnknownNestedFields(t *testing.T) {
 	}
 }
 
+func TestResponsesRequestJSON_PreservesUnknownInputItems(t *testing.T) {
+	var req ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"gpt-5-mini",
+		"input":[
+			{
+				"type":"reasoning",
+				"id":"rs_123",
+				"summary":[{"type":"summary_text","text":"Checked the facts."}]
+			}
+		]
+	}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	input, ok := req.Input.([]ResponsesInputElement)
+	if !ok || len(input) != 1 {
+		t.Fatalf("Input = %#v, want []ResponsesInputElement len=1", req.Input)
+	}
+	if input[0].Type != "reasoning" {
+		t.Fatalf("Input[0].Type = %q, want reasoning", input[0].Type)
+	}
+	if len(input[0].Raw) == 0 {
+		t.Fatal("Input[0].Raw missing for unknown input item")
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(roundTrip) error = %v", err)
+	}
+	items := decoded["input"].([]any)
+	item := items[0].(map[string]any)
+	if item["type"] != "reasoning" || item["id"] != "rs_123" {
+		t.Fatalf("round-tripped item = %#v, want reasoning item", item)
+	}
+	if _, ok := item["summary"].([]any); !ok {
+		t.Fatalf("round-tripped summary = %#v, want array", item["summary"])
+	}
+	if _, ok := item["role"]; ok {
+		t.Fatalf("unknown item gained role field: %#v", item)
+	}
+	if _, ok := item["content"]; ok {
+		t.Fatalf("unknown item gained content field: %#v", item)
+	}
+}
+
 func TestResponsesRequestJSON_PreservesVariantSpecificUnknownFields(t *testing.T) {
 	var req ResponsesRequest
 	if err := json.Unmarshal([]byte(`{
@@ -415,11 +466,24 @@ func TestResponsesRequestJSON_PreservesVariantSpecificUnknownFields(t *testing.T
 	}
 }
 
-func TestResponsesRequestJSON_PreservesUnknownFields(t *testing.T) {
+func TestResponsesRequestJSON_PreservesAgentsSDKFields(t *testing.T) {
 	var req ResponsesRequest
 	if err := json.Unmarshal([]byte(`{
 		"model":"gpt-5-mini",
 		"input":"hello",
+		"previous_response_id":"resp_previous",
+		"conversation":"conv_123",
+		"include":["reasoning.encrypted_content"],
+		"top_p":0.8,
+		"top_logprobs":3,
+		"truncation":"auto",
+		"store":false,
+		"prompt":{"id":"pmpt_123"},
+		"prompt_cache_retention":"24h",
+		"context_management":{"truncation":"auto"},
+		"user":"tenant-123",
+		"service_tier":"flex",
+		"safety_identifier":"safe_123",
 		"text":{
 			"format":{
 				"type":"json_schema",
@@ -430,8 +494,20 @@ func TestResponsesRequestJSON_PreservesUnknownFields(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	if req.ExtraFields.Lookup("text") == nil {
-		t.Fatal("text missing from ExtraFields")
+	if req.PreviousResponseID != "resp_previous" {
+		t.Fatalf("PreviousResponseID = %q, want resp_previous", req.PreviousResponseID)
+	}
+	if req.Store == nil || *req.Store {
+		t.Fatalf("Store = %#v, want false", req.Store)
+	}
+	if req.TopP == nil || *req.TopP != 0.8 {
+		t.Fatalf("TopP = %#v, want 0.8", req.TopP)
+	}
+	if req.TopLogprobs == nil || *req.TopLogprobs != 3 {
+		t.Fatalf("TopLogprobs = %#v, want 3", req.TopLogprobs)
+	}
+	if req.Text == nil {
+		t.Fatal("Text missing")
 	}
 
 	body, err := json.Marshal(req)
@@ -454,6 +530,18 @@ func TestResponsesRequestJSON_PreservesUnknownFields(t *testing.T) {
 	}
 	if formatField["type"] != "json_schema" {
 		t.Fatalf("decoded text.format.type = %#v, want json_schema", formatField["type"])
+	}
+	if decoded["store"] != false {
+		t.Fatalf("decoded store = %#v, want false", decoded["store"])
+	}
+	if decoded["previous_response_id"] != "resp_previous" {
+		t.Fatalf("decoded previous_response_id = %#v, want resp_previous", decoded["previous_response_id"])
+	}
+	if decoded["conversation"] != "conv_123" {
+		t.Fatalf("decoded conversation = %#v, want conv_123", decoded["conversation"])
+	}
+	if decoded["service_tier"] != "flex" {
+		t.Fatalf("decoded service_tier = %#v, want flex", decoded["service_tier"])
 	}
 }
 

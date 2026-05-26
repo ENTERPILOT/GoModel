@@ -21,6 +21,7 @@ type Reasoning struct {
 // ChatRequest represents the incoming chat completion request
 type ChatRequest struct {
 	Temperature       *float64          `json:"temperature,omitempty"`
+	TopP              *float64          `json:"top_p,omitempty"`
 	MaxTokens         *int              `json:"max_tokens,omitempty"`
 	Model             string            `json:"model"`
 	Provider          string            `json:"provider,omitempty"` // Gateway routing hint; stripped before upstream execution.
@@ -31,6 +32,8 @@ type ChatRequest struct {
 	Stream            bool              `json:"stream,omitempty"`
 	StreamOptions     *StreamOptions    `json:"stream_options,omitempty"`
 	Reasoning         *Reasoning        `json:"reasoning,omitempty"`
+	User              string            `json:"user,omitempty"`
+	ServiceTier       string            `json:"service_tier,omitempty"`
 	ExtraFields       UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 

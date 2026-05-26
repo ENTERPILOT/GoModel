@@ -388,6 +388,85 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 	}
 }
 
+func TestConvertResponsesRequestToChat_MapsPortableAgentsSDKFields(t *testing.T) {
+	topP := 0.8
+	req := &core.ResponsesRequest{
+		Model:       "test-model",
+		Input:       "Hello",
+		TopP:        &topP,
+		User:        "tenant-123",
+		ServiceTier: "flex",
+	}
+
+	chatReq, err := ConvertResponsesRequestToChat(req)
+	if err != nil {
+		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+	}
+	if chatReq.TopP == nil || *chatReq.TopP != 0.8 {
+		t.Fatalf("TopP = %#v, want 0.8", chatReq.TopP)
+	}
+	if chatReq.User != "tenant-123" {
+		t.Fatalf("User = %q, want tenant-123", chatReq.User)
+	}
+	if chatReq.ServiceTier != "flex" {
+		t.Fatalf("ServiceTier = %q, want flex", chatReq.ServiceTier)
+	}
+}
+
+func TestConvertResponsesRequestToChat_RejectsStatefulAgentsSDKFields(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *core.ResponsesRequest
+		want string
+	}{
+		{
+			name: "previous response id",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", PreviousResponseID: "resp_123"},
+			want: "previous_response_id",
+		},
+		{
+			name: "conversation",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Conversation: "conv_123"},
+			want: "conversation",
+		},
+		{
+			name: "structured output text",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Text: map[string]any{"format": map[string]any{"type": "json_schema"}}},
+			want: "text",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ConvertResponsesRequestToChat(tt.req)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want mention %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestConvertResponsesRequestToChat_RejectsUnknownInputItemTypes(t *testing.T) {
+	var req core.ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"test-model",
+		"input":[{"type":"reasoning","id":"rs_123","summary":[]}]
+	}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	_, err := ConvertResponsesRequestToChat(&req)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), `unsupported input item type "reasoning"`) {
+		t.Fatalf("error = %v, want unsupported reasoning item", err)
+	}
+}
+
 func TestConvertResponsesRequestToChat_DoesNotMergeAssistantMessagesWithExtraFields(t *testing.T) {
 	req := &core.ResponsesRequest{
 		Model: "test-model",

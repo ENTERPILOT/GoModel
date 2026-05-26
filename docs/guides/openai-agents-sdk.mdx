@@ -1,0 +1,176 @@
+---
+title: "GoModel & OpenAI Agents SDK"
+description: "Route OpenAI Agents SDK model calls through GoModel's OpenAI-compatible Responses API."
+icon: "bot"
+---
+
+GoModel can sit in front of the OpenAI Agents SDK when you want gateway keys,
+budgets, audit logs, model routing, and usage tracking around agent runs.
+
+Flow:
+
+`OpenAI Agents SDK -> GoModel /v1 -> selected provider`
+
+## Before you start
+
+- Install GoModel.
+- Choose a GoModel master key, for example `change-me`.
+- Configure at least one upstream model provider.
+- Install the OpenAI Agents SDK for Python or JavaScript.
+
+<Note>
+  The SDK exports traces to OpenAI by default. If GoModel is your only OpenAI
+  client endpoint, disable tracing or configure a separate OpenAI tracing key.
+</Note>
+
+## 1. Run GoModel
+
+Start GoModel with a master key and an upstream provider key. This example uses
+OpenAI upstream:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OPENAI_API_KEY="sk-..." \
+  enterpilot/gomodel
+```
+
+If you use another provider, keep the same GoModel base URL and choose a model
+that your provider exposes through GoModel.
+
+## 2. Confirm the Responses endpoint
+
+Send one small request through GoModel:
+
+```bash
+curl -s http://localhost:8080/v1/responses \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5-mini",
+    "input": "Reply with exactly ok."
+  }'
+```
+
+If the gateway is wired correctly, the response will contain `ok`.
+
+## 3. Configure the SDK
+
+Point the SDK's OpenAI client at GoModel:
+
+<CodeGroup>
+
+```python Python
+import asyncio
+import os
+
+from agents import Agent, Runner, set_default_openai_client, set_tracing_disabled
+from openai import AsyncOpenAI
+
+set_default_openai_client(
+    AsyncOpenAI(
+        base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8080/v1"),
+        api_key=os.getenv("GOMODEL_MASTER_KEY", "change-me"),
+    ),
+    use_for_tracing=False,
+)
+set_tracing_disabled(True)
+
+agent = Agent(
+    name="Gateway assistant",
+    instructions="Be concise.",
+    model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+)
+
+
+async def main():
+    result = await Runner.run(agent, "Reply with exactly ok.")
+    print(result.final_output)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+import {
+  Agent,
+  run,
+  setDefaultOpenAIClient,
+  setOpenAIAPI,
+  setTracingDisabled,
+} from "@openai/agents";
+
+setDefaultOpenAIClient(
+  new OpenAI({
+    baseURL: process.env.OPENAI_BASE_URL ?? "http://localhost:8080/v1",
+    apiKey: process.env.GOMODEL_MASTER_KEY ?? "change-me",
+  }),
+);
+setOpenAIAPI("responses");
+setTracingDisabled(true);
+
+const agent = new Agent({
+  name: "Gateway assistant",
+  instructions: "Be concise.",
+  model: process.env.OPENAI_MODEL ?? "gpt-5-mini",
+});
+
+const result = await run(agent, "Reply with exactly ok.");
+console.log(result.finalOutput);
+```
+
+</CodeGroup>
+
+## Supported SDK paths
+
+GoModel supports the SDK's normal HTTP Responses path:
+
+- non-streaming `Runner.run(...)`
+- streaming `Runner.run_streamed(...)` over HTTP/SSE
+- function tool loops
+- handoffs and agents-as-tools when they compile to model tool calls
+- SDK-managed local sessions that replay input history
+- `/v1/conversations` for server-managed conversation resources
+- `/v1/responses/input_tokens`
+- `/v1/responses/compact`
+- local response retrieval through `/v1/responses/{id}` and
+  `/v1/responses/{id}/input_items`
+
+GoModel also preserves newer Responses input items for native Responses
+providers. If a request has to be translated to Chat Completions for a provider
+that does not implement Responses natively, GoModel returns a clear error for
+stateful or provider-native Responses fields such as `previous_response_id`,
+`conversation`, hosted tool items, and structured `text` output settings.
+
+## Storage behavior
+
+GoModel stores local response snapshots so lifecycle endpoints can work even
+when the upstream provider does not support response retrieval. If the SDK sends
+`store: false`, GoModel does not persist that local response snapshot.
+
+## Current limitations
+
+- Responses websocket transport is not implemented. Use the SDK's HTTP/SSE
+  transport with GoModel.
+- Hosted tools such as web search, file search, and computer use require a
+  native upstream provider that supports those tool payloads.
+- `previous_response_id` and `conversation` are forwarded to native Responses
+  providers. Chat-translated providers reject them because GoModel cannot safely
+  reconstruct provider-managed state across that translation boundary yet.
+- Tracing is separate from model routing. Disable SDK tracing or configure a
+  real OpenAI tracing key.
+
+## More examples
+
+See the runnable examples in `docs/examples/openai-agents-sdk/`.
+
+## References
+
+- OpenAI Agents SDK Python configuration:
+  [https://openai.github.io/openai-agents-python/config/](https://openai.github.io/openai-agents-python/config/)
+- OpenAI Agents SDK JavaScript configuration:
+  [https://openai.github.io/openai-agents-js/guides/config/](https://openai.github.io/openai-agents-js/guides/config/)
+- OpenAI Agents SDK running agents:
+  [https://openai.github.io/openai-agents-python/running_agents/](https://openai.github.io/openai-agents-python/running_agents/)

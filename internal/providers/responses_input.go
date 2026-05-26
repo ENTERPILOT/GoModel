@@ -130,7 +130,7 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 			Content:     content,
 			ExtraFields: core.CloneUnknownJSONFields(item.ExtraFields),
 		}, "function_call_output", nil
-	default: // message (type="" or "message")
+	case "", "message":
 		role := strings.TrimSpace(item.Role)
 		if role == "" {
 			return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: role is required", index), nil)
@@ -144,6 +144,8 @@ func convertResponsesInputElement(item core.ResponsesInputElement, index int) (c
 			Content:     content,
 			ExtraFields: core.CloneUnknownJSONFields(item.ExtraFields),
 		}, "message", nil
+	default:
+		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: unsupported input item type %q for chat-translated providers", index, item.Type), nil)
 	}
 }
 
@@ -191,6 +193,9 @@ func convertResponsesInputMap(item map[string]any, index int) (core.Message, str
 			Content:     content,
 			ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(item, "type", "call_id", "status", "output")),
 		}, "function_call_output", nil
+	case "", "message":
+	default:
+		return core.Message{}, "", core.NewInvalidRequestError(fmt.Sprintf("invalid responses input item at index %d: unsupported input item type %q for chat-translated providers", index, itemType), nil)
 	}
 
 	role, _ := item["role"].(string)

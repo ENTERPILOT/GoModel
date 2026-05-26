@@ -3974,6 +3974,297 @@
         }
       }
     },
+    "/v1/conversations": {
+      "post": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "Create a conversation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/core.ConversationCreateRequest"
+              }
+            }
+          },
+          "description": "Conversation create request"
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.Conversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/conversations"
+          }
+        }
+      }
+    },
+    "/v1/conversations/{id}": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "Get a conversation",
+        "parameters": [
+          {
+            "description": "Conversation ID",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.Conversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/conversations/{id}"
+          }
+        }
+      },
+      "post": {
+        "description": "Replaces the conversation metadata in full.",
+        "tags": [
+          "conversations"
+        ],
+        "summary": "Update a conversation",
+        "parameters": [
+          {
+            "description": "Conversation ID",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/core.ConversationUpdateRequest"
+              }
+            }
+          },
+          "description": "Conversation update request",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.Conversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/conversations/{id}"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "Delete a conversation",
+        "parameters": [
+          {
+            "description": "Conversation ID",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.ConversationDeleteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/conversations/{id}"
+          }
+        }
+      }
+    },
     "/v1/embeddings": {
       "post": {
         "tags": [
@@ -6668,6 +6959,9 @@
           "reasoning": {
             "$ref": "#/components/schemas/core.Reasoning"
           },
+          "service_tier": {
+            "type": "string"
+          },
           "stream": {
             "type": "boolean"
           },
@@ -6686,6 +6980,12 @@
               "type": "object",
               "additionalProperties": {}
             }
+          },
+          "top_p": {
+            "type": "number"
+          },
+          "user": {
+            "type": "string"
           }
         }
       },
@@ -6769,6 +7069,73 @@
           },
           "type": {
             "type": "string"
+          }
+        }
+      },
+      "core.Conversation": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "object": {
+            "description": "\"conversation\"",
+            "type": "string"
+          }
+        }
+      },
+      "core.ConversationCreateRequest": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "core.ConversationDeleteResponse": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "description": "\"conversation.deleted\"",
+            "type": "string"
+          }
+        }
+      },
+      "core.ConversationUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       },
@@ -7533,6 +7900,14 @@
       "core.ResponsesRequest": {
         "type": "object",
         "properties": {
+          "context_management": {},
+          "conversation": {},
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "input": {
             "description": "string or []ResponsesInputElement — see docs for array form",
             "oneOf": [
@@ -7565,12 +7940,28 @@
           "parallel_tool_calls": {
             "type": "boolean"
           },
+          "previous_response_id": {
+            "type": "string"
+          },
+          "prompt": {},
+          "prompt_cache_retention": {
+            "type": "string"
+          },
           "provider": {
             "description": "Gateway routing hint; stripped before upstream execution.",
             "type": "string"
           },
           "reasoning": {
             "$ref": "#/components/schemas/core.Reasoning"
+          },
+          "safety_identifier": {
+            "type": "string"
+          },
+          "service_tier": {
+            "type": "string"
+          },
+          "store": {
+            "type": "boolean"
           },
           "stream": {
             "type": "boolean"
@@ -7581,6 +7972,7 @@
           "temperature": {
             "type": "number"
           },
+          "text": {},
           "tool_choice": {
             "description": "string or object"
           },
@@ -7590,6 +7982,18 @@
               "type": "object",
               "additionalProperties": {}
             }
+          },
+          "top_logprobs": {
+            "type": "integer"
+          },
+          "top_p": {
+            "type": "number"
+          },
+          "truncation": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
           }
         }
       },

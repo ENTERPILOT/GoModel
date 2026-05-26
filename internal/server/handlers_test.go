@@ -2747,10 +2747,10 @@ func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
 	cancel()
 
 	tests := []struct {
-		name      string
-		ctx       context.Context
-		err       error
-		wantType  string
+		name     string
+		ctx      context.Context
+		err      error
+		wantType string
 	}{
 		{
 			name:     "explicit context.Canceled",
@@ -5155,6 +5155,35 @@ func TestResponsesLifecycle_StoresConcreteProviderName(t *testing.T) {
 	}
 	if stored.ProviderName != "openai_primary" {
 		t.Fatalf("stored provider name = %q, want openai_primary", stored.ProviderName)
+	}
+}
+
+func TestResponsesLifecycle_StoreFalseSkipsLocalSnapshot(t *testing.T) {
+	store := responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
+	provider := &mockProvider{
+		supportedModels: []string{"gpt-5-mini"},
+		providerTypes: map[string]string{
+			"gpt-5-mini": "mock",
+		},
+		responsesResponse: &core.ResponsesResponse{
+			ID:     "resp_store_false_1",
+			Object: "response",
+			Model:  "gpt-5-mini",
+			Status: "completed",
+		},
+	}
+	srv := New(provider, &Config{ResponseStore: store})
+
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5-mini","input":"hello","store":false}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	srv.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create status = %d, want 200 (%s)", createRec.Code, createRec.Body.String())
+	}
+
+	if _, err := store.Get(context.Background(), "resp_store_false_1"); !errors.Is(err, responsestore.ErrNotFound) {
+		t.Fatalf("store.Get() error = %v, want ErrNotFound", err)
 	}
 }
 

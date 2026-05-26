@@ -86,6 +86,7 @@
                 "tab": "Guides",
                 "icon": "compass",
                 "pages": [
+                    "guides/openai-agents-sdk",
                     "guides/openclaw",
                     "guides/claude-code",
                     "guides/codex",

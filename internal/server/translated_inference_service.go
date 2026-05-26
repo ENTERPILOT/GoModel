@@ -283,6 +283,9 @@ func (s *translatedInferenceService) storeResponseSnapshot(ctx context.Context, 
 	if store == nil || resp == nil || resp.ID == "" {
 		return nil
 	}
+	if req != nil && req.Store != nil && !*req.Store {
+		return nil
+	}
 
 	stored := &responsestore.StoredResponse{
 		Response:           resp,

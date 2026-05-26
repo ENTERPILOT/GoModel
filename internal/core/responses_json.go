@@ -9,19 +9,33 @@ import (
 // Array inputs are deserialized as []ResponsesInputElement for type-safe downstream handling.
 func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Model             string            `json:"model"`
-		Provider          string            `json:"provider,omitempty"`
-		Input             json.RawMessage   `json:"input"`
-		Instructions      string            `json:"instructions,omitempty"`
-		Tools             []map[string]any  `json:"tools,omitempty"`
-		ToolChoice        any               `json:"tool_choice,omitempty"`
-		ParallelToolCalls *bool             `json:"parallel_tool_calls,omitempty"`
-		Temperature       *float64          `json:"temperature,omitempty"`
-		MaxOutputTokens   *int              `json:"max_output_tokens,omitempty"`
-		Stream            bool              `json:"stream,omitempty"`
-		StreamOptions     *StreamOptions    `json:"stream_options,omitempty"`
-		Metadata          map[string]string `json:"metadata,omitempty"`
-		Reasoning         *Reasoning        `json:"reasoning,omitempty"`
+		Model                string            `json:"model"`
+		Provider             string            `json:"provider,omitempty"`
+		Input                json.RawMessage   `json:"input"`
+		Instructions         string            `json:"instructions,omitempty"`
+		Tools                []map[string]any  `json:"tools,omitempty"`
+		ToolChoice           any               `json:"tool_choice,omitempty"`
+		ParallelToolCalls    *bool             `json:"parallel_tool_calls,omitempty"`
+		Temperature          *float64          `json:"temperature,omitempty"`
+		TopP                 *float64          `json:"top_p,omitempty"`
+		TopLogprobs          *int              `json:"top_logprobs,omitempty"`
+		MaxOutputTokens      *int              `json:"max_output_tokens,omitempty"`
+		Stream               bool              `json:"stream,omitempty"`
+		StreamOptions        *StreamOptions    `json:"stream_options,omitempty"`
+		Metadata             map[string]string `json:"metadata,omitempty"`
+		Reasoning            *Reasoning        `json:"reasoning,omitempty"`
+		Text                 any               `json:"text,omitempty"`
+		Include              []string          `json:"include,omitempty"`
+		Truncation           string            `json:"truncation,omitempty"`
+		Store                *bool             `json:"store,omitempty"`
+		PreviousResponseID   string            `json:"previous_response_id,omitempty"`
+		Conversation         any               `json:"conversation,omitempty"`
+		Prompt               any               `json:"prompt,omitempty"`
+		PromptCacheRetention string            `json:"prompt_cache_retention,omitempty"`
+		ContextManagement    any               `json:"context_management,omitempty"`
+		User                 string            `json:"user,omitempty"`
+		ServiceTier          string            `json:"service_tier,omitempty"`
+		SafetyIdentifier     string            `json:"safety_identifier,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -36,11 +50,25 @@ func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 		"tool_choice",
 		"parallel_tool_calls",
 		"temperature",
+		"top_p",
+		"top_logprobs",
 		"max_output_tokens",
 		"stream",
 		"stream_options",
 		"metadata",
 		"reasoning",
+		"text",
+		"include",
+		"truncation",
+		"store",
+		"previous_response_id",
+		"conversation",
+		"prompt",
+		"prompt_cache_retention",
+		"context_management",
+		"user",
+		"service_tier",
+		"safety_identifier",
 	)
 	if err != nil {
 		return err
@@ -59,11 +87,25 @@ func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 	r.ToolChoice = raw.ToolChoice
 	r.ParallelToolCalls = raw.ParallelToolCalls
 	r.Temperature = raw.Temperature
+	r.TopP = raw.TopP
+	r.TopLogprobs = raw.TopLogprobs
 	r.MaxOutputTokens = raw.MaxOutputTokens
 	r.Stream = raw.Stream
 	r.StreamOptions = raw.StreamOptions
 	r.Metadata = raw.Metadata
 	r.Reasoning = raw.Reasoning
+	r.Text = raw.Text
+	r.Include = raw.Include
+	r.Truncation = raw.Truncation
+	r.Store = raw.Store
+	r.PreviousResponseID = raw.PreviousResponseID
+	r.Conversation = raw.Conversation
+	r.Prompt = raw.Prompt
+	r.PromptCacheRetention = raw.PromptCacheRetention
+	r.ContextManagement = raw.ContextManagement
+	r.User = raw.User
+	r.ServiceTier = raw.ServiceTier
+	r.SafetyIdentifier = raw.SafetyIdentifier
 	r.ExtraFields = extraFields
 	return nil
 }
@@ -91,33 +133,61 @@ func decodeResponsesInput(raw json.RawMessage) (any, error) {
 // MarshalJSON preserves dynamic input payloads while supporting Swagger-only schema fields.
 func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
 	return marshalWithUnknownJSONFields(struct {
-		Model             string            `json:"model"`
-		Provider          string            `json:"provider,omitempty"`
-		Input             any               `json:"input"`
-		Instructions      string            `json:"instructions,omitempty"`
-		Tools             []map[string]any  `json:"tools,omitempty"`
-		ToolChoice        any               `json:"tool_choice,omitempty"`
-		ParallelToolCalls *bool             `json:"parallel_tool_calls,omitempty"`
-		Temperature       *float64          `json:"temperature,omitempty"`
-		MaxOutputTokens   *int              `json:"max_output_tokens,omitempty"`
-		Stream            bool              `json:"stream,omitempty"`
-		StreamOptions     *StreamOptions    `json:"stream_options,omitempty"`
-		Metadata          map[string]string `json:"metadata,omitempty"`
-		Reasoning         *Reasoning        `json:"reasoning,omitempty"`
+		Model                string            `json:"model"`
+		Provider             string            `json:"provider,omitempty"`
+		Input                any               `json:"input"`
+		Instructions         string            `json:"instructions,omitempty"`
+		Tools                []map[string]any  `json:"tools,omitempty"`
+		ToolChoice           any               `json:"tool_choice,omitempty"`
+		ParallelToolCalls    *bool             `json:"parallel_tool_calls,omitempty"`
+		Temperature          *float64          `json:"temperature,omitempty"`
+		TopP                 *float64          `json:"top_p,omitempty"`
+		TopLogprobs          *int              `json:"top_logprobs,omitempty"`
+		MaxOutputTokens      *int              `json:"max_output_tokens,omitempty"`
+		Stream               bool              `json:"stream,omitempty"`
+		StreamOptions        *StreamOptions    `json:"stream_options,omitempty"`
+		Metadata             map[string]string `json:"metadata,omitempty"`
+		Reasoning            *Reasoning        `json:"reasoning,omitempty"`
+		Text                 any               `json:"text,omitempty"`
+		Include              []string          `json:"include,omitempty"`
+		Truncation           string            `json:"truncation,omitempty"`
+		Store                *bool             `json:"store,omitempty"`
+		PreviousResponseID   string            `json:"previous_response_id,omitempty"`
+		Conversation         any               `json:"conversation,omitempty"`
+		Prompt               any               `json:"prompt,omitempty"`
+		PromptCacheRetention string            `json:"prompt_cache_retention,omitempty"`
+		ContextManagement    any               `json:"context_management,omitempty"`
+		User                 string            `json:"user,omitempty"`
+		ServiceTier          string            `json:"service_tier,omitempty"`
+		SafetyIdentifier     string            `json:"safety_identifier,omitempty"`
 	}{
-		Model:             r.Model,
-		Provider:          r.Provider,
-		Input:             r.Input,
-		Instructions:      r.Instructions,
-		Tools:             r.Tools,
-		ToolChoice:        r.ToolChoice,
-		ParallelToolCalls: r.ParallelToolCalls,
-		Temperature:       r.Temperature,
-		MaxOutputTokens:   r.MaxOutputTokens,
-		Stream:            r.Stream,
-		StreamOptions:     r.StreamOptions,
-		Metadata:          r.Metadata,
-		Reasoning:         r.Reasoning,
+		Model:                r.Model,
+		Provider:             r.Provider,
+		Input:                r.Input,
+		Instructions:         r.Instructions,
+		Tools:                r.Tools,
+		ToolChoice:           r.ToolChoice,
+		ParallelToolCalls:    r.ParallelToolCalls,
+		Temperature:          r.Temperature,
+		TopP:                 r.TopP,
+		TopLogprobs:          r.TopLogprobs,
+		MaxOutputTokens:      r.MaxOutputTokens,
+		Stream:               r.Stream,
+		StreamOptions:        r.StreamOptions,
+		Metadata:             r.Metadata,
+		Reasoning:            r.Reasoning,
+		Text:                 r.Text,
+		Include:              r.Include,
+		Truncation:           r.Truncation,
+		Store:                r.Store,
+		PreviousResponseID:   r.PreviousResponseID,
+		Conversation:         r.Conversation,
+		Prompt:               r.Prompt,
+		PromptCacheRetention: r.PromptCacheRetention,
+		ContextManagement:    r.ContextManagement,
+		User:                 r.User,
+		ServiceTier:          r.ServiceTier,
+		SafetyIdentifier:     r.SafetyIdentifier,
 	}, r.ExtraFields)
 }
 
@@ -263,7 +333,7 @@ func (e *ResponsesInputElement) UnmarshalJSON(data []byte) error {
 		if v, ok := raw["output"]; ok {
 			e.Output = stringifyRawValue(v)
 		}
-	default: // message (type="" or "message")
+	case "", "message":
 		if v, ok := raw["role"]; ok {
 			_ = json.Unmarshal(v, &e.Role)
 		}
@@ -278,6 +348,8 @@ func (e *ResponsesInputElement) UnmarshalJSON(data []byte) error {
 				e.Content = content
 			}
 		}
+	default:
+		e.Raw = cloneRawMessage(data)
 	}
 
 	knownFields := []string{"type"}
@@ -286,7 +358,7 @@ func (e *ResponsesInputElement) UnmarshalJSON(data []byte) error {
 		knownFields = append(knownFields, "call_id", "id", "name", "arguments", "status")
 	case "function_call_output":
 		knownFields = append(knownFields, "call_id", "status", "output")
-	default:
+	case "", "message":
 		knownFields = append(knownFields, "role", "status", "content")
 	}
 
@@ -328,7 +400,7 @@ func (e ResponsesInputElement) MarshalJSON() ([]byte, error) {
 			Output: e.Output,
 			Status: e.Status,
 		}, e.ExtraFields)
-	default: // message
+	case "", "message":
 		type msg struct {
 			Type    string `json:"type,omitempty"`
 			Role    string `json:"role"`
@@ -341,7 +413,26 @@ func (e ResponsesInputElement) MarshalJSON() ([]byte, error) {
 			Content: e.Content,
 			Status:  e.Status,
 		}, e.ExtraFields)
+	default:
+		if len(bytes.TrimSpace(e.Raw)) > 0 {
+			return e.Raw, nil
+		}
+		return marshalWithUnknownJSONFields(struct {
+			Type string `json:"type"`
+		}{
+			Type: e.Type,
+		}, e.ExtraFields)
 	}
+}
+
+func cloneRawMessage(data []byte) json.RawMessage {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return nil
+	}
+	cloned := make([]byte, len(trimmed))
+	copy(cloned, trimmed)
+	return cloned
 }
 
 // stringifyRawValue converts a json.RawMessage to a string.
