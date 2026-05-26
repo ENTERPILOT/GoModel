@@ -28,7 +28,8 @@ Start with these decisions:
 
 ## Create a production .env file
 
-Create `/opt/gomodel/.env` or another path managed by your deployment system:
+Create `/opt/gomodel/.env` on the host, or use another host path managed by
+your deployment system:
 
 ```bash
 PORT=8080
@@ -63,12 +64,17 @@ ADMIN_ENDPOINTS_ENABLED=true
 ADMIN_UI_ENABLED=true
 ```
 
+`/opt/gomodel/.env` is a host file. Docker reads it through `--env-file` or
+Compose `env_file` before the container starts, then passes the values as
+environment variables. The file is not copied into the image. Keeping secrets on
+the host lets you rotate credentials without rebuilding or republishing the
+container image.
+
 `SQLITE_PATH` uses `/app/data/gomodel.db` for Docker because that path exists
 inside the GoModel image. The image runs from `/app`, creates `/app/data` as a
 writable directory for the nonroot container user, and the examples below mount
 the host directory `/opt/gomodel/data` into that container path. This keeps
-runtime state out of the image while preserving it on the host. The executable
-stays at `/gomodel`, so mounting `/app/data` cannot replace the binary.
+runtime state out of the image while preserving it on the host.
 
 Protect the file on the host:
 
