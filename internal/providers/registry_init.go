@@ -197,6 +197,10 @@ func (r *ModelRegistry) fetchAllProviderModels(
 			configuredReason == configuredProviderModelsAllowlist {
 			runtimeUpdate.lastModelFetchSuccessAt = fetchAt
 		}
+		if configuredReason == configuredProviderModelsNotApplied {
+			runtimeUpdate.lastAvailabilityCheckAt = fetchAt
+			runtimeUpdate.lastAvailabilityOKAt = fetchAt
+		}
 		out.runtimeUpdates[providerName] = runtimeUpdate
 
 		if _, ok := out.modelsByProvider[providerName]; !ok {
@@ -239,15 +243,7 @@ func (r *ModelRegistry) applyFetchedInventory(
 	fetched fetchedInventory,
 	totalProviders int,
 ) {
-	r.mu.RLock()
-	list := r.modelList
-	r.mu.RUnlock()
-	configOverrides := r.snapshotConfigOverrides()
-	metadataStats := metadataEnrichmentStats{}
-	if list != nil {
-		metadataStats = enrichProviderModelMaps(list, providerTypes, fetched.modelsByProvider, nil)
-	}
-	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, fetched.modelsByProvider, nil)
+	metadataStats := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
 
 	r.mu.Lock()
 	r.models = fetched.models
@@ -267,6 +263,23 @@ func (r *ModelRegistry) applyFetchedInventory(
 	}
 	attrs = append(attrs, metadataStats.slogAttrs()...)
 	slog.Info("model registry initialized", attrs...)
+}
+
+func (r *ModelRegistry) enrichFetchedProviderModelMaps(
+	providerTypes map[core.Provider]string,
+	modelsByProvider map[string]map[string]*ModelInfo,
+) metadataEnrichmentStats {
+	r.mu.RLock()
+	list := r.modelList
+	r.mu.RUnlock()
+
+	configOverrides := r.snapshotConfigOverrides()
+	metadataStats := metadataEnrichmentStats{}
+	if list != nil {
+		metadataStats = enrichProviderModelMaps(list, providerTypes, modelsByProvider, nil)
+	}
+	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, modelsByProvider, nil)
+	return metadataStats
 }
 
 func fetchProviderInventory(
@@ -332,6 +345,14 @@ func (r *ModelRegistry) applyProviderRuntimeUpdatesLocked(updates map[string]pro
 		}
 		if !update.lastModelFetchSuccessAt.IsZero() {
 			current.lastModelFetchSuccessAt = update.lastModelFetchSuccessAt
+		}
+		if !update.lastAvailabilityCheckAt.IsZero() {
+			current.lastAvailabilityCheckAt = update.lastAvailabilityCheckAt
+			current.lastAvailabilityError = strings.TrimSpace(update.lastAvailabilityError)
+		}
+		if !update.lastAvailabilityOKAt.IsZero() {
+			current.lastAvailabilityOKAt = update.lastAvailabilityOKAt
+			current.lastAvailabilityError = ""
 		}
 		r.providerRuntime[providerName] = current
 	}

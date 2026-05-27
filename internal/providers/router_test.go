@@ -197,6 +197,28 @@ func (m *mockProvider) Passthrough(_ context.Context, req *core.PassthroughReque
 	}, nil
 }
 
+type lazyRefreshProvider struct {
+	mockProvider
+	modelsResponse    *core.ModelsResponse
+	listModelsErr     error
+	availabilityErr   error
+	listModelsCalls   int
+	availabilityCalls int
+}
+
+func (p *lazyRefreshProvider) ListModels(context.Context) (*core.ModelsResponse, error) {
+	p.listModelsCalls++
+	if p.listModelsErr != nil {
+		return nil, p.listModelsErr
+	}
+	return p.modelsResponse, nil
+}
+
+func (p *lazyRefreshProvider) CheckAvailability(context.Context) error {
+	p.availabilityCalls++
+	return p.availabilityErr
+}
+
 type mockBatchProvider struct {
 	mockProvider
 	listBatchesResp    *core.BatchListResponse
@@ -556,6 +578,137 @@ func TestRouterChatCompletion_PrefixedModelSelector(t *testing.T) {
 	}
 	if west.lastChatReq == nil || west.lastChatReq.Model != "gpt-4o" {
 		t.Fatalf("expected upstream model to be unqualified gpt-4o, got %#v", west.lastChatReq)
+	}
+}
+
+func TestRouterChatCompletion_RefreshesProviderModelsForQualifiedRequest(t *testing.T) {
+	provider := &lazyRefreshProvider{
+		mockProvider: mockProvider{
+			name:         "ollama",
+			chatResponse: &core.ChatResponse{ID: "chatcmpl-later", Model: "later-model"},
+		},
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "later-model", Object: "model", OwnedBy: "ollama"},
+			},
+		},
+	}
+	registry := NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(provider, "ollama", "ollama")
+
+	router, err := NewRouter(registry)
+	if err != nil {
+		t.Fatalf("NewRouter() error = %v", err)
+	}
+
+	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "ollama/later-model"})
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v, want nil", err)
+	}
+	if resp.ID != "chatcmpl-later" {
+		t.Fatalf("response ID = %q, want chatcmpl-later", resp.ID)
+	}
+	if provider.availabilityCalls != 1 {
+		t.Fatalf("availability calls = %d, want 1", provider.availabilityCalls)
+	}
+	if provider.listModelsCalls != 1 {
+		t.Fatalf("ListModels calls = %d, want 1", provider.listModelsCalls)
+	}
+	if provider.lastChatReq == nil || provider.lastChatReq.Model != "later-model" {
+		t.Fatalf("expected upstream model later-model, got %#v", provider.lastChatReq)
+	}
+	if !registry.Supports("ollama/later-model") {
+		t.Fatal("expected request-time refresh to register ollama/later-model")
+	}
+}
+
+func TestRouterChatCompletion_RefreshesMissingProviderWithoutDroppingExistingModels(t *testing.T) {
+	openAI := &mockProvider{
+		name:         "openai",
+		chatResponse: &core.ChatResponse{ID: "openai", Model: "gpt-4o"},
+	}
+	ollama := &lazyRefreshProvider{
+		mockProvider: mockProvider{
+			name:         "ollama",
+			chatResponse: &core.ChatResponse{ID: "ollama", Model: "local-model"},
+		},
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "local-model", Object: "model", OwnedBy: "ollama"},
+			},
+		},
+	}
+	registry := newTestRegistryWithModels(registryModelEntry{
+		provider:     openAI,
+		providerName: "openai",
+		providerType: "openai",
+		modelID:      "gpt-4o",
+	})
+	registry.RegisterProviderWithNameAndType(ollama, "ollama", "ollama")
+
+	router, err := NewRouter(registry)
+	if err != nil {
+		t.Fatalf("NewRouter() error = %v", err)
+	}
+
+	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "ollama/local-model"})
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v, want nil", err)
+	}
+	if resp.ID != "ollama" {
+		t.Fatalf("response ID = %q, want ollama", resp.ID)
+	}
+	if !registry.Supports("openai/gpt-4o") {
+		t.Fatal("expected existing openai model to remain after targeted refresh")
+	}
+	if !registry.Supports("ollama/local-model") {
+		t.Fatal("expected targeted refresh to add ollama/local-model")
+	}
+}
+
+func TestRouterChatCompletion_RequestTimeRefreshUnavailableProvider(t *testing.T) {
+	provider := &lazyRefreshProvider{
+		mockProvider: mockProvider{
+			name:         "ollama",
+			chatResponse: &core.ChatResponse{ID: "should-not-run"},
+		},
+		availabilityErr: errors.New("connection refused"),
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "later-model", Object: "model", OwnedBy: "ollama"},
+			},
+		},
+	}
+	registry := NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(provider, "ollama", "ollama")
+
+	router, err := NewRouter(registry)
+	if err != nil {
+		t.Fatalf("NewRouter() error = %v", err)
+	}
+
+	_, err = router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "ollama/later-model"})
+	if err == nil {
+		t.Fatal("ChatCompletion() error = nil, want provider unavailable")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("error = %T, want GatewayError", err)
+	}
+	if gatewayErr.HTTPStatusCode() != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusServiceUnavailable)
+	}
+	if provider.availabilityCalls != 1 {
+		t.Fatalf("availability calls = %d, want 1", provider.availabilityCalls)
+	}
+	if provider.listModelsCalls != 0 {
+		t.Fatalf("ListModels calls = %d, want 0 when availability fails", provider.listModelsCalls)
+	}
+	if provider.lastChatReq != nil {
+		t.Fatalf("provider call should not be attempted, got %#v", provider.lastChatReq)
 	}
 }
 

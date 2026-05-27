@@ -209,6 +209,36 @@ func TestModelRegistry(t *testing.T) {
 		}
 	})
 
+	t.Run("SuccessfulLiveModelFetchClearsAvailabilityError", func(t *testing.T) {
+		registry := NewModelRegistry()
+		mock := &registryMockProvider{
+			name: "ollama",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{ID: "qwen3:8b", Object: "model", OwnedBy: "ollama"},
+				},
+			},
+		}
+		registry.RegisterProviderWithNameAndType(mock, "ollama", "ollama")
+		registry.RecordAvailabilityCheck("ollama", errors.New("connection refused"))
+
+		if err := registry.Initialize(context.Background()); err != nil {
+			t.Fatalf("Initialize() error = %v, want nil", err)
+		}
+
+		snapshots := registry.ProviderRuntimeSnapshots()
+		if len(snapshots) != 1 {
+			t.Fatalf("snapshots = %d, want 1", len(snapshots))
+		}
+		if snapshots[0].LastAvailabilityError != "" {
+			t.Fatalf("LastAvailabilityError = %q, want empty after live model fetch", snapshots[0].LastAvailabilityError)
+		}
+		if snapshots[0].LastAvailabilityOKAt == nil {
+			t.Fatal("LastAvailabilityOKAt = nil, want timestamp after live model fetch")
+		}
+	})
+
 	t.Run("ConfiguredModelsAllowlistModeSkipsUpstreamAndUsesConfiguredModels", func(t *testing.T) {
 		registry := NewModelRegistry()
 		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeAllowlist)

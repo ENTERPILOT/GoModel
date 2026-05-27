@@ -52,6 +52,10 @@ type modelWithProviderLister interface {
 	ListModelsWithProvider() []ModelWithProvider
 }
 
+type providerModelRefresher interface {
+	RefreshProviderModels(ctx context.Context, providerSelector string) (int, error)
+}
+
 func registryUnavailableError(err error) error {
 	return core.NewProviderError("", http.StatusServiceUnavailable, err.Error(), err)
 }
@@ -235,17 +239,96 @@ func (r *Router) hasConfiguredProviderName(providerName string) bool {
 }
 
 // resolveProvider validates readiness, parses the model selector, and finds the target provider.
-func (r *Router) resolveProvider(model, providerHint string) (core.Provider, core.ModelSelector, error) {
-	selector, _, err := r.ResolveModel(core.NewRequestedModelSelector(model, providerHint))
+func (r *Router) resolveProvider(ctx context.Context, model, providerHint string) (core.Provider, core.ModelSelector, error) {
+	requested := core.NewRequestedModelSelector(model, providerHint)
+	selector, _, err := r.ResolveModel(requested)
+	refreshed := false
 	if err != nil {
-		return nil, core.ModelSelector{}, err
+		var refreshErr error
+		refreshed, refreshErr = r.refreshProviderModelsForRequest(ctx, requested)
+		if refreshErr != nil {
+			return nil, core.ModelSelector{}, refreshErr
+		}
+		if !refreshed {
+			return nil, core.ModelSelector{}, err
+		}
+		selector, _, err = r.ResolveModel(requested)
+		if err != nil {
+			return nil, core.ModelSelector{}, err
+		}
 	}
+
 	lookupModel := selector.QualifiedModel()
 	p := r.lookup.GetProvider(lookupModel)
+	if p == nil && !refreshed {
+		var refreshErr error
+		refreshed, refreshErr = r.refreshProviderModelsForRequest(ctx, requested)
+		if refreshErr != nil {
+			return nil, core.ModelSelector{}, refreshErr
+		}
+		if refreshed {
+			selector, _, err = r.ResolveModel(requested)
+			if err != nil {
+				return nil, core.ModelSelector{}, err
+			}
+			lookupModel = selector.QualifiedModel()
+			p = r.lookup.GetProvider(lookupModel)
+		}
+	}
 	if p == nil {
 		return nil, core.ModelSelector{}, core.NewNotFoundError("model not found: " + lookupModel)
 	}
 	return p, selector, nil
+}
+
+func (r *Router) refreshProviderModelsForRequest(ctx context.Context, requested core.RequestedModelSelector) (bool, error) {
+	refresher, ok := r.lookup.(providerModelRefresher)
+	if !ok {
+		return false, nil
+	}
+
+	selector, err := requested.Normalize()
+	if err != nil {
+		return false, nil
+	}
+	providerSelector := strings.TrimSpace(selector.Provider)
+	if providerSelector == "" {
+		return false, nil
+	}
+	if !r.hasRegisteredProviderSelector(providerSelector) {
+		return false, nil
+	}
+
+	_, err = refresher.RefreshProviderModels(ctx, providerSelector)
+	return true, err
+}
+
+// RefreshProviderModels refreshes a configured provider's model inventory when
+// the backing lookup supports request-time provider refreshes.
+func (r *Router) RefreshProviderModels(ctx context.Context, providerSelector string) (int, error) {
+	providerSelector = strings.TrimSpace(providerSelector)
+	if !r.hasRegisteredProviderSelector(providerSelector) {
+		return 0, nil
+	}
+	refresher, ok := r.lookup.(providerModelRefresher)
+	if !ok {
+		return 0, nil
+	}
+	return refresher.RefreshProviderModels(ctx, providerSelector)
+}
+
+func (r *Router) hasRegisteredProviderSelector(providerSelector string) bool {
+	providerSelector = strings.TrimSpace(providerSelector)
+	if providerSelector == "" {
+		return false
+	}
+	if r.hasConfiguredProviderName(providerSelector) {
+		return true
+	}
+	if strings.TrimSpace(r.lookup.GetProviderNameForType(providerSelector)) != "" {
+		return true
+	}
+	return r.providerByTypeRegistry(providerSelector) != nil
 }
 
 func (r *Router) resolveProviderType(providerType string) (core.Provider, error) {
@@ -374,7 +457,7 @@ func routeResolvedModelCall[Req any, Resp any](
 	buildForward func(core.ModelSelector) Req,
 	call func(context.Context, core.Provider, Req) (Resp, error),
 ) (Resp, string, error) {
-	p, selector, err := r.resolveProvider(model, providerHint)
+	p, selector, err := r.resolveProvider(ctx, model, providerHint)
 	if err != nil {
 		var zero Resp
 		return zero, "", err
