@@ -69,10 +69,11 @@ func (r *ModelRegistry) RefreshProviderModels(ctx context.Context, providerSelec
 	)
 
 	if fetched.totalModels == 0 {
-		r.applyProviderRuntimeUpdates(fetched.runtimeUpdates)
 		if fetched.failedProviders == len(providers) {
+			r.applyProviderRuntimeUpdates(fetched.runtimeUpdates)
 			return 0, core.NewProviderError(providerSelector, http.StatusServiceUnavailable, "failed to refresh provider models", fetchedProviderRefreshError(fetched))
 		}
+		r.applyFetchedProviderInventory(providerTypes, fetched)
 		return 0, core.NewProviderError(providerSelector, http.StatusServiceUnavailable, "provider returned no models", nil)
 	}
 

@@ -11,11 +11,12 @@ import (
 )
 
 type requestRefreshProvider struct {
-	supported    map[string]bool
-	providerType map[string]string
-	modelCount   int
-	refreshErr   error
-	refreshCalls int
+	supported           map[string]bool
+	providerType        map[string]string
+	modelCount          int
+	refreshErr          error
+	resolveErrWhenEmpty bool
+	refreshCalls        int
 }
 
 func newRequestRefreshProvider(modelCount int) *requestRefreshProvider {
@@ -45,6 +46,9 @@ func (p *requestRefreshProvider) RefreshProviderModels(_ context.Context, provid
 }
 
 func (p *requestRefreshProvider) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	if p.resolveErrWhenEmpty && p.modelCount == 0 {
+		return core.ModelSelector{}, false, core.NewProviderError("", http.StatusServiceUnavailable, "model registry not initialized", nil)
+	}
 	selector, err := requested.Normalize()
 	return selector, false, err
 }
@@ -83,6 +87,36 @@ func (p *requestRefreshProvider) StreamResponses(context.Context, *core.Response
 
 func (p *requestRefreshProvider) Embeddings(context.Context, *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
 	return nil, nil
+}
+
+type requestAliasResolver map[string]core.ModelSelector
+
+func (r requestAliasResolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	if selector, ok := r[requested.RequestedQualifiedModel()]; ok {
+		return selector, true, nil
+	}
+	selector, err := requested.Normalize()
+	return selector, false, err
+}
+
+type requestRefreshTargetResolver struct {
+	provider *requestRefreshProvider
+	target   core.ModelSelector
+}
+
+func (r requestRefreshTargetResolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	if requested.RequestedQualifiedModel() == "smart" && r.provider.Supports(r.target.QualifiedModel()) {
+		return r.target, true, nil
+	}
+	selector, err := requested.Normalize()
+	return selector, false, err
+}
+
+func (r requestRefreshTargetResolver) ResolveRefreshTarget(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	if requested.RequestedQualifiedModel() != "smart" {
+		return core.ModelSelector{}, false, nil
+	}
+	return r.target, true, nil
 }
 
 func TestResolveRequestModelRefreshesBeforeUnsupportedModel(t *testing.T) {
@@ -127,6 +161,62 @@ func TestResolveRequestModelRefreshesBeforeEmptyRegistryFailure(t *testing.T) {
 	}
 	if got := resolution.ResolvedQualifiedModel(); got != "ollama/qwen3:8b" {
 		t.Fatalf("ResolvedQualifiedModel() = %q, want ollama/qwen3:8b", got)
+	}
+}
+
+func TestResolveRequestModelRefreshesAliasTargetBeforeCatalogSupportsIt(t *testing.T) {
+	provider := newRequestRefreshProvider(1)
+	resolver := requestRefreshTargetResolver{
+		provider: provider,
+		target:   core.ModelSelector{Provider: "ollama", Model: "qwen3:8b"},
+	}
+
+	resolution, err := ResolveRequestModelWithAuthorizer(
+		context.Background(),
+		provider,
+		resolver,
+		nil,
+		core.NewRequestedModelSelector("smart", ""),
+	)
+	if err != nil {
+		t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v, want nil", err)
+	}
+	if provider.refreshCalls != 1 {
+		t.Fatalf("refresh calls = %d, want 1", provider.refreshCalls)
+	}
+	if got := resolution.ResolvedQualifiedModel(); got != "ollama/qwen3:8b" {
+		t.Fatalf("ResolvedQualifiedModel() = %q, want ollama/qwen3:8b", got)
+	}
+	if !resolution.AliasApplied {
+		t.Fatal("AliasApplied = false, want true")
+	}
+}
+
+func TestResolveRequestModelRefreshesAliasTargetAfterResolverFailure(t *testing.T) {
+	provider := newRequestRefreshProvider(0)
+	provider.resolveErrWhenEmpty = true
+	resolver := requestAliasResolver{
+		"smart": {Provider: "ollama", Model: "qwen3:8b"},
+	}
+
+	resolution, err := ResolveRequestModelWithAuthorizer(
+		context.Background(),
+		provider,
+		resolver,
+		nil,
+		core.NewRequestedModelSelector("smart", ""),
+	)
+	if err != nil {
+		t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v, want nil", err)
+	}
+	if provider.refreshCalls != 1 {
+		t.Fatalf("refresh calls = %d, want 1", provider.refreshCalls)
+	}
+	if got := resolution.ResolvedQualifiedModel(); got != "ollama/qwen3:8b" {
+		t.Fatalf("ResolvedQualifiedModel() = %q, want ollama/qwen3:8b", got)
+	}
+	if !resolution.AliasApplied {
+		t.Fatal("AliasApplied = false, want true")
 	}
 }
 

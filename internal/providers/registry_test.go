@@ -239,6 +239,39 @@ func TestModelRegistry(t *testing.T) {
 		}
 	})
 
+	t.Run("TargetedRefreshWithEmptyInventoryClearsStaleProviderModels", func(t *testing.T) {
+		registry := NewModelRegistry()
+		mock := &registryMockProvider{
+			name: "ollama",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data: []core.Model{
+					{ID: "qwen3:8b", Object: "model", OwnedBy: "ollama"},
+				},
+			},
+		}
+		registry.RegisterProviderWithNameAndType(mock, "ollama", "ollama")
+
+		if err := registry.Initialize(context.Background()); err != nil {
+			t.Fatalf("Initialize() error = %v, want nil", err)
+		}
+		if !registry.Supports("ollama/qwen3:8b") {
+			t.Fatal("expected ollama/qwen3:8b to be supported before empty refresh")
+		}
+
+		mock.modelsResponse = &core.ModelsResponse{Object: "list", Data: []core.Model{}}
+		_, err := registry.RefreshProviderModels(context.Background(), "ollama")
+		if err == nil || !strings.Contains(err.Error(), "provider returned no models") {
+			t.Fatalf("RefreshProviderModels() error = %v, want provider returned no models", err)
+		}
+		if registry.Supports("ollama/qwen3:8b") {
+			t.Fatal("expected stale ollama/qwen3:8b to be removed after empty refresh")
+		}
+		if registry.ModelCount() != 0 {
+			t.Fatalf("ModelCount() = %d, want 0", registry.ModelCount())
+		}
+	})
+
 	t.Run("ConfiguredModelsAllowlistModeSkipsUpstreamAndUsesConfiguredModels", func(t *testing.T) {
 		registry := NewModelRegistry()
 		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeAllowlist)
