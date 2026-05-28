@@ -321,6 +321,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/conversations/:id", handler.UpdateConversation)
 	e.DELETE("/v1/conversations/:id", handler.DeleteConversation)
 	e.POST("/v1/embeddings", handler.Embeddings)
+	e.POST("/v1/audio/speech", handler.AudioSpeech)
+	e.POST("/v1/audio/transcriptions", handler.AudioTranscriptions)
 	e.POST("/v1/files", handler.CreateFile)
 	e.GET("/v1/files", handler.ListFiles)
 	e.GET("/v1/files/:id", handler.GetFile)

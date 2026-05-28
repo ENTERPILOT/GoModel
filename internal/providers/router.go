@@ -574,6 +574,20 @@ func forwardEmbeddingRequest(req *core.EmbeddingRequest, selector core.ModelSele
 	return &forwardReq
 }
 
+func forwardAudioSpeechRequest(req *core.AudioSpeechRequest, selector core.ModelSelector) *core.AudioSpeechRequest {
+	forwardReq := *req
+	forwardReq.Model = selector.Model
+	forwardReq.Provider = ""
+	return &forwardReq
+}
+
+func forwardAudioTranscriptionRequest(req *core.AudioTranscriptionRequest, selector core.ModelSelector) *core.AudioTranscriptionRequest {
+	forwardReq := *req
+	forwardReq.Model = selector.Model
+	forwardReq.Provider = ""
+	return &forwardReq
+}
+
 func callChatCompletion(ctx context.Context, provider core.Provider, req *core.ChatRequest) (*core.ChatResponse, error) {
 	return provider.ChatCompletion(ctx, req)
 }
@@ -700,6 +714,59 @@ func (r *Router) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*c
 		},
 		callEmbeddings,
 	)
+}
+
+// CreateSpeech routes a text-to-speech request to the provider that owns the model.
+func (r *Router) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
+	return routeAudioCall(
+		r, ctx, req.Model, req.Provider,
+		func(selector core.ModelSelector) *core.AudioSpeechRequest {
+			return forwardAudioSpeechRequest(req, selector)
+		},
+		func(ctx context.Context, ap core.AudioProvider, forwardReq *core.AudioSpeechRequest) (*core.AudioResponse, error) {
+			return ap.CreateSpeech(ctx, forwardReq)
+		},
+	)
+}
+
+// CreateTranscription routes a speech-to-text request to the provider that owns the model.
+func (r *Router) CreateTranscription(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+	return routeAudioCall(
+		r, ctx, req.Model, req.Provider,
+		func(selector core.ModelSelector) *core.AudioTranscriptionRequest {
+			return forwardAudioTranscriptionRequest(req, selector)
+		},
+		func(ctx context.Context, ap core.AudioProvider, forwardReq *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+			return ap.CreateTranscription(ctx, forwardReq)
+		},
+	)
+}
+
+// routeAudioCall resolves the model, requires the target provider to implement
+// core.AudioProvider, and invokes call. It mirrors routeNative*Call but for the
+// optional audio capability.
+func routeAudioCall[Req any](
+	r *Router,
+	ctx context.Context,
+	model, providerHint string,
+	forward func(core.ModelSelector) Req,
+	call func(context.Context, core.AudioProvider, Req) (*core.AudioResponse, error),
+) (*core.AudioResponse, error) {
+	resp, _, err := routeResolvedModelCall(
+		r, ctx, model, providerHint, forward,
+		func(ctx context.Context, provider core.Provider, forwardReq Req) (*core.AudioResponse, error) {
+			ap, ok := provider.(core.AudioProvider)
+			if !ok {
+				return nil, audioUnsupportedError(model)
+			}
+			return call(ctx, ap, forwardReq)
+		},
+	)
+	return resp, err
+}
+
+func audioUnsupportedError(model string) error {
+	return core.NewInvalidRequestError(fmt.Sprintf("model %q does not support audio operations", model), nil)
 }
 
 // GetProviderType returns the provider type string for the given model.
