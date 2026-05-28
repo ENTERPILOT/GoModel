@@ -97,9 +97,7 @@ func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*co
 	}, &resp); err != nil {
 		return nil, err
 	}
-	if resp.ProviderBatchID == "" {
-		resp.ProviderBatchID = resp.ID
-	}
+	providers.EnsureProviderBatchID(&resp)
 	return &resp, nil
 }
 
@@ -111,9 +109,7 @@ func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse
 	}, &resp); err != nil {
 		return nil, err
 	}
-	if resp.ProviderBatchID == "" {
-		resp.ProviderBatchID = resp.ID
-	}
+	providers.EnsureProviderBatchID(&resp)
 	return &resp, nil
 }
 
@@ -138,11 +134,7 @@ func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*c
 	}, &resp); err != nil {
 		return nil, err
 	}
-	for i := range resp.Data {
-		if resp.Data[i].ProviderBatchID == "" {
-			resp.Data[i].ProviderBatchID = resp.Data[i].ID
-		}
-	}
+	providers.EnsureProviderBatchIDs(&resp)
 	return &resp, nil
 }
 
@@ -154,9 +146,7 @@ func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchRespo
 	}, &resp); err != nil {
 		return nil, err
 	}
-	if resp.ProviderBatchID == "" {
-		resp.ProviderBatchID = resp.ID
-	}
+	providers.EnsureProviderBatchID(&resp)
 	return &resp, nil
 }
 
@@ -183,10 +173,11 @@ func (p *Provider) mutateRequest(req *llmclient.Request) {
 }
 
 func setHeaders(req *http.Request, apiKey string) {
-	req.Header.Set("api-key", apiKey)
-	if requestID := core.GetRequestID(req.Context()); requestID != "" && isValidClientRequestID(requestID) {
-		req.Header.Set("X-Client-Request-Id", requestID)
-	}
+	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{
+		AuthHeader:        "api-key",
+		RequestIDHeader:   "X-Client-Request-Id",
+		ValidateRequestID: isValidClientRequestID,
+	})
 }
 
 func isValidClientRequestID(id string) bool {

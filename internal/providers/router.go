@@ -385,52 +385,49 @@ func (r *Router) ensureProviderInventoryReady() error {
 	return nil
 }
 
+// assertProviderCapability narrows a resolved provider to capability T. It
+// propagates any resolution error unchanged and, when the provider does not
+// implement T, returns the error built by unsupported.
+func assertProviderCapability[T any](provider core.Provider, err error, unsupported func() error) (T, error) {
+	var capability T
+	if err != nil {
+		return capability, err
+	}
+	capability, ok := provider.(T)
+	if !ok {
+		return capability, unsupported()
+	}
+	return capability, nil
+}
+
 func (r *Router) resolveNativeBatchProvider(providerType string) (core.NativeBatchProvider, error) {
 	provider, err := r.resolveProviderType(providerType)
-	if err != nil {
-		return nil, err
-	}
-	bp, ok := provider.(core.NativeBatchProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native batch processing", providerType), nil)
-	}
-	return bp, nil
+	return assertProviderCapability[core.NativeBatchProvider](provider, err, func() error {
+		return core.NewInvalidRequestError(fmt.Sprintf("%s does not support native batch processing", providerType), nil)
+	})
 }
 
 func (r *Router) resolveNativeFileProvider(providerType string) (core.NativeFileProvider, error) {
 	provider, err := r.resolveProviderType(providerType)
-	if err != nil {
-		return nil, err
-	}
-	fp, ok := provider.(core.NativeFileProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support native file operations", providerType), nil)
-	}
-	return fp, nil
+	return assertProviderCapability[core.NativeFileProvider](provider, err, func() error {
+		return core.NewInvalidRequestError(fmt.Sprintf("%s does not support native file operations", providerType), nil)
+	})
 }
 
 func (r *Router) resolveNativeResponseLifecycleProvider(providerType string) (core.NativeResponseLifecycleProvider, string, error) {
 	provider, resolvedProviderType, err := r.resolveProviderSelector(providerType)
-	if err != nil {
-		return nil, "", err
-	}
-	rp, ok := provider.(core.NativeResponseLifecycleProvider)
-	if !ok {
-		return nil, "", unsupportedNativeResponseOperation(fmt.Sprintf("%s does not support native response lifecycle operations", providerType))
-	}
-	return rp, resolvedProviderType, nil
+	rp, err := assertProviderCapability[core.NativeResponseLifecycleProvider](provider, err, func() error {
+		return unsupportedNativeResponseOperation(fmt.Sprintf("%s does not support native response lifecycle operations", providerType))
+	})
+	return rp, resolvedProviderType, err
 }
 
 func (r *Router) resolveNativeResponseUtilityProvider(providerType string) (core.NativeResponseUtilityProvider, string, error) {
 	provider, resolvedProviderType, err := r.resolveProviderSelector(providerType)
-	if err != nil {
-		return nil, "", err
-	}
-	rp, ok := provider.(core.NativeResponseUtilityProvider)
-	if !ok {
-		return nil, "", unsupportedNativeResponseOperation(fmt.Sprintf("%s does not support native response utility operations", providerType))
-	}
-	return rp, resolvedProviderType, nil
+	rp, err := assertProviderCapability[core.NativeResponseUtilityProvider](provider, err, func() error {
+		return unsupportedNativeResponseOperation(fmt.Sprintf("%s does not support native response utility operations", providerType))
+	})
+	return rp, resolvedProviderType, err
 }
 
 func unsupportedNativeResponseOperation(message string) *core.GatewayError {
@@ -439,14 +436,9 @@ func unsupportedNativeResponseOperation(message string) *core.GatewayError {
 
 func (r *Router) resolvePassthroughProvider(providerType string) (core.PassthroughProvider, error) {
 	provider, err := r.resolveProviderType(providerType)
-	if err != nil {
-		return nil, err
-	}
-	pp, ok := provider.(core.PassthroughProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("%s does not support provider passthrough", providerType), nil)
-	}
-	return pp, nil
+	return assertProviderCapability[core.PassthroughProvider](provider, err, func() error {
+		return core.NewInvalidRequestError(fmt.Sprintf("%s does not support provider passthrough", providerType), nil)
+	})
 }
 
 func routeResolvedModelCall[Req any, Resp any](

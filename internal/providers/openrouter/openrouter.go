@@ -76,10 +76,11 @@ func (p *Provider) mutateRequest(req *llmclient.Request) {
 }
 
 func setHeaders(req *http.Request, apiKey string) {
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	if requestID := core.GetRequestID(req.Context()); requestID != "" && isValidClientRequestID(requestID) {
-		req.Header.Set("X-Client-Request-Id", requestID)
-	}
+	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{
+		AuthScheme:        "Bearer ",
+		RequestIDHeader:   "X-Client-Request-Id",
+		ValidateRequestID: isValidClientRequestID,
+	})
 }
 
 func envOrDefault(key, fallback string) string {

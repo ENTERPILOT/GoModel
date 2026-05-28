@@ -71,12 +71,10 @@ func (p *Provider) SetBaseURL(url string) {
 
 // setHeaders sets the required headers for xAI API requests
 func (p *Provider) setHeaders(req *http.Request) {
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-
-	// Forward request ID if present in context
-	if requestID := core.GetRequestID(req.Context()); requestID != "" {
-		req.Header.Set("X-Request-ID", requestID)
-	}
+	providers.SetAuthHeaders(req, p.apiKey, providers.AuthHeaderConfig{
+		AuthScheme:      "Bearer ",
+		RequestIDHeader: "X-Request-ID",
+	})
 }
 
 type grokConversationAnchor struct {
@@ -273,9 +271,7 @@ func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*co
 	if err != nil {
 		return nil, err
 	}
-	if resp.ProviderBatchID == "" {
-		resp.ProviderBatchID = resp.ID
-	}
+	providers.EnsureProviderBatchID(&resp)
 	return &resp, nil
 }
 
@@ -289,9 +285,7 @@ func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse
 	if err != nil {
 		return nil, err
 	}
-	if resp.ProviderBatchID == "" {
-		resp.ProviderBatchID = resp.ID
-	}
+	providers.EnsureProviderBatchID(&resp)
 	return &resp, nil
 }
 
@@ -317,11 +311,7 @@ func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*c
 	if err != nil {
 		return nil, err
 	}
-	for i := range resp.Data {
-		if resp.Data[i].ProviderBatchID == "" {
-			resp.Data[i].ProviderBatchID = resp.Data[i].ID
-		}
-	}
+	providers.EnsureProviderBatchIDs(&resp)
 	return &resp, nil
 }
 
@@ -335,9 +325,7 @@ func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchRespo
 	if err != nil {
 		return nil, err
 	}
-	if resp.ProviderBatchID == "" {
-		resp.ProviderBatchID = resp.ID
-	}
+	providers.EnsureProviderBatchID(&resp)
 	return &resp, nil
 }
 
