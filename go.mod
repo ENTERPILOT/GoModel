@@ -6,7 +6,7 @@ require (
 	github.com/andybalholm/brotli v1.2.1
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.18
-	github.com/aws/aws-sdk-go-v2/service/bedrock v1.60.0
+	github.com/aws/aws-sdk-go-v2/service/bedrock v1.61.0
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.52.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/google/uuid v1.6.0
