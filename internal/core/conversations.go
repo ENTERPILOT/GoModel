@@ -46,7 +46,7 @@ type ConversationDeleteResponse struct {
 // Items are stored as opaque JSON so the gateway accepts any item shape the
 // client sends without constraining future item-list support.
 type ConversationCreateRequest struct {
-	Items    []json.RawMessage `json:"items,omitempty"`
+	Items    []json.RawMessage `json:"items,omitempty" swaggertype:"array,object"`
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
@@ -54,7 +54,7 @@ type ConversationCreateRequest struct {
 // Metadata is a pointer so the handler can tell an absent field apart from an
 // explicit empty object: OpenAI requires metadata on update.
 type ConversationUpdateRequest struct {
-	Metadata *map[string]string `json:"metadata"`
+	Metadata *map[string]string `json:"metadata" binding:"required"`
 }
 
 // DecodeConversationCreateRequest parses a conversation create body. An empty

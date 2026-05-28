@@ -1155,7 +1155,7 @@ func TestResponses(t *testing.T) {
 	}
 }
 
-func TestResponsesUtilitiesForwardNarrowRequests(t *testing.T) {
+func TestResponsesUtilitiesForwardResponseContext(t *testing.T) {
 	var inputTokensBody map[string]any
 	var compactBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1183,20 +1183,37 @@ func TestResponsesUtilitiesForwardNarrowRequests(t *testing.T) {
 	maxOutputTokens := 128
 	parallelToolCalls := true
 	temperature := 0.2
+	topP := 0.8
+	topLogprobs := 3
+	store := false
 	req := &core.ResponsesRequest{
-		Model:             "gpt-4o",
-		Provider:          "openai_primary",
-		Input:             "hello",
-		Instructions:      "be brief",
-		Tools:             []map[string]any{{"type": "function"}},
-		ToolChoice:        "auto",
-		ParallelToolCalls: &parallelToolCalls,
-		Temperature:       &temperature,
-		MaxOutputTokens:   &maxOutputTokens,
-		Stream:            true,
-		StreamOptions:     &core.StreamOptions{IncludeUsage: true},
-		Metadata:          map[string]string{"team": "alpha"},
-		Reasoning:         &core.Reasoning{Effort: "low"},
+		Model:                "gpt-4o",
+		Provider:             "openai_primary",
+		Input:                "hello",
+		Instructions:         "be brief",
+		Tools:                []map[string]any{{"type": "function", "name": "lookup"}},
+		ToolChoice:           "auto",
+		ParallelToolCalls:    &parallelToolCalls,
+		Temperature:          &temperature,
+		TopP:                 &topP,
+		TopLogprobs:          &topLogprobs,
+		MaxOutputTokens:      &maxOutputTokens,
+		Stream:               true,
+		StreamOptions:        &core.StreamOptions{IncludeUsage: true},
+		Metadata:             map[string]string{"team": "alpha"},
+		Reasoning:            &core.Reasoning{Effort: "low"},
+		Text:                 map[string]any{"format": map[string]any{"type": "text"}},
+		Include:              []string{"reasoning.encrypted_content"},
+		Truncation:           "auto",
+		Store:                &store,
+		PreviousResponseID:   "resp_previous",
+		Conversation:         &core.ResponsesConversationRef{ID: "conv_123"},
+		Prompt:               map[string]any{"id": "pmpt_123"},
+		PromptCacheRetention: "24h",
+		ContextManagement:    map[string]any{"truncation": "auto"},
+		User:                 "tenant-123",
+		ServiceTier:          "flex",
+		SafetyIdentifier:     "safe_123",
 		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"custom": json.RawMessage(`"value"`),
 		}),
@@ -1215,13 +1232,35 @@ func TestResponsesUtilitiesForwardNarrowRequests(t *testing.T) {
 		if body["model"] != "gpt-4o" || body["input"] != "hello" || body["instructions"] != "be brief" {
 			t.Fatalf("%s body kept fields = %+v, want model/input/instructions", name, body)
 		}
-		if _, ok := body["metadata"]; !ok {
-			t.Fatalf("%s body missing metadata: %+v", name, body)
+		for _, field := range []string{
+			"tools",
+			"tool_choice",
+			"parallel_tool_calls",
+			"temperature",
+			"top_p",
+			"top_logprobs",
+			"max_output_tokens",
+			"metadata",
+			"reasoning",
+			"text",
+			"include",
+			"truncation",
+			"store",
+			"previous_response_id",
+			"conversation",
+			"prompt",
+			"prompt_cache_retention",
+			"context_management",
+			"user",
+			"service_tier",
+			"safety_identifier",
+			"custom",
+		} {
+			if _, ok := body[field]; !ok {
+				t.Fatalf("%s body missing %q: %+v", name, field, body)
+			}
 		}
-		if _, ok := body["reasoning"]; !ok {
-			t.Fatalf("%s body missing reasoning: %+v", name, body)
-		}
-		for _, field := range []string{"provider", "tools", "tool_choice", "parallel_tool_calls", "temperature", "max_output_tokens", "stream", "stream_options", "custom"} {
+		for _, field := range []string{"provider", "stream", "stream_options"} {
 			if _, ok := body[field]; ok {
 				t.Fatalf("%s body includes filtered field %q: %+v", name, field, body)
 			}

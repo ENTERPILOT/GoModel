@@ -394,6 +394,7 @@ func TestConvertResponsesRequestToChat_MapsPortableAgentsSDKFields(t *testing.T)
 		Model:       "test-model",
 		Input:       "Hello",
 		TopP:        &topP,
+		Text:        map[string]any{"format": map[string]any{"type": "text"}},
 		User:        "tenant-123",
 		ServiceTier: "flex",
 	}
@@ -426,7 +427,7 @@ func TestConvertResponsesRequestToChat_RejectsStatefulAgentsSDKFields(t *testing
 		},
 		{
 			name: "conversation",
-			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Conversation: "conv_123"},
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Conversation: &core.ResponsesConversationRef{ID: "conv_123"}},
 			want: "conversation",
 		},
 		{

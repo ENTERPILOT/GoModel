@@ -175,7 +175,7 @@ Done: add typed fields to `core.ResponsesRequest` for fields the Agents SDK send
 regularly, while still preserving unknown fields:
 
 - `PreviousResponseID string`
-- `Conversation any`
+- `Conversation *ResponsesConversationRef`
 - `Include []string`
 - `Prompt any`
 - `TopP *float64`

@@ -82,8 +82,8 @@ func validateResponsesRequestForChatTranslation(req *core.ResponsesRequest) erro
 	if strings.TrimSpace(req.Truncation) != "" {
 		return unsupportedResponsesChatTranslationField("truncation")
 	}
-	if req.Text != nil {
-		return unsupportedResponsesChatTranslationField("text")
+	if err := validateResponsesTextForChatTranslation(req.Text); err != nil {
+		return err
 	}
 	if strings.TrimSpace(req.PromptCacheRetention) != "" {
 		return unsupportedResponsesChatTranslationField("prompt_cache_retention")
@@ -98,6 +98,46 @@ func validateResponsesRequestForChatTranslation(req *core.ResponsesRequest) erro
 		return unsupportedResponsesChatTranslationField("safety_identifier")
 	}
 	return nil
+}
+
+func validateResponsesTextForChatTranslation(text any) error {
+	if text == nil {
+		return nil
+	}
+
+	textMap, ok := text.(map[string]any)
+	if !ok {
+		return unsupportedResponsesChatTranslationField("text")
+	}
+	for key, value := range textMap {
+		switch key {
+		case "format":
+			if !isPlainResponsesTextFormat(value) {
+				return unsupportedResponsesChatTranslationField("text")
+			}
+		default:
+			return unsupportedResponsesChatTranslationField("text")
+		}
+	}
+	return nil
+}
+
+func isPlainResponsesTextFormat(format any) bool {
+	if format == nil {
+		return true
+	}
+	formatMap, ok := format.(map[string]any)
+	if !ok {
+		return false
+	}
+	for key := range formatMap {
+		if key != "type" {
+			return false
+		}
+	}
+	formatType, _ := formatMap["type"].(string)
+	formatType = strings.TrimSpace(formatType)
+	return formatType == "" || formatType == "text"
 }
 
 func unsupportedResponsesChatTranslationField(field string) error {

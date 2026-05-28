@@ -268,25 +268,46 @@ func responseInputTokensRequestFromResponses(req *core.ResponsesRequest) *core.R
 	if req == nil {
 		return nil
 	}
-	return &core.ResponseInputTokensRequest{
-		Model:        req.Model,
-		Input:        req.Input,
-		Instructions: req.Instructions,
-		Metadata:     req.Metadata,
-		Reasoning:    req.Reasoning,
-	}
+	utility := responseUtilityRequestFromResponses(req)
+	return &utility
 }
 
 func responseCompactRequestFromResponses(req *core.ResponsesRequest) *core.ResponseCompactRequest {
 	if req == nil {
 		return nil
 	}
-	return &core.ResponseCompactRequest{
-		Model:        req.Model,
-		Input:        req.Input,
-		Instructions: req.Instructions,
-		Metadata:     req.Metadata,
-		Reasoning:    req.Reasoning,
+	utility := responseUtilityRequestFromResponses(req)
+	compact := core.ResponseCompactRequest(utility)
+	return &compact
+}
+
+func responseUtilityRequestFromResponses(req *core.ResponsesRequest) core.ResponseInputTokensRequest {
+	return core.ResponseInputTokensRequest{
+		Model:                req.Model,
+		Input:                req.Input,
+		Instructions:         req.Instructions,
+		Tools:                req.Tools,
+		ToolChoice:           req.ToolChoice,
+		ParallelToolCalls:    req.ParallelToolCalls,
+		Temperature:          req.Temperature,
+		TopP:                 req.TopP,
+		TopLogprobs:          req.TopLogprobs,
+		MaxOutputTokens:      req.MaxOutputTokens,
+		Metadata:             req.Metadata,
+		Reasoning:            req.Reasoning,
+		Text:                 req.Text,
+		Include:              req.Include,
+		Truncation:           req.Truncation,
+		Store:                req.Store,
+		PreviousResponseID:   req.PreviousResponseID,
+		Conversation:         req.Conversation,
+		Prompt:               req.Prompt,
+		PromptCacheRetention: req.PromptCacheRetention,
+		ContextManagement:    req.ContextManagement,
+		User:                 req.User,
+		ServiceTier:          req.ServiceTier,
+		SafetyIdentifier:     req.SafetyIdentifier,
+		ExtraFields:          core.CloneUnknownJSONFields(req.ExtraFields),
 	}
 }
 

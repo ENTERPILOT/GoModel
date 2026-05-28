@@ -228,6 +228,145 @@ func TestResponseUtilityRequestMarshalJSON_PreservesProvider(t *testing.T) {
 	}
 }
 
+func TestResponseUtilityRequestJSON_PreservesResponsesContextFields(t *testing.T) {
+	store := false
+	parallelToolCalls := true
+	temperature := 0.2
+	topP := 0.8
+	topLogprobs := 3
+	maxOutputTokens := 256
+	utilityRequests := []struct {
+		name string
+		req  any
+	}{
+		{
+			name: "input tokens",
+			req: ResponseInputTokensRequest{
+				Model:                "gpt-5-mini",
+				Input:                "hello",
+				Instructions:         "be brief",
+				Tools:                []map[string]any{{"type": "function", "name": "lookup"}},
+				ToolChoice:           "auto",
+				ParallelToolCalls:    &parallelToolCalls,
+				Temperature:          &temperature,
+				TopP:                 &topP,
+				TopLogprobs:          &topLogprobs,
+				MaxOutputTokens:      &maxOutputTokens,
+				Metadata:             map[string]string{"team": "alpha"},
+				Reasoning:            &Reasoning{Effort: "low"},
+				Text:                 map[string]any{"format": map[string]any{"type": "text"}},
+				Include:              []string{"reasoning.encrypted_content"},
+				Truncation:           "auto",
+				Store:                &store,
+				PreviousResponseID:   "resp_previous",
+				Conversation:         &ResponsesConversationRef{ID: "conv_123"},
+				Prompt:               map[string]any{"id": "pmpt_123"},
+				PromptCacheRetention: "24h",
+				ContextManagement:    map[string]any{"truncation": "auto"},
+				User:                 "tenant-123",
+				ServiceTier:          "flex",
+				SafetyIdentifier:     "safe_123",
+				ExtraFields: UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"future_field": json.RawMessage(`{"enabled":true}`),
+				}),
+			},
+		},
+		{
+			name: "compact",
+			req: ResponseCompactRequest{
+				Model:                "gpt-5-mini",
+				Input:                "hello",
+				Instructions:         "be brief",
+				Tools:                []map[string]any{{"type": "function", "name": "lookup"}},
+				ToolChoice:           "auto",
+				ParallelToolCalls:    &parallelToolCalls,
+				Temperature:          &temperature,
+				TopP:                 &topP,
+				TopLogprobs:          &topLogprobs,
+				MaxOutputTokens:      &maxOutputTokens,
+				Metadata:             map[string]string{"team": "alpha"},
+				Reasoning:            &Reasoning{Effort: "low"},
+				Text:                 map[string]any{"format": map[string]any{"type": "text"}},
+				Include:              []string{"reasoning.encrypted_content"},
+				Truncation:           "auto",
+				Store:                &store,
+				PreviousResponseID:   "resp_previous",
+				Conversation:         &ResponsesConversationRef{ID: "conv_123"},
+				Prompt:               map[string]any{"id": "pmpt_123"},
+				PromptCacheRetention: "24h",
+				ContextManagement:    map[string]any{"truncation": "auto"},
+				User:                 "tenant-123",
+				ServiceTier:          "flex",
+				SafetyIdentifier:     "safe_123",
+				ExtraFields: UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"future_field": json.RawMessage(`{"enabled":true}`),
+				}),
+			},
+		},
+	}
+
+	for _, tt := range utilityRequests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(tt.req)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+
+			var decoded map[string]any
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+			for _, field := range []string{
+				"tools",
+				"tool_choice",
+				"parallel_tool_calls",
+				"temperature",
+				"top_p",
+				"top_logprobs",
+				"max_output_tokens",
+				"metadata",
+				"reasoning",
+				"text",
+				"include",
+				"truncation",
+				"store",
+				"previous_response_id",
+				"conversation",
+				"prompt",
+				"prompt_cache_retention",
+				"context_management",
+				"user",
+				"service_tier",
+				"safety_identifier",
+				"future_field",
+			} {
+				if _, ok := decoded[field]; !ok {
+					t.Fatalf("decoded utility request missing %q: %s", field, string(body))
+				}
+			}
+
+			switch tt.req.(type) {
+			case ResponseInputTokensRequest:
+				var roundTripped ResponseInputTokensRequest
+				if err := json.Unmarshal(body, &roundTripped); err != nil {
+					t.Fatalf("json.Unmarshal(ResponseInputTokensRequest) error = %v", err)
+				}
+				if roundTripped.PreviousResponseID != "resp_previous" || roundTripped.ExtraFields.Lookup("future_field") == nil {
+					t.Fatalf("round-tripped input token request lost context fields: %+v", roundTripped)
+				}
+			case ResponseCompactRequest:
+				var roundTripped ResponseCompactRequest
+				if err := json.Unmarshal(body, &roundTripped); err != nil {
+					t.Fatalf("json.Unmarshal(ResponseCompactRequest) error = %v", err)
+				}
+				if roundTripped.PreviousResponseID != "resp_previous" || roundTripped.ExtraFields.Lookup("future_field") == nil {
+					t.Fatalf("round-tripped compact request lost context fields: %+v", roundTripped)
+				}
+			}
+		})
+	}
+}
+
 func TestResponsesRequestMarshalJSON_PreservesToolCallingControls(t *testing.T) {
 	parallelToolCalls := false
 	body, err := json.Marshal(ResponsesRequest{
@@ -413,6 +552,33 @@ func TestResponsesRequestJSON_PreservesUnknownInputItems(t *testing.T) {
 	}
 }
 
+func TestResponsesInputElementMarshalJSON_MergesRawUnknownItemExtras(t *testing.T) {
+	elem := ResponsesInputElement{
+		Type: "reasoning",
+		Raw:  json.RawMessage(`{"type":"reasoning","id":"rs_123","summary":[]}`),
+		ExtraFields: UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"provider_data": json.RawMessage(`{"trace_id":"trace-1"}`),
+		}),
+	}
+
+	body, err := json.Marshal(elem)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if decoded["type"] != "reasoning" || decoded["id"] != "rs_123" {
+		t.Fatalf("decoded item = %#v, want original raw reasoning item", decoded)
+	}
+	providerData, ok := decoded["provider_data"].(map[string]any)
+	if !ok || providerData["trace_id"] != "trace-1" {
+		t.Fatalf("provider_data = %#v, want merged trace id", decoded["provider_data"])
+	}
+}
+
 func TestResponsesRequestJSON_PreservesVariantSpecificUnknownFields(t *testing.T) {
 	var req ResponsesRequest
 	if err := json.Unmarshal([]byte(`{
@@ -542,6 +708,38 @@ func TestResponsesRequestJSON_PreservesAgentsSDKFields(t *testing.T) {
 	}
 	if decoded["service_tier"] != "flex" {
 		t.Fatalf("decoded service_tier = %#v, want flex", decoded["service_tier"])
+	}
+}
+
+func TestResponsesRequestJSON_PreservesConversationObjectShape(t *testing.T) {
+	var req ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"gpt-5-mini",
+		"input":"hello",
+		"conversation":{"id":"conv_123","metadata":{"team":"alpha"}}
+	}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if req.Conversation == nil || req.Conversation.ID != "conv_123" {
+		t.Fatalf("Conversation = %+v, want id conv_123", req.Conversation)
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(roundTrip) error = %v", err)
+	}
+	conversation, ok := decoded["conversation"].(map[string]any)
+	if !ok {
+		t.Fatalf("decoded conversation = %#v, want object", decoded["conversation"])
+	}
+	metadata, ok := conversation["metadata"].(map[string]any)
+	if !ok || metadata["team"] != "alpha" {
+		t.Fatalf("decoded conversation metadata = %#v, want team alpha", conversation["metadata"])
 	}
 }
 
