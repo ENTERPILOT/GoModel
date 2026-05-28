@@ -3,14 +3,15 @@ package anthropic
 import "encoding/json"
 
 // anthropicThinking represents the thinking configuration for Anthropic's extended thinking.
-// For 4.6 models: {type: "adaptive"} (budget_tokens omitted).
+// For adaptive-thinking models (Opus 4.6+): {type: "adaptive"} (budget_tokens omitted).
 // For older models: {type: "enabled", budget_tokens: N}.
 type anthropicThinking struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budget_tokens,omitempty"`
 }
 
-// anthropicOutputConfig controls effort level for adaptive thinking on 4.6 models.
+// anthropicOutputConfig controls the effort level for adaptive-thinking models
+// (Opus 4.6+). Effort is one of "low", "medium", "high", "xhigh", or "max".
 type anthropicOutputConfig struct {
 	Effort string `json:"effort,omitempty"`
 }

@@ -45,8 +45,8 @@ func resolveDefaultMaxTokens() int {
 }
 
 // applyReasoning configures thinking and effort on an anthropicRequest.
-// Opus 4.6 and Sonnet 4.6 use adaptive thinking with output_config.effort.
-// Older models and Haiku 4.6 use manual thinking with budget_tokens.
+// Adaptive-thinking models (Opus 4.6+) use adaptive thinking with
+// output_config.effort. Older models use manual thinking with budget_tokens.
 func applyReasoning(req *anthropicRequest, model, effort string) {
 	if isAdaptiveThinkingModel(model) {
 		req.Thinking = &anthropicThinking{Type: "adaptive"}
@@ -80,6 +80,10 @@ func reasoningEffortToBudgetTokens(effort string) int {
 		return 10000
 	case "high":
 		return 20000
+	case "xhigh":
+		return 32000
+	case "max":
+		return 48000
 	default:
 		return 5000
 	}

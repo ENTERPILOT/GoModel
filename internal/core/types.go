@@ -14,7 +14,9 @@ type StreamOptions struct {
 // This is used with OpenAI's o-series models and other reasoning-capable models.
 type Reasoning struct {
 	// Effort controls how much reasoning effort the model should use.
-	// Valid values are "low", "medium", and "high".
+	// Valid values are "low", "medium", "high", "xhigh", and "max".
+	// "xhigh" and "max" are supported by newer models such as Claude Opus 4.8;
+	// providers downgrade unsupported levels to their nearest equivalent.
 	Effort string `json:"effort,omitempty"`
 }
 

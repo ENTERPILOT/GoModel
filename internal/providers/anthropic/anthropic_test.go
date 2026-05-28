@@ -3652,6 +3652,56 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			expectedMaxTokens: 4096,
 			expectNilTemp:     true,
 		},
+		{
+			name:              "opus 4.8 - adaptive thinking with xhigh effort",
+			model:             "claude-opus-4-8",
+			reasoning:         &core.Reasoning{Effort: "xhigh"},
+			maxTokens:         new(4096),
+			expectedThinkType: "adaptive",
+			expectedEffort:    "xhigh",
+			expectedMaxTokens: 4096,
+			expectNilTemp:     true,
+		},
+		{
+			name:              "opus 4.8 - adaptive thinking with max effort",
+			model:             "claude-opus-4-8-20260301",
+			reasoning:         &core.Reasoning{Effort: "max"},
+			maxTokens:         new(4096),
+			expectedThinkType: "adaptive",
+			expectedEffort:    "max",
+			expectedMaxTokens: 4096,
+			expectNilTemp:     true,
+		},
+		{
+			name:              "opus 4.7 - adaptive thinking with high effort",
+			model:             "claude-opus-4-7",
+			reasoning:         &core.Reasoning{Effort: "high"},
+			maxTokens:         new(4096),
+			expectedThinkType: "adaptive",
+			expectedEffort:    "high",
+			expectedMaxTokens: 4096,
+			expectNilTemp:     true,
+		},
+		{
+			name:              "legacy model - xhigh effort maps to budget",
+			model:             "claude-3-5-sonnet-20241022",
+			reasoning:         &core.Reasoning{Effort: "xhigh"},
+			maxTokens:         new(40000),
+			expectedThinkType: "enabled",
+			expectedBudget:    32000,
+			expectedMaxTokens: 40000,
+			expectNilTemp:     true,
+		},
+		{
+			name:              "legacy model - max effort maps to budget",
+			model:             "claude-3-5-sonnet-20241022",
+			reasoning:         &core.Reasoning{Effort: "max"},
+			maxTokens:         new(50000),
+			expectedThinkType: "enabled",
+			expectedBudget:    48000,
+			expectedMaxTokens: 50000,
+			expectNilTemp:     true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -3886,6 +3936,10 @@ func TestIsAdaptiveThinkingModel(t *testing.T) {
 		model    string
 		expected bool
 	}{
+		{"claude-opus-4-8", true},
+		{"claude-opus-4-8-20260301", true},
+		{"claude-opus-4-7", true},
+		{"claude-opus-4-7-20260101", true},
 		{"claude-opus-4-6", true},
 		{"claude-opus-4-6-20260301", true},
 		{"claude-sonnet-4-6", true},

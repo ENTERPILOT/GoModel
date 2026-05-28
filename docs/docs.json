@@ -98,6 +98,7 @@
                 "icon": "plug",
                 "pages": [
                     "providers/overview",
+                    "providers/anthropic",
                     "providers/gemini",
                     "providers/deepseek",
                     "providers/vllm",
