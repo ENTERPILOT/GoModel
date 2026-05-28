@@ -102,6 +102,7 @@ func (r requestAliasResolver) ResolveModel(requested core.RequestedModelSelector
 type requestRefreshTargetResolver struct {
 	provider *requestRefreshProvider
 	target   core.ModelSelector
+	err      error
 }
 
 func (r requestRefreshTargetResolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
@@ -115,6 +116,9 @@ func (r requestRefreshTargetResolver) ResolveModel(requested core.RequestedModel
 func (r requestRefreshTargetResolver) ResolveRefreshTarget(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	if requested.RequestedQualifiedModel() != "smart" {
 		return core.ModelSelector{}, false, nil
+	}
+	if r.err != nil {
+		return core.ModelSelector{}, false, r.err
 	}
 	return r.target, true, nil
 }
@@ -189,6 +193,33 @@ func TestResolveRequestModelRefreshesAliasTargetBeforeCatalogSupportsIt(t *testi
 	}
 	if !resolution.AliasApplied {
 		t.Fatal("AliasApplied = false, want true")
+	}
+}
+
+func TestResolveRequestModelReturnsRefreshTargetError(t *testing.T) {
+	provider := newRequestRefreshProvider(1)
+	targetErr := errors.New("invalid alias target")
+	resolver := requestRefreshTargetResolver{
+		provider: provider,
+		target:   core.ModelSelector{Provider: "ollama", Model: "qwen3:8b"},
+		err:      targetErr,
+	}
+
+	_, err := ResolveRequestModelWithAuthorizer(
+		context.Background(),
+		provider,
+		resolver,
+		nil,
+		core.NewRequestedModelSelector("smart", ""),
+	)
+	if err == nil {
+		t.Fatal("ResolveRequestModelWithAuthorizer() error = nil, want refresh target error")
+	}
+	if !errors.Is(err, targetErr) {
+		t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v, want %v", err, targetErr)
+	}
+	if provider.refreshCalls != 0 {
+		t.Fatalf("refresh calls = %d, want 0 after refresh target error", provider.refreshCalls)
 	}
 }
 

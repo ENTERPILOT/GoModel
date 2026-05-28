@@ -163,7 +163,11 @@ func refreshProviderModelsForResolution(
 	providerSelector := strings.TrimSpace(resolvedSelector.Provider)
 	if providerSelector == "" {
 		if targetResolver, ok := resolver.(modelRefreshTargetResolver); ok {
-			if selector, ok, err := targetResolver.ResolveRefreshTarget(requested); err == nil && ok {
+			selector, ok, err := targetResolver.ResolveRefreshTarget(requested)
+			if err != nil {
+				return false, err
+			}
+			if ok {
 				providerSelector = strings.TrimSpace(selector.Provider)
 			}
 		}
