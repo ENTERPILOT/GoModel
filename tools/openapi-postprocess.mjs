@@ -282,6 +282,17 @@ function applyAnthropicMessagesStreamSchema() {
   };
 }
 
+function applyAudioTranscriptionTextSchema() {
+  // swag emits one schema across every produced content type, so the text/plain
+  // transcription body is generated as a JSON object. For text/srt/vtt the
+  // endpoint returns a plain string, so model it as such.
+  const textResponse = spec.paths?.["/v1/audio/transcriptions"]?.post?.responses?.["200"]?.content?.["text/plain"];
+  if (!textResponse) {
+    throw new Error("missing OpenAPI text/plain response: POST /v1/audio/transcriptions 200");
+  }
+  textResponse.schema = { type: "string" };
+}
+
 function ensureBearerAuthSecurityScheme() {
   const securitySchemes = spec.components?.securitySchemes;
   if (!securitySchemes?.BearerAuth) {
@@ -395,7 +406,11 @@ spec.servers = parseServers(process.env.DOCS_API_SERVERS);
 ensureResponsesInputElementSchema();
 applyAnthropicMessageSchemas();
 applyAnthropicMessagesStreamSchema();
+applyAudioTranscriptionTextSchema();
 ensureBearerAuthSecurityScheme();
+ensureRequiredProperty("core.AudioSpeechRequest", "model");
+ensureRequiredProperty("core.AudioSpeechRequest", "input");
+ensureRequiredProperty("core.AudioSpeechRequest", "voice");
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
 ensureRequiredProperty("admin.upsertBudgetRequest", "amount");
 ensureRequiredProperty("admin.upsertBudgetRequest", "budget_key");

@@ -3545,7 +3545,14 @@
                   },
                   "temperature": {
                     "description": "Sampling temperature (0-1)",
-                    "type": "string"
+                    "type": "number"
+                  },
+                  "timestamp_granularities[]": {
+                    "description": "Timestamp granularities to populate: word and/or segment",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
                 "required": [
@@ -3569,8 +3576,7 @@
               },
               "text/plain": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true
+                  "type": "string"
                 }
               }
             }
@@ -6951,7 +6957,12 @@
           "voice": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "input",
+          "model",
+          "voice"
+        ]
       },
       "core.BatchError": {
         "type": "object",

@@ -2269,9 +2269,19 @@ const docTemplate = `{
                         "in": "formData"
                     },
                     {
-                        "type": "string",
+                        "type": "number",
                         "description": "Sampling temperature (0-1)",
                         "name": "temperature",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "csv",
+                        "description": "Timestamp granularities to populate: word and/or segment",
+                        "name": "timestamp_granularities[]",
                         "in": "formData"
                     }
                 ],
