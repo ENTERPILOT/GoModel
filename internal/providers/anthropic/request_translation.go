@@ -74,16 +74,17 @@ func applyReasoning(req *anthropicRequest, model, effort string) {
 	}
 }
 
+// reasoningEffortToBudgetTokens maps effort to a thinking budget for legacy
+// (manual-thinking) models. The "xhigh" and "max" levels are adaptive-thinking
+// features (Opus 4.6+) that legacy models do not support, so they are capped at
+// the "high" budget rather than inflating budget_tokens — and max_tokens with
+// it — beyond what legacy models can emit.
 func reasoningEffortToBudgetTokens(effort string) int {
 	switch normalizeEffort(effort) {
 	case "medium":
 		return 10000
-	case "high":
+	case "high", "xhigh", "max":
 		return 20000
-	case "xhigh":
-		return 32000
-	case "max":
-		return 48000
 	default:
 		return 5000
 	}

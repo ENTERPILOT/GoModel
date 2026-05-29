@@ -40,25 +40,33 @@ The translation depends on whether the model supports **adaptive thinking**.
 
 | Model generation | Thinking config | Effort destination |
 | ---------------- | --------------- | ------------------ |
-| Adaptive (Opus 4.6+, Sonnet 4.6) — e.g. `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` | `thinking: {type: "adaptive"}` | `output_config.effort` (passed through) |
-| Legacy (Opus 4.5 and older) — e.g. `claude-3-5-sonnet` | `thinking: {type: "enabled", budget_tokens: N}` | mapped to a token budget |
+| Adaptive — `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` (and dated snapshots of each) | `thinking: {type: "adaptive"}` | `output_config.effort` (passed through) |
+| Legacy (everything else, e.g. `claude-opus-4-5`, `claude-3-5-sonnet`) | `thinking: {type: "enabled", budget_tokens: N}` | mapped to a token budget |
+
+<Note>
+  Adaptive routing is an explicit allowlist, not a version comparison. New model
+  IDs are treated as legacy until added to the list, so they keep working
+  (via `budget_tokens`) rather than silently sending an unsupported config.
+</Note>
 
 For legacy models the effort string maps to a thinking budget; `max_tokens` is
-bumped above the budget when needed:
+bumped above the budget when needed. `xhigh` and `max` are adaptive-only levels,
+so on legacy models they are capped at the `high` budget rather than inflating
+`max_tokens` past what those models can emit:
 
 | Effort | Budget tokens |
 | ------ | ------------- |
 | `low` | 5000 |
 | `medium` | 10000 |
-| `high` | 20000 |
-| `xhigh` | 32000 |
-| `max` | 48000 |
+| `high` / `xhigh` / `max` | 20000 |
 
 <Note>
-  Omit `reasoning` to leave thinking off. On adaptive models, GoModel only sets
-  `thinking: {type: "adaptive"}` when you pass `reasoning.effort`; without it,
-  requests run without thinking (Claude still applies its server-side default
-  effort of `high` to overall token spend).
+  Omit `reasoning` to leave thinking off. On the adaptive models above, GoModel
+  only sets `thinking: {type: "adaptive"}` when you pass `reasoning.effort`;
+  without it those models run without thinking, though Claude still applies its
+  server-side default effort of `high`. Effort is a behavioral signal for depth
+  and token spend (text, tool calls, and thinking), not a hard budget — actual
+  usage varies per request and is bounded by `max_tokens`.
 </Note>
 
 <Note>
