@@ -63,6 +63,7 @@
                             "advanced/responses-api",
                             "advanced/conversations-api",
                             "advanced/anthropic-messages-api",
+                            "advanced/audio-api",
                             "advanced/guardrails",
                             "advanced/workflows",
                             "advanced/admin-endpoints"

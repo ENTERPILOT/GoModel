@@ -1,0 +1,84 @@
+---
+title: "Audio API"
+description: "OpenAI-compatible text-to-speech and speech-to-text through model routing."
+icon: "audio-lines"
+tag: "Beta"
+---
+
+## Overview
+
+GoModel exposes the **OpenAI-compatible audio endpoints** for text-to-speech (TTS)
+and speech-to-text (STT). Clients and SDKs that already call OpenAI's
+`/v1/audio/*` routes can point at GoModel unchanged.
+
+Requests route **by model** through the same registry used for chat and
+embeddings, so `model` selection, `provider` hints, model aliases, per-key model
+access rules ([user paths](/features/user-path)), and budgets all apply. Audio is
+served by OpenAI and the OpenAI-compatible providers (OpenRouter, Azure OpenAI,
+vLLM, Oracle, MiniMax, Z.ai); a provider that doesn't support audio returns a
+clear error rather than mis-routing.
+
+## Supported endpoints
+
+| Endpoint | Behavior |
+| --- | --- |
+| `POST /v1/audio/speech` | Text-to-speech. Accepts a JSON body and returns **binary audio** in the requested `response_format`. |
+| `POST /v1/audio/transcriptions` | Speech-to-text. Accepts a `multipart/form-data` upload and returns JSON or plain text per `response_format`. |
+
+## Text-to-speech
+
+```bash
+curl https://your-gateway/v1/audio/speech \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini-tts",
+    "input": "Hello from GoModel.",
+    "voice": "alloy",
+    "response_format": "wav"
+  }' \
+  --output speech.wav
+```
+
+`model`, `input`, and `voice` are required. Optional fields — `instructions`,
+`response_format` (`mp3` default, plus `opus`, `aac`, `flac`, `wav`, `pcm`), and
+`speed` — are forwarded to the provider. The response `Content-Type` is derived
+from `response_format` (for example `wav` → `audio/wav`).
+
+## Speech-to-text
+
+```bash
+curl https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F "file=@speech.wav" \
+  -F "model=gpt-4o-transcribe" \
+  -F "response_format=json"
+```
+
+`file` and `model` are required. Optional form fields — `language`, `prompt`,
+`response_format`, `temperature`, and `timestamp_granularities[]` — are forwarded.
+`response_format` controls the response shape: `json` and `verbose_json` return a
+JSON object; `text`, `srt`, and `vtt` return a `text/plain` body.
+
+<Tip>
+  The bracketed `timestamp_granularities[]` form key is canonical, but GoModel
+  also accepts the unbracketed `timestamp_granularities` for client compatibility.
+</Tip>
+
+## Limitations
+
+The audio endpoints are a thin, model-routed pass to the provider and **do not run
+through the full inference orchestrator**. Compared with `/v1/chat/completions`:
+
+- **No failover, guardrails, or response cache** — these stages are skipped.
+- **No usage/cost metering** — audio is not token-priced, so it is not recorded in
+  usage tracking. Requests are still authorized, budget-checked, and written to the
+  [audit log](/advanced/admin-endpoints) under their `/v1/audio/*` path.
+- **OpenAI request shape only** — requests are forwarded in OpenAI's audio format to
+  OpenAI-compatible upstreams. Providers with a different native audio contract are
+  not yet adapted behind this endpoint.
+- **Realtime voice-to-voice** (the WebSocket realtime API) is not supported.
+
+For a provider whose native audio API differs from OpenAI's, use the
+[passthrough API](/features/passthrough-api) (`/p/{provider}/v1/audio/...`) to
+forward bytes verbatim to that upstream.
