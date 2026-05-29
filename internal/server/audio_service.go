@@ -98,9 +98,15 @@ func (s *audioService) prepare(c *echo.Context, model, providerHint string) (con
 		return nil, core.NewInvalidRequestError(err.Error(), err)
 	}
 	if resolver, ok := s.provider.(selectorResolver); ok {
-		if resolved, _, resolveErr := resolver.ResolveModel(core.NewRequestedModelSelector(model, providerHint)); resolveErr == nil {
-			selector = resolved
+		// Surface resolution failures (registry not ready, malformed selector)
+		// instead of authorizing the unresolved selector. The boolean is "did the
+		// selector change", not a found flag — on no change resolved already
+		// equals the normalized selector, so it is always safe to adopt.
+		resolved, _, resolveErr := resolver.ResolveModel(core.NewRequestedModelSelector(model, providerHint))
+		if resolveErr != nil {
+			return nil, resolveErr
 		}
+		selector = resolved
 	}
 	if s.modelAuthorizer != nil {
 		if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {
@@ -137,9 +143,14 @@ func transcriptionRequestFromForm(c *echo.Context) (*core.AudioTranscriptionRequ
 		return nil, core.NewInvalidRequestError("failed to read uploaded file", err)
 	}
 
+	// Accept both the canonical bracketed key and the unbracketed variant some
+	// clients send; the adapter always forwards the bracketed form upstream.
 	var granularities []string
 	if form, err := c.MultipartForm(); err == nil && form != nil {
 		granularities = form.Value["timestamp_granularities[]"]
+		if len(granularities) == 0 {
+			granularities = form.Value["timestamp_granularities"]
+		}
 	}
 
 	return &core.AudioTranscriptionRequest{

@@ -249,3 +249,79 @@ func TestAudioTranscription_MissingModel(t *testing.T) {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 }
+
+// TestAudioSpeech_NilResponseReturns502 covers the respondAudio guard: when the
+// provider returns no response and no error, the gateway must report a 502.
+func TestAudioSpeech_NilResponseReturns502(t *testing.T) {
+	mock := &audioMockProvider{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}},
+		speechResp:   nil, // provider returns (nil, nil)
+	}
+	handler := NewHandler(mock, nil, nil, nil)
+
+	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+
+	if err := handler.AudioSpeech(c); err != nil {
+		t.Fatalf("AudioSpeech returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+}
+
+// TestAudioSpeech_EmptyContentTypeDefaults covers the respondAudio default: an
+// empty response content type falls back to application/octet-stream.
+func TestAudioSpeech_EmptyContentTypeDefaults(t *testing.T) {
+	mock := &audioMockProvider{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}},
+		speechResp:   &core.AudioResponse{ContentType: "", Data: []byte("audio")},
+	}
+	handler := NewHandler(mock, nil, nil, nil)
+
+	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+
+	if err := handler.AudioSpeech(c); err != nil {
+		t.Fatalf("AudioSpeech returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/octet-stream" {
+		t.Errorf("Content-Type = %q, want application/octet-stream", got)
+	}
+}
+
+// TestAudioTranscription_MissingFile covers the multipart guard: a request with a
+// model but no file part is rejected with a 400 before any provider call.
+func TestAudioTranscription_MissingFile(t *testing.T) {
+	mock := &audioMockProvider{mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-transcribe"}}}
+	handler := NewHandler(mock, nil, nil, nil)
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("model", "gpt-4o-transcribe")
+	_ = w.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+
+	if err := handler.AudioTranscriptions(c); err != nil {
+		t.Fatalf("AudioTranscriptions returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if mock.capturedTranscription != nil {
+		t.Error("provider should not be called when file is missing")
+	}
+}

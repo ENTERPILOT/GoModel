@@ -481,6 +481,7 @@ func (h *Handler) AudioSpeech(c *echo.Context) error {
 // @Tags         audio
 // @Accept       mpfd
 // @Produce      json
+// @Produce      plain
 // @Security     BearerAuth
 // @Param        file             formData  file    true   "Audio file to transcribe"
 // @Param        model            formData  string  true   "Model ID"
@@ -488,7 +489,7 @@ func (h *Handler) AudioSpeech(c *echo.Context) error {
 // @Param        prompt           formData  string  false  "Optional text to guide the model"
 // @Param        response_format  formData  string  false  "json, text, srt, verbose_json, or vtt"
 // @Param        temperature      formData  string  false  "Sampling temperature (0-1)"
-// @Success      200              {object}  map[string]interface{}  "Transcription in the requested response_format"
+// @Success      200              {object}  map[string]interface{}  "Transcription in the requested response_format: a JSON object for json/verbose_json, or a text/plain body for text/srt/vtt"
 // @Failure      400              {object}  core.OpenAIErrorEnvelope
 // @Failure      401              {object}  core.OpenAIErrorEnvelope
 // @Failure      404              {object}  core.OpenAIErrorEnvelope
