@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 109 end-to-end curl scenarios for release validation.
+This file contains 114 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -38,6 +38,10 @@ Stateful note:
 - `S90` mutates stored usage pricing fields on the no-master-key gateway
 - `S96`-`S109` exercise the Anthropic Messages API ingress endpoint and are
   self-contained (`S104` creates and deletes its own alias); they can be rerun
+  in any order
+- `S110`-`S114` exercise the OpenAI-compatible audio endpoints
+  (`POST /v1/audio/speech`, `POST /v1/audio/transcriptions`); each generates its
+  own input audio under `QA_RUN_DIR`, so they are self-contained and can be rerun
   in any order
 - For stateful partial reruns, prefer a contiguous range that includes the
   prerequisite setup scenarios, or rerun with the same `--qa-suffix` and
@@ -2170,4 +2174,110 @@ jq -e --arg rid "$REQUEST_ID" '
       and .status_code == 200
     )
   ' "$AUDIT_JSON_FILE" >/dev/null
+```
+
+### S110 Text-to-speech returns binary audio
+
+Checks `POST /v1/audio/speech`: a text-to-speech request returns binary audio
+with the content type implied by `response_format`. Asserts HTTP 200, a
+`Content-Type: audio/wav` response, and a valid RIFF/WAVE payload from upstream.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s110.headers.XXXXXX")
+AUDIO_FILE="$QA_RUN_DIR/s110.speech.wav"
+curl -sS -D "$HEADERS_FILE" -o "$AUDIO_FILE" "$BASE_URL/v1/audio/speech" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o-mini-tts","input":"Hello from the GoModel release matrix.","voice":"alloy","response_format":"wav"}'
+sed -n '1,20p' "$HEADERS_FILE"
+grep -Eiq '^HTTP/.* 200 ' "$HEADERS_FILE"
+grep -Eiq '^content-type: *audio/wav' "$HEADERS_FILE"
+# RIFF/WAVE magic bytes confirm real audio, not a JSON error body.
+test "$(head -c 4 "$AUDIO_FILE")" = "RIFF"
+test "$(dd if="$AUDIO_FILE" bs=1 skip=8 count=4 2>/dev/null)" = "WAVE"
+test "$(wc -c < "$AUDIO_FILE")" -gt 1000
+```
+
+### S111 Speech-to-text round trip returns JSON transcript
+
+Checks `POST /v1/audio/transcriptions`: synthesizes audio via the speech
+endpoint, then transcribes it back. Asserts a `200` JSON response whose `text`
+is a non-empty string. (Transcription fidelity is not asserted, only that the
+multipart-in / JSON-out path works end to end.)
+
+```bash
+AUDIO_FILE="$QA_RUN_DIR/s111.speech.wav"
+curl -fsS "$BASE_URL/v1/audio/speech" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o-mini-tts","input":"The quick brown fox jumps over the lazy dog.","voice":"alloy","response_format":"wav"}' \
+  > "$AUDIO_FILE"
+test "$(head -c 4 "$AUDIO_FILE")" = "RIFF"
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s111.headers.XXXXXX")
+RESP_FILE="$QA_RUN_DIR/s111.transcription.json"
+curl -sS -D "$HEADERS_FILE" -o "$RESP_FILE" "$BASE_URL/v1/audio/transcriptions" \
+  -F "file=@$AUDIO_FILE;type=audio/wav" \
+  -F 'model=gpt-4o-transcribe' \
+  -F 'response_format=json'
+sed -n '1,20p' "$HEADERS_FILE"
+jq '.' "$RESP_FILE"
+grep -Eiq '^HTTP/.* 200 ' "$HEADERS_FILE"
+grep -Eiq '^content-type: *application/json' "$HEADERS_FILE"
+jq -e '.text | type == "string" and (length > 0)' "$RESP_FILE" >/dev/null
+```
+
+### S112 Speech-to-text honors the text response format
+
+Checks that `response_format=text` returns a `text/plain` body rather than JSON,
+confirming the gateway derives the response content type from the request.
+
+```bash
+AUDIO_FILE="$QA_RUN_DIR/s112.speech.wav"
+curl -fsS "$BASE_URL/v1/audio/speech" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o-mini-tts","input":"Plain text transcription check.","voice":"alloy","response_format":"wav"}' \
+  > "$AUDIO_FILE"
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s112.headers.XXXXXX")
+BODY_FILE="$QA_RUN_DIR/s112.transcription.txt"
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/transcriptions" \
+  -F "file=@$AUDIO_FILE;type=audio/wav" \
+  -F 'model=gpt-4o-transcribe' \
+  -F 'response_format=text'
+sed -n '1,20p' "$HEADERS_FILE"
+cat "$BODY_FILE"
+grep -Eiq '^HTTP/.* 200 ' "$HEADERS_FILE"
+grep -Eiq '^content-type: *text/plain' "$HEADERS_FILE"
+test "$(wc -c < "$BODY_FILE")" -gt 0
+```
+
+### S113 Speech without a voice is rejected (negative)
+
+Checks that a text-to-speech request missing the required `voice` field is
+rejected as a `400` OpenAI error envelope before any upstream call.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s113.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s113.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/speech" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o-mini-tts","input":"missing voice"}'
+sed -n '1,20p' "$HEADERS_FILE"
+jq '.' "$BODY_FILE"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("voice"))' "$BODY_FILE" >/dev/null
+```
+
+### S114 Speech on an unknown model is not found (negative)
+
+Checks that the audio router rejects an unknown model with a `404` not-found
+error rather than forwarding it upstream.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s114.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s114.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/speech" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"this-model-does-not-exist","input":"hi","voice":"alloy"}'
+sed -n '1,20p' "$HEADERS_FILE"
+jq '.' "$BODY_FILE"
+grep -Eiq '^HTTP/.* 404 ' "$HEADERS_FILE"
+jq -e '.error.type == "not_found_error"' "$BODY_FILE" >/dev/null
 ```
