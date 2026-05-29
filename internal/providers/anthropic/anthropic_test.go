@@ -3902,6 +3902,16 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			expectNilTemp:     true,
 		},
 		{
+			name:              "legacy model - xhigh effort caps at high budget",
+			model:             "claude-3-5-sonnet-20241022",
+			reasoning:         &core.Reasoning{Effort: "xhigh"},
+			maxOutputTokens:   new(25000),
+			expectedThinkType: "enabled",
+			expectedBudget:    20000,
+			expectedMaxTokens: 25000,
+			expectNilTemp:     true,
+		},
+		{
 			name:              "legacy model - max effort caps at high budget",
 			model:             "claude-3-5-sonnet-20241022",
 			reasoning:         &core.Reasoning{Effort: "max"},

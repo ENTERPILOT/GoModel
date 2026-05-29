@@ -63,10 +63,11 @@ so on legacy models they are capped at the `high` budget rather than inflating
 <Note>
   Omit `reasoning` to leave thinking off. On the adaptive models above, GoModel
   only sets `thinking: {type: "adaptive"}` when you pass `reasoning.effort`;
-  without it those models run without thinking, though Claude still applies its
-  server-side default effort of `high`. Effort is a behavioral signal for depth
-  and token spend (text, tool calls, and thinking), not a hard budget — actual
-  usage varies per request and is bounded by `max_tokens`.
+  without it those models do not engage extended thinking. Effort is a separate
+  control that governs overall token spend (text and tool calls) whether or not
+  thinking is engaged, and Anthropic defaults it to `high` when unset. It is a
+  behavioral signal for depth and verbosity, not a hard budget — actual usage
+  varies per request and is bounded by `max_tokens`.
 </Note>
 
 <Note>
