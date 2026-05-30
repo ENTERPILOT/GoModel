@@ -11,6 +11,14 @@ type modelCountProvider interface {
 	ModelCount() int
 }
 
+type providerModelRefresher interface {
+	RefreshProviderModels(ctx context.Context, providerSelector string) (int, error)
+}
+
+type modelRefreshTargetResolver interface {
+	ResolveRefreshTarget(requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
+}
+
 // ResolvedProviderName returns the configured provider instance name for a selector.
 func ResolvedProviderName(provider core.RoutableProvider, selector core.ModelSelector, fallback string) string {
 	fallback = strings.TrimSpace(fallback)
@@ -64,8 +72,20 @@ func ResolveRequestModelWithAuthorizer(
 	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
 
 	resolvedSelector, aliasApplied, err := ResolveExecutionSelector(provider, resolver, requested)
+	refreshed := false
 	if err != nil {
-		return nil, core.NewInvalidRequestError(err.Error(), err)
+		var refreshErr error
+		refreshed, refreshErr = refreshProviderModelsForResolution(ctx, provider, resolver, requested, resolvedSelector)
+		if refreshErr != nil {
+			return nil, refreshErr
+		}
+		if !refreshed {
+			return nil, core.NewInvalidRequestError(err.Error(), err)
+		}
+		resolvedSelector, aliasApplied, err = ResolveExecutionSelector(provider, resolver, requested)
+		if err != nil {
+			return nil, core.NewInvalidRequestError(err.Error(), err)
+		}
 	}
 	if resolvedSelector == (core.ModelSelector{}) {
 		resolvedSelector, err = requested.Normalize()
@@ -76,7 +96,39 @@ func ResolveRequestModelWithAuthorizer(
 
 	resolvedModel := resolvedSelector.QualifiedModel()
 	if counted, ok := provider.(modelCountProvider); ok && counted.ModelCount() == 0 {
+		if !refreshed {
+			var refreshErr error
+			refreshed, refreshErr = refreshProviderModelsForResolution(ctx, provider, resolver, requested, resolvedSelector)
+			if refreshErr != nil {
+				return nil, refreshErr
+			}
+			if refreshed {
+				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(provider, resolver, requested)
+				if err != nil {
+					return nil, core.NewInvalidRequestError(err.Error(), err)
+				}
+				resolvedModel = resolvedSelector.QualifiedModel()
+			}
+		}
+	}
+	if counted, ok := provider.(modelCountProvider); ok && counted.ModelCount() == 0 {
 		return nil, core.NewProviderError("", 0, "model registry not initialized", nil)
+	}
+	if !provider.Supports(resolvedModel) {
+		if !refreshed {
+			var refreshErr error
+			refreshed, refreshErr = refreshProviderModelsForResolution(ctx, provider, resolver, requested, resolvedSelector)
+			if refreshErr != nil {
+				return nil, refreshErr
+			}
+			if refreshed {
+				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(provider, resolver, requested)
+				if err != nil {
+					return nil, core.NewInvalidRequestError(err.Error(), err)
+				}
+				resolvedModel = resolvedSelector.QualifiedModel()
+			}
+		}
 	}
 	if !provider.Supports(resolvedModel) {
 		return nil, core.NewInvalidRequestError("unsupported model: "+resolvedModel, nil)
@@ -94,6 +146,45 @@ func ResolveRequestModelWithAuthorizer(
 		ProviderName:     ResolvedProviderName(provider, resolvedSelector, ""),
 		AliasApplied:     aliasApplied,
 	}, nil
+}
+
+func refreshProviderModelsForResolution(
+	ctx context.Context,
+	provider core.RoutableProvider,
+	resolver ModelResolver,
+	requested core.RequestedModelSelector,
+	resolvedSelector core.ModelSelector,
+) (bool, error) {
+	refresher, ok := provider.(providerModelRefresher)
+	if !ok {
+		return false, nil
+	}
+
+	providerSelector := strings.TrimSpace(resolvedSelector.Provider)
+	if providerSelector == "" {
+		if targetResolver, ok := resolver.(modelRefreshTargetResolver); ok {
+			selector, ok, err := targetResolver.ResolveRefreshTarget(requested)
+			if err != nil {
+				return false, err
+			}
+			if ok {
+				providerSelector = strings.TrimSpace(selector.Provider)
+			}
+		}
+	}
+	if providerSelector == "" {
+		selector, err := requested.Normalize()
+		if err != nil {
+			return false, nil
+		}
+		providerSelector = strings.TrimSpace(selector.Provider)
+	}
+	if providerSelector == "" {
+		return false, nil
+	}
+
+	_, err := refresher.RefreshProviderModels(ctx, providerSelector)
+	return true, err
 }
 
 // ResolveExecutionSelector applies explicit and provider-owned selector resolution.
@@ -119,12 +210,15 @@ func ResolveExecutionSelector(
 	}
 
 	if providerResolver, ok := provider.(ModelResolver); ok {
-		var providerChanged bool
-		resolvedSelector, providerChanged, err = providerResolver.ResolveModel(requested)
+		providerSelector, providerChanged, err := providerResolver.ResolveModel(requested)
 		if err != nil {
+			if resolvedSelector != (core.ModelSelector{}) {
+				// Preserve alias targets so callers can refresh the concrete provider before retrying.
+				return resolvedSelector, aliasApplied, err
+			}
 			return core.ModelSelector{}, false, err
 		}
-		return resolvedSelector, aliasApplied || providerChanged, nil
+		return providerSelector, aliasApplied || providerChanged, nil
 	}
 
 	if resolvedSelector != (core.ModelSelector{}) {

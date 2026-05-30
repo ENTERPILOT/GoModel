@@ -59,7 +59,7 @@ func (p *Provider) SetBaseURL(url string) {
 }
 
 func setHeaders(req *http.Request, apiKey string) {
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{AuthScheme: "Bearer "})
 }
 
 // ChatCompletion sends a chat completion request to Z.ai.

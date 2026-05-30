@@ -250,10 +250,22 @@ func extractResponsesStreamContent(events []ResponsesStreamEvent) string {
 	return content.String()
 }
 
-// hasDoneEvent checks if the stream contains a done event.
-func hasDoneEvent(events []ResponsesStreamEvent) bool {
+// hasResponsesCompletedEvent checks if the stream contains a typed Responses
+// completion event that carries the final response payload.
+func hasResponsesCompletedEvent(events []ResponsesStreamEvent) bool {
 	for _, event := range events {
-		if event.Type == "response.completed" || event.Type == "response.done" || event.Done {
+		if event.Type == "response.completed" || event.Type == "response.done" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasResponsesDoneMarker checks if the stream contains the terminal [DONE]
+// marker after the typed completion event.
+func hasResponsesDoneMarker(events []ResponsesStreamEvent) bool {
+	for _, event := range events {
+		if event.Done {
 			return true
 		}
 	}

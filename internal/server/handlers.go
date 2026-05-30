@@ -201,6 +201,14 @@ func (h *Handler) nativeFiles() *nativeFileService {
 	return &nativeFileService{provider: h.provider, fileStore: h.fileStore}
 }
 
+func (h *Handler) audio() *audioService {
+	return &audioService{
+		provider:        h.provider,
+		modelAuthorizer: h.modelAuthorizer,
+		budgetChecker:   h.budgetChecker,
+	}
+}
+
 func (h *Handler) nativeResponses() *nativeResponseService {
 	return &nativeResponseService{
 		provider:                 h.provider,
@@ -447,6 +455,49 @@ func (h *Handler) DeleteFile(c *echo.Context) error {
 // @Router       /v1/files/{id}/content [get]
 func (h *Handler) GetFileContent(c *echo.Context) error {
 	return h.nativeFiles().GetFileContent(c)
+}
+
+// AudioSpeech handles POST /v1/audio/speech.
+//
+// @Summary      Create speech (text-to-speech)
+// @Tags         audio
+// @Accept       json
+// @Produce      application/octet-stream
+// @Security     BearerAuth
+// @Param        request  body      core.AudioSpeechRequest  true  "Text-to-speech request"
+// @Success      200      {file}    file  "Binary audio in the requested response_format"
+// @Failure      400      {object}  core.OpenAIErrorEnvelope
+// @Failure      401      {object}  core.OpenAIErrorEnvelope
+// @Failure      404      {object}  core.OpenAIErrorEnvelope
+// @Failure      502      {object}  core.OpenAIErrorEnvelope
+// @Router       /v1/audio/speech [post]
+func (h *Handler) AudioSpeech(c *echo.Context) error {
+	return h.audio().CreateSpeech(c)
+}
+
+// AudioTranscriptions handles POST /v1/audio/transcriptions.
+//
+// @Summary      Create transcription (speech-to-text)
+// @Tags         audio
+// @Accept       mpfd
+// @Produce      json
+// @Produce      plain
+// @Security     BearerAuth
+// @Param        file             formData  file    true   "Audio file to transcribe"
+// @Param        model            formData  string  true   "Model ID"
+// @Param        language         formData  string  false  "Input language (ISO-639-1)"
+// @Param        prompt           formData  string  false  "Optional text to guide the model"
+// @Param        response_format          formData  string    false  "json, text, srt, verbose_json, or vtt"
+// @Param        temperature              formData  number    false  "Sampling temperature (0-1)"
+// @Param        timestamp_granularities[] formData  []string  false  "Timestamp granularities to populate: word and/or segment"
+// @Success      200                      {object}  map[string]interface{}  "Transcription in the requested response_format: a JSON object for json/verbose_json, or a text/plain body for text/srt/vtt"
+// @Failure      400              {object}  core.OpenAIErrorEnvelope
+// @Failure      401              {object}  core.OpenAIErrorEnvelope
+// @Failure      404              {object}  core.OpenAIErrorEnvelope
+// @Failure      502              {object}  core.OpenAIErrorEnvelope
+// @Router       /v1/audio/transcriptions [post]
+func (h *Handler) AudioTranscriptions(c *echo.Context) error {
+	return h.audio().CreateTranscription(c)
 }
 
 // Responses handles POST /v1/responses

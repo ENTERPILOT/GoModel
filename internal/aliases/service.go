@@ -149,6 +149,28 @@ func (s *Service) ResolveModel(requested core.RequestedModelSelector) (core.Mode
 	return resolution.Resolved, changed, nil
 }
 
+// ResolveRefreshTarget returns an alias target without consulting the current
+// catalog so callers can refresh an unavailable target provider before normal
+// alias resolution is retried.
+func (s *Service) ResolveRefreshTarget(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	if s == nil || requested.ExplicitProvider {
+		return core.ModelSelector{}, false, nil
+	}
+	name := normalizeName(requested.Model)
+	if name == "" {
+		return core.ModelSelector{}, false, nil
+	}
+	alias, ok := s.Get(name)
+	if !ok || !alias.Enabled {
+		return core.ModelSelector{}, false, nil
+	}
+	target, err := alias.TargetSelector()
+	if err != nil {
+		return core.ModelSelector{}, false, err
+	}
+	return target, true, nil
+}
+
 // Supports reports whether an alias currently resolves to a concrete model.
 func (s *Service) Supports(model string) bool {
 	_, ok := s.resolveAlias(model)

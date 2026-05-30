@@ -66,10 +66,10 @@ func (p *Provider) SetBaseURL(url string) {
 }
 
 func (p *Provider) setHeaders(req *http.Request) {
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	if requestID := core.GetRequestID(req.Context()); requestID != "" {
-		req.Header.Set("X-Request-Id", requestID)
-	}
+	providers.SetAuthHeaders(req, p.apiKey, providers.AuthHeaderConfig{
+		AuthScheme:      "Bearer ",
+		RequestIDHeader: "X-Request-Id",
+	})
 }
 
 // adaptChatRequest rewrites GoModel's common reasoning shape into DeepSeek's

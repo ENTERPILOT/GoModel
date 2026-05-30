@@ -27,6 +27,14 @@ type Provider interface {
 	Embeddings(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error)
 }
 
+// AudioProvider is implemented by providers that support OpenAI-compatible audio
+// endpoints: text-to-speech (CreateSpeech) and speech-to-text (CreateTranscription).
+// It is optional so providers without audio support can omit it.
+type AudioProvider interface {
+	CreateSpeech(ctx context.Context, req *AudioSpeechRequest) (*AudioResponse, error)
+	CreateTranscription(ctx context.Context, req *AudioTranscriptionRequest) (*AudioResponse, error)
+}
+
 // NativeBatchProvider is implemented by providers that support native discounted batching.
 // This is intentionally separate from Provider so unsupported providers can still implement
 // regular synchronous APIs without batch capabilities.

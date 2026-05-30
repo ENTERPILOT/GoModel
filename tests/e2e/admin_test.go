@@ -38,27 +38,95 @@ func TestAdminAPI_EndpointsEnabled_E2E(t *testing.T) {
 	ts := setupAdminServer(t, "", true, false)
 	defer ts.Close()
 
-	endpoints := []string{
-		"/admin/usage/summary",
-		"/admin/usage/daily",
-		"/admin/audit/log",
-		"/admin/audit/conversation?log_id=test",
-		"/admin/models",
+	// Each endpoint asserts the response shape it advertises in its handler,
+	// not just "valid JSON". A regression that returned `{"error":"..."}` with
+	// a 200 status would otherwise slip through the smoke test.
+	cases := []struct {
+		name     string
+		endpoint string
+		check    func(t *testing.T, body []byte)
+	}{
+		{
+			name:     "usage summary returns aggregate counters",
+			endpoint: "/admin/usage/summary",
+			check: func(t *testing.T, body []byte) {
+				var summary usage.UsageSummary
+				require.NoError(t, json.Unmarshal(body, &summary))
+				assert.GreaterOrEqual(t, summary.TotalRequests, 0)
+				assert.GreaterOrEqual(t, summary.TotalInput, int64(0))
+				assert.GreaterOrEqual(t, summary.TotalOutput, int64(0))
+				assert.GreaterOrEqual(t, summary.TotalTokens, int64(0))
+			},
+		},
+		{
+			name:     "daily usage returns a rollup array",
+			endpoint: "/admin/usage/daily",
+			check: func(t *testing.T, body []byte) {
+				var daily []usage.DailyUsage
+				require.NoError(t, json.Unmarshal(body, &daily))
+				for i, entry := range daily {
+					assert.NotEmpty(t, entry.Date, "entry %d should have a date label", i)
+				}
+			},
+		},
+		{
+			name:     "audit log returns paginated entries envelope",
+			endpoint: "/admin/audit/log",
+			check: func(t *testing.T, body []byte) {
+				var envelope struct {
+					Entries []map[string]any `json:"entries"`
+					Total   int              `json:"total"`
+					Limit   int              `json:"limit"`
+					Offset  int              `json:"offset"`
+				}
+				require.NoError(t, json.Unmarshal(body, &envelope))
+				// entries is `[]` (not null) even when empty per the handler contract.
+				assert.NotNil(t, envelope.Entries)
+				assert.GreaterOrEqual(t, envelope.Total, 0)
+			},
+		},
+		{
+			name:     "audit conversation returns anchor + entries",
+			endpoint: "/admin/audit/conversation?log_id=test",
+			check: func(t *testing.T, body []byte) {
+				var conv struct {
+					AnchorID string           `json:"anchor_id"`
+					Entries  []map[string]any `json:"entries"`
+				}
+				require.NoError(t, json.Unmarshal(body, &conv))
+				assert.Equal(t, "test", conv.AnchorID,
+					"conversation must echo the requested log_id as anchor")
+				assert.NotNil(t, conv.Entries)
+			},
+		},
+		{
+			name:     "models returns provider-tagged model list",
+			endpoint: "/admin/models",
+			check: func(t *testing.T, body []byte) {
+				var models []providers.ModelWithProvider
+				require.NoError(t, json.Unmarshal(body, &models))
+				require.NotEmpty(t, models, "registered test provider should expose at least one model")
+				for _, m := range models {
+					assert.NotEmpty(t, m.Model.ID, "every model should have an id")
+					assert.NotEmpty(t, m.ProviderType, "every model should have a provider_type")
+				}
+			},
+		},
 	}
 
-	for _, ep := range endpoints {
-		t.Run(ep, func(t *testing.T) {
-			resp, err := http.Get(ts.URL + ep)
+	for _, tc := range cases {
+		t.Run(tc.endpoint, func(t *testing.T) {
+			resp, err := http.Get(ts.URL + tc.endpoint)
 			require.NoError(t, err)
 			defer closeBody(resp)
 
-			assert.Equal(t, http.StatusOK, resp.StatusCode, "endpoint %s should return 200", ep)
+			require.Equal(t, http.StatusOK, resp.StatusCode, "endpoint %s should return 200", tc.endpoint)
 
 			body, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
+			require.True(t, json.Valid(body), "response should be valid JSON for %s, got: %s", tc.endpoint, string(body))
 
-			// Should be valid JSON
-			assert.True(t, json.Valid(body), "response should be valid JSON for %s, got: %s", ep, string(body))
+			tc.check(t, body)
 		})
 	}
 }
@@ -144,21 +212,40 @@ func TestAdminDashboard_Enabled_E2E(t *testing.T) {
 	ts := setupAdminServer(t, "", true, true)
 	defer ts.Close()
 
-	t.Run("dashboard returns 200 HTML", func(t *testing.T) {
+	t.Run("dashboard returns 200 HTML with expected markup", func(t *testing.T) {
 		resp, err := http.Get(ts.URL + "/admin/dashboard")
 		require.NoError(t, err)
 		defer closeBody(resp)
 
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Contains(t, resp.Header.Get("Content-Type"), "text/html")
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		html := string(body)
+
+		// Guard against regressions that return a 200 with an empty/placeholder
+		// document. The dashboard layout pins these markers.
+		assert.Contains(t, html, "<title>GoModel Dashboard</title>",
+			"dashboard HTML should carry the expected <title>")
+		assert.Contains(t, html, "css/dashboard.css",
+			"dashboard HTML should reference its stylesheet bundle")
+		assert.Contains(t, html, "js/dashboard.js",
+			"dashboard HTML should reference its script bundle")
 	})
 
-	t.Run("static CSS returns 200", func(t *testing.T) {
+	t.Run("static CSS returns 200 with css content", func(t *testing.T) {
 		resp, err := http.Get(ts.URL + "/admin/static/css/dashboard.css")
 		require.NoError(t, err)
 		defer closeBody(resp)
 
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Contains(t, resp.Header.Get("Content-Type"), "text/css",
+			"static CSS asset must be served with a CSS content-type")
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.NotEmpty(t, body, "CSS bundle must not be empty")
 	})
 }
 
@@ -235,11 +322,6 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 		expectedTotalTokens                      = expectedInputTokens + expectedOutputTokens
 	)
 
-	// Mock provider usage is 10 input + 20 output tokens per request, and this test sends 2 requests.
-	requestDate := time.Now().UTC()
-	today := requestDate.Format("2006-01-02")
-	yesterday := requestDate.Add(-24 * time.Hour).Format("2006-01-02")
-
 	usageFixture := setupSQLiteUsageFixture(t)
 	ts := setupE2EAdminServer(t, e2eServerOptions{
 		adminUsageReader: usageFixture.reader,
@@ -247,12 +329,19 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 	})
 	defer ts.Close()
 
+	// Mock provider usage is 10 input + 20 output tokens per request, and this test sends 2 requests.
+	requestWindowStart := time.Now().UTC()
 	for i := 0; i < expectedRequests; i++ {
 		resp := sendJSONRequest(t, ts.URL+chatCompletionsPath, defaultChatReq("Hello usage"))
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		closeBody(resp)
 	}
 	usageFixture.flush(t)
+	requestWindowEnd := time.Now().UTC()
+	expectedDailyDates := []string{requestWindowStart.Format("2006-01-02")}
+	if endDate := requestWindowEnd.Format("2006-01-02"); endDate != expectedDailyDates[0] {
+		expectedDailyDates = append(expectedDailyDates, endDate)
+	}
 
 	t.Run("summary includes persisted usage", func(t *testing.T) {
 		resp, err := http.Get(ts.URL + "/admin/usage/summary")
@@ -283,18 +372,32 @@ func TestAdminAPI_UsageEndpoints_E2E(t *testing.T) {
 		require.NoError(t, json.Unmarshal(body, &daily))
 		require.NotEmpty(t, daily)
 
-		var todayEntry *usage.DailyUsage
+		var matchedEntries []usage.DailyUsage
 		for i := range daily {
-			if daily[i].Date == today || daily[i].Date == yesterday {
-				todayEntry = &daily[i]
-				break
+			for _, expectedDate := range expectedDailyDates {
+				if daily[i].Date == expectedDate {
+					matchedEntries = append(matchedEntries, daily[i])
+					break
+				}
 			}
 		}
-		require.NotNil(t, todayEntry, "expected daily usage entry for %s or %s", today, yesterday)
-		assert.Equal(t, expectedRequests, todayEntry.Requests)
-		assert.Equal(t, expectedInputTokens, todayEntry.InputTokens)
-		assert.Equal(t, expectedOutputTokens, todayEntry.OutputTokens)
-		assert.Equal(t, expectedTotalTokens, todayEntry.TotalTokens)
+		require.NotEmpty(t, matchedEntries, "expected daily usage entry for one of %v", expectedDailyDates)
+
+		var actualRequests int
+		var actualInputTokens int64
+		var actualOutputTokens int64
+		var actualTotalTokens int64
+		for _, entry := range matchedEntries {
+			actualRequests += entry.Requests
+			actualInputTokens += entry.InputTokens
+			actualOutputTokens += entry.OutputTokens
+			actualTotalTokens += entry.TotalTokens
+		}
+
+		assert.Equal(t, expectedRequests, actualRequests)
+		assert.Equal(t, expectedInputTokens, actualInputTokens)
+		assert.Equal(t, expectedOutputTokens, actualOutputTokens)
+		assert.Equal(t, expectedTotalTokens, actualTotalTokens)
 	})
 
 	t.Run("query params accepted", func(t *testing.T) {

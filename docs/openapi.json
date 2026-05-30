@@ -3428,6 +3428,232 @@
         }
       }
     },
+    "/v1/audio/speech": {
+      "post": {
+        "tags": [
+          "audio"
+        ],
+        "summary": "Create speech (text-to-speech)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/core.AudioSpeechRequest"
+              }
+            }
+          },
+          "description": "Text-to-speech request",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Binary audio in the requested response_format",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/audio/speech"
+          }
+        }
+      }
+    },
+    "/v1/audio/transcriptions": {
+      "post": {
+        "tags": [
+          "audio"
+        ],
+        "summary": "Create transcription (speech-to-text)",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "description": "Audio file to transcribe",
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "model": {
+                    "description": "Model ID",
+                    "type": "string"
+                  },
+                  "language": {
+                    "description": "Input language (ISO-639-1)",
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "description": "Optional text to guide the model",
+                    "type": "string"
+                  },
+                  "response_format": {
+                    "description": "json, text, srt, verbose_json, or vtt",
+                    "type": "string"
+                  },
+                  "temperature": {
+                    "description": "Sampling temperature (0-1)",
+                    "type": "number"
+                  },
+                  "timestamp_granularities[]": {
+                    "description": "Timestamp granularities to populate: word and/or segment",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "file",
+                  "model"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, or a text/plain body for text/srt/vtt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/audio/transcriptions"
+          }
+        }
+      }
+    },
     "/v1/batches": {
       "get": {
         "tags": [
@@ -6706,6 +6932,38 @@
           }
         }
       },
+      "core.AudioSpeechRequest": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "description": "Provider is gateway routing metadata, stripped before dispatching upstream.",
+            "type": "string"
+          },
+          "response_format": {
+            "type": "string"
+          },
+          "speed": {
+            "type": "number"
+          },
+          "voice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "input",
+          "model",
+          "voice"
+        ]
+      },
       "core.BatchError": {
         "type": "object",
         "properties": {
@@ -7643,7 +7901,7 @@
         "type": "object",
         "properties": {
           "effort": {
-            "description": "Effort controls how much reasoning effort the model should use.\nValid values are \"low\", \"medium\", and \"high\".",
+            "description": "Effort controls how much reasoning effort the model should use.\nValid values are \"low\", \"medium\", \"high\", \"xhigh\", and \"max\".\n\"xhigh\" and \"max\" are supported by newer models such as Claude Opus 4.8;\nproviders downgrade unsupported levels to their nearest equivalent.",
             "type": "string"
           }
         }

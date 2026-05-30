@@ -128,6 +128,43 @@ func TestServiceResolveAndExposeModels(t *testing.T) {
 	}
 }
 
+func TestServiceResolveRefreshTargetDoesNotRequireCatalogSupport(t *testing.T) {
+	service, err := NewService(newMemoryStore(Alias{
+		Name:           "smart",
+		TargetModel:    "qwen3:8b",
+		TargetProvider: "ollama",
+		Enabled:        true,
+	}), newTestCatalog())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	selector, changed, err := service.ResolveModel(core.NewRequestedModelSelector("smart", ""))
+	if err != nil {
+		t.Fatalf("ResolveModel() error = %v", err)
+	}
+	if changed {
+		t.Fatal("ResolveModel() changed = true, want false while target is absent from catalog")
+	}
+	if got := selector.QualifiedModel(); got != "smart" {
+		t.Fatalf("ResolveModel() selector = %q, want smart", got)
+	}
+
+	target, ok, err := service.ResolveRefreshTarget(core.NewRequestedModelSelector("smart", ""))
+	if err != nil {
+		t.Fatalf("ResolveRefreshTarget() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("ResolveRefreshTarget() ok = false, want true")
+	}
+	if got := target.QualifiedModel(); got != "ollama/qwen3:8b" {
+		t.Fatalf("ResolveRefreshTarget() = %q, want ollama/qwen3:8b", got)
+	}
+}
+
 func TestServiceUpsertRejectsAliasChainAndAllowsMasking(t *testing.T) {
 	catalog := newTestCatalog()
 	catalog.add("gpt-4o", "openai", core.Model{ID: "gpt-4o", Object: "model"})

@@ -63,7 +63,7 @@ func (p *Provider) SetBaseURL(url string) {
 }
 
 func setHeaders(req *http.Request, apiKey string) {
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{AuthScheme: "Bearer "})
 }
 
 // clampTemperature returns the request with temperature clamped to (0.0, 1.0].

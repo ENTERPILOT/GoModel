@@ -189,6 +189,8 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 }
 
 var adaptiveThinkingPrefixes = []string{
+	"claude-opus-4-8",
+	"claude-opus-4-7",
 	"claude-opus-4-6",
 	"claude-sonnet-4-6",
 }
@@ -202,14 +204,13 @@ func isAdaptiveThinkingModel(model string) bool {
 	return false
 }
 
-// normalizeEffort maps effort to gateway-supported values. Anthropic Opus 4.6
-// supports "max" for adaptive thinking, but the gateway's public type
-// core.Reasoning.Effort only exposes "low", "medium", and "high". "max" is
-// therefore intentionally rejected; any unsupported value is downgraded to
-// "low" and logged via slog.Warn.
+// normalizeEffort maps effort to the values Anthropic's adaptive thinking
+// accepts: "low", "medium", "high", "xhigh", and "max". Opus 4.8 introduced the
+// "xhigh" and "max" levels for deeper reasoning. Any unsupported value is
+// downgraded to "low" and logged via slog.Warn.
 func normalizeEffort(effort string) string {
 	switch effort {
-	case "low", "medium", "high":
+	case "low", "medium", "high", "xhigh", "max":
 		return effort
 	default:
 		slog.Warn("invalid reasoning effort, defaulting to 'low'", "effort", effort)

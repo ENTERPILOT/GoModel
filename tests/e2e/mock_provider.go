@@ -62,6 +62,14 @@ func (m *MockLLMServer) ResetRequests() {
 	m.mu.Unlock()
 }
 
+// SetResponseDelay configures an artificial delay added to every response.
+// Pass 0 to disable. Used by timeout tests.
+func (m *MockLLMServer) SetResponseDelay(d time.Duration) {
+	m.mu.Lock()
+	m.responseDelay = d
+	m.mu.Unlock()
+}
+
 // NewMockLLMServer creates a new mock LLM server.
 func NewMockLLMServer() *MockLLMServer {
 	m := &MockLLMServer{

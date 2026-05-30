@@ -556,6 +556,12 @@ func extractModel(body any) string {
 		return respReq.Model
 	}
 
+	// Try AudioSpeechRequest. Transcription has no JSON body (multipart upload),
+	// so its model cannot be recovered here and stays "unknown".
+	if speechReq, ok := body.(*core.AudioSpeechRequest); ok && speechReq != nil {
+		return speechReq.Model
+	}
+
 	// Unknown request type
 	return "unknown"
 }

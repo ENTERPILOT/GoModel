@@ -79,12 +79,11 @@ func (p *Provider) SetBaseURL(url string) {
 }
 
 func setHeaders(req *http.Request, apiKey string) {
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-	if requestID := core.GetRequestID(req.Context()); requestID != "" {
-		req.Header.Set("X-Request-Id", requestID)
-	}
+	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{
+		AuthScheme:      "Bearer ",
+		RequestIDHeader: "X-Request-Id",
+		OptionalAPIKey:  true,
+	})
 }
 
 // ChatCompletion sends a chat completion request to vLLM.

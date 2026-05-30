@@ -1,0 +1,88 @@
+---
+title: "Anthropic"
+description: "Configure Anthropic (Claude) in GoModel and understand how reasoning effort maps to Claude's adaptive thinking and effort control."
+icon: "sparkles"
+---
+
+Anthropic setup is just an API key. This page exists for one quirk: how
+GoModel maps the OpenAI-style `reasoning.effort` knob onto Claude's native
+thinking and effort controls, which differ by model generation.
+
+## Configure
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+# ANTHROPIC_BASE_URL=https://api.anthropic.com/v1   # optional override
+# ANTHROPIC_DEFAULT_MAX_TOKENS=4096                 # injected when callers omit max_tokens
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  anthropic:
+    type: anthropic
+    api_key: "${ANTHROPIC_API_KEY}"
+```
+
+<Note>
+  Anthropic's `/v1/messages` requires `max_tokens` on every request. GoModel
+  injects `ANTHROPIC_DEFAULT_MAX_TOKENS` (default `4096`) when a caller omits
+  it, keeping the OpenAI-compatible surface lenient.
+</Note>
+
+## Reasoning effort mapping
+
+GoModel accepts OpenAI-shaped `"reasoning": {"effort": "..."}` and translates it
+to Claude's native controls. The five accepted levels are `low`, `medium`,
+`high`, `xhigh`, and `max`; any other value is downgraded to `low` and logged.
+The translation depends on whether the model supports **adaptive thinking**.
+
+| Model generation | Thinking config | Effort destination |
+| ---------------- | --------------- | ------------------ |
+| Adaptive — `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` (and dated snapshots of each) | `thinking: {type: "adaptive"}` | `output_config.effort` (passed through) |
+| Legacy (everything else, e.g. `claude-opus-4-5`, `claude-3-5-sonnet`) | `thinking: {type: "enabled", budget_tokens: N}` | mapped to a token budget |
+
+<Note>
+  Adaptive routing is an explicit allowlist, not a version comparison. New model
+  IDs are treated as legacy until added to the list, so they keep working
+  (via `budget_tokens`) rather than silently sending an unsupported config.
+</Note>
+
+For legacy models the effort string maps to a thinking budget; `max_tokens` is
+bumped above the budget when needed. `xhigh` and `max` are adaptive-only levels,
+so on legacy models they are capped at the `high` budget rather than inflating
+`max_tokens` past what those models can emit:
+
+| Effort | Budget tokens |
+| ------ | ------------- |
+| `low` | 5000 |
+| `medium` | 10000 |
+| `high` / `xhigh` / `max` | 20000 |
+
+<Note>
+  Omit `reasoning` to leave thinking off. On the adaptive models above, GoModel
+  only sets `thinking: {type: "adaptive"}` when you pass `reasoning.effort`;
+  without it those models do not engage extended thinking. Effort is a separate
+  control that governs overall token spend (text and tool calls) whether or not
+  thinking is engaged, and Anthropic defaults it to `high` when unset. It is a
+  behavioral signal for depth and verbosity, not a hard budget — actual usage
+  varies per request and is bounded by `max_tokens`.
+</Note>
+
+<Note>
+  Effort levels are model-gated upstream: `xhigh` is only available on Opus 4.8
+  and Opus 4.7, and `max` on Opus 4.8/4.7/4.6 and Sonnet 4.6. GoModel forwards
+  the level you send; Anthropic rejects it with a 400 if the target model does
+  not support it. Manual `budget_tokens` thinking is rejected on Opus 4.7/4.8,
+  which is why GoModel uses adaptive thinking for those models.
+</Note>
+
+When extended thinking is engaged, Anthropic requires `temperature = 1`. GoModel
+drops any other temperature value (and logs it) rather than failing the request.
+
+## Native passthrough
+
+To send Claude-native request fields that have no OpenAI-compatible equivalent
+(for example inline mid-task `system` entries in the `messages` array), use the
+passthrough route `/p/anthropic/messages`, which forwards the body verbatim.

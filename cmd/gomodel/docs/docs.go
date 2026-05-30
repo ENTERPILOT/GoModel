@@ -2160,6 +2160,171 @@ const docTemplate = `{
                 ]
             }
         },
+        "/v1/audio/speech": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "audio"
+                ],
+                "summary": "Create speech (text-to-speech)",
+                "parameters": [
+                    {
+                        "description": "Text-to-speech request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/core.AudioSpeechRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Binary audio in the requested response_format",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/audio/transcriptions": {
+            "post": {
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json",
+                    "text/plain"
+                ],
+                "tags": [
+                    "audio"
+                ],
+                "summary": "Create transcription (speech-to-text)",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Audio file to transcribe",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "model",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Input language (ISO-639-1)",
+                        "name": "language",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional text to guide the model",
+                        "name": "prompt",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "json, text, srt, verbose_json, or vtt",
+                        "name": "response_format",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "number",
+                        "description": "Sampling temperature (0-1)",
+                        "name": "temperature",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "csv",
+                        "description": "Timestamp granularities to populate: word and/or segment",
+                        "name": "timestamp_granularities[]",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Transcription in the requested response_format: a JSON object for json/verbose_json, or a text/plain body for text/srt/vtt",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/batches": {
             "get": {
                 "produces": [
@@ -4698,6 +4863,33 @@ const docTemplate = `{
                 }
             }
         },
+        "core.AudioSpeechRequest": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "string"
+                },
+                "instructions": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "Provider is gateway routing metadata, stripped before dispatching upstream.",
+                    "type": "string"
+                },
+                "response_format": {
+                    "type": "string"
+                },
+                "speed": {
+                    "type": "number"
+                },
+                "voice": {
+                    "type": "string"
+                }
+            }
+        },
         "core.BatchError": {
             "type": "object",
             "properties": {
@@ -5634,7 +5826,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "effort": {
-                    "description": "Effort controls how much reasoning effort the model should use.\nValid values are \"low\", \"medium\", and \"high\".",
+                    "description": "Effort controls how much reasoning effort the model should use.\nValid values are \"low\", \"medium\", \"high\", \"xhigh\", and \"max\".\n\"xhigh\" and \"max\" are supported by newer models such as Claude Opus 4.8;\nproviders downgrade unsupported levels to their nearest equivalent.",
                     "type": "string"
                 }
             }

@@ -221,13 +221,33 @@ func TestAuditLogMiddleware(t *testing.T) {
 		require.Len(t, entries, 1)
 
 		entry := entries[0]
-		assert.NotNil(t, entry.Data.RequestBody)
-		assert.NotNil(t, entry.Data.ResponseBody)
+		require.NotNil(t, entry.Data.RequestBody)
+		require.NotNil(t, entry.Data.ResponseBody)
 
 		// Verify request body contains our message (now stored as interface{})
 		reqBody, ok := entry.Data.RequestBody.(map[string]interface{})
 		require.True(t, ok, "RequestBody should be a map[string]interface{}, got %T", entry.Data.RequestBody)
 		assert.Equal(t, "gpt-4", reqBody["model"])
+
+		// Verify response body captured the upstream chat completion payload, not
+		// just an empty marker — a regression that stored {} but non-nil would
+		// otherwise slip past a NotNil-only check.
+		respBody, ok := entry.Data.ResponseBody.(map[string]interface{})
+		require.True(t, ok, "ResponseBody should be a map[string]interface{}, got %T", entry.Data.ResponseBody)
+		assert.Equal(t, "chat.completion", respBody["object"])
+		assert.Equal(t, "gpt-4", respBody["model"])
+		assert.NotEmpty(t, respBody["id"], "response id should be captured")
+		choices, ok := respBody["choices"].([]interface{})
+		require.True(t, ok, "choices should be an array, got %T", respBody["choices"])
+		require.NotEmpty(t, choices)
+		choice0, ok := choices[0].(map[string]interface{})
+		require.True(t, ok)
+		msg, ok := choice0["message"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "assistant", msg["role"])
+		content, ok := msg["content"].(string)
+		require.True(t, ok, "message.content should be a string, got %T", msg["content"])
+		assert.Contains(t, content, "Test message", "captured response body should echo our input via the mock")
 	})
 
 	t.Run("captures headers with redaction when enabled", func(t *testing.T) {
@@ -466,8 +486,14 @@ func TestAuditLogConcurrency(t *testing.T) {
 		defer cleanup()
 
 		const numRequests = 20
+		type result struct {
+			statusCode int
+			err        error
+		}
+
 		var wg sync.WaitGroup
 		wg.Add(numRequests)
+		results := make(chan result, numRequests)
 
 		for i := 0; i < numRequests; i++ {
 			go func(idx int) {
@@ -476,14 +502,28 @@ func TestAuditLogConcurrency(t *testing.T) {
 				body, _ := json.Marshal(payload)
 				resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
 				if err != nil {
-					t.Logf("Request %d failed: %v", idx, err)
+					results <- result{err: fmt.Errorf("request %d failed: %w", idx, err)}
 					return
 				}
+				results <- result{statusCode: resp.StatusCode}
 				closeBody(resp)
 			}(i)
 		}
 
 		wg.Wait()
+		close(results)
+
+		var requestErrors []error
+		statusCounts := make(map[int]int)
+		for r := range results {
+			if r.err != nil {
+				requestErrors = append(requestErrors, r.err)
+				continue
+			}
+			statusCounts[r.statusCode]++
+		}
+		require.Empty(t, requestErrors)
+		assert.Equal(t, numRequests, statusCounts[http.StatusOK], "all concurrent requests should return 200; status counts: %v", statusCounts)
 
 		// Wait for all log entries
 		entries := store.WaitForAPIEntries(numRequests, 5*time.Second)

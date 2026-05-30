@@ -16,7 +16,7 @@ quirks.
 | Provider | Credential | Guide |
 | -------- | ---------- | ----- |
 | OpenAI | `OPENAI_API_KEY` | — |
-| Anthropic | `ANTHROPIC_API_KEY` | — |
+| Anthropic | `ANTHROPIC_API_KEY` | [Anthropic](/providers/anthropic) |
 | Google Gemini | `GEMINI_API_KEY` | [Google Gemini](/providers/gemini) |
 | Google Vertex AI | `VERTEX_PROJECT` + `VERTEX_LOCATION` + GCP credentials | [Google Vertex AI](/providers/vertex) |
 | DeepSeek | `DEEPSEEK_API_KEY` | [DeepSeek](/providers/deepseek) |
@@ -49,6 +49,8 @@ These are the providers most users hit friction on:
   region-specific OpenAI-compatible endpoint URL.
 - **Google Gemini (AI Studio)** — two routing modes (native `generateContent`
   vs OpenAI-compatible) with different image-input behavior.
+- **Anthropic** — reasoning effort maps to Claude's adaptive thinking and
+  effort control, which differ across model generations.
 - **DeepSeek** — reasoning effort mapping quirks for DeepSeek V4.
 - **Ollama / vLLM** — local-model hosting with optional multi-instance setup
   through suffixed env vars and provider-qualified model IDs.
@@ -61,7 +63,7 @@ These are the providers most users hit friction on:
   same file for both Docker and the native binary.
 </Tip>
 
-Providers without a dedicated page (OpenAI, Anthropic, Groq, OpenRouter, Z.ai,
+Providers without a dedicated page (OpenAI, Groq, OpenRouter, Z.ai,
 xAI, MiniMax) follow the same pattern: set the API key (and optional base URL
 where supported), start GoModel, route by model ID. The full env-var reference
 lives in [Configuration](/advanced/configuration).

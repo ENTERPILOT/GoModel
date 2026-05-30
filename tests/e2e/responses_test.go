@@ -30,19 +30,21 @@ func TestResponses(t *testing.T) {
 		var respBody core.ResponsesResponse
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&respBody))
 
-		assert.NotEmpty(t, respBody.ID)
+		require.NotEmpty(t, respBody.ID)
 		assert.Equal(t, "response", respBody.Object)
 		assert.Equal(t, "gpt-4.1", respBody.Model)
 		assert.Equal(t, "completed", respBody.Status)
-		assert.NotEmpty(t, respBody.Output)
-
-		if len(respBody.Output) > 0 {
-			assert.Equal(t, "message", respBody.Output[0].Type)
-			assert.Equal(t, "assistant", respBody.Output[0].Role)
-		}
+		require.NotEmpty(t, respBody.Output)
+		assert.Equal(t, "message", respBody.Output[0].Type)
+		assert.Equal(t, "assistant", respBody.Output[0].Role)
+		require.NotEmpty(t, respBody.Output[0].Content)
+		assert.Equal(t, "output_text", respBody.Output[0].Content[0].Type)
+		assert.Contains(t, respBody.Output[0].Content[0].Text, "What is the capital of France?")
 	})
 
 	t.Run("with instructions", func(t *testing.T) {
+		mockServer.ResetRequests()
+
 		payload := core.ResponsesRequest{
 			Model:        "gpt-4.1",
 			Input:        "Tell me about Go programming",
@@ -57,9 +59,15 @@ func TestResponses(t *testing.T) {
 		var respBody core.ResponsesResponse
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&respBody))
 		assert.Equal(t, "completed", respBody.Status)
+
+		upstream := requireRecordedResponsesRequest(t)
+		assert.Equal(t, "Tell me about Go programming", upstream.Input)
+		assert.Equal(t, "You are a helpful programming assistant.", upstream.Instructions)
 	})
 
 	t.Run("array input conversation", func(t *testing.T) {
+		mockServer.ResetRequests()
+
 		payload := core.ResponsesRequest{
 			Model: "gpt-4.1",
 			Input: []map[string]interface{}{
@@ -77,6 +85,17 @@ func TestResponses(t *testing.T) {
 		var respBody core.ResponsesResponse
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&respBody))
 		assert.Equal(t, "completed", respBody.Status)
+
+		upstream := requireRecordedResponsesRequest(t)
+		input, ok := upstream.Input.([]core.ResponsesInputElement)
+		require.True(t, ok, "expected upstream input to preserve typed conversation array, got %T", upstream.Input)
+		require.Len(t, input, 3)
+		assert.Equal(t, "user", input[0].Role)
+		assert.Equal(t, "What is 2 + 2?", input[0].Content)
+		assert.Equal(t, "assistant", input[1].Role)
+		assert.Equal(t, "2 + 2 equals 4.", input[1].Content)
+		assert.Equal(t, "user", input[2].Role)
+		assert.Equal(t, "And what is 3 + 3?", input[2].Content)
 	})
 }
 
@@ -154,7 +173,8 @@ func TestResponsesStreaming(t *testing.T) {
 
 		events := readResponsesStream(t, resp.Body)
 		require.Greater(t, len(events), 0)
-		assert.True(t, hasDoneEvent(events), "Should receive done event")
+		assert.True(t, hasResponsesCompletedEvent(events), "Should receive response.completed or response.done event")
+		assert.True(t, hasResponsesDoneMarker(events), "Should receive [DONE] marker")
 	})
 
 	t.Run("streaming does not inject stream_options", func(t *testing.T) {
@@ -177,7 +197,8 @@ func TestResponsesStreaming(t *testing.T) {
 
 		events := readResponsesStream(t, resp.Body)
 		require.Greater(t, len(events), 0, "Should receive at least one SSE event")
-		assert.True(t, hasDoneEvent(events), "Should receive done event")
+		assert.True(t, hasResponsesCompletedEvent(events), "Should receive response.completed or response.done event")
+		assert.True(t, hasResponsesDoneMarker(events), "Should receive [DONE] marker")
 
 		recorded := requireRecordedRequest(t, "/responses")
 		var upstreamRaw map[string]json.RawMessage
@@ -203,7 +224,7 @@ func TestResponsesStreaming(t *testing.T) {
 
 		events := readResponsesStream(t, resp.Body)
 		content := extractResponsesStreamContent(events)
-		assert.NotEmpty(t, content)
+		assert.Contains(t, content, "Hello")
 	})
 }
 
@@ -271,6 +292,11 @@ func TestResponsesErrors(t *testing.T) {
 	})
 
 	t.Run("empty input", func(t *testing.T) {
+		// Per Postel's Law, the gateway accepts empty input rather than rejecting
+		// it. Verify the empty string is forwarded as-is (not coerced) and the
+		// response is a well-formed completed Responses payload.
+		mockServer.ResetRequests()
+
 		payload := core.ResponsesRequest{Model: "gpt-4.1", Input: ""}
 
 		resp := sendResponsesRequest(t, payload)
@@ -280,7 +306,16 @@ func TestResponsesErrors(t *testing.T) {
 
 		var respBody core.ResponsesResponse
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&respBody))
+		assert.Equal(t, "response", respBody.Object)
+		assert.Equal(t, "gpt-4.1", respBody.Model)
 		assert.Equal(t, "completed", respBody.Status)
+		require.NotEmpty(t, respBody.Output)
+		assert.Equal(t, "message", respBody.Output[0].Type)
+		assert.Equal(t, "assistant", respBody.Output[0].Role)
+
+		upstream := requireRecordedResponsesRequest(t)
+		assert.Equal(t, "gpt-4.1", upstream.Model)
+		assert.Equal(t, "", upstream.Input, "empty input must be forwarded as empty string, not coerced")
 	})
 
 	t.Run("invalid model", func(t *testing.T) {
@@ -307,11 +342,10 @@ func TestResponsesUsage(t *testing.T) {
 	var respBody core.ResponsesResponse
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&respBody))
 
-	if respBody.Usage != nil {
-		assert.Greater(t, respBody.Usage.InputTokens, 0)
-		assert.Greater(t, respBody.Usage.OutputTokens, 0)
-		assert.Equal(t, respBody.Usage.InputTokens+respBody.Usage.OutputTokens, respBody.Usage.TotalTokens)
-	}
+	require.NotNil(t, respBody.Usage)
+	assert.Greater(t, respBody.Usage.InputTokens, 0)
+	assert.Greater(t, respBody.Usage.OutputTokens, 0)
+	assert.Equal(t, respBody.Usage.InputTokens+respBody.Usage.OutputTokens, respBody.Usage.TotalTokens)
 }
 
 func TestResponsesMultimodal(t *testing.T) {
