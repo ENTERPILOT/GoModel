@@ -577,14 +577,10 @@ func (e ResponsesInputElement) MarshalJSON() ([]byte, error) {
 	}
 }
 
+// cloneRawMessage returns a detached, whitespace-trimmed copy of a raw JSON
+// value so stored Raw fields stay independent of the decoder's backing buffer.
 func cloneRawMessage(data []byte) json.RawMessage {
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 {
-		return nil
-	}
-	cloned := make([]byte, len(trimmed))
-	copy(cloned, trimmed)
-	return cloned
+	return CloneRawJSON(bytes.TrimSpace(data))
 }
 
 // stringifyRawValue converts a json.RawMessage to a string.
