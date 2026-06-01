@@ -197,6 +197,9 @@ provider-specific adaptation where relevant.
 - Done: implement `/v1/conversations` lifecycle support.
 - Done: reject `previous_response_id` and `conversation` on chat-translated
   providers with a clear compatibility error.
+- Done: translate `text.format` to the Chat Completions `response_format`
+  (`json_schema` / `json_object`) and pass `text.verbosity` through on
+  chat-translated providers; unknown text formats still return a clear error.
 - Still needed: optionally expand previous stored responses into full input for
   chat-translated providers.
 - Add tests for:

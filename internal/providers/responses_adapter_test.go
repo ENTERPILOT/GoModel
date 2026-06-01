@@ -431,8 +431,8 @@ func TestConvertResponsesRequestToChat_RejectsStatefulAgentsSDKFields(t *testing
 			want: "conversation",
 		},
 		{
-			name: "structured output text",
-			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Text: map[string]any{"format": map[string]any{"type": "json_schema"}}},
+			name: "unknown text format type",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Text: map[string]any{"format": map[string]any{"type": "grammar"}}},
 			want: "text",
 		},
 	}
@@ -448,6 +448,89 @@ func TestConvertResponsesRequestToChat_RejectsStatefulAgentsSDKFields(t *testing
 			}
 		})
 	}
+}
+
+func TestConvertResponsesRequestToChat_MapsTextFormatToResponseFormat(t *testing.T) {
+	t.Run("json_schema nests schema fields", func(t *testing.T) {
+		req := &core.ResponsesRequest{
+			Model: "test-model",
+			Input: "Hello",
+			Text: map[string]any{
+				"format": map[string]any{
+					"type":   "json_schema",
+					"name":   "weather",
+					"strict": true,
+					"schema": map[string]any{"type": "object"},
+				},
+				"verbosity": "low",
+			},
+		}
+
+		chatReq, err := ConvertResponsesRequestToChat(req)
+		if err != nil {
+			t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+		}
+
+		raw := chatReq.ExtraFields.Lookup("response_format")
+		if raw == nil {
+			t.Fatal("response_format missing from chat request extras")
+		}
+		var responseFormat struct {
+			Type       string `json:"type"`
+			JSONSchema struct {
+				Name   string         `json:"name"`
+				Strict bool           `json:"strict"`
+				Schema map[string]any `json:"schema"`
+			} `json:"json_schema"`
+		}
+		if err := json.Unmarshal(raw, &responseFormat); err != nil {
+			t.Fatalf("json.Unmarshal(response_format) error = %v", err)
+		}
+		if responseFormat.Type != "json_schema" {
+			t.Fatalf("response_format.type = %q, want json_schema", responseFormat.Type)
+		}
+		if responseFormat.JSONSchema.Name != "weather" || !responseFormat.JSONSchema.Strict {
+			t.Fatalf("response_format.json_schema = %#v, want nested name/strict", responseFormat.JSONSchema)
+		}
+		if responseFormat.JSONSchema.Schema["type"] != "object" {
+			t.Fatalf("response_format.json_schema.schema = %#v, want nested schema", responseFormat.JSONSchema.Schema)
+		}
+		if verbosity := chatReq.ExtraFields.Lookup("verbosity"); string(verbosity) != `"low"` {
+			t.Fatalf("verbosity = %s, want \"low\"", verbosity)
+		}
+	})
+
+	t.Run("json_object passes through", func(t *testing.T) {
+		req := &core.ResponsesRequest{
+			Model: "test-model",
+			Input: "Hello",
+			Text:  map[string]any{"format": map[string]any{"type": "json_object"}},
+		}
+
+		chatReq, err := ConvertResponsesRequestToChat(req)
+		if err != nil {
+			t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+		}
+		if got := string(chatReq.ExtraFields.Lookup("response_format")); got != `{"type":"json_object"}` {
+			t.Fatalf("response_format = %s, want json_object", got)
+		}
+	})
+
+	t.Run("plain text produces no response_format", func(t *testing.T) {
+		req := &core.ResponsesRequest{
+			Model: "test-model",
+			Input: "Hello",
+			Text:  map[string]any{"format": map[string]any{"type": "text"}},
+		}
+
+		chatReq, err := ConvertResponsesRequestToChat(req)
+		if err != nil {
+			t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+		}
+		if raw := chatReq.ExtraFields.Lookup("response_format"); raw != nil {
+			t.Fatalf("response_format = %s, want none for plain text", raw)
+		}
+	})
 }
 
 func TestConvertResponsesRequestToChat_RejectsUnknownInputItemTypes(t *testing.T) {

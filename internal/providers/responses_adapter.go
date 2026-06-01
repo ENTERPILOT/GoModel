@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -50,6 +51,14 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 		chatReq.MaxTokens = req.MaxOutputTokens
 	}
 
+	textFields, err := responsesTextToChatExtraFields(req.Text)
+	if err != nil {
+		return nil, err
+	}
+	if chatReq.ExtraFields, err = core.MergeUnknownJSONFields(chatReq.ExtraFields, textFields); err != nil {
+		return nil, err
+	}
+
 	if req.Instructions != "" {
 		chatReq.Messages = append(chatReq.Messages, core.Message{
 			Role:    "system",
@@ -82,9 +91,6 @@ func validateResponsesRequestForChatTranslation(req *core.ResponsesRequest) erro
 	if strings.TrimSpace(req.Truncation) != "" {
 		return unsupportedResponsesChatTranslationField("truncation")
 	}
-	if err := validateResponsesTextForChatTranslation(req.Text); err != nil {
-		return err
-	}
 	if strings.TrimSpace(req.PromptCacheRetention) != "" {
 		return unsupportedResponsesChatTranslationField("prompt_cache_retention")
 	}
@@ -100,44 +106,83 @@ func validateResponsesRequestForChatTranslation(req *core.ResponsesRequest) erro
 	return nil
 }
 
-func validateResponsesTextForChatTranslation(text any) error {
+// responsesTextToChatExtraFields maps the Responses "text" settings onto the
+// equivalent Chat Completions fields. text.format becomes response_format and
+// text.verbosity passes through unchanged; both are emitted as passthrough
+// members so existing provider handling (e.g. Gemini response_format) applies.
+// Plain text output produces no fields. Anything that cannot be translated
+// faithfully (an unknown format type or text option) returns an error rather
+// than silently dropping the caller's intent.
+func responsesTextToChatExtraFields(text any) (map[string]json.RawMessage, error) {
 	if text == nil {
-		return nil
+		return nil, nil
 	}
-
 	textMap, ok := text.(map[string]any)
 	if !ok {
-		return unsupportedResponsesChatTranslationField("text")
+		return nil, unsupportedResponsesChatTranslationField("text")
 	}
+
+	additions := make(map[string]json.RawMessage)
 	for key, value := range textMap {
 		switch key {
 		case "format":
-			if !isPlainResponsesTextFormat(value) {
-				return unsupportedResponsesChatTranslationField("text")
+			responseFormat, err := responsesTextFormatToChatResponseFormat(value)
+			if err != nil {
+				return nil, err
 			}
+			if responseFormat != nil {
+				additions["response_format"] = responseFormat
+			}
+		case "verbosity":
+			raw, err := json.Marshal(value)
+			if err != nil {
+				return nil, err
+			}
+			additions["verbosity"] = raw
 		default:
-			return unsupportedResponsesChatTranslationField("text")
+			return nil, unsupportedResponsesChatTranslationField("text")
 		}
 	}
-	return nil
+	if len(additions) == 0 {
+		return nil, nil
+	}
+	return additions, nil
 }
 
-func isPlainResponsesTextFormat(format any) bool {
+// responsesTextFormatToChatResponseFormat converts a Responses text.format into
+// a Chat Completions response_format. Plain text yields nil (chat default). The
+// Responses API places json_schema fields directly on the format object, while
+// Chat nests them under a json_schema member.
+func responsesTextFormatToChatResponseFormat(format any) (json.RawMessage, error) {
 	if format == nil {
-		return true
+		return nil, nil
 	}
 	formatMap, ok := format.(map[string]any)
 	if !ok {
-		return false
+		return nil, unsupportedResponsesChatTranslationField("text")
 	}
-	for key := range formatMap {
-		if key != "type" {
-			return false
-		}
-	}
+
 	formatType, _ := formatMap["type"].(string)
-	formatType = strings.TrimSpace(formatType)
-	return formatType == "" || formatType == "text"
+	switch strings.TrimSpace(formatType) {
+	case "", "text":
+		return nil, nil
+	case "json_object":
+		return json.Marshal(map[string]any{"type": "json_object"})
+	case "json_schema":
+		jsonSchema := make(map[string]any, len(formatMap))
+		for k, v := range formatMap {
+			if k == "type" {
+				continue
+			}
+			jsonSchema[k] = v
+		}
+		return json.Marshal(map[string]any{
+			"type":        "json_schema",
+			"json_schema": jsonSchema,
+		})
+	default:
+		return nil, unsupportedResponsesChatTranslationField("text")
+	}
 }
 
 func unsupportedResponsesChatTranslationField(field string) error {

@@ -140,9 +140,11 @@ GoModel supports the SDK's normal HTTP Responses path:
 
 GoModel also preserves newer Responses input items for native Responses
 providers. If a request has to be translated to Chat Completions for a provider
-that does not implement Responses natively, GoModel returns a clear error for
-stateful or provider-native Responses fields such as `previous_response_id`,
-`conversation`, hosted tool items, and structured `text` output settings.
+that does not implement Responses natively, GoModel translates structured
+`text` output settings into the Chat Completions `response_format` (and passes
+`text.verbosity` through), while returning a clear error for stateful or
+provider-native Responses fields such as `previous_response_id`, `conversation`,
+and hosted tool items.
 
 ## Storage behavior
 

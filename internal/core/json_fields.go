@@ -72,6 +72,26 @@ func unknownJSONFieldsFromMap(fields map[string]json.RawMessage, cloneValues boo
 	return UnknownJSONFields{raw: buf.Bytes()}
 }
 
+// MergeUnknownJSONFields returns base with the given raw members added; additions
+// override existing members on key conflict. It lets translation layers inject
+// derived fields (such as a chat response_format mapped from a Responses text
+// format) into a request's passthrough object without a dedicated typed field.
+func MergeUnknownJSONFields(base UnknownJSONFields, additions map[string]json.RawMessage) (UnknownJSONFields, error) {
+	if len(additions) == 0 {
+		return base, nil
+	}
+	merged := make(map[string]json.RawMessage, len(additions))
+	if !base.IsEmpty() {
+		if err := json.Unmarshal(base.raw, &merged); err != nil {
+			return UnknownJSONFields{}, err
+		}
+	}
+	for key, value := range additions {
+		merged[key] = value
+	}
+	return UnknownJSONFieldsFromMap(merged), nil
+}
+
 // Lookup returns the raw JSON value for key or nil when absent.
 // It scans the stored object on demand so single-lookups stay allocation-light,
 // but repeated lookups on the same value are linear in the raw JSON size.
