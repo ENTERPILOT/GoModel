@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -549,6 +550,25 @@ func TestResponsesRequestJSON_PreservesUnknownInputItems(t *testing.T) {
 	}
 	if _, ok := item["content"]; ok {
 		t.Fatalf("unknown item gained content field: %#v", item)
+	}
+}
+
+func TestResponsesInputElementJSON_UnknownItemRoundTripHasNoDuplicateKeys(t *testing.T) {
+	var elem ResponsesInputElement
+	if err := json.Unmarshal([]byte(`{"type":"reasoning","id":"rs_123","summary":[]}`), &elem); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	body, err := json.Marshal(elem)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	// A decode→encode round trip must not duplicate the fields preserved in Raw.
+	for _, key := range []string{`"type"`, `"id"`, `"summary"`} {
+		if got := bytes.Count(body, []byte(key)); got != 1 {
+			t.Fatalf("key %s appears %d times in %s, want 1", key, got, body)
+		}
 	}
 }
 

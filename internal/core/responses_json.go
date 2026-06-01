@@ -498,7 +498,11 @@ func (e *ResponsesInputElement) UnmarshalJSON(data []byte) error {
 			}
 		}
 	default:
+		// Unknown item types are preserved verbatim in Raw, which already holds
+		// every field. Skip ExtraFields extraction here so a round trip emits Raw
+		// once; ExtraFields stays reserved for metadata added after decoding.
 		e.Raw = cloneRawMessage(data)
+		return nil
 	}
 
 	knownFields := []string{"type"}
