@@ -116,7 +116,7 @@ Full reference: `.env.template` and `config/config.yaml`
   - `ENABLED_PASSTHROUGH_PROVIDERS` (openai,anthropic,openrouter,zai,vllm: Comma-separated list of enabled passthrough providers)
 - **Storage:** `STORAGE_TYPE` (sqlite), `SQLITE_PATH` (data/gomodel.db), `POSTGRES_URL`, `MONGODB_URL`
 - **Models:** `MODELS_ENABLED_BY_DEFAULT` (true), `MODEL_OVERRIDES_ENABLED` (true), `KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT` (false), `CONFIGURED_PROVIDER_MODELS_MODE` (`fallback` or `allowlist`, default `fallback`; `allowlist` skips upstream `/models` for providers with configured lists); persisted overrides restrict/allow selectors with `user_paths`. When alias-only models listing is enabled, `GET /v1/models` returns only model aliases, not full concrete model specs, to operators.
-- **Audit logging:** `LOGGING_ENABLED` (false), `LOGGING_LOG_BODIES` (false), `LOGGING_LOG_HEADERS` (false), `LOGGING_RETENTION_DAYS` (30)
+- **Audit logging:** `LOGGING_ENABLED` (false), `LOGGING_LOG_BODIES` (false), `LOGGING_LOG_AUDIO_BODIES` (false: log audio endpoint inputs/outputs — base64 audio for `/v1/audio/speech` + dashboard playback, upload metadata for transcriptions; independent of `LOGGING_LOG_BODIES`), `LOGGING_LOG_HEADERS` (false), `LOGGING_RETENTION_DAYS` (30)
 - **Usage tracking:** `USAGE_ENABLED` (true), `ENFORCE_RETURNING_USAGE_DATA` (true), `USAGE_RETENTION_DAYS` (90)
 - **Dashboard live logs:**
   - `DASHBOARD_LIVE_LOGS_ENABLED` (true): keep enabled for low-latency dashboard previews; set false only when live streams are not needed or memory/socket usage must be minimized.
