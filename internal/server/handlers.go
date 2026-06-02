@@ -202,10 +202,18 @@ func (h *Handler) nativeFiles() *nativeFileService {
 }
 
 func (h *Handler) audio() *audioService {
+	var logBodies, logAudioBodies bool
+	if h.logger != nil {
+		cfg := h.logger.Config()
+		logBodies = cfg.LogBodies
+		logAudioBodies = cfg.LogAudioBodies
+	}
 	return &audioService{
 		provider:        h.provider,
 		modelAuthorizer: h.modelAuthorizer,
 		budgetChecker:   h.budgetChecker,
+		logBodies:       logBodies,
+		logAudioBodies:  logAudioBodies,
 	}
 }
 

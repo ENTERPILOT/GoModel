@@ -95,6 +95,7 @@ func buildLoggerConfig(logCfg config.LogConfig) Config {
 	cfg := Config{
 		Enabled:               logCfg.Enabled,
 		LogBodies:             logCfg.LogBodies,
+		LogAudioBodies:        logCfg.LogAudioBodies,
 		LogHeaders:            logCfg.LogHeaders,
 		BufferSize:            logCfg.BufferSize,
 		FlushInterval:         time.Duration(logCfg.FlushInterval) * time.Second,

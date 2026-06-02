@@ -233,6 +233,11 @@ type Config struct {
 	// LogBodies enables logging of full request/response bodies
 	LogBodies bool
 
+	// LogAudioBodies enables logging of audio endpoint inputs/outputs
+	// (base64 audio for /v1/audio/speech, upload metadata for transcriptions).
+	// Independent of LogBodies because audio payloads are large and binary.
+	LogAudioBodies bool
+
 	// LogHeaders enables logging of request/response headers
 	LogHeaders bool
 

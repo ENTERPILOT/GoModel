@@ -19,6 +19,11 @@ type audioService struct {
 	provider        core.RoutableProvider
 	modelAuthorizer RequestModelAuthorizer
 	budgetChecker   BudgetChecker
+	// logBodies and logAudioBodies mirror the audit logger config. Audio
+	// endpoints are not ingress-managed, so the audit middleware cannot capture
+	// their (binary/multipart) bodies; the service captures them here instead.
+	logBodies      bool
+	logAudioBodies bool
 }
 
 func (s *audioService) router() (core.AudioProvider, error) {
@@ -47,6 +52,10 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("voice is required", nil))
 	}
 
+	if s.logAudioBodies {
+		auditlog.EnrichEntryWithRequestBody(c, audioSpeechAuditInput(req))
+	}
+
 	ctx, err := s.prepare(c, req.Model, req.Provider)
 	if err != nil {
 		return handleError(c, err)
@@ -55,7 +64,7 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	return respondAudio(c, resp)
+	return s.respondAudio(c, resp)
 }
 
 // CreateTranscription handles POST /v1/audio/transcriptions.
@@ -70,6 +79,10 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
+	if s.logAudioBodies {
+		auditlog.EnrichEntryWithRequestBody(c, audioTranscriptionAuditInput(req))
+	}
+
 	ctx, err := s.prepare(c, req.Model, req.Provider)
 	if err != nil {
 		return handleError(c, err)
@@ -78,7 +91,7 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	return respondAudio(c, resp)
+	return s.respondAudio(c, resp)
 }
 
 // selectorResolver maps a requested model selector to the concrete registry
@@ -166,7 +179,7 @@ func transcriptionRequestFromForm(c *echo.Context) (*core.AudioTranscriptionRequ
 	}, nil
 }
 
-func respondAudio(c *echo.Context, resp *core.AudioResponse) error {
+func (s *audioService) respondAudio(c *echo.Context, resp *core.AudioResponse) error {
 	if resp == nil {
 		return handleError(c, core.NewProviderError("", http.StatusBadGateway, "provider returned empty audio response", nil))
 	}
@@ -174,5 +187,60 @@ func respondAudio(c *echo.Context, resp *core.AudioResponse) error {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+
+	// Audio output is binary; the audit middleware skips audio Content-Types so
+	// it never corrupts the bytes via UTF-8 coercion. Capture it here instead,
+	// embedding base64 audio for playback only when LogAudioBodies is set.
+	if auditlog.IsAudioContentType(contentType) && (s.logBodies || s.logAudioBodies) {
+		auditlog.EnrichEntryWithResponseBody(c, auditlog.BuildAudioResponseBody(contentType, resp.Data, s.logAudioBodies))
+	}
+
 	return c.Blob(http.StatusOK, contentType, resp.Data)
+}
+
+// audioSpeechAuditInput builds the audit request body for a text-to-speech
+// request: the user-facing synthesis parameters, never routing metadata.
+func audioSpeechAuditInput(req *core.AudioSpeechRequest) map[string]any {
+	input := map[string]any{
+		"model": req.Model,
+		"input": req.Input,
+		"voice": req.Voice,
+	}
+	if req.ResponseFormat != "" {
+		input["response_format"] = req.ResponseFormat
+	}
+	if req.Speed != 0 {
+		input["speed"] = req.Speed
+	}
+	if req.Instructions != "" {
+		input["instructions"] = req.Instructions
+	}
+	return input
+}
+
+// audioTranscriptionAuditInput builds the audit request body for a
+// speech-to-text request: upload metadata and parameters, never the raw audio
+// bytes (which are large and binary).
+func audioTranscriptionAuditInput(req *core.AudioTranscriptionRequest) map[string]any {
+	meta := map[string]any{
+		"model":      req.Model,
+		"filename":   req.Filename,
+		"file_bytes": len(req.File),
+	}
+	if req.Language != "" {
+		meta["language"] = req.Language
+	}
+	if req.Prompt != "" {
+		meta["prompt"] = req.Prompt
+	}
+	if req.ResponseFormat != "" {
+		meta["response_format"] = req.ResponseFormat
+	}
+	if req.Temperature != "" {
+		meta["temperature"] = req.Temperature
+	}
+	if len(req.TimestampGranularities) > 0 {
+		meta["timestamp_granularities"] = req.TimestampGranularities
+	}
+	return meta
 }

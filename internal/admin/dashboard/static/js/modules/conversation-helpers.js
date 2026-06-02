@@ -343,6 +343,53 @@
             .replaceAll("'", '&#39;');
     }
 
+    // isAudioBody detects the audit value produced for audio endpoint bodies
+    // (see auditlog.AudioBodyLog): an object carrying the "__audio__" marker.
+    function isAudioBody(value) {
+        return !!(value && typeof value === 'object' && value.__audio__ === true);
+    }
+
+    function formatByteSize(bytes) {
+        const n = Number(bytes || 0);
+        if (!Number.isFinite(n) || n <= 0) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let i = 0;
+        let size = n;
+        while (size >= 1024 && i < units.length - 1) {
+            size /= 1024;
+            i++;
+        }
+        return (i === 0 ? String(size) : size.toFixed(1)) + ' ' + units[i];
+    }
+
+    function sanitizeAudioContentType(value) {
+        const ct = String(value || '').trim();
+        return /^audio\/[a-zA-Z0-9.+-]+$/.test(ct) ? ct : 'audio/mpeg';
+    }
+
+    // renderAudioBody renders an audio body as a player when the audio bytes
+    // were captured (base64), otherwise a labeled placeholder explaining why.
+    function renderAudioBody(value) {
+        const contentType = sanitizeAudioContentType(value.content_type);
+        const metaLabel = escapeHTML(contentType + ' · ' + formatByteSize(value.bytes));
+        if (value.stored && value.encoding === 'base64' && value.data) {
+            const b64 = String(value.data).replace(/[^A-Za-z0-9+/=]/g, '');
+            const src = 'data:' + contentType + ';base64,' + b64;
+            return '<div class="audit-audio">'
+                + '<audio class="audit-audio-player" controls preload="none" src="' + src + '"></audio>'
+                + '<div class="audit-audio-meta mono">' + metaLabel + '</div>'
+                + '</div>';
+        }
+        const reason = value.too_large
+            ? 'Audio too large to store.'
+            : 'Audio not logged. Set LOGGING_LOG_AUDIO_BODIES=true to capture playable audio.';
+        return '<div class="audit-audio audit-audio-empty">'
+            + '<div class="audit-audio-icon" aria-hidden="true">🔊</div>'
+            + '<div class="audit-audio-meta mono">' + metaLabel + '</div>'
+            + '<div class="audit-audio-note">' + escapeHTML(reason) + '</div>'
+            + '</div>';
+    }
+
     function jsonStringContent(value) {
         try {
             return JSON.stringify(String(value)).slice(1, -1);
@@ -465,6 +512,8 @@
         isConversationalPath,
         isConversationExcludedPath,
         canShowConversation,
-        renderBodyWithConversationHighlights
+        renderBodyWithConversationHighlights,
+        isAudioBody,
+        renderAudioBody
     };
 })(window);
