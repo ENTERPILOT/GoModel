@@ -665,6 +665,38 @@ test('renderAudioBody notes when audio was too large to store', () => {
     assert.match(html, /too large/i);
 });
 
+test('renderAudioBody renders a player and attached upload metadata', () => {
+    const helpers = loadConversationHelpers();
+    const html = helpers.renderAudioBody({
+        __audio__: true,
+        content_type: 'audio/mpeg',
+        bytes: 20,
+        encoding: 'base64',
+        data: 'QUJD',
+        stored: true,
+        meta: { model: 'gpt-4o-transcribe', language: 'en', file_bytes: 20 }
+    });
+    assert.match(html, /<audio[^>]+src="data:audio\/mpeg;base64,QUJD"/);
+    assert.match(html, /audit-audio-metadata/);
+    assert.match(html, /gpt-4o-transcribe/);
+    assert.match(html, /language/);
+});
+
+test('renderAudioBody renders metadata even when audio is not stored', () => {
+    const helpers = loadConversationHelpers();
+    const html = helpers.renderAudioBody({
+        __audio__: true,
+        content_type: 'audio/wav',
+        bytes: 99999999,
+        stored: false,
+        too_large: true,
+        meta: { model: 'whisper-1' }
+    });
+    assert.ok(!html.includes('<audio'), 'no player when too large');
+    assert.match(html, /too large/i);
+    assert.match(html, /whisper-1/);
+});
+
 test('auditPaneState renders audio bodies through the audio helper', () => {
     const helpers = loadConversationHelpers();
     const module = createAuditListModule({

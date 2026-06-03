@@ -62,6 +62,35 @@ func TestBuildAudioResponseBody_PlaceholderWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestBuildAudioUploadBody_StoresBase64AndMeta(t *testing.T) {
+	data := []byte("uploaded-audio")
+	meta := map[string]any{"model": "gpt-4o-transcribe", "filename": "a.mp3"}
+	body := BuildAudioUploadBody("audio/mpeg", data, true, meta)
+
+	if !body.Audio || !body.Stored || body.Encoding != "base64" {
+		t.Fatalf("expected stored base64 upload, got %+v", body)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(body.Data)
+	if err != nil || string(decoded) != "uploaded-audio" {
+		t.Fatalf("base64 did not round-trip: decoded=%q err=%v", decoded, err)
+	}
+	if body.Meta["model"] != "gpt-4o-transcribe" {
+		t.Errorf("meta not preserved alongside audio: %+v", body.Meta)
+	}
+}
+
+func TestBuildAudioUploadBody_PlaceholderKeepsMeta(t *testing.T) {
+	meta := map[string]any{"model": "whisper-1"}
+	body := BuildAudioUploadBody("audio/wav", []byte("x"), false, meta)
+
+	if body.Stored || body.Data != "" {
+		t.Errorf("expected no bytes stored when disabled, got %+v", body)
+	}
+	if body.Meta["model"] != "whisper-1" {
+		t.Errorf("meta should be kept on the placeholder: %+v", body.Meta)
+	}
+}
+
 func TestBuildAudioResponseBody_TooLarge(t *testing.T) {
 	data := make([]byte, audioBodyMaxBytes+1)
 	body := BuildAudioResponseBody("audio/mpeg", data, true)

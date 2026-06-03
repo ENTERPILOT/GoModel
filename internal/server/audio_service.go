@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -83,7 +84,8 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 	}
 
 	if s.logBodies && s.logAudioBodies {
-		auditlog.EnrichEntryWithRequestBody(c, audioTranscriptionAuditInput(req))
+		auditlog.EnrichEntryWithRequestBody(c, auditlog.BuildAudioUploadBody(
+			audioUploadContentType(req), req.File, true, audioTranscriptionAuditInput(req)))
 	}
 
 	ctx, err := s.prepare(c, req.Model, req.Provider)
@@ -172,6 +174,7 @@ func transcriptionRequestFromForm(c *echo.Context) (*core.AudioTranscriptionRequ
 	return &core.AudioTranscriptionRequest{
 		Model:                  model,
 		Filename:               fileHeader.Filename,
+		FileContentType:        fileHeader.Header.Get("Content-Type"),
 		File:                   data,
 		Language:               strings.TrimSpace(c.FormValue("language")),
 		Prompt:                 c.FormValue("prompt"),
@@ -223,9 +226,34 @@ func audioSpeechAuditInput(req *core.AudioSpeechRequest) map[string]any {
 	return input
 }
 
-// audioTranscriptionAuditInput builds the audit request body for a
-// speech-to-text request: upload metadata and parameters, never the raw audio
-// bytes (which are large and binary).
+// audioUploadContentType resolves a playable audio MIME type for a transcription
+// upload: the client-declared part Content-Type when it is an audio type,
+// otherwise a best-effort guess from the filename extension (defaulting to mp3).
+func audioUploadContentType(req *core.AudioTranscriptionRequest) string {
+	if ct := strings.TrimSpace(req.FileContentType); auditlog.IsAudioContentType(ct) {
+		return ct
+	}
+	switch strings.ToLower(filepath.Ext(req.Filename)) {
+	case ".wav":
+		return "audio/wav"
+	case ".ogg", ".oga":
+		return "audio/ogg"
+	case ".flac":
+		return "audio/flac"
+	case ".m4a", ".mp4", ".m4b":
+		return "audio/mp4"
+	case ".webm":
+		return "audio/webm"
+	case ".aac":
+		return "audio/aac"
+	default:
+		return "audio/mpeg"
+	}
+}
+
+// audioTranscriptionAuditInput builds the metadata attached to a logged
+// transcription request (model and upload parameters). The uploaded audio
+// itself is embedded separately via BuildAudioUploadBody.
 func audioTranscriptionAuditInput(req *core.AudioTranscriptionRequest) map[string]any {
 	meta := map[string]any{
 		"model":      req.Model,

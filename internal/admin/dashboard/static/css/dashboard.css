@@ -2913,6 +2913,24 @@ textarea:focus {
   color: var(--text-muted);
 }
 
+.audit-audio-metadata {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.audit-audio-meta-row {
+  display: flex;
+  gap: 8px;
+}
+
+.audit-audio-meta-key {
+  color: var(--text-muted);
+  min-width: 120px;
+}
+
 .conversation-body-highlight {
   display: inline;
   border-left: 2px solid color-mix(in srgb, var(--accent) 70%, var(--border));

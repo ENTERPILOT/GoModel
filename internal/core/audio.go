@@ -26,6 +26,7 @@ type AudioSpeechRequest struct {
 type AudioTranscriptionRequest struct {
 	Model                  string
 	Filename               string
+	FileContentType        string
 	File                   []byte
 	FileReader             io.Reader
 	Language               string
