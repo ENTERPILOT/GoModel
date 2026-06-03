@@ -2895,7 +2895,7 @@ textarea:focus {
 
 .audit-audio-meta {
   font-size: 12px;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
 }
 
 .audit-audio-empty {
@@ -2910,7 +2910,7 @@ textarea:focus {
 
 .audit-audio-note {
   font-size: 12px;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
 }
 
 .conversation-body-highlight {

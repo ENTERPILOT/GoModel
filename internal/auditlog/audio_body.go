@@ -7,11 +7,12 @@ import (
 
 // audioBodyMaxBytes caps how much *raw* audio is embedded as base64 in an audit
 // log entry; larger payloads are recorded as metadata-only placeholders so the
-// audit store does not balloon on long generations. Note the stored base64 is
-// ~4/3 of this (≈13.3 MB at the cap). On document stores with a hard per-record
-// ceiling (e.g. MongoDB's 16 MB BSON limit) a near-cap clip plus other entry
-// fields can approach that ceiling; lower this if you log audio to such a store.
-const audioBodyMaxBytes = 10 * 1024 * 1024
+// audit store does not balloon on long generations. The stored base64 is ~4/3 of
+// this (≈10.7 MB at the cap), deliberately kept well under document-store
+// per-record ceilings (e.g. MongoDB's 16 MB BSON limit) so a near-cap clip plus
+// the rest of the entry (request text, headers, workflow metadata) and encoding
+// overhead cannot push the document over the limit and fail the audit insert.
+const audioBodyMaxBytes = 8 * 1024 * 1024
 
 // AudioBodyLog is the audit representation of an audio request/response body.
 // The "__audio__" marker lets the dashboard detect audio payloads and render a

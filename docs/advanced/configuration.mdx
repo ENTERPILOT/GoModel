@@ -108,7 +108,7 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 <Note>
   `LOGGING_LOG_AUDIO_BODIES` refines `LOGGING_LOG_BODIES` for audio endpoints —
   it has no effect unless body logging is enabled. With both on, `/v1/audio/speech`
-  stores its text input and the generated audio (base64, capped at 10 MB) so the
+  stores its text input and the generated audio (base64, capped at 8 MB) so the
   dashboard can play it back, and `/v1/audio/transcriptions` stores upload metadata
   (never the raw audio bytes). It defaults to `false` because audio payloads are
   large and grow the audit store quickly. When body logging is on but this is off,
