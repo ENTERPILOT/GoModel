@@ -233,9 +233,10 @@ type Config struct {
 	// LogBodies enables logging of full request/response bodies
 	LogBodies bool
 
-	// LogAudioBodies enables logging of audio endpoint inputs/outputs
-	// (base64 audio for /v1/audio/speech, upload metadata for transcriptions).
-	// Independent of LogBodies because audio payloads are large and binary.
+	// LogAudioBodies refines LogBodies for audio endpoints (base64 audio for
+	// /v1/audio/speech, upload metadata for transcriptions). Requires LogBodies:
+	// when LogBodies is off no audio body is captured; when LogBodies is on but
+	// this is off, audio responses are recorded as a lightweight placeholder.
 	LogAudioBodies bool
 
 	// LogHeaders enables logging of request/response headers

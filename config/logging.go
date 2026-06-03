@@ -11,10 +11,12 @@ type LogConfig struct {
 	// Default: true
 	LogBodies bool `yaml:"log_bodies" env:"LOGGING_LOG_BODIES"`
 
-	// LogAudioBodies enables logging of audio endpoint inputs and outputs:
-	// the /v1/audio/speech JSON input and binary audio output (stored as
-	// base64 for playback), and /v1/audio/transcriptions upload metadata.
-	// Independent of LogBodies because audio payloads are large and binary.
+	// LogAudioBodies refines LogBodies for audio endpoints: when both are
+	// enabled, the /v1/audio/speech JSON input and binary audio output are
+	// stored (audio as base64 for playback) and /v1/audio/transcriptions upload
+	// metadata is recorded. Requires LogBodies (the master body-logging switch);
+	// when LogBodies is on but this is off, audio responses are recorded as a
+	// lightweight placeholder instead of the full bytes.
 	// WARNING: stores full audio in the audit log; grows storage quickly.
 	// Default: false
 	LogAudioBodies bool `yaml:"log_audio_bodies" env:"LOGGING_LOG_AUDIO_BODIES"`

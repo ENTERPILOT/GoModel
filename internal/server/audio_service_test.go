@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
 )
 
@@ -247,6 +249,106 @@ func TestAudioTranscription_MissingModel(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+// newSpeechRequestWithAuditEntry builds a /v1/audio/speech request and seeds an
+// empty audit entry into the context (as the audit middleware would), returning
+// the context, recorder, and the entry to assert on.
+func newSpeechRequestWithAuditEntry() (*echo.Context, *httptest.ResponseRecorder, *auditlog.LogEntry) {
+	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	entry := &auditlog.LogEntry{}
+	c.Set(string(auditlog.LogEntryKey), entry)
+	return c, rec, entry
+}
+
+func newSpeechMock() *audioMockProvider {
+	return &audioMockProvider{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}},
+		speechResp:   &core.AudioResponse{ContentType: "audio/mpeg", Data: []byte("synthetic-audio")},
+	}
+}
+
+// TestAudioSpeech_LogsAudioBodiesWhenEnabled: with both LogBodies and
+// LogAudioBodies on, the speech input is logged and the audio output is stored
+// losslessly as base64 for playback.
+func TestAudioSpeech_LogsAudioBodiesWhenEnabled(t *testing.T) {
+	svc := &audioService{provider: newSpeechMock(), logBodies: true, logAudioBodies: true}
+	c, rec, entry := newSpeechRequestWithAuditEntry()
+
+	if err := svc.CreateSpeech(c); err != nil {
+		t.Fatalf("CreateSpeech returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	reqBody, ok := entry.Data.RequestBody.(map[string]any)
+	if !ok {
+		t.Fatalf("request body not captured as map, got %T", entry.Data.RequestBody)
+	}
+	if reqBody["input"] != "hello" || reqBody["voice"] != "alloy" {
+		t.Errorf("request body mismatch: %+v", reqBody)
+	}
+
+	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
+	if !ok {
+		t.Fatalf("response body not an AudioBodyLog, got %T", entry.Data.ResponseBody)
+	}
+	if !respBody.Stored || respBody.Encoding != "base64" {
+		t.Fatalf("expected stored base64 audio, got %+v", respBody)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(respBody.Data)
+	if err != nil || string(decoded) != "synthetic-audio" {
+		t.Errorf("base64 did not round-trip to the audio bytes: decoded=%q err=%v", decoded, err)
+	}
+}
+
+// TestAudioSpeech_PlaceholderWhenAudioDisabled: with LogBodies on but
+// LogAudioBodies off, the audio response is a metadata-only placeholder and the
+// input is not captured.
+func TestAudioSpeech_PlaceholderWhenAudioDisabled(t *testing.T) {
+	svc := &audioService{provider: newSpeechMock(), logBodies: true, logAudioBodies: false}
+	c, _, entry := newSpeechRequestWithAuditEntry()
+
+	if err := svc.CreateSpeech(c); err != nil {
+		t.Fatalf("CreateSpeech returned error: %v", err)
+	}
+
+	if entry.Data != nil && entry.Data.RequestBody != nil {
+		t.Errorf("input should not be captured when LogAudioBodies is off, got %+v", entry.Data.RequestBody)
+	}
+	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
+	if !ok {
+		t.Fatalf("response body not an AudioBodyLog, got %T", entry.Data.ResponseBody)
+	}
+	if respBody.Stored || respBody.Data != "" {
+		t.Errorf("audio bytes must not be stored when LogAudioBodies is off, got %+v", respBody)
+	}
+	if respBody.Bytes != len("synthetic-audio") {
+		t.Errorf("placeholder should still record byte size, got %d", respBody.Bytes)
+	}
+}
+
+// TestAudioSpeech_NoAudioBodyWhenBodiesDisabled: LogBodies is the master switch.
+// With it off, no audio body is captured even if LogAudioBodies is on.
+func TestAudioSpeech_NoAudioBodyWhenBodiesDisabled(t *testing.T) {
+	svc := &audioService{provider: newSpeechMock(), logBodies: false, logAudioBodies: true}
+	c, rec, entry := newSpeechRequestWithAuditEntry()
+
+	if err := svc.CreateSpeech(c); err != nil {
+		t.Fatalf("CreateSpeech returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if entry.Data != nil && (entry.Data.RequestBody != nil || entry.Data.ResponseBody != nil) {
+		t.Errorf("no body should be captured when LogBodies is off, got req=%+v resp=%+v",
+			entry.Data.RequestBody, entry.Data.ResponseBody)
 	}
 }
 

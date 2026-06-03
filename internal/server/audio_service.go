@@ -22,6 +22,9 @@ type audioService struct {
 	// logBodies and logAudioBodies mirror the audit logger config. Audio
 	// endpoints are not ingress-managed, so the audit middleware cannot capture
 	// their (binary/multipart) bodies; the service captures them here instead.
+	// logBodies is the master switch: audio bodies are only captured when it is
+	// on. logAudioBodies then decides whether the audio bytes are stored as
+	// base64 (playable) or as a lightweight placeholder.
 	logBodies      bool
 	logAudioBodies bool
 }
@@ -52,7 +55,7 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("voice is required", nil))
 	}
 
-	if s.logAudioBodies {
+	if s.logBodies && s.logAudioBodies {
 		auditlog.EnrichEntryWithRequestBody(c, audioSpeechAuditInput(req))
 	}
 
@@ -79,7 +82,7 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
-	if s.logAudioBodies {
+	if s.logBodies && s.logAudioBodies {
 		auditlog.EnrichEntryWithRequestBody(c, audioTranscriptionAuditInput(req))
 	}
 
@@ -189,9 +192,11 @@ func (s *audioService) respondAudio(c *echo.Context, resp *core.AudioResponse) e
 	}
 
 	// Audio output is binary; the audit middleware skips audio Content-Types so
-	// it never corrupts the bytes via UTF-8 coercion. Capture it here instead,
-	// embedding base64 audio for playback only when LogAudioBodies is set.
-	if auditlog.IsAudioContentType(contentType) && (s.logBodies || s.logAudioBodies) {
+	// it never corrupts the bytes via UTF-8 coercion. Capture it here instead.
+	// Body logging is the master switch (LogBodies); LogAudioBodies only decides
+	// whether the bytes are embedded as base64 for playback or recorded as a
+	// lightweight placeholder.
+	if auditlog.IsAudioContentType(contentType) && s.logBodies {
 		auditlog.EnrichEntryWithResponseBody(c, auditlog.BuildAudioResponseBody(contentType, resp.Data, s.logAudioBodies))
 	}
 
