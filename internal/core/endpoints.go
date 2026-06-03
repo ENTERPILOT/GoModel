@@ -124,7 +124,7 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationAudioSpeech,
 		}
-	case path == "/v1/audio/transcriptions" || path == "/v1/audio/translations":
+	case path == "/v1/audio/transcriptions":
 		return EndpointDescriptor{
 			ModelInteraction: true,
 			Dialect:          "openai_compat",

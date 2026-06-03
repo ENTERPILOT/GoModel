@@ -25,7 +25,6 @@ func TestDescribeEndpointPath(t *testing.T) {
 		{path: "/v1/files/file_1", managed: true, dialect: "openai_compat", operation: OperationFiles, bodyMode: BodyModeNone, interaction: true},
 		{path: "/v1/audio/speech", managed: false, dialect: "openai_compat", operation: OperationAudioSpeech, bodyMode: BodyModeJSON, interaction: true},
 		{path: "/v1/audio/transcriptions", managed: false, dialect: "openai_compat", operation: OperationAudioTranscriptions, bodyMode: BodyModeMultipart, interaction: true},
-		{path: "/v1/audio/translations", managed: false, dialect: "openai_compat", operation: OperationAudioTranscriptions, bodyMode: BodyModeMultipart, interaction: true},
 		{path: "/p/openai/responses", managed: true, dialect: "provider_passthrough", operation: OperationProviderPassthrough, bodyMode: BodyModeOpaque, interaction: true},
 		{path: "/v1/models", managed: false, dialect: "", operation: "", bodyMode: BodyModeNone, interaction: false},
 	}
@@ -77,7 +76,6 @@ func TestDescribeEndpoint_UsesMethodForBodyMode(t *testing.T) {
 		{method: http.MethodGet, path: "/v1/files/file_1", bodyMode: BodyModeNone},
 		{method: http.MethodPost, path: "/v1/audio/speech", bodyMode: BodyModeJSON},
 		{method: http.MethodPost, path: "/v1/audio/transcriptions", bodyMode: BodyModeMultipart},
-		{method: http.MethodPost, path: "/v1/audio/translations", bodyMode: BodyModeMultipart},
 		{method: http.MethodPost, path: "/v1/batches/batch_1/cancel", bodyMode: BodyModeNone},
 	}
 

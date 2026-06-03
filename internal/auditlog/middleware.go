@@ -135,18 +135,20 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 
 			// Capture response body if enabled
 			if cfg.LogBodies && responseCapture != nil && shouldCaptureResponseBody(c) && responseCapture.body.Len() > 0 {
-				// Set truncation flag if response body exceeded limit
-				if responseCapture.truncated {
-					entry.Data.ResponseBodyTooBigToHandle = true
-				}
-
 				bodyBytes := responseCapture.body.Bytes()
 
 				// Audio responses are binary; the audio handler captures them
 				// losslessly as base64 (gated by LogAudioBodies) before this
 				// runs. Skip here so we neither corrupt the bytes via UTF-8
-				// coercion nor clobber the handler-set body.
+				// coercion nor clobber the handler-set body — and do not apply
+				// the writer's truncation flag, which would conflict with the
+				// fully-stored audio body (the handler tracks its own size cap).
 				if !IsAudioContentType(c.Response().Header().Get("Content-Type")) {
+					// Set truncation flag if response body exceeded limit
+					if responseCapture.truncated {
+						entry.Data.ResponseBodyTooBigToHandle = true
+					}
+
 					// Decompress if Content-Encoding header is present
 					if contentEncoding := c.Response().Header().Get("Content-Encoding"); contentEncoding != "" {
 						if decompressed, ok := decompressBody(bodyBytes, contentEncoding); ok {

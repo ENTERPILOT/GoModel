@@ -261,6 +261,7 @@ func DefaultConfig() Config {
 	return Config{
 		Enabled:               false,
 		LogBodies:             false,
+		LogAudioBodies:        false,
 		LogHeaders:            false,
 		BufferSize:            1000,
 		FlushInterval:         5 * time.Second,
