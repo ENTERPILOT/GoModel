@@ -80,16 +80,77 @@ func MergeUnknownJSONFields(base UnknownJSONFields, additions map[string]json.Ra
 	if len(additions) == 0 {
 		return base, nil
 	}
-	merged := make(map[string]json.RawMessage, len(additions))
-	if !base.IsEmpty() {
-		if err := json.Unmarshal(base.raw, &merged); err != nil {
-			return UnknownJSONFields{}, err
+	additionFields := UnknownJSONFieldsFromMap(additions)
+	if base.IsEmpty() {
+		return additionFields, nil
+	}
+
+	overrideKeys := make(map[string]struct{}, len(additions))
+	for key := range additions {
+		overrideKeys[key] = struct{}{}
+	}
+
+	merged, err := mergeUnknownJSONFieldsRaw(base.raw, additionFields.raw, overrideKeys)
+	if err != nil {
+		return UnknownJSONFields{}, err
+	}
+	return UnknownJSONFields{raw: merged}, nil
+}
+
+func mergeUnknownJSONFieldsRaw(baseBody, additionBody []byte, overrideKeys map[string]struct{}) ([]byte, error) {
+	baseBody = bytes.TrimSpace(baseBody)
+	additionBody = bytes.TrimSpace(additionBody)
+	if len(additionBody) == 0 || bytes.Equal(additionBody, []byte("{}")) {
+		return CloneRawJSON(baseBody), nil
+	}
+	if len(baseBody) == 0 || bytes.Equal(baseBody, []byte("{}")) {
+		return CloneRawJSON(additionBody), nil
+	}
+
+	totalCap, err := mergedJSONObjectCap(len(baseBody), len(additionBody))
+	if err != nil {
+		return nil, err
+	}
+
+	buf := bytes.NewBuffer(make([]byte, 0, totalCap))
+	buf.WriteByte('{')
+	wrote := false
+	if err := appendUnknownJSONMembers(buf, baseBody, overrideKeys, &wrote); err != nil {
+		return nil, err
+	}
+	if err := appendUnknownJSONMembers(buf, additionBody, nil, &wrote); err != nil {
+		return nil, err
+	}
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
+}
+
+func appendUnknownJSONMembers(buf *bytes.Buffer, body []byte, skip map[string]struct{}, wrote *bool) error {
+	if len(body) == 0 || bytes.Equal(body, []byte("{}")) {
+		return nil
+	}
+	if !gjson.ValidBytes(body) {
+		return fmt.Errorf("invalid JSON object")
+	}
+	root := gjson.ParseBytes(body)
+	if !root.IsObject() {
+		return fmt.Errorf("expected JSON object")
+	}
+
+	root.ForEach(func(key, value gjson.Result) bool {
+		if _, shouldSkip := skip[key.String()]; shouldSkip {
+			return true
 		}
-	}
-	for key, value := range additions {
-		merged[key] = value
-	}
-	return UnknownJSONFieldsFromMap(merged), nil
+		if *wrote {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(key.Raw)
+		buf.WriteByte(':')
+		buf.WriteString(value.Raw)
+		*wrote = true
+		return true
+	})
+	return nil
 }
 
 // Lookup returns the raw JSON value for key or nil when absent.

@@ -131,9 +131,10 @@ want those namespaced GoModel IDs to reach the gateway unchanged, configure the
 SDK model provider in model ID pass-through mode:
 
 ```python
+import asyncio
 import os
 
-from agents import MultiProvider, RunConfig, Runner
+from agents import Agent, MultiProvider, RunConfig, Runner
 from openai import AsyncOpenAI
 
 client = AsyncOpenAI(
@@ -149,11 +150,24 @@ run_config = RunConfig(
     )
 )
 
-result = await Runner.run(
-    agent,
-    "Reply with exactly ok.",
-    run_config=run_config,
+agent = Agent(
+    name="Gateway assistant",
+    instructions="Be concise.",
+    model=os.getenv("OPENAI_MODEL", "anthropic/claude-sonnet-4-20250514"),
 )
+
+
+async def main():
+    result = await Runner.run(
+        agent,
+        "Reply with exactly ok.",
+        run_config=run_config,
+    )
+    print(result.final_output)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ## Supported SDK paths

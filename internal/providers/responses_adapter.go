@@ -106,6 +106,9 @@ func validateResponsesRequestForChatTranslation(req *core.ResponsesRequest) erro
 	if err := validateResponsesToolsForChatTranslation(req.Tools); err != nil {
 		return err
 	}
+	if err := validateResponsesToolChoiceForChatTranslation(req.ToolChoice); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -115,6 +118,19 @@ func validateResponsesToolsForChatTranslation(tools []map[string]any) error {
 		if strings.TrimSpace(toolType) != "function" {
 			return unsupportedResponsesChatTranslationTool(toolType)
 		}
+	}
+	return nil
+}
+
+func validateResponsesToolChoiceForChatTranslation(choice any) error {
+	choiceMap, ok := choice.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	choiceType, _ := choiceMap["type"].(string)
+	if strings.TrimSpace(choiceType) != "function" {
+		return unsupportedResponsesChatTranslationTool(choiceType)
 	}
 	return nil
 }

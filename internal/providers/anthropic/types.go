@@ -24,6 +24,7 @@ type anthropicRequest struct {
 	ToolChoice    *anthropicToolChoice   `json:"tool_choice,omitempty"`
 	MaxTokens     int                    `json:"max_tokens"`
 	Temperature   *float64               `json:"temperature,omitempty"`
+	TopP          *float64               `json:"top_p,omitempty"`
 	System        any                    `json:"system,omitempty"`
 	Stream        bool                   `json:"stream,omitempty"`
 	StopSequences []string               `json:"stop_sequences,omitempty"`

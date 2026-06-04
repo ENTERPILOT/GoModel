@@ -289,6 +289,28 @@ func TestBuildConverseParts_TopPFromTypedField(t *testing.T) {
 	}
 }
 
+func TestBuildConverseParts_TypedTopPWinsOverExtraFields(t *testing.T) {
+	topP := 0.8
+	req := &core.ChatRequest{
+		Model:    "anthropic.claude-3-5-haiku-20241022-v1:0",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		TopP:     &topP,
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"top_p": json.RawMessage("0.2"),
+		}),
+	}
+	parts, err := buildConverseParts(req)
+	if err != nil {
+		t.Fatalf("buildConverseParts: %v", err)
+	}
+	if parts.infCfg == nil || parts.infCfg.TopP == nil {
+		t.Fatal("typed top_p was not forwarded to InferenceConfiguration.TopP")
+	}
+	if got := awssdk.ToFloat32(parts.infCfg.TopP); got != 0.8 {
+		t.Errorf("top_p = %v, want typed value 0.8", got)
+	}
+}
+
 func TestBuildConverseParts_RejectsMaxTokensOverflow(t *testing.T) {
 	overflow := int(int64(1) << 33) // 2^33, fits in int64 but not int32
 	req := &core.ChatRequest{

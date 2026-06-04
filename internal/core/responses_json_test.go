@@ -572,6 +572,29 @@ func TestResponsesInputElementJSON_UnknownItemRoundTripHasNoDuplicateKeys(t *tes
 	}
 }
 
+func TestResponsesInputElementUnmarshalJSON_ResetsReceiver(t *testing.T) {
+	var elem ResponsesInputElement
+	if err := json.Unmarshal([]byte(`{"type":"message","role":"user","content":"hi","x_trace":"old"}`), &elem); err != nil {
+		t.Fatalf("json.Unmarshal(message) error = %v", err)
+	}
+	if elem.Role != "user" || elem.Content == nil || elem.ExtraFields.Lookup("x_trace") == nil {
+		t.Fatalf("initial element = %+v, want populated message", elem)
+	}
+
+	if err := json.Unmarshal([]byte(`{"type":"reasoning","id":"rs_123","summary":[]}`), &elem); err != nil {
+		t.Fatalf("json.Unmarshal(reasoning) error = %v", err)
+	}
+	if elem.Type != "reasoning" {
+		t.Fatalf("Type = %q, want reasoning", elem.Type)
+	}
+	if elem.Role != "" || elem.Content != nil || !elem.ExtraFields.IsEmpty() {
+		t.Fatalf("stale typed fields remained after unknown item decode: %+v", elem)
+	}
+	if len(elem.Raw) == 0 {
+		t.Fatal("Raw missing for unknown item")
+	}
+}
+
 func TestResponsesInputElementMarshalJSON_MergesRawUnknownItemExtras(t *testing.T) {
 	elem := ResponsesInputElement{
 		Type: "reasoning",

@@ -450,6 +450,7 @@ func (e *ResponsesInputElement) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	*e = ResponsesInputElement{}
 
 	if v, ok := raw["type"]; ok {
 		_ = json.Unmarshal(v, &e.Type)

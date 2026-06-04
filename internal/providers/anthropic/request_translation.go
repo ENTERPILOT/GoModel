@@ -296,6 +296,7 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		Model:         req.Model,
 		Messages:      make([]anthropicMessage, 0, len(req.Messages)),
 		Temperature:   req.Temperature,
+		TopP:          resolveAnthropicTopP(req),
 		Stream:        req.Stream,
 		StopSequences: stopSequencesFromExtra(req.ExtraFields),
 	}
@@ -544,6 +545,22 @@ func anthropicCacheControlFromExtra(extraFields core.UnknownJSONFields) (json.Ra
 		return nil, core.NewInvalidRequestError("anthropic cache_control must be an object", nil)
 	}
 	return core.CloneRawJSON(trimmed), nil
+}
+
+func resolveAnthropicTopP(req *core.ChatRequest) *float64 {
+	if req.TopP != nil {
+		return req.TopP
+	}
+
+	raw := bytes.TrimSpace(req.ExtraFields.Lookup("top_p"))
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	var topP float64
+	if err := json.Unmarshal(raw, &topP); err != nil {
+		return nil
+	}
+	return &topP
 }
 
 // stopSequencesFromExtra maps the OpenAI-compatible stop field (a string or an

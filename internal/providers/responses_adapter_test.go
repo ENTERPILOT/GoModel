@@ -468,6 +468,24 @@ func TestConvertResponsesRequestToChat_RejectsStatefulAgentsSDKFields(t *testing
 			},
 			want: "computer_use_preview",
 		},
+		{
+			name: "hosted file search tool choice",
+			req: &core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				ToolChoice: map[string]any{"type": "file_search"},
+			},
+			want: "file_search",
+		},
+		{
+			name: "hosted web search tool choice",
+			req: &core.ResponsesRequest{
+				Model:      "test-model",
+				Input:      "Hello",
+				ToolChoice: map[string]any{"type": "web_search_preview"},
+			},
+			want: "web_search_preview",
+		},
 	}
 
 	for _, tt := range tests {
