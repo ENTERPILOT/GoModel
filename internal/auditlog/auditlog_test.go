@@ -535,6 +535,47 @@ func TestMiddleware_SkipsStreamingResponseWriterCapture(t *testing.T) {
 	}
 }
 
+// TestMiddleware_AudioResponseNotMarkedTruncated verifies that an oversized audio
+// response — which trips the response writer's truncation flag — does NOT set
+// ResponseBodyTooBigToHandle on the audit entry. The audio handler captures the
+// body losslessly via its own path, so a truncation flag here would produce
+// conflicting metadata (a fully-stored body alongside a "too big" marker).
+func TestMiddleware_AudioResponseNotMarkedTruncated(t *testing.T) {
+	e := echo.New()
+	logger := &capturingLogger{cfg: Config{Enabled: true, LogBodies: true}}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(`{"model":"gpt-4o-mini-tts","input":"hi","voice":"alloy"}`))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	oversized := bytes.Repeat([]byte{0xff}, int(MaxBodyCapture)+16)
+	var capture *responseBodyCapture
+	handler := Middleware(logger)(func(c *echo.Context) error {
+		capture, _ = c.Response().(*responseBodyCapture)
+		c.Response().Header().Set("Content-Type", "audio/mpeg")
+		c.Response().WriteHeader(http.StatusOK)
+		_, err := c.Response().Write(oversized)
+		return err
+	})
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if capture == nil || !capture.truncated {
+		t.Fatal("expected the response writer to mark the oversized body as truncated")
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
+	}
+	entry := logger.entries[0]
+	if entry.Data != nil && entry.Data.ResponseBodyTooBigToHandle {
+		t.Error("audio response must not set ResponseBodyTooBigToHandle; the handler owns audio body capture")
+	}
+	if entry.Data != nil && entry.Data.ResponseBody != nil {
+		t.Errorf("middleware must not store the audio response body, got %T", entry.Data.ResponseBody)
+	}
+}
+
 func TestMiddleware_PrefersWorkflowOverLegacyResolution(t *testing.T) {
 	e := echo.New()
 	logger := &capturingLogger{
@@ -918,6 +959,8 @@ func TestIsModelInteractionPath(t *testing.T) {
 		{"batches", "/v1/batches", true},
 		{"batches with subpath", "/v1/batches/123", true},
 		{"batches prefix overmatch", "/v1/batcheship", false},
+		{"audio speech", "/v1/audio/speech", true},
+		{"audio transcriptions", "/v1/audio/transcriptions", true},
 		{"models", "/v1/models", false},
 		{"models with subpath", "/v1/models/gpt-4", false},
 		{"health", "/health", false},

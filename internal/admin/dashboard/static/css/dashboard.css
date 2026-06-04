@@ -2880,6 +2880,39 @@ textarea:focus {
   overflow-wrap: normal;
 }
 
+.audit-audio {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  white-space: normal;
+}
+
+.audit-audio-player {
+  width: 100%;
+  max-width: 420px;
+  height: 36px;
+}
+
+.audit-audio-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.audit-audio-empty {
+  align-items: flex-start;
+  padding: 4px 0;
+}
+
+.audit-audio-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.audit-audio-note {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .conversation-body-highlight {
   display: inline;
   border-left: 2px solid color-mix(in srgb, var(--accent) 70%, var(--border));

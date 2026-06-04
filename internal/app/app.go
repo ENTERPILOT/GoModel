@@ -883,6 +883,7 @@ func (a *App) logStartupInfo() {
 	if cfg.Logging.Enabled {
 		slog.Info("audit logging enabled",
 			"log_bodies", cfg.Logging.LogBodies,
+			"log_audio_bodies", cfg.Logging.LogAudioBodies,
 			"log_headers", cfg.Logging.LogHeaders,
 			"retention_days", cfg.Logging.RetentionDays,
 		)

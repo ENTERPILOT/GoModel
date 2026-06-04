@@ -233,6 +233,12 @@ type Config struct {
 	// LogBodies enables logging of full request/response bodies
 	LogBodies bool
 
+	// LogAudioBodies refines LogBodies for audio endpoints (base64 audio for
+	// /v1/audio/speech, upload metadata for transcriptions). Requires LogBodies:
+	// when LogBodies is off no audio body is captured; when LogBodies is on but
+	// this is off, audio responses are recorded as a lightweight placeholder.
+	LogAudioBodies bool
+
 	// LogHeaders enables logging of request/response headers
 	LogHeaders bool
 
@@ -255,6 +261,7 @@ func DefaultConfig() Config {
 	return Config{
 		Enabled:               false,
 		LogBodies:             false,
+		LogAudioBodies:        false,
 		LogHeaders:            false,
 		BufferSize:            1000,
 		FlushInterval:         5 * time.Second,

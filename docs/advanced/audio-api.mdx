@@ -82,3 +82,20 @@ through the full inference orchestrator**. Compared with `/v1/chat/completions`:
 For a provider whose native audio API differs from OpenAI's, use the
 [passthrough API](/features/passthrough-api) (`/p/{provider}/v1/audio/...`) to
 forward bytes verbatim to that upstream.
+
+## Audit logging
+
+Audio requests appear in the audit log like any other model interaction. Because
+audio payloads are binary and large, their bodies are gated by a dedicated
+setting, [`LOGGING_LOG_AUDIO_BODIES`](/advanced/configuration#audit-logging)
+(default `false`), which **refines** `LOGGING_LOG_BODIES` — it has no effect
+unless body logging is enabled:
+
+- **Body logging off** (`LOGGING_LOG_BODIES=false`) — no audio body is stored,
+  regardless of this setting.
+- **Body logging on, audio off** (the default) — the audio response is recorded
+  as a lightweight `{__audio__, content_type, bytes, stored: false}` placeholder; no audio bytes are stored.
+- **Body logging on, audio on** — `/v1/audio/speech` stores its text input and the
+  generated audio (base64, capped at 8 MB) so the **dashboard renders an inline
+  player**, and `/v1/audio/transcriptions` stores upload metadata (filename, model,
+  params) but never the raw uploaded audio bytes.

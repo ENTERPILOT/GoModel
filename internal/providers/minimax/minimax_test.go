@@ -23,7 +23,7 @@ func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
 		_, _ = w.Write([]byte(`{
 			"id":"chatcmpl-minimax",
 			"created":1677652288,
-			"model":"MiniMax-M2.7",
+			"model":"MiniMax-M3",
 			"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]
 		}`))
 	}))
@@ -32,7 +32,7 @@ func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
 	provider := NewWithHTTPClient("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-		Model: "MiniMax-M2.7",
+		Model: "MiniMax-M3",
 		Messages: []core.Message{
 			{Role: "user", Content: "hi"},
 		},
@@ -40,8 +40,8 @@ func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ChatCompletion() error = %v", err)
 	}
-	if resp.Model != "MiniMax-M2.7" {
-		t.Fatalf("resp.Model = %q, want MiniMax-M2.7", resp.Model)
+	if resp.Model != "MiniMax-M3" {
+		t.Fatalf("resp.Model = %q, want MiniMax-M3", resp.Model)
 	}
 	if gotPath != "/chat/completions" {
 		t.Fatalf("path = %q, want /chat/completions", gotPath)
@@ -65,7 +65,7 @@ func TestChatCompletion_ClampsZeroTemperature(t *testing.T) {
 		_, _ = w.Write([]byte(`{
 			"id":"chatcmpl-minimax",
 			"created":1677652288,
-			"model":"MiniMax-M2.7",
+			"model":"MiniMax-M3",
 			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
 		}`))
 	}))
@@ -75,7 +75,7 @@ func TestChatCompletion_ClampsZeroTemperature(t *testing.T) {
 
 	temp := 0.0
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-		Model:       "MiniMax-M2.7",
+		Model:       "MiniMax-M3",
 		Messages:    []core.Message{{Role: "user", Content: "hi"}},
 		Temperature: &temp,
 	})
@@ -119,7 +119,7 @@ func TestClampTemperature_NilRequest(t *testing.T) {
 }
 
 func TestClampTemperature_NilTemperature(t *testing.T) {
-	req := &core.ChatRequest{Model: "MiniMax-M2.7"}
+	req := &core.ChatRequest{Model: "MiniMax-M3"}
 	result := clampTemperature(req)
 	if result.Temperature != nil {
 		t.Fatal("expected nil temperature to remain nil")
@@ -128,7 +128,7 @@ func TestClampTemperature_NilTemperature(t *testing.T) {
 
 func TestClampTemperature_ZeroTemperature(t *testing.T) {
 	temp := 0.0
-	req := &core.ChatRequest{Model: "MiniMax-M2.7", Temperature: &temp}
+	req := &core.ChatRequest{Model: "MiniMax-M3", Temperature: &temp}
 	result := clampTemperature(req)
 	if result.Temperature == nil {
 		t.Fatal("expected non-nil temperature after clamping")
@@ -144,7 +144,7 @@ func TestClampTemperature_ZeroTemperature(t *testing.T) {
 
 func TestClampTemperature_PositiveTemperature(t *testing.T) {
 	temp := 0.7
-	req := &core.ChatRequest{Model: "MiniMax-M2.7", Temperature: &temp}
+	req := &core.ChatRequest{Model: "MiniMax-M3", Temperature: &temp}
 	result := clampTemperature(req)
 	if result != req {
 		t.Fatal("expected same pointer for valid temperature")

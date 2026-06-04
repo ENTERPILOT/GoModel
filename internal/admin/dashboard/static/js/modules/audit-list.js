@@ -508,10 +508,19 @@
                 const copyBodyState = createCopyState();
                 const copyHeadersState = createCopyState();
 
+                const helpers = global.DashboardConversationHelpers;
+                const computeRenderedBody = (p) => {
+                    if (!p || !p.showBody) return '';
+                    if (helpers && typeof helpers.isAudioBody === 'function' && helpers.isAudioBody(p.body)) {
+                        return helpers.renderAudioBody(p.body);
+                    }
+                    return renderBody(p.entry, p.body, { promptCacheHighlight: p.promptCacheHighlight });
+                };
+
                 return {
                     pane,
                     formattedHeaders: pane && pane.showHeaders ? formatJSON(pane.headers) : '',
-                    renderedBody: pane && pane.showBody ? renderBody(pane.entry, pane.body, { promptCacheHighlight: pane.promptCacheHighlight }) : '',
+                    renderedBody: computeRenderedBody(pane),
                     copyBodyState,
                     copyHeadersState,
                     copyState: copyBodyState,
@@ -527,9 +536,7 @@
                     syncPane(nextPane) {
                         this.pane = nextPane;
                         this.formattedHeaders = nextPane && nextPane.showHeaders ? formatJSON(nextPane.headers) : '';
-                        this.renderedBody = nextPane && nextPane.showBody
-                            ? renderBody(nextPane.entry, nextPane.body, { promptCacheHighlight: nextPane.promptCacheHighlight })
-                            : '';
+                        this.renderedBody = computeRenderedBody(nextPane);
                     }
                 };
             }

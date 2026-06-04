@@ -135,27 +135,35 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 
 			// Capture response body if enabled
 			if cfg.LogBodies && responseCapture != nil && shouldCaptureResponseBody(c) && responseCapture.body.Len() > 0 {
-				// Set truncation flag if response body exceeded limit
-				if responseCapture.truncated {
-					entry.Data.ResponseBodyTooBigToHandle = true
-				}
-
 				bodyBytes := responseCapture.body.Bytes()
 
-				// Decompress if Content-Encoding header is present
-				if contentEncoding := c.Response().Header().Get("Content-Encoding"); contentEncoding != "" {
-					if decompressed, ok := decompressBody(bodyBytes, contentEncoding); ok {
-						bodyBytes = decompressed
+				// Audio responses are binary; the audio handler captures them
+				// losslessly as base64 (gated by LogAudioBodies) before this
+				// runs. Skip here so we neither corrupt the bytes via UTF-8
+				// coercion nor clobber the handler-set body — and do not apply
+				// the writer's truncation flag, which would conflict with the
+				// fully-stored audio body (the handler tracks its own size cap).
+				if !IsAudioContentType(c.Response().Header().Get("Content-Type")) {
+					// Set truncation flag if response body exceeded limit
+					if responseCapture.truncated {
+						entry.Data.ResponseBodyTooBigToHandle = true
 					}
-				}
 
-				// Parse JSON to any for native BSON storage in MongoDB
-				var parsed any
-				if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
-					entry.Data.ResponseBody = parsed
-				} else {
-					// Fallback: store as valid UTF-8 string if not valid JSON
-					entry.Data.ResponseBody = toValidUTF8String(bodyBytes)
+					// Decompress if Content-Encoding header is present
+					if contentEncoding := c.Response().Header().Get("Content-Encoding"); contentEncoding != "" {
+						if decompressed, ok := decompressBody(bodyBytes, contentEncoding); ok {
+							bodyBytes = decompressed
+						}
+					}
+
+					// Parse JSON to any for native BSON storage in MongoDB
+					var parsed any
+					if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
+						entry.Data.ResponseBody = parsed
+					} else {
+						// Fallback: store as valid UTF-8 string if not valid JSON
+						entry.Data.ResponseBody = toValidUTF8String(bodyBytes)
+					}
 				}
 			}
 
@@ -398,6 +406,54 @@ func EnrichEntry(c *echo.Context, model, provider string) {
 	entry.RequestedModel = model
 	entry.Provider = provider
 	publishLiveAuditUpdate(c, entry)
+}
+
+// EnrichEntryWithRequestBody sets the audit request body from a handler that
+// captures its own request payload (e.g. audio endpoints, which are not
+// ingress-managed and so have no request snapshot to read from). A nil body or
+// missing entry is a no-op; an already-populated request body is preserved.
+func EnrichEntryWithRequestBody(c *echo.Context, body any) {
+	if body == nil {
+		return
+	}
+	entry := entryFromContext(c)
+	if entry == nil {
+		return
+	}
+	data := ensureLogData(entry)
+	if data.RequestBody != nil {
+		return
+	}
+	data.RequestBody = body
+	publishLiveAuditUpdate(c, entry)
+}
+
+// EnrichEntryWithResponseBody sets the audit response body from a handler that
+// captures its own response payload (e.g. audio output served as raw bytes).
+// A nil body or missing entry is a no-op.
+func EnrichEntryWithResponseBody(c *echo.Context, body any) {
+	if body == nil {
+		return
+	}
+	entry := entryFromContext(c)
+	if entry == nil {
+		return
+	}
+	ensureLogData(entry).ResponseBody = body
+	publishLiveAuditUpdate(c, entry)
+}
+
+// entryFromContext returns the live audit entry stored on the request context,
+// or nil when audit logging is inactive for the request.
+func entryFromContext(c *echo.Context) *LogEntry {
+	if c == nil {
+		return nil
+	}
+	entry, ok := c.Get(string(LogEntryKey)).(*LogEntry)
+	if !ok {
+		return nil
+	}
+	return entry
 }
 
 // EnrichEntryWithRequestedModel attaches early requested-model metadata to the

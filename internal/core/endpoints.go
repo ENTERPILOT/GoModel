@@ -25,6 +25,8 @@ const (
 	OperationEmbeddings          Operation = "embeddings"
 	OperationBatches             Operation = "batches"
 	OperationFiles               Operation = "files"
+	OperationAudioSpeech         Operation = "audio_speech"
+	OperationAudioTranscriptions Operation = "audio_transcriptions"
 	OperationProviderPassthrough Operation = "provider_passthrough"
 )
 
@@ -111,6 +113,23 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationFiles,
 		}
+	case path == "/v1/audio/speech":
+		// Audio endpoints call a provider and incur usage, so they are model
+		// interactions and must appear in audit/request logs. They are not
+		// IngressManaged: the handlers parse the body themselves (JSON for
+		// speech, multipart for transcriptions) rather than going through the
+		// translated inference pipeline.
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			Dialect:          "openai_compat",
+			Operation:        OperationAudioSpeech,
+		}
+	case path == "/v1/audio/transcriptions":
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			Dialect:          "openai_compat",
+			Operation:        OperationAudioTranscriptions,
+		}
 	case strings.HasPrefix(path, "/p/"):
 		return EndpointDescriptor{
 			ModelInteraction: true,
@@ -156,6 +175,10 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 			return BodyModeMultipart
 		}
 		return BodyModeNone
+	case OperationAudioSpeech:
+		return BodyModeJSON
+	case OperationAudioTranscriptions:
+		return BodyModeMultipart
 	case OperationProviderPassthrough:
 		return BodyModeOpaque
 	default:

@@ -599,6 +599,92 @@ test('auditPaneState syncs pane content when live detail data arrives', () => {
     assert.equal(renderCalls, 1);
 });
 
+test('isAudioBody detects the audio body marker', () => {
+    const helpers = loadConversationHelpers();
+    assert.equal(helpers.isAudioBody({ __audio__: true, content_type: 'audio/mpeg' }), true);
+    assert.equal(helpers.isAudioBody({ model: 'gpt-5' }), false);
+    assert.equal(helpers.isAudioBody(null), false);
+    assert.equal(helpers.isAudioBody('audio'), false);
+});
+
+test('renderAudioBody renders a player with a data URL when audio bytes are stored', () => {
+    const helpers = loadConversationHelpers();
+    const html = helpers.renderAudioBody({
+        __audio__: true,
+        content_type: 'audio/mpeg',
+        bytes: 2048,
+        encoding: 'base64',
+        data: 'QUJD',
+        stored: true
+    });
+    assert.match(html, /<audio[^>]+controls/);
+    assert.match(html, /src="data:audio\/mpeg;base64,QUJD"/);
+    assert.match(html, /2\.0 KB/);
+});
+
+test('renderAudioBody sanitizes content type and strips non-base64 characters', () => {
+    const helpers = loadConversationHelpers();
+    const html = helpers.renderAudioBody({
+        __audio__: true,
+        content_type: 'audio/mpeg" onerror=alert(1)',
+        bytes: 10,
+        encoding: 'base64',
+        data: 'AB"><script>CD',
+        stored: true
+    });
+    assert.ok(!html.includes('onerror'), 'content type must be sanitized');
+    assert.ok(!html.includes('<script>'), 'base64 payload must be sanitized');
+    // Dangerous characters (<, >, ") are stripped from the data URL; only the
+    // valid base64 alphabet survives (the letters of "script" are harmless).
+    assert.match(html, /src="data:audio\/mpeg;base64,ABscriptCD"/);
+});
+
+test('renderAudioBody renders a placeholder when audio is not stored', () => {
+    const helpers = loadConversationHelpers();
+    const html = helpers.renderAudioBody({
+        __audio__: true,
+        content_type: 'audio/mpeg',
+        bytes: 61056,
+        stored: false
+    });
+    assert.ok(!html.includes('<audio'), 'no player when bytes are absent');
+    assert.match(html, /LOGGING_LOG_AUDIO_BODIES/);
+    assert.match(html, /59\.6 KB/);
+});
+
+test('renderAudioBody notes when audio was too large to store', () => {
+    const helpers = loadConversationHelpers();
+    const html = helpers.renderAudioBody({
+        __audio__: true,
+        content_type: 'audio/wav',
+        bytes: 99999999,
+        stored: false,
+        too_large: true
+    });
+    assert.ok(!html.includes('<audio'));
+    assert.match(html, /too large/i);
+});
+
+test('auditPaneState renders audio bodies through the audio helper', () => {
+    const helpers = loadConversationHelpers();
+    const module = createAuditListModule({
+        window: { DashboardConversationHelpers: helpers }
+    });
+    const paneState = module.auditPaneState({
+        entry: { id: 'audit-1' },
+        showBody: true,
+        body: {
+            __audio__: true,
+            content_type: 'audio/mpeg',
+            bytes: 1024,
+            encoding: 'base64',
+            data: 'QUJD',
+            stored: true
+        }
+    });
+    assert.match(paneState.renderedBody, /<audio[^>]+src="data:audio\/mpeg;base64,QUJD"/);
+});
+
 test('auditPaneState copies the formatted body and resets success feedback', async () => {
     let resetCallback = null;
     const writes = [];
