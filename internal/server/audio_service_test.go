@@ -287,17 +287,63 @@ func TestAudioTranscription_LogsUploadedAudioWhenEnabled(t *testing.T) {
 	}
 }
 
-// TestAudioTranscription_NoUploadCaptureWhenAudioDisabled: the upload is not
-// captured when LogAudioBodies is off.
-func TestAudioTranscription_NoUploadCaptureWhenAudioDisabled(t *testing.T) {
+// TestAudioTranscription_MetadataPlaceholderWhenAudioDisabled: with LogBodies on
+// but LogAudioBodies off, the upload metadata is still recorded as a placeholder
+// (no audio bytes), mirroring the speech-response behavior.
+func TestAudioTranscription_MetadataPlaceholderWhenAudioDisabled(t *testing.T) {
 	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: false}
 	c, _, entry := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("uploaded-audio-bytes"))
 
 	if err := svc.CreateTranscription(c); err != nil {
 		t.Fatalf("CreateTranscription returned error: %v", err)
 	}
+	body, ok := entry.Data.RequestBody.(auditlog.AudioBodyLog)
+	if !ok {
+		t.Fatalf("request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
+	}
+	if body.Stored || body.Data != "" {
+		t.Errorf("audio bytes must not be stored when LogAudioBodies is off, got %+v", body)
+	}
+	if body.Meta["model"] != "gpt-4o-transcribe" {
+		t.Errorf("metadata must be preserved on the placeholder, got %+v", body.Meta)
+	}
+}
+
+// TestAudioTranscription_NoCaptureWhenBodiesDisabled: nothing is captured when
+// the master LogBodies switch is off.
+func TestAudioTranscription_NoCaptureWhenBodiesDisabled(t *testing.T) {
+	svc := &audioService{provider: newTranscriptionMock(), logBodies: false, logAudioBodies: true}
+	c, _, entry := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("uploaded-audio-bytes"))
+
+	if err := svc.CreateTranscription(c); err != nil {
+		t.Fatalf("CreateTranscription returned error: %v", err)
+	}
 	if entry.Data != nil && entry.Data.RequestBody != nil {
-		t.Errorf("upload must not be captured when LogAudioBodies is off, got %+v", entry.Data.RequestBody)
+		t.Errorf("nothing should be captured when LogBodies is off, got %+v", entry.Data.RequestBody)
+	}
+}
+
+func TestAudioUploadContentType(t *testing.T) {
+	cases := []struct {
+		contentType string
+		filename    string
+		want        string
+	}{
+		{"audio/wav; codecs=1", "x.bin", "audio/wav"},
+		{"audio/webm; codecs=opus", "x", "audio/webm"},
+		{"AUDIO/MPEG", "x", "audio/mpeg"},
+		{"application/octet-stream", "speech.mp3", "audio/mpeg"},
+		{"", "clip.wav", "audio/wav"},
+		{"", "clip.ogg", "audio/ogg"},
+		{"", "clip.flac", "audio/flac"},
+		{"", "clip.m4a", "audio/mp4"},
+		{"", "unknown", "audio/mpeg"},
+	}
+	for _, tc := range cases {
+		got := audioUploadContentType(&core.AudioTranscriptionRequest{FileContentType: tc.contentType, Filename: tc.filename})
+		if got != tc.want {
+			t.Errorf("audioUploadContentType(ct=%q, file=%q) = %q, want %q", tc.contentType, tc.filename, got, tc.want)
+		}
 	}
 }
 

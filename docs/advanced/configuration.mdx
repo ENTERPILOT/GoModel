@@ -113,8 +113,9 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
   audio (base64, capped at 8 MB, also playable) plus its upload metadata. It
   defaults to `false` because audio payloads are
   large and grow the audit store quickly. When body logging is on but this is off,
-  audio responses are recorded as a lightweight `{__audio__, content_type, bytes, stored: false}` placeholder;
-  when body logging is off, no audio body is stored at all.
+  audio bodies (the speech response and the transcription upload, which keeps its
+  metadata) are recorded as a lightweight `{__audio__, content_type, bytes, stored: false}`
+  placeholder; when body logging is off, no audio body is stored at all.
 </Note>
 
 #### Token Usage Tracking

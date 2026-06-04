@@ -83,9 +83,12 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
-	if s.logBodies && s.logAudioBodies {
+	// LogBodies is the master switch: when on, the upload metadata is always
+	// recorded; LogAudioBodies additionally embeds the raw audio as base64 for
+	// playback, otherwise the entry keeps a metadata-only placeholder.
+	if s.logBodies {
 		auditlog.EnrichEntryWithRequestBody(c, auditlog.BuildAudioUploadBody(
-			audioUploadContentType(req), req.File, true, audioTranscriptionAuditInput(req)))
+			audioUploadContentType(req), req.File, s.logAudioBodies, audioTranscriptionAuditInput(req)))
 	}
 
 	ctx, err := s.prepare(c, req.Model, req.Provider)
@@ -230,8 +233,13 @@ func audioSpeechAuditInput(req *core.AudioSpeechRequest) map[string]any {
 // upload: the client-declared part Content-Type when it is an audio type,
 // otherwise a best-effort guess from the filename extension (defaulting to mp3).
 func audioUploadContentType(req *core.AudioTranscriptionRequest) string {
-	if ct := strings.TrimSpace(req.FileContentType); auditlog.IsAudioContentType(ct) {
-		return ct
+	// Strip any MIME parameters (e.g. "audio/webm; codecs=opus") so the stored
+	// type is a bare media type the dashboard can use directly in a data: URL.
+	if ct := strings.TrimSpace(req.FileContentType); ct != "" {
+		mediaType := strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
+		if auditlog.IsAudioContentType(mediaType) {
+			return mediaType
+		}
 	}
 	switch strings.ToLower(filepath.Ext(req.Filename)) {
 	case ".wav":
