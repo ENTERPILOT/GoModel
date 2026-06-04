@@ -994,6 +994,40 @@ func TestChatCompletion_UsesNativeGenerateContentByDefault(t *testing.T) {
 	}
 }
 
+func TestGeminiGenerationConfig_UsesTypedTopP(t *testing.T) {
+	topP := 0.8
+	cfg := geminiGenerationConfig(&core.ChatRequest{
+		Model:    "gemini-2.5-flash",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		TopP:     &topP,
+	})
+
+	if got := cfg["topP"]; got != 0.8 {
+		t.Fatalf("topP = %#v, want 0.8", got)
+	}
+}
+
+func TestConvertResponsesRequestToGeminiPreservesTopP(t *testing.T) {
+	topP := 0.7
+	chatReq, err := providers.ConvertResponsesRequestToChat(&core.ResponsesRequest{
+		Model: "gemini-2.5-flash",
+		Input: "hi",
+		TopP:  &topP,
+	})
+	if err != nil {
+		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+	}
+
+	geminiReq, err := convertChatRequestToGemini(chatReq)
+	if err != nil {
+		t.Fatalf("convertChatRequestToGemini() error = %v", err)
+	}
+
+	if got := geminiReq.GenerationConfig["topP"]; got != 0.7 {
+		t.Fatalf("topP = %#v, want 0.7", got)
+	}
+}
+
 func TestChatCompletion_NativeUsageMetadata(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 

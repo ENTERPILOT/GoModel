@@ -351,10 +351,12 @@ func resolveMaxTokens(req *core.ChatRequest) int {
 	return 0
 }
 
-// resolveTopP extracts top_p from req.ExtraFields. core.ChatRequest does not
-// surface top_p as a typed field, so we look it up in the catch-all map the
-// JSON decoder populates for unknown OpenAI parameters.
+// resolveTopP extracts top_p from the typed request field, falling back to the
+// catch-all map for older internal callers that still carry it as an extra.
 func resolveTopP(req *core.ChatRequest) (float64, bool) {
+	if req.TopP != nil {
+		return *req.TopP, true
+	}
 	raw := req.ExtraFields.Lookup("top_p")
 	if len(raw) == 0 {
 		return 0, false

@@ -481,7 +481,11 @@ func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
 	if req.Temperature != nil {
 		cfg["temperature"] = *req.Temperature
 	}
-	copyJSONNumber(req.ExtraFields.Lookup("top_p"), cfg, "topP")
+	if req.TopP != nil {
+		cfg["topP"] = *req.TopP
+	} else {
+		copyJSONNumber(req.ExtraFields.Lookup("top_p"), cfg, "topP")
+	}
 	copyJSONNumber(req.ExtraFields.Lookup("top_k"), cfg, "topK")
 	copyJSONNumber(req.ExtraFields.Lookup("candidate_count"), cfg, "candidateCount")
 	copyJSONNumber(req.ExtraFields.Lookup("presence_penalty"), cfg, "presencePenalty")

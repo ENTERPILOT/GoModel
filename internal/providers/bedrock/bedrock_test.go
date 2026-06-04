@@ -270,6 +270,25 @@ func TestBuildConverseParts_TopPFromExtraFields(t *testing.T) {
 	}
 }
 
+func TestBuildConverseParts_TopPFromTypedField(t *testing.T) {
+	topP := 0.8
+	req := &core.ChatRequest{
+		Model:    "anthropic.claude-3-5-haiku-20241022-v1:0",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		TopP:     &topP,
+	}
+	parts, err := buildConverseParts(req)
+	if err != nil {
+		t.Fatalf("buildConverseParts: %v", err)
+	}
+	if parts.infCfg == nil || parts.infCfg.TopP == nil {
+		t.Fatal("typed top_p was not forwarded to InferenceConfiguration.TopP")
+	}
+	if got := awssdk.ToFloat32(parts.infCfg.TopP); got != 0.8 {
+		t.Errorf("top_p = %v, want 0.8", got)
+	}
+}
+
 func TestBuildConverseParts_RejectsMaxTokensOverflow(t *testing.T) {
 	overflow := int(int64(1) << 33) // 2^33, fits in int64 but not int32
 	req := &core.ChatRequest{
@@ -468,9 +487,9 @@ func TestConvertTools_ToolChoiceNormalization(t *testing.T) {
 	}}
 
 	cases := []struct {
-		name      string
-		choice    any
-		wantNil   bool
+		name       string
+		choice     any
+		wantNil    bool
 		wantChoice string // type name suffix for assertion when cfg is non-nil
 	}{
 		{"auto string", "auto", false, "Auto"},
