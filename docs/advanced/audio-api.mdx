@@ -97,5 +97,6 @@ unless body logging is enabled:
   as a lightweight `{__audio__, content_type, bytes, stored: false}` placeholder; no audio bytes are stored.
 - **Body logging on, audio on** — `/v1/audio/speech` stores its text input and the
   generated audio (base64, capped at 8 MB) so the **dashboard renders an inline
-  player**, and `/v1/audio/transcriptions` stores upload metadata (filename, model,
-  params) but never the raw uploaded audio bytes.
+  player**, and `/v1/audio/transcriptions` stores the uploaded audio (base64,
+  capped at 8 MB, also playable in the dashboard) alongside the upload metadata
+  (filename, model, params).

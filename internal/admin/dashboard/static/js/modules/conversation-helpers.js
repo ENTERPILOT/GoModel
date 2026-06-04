@@ -367,17 +367,45 @@
         return /^audio\/[a-zA-Z0-9.+-]+$/.test(ct) ? ct : 'audio/mpeg';
     }
 
+    function formatAudioMetaValue(value) {
+        if (value == null) return '';
+        if (typeof value === 'object') {
+            try {
+                return JSON.stringify(value);
+            } catch (_) {
+                return String(value);
+            }
+        }
+        return String(value);
+    }
+
+    // renderAudioMeta renders the optional request-parameter metadata attached to
+    // an audio body (e.g. a transcription upload's model and options).
+    function renderAudioMeta(meta) {
+        if (!meta || typeof meta !== 'object') return '';
+        const rows = Object.keys(meta).map((key) =>
+            '<div class="audit-audio-meta-row">'
+            + '<span class="audit-audio-meta-key mono">' + escapeHTML(key) + '</span>'
+            + '<span class="mono">' + escapeHTML(formatAudioMetaValue(meta[key])) + '</span>'
+            + '</div>');
+        if (!rows.length) return '';
+        return '<div class="audit-audio-metadata">' + rows.join('') + '</div>';
+    }
+
     // renderAudioBody renders an audio body as a player when the audio bytes
     // were captured (base64), otherwise a labeled placeholder explaining why.
+    // Any attached request metadata is listed below.
     function renderAudioBody(value) {
         const contentType = sanitizeAudioContentType(value.content_type);
         const metaLabel = escapeHTML(contentType + ' · ' + formatByteSize(value.bytes));
+        const metaBlock = renderAudioMeta(value.meta);
         if (value.stored && value.encoding === 'base64' && value.data) {
             const b64 = String(value.data).replace(/[^A-Za-z0-9+/=]/g, '');
             const src = 'data:' + contentType + ';base64,' + b64;
             return '<div class="audit-audio">'
                 + '<audio class="audit-audio-player" controls preload="none" src="' + src + '"></audio>'
                 + '<div class="audit-audio-meta mono">' + metaLabel + '</div>'
+                + metaBlock
                 + '</div>';
         }
         const reason = value.too_large
@@ -387,6 +415,7 @@
             + '<div class="audit-audio-icon" aria-hidden="true">🔊</div>'
             + '<div class="audit-audio-meta mono">' + metaLabel + '</div>'
             + '<div class="audit-audio-note">' + escapeHTML(reason) + '</div>'
+            + metaBlock
             + '</div>';
     }
 

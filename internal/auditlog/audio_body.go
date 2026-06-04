@@ -19,13 +19,14 @@ const audioBodyMaxBytes = 8 * 1024 * 1024
 // player (when Data is present) or a labeled placeholder. When Data is set it
 // holds the base64-encoded audio, suitable for a data: URL of ContentType.
 type AudioBodyLog struct {
-	Audio       bool   `json:"__audio__" bson:"__audio__"`
-	ContentType string `json:"content_type,omitempty" bson:"content_type,omitempty"`
-	Bytes       int    `json:"bytes" bson:"bytes"`
-	Encoding    string `json:"encoding,omitempty" bson:"encoding,omitempty"`
-	Data        string `json:"data,omitempty" bson:"data,omitempty"`
-	Stored      bool   `json:"stored" bson:"stored"`
-	TooLarge    bool   `json:"too_large,omitempty" bson:"too_large,omitempty"`
+	Audio       bool           `json:"__audio__" bson:"__audio__"`
+	ContentType string         `json:"content_type,omitempty" bson:"content_type,omitempty"`
+	Bytes       int            `json:"bytes" bson:"bytes"`
+	Encoding    string         `json:"encoding,omitempty" bson:"encoding,omitempty"`
+	Data        string         `json:"data,omitempty" bson:"data,omitempty"`
+	Stored      bool           `json:"stored" bson:"stored"`
+	TooLarge    bool           `json:"too_large,omitempty" bson:"too_large,omitempty"`
+	Meta        map[string]any `json:"meta,omitempty" bson:"meta,omitempty"`
 }
 
 // IsAudioContentType reports whether a Content-Type denotes an audio payload.
@@ -38,10 +39,23 @@ func IsAudioContentType(contentType string) bool {
 // When storeBytes is true and the payload fits within audioBodyMaxBytes the
 // audio is embedded as base64 for playback; otherwise only metadata is kept.
 func BuildAudioResponseBody(contentType string, data []byte, storeBytes bool) AudioBodyLog {
+	return buildAudioBody(contentType, data, storeBytes, nil)
+}
+
+// BuildAudioUploadBody builds the audit value for an uploaded audio request
+// (e.g. a transcription input). It behaves like BuildAudioResponseBody but
+// attaches request metadata (model, params) alongside the audio so the
+// dashboard can show both a player and the parameters.
+func BuildAudioUploadBody(contentType string, data []byte, storeBytes bool, meta map[string]any) AudioBodyLog {
+	return buildAudioBody(contentType, data, storeBytes, meta)
+}
+
+func buildAudioBody(contentType string, data []byte, storeBytes bool, meta map[string]any) AudioBodyLog {
 	body := AudioBodyLog{
 		Audio:       true,
 		ContentType: strings.TrimSpace(contentType),
 		Bytes:       len(data),
+		Meta:        meta,
 	}
 	if !storeBytes || len(data) == 0 {
 		return body

@@ -229,6 +229,124 @@ func TestAudioTranscription_HappyPath(t *testing.T) {
 	}
 }
 
+// newTranscriptionRequestWithAuditEntry builds a multipart /v1/audio/transcriptions
+// request carrying the given audio bytes and seeds an empty audit entry.
+func newTranscriptionRequestWithAuditEntry(filename string, audio []byte) (*echo.Context, *httptest.ResponseRecorder, *auditlog.LogEntry) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("model", "gpt-4o-transcribe")
+	_ = w.WriteField("language", "en")
+	part, _ := w.CreateFormFile("file", filename)
+	_, _ = part.Write(audio)
+	_ = w.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	entry := &auditlog.LogEntry{}
+	c.Set(string(auditlog.LogEntryKey), entry)
+	return c, rec, entry
+}
+
+func newTranscriptionMock() *audioMockProvider {
+	return &audioMockProvider{
+		mockProvider:      &mockProvider{supportedModels: []string{"gpt-4o-transcribe"}},
+		transcriptionResp: &core.AudioResponse{ContentType: "application/json", Data: []byte(`{"text":"hi"}`)},
+	}
+}
+
+// TestAudioTranscription_LogsUploadedAudioWhenEnabled: with both flags on, the
+// uploaded audio is captured losslessly as a playable base64 request body, with
+// the upload metadata attached. Content type falls back to the filename
+// extension when the multipart part declares a non-audio type.
+func TestAudioTranscription_LogsUploadedAudioWhenEnabled(t *testing.T) {
+	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: true}
+	c, rec, entry := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("uploaded-audio-bytes"))
+
+	if err := svc.CreateTranscription(c); err != nil {
+		t.Fatalf("CreateTranscription returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	body, ok := entry.Data.RequestBody.(auditlog.AudioBodyLog)
+	if !ok {
+		t.Fatalf("request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
+	}
+	if !body.Stored || body.ContentType != "audio/mpeg" {
+		t.Fatalf("expected stored audio/mpeg (from .mp3 extension), got %+v", body)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(body.Data)
+	if err != nil || string(decoded) != "uploaded-audio-bytes" {
+		t.Errorf("uploaded audio not preserved losslessly: decoded=%q err=%v", decoded, err)
+	}
+	if body.Meta["model"] != "gpt-4o-transcribe" || body.Meta["language"] != "en" {
+		t.Errorf("upload metadata mismatch: %+v", body.Meta)
+	}
+}
+
+// TestAudioTranscription_MetadataPlaceholderWhenAudioDisabled: with LogBodies on
+// but LogAudioBodies off, the upload metadata is still recorded as a placeholder
+// (no audio bytes), mirroring the speech-response behavior.
+func TestAudioTranscription_MetadataPlaceholderWhenAudioDisabled(t *testing.T) {
+	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: false}
+	c, _, entry := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("uploaded-audio-bytes"))
+
+	if err := svc.CreateTranscription(c); err != nil {
+		t.Fatalf("CreateTranscription returned error: %v", err)
+	}
+	body, ok := entry.Data.RequestBody.(auditlog.AudioBodyLog)
+	if !ok {
+		t.Fatalf("request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
+	}
+	if body.Stored || body.Data != "" {
+		t.Errorf("audio bytes must not be stored when LogAudioBodies is off, got %+v", body)
+	}
+	if body.Meta["model"] != "gpt-4o-transcribe" {
+		t.Errorf("metadata must be preserved on the placeholder, got %+v", body.Meta)
+	}
+}
+
+// TestAudioTranscription_NoCaptureWhenBodiesDisabled: nothing is captured when
+// the master LogBodies switch is off.
+func TestAudioTranscription_NoCaptureWhenBodiesDisabled(t *testing.T) {
+	svc := &audioService{provider: newTranscriptionMock(), logBodies: false, logAudioBodies: true}
+	c, _, entry := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("uploaded-audio-bytes"))
+
+	if err := svc.CreateTranscription(c); err != nil {
+		t.Fatalf("CreateTranscription returned error: %v", err)
+	}
+	if entry.Data != nil && entry.Data.RequestBody != nil {
+		t.Errorf("nothing should be captured when LogBodies is off, got %+v", entry.Data.RequestBody)
+	}
+}
+
+func TestAudioUploadContentType(t *testing.T) {
+	cases := []struct {
+		contentType string
+		filename    string
+		want        string
+	}{
+		{"audio/wav; codecs=1", "x.bin", "audio/wav"},
+		{"audio/webm; codecs=opus", "x", "audio/webm"},
+		{"AUDIO/MPEG", "x", "audio/mpeg"},
+		{"application/octet-stream", "speech.mp3", "audio/mpeg"},
+		{"", "clip.wav", "audio/wav"},
+		{"", "clip.ogg", "audio/ogg"},
+		{"", "clip.flac", "audio/flac"},
+		{"", "clip.m4a", "audio/mp4"},
+		{"", "unknown", "audio/mpeg"},
+	}
+	for _, tc := range cases {
+		got := audioUploadContentType(&core.AudioTranscriptionRequest{FileContentType: tc.contentType, Filename: tc.filename})
+		if got != tc.want {
+			t.Errorf("audioUploadContentType(ct=%q, file=%q) = %q, want %q", tc.contentType, tc.filename, got, tc.want)
+		}
+	}
+}
+
 func TestAudioTranscription_MissingModel(t *testing.T) {
 	mock := &audioMockProvider{mockProvider: &mockProvider{}}
 	handler := NewHandler(mock, nil, nil, nil)
