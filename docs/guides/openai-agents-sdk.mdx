@@ -123,6 +123,39 @@ console.log(result.finalOutput);
 
 </CodeGroup>
 
+### Namespaced model IDs
+
+The Python SDK treats strings like `anthropic/claude-sonnet-4-20250514` and
+`gemini/gemini-2.0-flash` as provider-prefixed model names by default. When you
+want those namespaced GoModel IDs to reach the gateway unchanged, configure the
+SDK model provider in model ID pass-through mode:
+
+```python
+import os
+
+from agents import MultiProvider, RunConfig, Runner
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI(
+    base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8080/v1"),
+    api_key=os.getenv("GOMODEL_MASTER_KEY", "change-me"),
+)
+
+run_config = RunConfig(
+    model_provider=MultiProvider(
+        openai_client=client,
+        unknown_prefix_mode="model_id",
+        openai_prefix_mode="model_id",
+    )
+)
+
+result = await Runner.run(
+    agent,
+    "Reply with exactly ok.",
+    run_config=run_config,
+)
+```
+
 ## Supported SDK paths
 
 GoModel supports the SDK's normal HTTP Responses path:
@@ -142,9 +175,12 @@ GoModel also preserves newer Responses input items for native Responses
 providers. If a request has to be translated to Chat Completions for a provider
 that does not implement Responses natively, GoModel translates structured
 `text` output settings into the Chat Completions `response_format` (and passes
-`text.verbosity` through), while returning a clear error for stateful or
-provider-native Responses fields such as `previous_response_id`, `conversation`,
-and hosted tool items.
+`text.verbosity` through) only for chat providers that support those fields,
+while returning a clear error for stateful or provider-native Responses fields
+such as `previous_response_id`, `conversation`, and hosted tool items.
+
+See [Responses compatibility](/advanced/responses-compatibility) for the full
+feature matrix.
 
 ## Storage behavior
 
@@ -157,7 +193,12 @@ when the upstream provider does not support response retrieval. If the SDK sends
 - Responses websocket transport is not implemented. Use the SDK's HTTP/SSE
   transport with GoModel.
 - Hosted tools such as web search, file search, and computer use require a
-  native upstream provider that supports those tool payloads.
+  native upstream provider that supports those tool payloads. Chat-translated
+  providers such as Anthropic and Gemini reject those tools unless GoModel adds
+  explicit provider capability mapping for them.
+- Anthropic does not currently accept translated structured-output
+  `response_format` or `text.verbosity` settings. GoModel rejects those fields
+  instead of silently ignoring them.
 - `previous_response_id` and `conversation` are forwarded to native Responses
   providers. Chat-translated providers reject them because GoModel cannot safely
   reconstruct provider-managed state across that translation boundary yet.

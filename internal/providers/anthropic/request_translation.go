@@ -288,6 +288,9 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	if req == nil {
 		return nil, core.NewInvalidRequestError("anthropic chat request is required", nil)
 	}
+	if err := validateAnthropicUnsupportedChatExtras(req.ExtraFields); err != nil {
+		return nil, err
+	}
 
 	anthropicReq := &anthropicRequest{
 		Model:         req.Model,
@@ -351,6 +354,15 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	}
 
 	return anthropicReq, nil
+}
+
+func validateAnthropicUnsupportedChatExtras(extra core.UnknownJSONFields) error {
+	for _, field := range []string{"response_format", "verbosity"} {
+		if extra.Lookup(field) != nil {
+			return core.NewInvalidRequestError("chat field "+field+" is not supported by Anthropic translation", nil)
+		}
+	}
+	return nil
 }
 
 // convertResponsesRequestToAnthropic converts a canonical Responses request by

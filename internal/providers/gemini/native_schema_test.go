@@ -155,3 +155,39 @@ func TestGeminiToolsFromOpenAIRejectsInvalidParameterSchemas(t *testing.T) {
 		})
 	}
 }
+
+func TestGeminiToolsFromOpenAIRejectsUnsupportedToolShapes(t *testing.T) {
+	tests := []struct {
+		name      string
+		tool      map[string]any
+		wantError string
+	}{
+		{
+			name:      "hosted tool type",
+			tool:      map[string]any{"type": "web_search_preview"},
+			wantError: "unsupported tool type: web_search_preview",
+		},
+		{
+			name:      "missing function object",
+			tool:      map[string]any{"type": "function"},
+			wantError: "tool.function must be an object",
+		},
+		{
+			name:      "empty function name",
+			tool:      map[string]any{"type": "function", "function": map[string]any{"name": " "}},
+			wantError: "tool.function.name is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := geminiToolsFromOpenAI([]map[string]any{tt.tool})
+			if err == nil {
+				t.Fatal("geminiToolsFromOpenAI() error = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("error = %q, want to contain %q", err.Error(), tt.wantError)
+			}
+		})
+	}
+}

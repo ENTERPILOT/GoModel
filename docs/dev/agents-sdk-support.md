@@ -1,6 +1,6 @@
 # OpenAI Agents SDK Support
 
-Status checked: 2026-05-22
+Status checked: 2026-06-02
 
 ## Short answer
 
@@ -84,6 +84,9 @@ exact shape.
 - Unknown Responses input item types round-trip unchanged for native Responses
   providers; chat-translated providers now return a clear compatibility error.
 - First OpenAI Agents SDK guide and runnable smoke examples.
+- Manual Anthropic probes passed for direct OpenAI Responses calls, Python
+  Agents SDK `Runner.run(...)`, function tool loops, and
+  `Runner.run_streamed(...)` on 2026-06-02.
 
 ### Needs validation
 
@@ -97,6 +100,7 @@ exact shape.
 - Sessions that replay `result.to_input_list()` and SDK-managed local session
   history.
 - `OpenAIResponsesCompactionSession` with `responses.compact`.
+- Full Gemini Agents SDK probes against live upstream models.
 
 ### Known or likely gaps
 
@@ -113,12 +117,19 @@ exact shape.
   endpoint.
 - Built-in Responses tools such as web search, file search, computer use, and
   tool search are only safe when the selected upstream provider natively
-  supports those tool payloads.
+  supports those tool payloads. Chat-translated providers now reject hosted tool
+  payloads instead of assuming provider compatibility.
+- Anthropic rejects translated `response_format` and `verbosity` fields because
+  there is no safe native mapping today.
 - Prompt-managed flows and deferred tool loading need validation, especially
   when the SDK omits `model` because the prompt owns model selection.
 - Tracing uploads go to OpenAI by default in the SDK. Users without an OpenAI
   Platform key need docs to disable tracing or configure a separate tracing
   processor/key.
+- Python Agents SDK users must enable model ID pass-through on `MultiProvider`
+  when sending GoModel namespaced model IDs such as `anthropic/...` or
+  `gemini/...`; otherwise the SDK rejects unknown provider prefixes before
+  calling GoModel.
 
 ## Implementation checklist
 
@@ -199,7 +210,8 @@ provider-specific adaptation where relevant.
   providers with a clear compatibility error.
 - Done: translate `text.format` to the Chat Completions `response_format`
   (`json_schema` / `json_object`) and pass `text.verbosity` through on
-  chat-translated providers; unknown text formats still return a clear error.
+  chat-translated providers that support those fields; unknown text formats
+  still return a clear error. Anthropic rejects these fields explicitly.
 - Still needed: optionally expand previous stored responses into full input for
   chat-translated providers.
 - Add tests for:
@@ -223,7 +235,9 @@ provider-specific adaptation where relevant.
 
 ### P2: Feature capability gating
 
-- Add model/provider capability metadata for Responses features:
+- Partially done: chat-translated providers reject hosted OpenAI Responses tools
+  until a provider-specific capability mapping exists.
+- Still needed: add model/provider capability metadata for Responses features:
   - function tools
   - structured outputs through `text.format`
   - multimodal input

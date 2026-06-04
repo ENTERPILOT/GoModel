@@ -23,6 +23,21 @@ python3 python_streaming_tool.py
 node javascript_basic.mjs
 ```
 
+To probe an Anthropic model through GoModel's OpenAI-compatible Responses API:
+
+```bash
+export OPENAI_BASE_URL=http://localhost:8080/v1
+export GOMODEL_MASTER_KEY=change-me
+export OPENAI_MODEL=anthropic/claude-sonnet-4-20250514
+
+python3 anthropic_responses_probe.py
+python3 anthropic_agents_probe.py
+```
+
+`anthropic_agents_probe.py` configures the Python SDK's `MultiProvider` with
+model ID pass-through so namespaced GoModel IDs such as `anthropic/...` reach
+the gateway unchanged.
+
 Install the SDK dependencies in your own environment:
 
 ```bash

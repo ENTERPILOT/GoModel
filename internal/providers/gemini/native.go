@@ -347,16 +347,17 @@ func geminiToolsFromOpenAI(tools []map[string]any) ([]geminiTool, error) {
 	}
 	declarations := make([]geminiFunctionDeclaration, 0, len(tools))
 	for _, tool := range tools {
-		if strings.TrimSpace(fmt.Sprint(tool["type"])) != "function" {
-			continue
+		toolType := strings.TrimSpace(fmt.Sprint(tool["type"]))
+		if toolType != "function" {
+			return nil, core.NewInvalidRequestError("unsupported tool type: "+toolType, nil)
 		}
 		fn, ok := tool["function"].(map[string]any)
 		if !ok {
-			continue
+			return nil, core.NewInvalidRequestError("tool.function must be an object", nil)
 		}
 		name, _ := fn["name"].(string)
 		if strings.TrimSpace(name) == "" {
-			continue
+			return nil, core.NewInvalidRequestError("tool.function.name is required", nil)
 		}
 		description, _ := fn["description"].(string)
 		var parametersJSONSchema json.RawMessage

@@ -1342,6 +1342,43 @@ func TestConvertToAnthropicRequest_MapsStopSequences(t *testing.T) {
 	}
 }
 
+func TestConvertToAnthropicRequest_RejectsUnsupportedChatExtras(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value json.RawMessage
+	}{
+		{
+			name:  "response format",
+			field: "response_format",
+			value: json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer"}}`),
+		},
+		{
+			name:  "verbosity",
+			field: "verbosity",
+			value: json.RawMessage(`"low"`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:    "claude-sonnet-4-5-20250929",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					tt.field: tt.value,
+				}),
+			})
+			if err == nil {
+				t.Fatal("expected invalid request error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.field) {
+				t.Fatalf("error = %v, want mention %q", err, tt.field)
+			}
+		})
+	}
+}
+
 func TestConvertToAnthropicRequest_InvalidToolArguments(t *testing.T) {
 	_, err := convertToAnthropicRequest(&core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",

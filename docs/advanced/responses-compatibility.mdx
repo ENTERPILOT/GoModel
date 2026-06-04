@@ -1,0 +1,142 @@
+---
+title: "Responses compatibility"
+description: "Understand which Responses API features GoModel can translate to chat providers, which ones require native provider support, and how this affects agent SDKs."
+icon: "route"
+tag: "Beta"
+---
+
+GoModel accepts OpenAI-compatible `/v1/responses` requests and routes them to
+the selected model provider. Some providers expose a native Responses-compatible
+surface. Others expose chat completions or provider-native chat APIs, so
+GoModel translates the request.
+
+The compatibility rule is conservative: GoModel translates portable model
+features and rejects provider-hosted features when it cannot preserve their
+meaning.
+
+## Routing modes
+
+| Mode | What happens |
+| --- | --- |
+| Native Responses provider | GoModel forwards the Responses payload to the provider's Responses-compatible endpoint. Provider-native features may work if that provider supports them. |
+| Chat-translated provider | GoModel converts `/v1/responses` to chat semantics, calls the provider's chat API, then converts the result back to a Responses shape. |
+
+Chat-translated providers include Anthropic and Gemini native routing. They work
+well for text, streaming, multimodal inputs supported by the target adapter, and
+function tool loops. They cannot safely execute OpenAI-hosted tools.
+
+## Feature behavior
+
+| Feature | Native Responses provider | Chat-translated provider |
+| --- | --- | --- |
+| Text input and `instructions` | Forwarded | Converted to chat messages |
+| Streaming over HTTP/SSE | Forwarded | Converted from chat streaming events |
+| Function tools | Forwarded | Converted to provider function/tool declarations |
+| Function call output items | Forwarded | Converted to chat tool-result messages |
+| `text.format` structured output | Forwarded | Converted to `response_format` when the provider supports it |
+| OpenAI-hosted web search | Provider decides | Rejected |
+| OpenAI-hosted file search | Provider decides | Rejected |
+| OpenAI-hosted computer use | Provider decides | Rejected |
+| `previous_response_id` and `conversation` | Forwarded | Rejected |
+| Unknown Responses input item types | Preserved | Rejected |
+| Responses websocket transport | Not implemented by GoModel | Not implemented by GoModel |
+
+<Note>
+  Anthropic does not currently accept translated `response_format` or
+  `text.verbosity` settings through GoModel's chat translation path. GoModel
+  rejects those fields instead of dropping them.
+</Note>
+
+## Hosted tools
+
+Hosted tools are executed by the upstream provider, not by the model text
+completion alone. Their payloads often reference provider-owned resources and
+runtime state:
+
+- `web_search_preview` depends on the provider's search implementation and
+  event schema.
+- `file_search` references provider vector stores such as `vector_store_ids`.
+- `computer_use_preview` depends on a provider-managed computer session,
+  display environment, and safety model.
+
+GoModel does not translate these into Anthropic or Gemini tool calls. A fake
+translation would make the request appear supported while changing where the
+tool runs, how state is stored, and which security controls apply.
+
+When a chat-translated provider receives a hosted tool request, GoModel returns
+an OpenAI-compatible invalid request error:
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "message": "responses tool type \"web_search_preview\" is only supported by native Responses providers; chat-translated providers only support function tools",
+    "param": null,
+    "code": null
+  }
+}
+```
+
+## Agent SDKs
+
+OpenAI Agents SDK clients can talk to Anthropic and Gemini models through
+GoModel for portable flows:
+
+- plain `Runner.run(...)`
+- `Runner.run_streamed(...)` over HTTP/SSE
+- local function tools
+- SDK-managed local history replay
+
+Provider-hosted tools, server-managed conversation state, and websocket
+Responses transport still depend on provider-specific support.
+
+For Python Agents SDK clients, namespaced GoModel model IDs such as
+`anthropic/claude-sonnet-4-20250514` and `gemini/gemini-2.0-flash` need model ID
+pass-through mode:
+
+```python
+from agents import MultiProvider, RunConfig
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="change-me",
+)
+
+run_config = RunConfig(
+    model_provider=MultiProvider(
+        openai_client=client,
+        unknown_prefix_mode="model_id",
+        openai_prefix_mode="model_id",
+    )
+)
+```
+
+Use that `run_config` when calling `Runner.run(...)` or
+`Runner.run_streamed(...)`.
+
+## Test the compatibility boundary
+
+The OpenAI Agents SDK examples include probes for Anthropic routing through
+GoModel:
+
+```bash
+export OPENAI_BASE_URL=http://localhost:8080/v1
+export GOMODEL_MASTER_KEY=change-me
+export OPENAI_MODEL=anthropic/claude-sonnet-4-20250514
+
+python3 docs/examples/openai-agents-sdk/anthropic_responses_probe.py
+python3 docs/examples/openai-agents-sdk/anthropic_agents_probe.py
+```
+
+The Responses probe verifies both supported and unsupported paths: plain
+Responses calls, function tools, structured-output rejection, stateful-field
+rejection, unknown input-item rejection, and hosted-tool rejection. The Agents
+probe verifies basic runs, function tool loops, and streamed function tool
+loops.
+
+## Roadmap
+
+Future support for hosted tools should use explicit provider capability mapping.
+That means GoModel should know which provider, model, API mode, and request
+shape can safely handle each feature before accepting the request.

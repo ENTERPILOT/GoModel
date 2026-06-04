@@ -103,6 +103,19 @@ func validateResponsesRequestForChatTranslation(req *core.ResponsesRequest) erro
 	if strings.TrimSpace(req.SafetyIdentifier) != "" {
 		return unsupportedResponsesChatTranslationField("safety_identifier")
 	}
+	if err := validateResponsesToolsForChatTranslation(req.Tools); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateResponsesToolsForChatTranslation(tools []map[string]any) error {
+	for _, tool := range tools {
+		toolType, _ := tool["type"].(string)
+		if strings.TrimSpace(toolType) != "function" {
+			return unsupportedResponsesChatTranslationTool(toolType)
+		}
+	}
 	return nil
 }
 
@@ -188,6 +201,17 @@ func responsesTextFormatToChatResponseFormat(format any) (json.RawMessage, error
 func unsupportedResponsesChatTranslationField(field string) error {
 	return core.NewInvalidRequestError(
 		fmt.Sprintf("responses field %q is only supported by native Responses providers; use an OpenAI-compatible provider or passthrough for this request", field),
+		nil,
+	)
+}
+
+func unsupportedResponsesChatTranslationTool(toolType string) error {
+	toolType = strings.TrimSpace(toolType)
+	if toolType == "" {
+		toolType = "unknown"
+	}
+	return core.NewInvalidRequestError(
+		fmt.Sprintf("responses tool type %q is only supported by native Responses providers; chat-translated providers only support function tools", toolType),
 		nil,
 	)
 }

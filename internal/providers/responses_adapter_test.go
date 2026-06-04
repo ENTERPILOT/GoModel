@@ -435,6 +435,39 @@ func TestConvertResponsesRequestToChat_RejectsStatefulAgentsSDKFields(t *testing
 			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", Text: map[string]any{"format": map[string]any{"type": "grammar"}}},
 			want: "text",
 		},
+		{
+			name: "hosted web search tool",
+			req: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: "Hello",
+				Tools: []map[string]any{
+					{"type": "web_search_preview"},
+				},
+			},
+			want: "web_search_preview",
+		},
+		{
+			name: "hosted file search tool",
+			req: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: "Hello",
+				Tools: []map[string]any{
+					{"type": "file_search", "vector_store_ids": []string{"vs_123"}},
+				},
+			},
+			want: "file_search",
+		},
+		{
+			name: "hosted computer use tool",
+			req: &core.ResponsesRequest{
+				Model: "test-model",
+				Input: "Hello",
+				Tools: []map[string]any{
+					{"type": "computer_use_preview", "display_width": 1024, "display_height": 768},
+				},
+			},
+			want: "computer_use_preview",
+		},
 	}
 
 	for _, tt := range tests {
