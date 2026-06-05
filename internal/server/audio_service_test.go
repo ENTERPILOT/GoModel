@@ -566,6 +566,52 @@ func TestAudioSpeech_NilResponseReturns502(t *testing.T) {
 	}
 }
 
+// TestAudio_NilResponseSkipsUsage covers the nil-response guard: a (nil, nil)
+// provider result must return 502 without writing a usage row — and for
+// transcription, without dereferencing resp.Data (which would panic).
+func TestAudio_NilResponseSkipsUsage(t *testing.T) {
+	t.Run("speech", func(t *testing.T) {
+		var captured *usage.UsageEntry
+		logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
+		svc := &audioService{
+			provider:    &audioMockProvider{mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}}, speechResp: nil},
+			usageLogger: logger,
+		}
+		c, rec, _ := newSpeechRequestWithAuditEntry()
+
+		if err := svc.CreateSpeech(c); err != nil {
+			t.Fatalf("CreateSpeech returned error: %v", err)
+		}
+		if rec.Code != http.StatusBadGateway {
+			t.Fatalf("status = %d, want 502", rec.Code)
+		}
+		if captured != nil {
+			t.Errorf("no usage should be written for a failed call, got %+v", captured)
+		}
+	})
+
+	t.Run("transcription", func(t *testing.T) {
+		var captured *usage.UsageEntry
+		logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
+		svc := &audioService{
+			provider:    &audioMockProvider{mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-transcribe"}}, transcriptionResp: nil},
+			usageLogger: logger,
+		}
+		c, rec, _ := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("audio-bytes"))
+
+		// Must not panic on resp.Data when resp is nil.
+		if err := svc.CreateTranscription(c); err != nil {
+			t.Fatalf("CreateTranscription returned error: %v", err)
+		}
+		if rec.Code != http.StatusBadGateway {
+			t.Fatalf("status = %d, want 502", rec.Code)
+		}
+		if captured != nil {
+			t.Errorf("no usage should be written for a failed call, got %+v", captured)
+		}
+	})
+}
+
 // TestAudioSpeech_EmptyContentTypeDefaults covers the respondAudio default: an
 // empty response content type falls back to application/octet-stream.
 func TestAudioSpeech_EmptyContentTypeDefaults(t *testing.T) {

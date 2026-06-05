@@ -24,21 +24,19 @@ const (
 // ExtractFromSpeechRequest builds a usage entry for a text-to-speech request.
 // Speech responses are binary audio with no provider-reported usage, so the
 // billable unit is the input character count, recorded in RawData so the
-// interaction stays observable and per-character pricing can apply.
-func ExtractFromSpeechRequest(req *core.AudioSpeechRequest, requestID, provider string, pricing ...*core.ModelPricing) *UsageEntry {
-	if req == nil {
-		return nil
-	}
-
+// interaction stays observable and per-character pricing can apply. model is the
+// resolved route model (not the raw user input) so the row groups and prices
+// consistently with the pricing lookup, mirroring the transcription extractor.
+func ExtractFromSpeechRequest(input, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
 	entry := &UsageEntry{
 		ID:        uuid.New().String(),
 		RequestID: requestID,
 		Timestamp: time.Now().UTC(),
-		Model:     req.Model,
+		Model:     model,
 		Provider:  provider,
 		Endpoint:  endpointAudioSpeech,
 	}
-	if chars := len([]rune(req.Input)); chars > 0 {
+	if chars := len([]rune(input)); chars > 0 {
 		entry.RawData = map[string]any{rawKeyInputCharacters: chars}
 	}
 

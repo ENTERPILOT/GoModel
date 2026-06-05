@@ -74,8 +74,11 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	if resp == nil {
+		return s.respondAudio(c, resp) // emits the 502 guard; no usage for a failed call
+	}
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
-		return usage.ExtractFromSpeechRequest(req, route.requestID, route.providerType, pricing)
+		return usage.ExtractFromSpeechRequest(req.Input, route.requestID, route.model, route.providerType, pricing)
 	})
 	return s.respondAudio(c, resp)
 }
@@ -107,6 +110,9 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 	resp, err := router.CreateTranscription(ctx, req)
 	if err != nil {
 		return handleError(c, err)
+	}
+	if resp == nil {
+		return s.respondAudio(c, resp) // emits the 502 guard before resp.Data is read
 	}
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromTranscriptionResponse(resp.Data, route.requestID, route.model, route.providerType, pricing)

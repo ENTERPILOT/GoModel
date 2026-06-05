@@ -9,9 +9,7 @@ import (
 func floatPtr(v float64) *float64 { return &v }
 
 func TestExtractFromSpeechRequest(t *testing.T) {
-	req := &core.AudioSpeechRequest{Model: "gpt-4o-mini-tts", Input: "hello", Voice: "alloy"}
-
-	entry := ExtractFromSpeechRequest(req, "req-1", "openai")
+	entry := ExtractFromSpeechRequest("hello", "req-1", "gpt-4o-mini-tts", "openai")
 	if entry == nil {
 		t.Fatal("expected a usage entry")
 	}
@@ -26,11 +24,8 @@ func TestExtractFromSpeechRequest(t *testing.T) {
 	}
 }
 
-func TestExtractFromSpeechRequest_NilAndEmptyInput(t *testing.T) {
-	if ExtractFromSpeechRequest(nil, "req", "openai") != nil {
-		t.Error("nil request should yield nil entry")
-	}
-	entry := ExtractFromSpeechRequest(&core.AudioSpeechRequest{Model: "tts"}, "req", "openai")
+func TestExtractFromSpeechRequest_EmptyInput(t *testing.T) {
+	entry := ExtractFromSpeechRequest("", "req", "tts-1", "openai")
 	if entry == nil {
 		t.Fatal("empty input should still yield an entry")
 	}
@@ -41,8 +36,7 @@ func TestExtractFromSpeechRequest_NilAndEmptyInput(t *testing.T) {
 
 func TestExtractFromSpeechRequest_PerCharacterPricing(t *testing.T) {
 	// "hello" = 5 characters at $0.00001/char => $0.00005.
-	req := &core.AudioSpeechRequest{Model: "tts-1", Input: "hello", Voice: "alloy"}
-	entry := ExtractFromSpeechRequest(req, "req", "openai", &core.ModelPricing{PerCharacterInput: floatPtr(0.00001)})
+	entry := ExtractFromSpeechRequest("hello", "req", "tts-1", "openai", &core.ModelPricing{PerCharacterInput: floatPtr(0.00001)})
 	assertCostPtrNear(t, "input cost", entry.InputCost, 0.00005)
 	assertCostPtrNear(t, "total cost", entry.TotalCost, 0.00005)
 }
@@ -50,8 +44,7 @@ func TestExtractFromSpeechRequest_PerCharacterPricing(t *testing.T) {
 func TestExtractFromSpeechRequest_NoPerCharacterRateStaysUnpriced(t *testing.T) {
 	// gpt-4o-mini-tts is priced by output audio duration, which the gateway does
 	// not measure; with only an output-side audio rate, character usage is unpriced.
-	req := &core.AudioSpeechRequest{Model: "gpt-4o-mini-tts", Input: "hello", Voice: "alloy"}
-	entry := ExtractFromSpeechRequest(req, "req", "openai", &core.ModelPricing{PerSecondOutput: floatPtr(0.00025)})
+	entry := ExtractFromSpeechRequest("hello", "req", "gpt-4o-mini-tts", "openai", &core.ModelPricing{PerSecondOutput: floatPtr(0.00025)})
 	if entry.TotalCost != nil {
 		t.Errorf("want nil cost when only output audio duration is priced, got %v", *entry.TotalCost)
 	}
