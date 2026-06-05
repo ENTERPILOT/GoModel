@@ -214,6 +214,8 @@ func (h *Handler) audio() *audioService {
 		budgetChecker:   h.budgetChecker,
 		logBodies:       logBodies,
 		logAudioBodies:  logAudioBodies,
+		usageLogger:     h.usageLogger,
+		pricingResolver: h.pricingResolver,
 	}
 }
 

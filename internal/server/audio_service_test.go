@@ -14,6 +14,7 @@ import (
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
+	"gomodel/internal/usage"
 )
 
 // audioMockProvider extends mockProvider (a RoutableProvider) with audio support
@@ -320,6 +321,78 @@ func TestAudioTranscription_NoCaptureWhenBodiesDisabled(t *testing.T) {
 	}
 	if entry.Data != nil && entry.Data.RequestBody != nil {
 		t.Errorf("nothing should be captured when LogBodies is off, got %+v", entry.Data.RequestBody)
+	}
+}
+
+// TestAudioSpeech_LogsUsage verifies a text-to-speech call records a usage entry
+// keyed by the input character count when usage tracking is enabled.
+func TestAudioSpeech_LogsUsage(t *testing.T) {
+	var captured *usage.UsageEntry
+	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
+	svc := &audioService{provider: newSpeechMock(), usageLogger: logger}
+	c, rec, _ := newSpeechRequestWithAuditEntry()
+
+	if err := svc.CreateSpeech(c); err != nil {
+		t.Fatalf("CreateSpeech returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if captured == nil {
+		t.Fatal("expected a usage entry to be written")
+	}
+	if captured.Endpoint != "/v1/audio/speech" {
+		t.Errorf("endpoint = %q, want /v1/audio/speech", captured.Endpoint)
+	}
+	if captured.Model != "gpt-4o-mini-tts" {
+		t.Errorf("model = %q, want gpt-4o-mini-tts", captured.Model)
+	}
+	if got := captured.RawData["input_characters"]; got != len("hello") {
+		t.Errorf("input_characters = %v, want %d", got, len("hello"))
+	}
+}
+
+// TestAudioTranscription_LogsUsage verifies a speech-to-text call records a usage
+// entry even when the provider response carries no usage object (e.g. whisper).
+func TestAudioTranscription_LogsUsage(t *testing.T) {
+	var captured *usage.UsageEntry
+	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
+	svc := &audioService{provider: newTranscriptionMock(), usageLogger: logger}
+	c, rec, _ := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("audio-bytes"))
+
+	if err := svc.CreateTranscription(c); err != nil {
+		t.Fatalf("CreateTranscription returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if captured == nil {
+		t.Fatal("expected a usage entry to be written")
+	}
+	if captured.Endpoint != "/v1/audio/transcriptions" {
+		t.Errorf("endpoint = %q, want /v1/audio/transcriptions", captured.Endpoint)
+	}
+	if captured.Model != "gpt-4o-transcribe" {
+		t.Errorf("model = %q, want gpt-4o-transcribe", captured.Model)
+	}
+}
+
+// TestAudioSpeech_NoUsageWhenDisabled verifies nothing is written when usage
+// tracking is off.
+func TestAudioSpeech_NoUsageWhenDisabled(t *testing.T) {
+	var captured *usage.UsageEntry
+	logger := &capturingUsageLogger{config: usage.Config{Enabled: false}, captured: &captured}
+	svc := &audioService{provider: newSpeechMock(), usageLogger: logger}
+	c, rec, _ := newSpeechRequestWithAuditEntry()
+
+	if err := svc.CreateSpeech(c); err != nil {
+		t.Fatalf("CreateSpeech returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if captured != nil {
+		t.Errorf("no usage entry should be written when disabled, got %+v", captured)
 	}
 }
 

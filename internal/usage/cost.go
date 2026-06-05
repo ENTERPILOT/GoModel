@@ -191,6 +191,16 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 		}
 	}
 
+	// Price non-token audio units the providers report outside the usage tokens:
+	// per-character input for text-to-speech and per-second input audio duration
+	// for transcription. Both quantities live in RawData (see usage/audio.go).
+	if audioCost, ok := applyAudioUnitCosts(rawData, pricing); ok {
+		inputCost += audioCost
+		hasInput = true
+		mappedKeys[rawKeyInputCharacters] = true
+		mappedKeys[rawKeyAudioSeconds] = true
+	}
+
 	// Check for unmapped token fields in RawData
 	for key := range rawData {
 		if mappedKeys[key] {
@@ -232,6 +242,30 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 	result.Caveat = strings.Join(caveats, "; ")
 
 	return result
+}
+
+// applyAudioUnitCosts prices the non-token audio units carried in RawData:
+// PerCharacterInput against input characters (text-to-speech) and PerSecondInput
+// against input audio seconds (transcription). Both are input-side costs. It
+// returns the summed cost and whether any rate applied. Models priced by output
+// audio duration (e.g. gpt-4o-mini-tts) are not handled here because the gateway
+// proxies opaque audio bytes and does not measure their duration.
+func applyAudioUnitCosts(rawData map[string]any, pricing *core.ModelPricing) (float64, bool) {
+	var cost float64
+	var applied bool
+	if pricing.PerCharacterInput != nil {
+		if chars := extractInt(rawData, rawKeyInputCharacters); chars > 0 {
+			cost += float64(chars) * *pricing.PerCharacterInput
+			applied = true
+		}
+	}
+	if pricing.PerSecondInput != nil {
+		if seconds, ok := extractFloat(rawData, rawKeyAudioSeconds); ok && seconds > 0 {
+			cost += seconds * *pricing.PerSecondInput
+			applied = true
+		}
+	}
+	return cost, applied
 }
 
 func pricingForTokenCount(pricing *core.ModelPricing, inputTokens int) *core.ModelPricing {

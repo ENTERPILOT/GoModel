@@ -11,6 +11,7 @@ import (
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
+	"gomodel/internal/usage"
 )
 
 // audioService adapts Echo requests to the model-routed audio provider for the
@@ -28,6 +29,11 @@ type audioService struct {
 	// base64 (playable) or as a lightweight placeholder.
 	logBodies      bool
 	logAudioBodies bool
+	// usageLogger and pricingResolver record per-call usage. Audio providers
+	// return opaque bytes, so usage is derived locally: input characters for
+	// speech, and the optional usage object parsed from a transcription response.
+	usageLogger     usage.LoggerInterface
+	pricingResolver usage.PricingResolver
 }
 
 func (s *audioService) router() (core.AudioProvider, error) {
@@ -60,7 +66,7 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 		auditlog.EnrichEntryWithRequestBody(c, audioSpeechAuditInput(req))
 	}
 
-	ctx, err := s.prepare(c, req.Model, req.Provider)
+	ctx, route, err := s.prepare(c, req.Model, req.Provider)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -68,6 +74,9 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
+		return usage.ExtractFromSpeechRequest(req, route.requestID, route.providerType, pricing)
+	})
 	return s.respondAudio(c, resp)
 }
 
@@ -91,7 +100,7 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 			audioUploadContentType(req), req.File, s.logAudioBodies, audioTranscriptionAuditInput(req)))
 	}
 
-	ctx, err := s.prepare(c, req.Model, req.Provider)
+	ctx, route, err := s.prepare(c, req.Model, req.Provider)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -99,6 +108,9 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
+		return usage.ExtractFromTranscriptionResponse(resp.Data, route.requestID, route.model, route.providerType, pricing)
+	})
 	return s.respondAudio(c, resp)
 }
 
@@ -109,14 +121,23 @@ type selectorResolver interface {
 	ResolveModel(core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
+// audioRoute carries the resolved routing identity for a single audio call,
+// used to label its usage entry the same way the inference orchestrator does.
+type audioRoute struct {
+	model        string
+	providerType string
+	providerName string
+	requestID    string
+}
+
 // prepare resolves and authorizes the model, enforces budget, and stamps the
-// request id, returning the context to dispatch with. Authorization runs on the
-// registry-resolved selector so model-override and user-path rules see the same
-// concrete provider name as the inference orchestrator.
-func (s *audioService) prepare(c *echo.Context, model, providerHint string) (context.Context, error) {
+// request id, returning the context to dispatch with and the resolved route.
+// Authorization runs on the registry-resolved selector so model-override and
+// user-path rules see the same concrete provider name as the inference orchestrator.
+func (s *audioService) prepare(c *echo.Context, model, providerHint string) (context.Context, audioRoute, error) {
 	selector, err := core.ParseModelSelector(model, providerHint)
 	if err != nil {
-		return nil, core.NewInvalidRequestError(err.Error(), err)
+		return nil, audioRoute{}, core.NewInvalidRequestError(err.Error(), err)
 	}
 	if resolver, ok := s.provider.(selectorResolver); ok {
 		// Surface resolution failures (registry not ready, malformed selector)
@@ -125,23 +146,66 @@ func (s *audioService) prepare(c *echo.Context, model, providerHint string) (con
 		// equals the normalized selector, so it is always safe to adopt.
 		resolved, _, resolveErr := resolver.ResolveModel(core.NewRequestedModelSelector(model, providerHint))
 		if resolveErr != nil {
-			return nil, resolveErr
+			return nil, audioRoute{}, resolveErr
 		}
 		selector = resolved
 	}
 	if s.modelAuthorizer != nil {
 		if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {
-			return nil, err
+			return nil, audioRoute{}, err
 		}
 	}
 	if err := enforceBudget(c, s.budgetChecker); err != nil {
-		return nil, err
+		return nil, audioRoute{}, err
 	}
 	auditlog.EnrichEntry(c, selector.Model, "")
 
-	ctx, _ := requestContextWithRequestID(c.Request())
+	ctx, requestID := requestContextWithRequestID(c.Request())
 	c.SetRequest(c.Request().WithContext(ctx))
-	return ctx, nil
+	return ctx, s.routeFor(selector, requestID), nil
+}
+
+// routeFor maps a resolved selector to its canonical provider type and concrete
+// instance name. The name falls back to the selector's provider when the router
+// exposes no name resolver.
+func (s *audioService) routeFor(selector core.ModelSelector, requestID string) audioRoute {
+	qualified := selector.QualifiedModel()
+	route := audioRoute{
+		model:        selector.Model,
+		providerType: s.provider.GetProviderType(qualified),
+		providerName: selector.Provider,
+		requestID:    requestID,
+	}
+	if resolver, ok := s.provider.(core.ProviderNameResolver); ok {
+		if name := resolver.GetProviderName(qualified); name != "" {
+			route.providerName = name
+		}
+	}
+	return route
+}
+
+// logUsage records one usage entry for an audio call when usage tracking is on.
+// It mirrors the inference orchestrator: resolve pricing, extract the entry, then
+// stamp the concrete provider name and user path before the non-blocking write.
+func (s *audioService) logUsage(ctx context.Context, route audioRoute, extract func(*core.ModelPricing) *usage.UsageEntry) {
+	if s.usageLogger == nil || !s.usageLogger.Config().Enabled {
+		return
+	}
+	var pricing *core.ModelPricing
+	if s.pricingResolver != nil {
+		pricingProvider := route.providerName
+		if pricingProvider == "" {
+			pricingProvider = route.providerType
+		}
+		pricing = s.pricingResolver.ResolvePricing(route.model, pricingProvider)
+	}
+	entry := extract(pricing)
+	if entry == nil {
+		return
+	}
+	entry.ProviderName = strings.TrimSpace(route.providerName)
+	entry.UserPath = core.UserPathFromContext(ctx)
+	s.usageLogger.Write(entry)
 }
 
 func transcriptionRequestFromForm(c *echo.Context) (*core.AudioTranscriptionRequest, error) {
