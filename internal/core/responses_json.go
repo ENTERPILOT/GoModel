@@ -159,31 +159,29 @@ func (c *ResponsesConversationRef) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON preserves whether the conversation was originally supplied as a
-// string or object. Programmatic values default to the compact string ID form.
+// string or object. The ID field is authoritative so callers can update or
+// clear a decoded reference without leaking the original raw value.
 func (c ResponsesConversationRef) MarshalJSON() ([]byte, error) {
 	trimmed := bytes.TrimSpace(c.Raw)
+	if c.ID == "" {
+		return []byte("null"), nil
+	}
 	if len(trimmed) > 0 {
-		if c.ID == "" {
-			return cloneRawMessage(trimmed), nil
-		}
 		switch trimmed[0] {
 		case '"':
 			return json.Marshal(c.ID)
 		case '{':
 			var obj map[string]any
 			if err := json.Unmarshal(trimmed, &obj); err != nil {
-				return cloneRawMessage(trimmed), nil
+				return nil, err
 			}
 			obj["id"] = c.ID
 			return json.Marshal(obj)
 		default:
-			return cloneRawMessage(trimmed), nil
+			return nil, fmt.Errorf("conversation raw must be a string or object")
 		}
 	}
-	if c.ID != "" {
-		return json.Marshal(c.ID)
-	}
-	return []byte("null"), nil
+	return json.Marshal(c.ID)
 }
 
 // MarshalJSON preserves dynamic input payloads while supporting Swagger-only schema fields.

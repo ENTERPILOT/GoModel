@@ -102,18 +102,31 @@ func TestResponsesRequestUnmarshalJSON_PreservesToolCallingControls(t *testing.T
 func TestResponsesConversationRefMarshalJSON_UsesUpdatedID(t *testing.T) {
 	tests := []struct {
 		name string
+		id   string
 		raw  string
 		want string
 	}{
 		{
 			name: "string shape",
+			id:   "conv_new",
 			raw:  `"conv_old"`,
 			want: `"conv_new"`,
 		},
 		{
 			name: "object shape",
+			id:   "conv_new",
 			raw:  `{"id":"conv_old","metadata":{"team":"alpha"}}`,
 			want: `{"id":"conv_new","metadata":{"team":"alpha"}}`,
+		},
+		{
+			name: "clear string shape",
+			raw:  `"conv_old"`,
+			want: `null`,
+		},
+		{
+			name: "clear object shape",
+			raw:  `{"id":"conv_old","metadata":{"team":"alpha"}}`,
+			want: `null`,
 		},
 	}
 
@@ -123,7 +136,7 @@ func TestResponsesConversationRefMarshalJSON_UsesUpdatedID(t *testing.T) {
 			if err := json.Unmarshal([]byte(tt.raw), &ref); err != nil {
 				t.Fatalf("json.Unmarshal() error = %v", err)
 			}
-			ref.ID = "conv_new"
+			ref.ID = tt.id
 
 			body, err := json.Marshal(ref)
 			if err != nil {
@@ -133,6 +146,17 @@ func TestResponsesConversationRefMarshalJSON_UsesUpdatedID(t *testing.T) {
 				t.Fatalf("body = %s, want JSON equivalent to %s", body, tt.want)
 			}
 		})
+	}
+}
+
+func TestResponsesConversationRefMarshalJSON_InvalidRaw(t *testing.T) {
+	ref := ResponsesConversationRef{
+		ID:  "conv_new",
+		Raw: json.RawMessage(`{"id":`),
+	}
+
+	if _, err := json.Marshal(ref); err == nil {
+		t.Fatal("json.Marshal() error = nil, want invalid raw conversation error")
 	}
 }
 

@@ -294,6 +294,7 @@ func normalizeResponsesToolChoiceForChat(choice any) any {
 	case "auto", "required", "none":
 		return choiceType
 	case "function":
+		// Function choices stay object-shaped, with legacy name-form normalized below.
 	default:
 		return choice
 	}
