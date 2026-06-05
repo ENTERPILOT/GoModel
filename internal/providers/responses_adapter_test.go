@@ -414,6 +414,42 @@ func TestConvertResponsesRequestToChat_MapsPortableAgentsSDKFields(t *testing.T)
 	}
 }
 
+func TestConvertResponsesRequestToChat_NormalizesToolChoiceAliases(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *core.ResponsesRequest
+		want string
+	}{
+		{
+			name: "tool_choice none alias",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: map[string]any{"type": "none"}},
+			want: "none",
+		},
+		{
+			name: "tool_choice auto alias",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: map[string]any{"type": "auto"}},
+			want: "auto",
+		},
+		{
+			name: "tool_choice required alias",
+			req:  &core.ResponsesRequest{Model: "test-model", Input: "Hello", ToolChoice: map[string]any{"type": "required"}},
+			want: "required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chatReq, err := ConvertResponsesRequestToChat(tt.req)
+			if err != nil {
+				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+			}
+			if chatReq.ToolChoice != tt.want {
+				t.Fatalf("ToolChoice = %#v, want %q", chatReq.ToolChoice, tt.want)
+			}
+		})
+	}
+}
+
 func TestConvertResponsesRequestToChat_RejectsStatefulAgentsSDKFields(t *testing.T) {
 	tests := []struct {
 		name string

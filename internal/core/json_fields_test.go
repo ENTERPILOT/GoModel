@@ -140,6 +140,44 @@ func TestMergeUnknownJSONFields_PreservesRawBaseMembers(t *testing.T) {
 	}
 }
 
+func TestMergeUnknownJSONFields_ErrorPaths(t *testing.T) {
+	tests := []struct {
+		name      string
+		base      UnknownJSONFields
+		additions map[string]json.RawMessage
+	}{
+		{
+			name: "malformed base raw",
+			base: UnknownJSONFields{raw: json.RawMessage(`{"keep":`)},
+			additions: map[string]json.RawMessage{
+				"added": json.RawMessage(`true`),
+			},
+		},
+		{
+			name: "non object base raw",
+			base: UnknownJSONFields{raw: json.RawMessage(`[1,2,3]`)},
+			additions: map[string]json.RawMessage{
+				"added": json.RawMessage(`true`),
+			},
+		},
+		{
+			name: "malformed addition raw",
+			base: UnknownJSONFields{},
+			additions: map[string]json.RawMessage{
+				"added": json.RawMessage(`{`),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := MergeUnknownJSONFields(tt.base, tt.additions); err == nil {
+				t.Fatal("MergeUnknownJSONFields() error = nil, want error")
+			}
+		})
+	}
+}
+
 func TestMergeUnknownJSONFields_NoAdditionsReturnsBase(t *testing.T) {
 	base := UnknownJSONFieldsFromMap(map[string]json.RawMessage{"a": json.RawMessage(`1`)})
 

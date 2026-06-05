@@ -1389,6 +1389,45 @@ func TestConvertToAnthropicRequest_RejectsUnsupportedChatExtras(t *testing.T) {
 	}
 }
 
+func TestConvertToAnthropicRequest_IgnoresNoopChatExtras(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value json.RawMessage
+	}{
+		{
+			name:  "null response format",
+			field: "response_format",
+			value: json.RawMessage(`null`),
+		},
+		{
+			name:  "text response format",
+			field: "response_format",
+			value: json.RawMessage(`{"type":"text"}`),
+		},
+		{
+			name:  "null verbosity",
+			field: "verbosity",
+			value: json.RawMessage(`null`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:    "claude-sonnet-4-5-20250929",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					tt.field: tt.value,
+				}),
+			})
+			if err != nil {
+				t.Fatalf("convertToAnthropicRequest() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
 func TestConvertToAnthropicRequest_PreservesTopP(t *testing.T) {
 	topP := 0.2
 	result, err := convertToAnthropicRequest(&core.ChatRequest{

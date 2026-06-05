@@ -161,8 +161,24 @@ func (c *ResponsesConversationRef) UnmarshalJSON(data []byte) error {
 // MarshalJSON preserves whether the conversation was originally supplied as a
 // string or object. Programmatic values default to the compact string ID form.
 func (c ResponsesConversationRef) MarshalJSON() ([]byte, error) {
-	if len(bytes.TrimSpace(c.Raw)) > 0 {
-		return cloneRawMessage(c.Raw), nil
+	trimmed := bytes.TrimSpace(c.Raw)
+	if len(trimmed) > 0 {
+		if c.ID == "" {
+			return cloneRawMessage(trimmed), nil
+		}
+		switch trimmed[0] {
+		case '"':
+			return json.Marshal(c.ID)
+		case '{':
+			var obj map[string]any
+			if err := json.Unmarshal(trimmed, &obj); err != nil {
+				return cloneRawMessage(trimmed), nil
+			}
+			obj["id"] = c.ID
+			return json.Marshal(obj)
+		default:
+			return cloneRawMessage(trimmed), nil
+		}
 	}
 	if c.ID != "" {
 		return json.Marshal(c.ID)

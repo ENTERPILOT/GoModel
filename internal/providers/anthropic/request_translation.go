@@ -359,11 +359,27 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 
 func validateAnthropicUnsupportedChatExtras(extra core.UnknownJSONFields) error {
 	for _, field := range []string{"response_format", "verbosity"} {
-		if extra.Lookup(field) != nil {
-			return core.NewInvalidRequestError("chat field "+field+" is not supported by Anthropic translation", nil)
+		raw := bytes.TrimSpace(extra.Lookup(field))
+		if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+			continue
 		}
+		if field == "response_format" && isNoopResponseFormat(raw) {
+			continue
+		}
+		return core.NewInvalidRequestError("chat field "+field+" is not supported by Anthropic translation", nil)
 	}
 	return nil
+}
+
+func isNoopResponseFormat(raw json.RawMessage) bool {
+	var responseFormat struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &responseFormat); err != nil {
+		return false
+	}
+	responseFormatType := strings.TrimSpace(responseFormat.Type)
+	return responseFormatType == "" || responseFormatType == "text"
 }
 
 // convertResponsesRequestToAnthropic converts a canonical Responses request by

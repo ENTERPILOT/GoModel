@@ -81,6 +81,9 @@ func MergeUnknownJSONFields(base UnknownJSONFields, additions map[string]json.Ra
 		return base, nil
 	}
 	additionFields := UnknownJSONFieldsFromMap(additions)
+	if err := validateUnknownJSONObject(additionFields.raw); err != nil {
+		return UnknownJSONFields{}, err
+	}
 	if base.IsEmpty() {
 		return additionFields, nil
 	}
@@ -125,7 +128,8 @@ func mergeUnknownJSONFieldsRaw(baseBody, additionBody []byte, overrideKeys map[s
 	return buf.Bytes(), nil
 }
 
-func appendUnknownJSONMembers(buf *bytes.Buffer, body []byte, skip map[string]struct{}, wrote *bool) error {
+func validateUnknownJSONObject(body []byte) error {
+	body = bytes.TrimSpace(body)
 	if len(body) == 0 || bytes.Equal(body, []byte("{}")) {
 		return nil
 	}
@@ -136,6 +140,18 @@ func appendUnknownJSONMembers(buf *bytes.Buffer, body []byte, skip map[string]st
 	if !root.IsObject() {
 		return fmt.Errorf("expected JSON object")
 	}
+	return nil
+}
+
+func appendUnknownJSONMembers(buf *bytes.Buffer, body []byte, skip map[string]struct{}, wrote *bool) error {
+	body = bytes.TrimSpace(body)
+	if err := validateUnknownJSONObject(body); err != nil {
+		return err
+	}
+	if len(body) == 0 || bytes.Equal(body, []byte("{}")) {
+		return nil
+	}
+	root := gjson.ParseBytes(body)
 
 	root.ForEach(func(key, value gjson.Result) bool {
 		if _, shouldSkip := skip[key.String()]; shouldSkip {

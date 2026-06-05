@@ -129,10 +129,12 @@ func validateResponsesToolChoiceForChatTranslation(choice any) error {
 	}
 
 	choiceType, _ := choiceMap["type"].(string)
-	if strings.TrimSpace(choiceType) != "function" {
+	switch strings.TrimSpace(choiceType) {
+	case "function", "auto", "required", "none":
+		return nil
+	default:
 		return unsupportedResponsesChatTranslationTool(choiceType)
 	}
-	return nil
 }
 
 // responsesTextToChatExtraFields maps the Responses "text" settings onto the
@@ -288,7 +290,11 @@ func normalizeResponsesToolChoiceForChat(choice any) any {
 	}
 
 	choiceType, _ := choiceMap["type"].(string)
-	if strings.TrimSpace(choiceType) != "function" {
+	switch choiceType := strings.TrimSpace(choiceType); choiceType {
+	case "auto", "required", "none":
+		return choiceType
+	case "function":
+	default:
 		return choice
 	}
 	if _, ok := choiceMap["function"].(map[string]any); ok {

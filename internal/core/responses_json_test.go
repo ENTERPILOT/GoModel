@@ -99,6 +99,67 @@ func TestResponsesRequestUnmarshalJSON_PreservesToolCallingControls(t *testing.T
 	}
 }
 
+func TestResponsesConversationRefMarshalJSON_UsesUpdatedID(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "string shape",
+			raw:  `"conv_old"`,
+			want: `"conv_new"`,
+		},
+		{
+			name: "object shape",
+			raw:  `{"id":"conv_old","metadata":{"team":"alpha"}}`,
+			want: `{"id":"conv_new","metadata":{"team":"alpha"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ref ResponsesConversationRef
+			if err := json.Unmarshal([]byte(tt.raw), &ref); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+			ref.ID = "conv_new"
+
+			body, err := json.Marshal(ref)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+			if !jsonEqual(body, []byte(tt.want)) {
+				t.Fatalf("body = %s, want JSON equivalent to %s", body, tt.want)
+			}
+		})
+	}
+}
+
+func jsonEqual(a, b []byte) bool {
+	var av any
+	if err := json.Unmarshal(a, &av); err != nil {
+		return false
+	}
+	var bv any
+	if err := json.Unmarshal(b, &bv); err != nil {
+		return false
+	}
+	return jsonValueEqual(av, bv)
+}
+
+func jsonValueEqual(a, b any) bool {
+	ab, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	bb, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(ab, bb)
+}
+
 func TestResponsesRequestMarshalJSON_PreservesInput(t *testing.T) {
 	body, err := json.Marshal(ResponsesRequest{
 		Model: "gpt-4o-mini",
