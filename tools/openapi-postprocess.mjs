@@ -67,6 +67,23 @@ function applyResponseInputOneOf(name) {
   properties.input = input;
 }
 
+function applyResponseConversationOneOf(name) {
+  const properties = schema(name).properties;
+  if (!properties?.conversation) {
+    throw new Error(`missing conversation property on schema: ${name}`);
+  }
+
+  const conversation = {};
+  if (properties.conversation.description) {
+    conversation.description = properties.conversation.description;
+  }
+  conversation.oneOf = clone([
+    { type: "string" },
+    { $ref: "#/components/schemas/core.ResponsesConversationRef" },
+  ]);
+  properties.conversation = conversation;
+}
+
 function ensureResponsesInputElementSchema() {
   const schemas = spec.components?.schemas;
   if (!schemas) {
@@ -420,6 +437,7 @@ ensureRequiredProperty("admin.deleteModelOverrideRequest", "selector");
 ensureRequiredProperty("admin.upsertModelPricingOverrideRequest", "selector");
 ensureRequiredProperty("admin.upsertModelPricingOverrideRequest", "pricing");
 ensureRequiredProperty("admin.deleteModelPricingOverrideRequest", "selector");
+ensureRequiredProperty("core.ResponsesConversationRef", "id");
 applyBudgetKeySchemaConstraints();
 applyStringArrayPropertyBounds("admin.upsertModelOverrideRequest", "user_paths", 100, 1024);
 applyPricingSchemaConstraints();
@@ -450,6 +468,7 @@ for (const name of [
   "core.ResponseCompactRequest",
 ]) {
   applyResponseInputOneOf(name);
+  applyResponseConversationOneOf(name);
 }
 
 const inputItemList = schema("core.ResponseInputItemListResponse");

@@ -7912,7 +7912,10 @@
           "context_management": {},
           "conversation": {
             "description": "Conversation accepts either a conversation ID string or an object with id.",
-            "allOf": [
+            "oneOf": [
+              {
+                "type": "string"
+              },
               {
                 "$ref": "#/components/schemas/core.ResponsesConversationRef"
               }
@@ -8085,7 +8088,10 @@
           "context_management": {},
           "conversation": {
             "description": "Conversation accepts either a conversation ID string or an object with id.",
-            "allOf": [
+            "oneOf": [
+              {
+                "type": "string"
+              },
               {
                 "$ref": "#/components/schemas/core.ResponsesConversationRef"
               }
@@ -8243,7 +8249,10 @@
           "id": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "id"
+        ]
       },
       "core.ResponsesError": {
         "type": "object",
@@ -8295,7 +8304,10 @@
           "context_management": {},
           "conversation": {
             "description": "Conversation accepts either a conversation ID string or an object with id.",
-            "allOf": [
+            "oneOf": [
+              {
+                "type": "string"
+              },
               {
                 "$ref": "#/components/schemas/core.ResponsesConversationRef"
               }

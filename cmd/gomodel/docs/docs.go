@@ -5837,7 +5837,10 @@ const docTemplate = `{
                 "context_management": {},
                 "conversation": {
                     "description": "Conversation accepts either a conversation ID string or an object with id.",
-                    "allOf": [
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
                         {
                             "$ref": "#/definitions/core.ResponsesConversationRef"
                         }
@@ -5999,7 +6002,10 @@ const docTemplate = `{
                 "context_management": {},
                 "conversation": {
                     "description": "Conversation accepts either a conversation ID string or an object with id.",
-                    "allOf": [
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
                         {
                             "$ref": "#/definitions/core.ResponsesConversationRef"
                         }
@@ -6146,7 +6152,10 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 }
-            }
+            },
+            "required": [
+                "id"
+            ]
         },
         "core.ResponsesError": {
             "type": "object",
@@ -6198,7 +6207,10 @@ const docTemplate = `{
                 "context_management": {},
                 "conversation": {
                     "description": "Conversation accepts either a conversation ID string or an object with id.",
-                    "allOf": [
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
                         {
                             "$ref": "#/definitions/core.ResponsesConversationRef"
                         }

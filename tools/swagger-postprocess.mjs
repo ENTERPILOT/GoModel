@@ -33,6 +33,10 @@ function schema(name) {
   return result;
 }
 
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 function anthropicContentSchema() {
   return {
     oneOf: [
@@ -59,6 +63,33 @@ function stringOrFreeFormObjectSchema() {
       freeFormObjectSchema(),
     ],
   };
+}
+
+function applyResponseConversationOneOf(name) {
+  const properties = schema(name).properties;
+  if (!properties?.conversation) {
+    throw new Error(`missing conversation property on definition: ${name}`);
+  }
+
+  const conversation = {};
+  if (properties.conversation.description) {
+    conversation.description = properties.conversation.description;
+  }
+  conversation.oneOf = clone([
+    { type: "string" },
+    { $ref: "#/definitions/core.ResponsesConversationRef" },
+  ]);
+  properties.conversation = conversation;
+}
+
+function ensureRequiredProperty(schemaName, propertyName) {
+  const target = schema(schemaName);
+  if (!target.properties?.[propertyName]) {
+    throw new Error(`missing ${propertyName} property on definition: ${schemaName}`);
+  }
+  const required = new Set(target.required || []);
+  required.add(propertyName);
+  target.required = Array.from(required).sort();
 }
 
 function ensureAnthropicContentBlockSchema() {
@@ -91,6 +122,14 @@ function applyAnthropicMessageSchemas() {
 }
 
 applyAnthropicMessageSchemas();
+ensureRequiredProperty("core.ResponsesConversationRef", "id");
+for (const name of [
+  "core.ResponsesRequest",
+  "core.ResponseInputTokensRequest",
+  "core.ResponseCompactRequest",
+]) {
+  applyResponseConversationOneOf(name);
+}
 
 let rendered = JSON.stringify(spec, null, 4);
 rendered = rendered.replace(
