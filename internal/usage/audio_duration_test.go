@@ -83,6 +83,22 @@ func TestWavDurationSeconds_FallsBackToTrailingBytes(t *testing.T) {
 	}
 }
 
+func TestWavDurationSeconds_SkipsZeroLengthChunk(t *testing.T) {
+	// A valid zero-length non-data chunk (e.g. "fact") before "data" must not
+	// stop the walk; the duration is still derived from the following data chunk.
+	wav := buildWAV(t, 24000, 1, 16, 1.0)
+	idx := bytes.Index(wav, []byte("data"))
+	if idx < 0 {
+		t.Fatal("no data chunk")
+	}
+	withEmptyChunk := append(append(append([]byte{}, wav[:idx]...), []byte("fact\x00\x00\x00\x00")...), wav[idx:]...)
+
+	got, ok := wavDurationSeconds(withEmptyChunk)
+	if !ok || !nearlyEqual(got, 1.0) {
+		t.Errorf("got (%v, %v), want (1, true)", got, ok)
+	}
+}
+
 func TestNormalizeAudioFormat(t *testing.T) {
 	cases := map[string]string{
 		"wav":                     "wav",

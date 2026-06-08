@@ -353,41 +353,72 @@ func TestAudioSpeech_LogsUsage(t *testing.T) {
 }
 
 // TestAudioSpeech_CostsOutputAudioDuration verifies the full wire path for
-// output-duration-priced TTS models (e.g. gpt-4o-mini-tts): the synthesized WAV
-// is measured and priced via PerSecondOutput rather than logged as a zero cost.
+// output-duration-priced TTS models (e.g. gpt-4o-mini-tts), including how the
+// billing format is resolved: the response Content-Type is authoritative, the
+// requested response_format is the fallback, and mp3 is the final default.
 func TestAudioSpeech_CostsOutputAudioDuration(t *testing.T) {
-	var captured *usage.UsageEntry
-	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
 	// 2-second 24 kHz mono 16-bit WAV: byteRate 48000, dataLen 96000.
 	wav := wavBytes(24000, 1, 16, 2.0)
-	mock := &audioMockProvider{
-		mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}},
-		speechResp:   &core.AudioResponse{ContentType: "audio/wav", Data: wav},
-	}
-	resolver := &mockPricingResolver{pricing: &core.ModelPricing{PerSecondOutput: floatPtr(0.00025)}}
-	svc := &audioService{provider: mock, usageLogger: logger, pricingResolver: resolver}
+	mp3 := []byte("\xff\xfbnot-a-wav-body")
+	// gpt-4o-mini-tts-style pricing: tiny text input plus per-second audio output.
+	pricing := &core.ModelPricing{InputPerMtok: floatPtr(0.6), PerSecondOutput: floatPtr(0.00025)}
 
-	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy","response_format":"wav"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{})
+	tests := []struct {
+		name           string
+		responseFormat string // omitted from the request body when empty
+		contentType    string
+		data           []byte
+		wantSeconds    float64 // 0 => no measured duration expected
+		wantCost       float64
+		wantCaveat     bool
+	}{
+		{"explicit wav", "wav", "audio/wav", wav, 2, 0.0005, false},
+		{"content-type fallback wav", "", "audio/wav", wav, 2, 0.0005, false},
+		{"default mp3 unmeasured", "", "", mp3, 0, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var captured *usage.UsageEntry
+			logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
+			mock := &audioMockProvider{
+				mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}},
+				speechResp:   &core.AudioResponse{ContentType: tt.contentType, Data: tt.data},
+			}
+			svc := &audioService{provider: mock, usageLogger: logger, pricingResolver: &mockPricingResolver{pricing: pricing}}
 
-	if err := svc.CreateSpeech(c); err != nil {
-		t.Fatalf("CreateSpeech returned error: %v", err)
-	}
-	if captured == nil {
-		t.Fatal("expected a usage entry to be written")
-	}
-	if got := captured.RawData["audio_output_seconds"]; got != float64(2) {
-		t.Errorf("audio_output_seconds = %v, want 2", got)
-	}
-	if captured.TotalCost == nil || *captured.TotalCost != 0.0005 {
-		t.Fatalf("total_cost = %v, want 0.0005", captured.TotalCost)
-	}
-	if captured.CostsCalculationCaveat != "" {
-		t.Errorf("measured wav should carry no caveat, got %q", captured.CostsCalculationCaveat)
+			body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"`
+			if tt.responseFormat != "" {
+				body += `,"response_format":"` + tt.responseFormat + `"`
+			}
+			body += `}`
+			req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			c := echo.New().NewContext(req, httptest.NewRecorder())
+			c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{})
+
+			if err := svc.CreateSpeech(c); err != nil {
+				t.Fatalf("CreateSpeech returned error: %v", err)
+			}
+			if captured == nil {
+				t.Fatal("expected a usage entry to be written")
+			}
+
+			got, hasSeconds := captured.RawData["audio_output_seconds"]
+			if tt.wantSeconds > 0 {
+				if !hasSeconds || got != tt.wantSeconds {
+					t.Errorf("audio_output_seconds = %v (present=%v), want %v", got, hasSeconds, tt.wantSeconds)
+				}
+			} else if hasSeconds {
+				t.Errorf("audio_output_seconds = %v, want none", got)
+			}
+
+			if captured.TotalCost == nil || *captured.TotalCost != tt.wantCost {
+				t.Fatalf("total_cost = %v, want %v", captured.TotalCost, tt.wantCost)
+			}
+			if hasCaveat := captured.CostsCalculationCaveat != ""; hasCaveat != tt.wantCaveat {
+				t.Errorf("caveat = %q, want present=%v", captured.CostsCalculationCaveat, tt.wantCaveat)
+			}
+		})
 	}
 }
 

@@ -84,17 +84,18 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 }
 
 // speechResponseFormat resolves the codec of the synthesized audio so usage can
-// price models billed by output duration. The request response_format is
-// authoritative (OpenAI accepts mp3/opus/aac/flac/wav/pcm); when omitted it
-// falls back to the response Content-Type and finally OpenAI's mp3 default.
+// price models billed by output duration. The response Content-Type describes
+// the bytes actually returned, so it is authoritative when it names an audio
+// media type; this avoids charging a per-second rate against bytes whose real
+// format differs from the requested one (e.g. response_format=pcm but the
+// provider returns mp3). It falls back to the requested response_format and
+// finally OpenAI's mp3 default.
 func speechResponseFormat(req *core.AudioSpeechRequest, resp *core.AudioResponse) string {
+	if resp != nil && auditlog.IsAudioContentType(resp.ContentType) {
+		return resp.ContentType
+	}
 	if f := strings.TrimSpace(req.ResponseFormat); f != "" {
 		return f
-	}
-	if resp != nil {
-		if ct := strings.TrimSpace(resp.ContentType); ct != "" {
-			return ct
-		}
 	}
 	return "mp3"
 }

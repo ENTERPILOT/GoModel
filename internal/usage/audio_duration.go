@@ -90,9 +90,10 @@ func wavDurationSeconds(data []byte) (float64, bool) {
 		if haveFmt && haveData {
 			break
 		}
-		if size <= 0 {
-			break // malformed/streaming size: stop walking instead of spinning
-		}
+		// Advance past this chunk: an 8-byte header plus its word-aligned body.
+		// pos always grows by at least the header, so the walk terminates; a
+		// zero-length non-data chunk (valid) simply advances to the next header.
+		// size is read from a uint32, so it is never negative.
 		pos = body + size
 		if size%2 == 1 {
 			pos++ // chunks are word-aligned

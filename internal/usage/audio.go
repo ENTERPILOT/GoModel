@@ -52,10 +52,14 @@ func ExtractFromSpeechRequest(input string, output []byte, format, requestID, mo
 	if chars := len([]rune(input)); chars > 0 {
 		raw[rawKeyInputCharacters] = chars
 	}
+	// Record the output codec whenever it is known, even for an empty body, so a
+	// compressed (unmeasurable) format still surfaces a cost caveat in cost.go
+	// rather than a silent zero. Record the measured duration only when the
+	// gateway can compute it from the returned audio (uncompressed wav/pcm).
+	if codec := normalizeAudioFormat(format); codec != "" {
+		raw[rawKeyAudioOutputFormat] = codec
+	}
 	if len(output) > 0 {
-		if codec := normalizeAudioFormat(format); codec != "" {
-			raw[rawKeyAudioOutputFormat] = codec
-		}
 		if seconds, ok := measureSpeechDurationSeconds(output, format); ok {
 			raw[rawKeyAudioOutputSeconds] = seconds
 		}
