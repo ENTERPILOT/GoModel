@@ -168,6 +168,7 @@ type Request struct {
 // Response represents an HTTP response
 type Response struct {
 	StatusCode int
+	Header     http.Header
 	Body       []byte
 }
 
@@ -616,6 +617,7 @@ func (c *Client) doRequest(ctx context.Context, req Request) (*Response, error) 
 
 	return &Response{
 		StatusCode: resp.StatusCode,
+		Header:     resp.Header,
 		Body:       body,
 	}, nil
 }
