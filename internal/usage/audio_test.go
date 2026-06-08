@@ -97,18 +97,24 @@ func TestExtractFromTranscriptionResponse_PerSecondCost(t *testing.T) {
 
 func TestExtractFromTranscriptionResponse_NoUsage(t *testing.T) {
 	// Whisper / text responses carry no usage; the interaction is still recorded.
-	for _, body := range [][]byte{
-		[]byte(`{"text":"hi"}`),
-		[]byte("plain transcript text"),
-		nil,
-	} {
-		entry := ExtractFromTranscriptionResponse(body, "req", "whisper-1", "openai")
-		if entry == nil {
-			t.Fatalf("expected an entry for body %q", body)
-		}
-		if entry.TotalTokens != 0 || entry.RawData != nil {
-			t.Errorf("expected zero-usage entry for body %q, got %+v", body, entry)
-		}
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{"json without usage", []byte(`{"text":"hi"}`)},
+		{"plain text", []byte("plain transcript text")},
+		{"nil body", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := ExtractFromTranscriptionResponse(tt.body, "req", "whisper-1", "openai")
+			if entry == nil {
+				t.Fatal("expected an entry")
+			}
+			if entry.TotalTokens != 0 || entry.RawData != nil {
+				t.Errorf("expected zero-usage entry, got %+v", entry)
+			}
+		})
 	}
 }
 
