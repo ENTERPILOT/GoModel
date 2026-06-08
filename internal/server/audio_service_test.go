@@ -374,6 +374,10 @@ func TestAudioSpeech_CostsOutputAudioDuration(t *testing.T) {
 	}{
 		{"explicit wav", "wav", "audio/wav", wav, 2, 0.0005, false},
 		{"content-type fallback wav", "", "audio/wav", wav, 2, 0.0005, false},
+		// The client requested a measurable format (pcm) but the provider
+		// actually returned mp3; the response Content-Type must win so the
+		// non-PCM bytes are caveated, not charged as len/48000 of fake PCM.
+		{"content-type overrides requested format", "pcm", "audio/mpeg", mp3, 0, 0, true},
 		{"default mp3 unmeasured", "", "", mp3, 0, 0, true},
 	}
 	for _, tt := range tests {
