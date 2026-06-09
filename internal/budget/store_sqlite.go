@@ -1,6 +1,8 @@
 package budget
 
 import (
+	"gomodel/internal/storage/sqlutil"
+
 	"context"
 	"database/sql"
 	"fmt"
@@ -130,7 +132,7 @@ func (s *SQLiteStore) UpsertBudgets(ctx context.Context, budgets []Budget) error
 			budget.PeriodSeconds,
 			budget.Amount,
 			budget.Source,
-			unixOrNil(budget.LastResetAt),
+			sqlutil.UnixOrNil(budget.LastResetAt),
 			budget.CreatedAt.Unix(),
 			budget.UpdatedAt.Unix(),
 			SourceManual,
@@ -345,7 +347,7 @@ func upsertSQLiteBudgets(ctx context.Context, tx *sql.Tx, budgets []Budget) erro
 			budget.PeriodSeconds,
 			budget.Amount,
 			budget.Source,
-			unixOrNil(budget.LastResetAt),
+			sqlutil.UnixOrNil(budget.LastResetAt),
 			budget.CreatedAt.Unix(),
 			budget.UpdatedAt.Unix(),
 			SourceManual,
@@ -377,7 +379,7 @@ func scanSQLiteBudget(scanner interface{ Scan(dest ...any) error }) (Budget, err
 	); err != nil {
 		return Budget{}, fmt.Errorf("scan budget: %w", err)
 	}
-	budget.LastResetAt = unixPtr(lastResetAt)
+	budget.LastResetAt = sqlutil.TimeFromUnix(lastResetAt)
 	budget.CreatedAt = time.Unix(createdAt, 0).UTC()
 	budget.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	return budget, nil
@@ -393,19 +395,4 @@ func isSQLiteDuplicateColumnError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "duplicate column") || strings.Contains(message, "already exists")
-}
-
-func unixOrNil(value *time.Time) any {
-	if value == nil {
-		return nil
-	}
-	return value.UTC().Unix()
-}
-
-func unixPtr(value sql.NullInt64) *time.Time {
-	if !value.Valid {
-		return nil
-	}
-	t := time.Unix(value.Int64, 0).UTC()
-	return &t
 }

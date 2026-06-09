@@ -1,10 +1,11 @@
 package authkeys
 
 import (
+	"gomodel/internal/storage/sqlutil"
+
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -84,7 +85,7 @@ func (s *PostgreSQLStore) Create(ctx context.Context, key AuthKey) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO auth_keys (id, name, description, user_path, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-	`, key.ID, key.Name, key.Description, pgNullableString(key.UserPath), key.RedactedValue, key.SecretHash, key.Enabled, pgUnixOrNil(key.ExpiresAt), pgUnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
+	`, key.ID, key.Name, key.Description, sqlutil.NullableString(key.UserPath), key.RedactedValue, key.SecretHash, key.Enabled, sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
 	}
@@ -137,40 +138,10 @@ func scanPostgreSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		}
 		return AuthKey{}, err
 	}
-	key.UserPath = derefTrimmedString(userPath)
-	key.ExpiresAt = int64PtrToTime(expiresAt)
-	key.DeactivatedAt = int64PtrToTime(deactivatedAt)
+	key.UserPath = sqlutil.DerefTrimmed(userPath)
+	key.ExpiresAt = sqlutil.TimeFromUnixPtr(expiresAt)
+	key.DeactivatedAt = sqlutil.TimeFromUnixPtr(deactivatedAt)
 	key.CreatedAt = time.Unix(createdAt, 0).UTC()
 	key.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	return key, nil
-}
-
-func pgUnixOrNil(value *time.Time) any {
-	if value == nil {
-		return nil
-	}
-	return value.UTC().Unix()
-}
-
-func int64PtrToTime(value *int64) *time.Time {
-	if value == nil {
-		return nil
-	}
-	t := time.Unix(*value, 0).UTC()
-	return &t
-}
-
-func pgNullableString(value string) any {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	return value
-}
-
-func derefTrimmedString(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return strings.TrimSpace(*value)
 }

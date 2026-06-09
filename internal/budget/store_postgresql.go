@@ -1,6 +1,8 @@
 package budget
 
 import (
+	"gomodel/internal/storage/sqlutil"
+
 	"context"
 	"fmt"
 	"strconv"
@@ -279,7 +281,7 @@ func upsertPostgreSQLBudgets(ctx context.Context, tx pgx.Tx, budgets []Budget) e
 			budget.PeriodSeconds,
 			budget.Amount,
 			budget.Source,
-			unixOrNil(budget.LastResetAt),
+			sqlutil.UnixOrNil(budget.LastResetAt),
 			budget.CreatedAt.Unix(),
 			budget.UpdatedAt.Unix(),
 			SourceManual,

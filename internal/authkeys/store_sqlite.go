@@ -1,6 +1,8 @@
 package authkeys
 
 import (
+	"gomodel/internal/storage/sqlutil"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -80,7 +82,7 @@ func (s *SQLiteStore) Create(ctx context.Context, key AuthKey) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO auth_keys (id, name, description, user_path, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, key.ID, key.Name, key.Description, nullableString(key.UserPath), key.RedactedValue, key.SecretHash, boolToSQLite(key.Enabled), unixOrNil(key.ExpiresAt), unixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
+	`, key.ID, key.Name, key.Description, sqlutil.NullableString(key.UserPath), key.RedactedValue, key.SecretHash, boolToSQLite(key.Enabled), sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
 	}
@@ -138,10 +140,10 @@ func scanSQLiteAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		}
 		return AuthKey{}, err
 	}
-	key.UserPath = nullableStringValue(userPath)
+	key.UserPath = sqlutil.StringFromNullable(userPath)
 	key.Enabled = enabled != 0
-	key.ExpiresAt = unixPtr(expiresAt)
-	key.DeactivatedAt = unixPtr(deactivatedAt)
+	key.ExpiresAt = sqlutil.TimeFromUnix(expiresAt)
+	key.DeactivatedAt = sqlutil.TimeFromUnix(deactivatedAt)
 	key.CreatedAt = time.Unix(createdAt, 0).UTC()
 	key.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	return key, nil
@@ -160,34 +162,4 @@ func boolToSQLite(v bool) int {
 		return 1
 	}
 	return 0
-}
-
-func unixOrNil(value *time.Time) any {
-	if value == nil {
-		return nil
-	}
-	return value.UTC().Unix()
-}
-
-func unixPtr(value sql.NullInt64) *time.Time {
-	if !value.Valid {
-		return nil
-	}
-	t := time.Unix(value.Int64, 0).UTC()
-	return &t
-}
-
-func nullableString(value string) any {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	return value
-}
-
-func nullableStringValue(value sql.NullString) string {
-	if !value.Valid {
-		return ""
-	}
-	return strings.TrimSpace(value.String)
 }
