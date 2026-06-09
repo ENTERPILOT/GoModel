@@ -1,6 +1,8 @@
 package usage
 
 import (
+	"gomodel/internal/storage/sqlutil"
+
 	"context"
 	"database/sql"
 	"fmt"
@@ -73,7 +75,7 @@ func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params Recalcu
 
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, model, provider, provider_name, endpoint, input_tokens, output_tokens, raw_data::text
-		FROM usage`+buildWhereClause(conditions)+`
+		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		FOR UPDATE`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query postgres usage costs for recalculation: %w", err)

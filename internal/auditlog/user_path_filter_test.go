@@ -1,6 +1,10 @@
 package auditlog
 
-import "testing"
+import (
+	"testing"
+
+	"gomodel/internal/storage/sqlutil"
+)
 
 func TestAuditUserPathSubtreePattern(t *testing.T) {
 	tests := []struct {
@@ -67,8 +71,8 @@ func TestAuditUserPathSubtreeRegex(t *testing.T) {
 }
 
 func TestEscapeLikeWildcards(t *testing.T) {
-	if got := escapeLikeWildcards("/team%_a"); got != "/team\\%\\_a" {
-		t.Fatalf("escapeLikeWildcards(%q) = %q, want %q", "/team%_a", got, "/team\\%\\_a")
+	if got := sqlutil.EscapeLikeWildcards("/team%_a"); got != "/team\\%\\_a" {
+		t.Fatalf("sqlutil.EscapeLikeWildcards(%q) = %q, want %q", "/team%_a", got, "/team\\%\\_a")
 	}
 }
 

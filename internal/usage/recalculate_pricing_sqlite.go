@@ -1,6 +1,8 @@
 package usage
 
 import (
+	"gomodel/internal/storage/sqlutil"
+
 	"context"
 	"database/sql"
 	"fmt"
@@ -94,7 +96,7 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, model, provider, provider_name, endpoint, input_tokens, output_tokens, raw_data
-		FROM usage`+buildWhereClause(conditions)+`
+		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		ORDER BY id
 		LIMIT ?`, args...)
 	if err != nil {

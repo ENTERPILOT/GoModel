@@ -1,6 +1,8 @@
 package auditlog
 
 import (
+	"gomodel/internal/storage/sqlutil"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -37,11 +39,11 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 
 	if params.RequestedModel != "" {
 		conditions = append(conditions, "requested_model LIKE ? ESCAPE '\\'")
-		args = append(args, "%"+escapeLikeWildcards(params.RequestedModel)+"%")
+		args = append(args, "%"+sqlutil.EscapeLikeWildcards(params.RequestedModel)+"%")
 	}
 	if params.Provider != "" {
 		conditions = append(conditions, "(provider LIKE ? ESCAPE '\\' OR provider_name LIKE ? ESCAPE '\\')")
-		args = append(args, "%"+escapeLikeWildcards(params.Provider)+"%", "%"+escapeLikeWildcards(params.Provider)+"%")
+		args = append(args, "%"+sqlutil.EscapeLikeWildcards(params.Provider)+"%", "%"+sqlutil.EscapeLikeWildcards(params.Provider)+"%")
 	}
 	if params.Method != "" {
 		conditions = append(conditions, "method = ?")
@@ -49,7 +51,7 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 	}
 	if params.Path != "" {
 		conditions = append(conditions, "path LIKE ? ESCAPE '\\'")
-		args = append(args, "%"+escapeLikeWildcards(params.Path)+"%")
+		args = append(args, "%"+sqlutil.EscapeLikeWildcards(params.Path)+"%")
 	}
 	if userPath != "" {
 		conditions = append(conditions, auditUserPathSQLPredicate(userPath, "user_path = ?", "user_path LIKE ? ESCAPE '\\'"))
@@ -57,7 +59,7 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 	}
 	if params.ErrorType != "" {
 		conditions = append(conditions, "error_type LIKE ? ESCAPE '\\'")
-		args = append(args, "%"+escapeLikeWildcards(params.ErrorType)+"%")
+		args = append(args, "%"+sqlutil.EscapeLikeWildcards(params.ErrorType)+"%")
 	}
 	if params.StatusCode != nil {
 		conditions = append(conditions, "status_code = ?")
@@ -72,12 +74,12 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 		}
 	}
 	if params.Search != "" {
-		s := "%" + escapeLikeWildcards(params.Search) + "%"
+		s := "%" + sqlutil.EscapeLikeWildcards(params.Search) + "%"
 		conditions = append(conditions, `(request_id LIKE ? ESCAPE '\' OR auth_key_id LIKE ? ESCAPE '\' OR requested_model LIKE ? ESCAPE '\' OR provider LIKE ? ESCAPE '\' OR provider_name LIKE ? ESCAPE '\' OR method LIKE ? ESCAPE '\' OR path LIKE ? ESCAPE '\' OR user_path LIKE ? ESCAPE '\' OR error_type LIKE ? ESCAPE '\' OR json_extract(data, '$.error_message') LIKE ? ESCAPE '\')`)
 		args = append(args, s, s, s, s, s, s, s, s, s, s)
 	}
 
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 
 	// Count total
 	var total int

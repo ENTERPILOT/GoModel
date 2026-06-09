@@ -1,6 +1,8 @@
 package auditlog
 
 import (
+	"gomodel/internal/storage/sqlutil"
+
 	"fmt"
 	"regexp"
 
@@ -19,7 +21,7 @@ func auditUserPathSubtreePattern(userPath string) string {
 	if userPath == "/" {
 		return "/%"
 	}
-	return escapeLikeWildcards(userPath) + "/%"
+	return sqlutil.EscapeLikeWildcards(userPath) + "/%"
 }
 
 func auditUserPathSQLPredicate(userPath, exactExpr, subtreeExpr string) string {

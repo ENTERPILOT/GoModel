@@ -1,6 +1,8 @@
 package usage
 
 import (
+	"gomodel/internal/storage/sqlutil"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -34,7 +36,7 @@ func (r *PostgreSQLReader) GetSummary(ctx context.Context, params UsageQueryPara
 	if err != nil {
 		return nil, err
 	}
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
 	query := `SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + `
@@ -58,7 +60,7 @@ func (r *PostgreSQLReader) GetUsageByModel(ctx context.Context, params UsageQuer
 	if err != nil {
 		return nil, err
 	}
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 	providerNameExpr := usageGroupedProviderNameSQL("provider_name", "provider")
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
@@ -94,7 +96,7 @@ func (r *PostgreSQLReader) GetUsageByUserPath(ctx context.Context, params UsageQ
 	if err != nil {
 		return nil, err
 	}
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
 	query := `SELECT ` + userPathExpr + ` AS user_path, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + `
@@ -142,13 +144,13 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 		argIdx += 2
 	}
 	if params.Search != "" {
-		s := "%" + escapeLikeWildcards(params.Search) + "%"
+		s := "%" + sqlutil.EscapeLikeWildcards(params.Search) + "%"
 		conditions = append(conditions, fmt.Sprintf("(model ILIKE $%d ESCAPE '\\' OR provider ILIKE $%d ESCAPE '\\' OR provider_name ILIKE $%d ESCAPE '\\' OR request_id ILIKE $%d ESCAPE '\\' OR provider_id ILIKE $%d ESCAPE '\\')", argIdx, argIdx, argIdx, argIdx, argIdx))
 		args = append(args, s)
 		argIdx++
 	}
 
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 
 	// Count total
 	var total int
@@ -302,7 +304,7 @@ func (r *PostgreSQLReader) GetDailyUsage(ctx context.Context, params UsageQueryP
 	if err != nil {
 		return nil, err
 	}
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
 	query := fmt.Sprintf(`SELECT %s as period, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)`+costCols+`
@@ -338,7 +340,7 @@ func (r *PostgreSQLReader) GetCacheOverview(ctx context.Context, params UsageQue
 	if err != nil {
 		return nil, err
 	}
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 	queryArgs := append([]any{CacheTypeExact, CacheTypeSemantic}, args...)
 
 	summaryQuery := `SELECT COUNT(*),

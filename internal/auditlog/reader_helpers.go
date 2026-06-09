@@ -1,32 +1,11 @@
 package auditlog
 
 import (
-	"strings"
+	"gomodel/internal/storage/sqlutil"
 )
 
-func buildWhereClause(conditions []string) string {
-	if len(conditions) == 0 {
-		return ""
-	}
-	return " WHERE " + strings.Join(conditions, " AND ")
-}
-
-func escapeLikeWildcards(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `%`, `\%`)
-	s = strings.ReplaceAll(s, `_`, `\_`)
-	return s
-}
-
+// clampLimitOffset applies the audit log reader pagination policy:
+// limit defaults to 25 and is capped at 100; offset floors at 0.
 func clampLimitOffset(limit, offset int) (int, int) {
-	if limit <= 0 {
-		limit = 25
-	}
-	if limit > 100 {
-		limit = 100
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	return limit, offset
+	return sqlutil.ClampLimitOffset(limit, offset, 25, 100)
 }

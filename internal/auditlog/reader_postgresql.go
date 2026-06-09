@@ -1,6 +1,8 @@
 package auditlog
 
 import (
+	"gomodel/internal/storage/sqlutil"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -34,12 +36,12 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 
 	if params.RequestedModel != "" {
 		conditions = append(conditions, fmt.Sprintf("requested_model ILIKE $%d ESCAPE '\\'", argIdx))
-		args = append(args, "%"+escapeLikeWildcards(params.RequestedModel)+"%")
+		args = append(args, "%"+sqlutil.EscapeLikeWildcards(params.RequestedModel)+"%")
 		argIdx++
 	}
 	if params.Provider != "" {
 		conditions = append(conditions, fmt.Sprintf("(provider ILIKE $%d ESCAPE '\\' OR provider_name ILIKE $%d ESCAPE '\\')", argIdx, argIdx+1))
-		args = append(args, "%"+escapeLikeWildcards(params.Provider)+"%", "%"+escapeLikeWildcards(params.Provider)+"%")
+		args = append(args, "%"+sqlutil.EscapeLikeWildcards(params.Provider)+"%", "%"+sqlutil.EscapeLikeWildcards(params.Provider)+"%")
 		argIdx += 2
 	}
 	if params.Method != "" {
@@ -49,7 +51,7 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 	}
 	if params.Path != "" {
 		conditions = append(conditions, fmt.Sprintf("path ILIKE $%d ESCAPE '\\'", argIdx))
-		args = append(args, "%"+escapeLikeWildcards(params.Path)+"%")
+		args = append(args, "%"+sqlutil.EscapeLikeWildcards(params.Path)+"%")
 		argIdx++
 	}
 	if userPath != "" {
@@ -63,7 +65,7 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 	}
 	if params.ErrorType != "" {
 		conditions = append(conditions, fmt.Sprintf("error_type ILIKE $%d ESCAPE '\\'", argIdx))
-		args = append(args, "%"+escapeLikeWildcards(params.ErrorType)+"%")
+		args = append(args, "%"+sqlutil.EscapeLikeWildcards(params.ErrorType)+"%")
 		argIdx++
 	}
 	if params.StatusCode != nil {
@@ -77,13 +79,13 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 		argIdx++
 	}
 	if params.Search != "" {
-		s := "%" + escapeLikeWildcards(params.Search) + "%"
+		s := "%" + sqlutil.EscapeLikeWildcards(params.Search) + "%"
 		conditions = append(conditions, fmt.Sprintf("(request_id ILIKE $%d ESCAPE '\\' OR auth_key_id ILIKE $%d ESCAPE '\\' OR requested_model ILIKE $%d ESCAPE '\\' OR provider ILIKE $%d ESCAPE '\\' OR provider_name ILIKE $%d ESCAPE '\\' OR method ILIKE $%d ESCAPE '\\' OR path ILIKE $%d ESCAPE '\\' OR user_path ILIKE $%d ESCAPE '\\' OR error_type ILIKE $%d ESCAPE '\\' OR data->>'error_message' ILIKE $%d ESCAPE '\\')", argIdx, argIdx, argIdx, argIdx, argIdx, argIdx, argIdx, argIdx, argIdx, argIdx))
 		args = append(args, s)
 		argIdx++
 	}
 
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 
 	var total int
 	countQuery := `SELECT COUNT(*) FROM audit_logs` + where

@@ -1,6 +1,8 @@
 package usage
 
 import (
+	"gomodel/internal/storage/sqlutil"
+
 	"fmt"
 	"regexp"
 
@@ -19,7 +21,7 @@ func usageUserPathSubtreePattern(userPath string) string {
 	if userPath == "/" {
 		return "/%"
 	}
-	return escapeLikeWildcards(userPath) + "/%"
+	return sqlutil.EscapeLikeWildcards(userPath) + "/%"
 }
 
 func usageUserPathSubtreeRegex(userPath string) string {

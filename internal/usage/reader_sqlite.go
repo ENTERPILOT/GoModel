@@ -1,6 +1,8 @@
 package usage
 
 import (
+	"gomodel/internal/storage/sqlutil"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -29,7 +31,7 @@ func (r *SQLiteReader) GetSummary(ctx context.Context, params UsageQueryParams) 
 	if err != nil {
 		return nil, err
 	}
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
 	query := `SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + `
@@ -53,7 +55,7 @@ func (r *SQLiteReader) GetUsageByModel(ctx context.Context, params UsageQueryPar
 	if err != nil {
 		return nil, err
 	}
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 	providerNameExpr := usageGroupedProviderNameSQL("provider_name", "provider")
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
@@ -89,7 +91,7 @@ func (r *SQLiteReader) GetUsageByUserPath(ctx context.Context, params UsageQuery
 	if err != nil {
 		return nil, err
 	}
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
 	query := `SELECT ` + userPathExpr + ` AS user_path, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + costCols + `
@@ -136,11 +138,11 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 	}
 	if params.Search != "" {
 		conditions = append(conditions, "(model LIKE ? ESCAPE '\\' OR provider LIKE ? ESCAPE '\\' OR provider_name LIKE ? ESCAPE '\\' OR request_id LIKE ? ESCAPE '\\' OR provider_id LIKE ? ESCAPE '\\')")
-		s := "%" + escapeLikeWildcards(params.Search) + "%"
+		s := "%" + sqlutil.EscapeLikeWildcards(params.Search) + "%"
 		args = append(args, s, s, s, s, s)
 	}
 
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 
 	// Count total
 	var total int
@@ -329,7 +331,7 @@ func (r *SQLiteReader) GetDailyUsage(ctx context.Context, params UsageQueryParam
 	if err != nil {
 		return nil, err
 	}
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 
 	costCols := `, SUM(input_cost), SUM(output_cost), SUM(total_cost)`
 	query := `WITH usage_periods AS (
@@ -372,7 +374,7 @@ func (r *SQLiteReader) GetCacheOverview(ctx context.Context, params UsageQueryPa
 	if err != nil {
 		return nil, err
 	}
-	where := buildWhereClause(conditions)
+	where := sqlutil.BuildWhereClause(conditions)
 
 	summaryQuery := `SELECT COUNT(*),
 		COALESCE(SUM(CASE WHEN cache_type = '` + CacheTypeExact + `' THEN 1 ELSE 0 END), 0),
@@ -556,7 +558,7 @@ func (r *SQLiteReader) sqliteGroupingRange(ctx context.Context, params UsageQuer
 		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
 		args = append(args, userPath, usageUserPathSubtreePattern(userPath))
 	}
-	query := `SELECT MIN(` + sqliteTimestampEpochExpr() + `), MAX(` + sqliteTimestampEpochExpr() + `) FROM usage` + buildWhereClause(conditions)
+	query := `SELECT MIN(` + sqliteTimestampEpochExpr() + `), MAX(` + sqliteTimestampEpochExpr() + `) FROM usage` + sqlutil.BuildWhereClause(conditions)
 	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&minTS, &maxTS); err != nil {
 		return time.Time{}, time.Time{}, false, fmt.Errorf("failed to determine sqlite usage range: %w", err)
 	}
