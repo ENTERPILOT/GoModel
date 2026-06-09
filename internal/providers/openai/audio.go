@@ -48,7 +48,7 @@ func (p *CompatibleProvider) CreateSpeech(ctx context.Context, req *core.AudioSp
 // response_format when the upstream omits the header.
 func speechResponseContentType(raw *llmclient.Response, format string) string {
 	if raw != nil {
-		if ct := strings.TrimSpace(raw.Header.Get("Content-Type")); ct != "" {
+		if ct := strings.TrimSpace(raw.ContentType); ct != "" {
 			return ct
 		}
 	}

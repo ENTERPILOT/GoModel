@@ -29,14 +29,19 @@ func openAIAudioProvider(t *testing.T, routes map[string]replayRoute) core.Audio
 }
 
 func TestOpenAIReplayCreateSpeech(t *testing.T) {
+	// The response is tagged with the upstream Content-Type, which describes the
+	// bytes actually returned (usage prices output-duration models from it). The
+	// requested response_format does not override it — the last case returns mp3
+	// for a wav request to prove the upstream type wins.
 	testCases := []struct {
 		name           string
 		responseFormat string
-		wantType       string
+		upstreamType   string
 	}{
-		{name: "default", responseFormat: "", wantType: "audio/mpeg"},
-		{name: "wav", responseFormat: "wav", wantType: "audio/wav"},
-		{name: "opus", responseFormat: "opus", wantType: "audio/ogg"},
+		{name: "mp3 default", responseFormat: "", upstreamType: "audio/mpeg"},
+		{name: "wav", responseFormat: "wav", upstreamType: "audio/wav"},
+		{name: "opus", responseFormat: "opus", upstreamType: "audio/opus"},
+		{name: "upstream overrides requested format", responseFormat: "wav", upstreamType: "audio/mpeg"},
 	}
 
 	for _, tc := range testCases {
@@ -45,7 +50,7 @@ func TestOpenAIReplayCreateSpeech(t *testing.T) {
 			audio := openAIAudioProvider(t, map[string]replayRoute{
 				replayKey(http.MethodPost, "/audio/speech"): {
 					statusCode:  http.StatusOK,
-					contentType: "audio/mpeg",
+					contentType: tc.upstreamType,
 					body:        audioBytes,
 				},
 			})
@@ -58,8 +63,7 @@ func TestOpenAIReplayCreateSpeech(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.NotNil(t, resp)
-			// Content type is derived from the requested format, not the upstream header.
-			require.Equal(t, tc.wantType, resp.ContentType)
+			require.Equal(t, tc.upstreamType, resp.ContentType)
 			require.Equal(t, audioBytes, resp.Data)
 		})
 	}
