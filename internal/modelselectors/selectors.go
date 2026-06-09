@@ -3,8 +3,9 @@
 package modelselectors
 
 import (
-	"errors"
 	"strings"
+
+	"gomodel/internal/validation"
 )
 
 // Catalog is the minimal configured-provider surface needed for selector validation.
@@ -30,34 +31,16 @@ const (
 )
 
 // ValidationError indicates invalid selector input or invalid selector state.
-type ValidationError struct {
-	Message string
-	Err     error
-}
-
-func (e *ValidationError) Error() string {
-	if e == nil {
-		return ""
-	}
-	return e.Message
-}
-
-func (e *ValidationError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Err
-}
+type ValidationError = validation.Error
 
 // NewValidationError creates a selector validation error.
 func NewValidationError(message string, err error) error {
-	return &ValidationError{Message: message, Err: err}
+	return validation.NewError(message, err)
 }
 
 // IsValidationError reports whether err is a validation error.
 func IsValidationError(err error) bool {
-	var target *ValidationError
-	return errors.As(err, &target)
+	return validation.IsError(err)
 }
 
 // NormalizeInput validates and normalizes one user-supplied selector.

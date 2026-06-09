@@ -4,39 +4,23 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"gomodel/internal/validation"
 )
 
 // ErrNotFound indicates a requested alias was not found.
 var ErrNotFound = errors.New("alias not found")
 
 // ValidationError indicates invalid alias input or invalid alias state.
-type ValidationError struct {
-	Message string
-	Err     error
-}
-
-func (e *ValidationError) Error() string {
-	if e == nil {
-		return ""
-	}
-	return e.Message
-}
-
-func (e *ValidationError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Err
-}
+type ValidationError = validation.Error
 
 func newValidationError(message string, err error) error {
-	return &ValidationError{Message: message, Err: err}
+	return validation.NewError(message, err)
 }
 
 // IsValidationError reports whether err is a validation error.
 func IsValidationError(err error) bool {
-	_, ok := errors.AsType[*ValidationError](err)
-	return ok
+	return validation.IsError(err)
 }
 
 // Store defines persistence operations for aliases.
