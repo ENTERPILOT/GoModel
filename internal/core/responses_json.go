@@ -6,6 +6,40 @@ import (
 	"fmt"
 )
 
+// responsesUtilityRequestFields lists the JSON fields recognized on responses
+// utility requests; any other field is preserved as an unknown extra field.
+var responsesUtilityRequestFields = []string{
+	"model",
+	"provider",
+	"input",
+	"instructions",
+	"tools",
+	"tool_choice",
+	"parallel_tool_calls",
+	"temperature",
+	"top_p",
+	"top_logprobs",
+	"max_output_tokens",
+	"metadata",
+	"reasoning",
+	"text",
+	"include",
+	"truncation",
+	"store",
+	"previous_response_id",
+	"conversation",
+	"prompt",
+	"prompt_cache_retention",
+	"context_management",
+	"user",
+	"service_tier",
+	"safety_identifier",
+}
+
+// responsesRequestFields additionally recognizes the streaming controls that
+// only apply to full responses requests.
+var responsesRequestFields = append([]string{"stream", "stream_options"}, responsesUtilityRequestFields...)
+
 // UnmarshalJSON preserves dynamic input payloads while supporting Swagger-only schema fields.
 // Array inputs are deserialized as []ResponsesInputElement for type-safe downstream handling.
 func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
@@ -42,35 +76,7 @@ func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	extraFields, err := extractUnknownJSONFields(data,
-		"model",
-		"provider",
-		"input",
-		"instructions",
-		"tools",
-		"tool_choice",
-		"parallel_tool_calls",
-		"temperature",
-		"top_p",
-		"top_logprobs",
-		"max_output_tokens",
-		"stream",
-		"stream_options",
-		"metadata",
-		"reasoning",
-		"text",
-		"include",
-		"truncation",
-		"store",
-		"previous_response_id",
-		"conversation",
-		"prompt",
-		"prompt_cache_retention",
-		"context_management",
-		"user",
-		"service_tier",
-		"safety_identifier",
-	)
+	extraFields, err := extractUnknownJSONFields(data, responsesRequestFields...)
 	if err != nil {
 		return err
 	}
@@ -306,33 +312,7 @@ func decodeResponseUtilityRequestJSON(data []byte) (responseUtilityRequestJSON, 
 		return responseUtilityRequestJSON{}, err
 	}
 
-	extraFields, err := extractUnknownJSONFields(data,
-		"model",
-		"provider",
-		"input",
-		"instructions",
-		"tools",
-		"tool_choice",
-		"parallel_tool_calls",
-		"temperature",
-		"top_p",
-		"top_logprobs",
-		"max_output_tokens",
-		"metadata",
-		"reasoning",
-		"text",
-		"include",
-		"truncation",
-		"store",
-		"previous_response_id",
-		"conversation",
-		"prompt",
-		"prompt_cache_retention",
-		"context_management",
-		"user",
-		"service_tier",
-		"safety_identifier",
-	)
+	extraFields, err := extractUnknownJSONFields(data, responsesUtilityRequestFields...)
 	if err != nil {
 		return responseUtilityRequestJSON{}, err
 	}
