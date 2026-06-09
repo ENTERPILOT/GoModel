@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 
 	"github.com/tidwall/gjson"
@@ -233,7 +234,7 @@ func extractUnknownJSONFields(data []byte, knownFields ...string) (UnknownJSONFi
 	buf.WriteByte('{')
 	wrote := false
 	root.ForEach(func(key, value gjson.Result) bool {
-		if containsJSONField(knownFields, key.String()) {
+		if slices.Contains(knownFields, key.String()) {
 			return true
 		}
 		if wrote {
@@ -251,15 +252,6 @@ func extractUnknownJSONFields(data []byte, knownFields ...string) (UnknownJSONFi
 
 	buf.WriteByte('}')
 	return UnknownJSONFields{raw: buf.Bytes()}, nil
-}
-
-func containsJSONField(knownFields []string, field string) bool {
-	for _, known := range knownFields {
-		if field == known {
-			return true
-		}
-	}
-	return false
 }
 
 func marshalWithUnknownJSONFields(base any, extraFields UnknownJSONFields) ([]byte, error) {
