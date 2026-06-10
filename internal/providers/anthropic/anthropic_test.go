@@ -1477,6 +1477,42 @@ func TestConvertToAnthropicRequest_TypedTopPWinsOverExtraFields(t *testing.T) {
 	}
 }
 
+func TestConvertToAnthropicRequest_ReasoningEffortFromExtraFields(t *testing.T) {
+	result, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model:    "claude-fable-5",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"reasoning_effort": json.RawMessage(`"high"`),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+	if result.Thinking == nil || result.Thinking.Type != "adaptive" {
+		t.Fatalf("Thinking = %#v, want adaptive", result.Thinking)
+	}
+	if result.OutputConfig == nil || result.OutputConfig.Effort != "high" {
+		t.Fatalf("OutputConfig = %#v, want effort high", result.OutputConfig)
+	}
+}
+
+func TestConvertToAnthropicRequest_ReasoningObjectWinsOverReasoningEffort(t *testing.T) {
+	result, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model:     "claude-fable-5",
+		Messages:  []core.Message{{Role: "user", Content: "hi"}},
+		Reasoning: &core.Reasoning{Effort: "low"},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"reasoning_effort": json.RawMessage(`"max"`),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+	if result.OutputConfig == nil || result.OutputConfig.Effort != "low" {
+		t.Fatalf("OutputConfig = %#v, want object-form effort low", result.OutputConfig)
+	}
+}
+
 func TestConvertToAnthropicRequest_InvalidToolArguments(t *testing.T) {
 	_, err := convertToAnthropicRequest(&core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -3793,6 +3829,16 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			expectNilTemp:     true,
 		},
 		{
+			name:              "fable 5 - adaptive thinking with high effort",
+			model:             "claude-fable-5",
+			reasoning:         &core.Reasoning{Effort: "high"},
+			maxTokens:         new(4096),
+			expectedThinkType: "adaptive",
+			expectedEffort:    "high",
+			expectedMaxTokens: 4096,
+			expectNilTemp:     true,
+		},
+		{
 			name:              "opus 4.8 - adaptive thinking with xhigh effort",
 			model:             "claude-opus-4-8",
 			reasoning:         &core.Reasoning{Effort: "xhigh"},
@@ -4012,6 +4058,16 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			expectNilTemp:     true,
 		},
 		{
+			name:              "fable 5 - adaptive thinking with high effort",
+			model:             "claude-fable-5",
+			reasoning:         &core.Reasoning{Effort: "high"},
+			maxOutputTokens:   new(4096),
+			expectedThinkType: "adaptive",
+			expectedEffort:    "high",
+			expectedMaxTokens: 4096,
+			expectNilTemp:     true,
+		},
+		{
 			name:              "opus 4.8 - adaptive thinking with xhigh effort",
 			model:             "claude-opus-4-8",
 			reasoning:         &core.Reasoning{Effort: "xhigh"},
@@ -4126,6 +4182,8 @@ func TestIsAdaptiveThinkingModel(t *testing.T) {
 		model    string
 		expected bool
 	}{
+		{"claude-fable-5", true},
+		{"claude-fable-5-20260601", true},
 		{"claude-opus-4-8", true},
 		{"claude-opus-4-8-20260301", true},
 		{"claude-opus-4-7", true},

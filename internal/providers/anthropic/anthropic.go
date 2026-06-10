@@ -189,6 +189,7 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 }
 
 var adaptiveThinkingPrefixes = []string{
+	"claude-fable-5",
 	"claude-opus-4-8",
 	"claude-opus-4-7",
 	"claude-opus-4-6",

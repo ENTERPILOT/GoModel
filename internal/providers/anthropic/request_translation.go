@@ -307,8 +307,8 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		anthropicReq.MaxTokens = resolveDefaultMaxTokens()
 	}
 
-	if req.Reasoning != nil && req.Reasoning.Effort != "" {
-		applyReasoning(anthropicReq, req.Model, req.Reasoning.Effort)
+	if effort := resolveAnthropicReasoningEffort(req); effort != "" {
+		applyReasoning(anthropicReq, req.Model, effort)
 	}
 
 	tools, err := convertOpenAIToolsToAnthropic(req.Tools)
@@ -561,6 +561,26 @@ func anthropicCacheControlFromExtra(extraFields core.UnknownJSONFields) (json.Ra
 		return nil, core.NewInvalidRequestError("anthropic cache_control must be an object", nil)
 	}
 	return core.CloneRawJSON(trimmed), nil
+}
+
+// resolveAnthropicReasoningEffort returns the requested reasoning effort,
+// accepting both the OpenAI Responses-style reasoning object and the Chat
+// Completions reasoning_effort string carried in extra fields. The object
+// form wins when both are present.
+func resolveAnthropicReasoningEffort(req *core.ChatRequest) string {
+	if req.Reasoning != nil && req.Reasoning.Effort != "" {
+		return req.Reasoning.Effort
+	}
+
+	raw := bytes.TrimSpace(req.ExtraFields.Lookup("reasoning_effort"))
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return ""
+	}
+	var effort string
+	if err := json.Unmarshal(raw, &effort); err != nil {
+		return ""
+	}
+	return effort
 }
 
 func resolveAnthropicTopP(req *core.ChatRequest) *float64 {

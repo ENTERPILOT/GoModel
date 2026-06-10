@@ -33,20 +33,24 @@ providers:
 
 ## Reasoning effort mapping
 
-GoModel accepts OpenAI-shaped `"reasoning": {"effort": "..."}` and translates it
-to Claude's native controls. The five accepted levels are `low`, `medium`,
-`high`, `xhigh`, and `max`; any other value is downgraded to `low` and logged.
-The translation depends on whether the model supports **adaptive thinking**.
+GoModel accepts the OpenAI-shaped `"reasoning": {"effort": "..."}` object as
+well as the Chat Completions string form `"reasoning_effort": "..."` (the
+object wins when both are present) and translates them to Claude's native
+controls. The five accepted levels are `low`, `medium`, `high`, `xhigh`, and
+`max`; any other value is downgraded to `low` and logged. The translation
+depends on whether the model supports **adaptive thinking**.
 
 | Model generation | Thinking config | Effort destination |
 | ---------------- | --------------- | ------------------ |
-| Adaptive — `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` (and dated snapshots of each) | `thinking: {type: "adaptive"}` | `output_config.effort` (passed through) |
+| Adaptive — `claude-fable-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` (and dated snapshots of each) | `thinking: {type: "adaptive"}` | `output_config.effort` (passed through) |
 | Legacy (everything else, e.g. `claude-opus-4-5`, `claude-3-5-sonnet`) | `thinking: {type: "enabled", budget_tokens: N}` | mapped to a token budget |
 
 <Note>
-  Adaptive routing is an explicit allowlist, not a version comparison. New model
-  IDs are treated as legacy until added to the list, so they keep working
-  (via `budget_tokens`) rather than silently sending an unsupported config.
+  Adaptive routing is an explicit allowlist, not a version comparison. New
+  model IDs are treated as legacy until added to the list. For pre-4.7 models
+  the legacy fallback keeps working via `budget_tokens`; models from Opus 4.7
+  onward reject `budget_tokens` outright, so a new adaptive-only model ID
+  fails with an upstream 400 until it is added to the allowlist.
 </Note>
 
 For legacy models the effort string maps to a thinking budget; `max_tokens` is
@@ -71,11 +75,12 @@ so on legacy models they are capped at the `high` budget rather than inflating
 </Note>
 
 <Note>
-  Effort levels are model-gated upstream: `xhigh` is only available on Opus 4.8
-  and Opus 4.7, and `max` on Opus 4.8/4.7/4.6 and Sonnet 4.6. GoModel forwards
-  the level you send; Anthropic rejects it with a 400 if the target model does
-  not support it. Manual `budget_tokens` thinking is rejected on Opus 4.7/4.8,
-  which is why GoModel uses adaptive thinking for those models.
+  Effort levels are model-gated upstream: `xhigh` is only available on Fable 5
+  and Opus 4.8/4.7, and `max` on Fable 5, Opus 4.8/4.7/4.6, and Sonnet 4.6.
+  GoModel forwards the level you send; Anthropic rejects it with a 400 if the
+  target model does not support it. Manual `budget_tokens` thinking is rejected
+  on Fable 5 and Opus 4.7/4.8, which is why GoModel uses adaptive thinking for
+  those models.
 </Note>
 
 When extended thinking is engaged, Anthropic requires `temperature = 1`. GoModel
