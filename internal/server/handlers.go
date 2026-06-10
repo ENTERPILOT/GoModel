@@ -143,13 +143,16 @@ func (h *Handler) SetResponseStore(store responsestore.Store) {
 }
 
 // SetConversationStore replaces the conversation store used by the
-// Conversations lifecycle endpoints.
+// Conversations lifecycle endpoints and by /v1/responses conversation turns.
 // nil is ignored to keep an always-available fallback memory store.
 func (h *Handler) SetConversationStore(store conversationstore.Store) {
 	if store == nil {
 		return
 	}
 	h.conversationStore = store
+	if h.translatedSvc != nil {
+		h.translatedSvc.setConversationStore(store)
+	}
 }
 
 func (h *Handler) translatedInference() *translatedInferenceService {
@@ -168,6 +171,7 @@ func (h *Handler) translatedInference() *translatedInferenceService {
 			responseCache:            h.responseCache,
 			guardrailsHash:           h.guardrailsHash,
 			responseStore:            h.currentResponseStore(),
+			conversationStore:        h.conversationStore,
 		}
 		s.initHandlers()
 		h.responseStoreMu.Lock()

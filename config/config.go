@@ -82,9 +82,6 @@ func buildDefaultConfig() *Config {
 			PostgreSQL: PostgreSQLStorageConfig{
 				MaxConns: 10,
 			},
-			MongoDB: MongoDBStorageConfig{
-				Database: "gomodel",
-			},
 		},
 		Logging: LogConfig{
 			LogBodies:             true,

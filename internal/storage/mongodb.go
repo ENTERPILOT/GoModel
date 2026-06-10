@@ -3,10 +3,16 @@ package storage
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
+
+// DefaultMongoDatabase is the database used when neither the explicit Database
+// config nor the connection string names one.
+const DefaultMongoDatabase = "gomodel"
 
 // mongoStorage implements Storage for MongoDB
 type mongoStorage struct {
@@ -20,11 +26,7 @@ func NewMongoDB(ctx context.Context, cfg MongoDBConfig) (MongoDBStorage, error) 
 		return nil, fmt.Errorf("MongoDB URL is required")
 	}
 
-	// Set default database name
-	dbName := cfg.Database
-	if dbName == "" {
-		dbName = "gomodel"
-	}
+	dbName := resolveMongoDatabase(cfg)
 
 	// Create client options
 	clientOpts := options.Client().ApplyURI(cfg.URL)
@@ -48,6 +50,30 @@ func NewMongoDB(ctx context.Context, cfg MongoDBConfig) (MongoDBStorage, error) 
 		client:   client,
 		database: database,
 	}, nil
+}
+
+// resolveMongoDatabase picks the database name for a connection: the explicit
+// Database config wins, then the database named in the connection string path
+// (the standard "mongodb://host/dbname" form), then DefaultMongoDatabase.
+func resolveMongoDatabase(cfg MongoDBConfig) string {
+	if cfg.Database != "" {
+		return cfg.Database
+	}
+	if name := databaseNameFromURI(cfg.URL); name != "" {
+		return name
+	}
+	return DefaultMongoDatabase
+}
+
+// databaseNameFromURI extracts the database name (the path component) from a
+// MongoDB connection string. Returns "" when the URI is unparseable or names
+// no database.
+func databaseNameFromURI(uri string) string {
+	u, err := url.Parse(uri)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(u.Path, "/")
 }
 
 func (s *mongoStorage) Close() error {

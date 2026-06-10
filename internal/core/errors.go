@@ -174,6 +174,13 @@ func NewNotFoundError(message string) *GatewayError {
 	}
 }
 
+// NewModelNotFoundError reports a model the gateway cannot route. It mirrors
+// OpenAI's contract for unknown models — HTTP 404 with code "model_not_found" —
+// so clients that key on the status or code behave the same as against OpenAI.
+func NewModelNotFoundError(model string) *GatewayError {
+	return NewNotFoundError("unsupported model: " + model).WithCode("model_not_found")
+}
+
 // ParseProviderError parses an error response from a provider and returns an appropriate GatewayError
 func ParseProviderError(provider string, statusCode int, body []byte, originalErr error) *GatewayError {
 	message := string(body)

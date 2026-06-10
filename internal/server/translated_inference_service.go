@@ -14,6 +14,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/auditlog"
+	"gomodel/internal/conversationstore"
 	"gomodel/internal/core"
 	"gomodel/internal/gateway"
 	"gomodel/internal/observability"
@@ -40,6 +41,8 @@ type translatedInferenceService struct {
 	guardrailsHash           string
 	responseStore            responsestore.Store
 	responseStoreMu          sync.RWMutex
+	conversationStore        conversationstore.Store
+	conversationStoreMu      sync.RWMutex
 
 	orchestrator *gateway.InferenceOrchestrator
 
@@ -176,7 +179,14 @@ func prepareResponsesRequest(
 	meta gateway.RequestMeta,
 ) (context.Context, *core.ResponsesRequest, *core.Workflow, error) {
 	prepared, err := s.inference().PrepareResponsesRequest(ctx, req, meta)
-	return unpackPrepared(ctx, prepared, err, responsesPreparedFields)
+	ctx, preparedReq, workflow, err := unpackPrepared(ctx, prepared, err, responsesPreparedFields)
+	if err != nil {
+		return ctx, preparedReq, workflow, err
+	}
+	// Resolve gateway-managed conversations before caching and dispatch so the
+	// cache key reflects the merged history and providers never see local IDs.
+	ctx, preparedReq, err = s.applyResponsesConversation(ctx, preparedReq)
+	return ctx, preparedReq, workflow, err
 }
 
 func unpackPrepared[Prepared any, Req any](
@@ -214,6 +224,12 @@ func handleWithCache[R any](
 	workflow *core.Workflow,
 	dispatch func(*echo.Context, R, *core.Workflow) error,
 ) error {
+	// Conversation turns are stateful: the same input means something different
+	// as the conversation grows, and a cache hit would skip the history append.
+	if conversationTurnFromContext(c.Request().Context()) != nil {
+		return dispatch(c, req, workflow)
+	}
+
 	if s.responseCache != nil && (workflow == nil || workflow.CacheEnabled()) {
 		body, marshalErr := marshalRequestBody(req)
 		if marshalErr != nil {
@@ -244,6 +260,10 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		if result.Meta.UsedFallback {
 			markRequestFallbackUsed(c)
 		}
+		stream := result.Stream
+		if turn := conversationTurnFromContext(ctx); turn != nil {
+			stream = streaming.NewObservedSSEStream(stream, turn.streamObserver(ctx))
+		}
 		return s.handleStreamingReadCloser(
 			c,
 			workflow,
@@ -251,7 +271,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			result.Meta.ProviderType,
 			result.Meta.ProviderName,
 			result.Meta.FailoverModel,
-			result.Stream,
+			stream,
 			nil,
 		)
 	}
@@ -274,6 +294,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	if err := s.storeResponseSnapshot(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID); err != nil {
 		s.recordResponseSnapshotStoreFailure(workflow, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID, err)
 	}
+	conversationTurnFromContext(ctx).appendResponse(ctx, result.Response)
 
 	return c.JSON(http.StatusOK, result.Response)
 }
@@ -317,6 +338,18 @@ func (s *translatedInferenceService) setResponseStore(store responsestore.Store)
 	s.responseStoreMu.Lock()
 	defer s.responseStoreMu.Unlock()
 	s.responseStore = store
+}
+
+func (s *translatedInferenceService) currentConversationStore() conversationstore.Store {
+	s.conversationStoreMu.RLock()
+	defer s.conversationStoreMu.RUnlock()
+	return s.conversationStore
+}
+
+func (s *translatedInferenceService) setConversationStore(store conversationstore.Store) {
+	s.conversationStoreMu.Lock()
+	defer s.conversationStoreMu.Unlock()
+	s.conversationStore = store
 }
 
 func (s *translatedInferenceService) recordResponseSnapshotStoreFailure(workflow *core.Workflow, resp *core.ResponsesResponse, providerType, providerName, requestID string, err error) {

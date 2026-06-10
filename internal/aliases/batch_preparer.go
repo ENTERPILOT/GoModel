@@ -80,7 +80,7 @@ func resolveAliasRoutableSelector(service *Service, checker aliasModelSupportChe
 		return core.ModelSelector{}, core.NewInvalidRequestError("model is required", nil)
 	}
 	if checker == nil || !checker.Supports(resolvedModel) {
-		return core.ModelSelector{}, core.NewInvalidRequestError("unsupported model: "+resolvedModel, nil)
+		return core.ModelSelector{}, core.NewModelNotFoundError(resolvedModel)
 	}
 	if err := validateResolvedProviderType(checker, selector, expectedProviderType); err != nil {
 		return core.ModelSelector{}, err

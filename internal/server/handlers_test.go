@@ -4369,7 +4369,7 @@ func TestBatches_InputFileRejectsUnsupportedExplicitProviderSelector(t *testing.
 
 	err = handler.Batches(c)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, http.StatusNotFound, rec.Code)
 	require.Contains(t, rec.Body.String(), "unsupported model: openai/smart")
 	require.Nil(t, mock.capturedBatchReq)
 	require.Empty(t, mock.capturedFileCreateReqs)
@@ -4469,7 +4469,7 @@ func TestBatches_InputFileRejectsDisabledAlias(t *testing.T) {
 
 	err = handler.Batches(c)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, http.StatusNotFound, rec.Code)
 	require.Contains(t, rec.Body.String(), "unsupported model: smart")
 	require.Nil(t, inner.capturedBatchReq)
 	require.Empty(t, inner.capturedFileCreateReqs)

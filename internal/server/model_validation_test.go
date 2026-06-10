@@ -144,12 +144,12 @@ func TestModelValidation(t *testing.T) {
 			handlerCalled:  false,
 		},
 		{
-			name:           "unsupported model returns 400",
+			name:           "unsupported model returns 404 model_not_found",
 			method:         http.MethodPost,
 			path:           "/v1/chat/completions",
 			body:           `{"model":"unsupported-model","messages":[{"role":"user","content":"hi"}]}`,
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "unsupported model",
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   "model_not_found",
 			handlerCalled:  false,
 		},
 		{
@@ -758,12 +758,12 @@ func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t
 	require.NoError(t, err)
 
 	assert.False(t, handlerCalled)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Contains(t, rec.Body.String(), "unsupported model: smart")
 	assert.Equal(t, "smart", entry.RequestedModel)
 	assert.Equal(t, "", entry.ResolvedModel)
 	assert.Equal(t, "", entry.Provider)
-	assert.Equal(t, "invalid_request_error", entry.ErrorType)
+	assert.Equal(t, "not_found_error", entry.ErrorType)
 }
 
 func TestModelValidation_DefersOversizedLiveBodyResolutionToHandler(t *testing.T) {

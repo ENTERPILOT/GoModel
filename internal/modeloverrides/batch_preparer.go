@@ -45,7 +45,7 @@ func (p *BatchPreparer) PrepareBatchRequest(ctx context.Context, providerType st
 				return nil, err
 			}
 			if p.provider != nil && !p.provider.Supports(resolved.QualifiedModel()) {
-				return nil, core.NewInvalidRequestError("unsupported model: "+resolved.QualifiedModel(), nil)
+				return nil, core.NewModelNotFoundError(resolved.QualifiedModel())
 			}
 			if providerType != "" && p.provider != nil {
 				actualProviderType := strings.TrimSpace(p.provider.GetProviderType(resolved.QualifiedModel()))

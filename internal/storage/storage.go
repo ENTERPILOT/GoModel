@@ -126,19 +126,3 @@ func New(ctx context.Context, cfg Config) (Storage, error) {
 		return nil, fmt.Errorf("unknown storage type: %s (valid: sqlite, postgresql, mongodb)", cfg.Type)
 	}
 }
-
-// DefaultConfig returns a Config with sensible defaults
-func DefaultConfig() Config {
-	return Config{
-		Type: TypeSQLite,
-		SQLite: SQLiteConfig{
-			Path: DefaultSQLitePath,
-		},
-		PostgreSQL: PostgreSQLConfig{
-			MaxConns: 10,
-		},
-		MongoDB: MongoDBConfig{
-			Database: "gomodel",
-		},
-	}
-}

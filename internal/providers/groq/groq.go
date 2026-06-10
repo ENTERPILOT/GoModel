@@ -5,11 +5,11 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/url"
 
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
 	"gomodel/internal/providers"
+	"gomodel/internal/providers/openai"
 )
 
 // Registration provides factory registration for the Groq provider.
@@ -25,87 +25,63 @@ const (
 	defaultBaseURL = "https://api.groq.com/openai/v1"
 )
 
-// Provider implements the core.Provider interface for Groq
+// Provider implements the core.Provider interface for Groq. Groq's API is
+// OpenAI-compatible, so all transport goes through the shared compatible
+// provider; only the Responses API differs (translated via chat) because the
+// gateway does not use Groq's native /responses endpoints.
 type Provider struct {
-	client *llmclient.Client
-	apiKey string
+	compat *openai.CompatibleProvider
 }
 
 // New creates a new Groq provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	p := &Provider{apiKey: providerCfg.APIKey}
-	clientCfg := llmclient.Config{
-		ProviderName:   "groq",
-		BaseURL:        providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
-		Retry:          opts.Resilience.Retry,
-		Hooks:          opts.Hooks,
-		CircuitBreaker: opts.Resilience.CircuitBreaker,
+	return &Provider{
+		compat: openai.NewCompatibleProvider(providerCfg.APIKey, opts, openai.CompatibleProviderConfig{
+			ProviderName: "groq",
+			BaseURL:      providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
+			SetHeaders:   setHeaders,
+		}),
 	}
-	p.client = llmclient.New(clientCfg, p.setHeaders)
-	return p
 }
 
 // NewWithHTTPClient creates a new Groq provider with a custom HTTP client.
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
+	return &Provider{
+		compat: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
+			ProviderName: "groq",
+			BaseURL:      defaultBaseURL,
+			SetHeaders:   setHeaders,
+		}),
 	}
-	p := &Provider{apiKey: apiKey}
-	cfg := llmclient.DefaultConfig("groq", defaultBaseURL)
-	cfg.Hooks = hooks
-	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
-	return p
-}
-
-// SetBaseURL allows configuring a custom base URL for the provider
-func (p *Provider) SetBaseURL(url string) {
-	p.client.SetBaseURL(url)
 }
 
 // setHeaders sets the required headers for Groq API requests
-func (p *Provider) setHeaders(req *http.Request) {
-	providers.SetAuthHeaders(req, p.apiKey, providers.AuthHeaderConfig{
+func setHeaders(req *http.Request, apiKey string) {
+	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{
 		AuthScheme:      "Bearer ",
 		RequestIDHeader: "X-Request-ID",
 	})
 }
 
+// SetBaseURL allows configuring a custom base URL for the provider
+func (p *Provider) SetBaseURL(url string) {
+	p.compat.SetBaseURL(url)
+}
+
 // ChatCompletion sends a chat completion request to Groq
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	var resp core.ChatResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/chat/completions",
-		Body:     req,
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	core.EnsureModel(&resp.Model, req.Model)
-	return &resp, nil
+	return p.compat.ChatCompletion(ctx, req)
 }
 
 // StreamChatCompletion returns a raw response body for streaming (caller must close)
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	return p.client.DoStream(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/chat/completions",
-		Body:     req.WithStreaming(),
-	})
+	return p.compat.StreamChatCompletion(ctx, req)
 }
 
 // ListModels retrieves the list of available models from Groq
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	var resp core.ModelsResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodGet,
-		Endpoint: "/models",
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	return &resp, nil
+	return p.compat.ListModels(ctx)
 }
 
 // Responses sends a Responses API request to Groq (converted to chat format)
@@ -120,121 +96,66 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 
 // Embeddings sends an embeddings request to Groq
 func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
-	var resp core.EmbeddingResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/embeddings",
-		Body:     req,
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	core.EnsureModel(&resp.Model, req.Model)
-	return &resp, nil
+	return p.compat.Embeddings(ctx, req)
+}
+
+// CreateSpeech synthesizes speech through Groq's OpenAI-compatible /audio/speech API.
+func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
+	return p.compat.CreateSpeech(ctx, req)
+}
+
+// CreateTranscription transcribes audio through Groq's OpenAI-compatible
+// /audio/transcriptions API (whisper models).
+func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+	return p.compat.CreateTranscription(ctx, req)
 }
 
 // CreateBatch creates a native Groq batch job.
 func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*core.BatchResponse, error) {
-	var resp core.BatchResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/batches",
-		Body:     req,
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	providers.EnsureProviderBatchID(&resp)
-	return &resp, nil
+	return p.compat.CreateBatch(ctx, req)
 }
 
 // GetBatch retrieves a native Groq batch job.
 func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
-	var resp core.BatchResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodGet,
-		Endpoint: "/batches/" + url.PathEscape(id),
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	providers.EnsureProviderBatchID(&resp)
-	return &resp, nil
+	return p.compat.GetBatch(ctx, id)
 }
 
 // ListBatches lists native Groq batch jobs.
 func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*core.BatchListResponse, error) {
-	endpoint := providers.PaginatedEndpoint("/batches", limit, "after", after)
-
-	var resp core.BatchListResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodGet,
-		Endpoint: endpoint,
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	providers.EnsureProviderBatchIDs(&resp)
-	return &resp, nil
+	return p.compat.ListBatches(ctx, limit, after)
 }
 
 // CancelBatch cancels a native Groq batch job.
 func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchResponse, error) {
-	var resp core.BatchResponse
-	err := p.client.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/batches/" + url.PathEscape(id) + "/cancel",
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	providers.EnsureProviderBatchID(&resp)
-	return &resp, nil
+	return p.compat.CancelBatch(ctx, id)
 }
 
 // GetBatchResults fetches Groq batch results via the output file API.
 func (p *Provider) GetBatchResults(ctx context.Context, id string) (*core.BatchResultsResponse, error) {
-	return providers.FetchBatchResultsFromOutputFile(ctx, p.client, "groq", id)
+	return p.compat.GetBatchResults(ctx, id)
 }
 
 // CreateFile uploads a file through Groq's OpenAI-compatible /files API.
 func (p *Provider) CreateFile(ctx context.Context, req *core.FileCreateRequest) (*core.FileObject, error) {
-	resp, err := providers.CreateOpenAICompatibleFile(ctx, p.client, req)
-	if err != nil {
-		return nil, err
-	}
-	resp.Provider = "groq"
-	return resp, nil
+	return p.compat.CreateFile(ctx, req)
 }
 
 // ListFiles lists files through Groq's OpenAI-compatible /files API.
 func (p *Provider) ListFiles(ctx context.Context, purpose string, limit int, after string) (*core.FileListResponse, error) {
-	resp, err := providers.ListOpenAICompatibleFiles(ctx, p.client, purpose, limit, after)
-	if err != nil {
-		return nil, err
-	}
-	for i := range resp.Data {
-		resp.Data[i].Provider = "groq"
-	}
-	return resp, nil
+	return p.compat.ListFiles(ctx, purpose, limit, after)
 }
 
 // GetFile retrieves one file object through Groq's OpenAI-compatible /files API.
 func (p *Provider) GetFile(ctx context.Context, id string) (*core.FileObject, error) {
-	resp, err := providers.GetOpenAICompatibleFile(ctx, p.client, id)
-	if err != nil {
-		return nil, err
-	}
-	resp.Provider = "groq"
-	return resp, nil
+	return p.compat.GetFile(ctx, id)
 }
 
 // DeleteFile deletes a file object through Groq's OpenAI-compatible /files API.
 func (p *Provider) DeleteFile(ctx context.Context, id string) (*core.FileDeleteResponse, error) {
-	return providers.DeleteOpenAICompatibleFile(ctx, p.client, id)
+	return p.compat.DeleteFile(ctx, id)
 }
 
 // GetFileContent fetches raw file bytes through Groq's /files/{id}/content API.
 func (p *Provider) GetFileContent(ctx context.Context, id string) (*core.FileContentResponse, error) {
-	return providers.GetOpenAICompatibleFileContent(ctx, p.client, id)
+	return p.compat.GetFileContent(ctx, id)
 }

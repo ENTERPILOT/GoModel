@@ -1961,3 +1961,61 @@ func TestGetCategoryCounts(t *testing.T) {
 
 // Verify ModelRegistry implements core.ModelLookup interface
 var _ core.ModelLookup = (*ModelRegistry)(nil)
+
+// audioRegistryMockProvider extends the mock with audio support so capability
+// filtering can distinguish it from audio-less providers.
+type audioRegistryMockProvider struct {
+	registryMockProvider
+}
+
+func (m *audioRegistryMockProvider) CreateSpeech(_ context.Context, _ *core.AudioSpeechRequest) (*core.AudioResponse, error) {
+	return &core.AudioResponse{}, nil
+}
+
+func (m *audioRegistryMockProvider) CreateTranscription(_ context.Context, _ *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
+	return &core.AudioResponse{}, nil
+}
+
+func TestListPublicModels_HidesAudioOnlyModelsFromProvidersWithoutAudioSupport(t *testing.T) {
+	inventory := func() *core.ModelsResponse {
+		return &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "tts-model", Object: "model", Metadata: &core.ModelMetadata{Modes: []string{"audio_speech"}}},
+				{ID: "stt-model", Object: "model", Metadata: &core.ModelMetadata{Modes: []string{"audio_transcription"}}},
+				{ID: "chat-model", Object: "model", Metadata: &core.ModelMetadata{Modes: []string{"chat"}}},
+				{ID: "bare-model", Object: "model"},
+			},
+		}
+	}
+
+	registry := NewModelRegistry()
+	noAudio := &registryMockProvider{modelsResponse: inventory()}
+	withAudio := &audioRegistryMockProvider{registryMockProvider{modelsResponse: inventory()}}
+	registry.RegisterProviderWithNameAndType(noAudio, "gemini", "gemini")
+	registry.RegisterProviderWithNameAndType(withAudio, "openai", "openai")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := make(map[string]bool)
+	for _, model := range registry.ListPublicModels() {
+		got[model.ID] = true
+	}
+
+	wantListed := []string{
+		"gemini/chat-model", "gemini/bare-model", // no mode data or non-audio: kept
+		"openai/chat-model", "openai/bare-model",
+		"openai/tts-model", "openai/stt-model", // provider supports audio: kept
+	}
+	for _, id := range wantListed {
+		if !got[id] {
+			t.Errorf("expected %q to be listed", id)
+		}
+	}
+	for _, id := range []string{"gemini/tts-model", "gemini/stt-model"} {
+		if got[id] {
+			t.Errorf("expected audio-only %q to be hidden (provider has no audio support)", id)
+		}
+	}
+}

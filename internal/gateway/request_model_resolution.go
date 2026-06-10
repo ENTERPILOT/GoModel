@@ -131,7 +131,7 @@ func ResolveRequestModelWithAuthorizer(
 		}
 	}
 	if !provider.Supports(resolvedModel) {
-		return nil, core.NewInvalidRequestError("unsupported model: "+resolvedModel, nil)
+		return nil, core.NewModelNotFoundError(resolvedModel)
 	}
 	if authorizer != nil {
 		if err := authorizer.ValidateModelAccess(ctx, resolvedSelector); err != nil {

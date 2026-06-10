@@ -318,7 +318,9 @@ func (r *ModelRegistry) ListModels() []core.Model {
 }
 
 // ListPublicModels returns all provider-backed models as public selectors in
-// providerName/modelID form, sorted by public model ID.
+// providerName/modelID form, sorted by public model ID. Models the owning
+// provider cannot actually serve (audio-only models on providers without audio
+// support) are not advertised.
 func (r *ModelRegistry) ListPublicModels() []core.Model {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -331,6 +333,9 @@ func (r *ModelRegistry) ListPublicModels() []core.Model {
 	result := make([]core.Model, 0, total)
 	for providerName, models := range r.modelsByProvider {
 		for modelID, info := range models {
+			if !providerCanServeModel(info) {
+				continue
+			}
 			model := info.Model
 			model.ID = qualifyPublicModelID(providerName, modelID)
 			model.OwnedBy = providerName
@@ -339,6 +344,33 @@ func (r *ModelRegistry) ListPublicModels() []core.Model {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
+}
+
+// providerCanServeModel reports whether the owning provider implements the
+// capabilities a model needs. Upstream inventories and the metadata registry
+// can list audio-only models (TTS/STT) for providers whose gateway adapter has
+// no audio support; advertising those invites calls that can only fail with
+// "does not support audio operations". Models without mode metadata are kept —
+// missing data must not hide a model.
+func providerCanServeModel(info *ModelInfo) bool {
+	if !isAudioOnlyModel(info.Model) {
+		return true
+	}
+	_, ok := info.Provider.(core.AudioProvider)
+	return ok
+}
+
+// isAudioOnlyModel reports whether every declared mode is an audio operation.
+func isAudioOnlyModel(model core.Model) bool {
+	if model.Metadata == nil || len(model.Metadata.Modes) == 0 {
+		return false
+	}
+	for _, mode := range model.Metadata.Modes {
+		if mode != "audio_speech" && mode != "audio_transcription" {
+			return false
+		}
+	}
+	return true
 }
 
 // ModelCount returns the number of registered models

@@ -139,8 +139,8 @@ func TestBuildDefaultConfig(t *testing.T) {
 	if cfg.Storage.PostgreSQL.MaxConns != 10 {
 		t.Errorf("expected Storage.PostgreSQL.MaxConns=10, got %d", cfg.Storage.PostgreSQL.MaxConns)
 	}
-	if cfg.Storage.MongoDB.Database != "gomodel" {
-		t.Errorf("expected Storage.MongoDB.Database=gomodel, got %s", cfg.Storage.MongoDB.Database)
+	if cfg.Storage.MongoDB.Database != "" {
+		t.Errorf("expected Storage.MongoDB.Database to default empty (resolved by storage layer), got %s", cfg.Storage.MongoDB.Database)
 	}
 	if !cfg.Logging.LogBodies {
 		t.Error("expected Logging.LogBodies=true")

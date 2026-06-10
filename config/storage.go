@@ -33,9 +33,10 @@ type PostgreSQLStorageConfig struct {
 
 // MongoDBStorageConfig holds MongoDB-specific storage configuration
 type MongoDBStorageConfig struct {
-	// URL is the connection string (e.g., mongodb://localhost:27017)
+	// URL is the connection string; a database named in its path is honored
+	// (e.g., mongodb://localhost:27017/gomodel)
 	URL string `yaml:"url" env:"MONGODB_URL"`
-	// Database is the database name (default: gomodel)
+	// Database overrides the database named in the URL (default: gomodel)
 	Database string `yaml:"database" env:"MONGODB_DATABASE"`
 }
 
@@ -60,9 +61,6 @@ func (c StorageConfig) BackendConfig() storage.Config {
 	}
 	if cfg.SQLite.Path == "" {
 		cfg.SQLite.Path = storage.DefaultSQLitePath
-	}
-	if cfg.MongoDB.Database == "" {
-		cfg.MongoDB.Database = "gomodel"
 	}
 	return cfg
 }

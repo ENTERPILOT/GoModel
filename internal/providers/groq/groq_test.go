@@ -15,15 +15,11 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	apiKey := "test-api-key"
 	// Use NewWithHTTPClient to get concrete type for internal testing
-	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 
-	if provider.apiKey != apiKey {
-		t.Errorf("apiKey = %q, want %q", provider.apiKey, apiKey)
-	}
-	if provider.client == nil {
-		t.Error("client should not be nil")
+	if provider.compat == nil {
+		t.Error("compat provider should not be nil")
 	}
 }
 
@@ -794,16 +790,10 @@ data: [DONE]
 }
 
 func TestNewWithHTTPClient(t *testing.T) {
-	customClient := &http.Client{}
-	apiKey := "test-api-key"
+	provider := NewWithHTTPClient("test-api-key", &http.Client{}, llmclient.Hooks{})
 
-	provider := NewWithHTTPClient(apiKey, customClient, llmclient.Hooks{})
-
-	if provider.apiKey != apiKey {
-		t.Errorf("apiKey = %q, want %q", provider.apiKey, apiKey)
-	}
-	if provider.client == nil {
-		t.Error("client should not be nil")
+	if provider.compat == nil {
+		t.Error("compat provider should not be nil")
 	}
 }
 

@@ -210,7 +210,7 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 	}
 
 	// Flag speech priced by output audio duration whose codec the gateway could
-	// not measure (compressed mp3/opus/aac/flac), so the cost reads as visibly
+	// not measure (opus/aac/flac), so the cost reads as visibly
 	// partial instead of a silent zero. Transcription rows never set the output
 	// format key, so per-second-output transcription models are unaffected.
 	if pricing.PerSecondOutput != nil {
@@ -270,7 +270,7 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 // PerSecondOutput against synthesized audio seconds (text-to-speech) on the
 // output side. It returns the input and output costs and whether any rate
 // applied. Output duration is present only when the gateway could measure the
-// returned audio (uncompressed wav/pcm); compressed formats are flagged with a
+// returned audio (wav/pcm/mp3); other compressed formats are flagged with a
 // caveat by the caller instead.
 func applyAudioUnitCosts(rawData map[string]any, pricing *core.ModelPricing) (inputCost, outputCost float64, applied bool) {
 	if pricing.PerCharacterInput != nil {

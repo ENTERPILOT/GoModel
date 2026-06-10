@@ -105,7 +105,7 @@ func DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver(
 			return BatchExecutionSelection{}, core.NewInvalidRequestError(fmt.Sprintf("batch item %d: model is required", i), nil)
 		}
 		if !provider.Supports(model) {
-			return BatchExecutionSelection{}, core.NewInvalidRequestError("unsupported model: "+model, nil)
+			return BatchExecutionSelection{}, core.NewModelNotFoundError(model)
 		}
 		if authorizer != nil {
 			if err := authorizer.ValidateModelAccess(ctx, resolvedSelector); err != nil {

@@ -36,6 +36,65 @@ func buildWAV(t *testing.T, sampleRate, channels, bitsPerSample int, seconds flo
 	return buf.Bytes()
 }
 
+// buildMP3 produces a CBR MPEG-2 Layer III stream (24 kHz, 64 kbps — the shape
+// OpenAI speech emits) of the given frame count. Each frame is 192 bytes and
+// plays 576/24000 s, so duration assertions are exact.
+func buildMP3(frames int) []byte {
+	const frameSize = 192 // 576/8 * 64000 / 24000
+	data := make([]byte, 0, frames*frameSize)
+	for range frames {
+		frame := make([]byte, frameSize)
+		// sync + MPEG-2 + Layer III, 64 kbps @ 24 kHz, no padding, mono.
+		frame[0], frame[1], frame[2], frame[3] = 0xFF, 0xF3, 0x84, 0xC0
+		data = append(data, frame...)
+	}
+	return data
+}
+
+const mp3FrameSeconds = 576.0 / 24000
+
+func TestMP3DurationSeconds(t *testing.T) {
+	id3 := append([]byte{'I', 'D', '3', 4, 0, 0, 0, 0, 0, 10}, make([]byte, 10)...) // 10-byte body
+	id3v1 := append([]byte("TAG"), make([]byte, 125)...)
+
+	tests := []struct {
+		name   string
+		data   []byte
+		want   float64
+		wantOK bool
+	}{
+		{"50 frames", buildMP3(50), 50 * mp3FrameSeconds, true},
+		{"single frame", buildMP3(1), mp3FrameSeconds, true},
+		{"leading ID3v2 tag skipped", append(id3, buildMP3(10)...), 10 * mp3FrameSeconds, true},
+		{"trailing ID3v1 tag ignored", append(buildMP3(10), id3v1...), 10 * mp3FrameSeconds, true},
+		{"junk before first sync", append([]byte("junk"), buildMP3(5)...), 5 * mp3FrameSeconds, true},
+		{"no frames", []byte("definitely not audio"), 0, false},
+		{"empty", nil, 0, false},
+		{"ID3 tag only", id3, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := mp3DurationSeconds(tt.data)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if ok && !nearlyEqual(got, tt.want) {
+				t.Errorf("seconds = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseMP3FrameHeader_MPEG1(t *testing.T) {
+	// MPEG-1 Layer III, 128 kbps @ 44.1 kHz: 1152 samples, floor(144*128000/44100)
+	// = 417 bytes per frame.
+	buf := []byte{0xFF, 0xFB, 0x90, 0xC0}
+	size, seconds, ok := parseMP3FrameHeader(buf)
+	if !ok || size != 417 || !nearlyEqual(seconds, 1152.0/44100) {
+		t.Errorf("got (%d, %v, %v), want (417, %v, true)", size, seconds, ok, 1152.0/44100)
+	}
+}
+
 func TestMeasureSpeechDurationSeconds(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -49,7 +108,9 @@ func TestMeasureSpeechDurationSeconds(t *testing.T) {
 		{"wav detected despite mp3 format hint", buildWAV(t, 24000, 1, 16, 0.5), "mp3", 0.5, true},
 		{"pcm half second", make([]byte, pcmBytesPerSecond/2), "pcm", 0.5, true},
 		{"pcm via mime", make([]byte, pcmBytesPerSecond), "audio/pcm", 1.0, true},
-		{"mp3 unmeasured", []byte("\xff\xfbnot really mp3"), "mp3", 0, false},
+		{"mp3 measured via frame walk", buildMP3(25), "mp3", 25 * mp3FrameSeconds, true},
+		{"mp3 via mime type", buildMP3(25), "audio/mpeg", 25 * mp3FrameSeconds, true},
+		{"mp3 with no valid frames", []byte("\xff\xfbnot really mp3"), "mp3", 0, false},
 		{"opus unmeasured", []byte("OggS....."), "opus", 0, false},
 		{"empty", nil, "wav", 0, false},
 		{"truncated riff", []byte("RIFF"), "wav", 0, false},
