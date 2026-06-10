@@ -113,8 +113,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// closers collects the Close functions of successfully initialized
 	// components; fail unwinds them in reverse order before returning an
 	// initialization error. Appending here is the single source of truth
-	// for the cleanup order on startup failure.
-	var closers []func() error
+	// for the cleanup order on startup failure. The live broker is created
+	// above, so it is the first entry.
+	closers := []func() error{func() error {
+		app.live.Close()
+		return nil
+	}}
 	fail := func(msg string, cause error) (*App, error) {
 		var closeErrs []error
 		for i := len(closers) - 1; i >= 0; i-- {
@@ -144,7 +148,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	providerResult, err := providers.Init(ctx, cfg.AppConfig, cfg.Factory)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize providers: %w", err)
+		return fail("failed to initialize providers", err)
 	}
 	app.providers = providerResult
 	closers = append(closers, app.providers.Close)
@@ -661,7 +665,16 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 2. Close providers (stops model refresh and provider-owned resources)
+	// 2. Release server-owned resources now that no requests are in flight
+	// (drains response cache writes, closes response/conversation stores).
+	if a.server != nil {
+		if err := a.server.Shutdown(ctx); err != nil {
+			slog.Error("server resources close error", "error", err)
+			errs = append(errs, fmt.Errorf("server resources close: %w", err))
+		}
+	}
+
+	// 3. Close providers (stops model refresh and provider-owned resources)
 	if a.providers != nil {
 		if err := a.providers.Close(); err != nil {
 			slog.Error("providers close error", "error", err)
@@ -669,7 +682,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 3. Close aliases subsystem.
+	// 4. Close aliases subsystem.
 	if a.aliases != nil {
 		if err := a.aliases.Close(); err != nil {
 			slog.Error("aliases close error", "error", err)
@@ -677,7 +690,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 4. Close workflows subsystem.
+	// 5. Close workflows subsystem.
 	if a.workflows != nil {
 		if err := a.workflows.Close(); err != nil {
 			slog.Error("workflows close error", "error", err)
@@ -685,7 +698,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 5. Close model overrides subsystem.
+	// 6. Close model overrides subsystem.
 	if a.modelOverrides != nil {
 		if err := a.modelOverrides.Close(); err != nil {
 			slog.Error("model overrides close error", "error", err)
@@ -693,7 +706,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 6. Close model pricing overrides subsystem.
+	// 7. Close model pricing overrides subsystem.
 	if a.pricingOverrides != nil {
 		if err := a.pricingOverrides.Close(); err != nil {
 			slog.Error("model pricing overrides close error", "error", err)
@@ -701,7 +714,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 7. Close reusable guardrails subsystem.
+	// 8. Close reusable guardrails subsystem.
 	if a.guardrails != nil {
 		if err := a.guardrails.Close(); err != nil {
 			slog.Error("guardrails close error", "error", err)
@@ -709,7 +722,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 8. Close managed auth keys subsystem.
+	// 9. Close managed auth keys subsystem.
 	if a.authKeys != nil {
 		if err := a.authKeys.Close(); err != nil {
 			slog.Error("auth keys close error", "error", err)
@@ -717,7 +730,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 9. Close file mapping store.
+	// 10. Close file mapping store.
 	if a.fileStore != nil {
 		if err := a.fileStore.Close(); err != nil {
 			slog.Error("file mapping store close error", "error", err)
@@ -725,7 +738,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 10. Close batch store (flushes pending entries)
+	// 11. Close batch store (flushes pending entries)
 	if a.batch != nil {
 		if err := a.batch.Close(); err != nil {
 			slog.Error("batch store close error", "error", err)
@@ -733,7 +746,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 11. Close budget subsystem.
+	// 12. Close budget subsystem.
 	if a.budgets != nil {
 		if err := a.budgets.Close(); err != nil {
 			slog.Error("budgets close error", "error", err)
@@ -741,7 +754,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 12. Close usage tracking (flushes pending entries)
+	// 13. Close usage tracking (flushes pending entries)
 	if a.usage != nil {
 		if err := a.usage.Close(); err != nil {
 			slog.Error("usage logger close error", "error", err)
@@ -749,7 +762,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 13. Close audit logging (flushes pending logs)
+	// 14. Close audit logging (flushes pending logs)
 	if a.audit != nil {
 		if err := a.audit.Close(); err != nil {
 			slog.Error("audit logger close error", "error", err)
