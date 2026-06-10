@@ -393,17 +393,7 @@ func (p *CompatibleProvider) GetBatch(ctx context.Context, id string) (*core.Bat
 }
 
 func (p *CompatibleProvider) ListBatches(ctx context.Context, limit int, after string) (*core.BatchListResponse, error) {
-	values := url.Values{}
-	if limit > 0 {
-		values.Set("limit", strconv.Itoa(limit))
-	}
-	if after != "" {
-		values.Set("after", after)
-	}
-	endpoint := "/batches"
-	if encoded := values.Encode(); encoded != "" {
-		endpoint += "?" + encoded
-	}
+	endpoint := providers.PaginatedEndpoint("/batches", limit, "after", after)
 
 	var resp core.BatchListResponse
 	err := p.Do(ctx, llmclient.Request{

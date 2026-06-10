@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"gomodel/internal/core"
@@ -114,18 +113,7 @@ func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse
 }
 
 func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*core.BatchListResponse, error) {
-	values := url.Values{}
-	if limit > 0 {
-		values.Set("limit", strconv.Itoa(limit))
-	}
-	if after != "" {
-		values.Set("after", after)
-	}
-
-	endpoint := "/openai/batches"
-	if encoded := values.Encode(); encoded != "" {
-		endpoint += "?" + encoded
-	}
+	endpoint := providers.PaginatedEndpoint("/openai/batches", limit, "after", after)
 
 	var resp core.BatchListResponse
 	if err := p.resourceProvider.Do(ctx, llmclient.Request{

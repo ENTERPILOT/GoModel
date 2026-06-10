@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -730,17 +729,7 @@ func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*c
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	values := url.Values{}
-	if limit > 0 {
-		values.Set("limit", strconv.Itoa(limit))
-	}
-	if after != "" {
-		values.Set("after", after)
-	}
-	endpoint := "/batches"
-	if encoded := values.Encode(); encoded != "" {
-		endpoint += "?" + encoded
-	}
+	endpoint := providers.PaginatedEndpoint("/batches", limit, "after", after)
 
 	var resp core.BatchListResponse
 	err := p.client.Do(ctx, llmclient.Request{

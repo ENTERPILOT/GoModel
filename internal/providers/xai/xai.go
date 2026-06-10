@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"gomodel/internal/core"
@@ -285,17 +284,7 @@ func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse
 
 // ListBatches lists native xAI batch jobs.
 func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*core.BatchListResponse, error) {
-	values := url.Values{}
-	if limit > 0 {
-		values.Set("limit", strconv.Itoa(limit))
-	}
-	if after != "" {
-		values.Set("after", after)
-	}
-	endpoint := "/batches"
-	if encoded := values.Encode(); encoded != "" {
-		endpoint += "?" + encoded
-	}
+	endpoint := providers.PaginatedEndpoint("/batches", limit, "after", after)
 
 	var resp core.BatchListResponse
 	err := p.client.Do(ctx, llmclient.Request{
