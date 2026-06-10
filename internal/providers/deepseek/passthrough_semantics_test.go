@@ -7,21 +7,21 @@ import (
 )
 
 func TestPassthroughSemanticEnricher_ProviderType(t *testing.T) {
-	e := passthroughSemanticEnricher{}
+	e := passthroughSemanticEnricher
 	if got := e.ProviderType(); got != "deepseek" {
 		t.Fatalf("ProviderType() = %q, want deepseek", got)
 	}
 }
 
 func TestPassthroughSemanticEnricher_NilInfo_ReturnsNil(t *testing.T) {
-	e := passthroughSemanticEnricher{}
+	e := passthroughSemanticEnricher
 	if got := e.Enrich(nil, nil, nil); got != nil {
 		t.Fatalf("Enrich(nil) = %v, want nil", got)
 	}
 }
 
 func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {
-	e := passthroughSemanticEnricher{}
+	e := passthroughSemanticEnricher
 
 	tests := []struct {
 		name               string

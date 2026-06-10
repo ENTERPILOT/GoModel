@@ -19,7 +19,7 @@ const defaultBaseURL = "http://localhost:8000/v1"
 var Registration = providers.Registration{
 	Type:                        "vllm",
 	New:                         New,
-	PassthroughSemanticEnricher: passthroughSemanticEnricher{},
+	PassthroughSemanticEnricher: passthroughSemanticEnricher,
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL:  defaultBaseURL,
 		AllowAPIKeyless: true,

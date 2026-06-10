@@ -23,7 +23,7 @@ import (
 var Registration = providers.Registration{
 	Type:                        "anthropic",
 	New:                         New,
-	PassthroughSemanticEnricher: passthroughSemanticEnricher{},
+	PassthroughSemanticEnricher: passthroughSemanticEnricher,
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL: defaultBaseURL,
 	},

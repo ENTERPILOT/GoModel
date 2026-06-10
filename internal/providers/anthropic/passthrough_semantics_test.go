@@ -7,7 +7,7 @@ import (
 )
 
 func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {
-	enricher := passthroughSemanticEnricher{}
+	enricher := passthroughSemanticEnricher
 
 	tests := []struct {
 		name          string

@@ -53,3 +53,46 @@ func PassthroughEndpointPath(info *core.PassthroughRouteInfo) string {
 	}
 	return endpoint
 }
+
+// PassthroughEndpointSemantics names the semantic operation and audit path
+// for one provider passthrough endpoint.
+type PassthroughEndpointSemantics struct {
+	Operation string
+	AuditPath string
+}
+
+// SemanticEnricher implements core.PassthroughSemanticEnricher from a static
+// endpoint table. Endpoints missing from the table keep their audit path, or
+// fall back to the generic /p/{provider}/... form when none is set.
+type SemanticEnricher struct {
+	providerType string
+	endpoints    map[string]PassthroughEndpointSemantics
+}
+
+// NewSemanticEnricher builds a SemanticEnricher for a provider type from its
+// endpoint table; keys are normalized endpoint paths such as "/embeddings".
+func NewSemanticEnricher(providerType string, endpoints map[string]PassthroughEndpointSemantics) SemanticEnricher {
+	return SemanticEnricher{providerType: providerType, endpoints: endpoints}
+}
+
+// ProviderType returns the provider type this enricher serves.
+func (e SemanticEnricher) ProviderType() string {
+	return e.providerType
+}
+
+// Enrich annotates passthrough route info with the provider's semantic
+// operation and audit path for known endpoints.
+func (e SemanticEnricher) Enrich(_ *core.RequestSnapshot, _ *core.WhiteBoxPrompt, info *core.PassthroughRouteInfo) *core.PassthroughRouteInfo {
+	if info == nil {
+		return nil
+	}
+	enriched := *info
+	normalizedEndpoint := strings.TrimLeft(strings.TrimSpace(PassthroughEndpointPath(&enriched)), "/")
+	if semantics, ok := e.endpoints["/"+normalizedEndpoint]; ok {
+		enriched.SemanticOperation = semantics.Operation
+		enriched.AuditPath = semantics.AuditPath
+	} else if strings.TrimSpace(enriched.AuditPath) == "" && normalizedEndpoint != "" {
+		enriched.AuditPath = "/p/" + e.providerType + "/" + normalizedEndpoint
+	}
+	return &enriched
+}

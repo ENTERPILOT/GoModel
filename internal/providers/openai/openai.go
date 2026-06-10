@@ -15,7 +15,7 @@ import (
 var Registration = providers.Registration{
 	Type:                        "openai",
 	New:                         New,
-	PassthroughSemanticEnricher: passthroughSemanticEnricher{},
+	PassthroughSemanticEnricher: passthroughSemanticEnricher,
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL: defaultBaseURL,
 	},
