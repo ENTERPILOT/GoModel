@@ -46,6 +46,14 @@ func (r *ChatRequest) semanticSelector() (string, string) {
 	return r.Model, r.Provider
 }
 
+// EnsureModel sets *model to the requested model when a provider response
+// omits it, keeping responses OpenAI-compatible.
+func EnsureModel(model *string, requested string) {
+	if *model == "" {
+		*model = requested
+	}
+}
+
 // WithStreaming returns a shallow copy of the request with Stream set to true.
 // This avoids mutating the caller's request object.
 func (r *ChatRequest) WithStreaming() *ChatRequest {

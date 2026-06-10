@@ -453,9 +453,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	if resp.Model == "" {
-		resp.Model = req.Model
-	}
+	core.EnsureModel(&resp.Model, req.Model)
 	if resp.Provider == "" {
 		resp.Provider = p.responseProviderName()
 	}
@@ -677,9 +675,7 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 	if err != nil {
 		return nil, err
 	}
-	if resp.Model == "" {
-		resp.Model = req.Model
-	}
+	core.EnsureModel(&resp.Model, req.Model)
 	if resp.Provider == "" {
 		resp.Provider = p.responseProviderName()
 	}

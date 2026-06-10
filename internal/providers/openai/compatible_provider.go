@@ -105,9 +105,7 @@ func (p *CompatibleProvider) ChatCompletion(ctx context.Context, req *core.ChatR
 	if err != nil {
 		return nil, err
 	}
-	if resp.Model == "" {
-		resp.Model = req.Model
-	}
+	core.EnsureModel(&resp.Model, req.Model)
 	return &resp, nil
 }
 
@@ -167,9 +165,7 @@ func (p *CompatibleProvider) Responses(ctx context.Context, req *core.ResponsesR
 	if err != nil {
 		return nil, err
 	}
-	if resp.Model == "" {
-		resp.Model = req.Model
-	}
+	core.EnsureModel(&resp.Model, req.Model)
 	return &resp, nil
 }
 
@@ -340,9 +336,7 @@ func (p *CompatibleProvider) Embeddings(ctx context.Context, req *core.Embedding
 	if err != nil {
 		return nil, err
 	}
-	if resp.Model == "" {
-		resp.Model = req.Model
-	}
+	core.EnsureModel(&resp.Model, req.Model)
 	return &resp, nil
 }
 

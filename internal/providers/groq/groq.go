@@ -83,9 +83,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	if resp.Model == "" {
-		resp.Model = req.Model
-	}
+	core.EnsureModel(&resp.Model, req.Model)
 	return &resp, nil
 }
 
@@ -132,9 +130,7 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 	if err != nil {
 		return nil, err
 	}
-	if resp.Model == "" {
-		resp.Model = req.Model
-	}
+	core.EnsureModel(&resp.Model, req.Model)
 	return &resp, nil
 }
 
