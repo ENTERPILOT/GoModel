@@ -232,11 +232,7 @@ func scanSQLiteUsageLogEntries(rows *sql.Rows) ([]UsageLogEntry, error) {
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &e.CostSource, &rawDataJSON, &caveat); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
 		}
-		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-			e.Timestamp = t
-		} else if t, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", ts); err == nil {
-			e.Timestamp = t
-		} else if t, err := time.Parse("2006-01-02T15:04:05Z", ts); err == nil {
+		if t, ok := sqlutil.ParseSQLiteTimestamp(ts); ok {
 			e.Timestamp = t
 		} else {
 			slog.Warn("failed to parse timestamp", "request_id", e.RequestID, "raw_timestamp", ts)

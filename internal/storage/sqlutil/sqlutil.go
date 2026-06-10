@@ -41,6 +41,18 @@ func ClampLimitOffset(limit, offset, defaultLimit, maxLimit int) (int, int) {
 	return limit, offset
 }
 
+// ParseSQLiteTimestamp parses a SQLite text timestamp in the formats GoModel
+// writes (RFC3339Nano, SQLite datetime with offset, or bare UTC seconds).
+// Returns the zero time and false when no format matches.
+func ParseSQLiteTimestamp(ts string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999-07:00", "2006-01-02T15:04:05Z"} {
+		if t, err := time.Parse(layout, ts); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
 // UnixOrNil returns the UTC Unix timestamp for value, or nil when value is
 // nil, for binding optional timestamps to nullable integer columns.
 func UnixOrNil(value *time.Time) any {

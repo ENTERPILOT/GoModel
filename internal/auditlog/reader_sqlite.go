@@ -285,18 +285,11 @@ func sqliteTimestampBoundary(t time.Time) string {
 }
 
 func parseSQLTimestamp(ts string, entryID string) time.Time {
-	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-		return t
+	t, ok := sqlutil.ParseSQLiteTimestamp(ts)
+	if !ok {
+		slog.Warn("failed to parse audit timestamp", "id", entryID, "raw_timestamp", ts)
 	}
-	if t, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", ts); err == nil {
-		return t
-	}
-	if t, err := time.Parse("2006-01-02T15:04:05Z", ts); err == nil {
-		return t
-	}
-
-	slog.Warn("failed to parse audit timestamp", "id", entryID, "raw_timestamp", ts)
-	return time.Time{}
+	return t
 }
 
 func (r *SQLiteReader) findByResponseID(ctx context.Context, responseID string) (*LogEntry, error) {
