@@ -168,7 +168,11 @@ type Request struct {
 // Response represents an HTTP response
 type Response struct {
 	StatusCode int
-	Body       []byte
+	// ContentType is the upstream response Content-Type header, preserved so
+	// callers can describe the bytes actually returned (e.g. audio formats).
+	// Only this header is surfaced; the full upstream header set is not exposed.
+	ContentType string
+	Body        []byte
 }
 
 type requestScope struct {
@@ -615,8 +619,9 @@ func (c *Client) doRequest(ctx context.Context, req Request) (*Response, error) 
 	}
 
 	return &Response{
-		StatusCode: resp.StatusCode,
-		Body:       body,
+		StatusCode:  resp.StatusCode,
+		ContentType: resp.Header.Get("Content-Type"),
+		Body:        body,
 	}, nil
 }
 

@@ -138,7 +138,7 @@ defaults to Application Default Credentials (`gcp_adc`).
 
 ### Running from Source
 
-**Prerequisites:** Go 1.26.3+
+**Prerequisites:** Go 1.26.4+
 
 1. Create a `.env` file:
 

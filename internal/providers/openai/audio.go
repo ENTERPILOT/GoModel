@@ -13,8 +13,10 @@ import (
 )
 
 // CreateSpeech implements OpenAI text-to-speech (POST /audio/speech). The upstream
-// returns binary audio, so the response is read raw and tagged with the content
-// type implied by the requested response_format.
+// returns binary audio; the response is read raw and tagged with the upstream
+// Content-Type so it describes the bytes actually returned (see
+// speechResponseContentType), which usage relies on to price output-duration
+// models.
 func (p *CompatibleProvider) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("audio speech request is required", nil)
@@ -35,9 +37,22 @@ func (p *CompatibleProvider) CreateSpeech(ctx context.Context, req *core.AudioSp
 		return nil, err
 	}
 	return &core.AudioResponse{
-		ContentType: core.SpeechResponseContentType(req.ResponseFormat),
+		ContentType: speechResponseContentType(raw, req.ResponseFormat),
 		Data:        raw.Body,
 	}, nil
+}
+
+// speechResponseContentType returns the authoritative media type of synthesized
+// speech. The upstream response Content-Type describes the bytes actually
+// returned, so it wins; it falls back to the type implied by the requested
+// response_format when the upstream omits the header.
+func speechResponseContentType(raw *llmclient.Response, format string) string {
+	if raw != nil {
+		if ct := strings.TrimSpace(raw.ContentType); ct != "" {
+			return ct
+		}
+	}
+	return core.SpeechResponseContentType(format)
 }
 
 // CreateTranscription implements OpenAI speech-to-text (POST /audio/transcriptions).

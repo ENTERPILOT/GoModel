@@ -19,15 +19,26 @@ const (
 	// cost.go prices them via PerCharacterInput / PerSecondInput respectively.
 	rawKeyInputCharacters = "input_characters"
 	rawKeyAudioSeconds    = "audio_seconds"
+
+	// rawKeyAudioOutputSeconds carries the synthesized speech duration the gateway
+	// measures from the returned audio, priced via PerSecondOutput. rawKeyAudioOutputFormat
+	// records the output codec so cost.go can flag a duration it could not measure
+	// (compressed mp3/opus/aac/flac) rather than reporting a silent zero.
+	rawKeyAudioOutputSeconds = "audio_output_seconds"
+	rawKeyAudioOutputFormat  = "audio_output_format"
 )
 
 // ExtractFromSpeechRequest builds a usage entry for a text-to-speech request.
 // Speech responses are binary audio with no provider-reported usage, so the
-// billable unit is the input character count, recorded in RawData so the
-// interaction stays observable and per-character pricing can apply. model is the
-// resolved route model (not the raw user input) so the row groups and prices
-// consistently with the pricing lookup, mirroring the transcription extractor.
-func ExtractFromSpeechRequest(input, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+// billable units are derived locally: the input character count (per-character
+// models such as tts-1) and the synthesized audio duration (per-second-output
+// models such as gpt-4o-mini-tts), both recorded in RawData so the interaction
+// stays observable and pricing can apply. output is the returned audio and
+// format its response_format/MIME type; duration is measured for uncompressed
+// formats only (see measureSpeechDurationSeconds). model is the resolved route
+// model (not the raw user input) so the row groups and prices consistently with
+// the pricing lookup, mirroring the transcription extractor.
+func ExtractFromSpeechRequest(input string, output []byte, format, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
 	entry := &UsageEntry{
 		ID:        uuid.New().String(),
 		RequestID: requestID,
@@ -36,8 +47,25 @@ func ExtractFromSpeechRequest(input, requestID, model, provider string, pricing 
 		Provider:  provider,
 		Endpoint:  endpointAudioSpeech,
 	}
+
+	raw := map[string]any{}
 	if chars := len([]rune(input)); chars > 0 {
-		entry.RawData = map[string]any{rawKeyInputCharacters: chars}
+		raw[rawKeyInputCharacters] = chars
+	}
+	// Record the output codec whenever it is known, even for an empty body, so a
+	// compressed (unmeasurable) format still surfaces a cost caveat in cost.go
+	// rather than a silent zero. Record the measured duration only when the
+	// gateway can compute it from the returned audio (uncompressed wav/pcm).
+	if codec := normalizeAudioFormat(format); codec != "" {
+		raw[rawKeyAudioOutputFormat] = codec
+	}
+	if len(output) > 0 {
+		if seconds, ok := measureSpeechDurationSeconds(output, format); ok {
+			raw[rawKeyAudioOutputSeconds] = seconds
+		}
+	}
+	if len(raw) > 0 {
+		entry.RawData = raw
 	}
 
 	applyUsageCosts(entry, provider, endpointAudioSpeech, pricing...)

@@ -352,6 +352,105 @@ func TestAudioSpeech_LogsUsage(t *testing.T) {
 	}
 }
 
+// TestAudioSpeech_CostsOutputAudioDuration verifies the full wire path for
+// output-duration-priced TTS models (e.g. gpt-4o-mini-tts), including how the
+// billing format is resolved: the response Content-Type is authoritative, the
+// requested response_format is the fallback, and mp3 is the final default.
+func TestAudioSpeech_CostsOutputAudioDuration(t *testing.T) {
+	// 2-second 24 kHz mono 16-bit WAV: byteRate 48000, dataLen 96000.
+	wav := wavBytes(24000, 1, 16, 2.0)
+	mp3 := []byte("\xff\xfbnot-a-wav-body")
+	// gpt-4o-mini-tts-style pricing: tiny text input plus per-second audio output.
+	pricing := &core.ModelPricing{InputPerMtok: floatPtr(0.6), PerSecondOutput: floatPtr(0.00025)}
+
+	tests := []struct {
+		name           string
+		responseFormat string // omitted from the request body when empty
+		contentType    string
+		data           []byte
+		wantSeconds    float64 // 0 => no measured duration expected
+		wantCost       float64
+		wantCaveat     bool
+	}{
+		{"explicit wav", "wav", "audio/wav", wav, 2, 0.0005, false},
+		{"content-type fallback wav", "", "audio/wav", wav, 2, 0.0005, false},
+		// The client requested a measurable format (pcm) but the provider
+		// actually returned mp3; the response Content-Type must win so the
+		// non-PCM bytes are caveated, not charged as len/48000 of fake PCM.
+		{"content-type overrides requested format", "pcm", "audio/mpeg", mp3, 0, 0, true},
+		{"default mp3 unmeasured", "", "", mp3, 0, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var captured *usage.UsageEntry
+			logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
+			mock := &audioMockProvider{
+				mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}},
+				speechResp:   &core.AudioResponse{ContentType: tt.contentType, Data: tt.data},
+			}
+			svc := &audioService{provider: mock, usageLogger: logger, pricingResolver: &mockPricingResolver{pricing: pricing}}
+
+			body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"`
+			if tt.responseFormat != "" {
+				body += `,"response_format":"` + tt.responseFormat + `"`
+			}
+			body += `}`
+			req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			c := echo.New().NewContext(req, httptest.NewRecorder())
+			c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{})
+
+			if err := svc.CreateSpeech(c); err != nil {
+				t.Fatalf("CreateSpeech returned error: %v", err)
+			}
+			if captured == nil {
+				t.Fatal("expected a usage entry to be written")
+			}
+
+			got, hasSeconds := captured.RawData["audio_output_seconds"]
+			if tt.wantSeconds > 0 {
+				if !hasSeconds || got != tt.wantSeconds {
+					t.Errorf("audio_output_seconds = %v (present=%v), want %v", got, hasSeconds, tt.wantSeconds)
+				}
+			} else if hasSeconds {
+				t.Errorf("audio_output_seconds = %v, want none", got)
+			}
+
+			if captured.TotalCost == nil || *captured.TotalCost != tt.wantCost {
+				t.Fatalf("total_cost = %v, want %v", captured.TotalCost, tt.wantCost)
+			}
+			if hasCaveat := captured.CostsCalculationCaveat != ""; hasCaveat != tt.wantCaveat {
+				t.Errorf("caveat = %q, want present=%v", captured.CostsCalculationCaveat, tt.wantCaveat)
+			}
+		})
+	}
+}
+
+func floatPtr(v float64) *float64 { return &v }
+
+// wavBytes builds a minimal canonical PCM WAV of the requested duration.
+func wavBytes(sampleRate, channels, bitsPerSample int, seconds float64) []byte {
+	byteRate := sampleRate * channels * bitsPerSample / 8
+	dataLen := int(float64(byteRate) * seconds)
+	le := func(v uint32) []byte { return []byte{byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24)} }
+	le16 := func(v uint16) []byte { return []byte{byte(v), byte(v >> 8)} }
+	out := []byte("RIFF")
+	out = append(out, le(uint32(36+dataLen))...)
+	out = append(out, "WAVE"...)
+	out = append(out, "fmt "...)
+	out = append(out, le(16)...)
+	out = append(out, le16(1)...)
+	out = append(out, le16(uint16(channels))...)
+	out = append(out, le(uint32(sampleRate))...)
+	out = append(out, le(uint32(byteRate))...)
+	out = append(out, le16(uint16(channels*bitsPerSample/8))...)
+	out = append(out, le16(uint16(bitsPerSample))...)
+	out = append(out, "data"...)
+	out = append(out, le(uint32(dataLen))...)
+	out = append(out, make([]byte, dataLen)...)
+	return out
+}
+
 // TestAudioTranscription_LogsUsage verifies a speech-to-text call records a usage
 // entry even when the provider response carries no usage object (e.g. whisper).
 func TestAudioTranscription_LogsUsage(t *testing.T) {

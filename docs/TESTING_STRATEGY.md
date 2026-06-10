@@ -209,7 +209,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26.3"
+          go-version: "1.26.4"
 
       # Unit + E2E (no external dependencies)
       - run: make test-all

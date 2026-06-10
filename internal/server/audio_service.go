@@ -78,9 +78,26 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 		return s.respondAudio(c, resp) // emits the 502 guard; no usage for a failed call
 	}
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
-		return usage.ExtractFromSpeechRequest(req.Input, route.requestID, route.model, route.providerType, pricing)
+		return usage.ExtractFromSpeechRequest(req.Input, resp.Data, speechResponseFormat(req, resp), route.requestID, route.model, route.providerType, pricing)
 	})
 	return s.respondAudio(c, resp)
+}
+
+// speechResponseFormat resolves the codec of the synthesized audio so usage can
+// price models billed by output duration. The response Content-Type describes
+// the bytes actually returned, so it is authoritative when it names an audio
+// media type; this avoids charging a per-second rate against bytes whose real
+// format differs from the requested one (e.g. response_format=pcm but the
+// provider returns mp3). It falls back to the requested response_format and
+// finally OpenAI's mp3 default.
+func speechResponseFormat(req *core.AudioSpeechRequest, resp *core.AudioResponse) string {
+	if resp != nil && auditlog.IsAudioContentType(resp.ContentType) {
+		return resp.ContentType
+	}
+	if f := strings.TrimSpace(req.ResponseFormat); f != "" {
+		return f
+	}
+	return "mp3"
 }
 
 // CreateTranscription handles POST /v1/audio/transcriptions.
