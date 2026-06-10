@@ -12,6 +12,7 @@ import (
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
+	"gomodel/internal/gateway"
 	"gomodel/internal/responsestore"
 )
 
@@ -110,7 +111,7 @@ func (s *nativeResponseService) CancelResponse(c *echo.Context) error {
 		providerType := storedProvider(stored)
 		providerRoute := storedProviderRoute(stored)
 		auditResponseEntry(c, providerType)
-		resp, err := s.cancelNativeResponse(ctx, providerRoute, firstNonEmpty(stored.ProviderResponseID, id))
+		resp, err := s.cancelNativeResponse(ctx, providerRoute, gateway.FirstNonEmpty(stored.ProviderResponseID, id))
 		if err != nil {
 			if isUnsupportedNativeResponseError(err) {
 				return handleError(c, unsupportedResponseOperation("native response cancellation is not available for this provider"))
@@ -157,7 +158,7 @@ func (s *nativeResponseService) DeleteResponse(c *echo.Context) error {
 		providerType := storedProvider(stored)
 		providerRoute := storedProviderRoute(stored)
 		auditResponseEntry(c, providerType)
-		deleteResp, deleteErr := s.deleteNativeResponse(ctx, providerRoute, firstNonEmpty(stored.ProviderResponseID, id))
+		deleteResp, deleteErr := s.deleteNativeResponse(ctx, providerRoute, gateway.FirstNonEmpty(stored.ProviderResponseID, id))
 		if deleteErr != nil && !isUnsupportedNativeResponseError(deleteErr) && !isNotFoundGatewayError(deleteErr) {
 			return handleError(c, deleteErr)
 		}

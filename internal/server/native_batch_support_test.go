@@ -5,6 +5,7 @@ import (
 
 	batchstore "gomodel/internal/batch"
 	"gomodel/internal/core"
+	"gomodel/internal/gateway"
 	"gomodel/internal/usage"
 )
 
@@ -46,7 +47,7 @@ func TestHandlerLogBatchUsageFromBatchResultsUsesStoredUserPath(t *testing.T) {
 		},
 	}
 
-	logged := handler.logBatchUsageFromBatchResults(stored, result, "")
+	logged := gateway.LogBatchUsageFromBatchResults(stored, result, "", handler.usageLogger, handler.pricingResolver)
 	if !logged {
 		t.Fatal("logBatchUsageFromBatchResults() = false, want true")
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"gomodel/internal/core"
+	"gomodel/internal/gateway"
 )
 
 type requestWorkflowPolicyResolverFunc func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
@@ -73,15 +74,15 @@ func TestDetermineBatchExecutionSelection_UsesSingleResolutionPass(t *testing.T)
 		},
 	}
 
-	selection, err := determineBatchExecutionSelection(provider, resolver, req)
+	selection, err := gateway.DetermineBatchExecutionSelectionWithAuthorizer(context.Background(), provider, resolver, nil, req)
 	if err != nil {
-		t.Fatalf("determineBatchExecutionSelection() error = %v", err)
+		t.Fatalf("DetermineBatchExecutionSelectionWithAuthorizer() error = %v", err)
 	}
-	if selection.providerType != "openai" {
-		t.Fatalf("providerType = %q, want openai", selection.providerType)
+	if selection.ProviderType != "openai" {
+		t.Fatalf("providerType = %q, want openai", selection.ProviderType)
 	}
-	if selection.selector.Provider != "openai" || selection.selector.Model != "gpt-4o-mini" {
-		t.Fatalf("selector = %+v, want openai/gpt-4o-mini", selection.selector)
+	if selection.Selector.Provider != "openai" || selection.Selector.Model != "gpt-4o-mini" {
+		t.Fatalf("selector = %+v, want openai/gpt-4o-mini", selection.Selector)
 	}
 	if resolver.calls != len(req.Requests) {
 		t.Fatalf("resolver calls = %d, want %d", resolver.calls, len(req.Requests))

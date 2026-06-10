@@ -30,6 +30,7 @@ import (
 	batchstore "gomodel/internal/batch"
 	"gomodel/internal/core"
 	"gomodel/internal/filestore"
+	"gomodel/internal/gateway"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/observability"
 	provideradapter "gomodel/internal/providers"
@@ -1043,7 +1044,7 @@ func (m *mockProvider) ListFiles(_ context.Context, providerType, purpose string
 				Bytes:     10,
 				CreatedAt: 1000,
 				Filename:  "a.jsonl",
-				Purpose:   firstNonEmpty(purpose, "batch"),
+				Purpose:   gateway.FirstNonEmpty(purpose, "batch"),
 				Provider:  providerType,
 			},
 		},
@@ -6508,7 +6509,7 @@ func TestMergeStoredBatchFromUpstreamPreservesGatewayMetadata(t *testing.T) {
 		},
 	}
 
-	mergeStoredBatchFromUpstream(stored, upstream)
+	gateway.MergeStoredBatchFromUpstream(stored, upstream)
 
 	if stored.Batch.Metadata["provider"] != "openai" {
 		t.Fatalf("provider metadata overwritten: %q", stored.Batch.Metadata["provider"])
@@ -6576,7 +6577,7 @@ func TestMergeStoredBatchFromUpstreamPreservesExistingValuesOnSparseUpstream(t *
 		},
 	}
 
-	mergeStoredBatchFromUpstream(stored, upstream)
+	gateway.MergeStoredBatchFromUpstream(stored, upstream)
 
 	if got := stored.Batch.Status; got != "in_progress" {
 		t.Fatalf("Status = %q, want in_progress", got)
@@ -7285,7 +7286,7 @@ func TestIsNativeBatchResultsPending(t *testing.T) {
 		batchGetResponse: &core.BatchResponse{ID: "provider-batch-1", Status: "in_progress"},
 	}
 	anthropicErr := core.NewProviderError("anthropic", http.StatusNotFound, "pending", nil)
-	pending, latest := isNativeBatchResultsPending(context.Background(), provider, "anthropic", "provider-batch-1", anthropicErr)
+	pending, latest := gateway.IsNativeBatchResultsPending(context.Background(), provider, "anthropic", "provider-batch-1", anthropicErr)
 	if !pending {
 		t.Fatal("expected anthropic 404 to be treated as pending")
 	}
@@ -7294,12 +7295,12 @@ func TestIsNativeBatchResultsPending(t *testing.T) {
 	}
 
 	openAIErr := core.NewProviderError("openai", http.StatusNotFound, "not found", nil)
-	if pending, _ := isNativeBatchResultsPending(context.Background(), provider, "openai", "provider-batch-1", openAIErr); pending {
+	if pending, _ := gateway.IsNativeBatchResultsPending(context.Background(), provider, "openai", "provider-batch-1", openAIErr); pending {
 		t.Fatal("expected openai 404 not to be treated as pending")
 	}
 
 	provider.batchGetResponse = &core.BatchResponse{ID: "provider-batch-1", Status: "expired"}
-	if pending, _ := isNativeBatchResultsPending(context.Background(), provider, "anthropic", "provider-batch-1", anthropicErr); pending {
+	if pending, _ := gateway.IsNativeBatchResultsPending(context.Background(), provider, "anthropic", "provider-batch-1", anthropicErr); pending {
 		t.Fatal("expected terminal anthropic batch not to be treated as pending")
 	}
 }
