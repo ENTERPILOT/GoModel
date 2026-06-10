@@ -11,6 +11,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"gomodel/internal/core"
 )
 
 type mongoDefinitionDocument struct {
@@ -205,7 +207,7 @@ func (s *MongoDBStore) Close() error {
 
 func mongoConfigFromRaw(raw json.RawMessage) (bson.M, error) {
 	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if core.IsJSONNull(trimmed) {
 		return bson.M{}, nil
 	}
 	var doc bson.M

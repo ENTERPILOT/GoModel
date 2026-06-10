@@ -82,7 +82,7 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 
 func (c *ImageURLContent) UnmarshalJSON(data []byte) error {
 	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if IsJSONNull(trimmed) {
 		return fmt.Errorf("image_url part is missing image_url.url")
 	}
 
@@ -145,7 +145,7 @@ func (c ImageURLContent) MarshalJSON() ([]byte, error) {
 
 func (a *InputAudioContent) UnmarshalJSON(data []byte) error {
 	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if IsJSONNull(trimmed) {
 		return fmt.Errorf("input_audio part is missing data or format")
 	}
 	if trimmed[0] != '{' {
@@ -193,7 +193,7 @@ func (a InputAudioContent) MarshalJSON() ([]byte, error) {
 // Chat content accepts plain strings, null, or arrays of supported content parts.
 func UnmarshalMessageContent(data []byte) (any, error) {
 	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if IsJSONNull(trimmed) {
 		return nil, nil
 	}
 
@@ -467,7 +467,7 @@ func normalizeContentPartMap(partMap map[string]any) (ContentPart, error) {
 
 func unmarshalImageURLContent(data []byte) (*ImageURLContent, error) {
 	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if IsJSONNull(trimmed) {
 		return nil, fmt.Errorf("image_url part is missing image_url.url")
 	}
 
@@ -497,7 +497,7 @@ func unmarshalImageURLContent(data []byte) (*ImageURLContent, error) {
 
 func unmarshalInputAudioContent(data []byte) (*InputAudioContent, error) {
 	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if IsJSONNull(trimmed) {
 		return nil, fmt.Errorf("input_audio part is missing data or format")
 	}
 

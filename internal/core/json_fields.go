@@ -19,6 +19,11 @@ type UnknownJSONFields struct {
 }
 
 // CloneRawJSON returns a detached copy of a raw JSON value.
+// IsJSONNull reports whether trimmed JSON data is empty or the null literal.
+func IsJSONNull(trimmed []byte) bool {
+	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null"))
+}
+
 func CloneRawJSON(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {
 		return nil

@@ -247,7 +247,7 @@ func collapseParts(parts []core.ContentPart) core.MessageContent {
 // blocks is non-nil (possibly empty).
 func parseContent(raw json.RawMessage) (text string, blocks []ContentBlock, err error) {
 	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if core.IsJSONNull(trimmed) {
 		return "", nil, nil
 	}
 	switch trimmed[0] {
@@ -339,7 +339,7 @@ func imageURLFromSource(source *Source) (string, error) {
 // the form expected by core.FunctionCall.Arguments.
 func rawToArguments(raw json.RawMessage) string {
 	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if core.IsJSONNull(trimmed) {
 		return "{}"
 	}
 	var compact bytes.Buffer

@@ -554,7 +554,7 @@ func anthropicCacheControlFromExtra(extraFields core.UnknownJSONFields) (json.Ra
 	}
 
 	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if core.IsJSONNull(trimmed) {
 		return nil, nil
 	}
 	if trimmed[0] != '{' {

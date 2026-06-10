@@ -119,7 +119,7 @@ func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 
 func decodeResponsesInput(raw json.RawMessage) (any, error) {
 	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if IsJSONNull(trimmed) {
 		return nil, nil
 	}
 	if trimmed[0] == '[' {
@@ -141,7 +141,7 @@ func decodeResponsesInput(raw json.RawMessage) (any, error) {
 // ID or an object with an id field.
 func (c *ResponsesConversationRef) UnmarshalJSON(data []byte) error {
 	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if IsJSONNull(trimmed) {
 		*c = ResponsesConversationRef{}
 		return nil
 	}
@@ -586,7 +586,7 @@ func cloneRawMessage(data []byte) json.RawMessage {
 // JSON strings are unwrapped; objects/arrays are returned as-is.
 func stringifyRawValue(raw json.RawMessage) string {
 	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if IsJSONNull(trimmed) {
 		return ""
 	}
 	if trimmed[0] == '"' {
