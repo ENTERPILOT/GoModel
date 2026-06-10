@@ -63,6 +63,26 @@ func (row mongoUsageLogRow) toUsageLogEntry() UsageLogEntry {
 }
 
 // NewMongoDBReader creates a new MongoDB usage reader.
+// mongoCostSum sums a nullable cost field, treating missing values as zero.
+func mongoCostSum(field string) bson.D {
+	return bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{field, 0}}}}}
+}
+
+// mongoCostPresenceCount counts documents where a nullable cost field is set,
+// so decoders can distinguish an all-null aggregate from a zero total.
+func mongoCostPresenceCount(field string) bson.D {
+	return bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{field, nil}}}, 1, 0}}}}}
+}
+
+// costPtr exposes an aggregated cost only when at least one document carried
+// that cost, mirroring the nullable columns of the SQL backends.
+func costPtr(present int, value float64) *float64 {
+	if present > 0 {
+		return &value
+	}
+	return nil
+}
+
 func NewMongoDBReader(database *mongo.Database) (*MongoDBReader, error) {
 	if database == nil {
 		return nil, fmt.Errorf("database is required")
@@ -87,12 +107,12 @@ func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams)
 		{Key: "total_input", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
 		{Key: "total_output", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
 		{Key: "total_tokens", Value: bson.D{{Key: "$sum", Value: "$total_tokens"}}},
-		{Key: "total_input_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$input_cost", 0}}}}}},
-		{Key: "total_output_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$output_cost", 0}}}}}},
-		{Key: "total_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", 0}}}}}},
-		{Key: "has_input_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$input_cost", nil}}}, 1, 0}}}}}},
-		{Key: "has_output_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$output_cost", nil}}}, 1, 0}}}}}},
-		{Key: "has_total_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$total_cost", nil}}}, 1, 0}}}}}},
+		{Key: "total_input_cost", Value: mongoCostSum("$input_cost")},
+		{Key: "total_output_cost", Value: mongoCostSum("$output_cost")},
+		{Key: "total_cost", Value: mongoCostSum("$total_cost")},
+		{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
+		{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
+		{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
 	}}})
 
 	cursor, err := r.collection.Aggregate(ctx, pipeline)
@@ -122,15 +142,9 @@ func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams)
 		summary.TotalInput = result.TotalInput
 		summary.TotalOutput = result.TotalOutput
 		summary.TotalTokens = result.TotalTokens
-		if result.HasInputCost > 0 {
-			summary.TotalInputCost = &result.TotalInputCost
-		}
-		if result.HasOutputCost > 0 {
-			summary.TotalOutputCost = &result.TotalOutputCost
-		}
-		if result.HasTotalCost > 0 {
-			summary.TotalCost = &result.TotalCost
-		}
+		summary.TotalInputCost = costPtr(result.HasInputCost, result.TotalInputCost)
+		summary.TotalOutputCost = costPtr(result.HasOutputCost, result.TotalOutputCost)
+		summary.TotalCost = costPtr(result.HasTotalCost, result.TotalCost)
 	}
 
 	if err := cursor.Err(); err != nil {
@@ -160,12 +174,12 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 		}},
 		{Key: "input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
 		{Key: "output_tokens", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
-		{Key: "input_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$input_cost", 0}}}}}},
-		{Key: "output_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$output_cost", 0}}}}}},
-		{Key: "total_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", 0}}}}}},
-		{Key: "has_input_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$input_cost", nil}}}, 1, 0}}}}}},
-		{Key: "has_output_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$output_cost", nil}}}, 1, 0}}}}}},
-		{Key: "has_total_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$total_cost", nil}}}, 1, 0}}}}}},
+		{Key: "input_cost", Value: mongoCostSum("$input_cost")},
+		{Key: "output_cost", Value: mongoCostSum("$output_cost")},
+		{Key: "total_cost", Value: mongoCostSum("$total_cost")},
+		{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
+		{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
+		{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
 	}}})
 
 	cursor, err := r.collection.Aggregate(ctx, pipeline)
@@ -201,15 +215,9 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 			InputTokens:  row.InputTokens,
 			OutputTokens: row.OutputTokens,
 		}
-		if row.HasInputCost > 0 {
-			m.InputCost = &row.InputCost
-		}
-		if row.HasOutputCost > 0 {
-			m.OutputCost = &row.OutputCost
-		}
-		if row.HasTotalCost > 0 {
-			m.TotalCost = &row.TotalCost
-		}
+		m.InputCost = costPtr(row.HasInputCost, row.InputCost)
+		m.OutputCost = costPtr(row.HasOutputCost, row.OutputCost)
+		m.TotalCost = costPtr(row.HasTotalCost, row.TotalCost)
 		result = append(result, m)
 	}
 
@@ -253,12 +261,12 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 		{Key: "input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
 		{Key: "output_tokens", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
 		{Key: "total_tokens", Value: bson.D{{Key: "$sum", Value: "$total_tokens"}}},
-		{Key: "input_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$input_cost", 0}}}}}},
-		{Key: "output_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$output_cost", 0}}}}}},
-		{Key: "total_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", 0}}}}}},
-		{Key: "has_input_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$input_cost", nil}}}, 1, 0}}}}}},
-		{Key: "has_output_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$output_cost", nil}}}, 1, 0}}}}}},
-		{Key: "has_total_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$total_cost", nil}}}, 1, 0}}}}}},
+		{Key: "input_cost", Value: mongoCostSum("$input_cost")},
+		{Key: "output_cost", Value: mongoCostSum("$output_cost")},
+		{Key: "total_cost", Value: mongoCostSum("$total_cost")},
+		{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
+		{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
+		{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
 	}}})
 
 	cursor, err := r.collection.Aggregate(ctx, pipeline)
@@ -293,15 +301,9 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 		if u.UserPath == "" {
 			u.UserPath = "/"
 		}
-		if row.HasInputCost > 0 {
-			u.InputCost = &row.InputCost
-		}
-		if row.HasOutputCost > 0 {
-			u.OutputCost = &row.OutputCost
-		}
-		if row.HasTotalCost > 0 {
-			u.TotalCost = &row.TotalCost
-		}
+		u.InputCost = costPtr(row.HasInputCost, row.InputCost)
+		u.OutputCost = costPtr(row.HasOutputCost, row.OutputCost)
+		u.TotalCost = costPtr(row.HasTotalCost, row.TotalCost)
 		result = append(result, u)
 	}
 
@@ -490,12 +492,12 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 			{Key: "input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
 			{Key: "output_tokens", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
 			{Key: "total_tokens", Value: bson.D{{Key: "$sum", Value: "$total_tokens"}}},
-			{Key: "input_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$input_cost", 0}}}}}},
-			{Key: "output_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$output_cost", 0}}}}}},
-			{Key: "total_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", 0}}}}}},
-			{Key: "has_input_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$input_cost", nil}}}, 1, 0}}}}}},
-			{Key: "has_output_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$output_cost", nil}}}, 1, 0}}}}}},
-			{Key: "has_total_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$total_cost", nil}}}, 1, 0}}}}}},
+			{Key: "input_cost", Value: mongoCostSum("$input_cost")},
+			{Key: "output_cost", Value: mongoCostSum("$output_cost")},
+			{Key: "total_cost", Value: mongoCostSum("$total_cost")},
+			{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
+			{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
+			{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
 		}}},
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
 	)
@@ -531,15 +533,9 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 			OutputTokens: row.OutputTokens,
 			TotalTokens:  row.TotalTokens,
 		}
-		if row.HasInputCost > 0 {
-			d.InputCost = &row.InputCost
-		}
-		if row.HasOutputCost > 0 {
-			d.OutputCost = &row.OutputCost
-		}
-		if row.HasTotalCost > 0 {
-			d.TotalCost = &row.TotalCost
-		}
+		d.InputCost = costPtr(row.HasInputCost, row.InputCost)
+		d.OutputCost = costPtr(row.HasOutputCost, row.OutputCost)
+		d.TotalCost = costPtr(row.HasTotalCost, row.TotalCost)
 		result = append(result, d)
 	}
 
@@ -578,8 +574,8 @@ func (r *MongoDBReader) GetCacheOverview(ctx context.Context, params UsageQueryP
 				{Key: "total_input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
 				{Key: "total_output_tokens", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
 				{Key: "total_tokens", Value: bson.D{{Key: "$sum", Value: "$total_tokens"}}},
-				{Key: "total_saved_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", 0}}}}}},
-				{Key: "has_saved_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$total_cost", nil}}}, 1, 0}}}}}},
+				{Key: "total_saved_cost", Value: mongoCostSum("$total_cost")},
+				{Key: "has_saved_cost", Value: mongoCostPresenceCount("$total_cost")},
 			}}},
 		}},
 		{Key: "daily", Value: bson.A{
@@ -595,8 +591,8 @@ func (r *MongoDBReader) GetCacheOverview(ctx context.Context, params UsageQueryP
 				{Key: "input_tokens", Value: bson.D{{Key: "$sum", Value: "$input_tokens"}}},
 				{Key: "output_tokens", Value: bson.D{{Key: "$sum", Value: "$output_tokens"}}},
 				{Key: "total_tokens", Value: bson.D{{Key: "$sum", Value: "$total_tokens"}}},
-				{Key: "saved_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", 0}}}}}},
-				{Key: "has_saved_cost", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{bson.D{{Key: "$gt", Value: bson.A{"$total_cost", nil}}}, 1, 0}}}}}},
+				{Key: "saved_cost", Value: mongoCostSum("$total_cost")},
+				{Key: "has_saved_cost", Value: mongoCostPresenceCount("$total_cost")},
 			}}},
 			bson.D{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
 		}},
@@ -667,9 +663,7 @@ func (r *MongoDBReader) GetCacheOverview(ctx context.Context, params UsageQueryP
 			OutputTokens: row.OutputTokens,
 			TotalTokens:  row.TotalTokens,
 		}
-		if row.HasSavedCost > 0 {
-			entry.SavedCost = &row.SavedCost
-		}
+		entry.SavedCost = costPtr(row.HasSavedCost, row.SavedCost)
 		overview.Daily = append(overview.Daily, entry)
 	}
 
