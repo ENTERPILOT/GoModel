@@ -68,6 +68,8 @@ func TestMP3DurationSeconds(t *testing.T) {
 		{"leading ID3v2 tag skipped", append(id3, buildMP3(10)...), 10 * mp3FrameSeconds, true},
 		{"trailing ID3v1 tag ignored", append(buildMP3(10), id3v1...), 10 * mp3FrameSeconds, true},
 		{"junk before first sync", append([]byte("junk"), buildMP3(5)...), 5 * mp3FrameSeconds, true},
+		{"truncated final frame not counted", append(buildMP3(10), buildMP3(1)[:50]...), 10 * mp3FrameSeconds, true},
+		{"single truncated frame unmeasurable", buildMP3(1)[:50], 0, false},
 		{"no frames", []byte("definitely not audio"), 0, false},
 		{"empty", nil, 0, false},
 		{"ID3 tag only", id3, 0, false},

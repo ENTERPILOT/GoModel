@@ -2,10 +2,13 @@ package conversationstore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
+
+	"gomodel/internal/core"
 )
 
 const (
@@ -156,6 +159,29 @@ func (s *MemoryStore) Update(_ context.Context, conversation *StoredConversation
 	}
 	s.items[c.Conversation.ID] = c
 	s.enforceMaxEntriesLocked()
+	return nil
+}
+
+// AppendItems atomically appends items to an existing conversation snapshot.
+func (s *MemoryStore) AppendItems(_ context.Context, id string, items []json.RawMessage) error {
+	if len(items) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanupExpiredLocked(now)
+	conversation, exists := s.items[id]
+	if !exists {
+		return ErrNotFound
+	}
+	if conversationExpired(conversation, now) {
+		delete(s.items, id)
+		return ErrNotFound
+	}
+	for _, item := range items {
+		conversation.Items = append(conversation.Items, core.CloneRawJSON(item))
+	}
 	return nil
 }
 

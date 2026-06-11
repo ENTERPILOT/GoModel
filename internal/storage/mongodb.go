@@ -66,14 +66,19 @@ func resolveMongoDatabase(cfg MongoDBConfig) string {
 }
 
 // databaseNameFromURI extracts the database name (the path component) from a
-// MongoDB connection string. Returns "" when the URI is unparseable or names
-// no database.
+// MongoDB connection string. Returns "" when the URI is unparseable, names no
+// database, or the path is not a single segment — MongoDB database names
+// cannot contain '/', so a multi-segment path would fail at connect time.
 func databaseNameFromURI(uri string) string {
 	u, err := url.Parse(uri)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimPrefix(u.Path, "/")
+	name := strings.Trim(u.Path, "/")
+	if strings.Contains(name, "/") {
+		return ""
+	}
+	return name
 }
 
 func (s *mongoStorage) Close() error {

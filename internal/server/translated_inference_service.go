@@ -294,7 +294,9 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	if err := s.storeResponseSnapshot(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID); err != nil {
 		s.recordResponseSnapshotStoreFailure(workflow, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID, err)
 	}
-	conversationTurnFromContext(ctx).appendResponse(ctx, result.Response)
+	if turn := conversationTurnFromContext(ctx); turn != nil {
+		turn.appendResponse(ctx, result.Response)
+	}
 
 	return c.JSON(http.StatusOK, result.Response)
 }

@@ -817,3 +817,107 @@ func TestSetBaseURL(t *testing.T) {
 		t.Errorf("SetBaseURL should allow using custom URL: %v", err)
 	}
 }
+
+func TestCreateSpeech(t *testing.T) {
+	audio := []byte("fake-mp3-bytes")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/audio/speech" {
+			t.Errorf("path = %q, want /audio/speech", r.URL.Path)
+		}
+		if auth := r.Header.Get("Authorization"); !strings.HasPrefix(auth, "Bearer ") {
+			t.Error("Authorization header should start with 'Bearer '")
+		}
+		var req core.AudioSpeechRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Model != "playai-tts" || req.Voice != "Fritz-PlayAI" {
+			t.Errorf("forwarded request = %+v, want model/voice preserved", req)
+		}
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write(audio)
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
+		Model: "playai-tts",
+		Input: "Hello from Groq.",
+		Voice: "Fritz-PlayAI",
+	})
+	if err != nil {
+		t.Fatalf("CreateSpeech() error = %v", err)
+	}
+	if resp.ContentType != "audio/mpeg" {
+		t.Errorf("ContentType = %q, want audio/mpeg", resp.ContentType)
+	}
+	if string(resp.Data) != string(audio) {
+		t.Errorf("Data = %q, want %q", resp.Data, audio)
+	}
+}
+
+func TestCreateTranscription(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/audio/transcriptions" {
+			t.Errorf("path = %q, want /audio/transcriptions", r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		if got := r.FormValue("model"); got != "whisper-large-v3" {
+			t.Errorf("model field = %q, want whisper-large-v3", got)
+		}
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			t.Fatalf("file part: %v", err)
+		}
+		defer func() { _ = file.Close() }()
+		data, _ := io.ReadAll(file)
+		if string(data) != "fake-wav-bytes" {
+			t.Errorf("file content = %q, want fake-wav-bytes", data)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"hello from groq"}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
+		Model:    "whisper-large-v3",
+		Filename: "speech.wav",
+		File:     []byte("fake-wav-bytes"),
+	})
+	if err != nil {
+		t.Fatalf("CreateTranscription() error = %v", err)
+	}
+	if !strings.Contains(string(resp.Data), "hello from groq") {
+		t.Errorf("Data = %s, want transcription text", resp.Data)
+	}
+}
+
+func TestCreateTranscription_UpstreamError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"invalid audio"}}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	_, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
+		Model:    "whisper-large-v3",
+		Filename: "speech.wav",
+		File:     []byte("bad"),
+	})
+	if err == nil {
+		t.Fatal("CreateTranscription() error = nil, want upstream error")
+	}
+	if !strings.Contains(err.Error(), "invalid audio") {
+		t.Errorf("error = %v, want upstream message propagated", err)
+	}
+}

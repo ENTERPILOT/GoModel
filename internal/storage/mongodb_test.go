@@ -44,6 +44,16 @@ func TestResolveMongoDatabase(t *testing.T) {
 			want: DefaultMongoDatabase,
 		},
 		{
+			name: "database with trailing slash is trimmed",
+			cfg:  MongoDBConfig{URL: "mongodb://localhost:27017/mydb/"},
+			want: "mydb",
+		},
+		{
+			name: "multi-segment path falls back to default",
+			cfg:  MongoDBConfig{URL: "mongodb://localhost:27017/a/b"},
+			want: DefaultMongoDatabase,
+		},
+		{
 			name: "unparseable URL falls back to default",
 			cfg:  MongoDBConfig{URL: "mongodb://[::1"},
 			want: DefaultMongoDatabase,

@@ -82,7 +82,7 @@ func (s *translatedInferenceService) applyResponsesConversation(ctx context.Cont
 // Stored item IDs are gateway-generated and stripped so upstream providers do
 // not treat them as item references.
 func mergeConversationInput(history []json.RawMessage, input any) ([]any, error) {
-	merged := make([]any, 0, len(history)+1)
+	merged := make([]any, 0, len(history))
 	for _, raw := range history {
 		var item map[string]any
 		if err := json.Unmarshal(raw, &item); err != nil {
@@ -129,21 +129,14 @@ func (t *conversationTurn) appendExchange(ctx context.Context, responseID string
 	if len(items) == 0 {
 		return
 	}
-
-	stored, err := t.store.Get(ctx, t.id)
-	if err != nil {
-		slog.Warn("conversation append failed: load", "conversation_id", t.id, "error", err)
-		return
-	}
-	stored.Items = append(stored.Items, items...)
-	if err := t.store.Update(ctx, stored); err != nil {
-		slog.Warn("conversation append failed: update", "conversation_id", t.id, "error", err)
+	if err := t.store.AppendItems(ctx, t.id, items); err != nil {
+		slog.Warn("conversation append failed", "conversation_id", t.id, "error", err)
 	}
 }
 
 // appendResponse records a completed non-streaming response on the turn.
 func (t *conversationTurn) appendResponse(ctx context.Context, resp *core.ResponsesResponse) {
-	if t == nil || resp == nil {
+	if resp == nil {
 		return
 	}
 	output := make([]json.RawMessage, 0, len(resp.Output))

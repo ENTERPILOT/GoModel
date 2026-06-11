@@ -324,7 +324,7 @@ func TestResponsesErrors(t *testing.T) {
 		resp := sendResponsesRequest(t, payload)
 		defer closeBody(resp)
 
-		requireErrorResponse(t, resp, http.StatusBadRequest, core.ErrorTypeInvalidRequest, "unsupported model")
+		requireErrorResponse(t, resp, http.StatusNotFound, core.ErrorTypeNotFound, "unsupported model")
 	})
 }
 

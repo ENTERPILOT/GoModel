@@ -92,6 +92,9 @@ func mp3DurationSeconds(data []byte) (float64, bool) {
 			pos++ // still hunting for the first sync word
 			continue
 		}
+		if pos+frameSize > len(data) {
+			break // truncated frame: do not bill audio that is not there
+		}
 		seconds += frameSeconds
 		frames++
 		pos += frameSize

@@ -2,7 +2,10 @@ package conversationstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -162,5 +165,64 @@ func TestMemoryStoreGetReturnsIsolatedCopy(t *testing.T) {
 	}
 	if _, mutated := second.Conversation.Metadata["mutated"]; mutated {
 		t.Fatal("stored conversation mutated through returned copy")
+	}
+}
+
+func TestMemoryStoreAppendItems(t *testing.T) {
+	store := NewMemoryStore()
+	conv := &StoredConversation{
+		Conversation: &core.Conversation{ID: "conv_append", Object: "conversation"},
+		Items:        []json.RawMessage{json.RawMessage(`{"n":0}`)},
+	}
+	if err := store.Create(context.Background(), conv); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	if err := store.AppendItems(context.Background(), "conv_append", []json.RawMessage{json.RawMessage(`{"n":1}`)}); err != nil {
+		t.Fatalf("AppendItems() error = %v", err)
+	}
+	if err := store.AppendItems(context.Background(), "conv_append", nil); err != nil {
+		t.Fatalf("AppendItems(empty) error = %v", err)
+	}
+	if err := store.AppendItems(context.Background(), "missing", []json.RawMessage{json.RawMessage(`{}`)}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("AppendItems(missing) error = %v, want ErrNotFound", err)
+	}
+
+	got, err := store.Get(context.Background(), "conv_append")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(got.Items) != 2 || string(got.Items[1]) != `{"n":1}` {
+		t.Fatalf("Items = %v, want initial item plus appended item", got.Items)
+	}
+}
+
+func TestMemoryStoreAppendItems_ConcurrentAppendsAllSurvive(t *testing.T) {
+	store := NewMemoryStore()
+	conv := &StoredConversation{Conversation: &core.Conversation{ID: "conv_race", Object: "conversation"}}
+	if err := store.Create(context.Background(), conv); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	const writers = 20
+	var wg sync.WaitGroup
+	for i := range writers {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			item := json.RawMessage(fmt.Sprintf(`{"writer":%d}`, n))
+			if err := store.AppendItems(context.Background(), "conv_race", []json.RawMessage{item}); err != nil {
+				t.Errorf("AppendItems() error = %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	got, err := store.Get(context.Background(), "conv_race")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(got.Items) != writers {
+		t.Fatalf("Items = %d, want %d (no lost appends)", len(got.Items), writers)
 	}
 }

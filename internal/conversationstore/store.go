@@ -32,6 +32,10 @@ type Store interface {
 	Create(ctx context.Context, conversation *StoredConversation) error
 	Get(ctx context.Context, id string) (*StoredConversation, error)
 	Update(ctx context.Context, conversation *StoredConversation) error
+	// AppendItems atomically appends items to an existing conversation, so two
+	// concurrently completing turns cannot overwrite each other's exchange the
+	// way a Get-then-Update would.
+	AppendItems(ctx context.Context, id string, items []json.RawMessage) error
 	Delete(ctx context.Context, id string) error
 	Close() error
 }

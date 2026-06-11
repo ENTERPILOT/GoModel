@@ -613,17 +613,17 @@ func TestAuditLogErrorCapture(t *testing.T) {
 		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
 		require.NoError(t, err)
 		defer closeBody(resp)
-		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 
 		// Wait for log entry
 		entries := store.WaitForAPIEntries(1, 2*time.Second)
 		require.Len(t, entries, 1)
 
 		entry := entries[0]
-		assert.Equal(t, http.StatusBadRequest, entry.StatusCode)
+		assert.Equal(t, http.StatusNotFound, entry.StatusCode)
 		assert.Equal(t, "/v1/chat/completions", entry.Path)
 		assert.Equal(t, "unsupported-model-xyz", entry.RequestedModel)
-		assert.Equal(t, "invalid_request_error", entry.ErrorType)
+		assert.Equal(t, "not_found_error", entry.ErrorType)
 		assert.Equal(t, "", entry.Provider)
 	})
 
