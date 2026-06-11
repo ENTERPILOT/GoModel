@@ -295,7 +295,9 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		s.recordResponseSnapshotStoreFailure(workflow, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID, err)
 	}
 	if turn := conversationTurnFromContext(ctx); turn != nil {
-		turn.appendResponse(ctx, result.Response)
+		// Detach cancellation so a client disconnect after provider success
+		// cannot lose the completed turn, mirroring the streaming observer.
+		turn.appendResponse(context.WithoutCancel(ctx), result.Response)
 	}
 
 	return c.JSON(http.StatusOK, result.Response)

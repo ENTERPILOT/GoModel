@@ -225,4 +225,19 @@ func TestMemoryStoreAppendItems_ConcurrentAppendsAllSurvive(t *testing.T) {
 	if len(got.Items) != writers {
 		t.Fatalf("Items = %d, want %d (no lost appends)", len(got.Items), writers)
 	}
+	seen := make(map[int]int, writers)
+	for _, raw := range got.Items {
+		var item struct {
+			Writer int `json:"writer"`
+		}
+		if err := json.Unmarshal(raw, &item); err != nil {
+			t.Fatalf("unmarshal appended item: %v", err)
+		}
+		seen[item.Writer]++
+	}
+	for i := range writers {
+		if seen[i] != 1 {
+			t.Fatalf("writer %d count = %d, want exactly once (no lost or duplicated appends)", i, seen[i])
+		}
+	}
 }
