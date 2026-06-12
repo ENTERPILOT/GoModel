@@ -31,11 +31,16 @@ type InputAudioContent struct {
 	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
-// validateInputAudioFields enforces the input_audio contract: data is always
-// required, and format may be omitted only when data is a data: URI that
-// already carries the MIME type (used by providers such as Xiaomi MiMo ASR).
+// ValidInputAudioPayload reports whether an input_audio payload satisfies the
+// contract: data is always required, and format may be omitted only when data
+// is a data: URI that already carries the MIME type (used by providers such
+// as Xiaomi MiMo ASR).
+func ValidInputAudioPayload(data, format string) bool {
+	return data != "" && (format != "" || strings.HasPrefix(data, "data:"))
+}
+
 func validateInputAudioFields(data, format string) error {
-	if data == "" || (format == "" && !strings.HasPrefix(data, "data:")) {
+	if !ValidInputAudioPayload(data, format) {
 		return fmt.Errorf("input_audio part is missing data or format")
 	}
 	return nil

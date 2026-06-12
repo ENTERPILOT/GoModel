@@ -60,7 +60,7 @@ MiMo has no native `/audio/*` endpoints — TTS (`mimo-v2.5-tts`,
   `response_format` `wav` (default) and `pcm`; `instructions` become the MiMo
   style prompt and `voice` selects a preset voice. Transcription supports
   `json` (default) and `text` response formats, with `language` passed through
-  to MiMo's `asr_options`.
+  to MiMo's `asr_options` and `temperature` forwarded to the chat request.
 - **MiMo's chat dialect** — send chat completions directly: synthesis text in
   an `assistant` message with a top-level `audio: {format, voice}` parameter,
   or an `input_audio` content part whose `data` is a base64 `data:` URI for
@@ -68,9 +68,14 @@ MiMo has no native `/audio/*` endpoints — TTS (`mimo-v2.5-tts`,
 
 ## Not supported by Xiaomi MiMo
 
-- Embeddings (returns `invalid_request_error`).
-- Speech `response_format` values other than `wav`/`pcm`, and transcription
-  `srt`/`vtt` formats (MiMo synthesizes wav/pcm16 and returns plain text).
+All of these return `invalid_request_error` rather than silently dropping the
+option:
+
+- Embeddings.
+- Speech `response_format` values other than `wav`/`pcm` and non-default
+  `speed` (use `instructions` to adjust pace).
+- Transcription `verbose_json`/`srt`/`vtt` formats, `prompt`, and
+  `timestamp_granularities` (MiMo returns plain transcript text only).
 
 <Note>
   MiMo-V2-Flash and V2-TTS requests auto-route to the V2.5 models (at V2.5

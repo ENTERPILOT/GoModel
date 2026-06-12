@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"path"
+	"strconv"
 	"strings"
 
 	"gomodel/internal/core"
@@ -30,6 +31,9 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechReques
 	}
 	if strings.TrimSpace(req.Input) == "" {
 		return nil, core.NewInvalidRequestError("input is required", nil)
+	}
+	if req.Speed != 0 && req.Speed != 1 {
+		return nil, core.NewInvalidRequestError("xiaomi does not support speech speed control; use instructions to adjust pace", nil)
 	}
 	format, contentType, err := speechFormat(req.ResponseFormat)
 	if err != nil {
@@ -109,9 +113,17 @@ func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTrans
 		return nil, core.NewInvalidRequestError("audio transcription request is required", nil)
 	}
 	switch strings.ToLower(strings.TrimSpace(req.ResponseFormat)) {
-	case "", "json", "verbose_json", "text":
+	case "", "json", "text":
 	default:
 		return nil, core.NewInvalidRequestError("xiaomi transcription supports json or text response formats", nil)
+	}
+	if strings.TrimSpace(req.Prompt) != "" {
+		return nil, core.NewInvalidRequestError("xiaomi transcription does not support prompt", nil)
+	}
+	for _, granularity := range req.TimestampGranularities {
+		if strings.TrimSpace(granularity) != "" {
+			return nil, core.NewInvalidRequestError("xiaomi transcription does not support timestamp_granularities", nil)
+		}
 	}
 	audioBytes, err := transcriptionAudioBytes(req)
 	if err != nil {
@@ -136,12 +148,19 @@ func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTrans
 		}
 		chatReq.ExtraFields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"asr_options": rawOptions})
 	}
+	if rawTemperature := strings.TrimSpace(req.Temperature); rawTemperature != "" {
+		temperature, err := strconv.ParseFloat(rawTemperature, 64)
+		if err != nil {
+			return nil, core.NewInvalidRequestError("temperature must be a number", err)
+		}
+		chatReq.Temperature = &temperature
+	}
 
 	resp, err := p.ChatCompletion(ctx, chatReq)
 	if err != nil {
 		return nil, err
 	}
-	if len(resp.Choices) == 0 {
+	if resp == nil || len(resp.Choices) == 0 {
 		return nil, core.NewProviderError("xiaomi", 502, "transcription response contains no choices", nil)
 	}
 	text := core.ExtractTextContent(resp.Choices[0].Message.Content)

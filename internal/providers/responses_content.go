@@ -138,7 +138,7 @@ func normalizeTypedResponsesContentPart(part core.ContentPart) (core.ContentPart
 		}
 		data := strings.TrimSpace(part.InputAudio.Data)
 		format := strings.TrimSpace(part.InputAudio.Format)
-		if data == "" || format == "" {
+		if !core.ValidInputAudioPayload(data, format) {
 			return core.ContentPart{}, false
 		}
 		return core.ContentPart{
@@ -226,7 +226,7 @@ func normalizeResponsesInputAudioForChat(value any) (*core.InputAudioContent, bo
 	case map[string]string:
 		data := strings.TrimSpace(v["data"])
 		format := strings.TrimSpace(v["format"])
-		if data == "" || format == "" {
+		if !core.ValidInputAudioPayload(data, format) {
 			return nil, false
 		}
 		return &core.InputAudioContent{
@@ -239,7 +239,7 @@ func normalizeResponsesInputAudioForChat(value any) (*core.InputAudioContent, bo
 		format, _ := v["format"].(string)
 		data = strings.TrimSpace(data)
 		format = strings.TrimSpace(format)
-		if data == "" || format == "" {
+		if !core.ValidInputAudioPayload(data, format) {
 			return nil, false
 		}
 		return &core.InputAudioContent{

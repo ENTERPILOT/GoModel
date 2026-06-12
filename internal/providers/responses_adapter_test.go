@@ -854,6 +854,37 @@ func TestConvertResponsesRequestToChat_PreservesUnknownMapFields(t *testing.T) {
 	}
 }
 
+func TestConvertResponsesRequestToChat_InputAudioDataURIWithoutFormat(t *testing.T) {
+	const dataURI = "data:audio/wav;base64,UklGRg=="
+	req := &core.ResponsesRequest{
+		Model: "mimo-v2.5-asr",
+		Input: []any{
+			map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type":        "input_audio",
+						"input_audio": map[string]any{"data": dataURI},
+					},
+				},
+			},
+		},
+	}
+
+	chatReq, err := ConvertResponsesRequestToChat(req)
+	if err != nil {
+		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+	}
+	parts, ok := chatReq.Messages[0].Content.([]core.ContentPart)
+	if !ok || len(parts) != 1 || parts[0].InputAudio == nil {
+		t.Fatalf("Messages[0].Content = %#v, want one input_audio part", chatReq.Messages[0].Content)
+	}
+	if parts[0].InputAudio.Data != dataURI || parts[0].InputAudio.Format != "" {
+		t.Fatalf("InputAudio = %+v, want data URI with empty format", parts[0].InputAudio)
+	}
+}
+
 func TestConvertChatResponseToResponses(t *testing.T) {
 	resp := &core.ChatResponse{
 		ID:      "chatcmpl-123",

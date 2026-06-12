@@ -117,6 +117,25 @@ func TestCreateSpeech_RequiresInput(t *testing.T) {
 	}
 }
 
+func TestCreateSpeech_RejectsSpeedControl(t *testing.T) {
+	provider := NewWithHTTPClient("mimo-key", "", nil, llmclient.Hooks{})
+	_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
+		Model: "mimo-v2.5-tts", Input: "hi", Speed: 1.5,
+	})
+	if err == nil {
+		t.Fatal("CreateSpeech(speed=1.5) succeeded, want unsupported-speed error")
+	}
+
+	server, _ := newTTSServer(t, base64.StdEncoding.EncodeToString([]byte("wav")))
+	defer server.Close()
+	provider = NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
+	if _, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
+		Model: "mimo-v2.5-tts", Input: "hi", Speed: 1,
+	}); err != nil {
+		t.Fatalf("CreateSpeech(speed=1) error = %v, want default speed accepted", err)
+	}
+}
+
 func TestCreateTranscription_TranslatesToMiMoChatASR(t *testing.T) {
 	var gotBody []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -139,10 +158,11 @@ func TestCreateTranscription_TranslatesToMiMoChatASR(t *testing.T) {
 
 	audio := []byte("RIFF-fake-wav")
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
-		Model:    "mimo-v2.5-asr",
-		Filename: "clip.wav",
-		File:     audio,
-		Language: "auto",
+		Model:       "mimo-v2.5-asr",
+		Filename:    "clip.wav",
+		File:        audio,
+		Language:    "auto",
+		Temperature: "0.2",
 	})
 	if err != nil {
 		t.Fatalf("CreateTranscription() error = %v", err)
@@ -168,6 +188,9 @@ func TestCreateTranscription_TranslatesToMiMoChatASR(t *testing.T) {
 	if !strings.Contains(body, `"asr_options":{"language":"auto"}`) {
 		t.Fatalf("upstream body missing asr_options, got: %s", body)
 	}
+	if !strings.Contains(body, `"temperature":0.2`) {
+		t.Fatalf("upstream body missing forwarded temperature, got: %s", body)
+	}
 }
 
 func TestCreateTranscription_TextFormatAndValidation(t *testing.T) {
@@ -192,15 +215,17 @@ func TestCreateTranscription_TextFormatAndValidation(t *testing.T) {
 		t.Fatalf("got %q (%s), want plain text body", resp.Data, resp.ContentType)
 	}
 
-	_, err = provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
-		Model: "mimo-v2.5-asr", Filename: "clip.wav", File: []byte("audio"), ResponseFormat: "srt",
-	})
-	if err == nil {
-		t.Fatal("CreateTranscription(srt) succeeded, want unsupported-format error")
-	}
-
-	_, err = provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{Model: "mimo-v2.5-asr"})
-	if err == nil {
-		t.Fatal("CreateTranscription() without file succeeded, want file-required error")
+	for _, unsupported := range []core.AudioTranscriptionRequest{
+		{Model: "mimo-v2.5-asr", File: []byte("audio"), ResponseFormat: "srt"},
+		{Model: "mimo-v2.5-asr", File: []byte("audio"), ResponseFormat: "verbose_json"},
+		{Model: "mimo-v2.5-asr", File: []byte("audio"), Prompt: "domain hint"},
+		{Model: "mimo-v2.5-asr", File: []byte("audio"), TimestampGranularities: []string{"word"}},
+		{Model: "mimo-v2.5-asr", File: []byte("audio"), Temperature: "not-a-number"},
+		{Model: "mimo-v2.5-asr"},
+	} {
+		req := unsupported
+		if _, err := provider.CreateTranscription(context.Background(), &req); err == nil {
+			t.Fatalf("CreateTranscription(%+v) succeeded, want validation error", req)
+		}
 	}
 }
