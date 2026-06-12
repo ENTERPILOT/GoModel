@@ -233,6 +233,10 @@ providers:
     # Optional: use GLM Coding Plan endpoint instead of the general endpoint.
     # base_url: "https://api.z.ai/api/coding/paas/v4"
 
+  xiaomi:
+    type: xiaomi
+    api_key: "..."
+
   ollama:
     type: ollama
     base_url: "http://localhost:11434/v1"

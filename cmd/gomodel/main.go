@@ -30,6 +30,7 @@ import (
 	"gomodel/internal/providers/vertex"
 	"gomodel/internal/providers/vllm"
 	"gomodel/internal/providers/xai"
+	"gomodel/internal/providers/xiaomi"
 	"gomodel/internal/providers/zai"
 	"gomodel/internal/version"
 
@@ -75,7 +76,7 @@ func startApplication(application lifecycleApp, addr string) error {
 
 // @title          GoModel API
 // @version        1.0
-// @description    AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, DeepSeek, Z.ai, xAI, MiniMax, Oracle, Ollama). Drop-in OpenAI-compatible API.
+// @description    AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, DeepSeek, Z.ai, xAI, MiniMax, Xiaomi MiMo, Oracle, Ollama). Drop-in OpenAI-compatible API.
 // @BasePath       /
 // @schemes        http
 // @securityDefinitions.apikey BearerAuth
@@ -130,6 +131,7 @@ func main() {
 	factory.Add(ollama.Registration)
 	factory.Add(vllm.Registration)
 	factory.Add(xai.Registration)
+	factory.Add(xiaomi.Registration)
 	factory.Add(zai.Registration)
 
 	application, err := app.New(context.Background(), app.Config{

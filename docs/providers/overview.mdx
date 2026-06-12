@@ -25,6 +25,7 @@ quirks.
 | Z.ai | `ZAI_API_KEY` (`ZAI_BASE_URL` optional) | — |
 | xAI (Grok) | `XAI_API_KEY` | — |
 | MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | — |
+| Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | [Xiaomi MiMo](/providers/xiaomi) |
 | Azure OpenAI | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | [Azure OpenAI](/providers/azure) |
 | Amazon Bedrock | `BEDROCK_BASE_URL` (region or endpoint) + AWS credentials | [Amazon Bedrock](/providers/bedrock) |
 | Oracle GenAI | `ORACLE_API_KEY` + `ORACLE_BASE_URL` | [Oracle GenAI](/providers/oracle) |
@@ -54,6 +55,8 @@ These are the providers most users hit friction on:
 - **DeepSeek** — reasoning effort mapping quirks for DeepSeek V4.
 - **Ollama / vLLM** — local-model hosting with optional multi-instance setup
   through suffixed env vars and provider-qualified model IDs.
+- **Xiaomi MiMo** — thinking mode on by default, a `[1m]` context suffix, and
+  TTS/ASR that run through chat completions rather than native audio endpoints.
 
 <Tip>
   Every provider page shows three launch forms in one CodeGroup: Docker with

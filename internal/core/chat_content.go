@@ -27,8 +27,18 @@ type ImageURLContent struct {
 // InputAudioContent contains inline audio payload metadata.
 type InputAudioContent struct {
 	Data        string            `json:"data"`
-	Format      string            `json:"format"`
+	Format      string            `json:"format,omitempty"`
 	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
+}
+
+// validateInputAudioFields enforces the input_audio contract: data is always
+// required, and format may be omitted only when data is a data: URI that
+// already carries the MIME type (used by providers such as Xiaomi MiMo ASR).
+func validateInputAudioFields(data, format string) error {
+	if data == "" || (format == "" && !strings.HasPrefix(data, "data:")) {
+		return fmt.Errorf("input_audio part is missing data or format")
+	}
+	return nil
 }
 
 func (p *ContentPart) UnmarshalJSON(data []byte) error {
@@ -65,8 +75,11 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 			ImageURL: p.ImageURL,
 		}, p.ExtraFields)
 	case "input_audio":
-		if p.InputAudio == nil || p.InputAudio.Data == "" || p.InputAudio.Format == "" {
+		if p.InputAudio == nil {
 			return nil, fmt.Errorf("input_audio part is missing data or format")
+		}
+		if err := validateInputAudioFields(p.InputAudio.Data, p.InputAudio.Format); err != nil {
+			return nil, err
 		}
 		return marshalWithUnknownJSONFields(struct {
 			Type       string             `json:"type"`
@@ -159,8 +172,8 @@ func (a *InputAudioContent) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(trimmed, &raw); err != nil {
 		return err
 	}
-	if raw.Data == "" || raw.Format == "" {
-		return fmt.Errorf("input_audio part is missing data or format")
+	if err := validateInputAudioFields(raw.Data, raw.Format); err != nil {
+		return err
 	}
 	extraFields, err := extractUnknownJSONFields(trimmed,
 		"data",
@@ -177,12 +190,12 @@ func (a *InputAudioContent) UnmarshalJSON(data []byte) error {
 }
 
 func (a InputAudioContent) MarshalJSON() ([]byte, error) {
-	if a.Data == "" || a.Format == "" {
-		return nil, fmt.Errorf("input_audio part is missing data or format")
+	if err := validateInputAudioFields(a.Data, a.Format); err != nil {
+		return nil, err
 	}
 	return marshalWithUnknownJSONFields(struct {
 		Data   string `json:"data"`
-		Format string `json:"format"`
+		Format string `json:"format,omitempty"`
 	}{
 		Data:   a.Data,
 		Format: a.Format,
@@ -429,8 +442,11 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 			ExtraFields: CloneUnknownJSONFields(part.ExtraFields),
 		}, nil
 	case "input_audio":
-		if part.InputAudio == nil || part.InputAudio.Data == "" || part.InputAudio.Format == "" {
+		if part.InputAudio == nil {
 			return ContentPart{}, fmt.Errorf("input_audio part is missing data or format")
+		}
+		if err := validateInputAudioFields(part.InputAudio.Data, part.InputAudio.Format); err != nil {
+			return ContentPart{}, err
 		}
 		return ContentPart{
 			Type: "input_audio",
@@ -508,9 +524,6 @@ func unmarshalInputAudioContent(data []byte) (*InputAudioContent, error) {
 	var audio InputAudioContent
 	if err := json.Unmarshal(trimmed, &audio); err != nil {
 		return nil, err
-	}
-	if audio.Data == "" || audio.Format == "" {
-		return nil, fmt.Errorf("input_audio part is missing data or format")
 	}
 	return &audio, nil
 }

@@ -100,6 +100,8 @@ Example model identifiers are illustrative and subject to change; consult provid
 | OpenRouter    | `OPENROUTER_API_KEY`                                              | `google/gemini-2.5-flash`          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
 | Z.ai          | `ZAI_API_KEY` (`ZAI_BASE_URL` optional)                           | `glm-5.1`                          |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ✅    |
 | xAI (Grok)    | `XAI_API_KEY`                                                     | `grok-4`                           |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
+| MiniMax       | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional)                   | `MiniMax-M3`                       |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ✅    |
+| Xiaomi MiMo   | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional)                     | `mimo-v2.5-pro`                    |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ✅    |
 | Azure OpenAI  | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | `gpt-5`                            |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
 | Oracle        | `ORACLE_API_KEY` + `ORACLE_BASE_URL`                              | `openai.gpt-oss-120b`              |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ❌    |
 | Ollama        | `OLLAMA_BASE_URL`                                                 | `llama3.2`                         |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ❌    |
@@ -109,6 +111,10 @@ Example model identifiers are illustrative and subject to change; consult provid
 ✅ Supported ❌ Unsupported
 
 For Z.ai's GLM Coding Plan, set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
+Xiaomi MiMo TTS (`mimo-v2.5-tts*`) and ASR (`mimo-v2.5-asr`) are served through
+`/v1/audio/speech` and `/v1/audio/transcriptions` (translated to MiMo's
+chat-completions audio dialect) as well as directly via chat completions; for
+1M context append `[1m]` to the model ID and list it in `XIAOMI_MODELS`.
 Configured model lists are available for every provider with
 `<PROVIDER>_MODELS`, for example
 `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` or
