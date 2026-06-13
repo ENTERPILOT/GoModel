@@ -33,10 +33,34 @@ type InputAudioContent struct {
 
 // ValidInputAudioPayload reports whether an input_audio payload satisfies the
 // contract: data is always required, and format may be omitted only when data
-// is a data: URI that already carries the MIME type (used by providers such
-// as Xiaomi MiMo ASR).
+// is a data: URI that already carries an explicit media type (used by
+// providers such as Xiaomi MiMo ASR).
 func ValidInputAudioPayload(data, format string) bool {
-	return data != "" && (format != "" || strings.HasPrefix(data, "data:"))
+	if data == "" {
+		return false
+	}
+	if format != "" {
+		return true
+	}
+	// With format omitted, data must be a data: URI declaring a "type/subtype"
+	// media type (e.g. "data:audio/wav;base64,...") so the format can be
+	// inferred; a bare or media-type-less data: URI is rejected.
+	return dataURIHasMediaType(data)
+}
+
+// dataURIHasMediaType reports whether s is a data: URI whose header declares a
+// "type/subtype" media type, e.g. "data:audio/wav;base64,....".
+func dataURIHasMediaType(s string) bool {
+	const scheme = "data:"
+	if len(s) < len(scheme) || !strings.EqualFold(s[:len(scheme)], scheme) {
+		return false
+	}
+	meta, _, ok := strings.Cut(s[len(scheme):], ",")
+	if !ok {
+		return false
+	}
+	mediaType, _, _ := strings.Cut(meta, ";")
+	return strings.Contains(mediaType, "/")
 }
 
 func validateInputAudioFields(data, format string) error {

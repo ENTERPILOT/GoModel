@@ -2,6 +2,7 @@ package xiaomi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -62,6 +63,16 @@ func TestEmbeddings_ReturnsUnsupportedError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Embeddings() expected error, got nil")
+	}
+	var ge *core.GatewayError
+	if !errors.As(err, &ge) {
+		t.Fatalf("error type = %T, want *core.GatewayError", err)
+	}
+	if ge.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("error type = %q, want %q", ge.Type, core.ErrorTypeInvalidRequest)
+	}
+	if ge.HTTPStatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", ge.HTTPStatusCode(), http.StatusBadRequest)
 	}
 }
 

@@ -229,3 +229,55 @@ func TestCreateTranscription_TextFormatAndValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateTranscription_FileReaderAndMIMEInference(t *testing.T) {
+	cases := []struct {
+		name            string
+		filename        string
+		fileContentType string
+		useReader       bool
+		wantDataPrefix  string
+	}{
+		{name: "reader ingestion with content type", fileContentType: "audio/ogg", useReader: true, wantDataPrefix: "data:audio/ogg;base64,"},
+		{name: "content type wins over extension", filename: "clip.wav", fileContentType: "audio/mpeg", wantDataPrefix: "data:audio/mpeg;base64,"},
+		{name: "extension fallback mp3", filename: "clip.mp3", wantDataPrefix: "data:audio/mpeg;base64,"},
+		{name: "extension fallback flac", filename: "clip.flac", wantDataPrefix: "data:audio/flac;base64,"},
+		{name: "default to wav", filename: "clip.unknown", wantDataPrefix: "data:audio/wav;base64,"},
+		{name: "non-audio content type ignored", filename: "clip.m4a", fileContentType: "application/octet-stream", wantDataPrefix: "data:audio/mp4;base64,"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody []byte
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotBody, _ = io.ReadAll(r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"x","model":"mimo-v2.5-asr","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+			}))
+			defer server.Close()
+
+			provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
+
+			audio := []byte("audio-bytes-" + tc.name)
+			req := &core.AudioTranscriptionRequest{
+				Model:           "mimo-v2.5-asr",
+				Filename:        tc.filename,
+				FileContentType: tc.fileContentType,
+			}
+			if tc.useReader {
+				req.FileReader = strings.NewReader(string(audio))
+			} else {
+				req.File = audio
+			}
+
+			if _, err := provider.CreateTranscription(context.Background(), req); err != nil {
+				t.Fatalf("CreateTranscription() error = %v", err)
+			}
+
+			wantData := tc.wantDataPrefix + base64.StdEncoding.EncodeToString(audio)
+			if !strings.Contains(string(gotBody), wantData) {
+				t.Fatalf("upstream body missing %q, got: %s", wantData, gotBody)
+			}
+		})
+	}
+}

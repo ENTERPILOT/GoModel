@@ -276,6 +276,19 @@ func TestMessageUnmarshalJSON_AcceptsInputAudioDataURIWithoutFormat(t *testing.T
 	}
 }
 
+func TestMessageUnmarshalJSON_RejectsInputAudioDataURIWithoutMediaType(t *testing.T) {
+	// format omitted AND the data: URI carries no "type/subtype" media type.
+	for _, data := range []string{"data:", "data:,UklGRg==", "data:base64,UklGRg==", "notdata:audio/wav,UklGRg=="} {
+		body := `{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"` + data + `"}}]}`
+		var msg Message
+		if err := json.Unmarshal([]byte(body), &msg); err == nil {
+			t.Fatalf("json.Unmarshal(%q) succeeded, want error", data)
+		} else if !strings.Contains(err.Error(), "input_audio part is missing data or format") {
+			t.Fatalf("data %q: error = %v, want input_audio validation error", data, err)
+		}
+	}
+}
+
 func TestMessageUnmarshalJSON_RejectsInputAudioNull(t *testing.T) {
 	var msg Message
 	err := json.Unmarshal([]byte(`{"role":"user","content":[{"type":"input_audio","input_audio":null}]}`), &msg)
