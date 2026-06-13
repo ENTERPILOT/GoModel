@@ -29,6 +29,7 @@ type RedisStore struct {
 
 // NewRedisStore creates a Redis-based key-value store.
 func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
+	installRedisLogger()
 	opts, err := redis.ParseURL(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid redis URL: %w", err)
