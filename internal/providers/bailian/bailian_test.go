@@ -386,6 +386,28 @@ func TestPassthrough_Delegates(t *testing.T) {
 	}
 }
 
+func TestPassthrough_NilRequest(t *testing.T) {
+	provider := NewWithHTTPClient("key", nil, llmclient.Hooks{})
+
+	if _, err := provider.Passthrough(context.Background(), nil); err == nil {
+		t.Fatal("expected error for nil passthrough request")
+	}
+}
+
+func TestPassthrough_ReadError(t *testing.T) {
+	readErr := errors.New("read failed")
+	provider := NewWithHTTPClient("key", nil, llmclient.Hooks{})
+
+	_, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodPost,
+		Endpoint: "/chat/completions",
+		Body:     errReadCloser{err: readErr},
+	})
+	if !errors.Is(err, readErr) {
+		t.Fatalf("Passthrough() error = %v, want %v", err, readErr)
+	}
+}
+
 func TestAdaptBailianRequest_Nil(t *testing.T) {
 	if r := adaptBailianRequest(nil); r != nil {
 		t.Fatal("expected nil")
@@ -828,6 +850,18 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
+}
+
+type errReadCloser struct {
+	err error
+}
+
+func (r errReadCloser) Read([]byte) (int, error) {
+	return 0, r.err
+}
+
+func (r errReadCloser) Close() error {
+	return nil
 }
 
 func TestPassthrough_MaxTokensMapping(t *testing.T) {

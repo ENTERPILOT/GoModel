@@ -108,6 +108,9 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 // It also adapts max_tokens -> max_completion_tokens in the raw body,
 // mirroring the adaptation done in ChatCompletion/StreamChatCompletion.
 func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("passthrough request is required", nil)
+	}
 	adapted, err := adaptPassthroughBody(req.Body)
 	if err != nil {
 		slog.Warn("bailian: passthrough body adaptation failed",
