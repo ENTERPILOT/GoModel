@@ -1,0 +1,53 @@
+---
+title: "OpenCode Go"
+description: "Configure OpenCode Zen (Go subscription) in GoModel using an OpenAI-compatible endpoint."
+icon: "terminal"
+---
+
+[OpenCode Zen](https://opencode.ai/docs/zen/) exposes its "Go" subscription
+models behind an OpenAI-compatible API. GoModel ships a native `opencode_go`
+provider that defaults the base URL, so you only need an API key.
+
+## Configure
+
+```bash
+OPENCODE_GO_API_KEY=sk-...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  opencode_go:
+    type: opencode_go
+    api_key: "${OPENCODE_GO_API_KEY}"
+    # Optional: override the default endpoint.
+    # base_url: "https://opencode.ai/zen/go/v1"
+```
+
+The default base URL is `https://opencode.ai/zen/go/v1`. Authentication uses
+`Authorization: Bearer <api_key>` with the key generated in the OpenCode Zen
+console.
+
+## Models
+
+`GET /v1/models` proxies OpenCode Zen's model list, exposing IDs such as
+`glm-5.1`, `kimi-k2.7-code`, `deepseek-v4-pro`, and `mimo-v2.5-pro`. Restrict the
+advertised set with a configured list when you only want a subset:
+
+```bash
+OPENCODE_GO_MODELS=glm-5.1,kimi-k2.7-code,deepseek-v4-pro
+```
+
+## Endpoints
+
+OpenCode Zen serves OpenAI-style models on `/chat/completions` and a separate
+set of Anthropic-style models on `/messages`. GoModel's `opencode_go` provider
+routes the **OpenAI-compatible** surface — `/chat/completions`, `/models`, and
+`/v1/responses` (translated to chat completions). This covers the chat coding
+models (GLM, Kimi, DeepSeek, MiMo). Anthropic-style models that require the
+native `/messages` endpoint are not served through this provider.
+
+## Not supported
+
+- Embeddings (returns `invalid_request_error`).

@@ -106,6 +106,7 @@
                     "providers/deepseek",
                     "providers/bailian",
                     "providers/xiaomi",
+                    "providers/opencode-go",
                     "providers/vllm",
                     "providers/multiple-ollama",
                     {

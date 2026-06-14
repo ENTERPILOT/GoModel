@@ -246,6 +246,10 @@ providers:
     type: xiaomi
     api_key: "..."
 
+  opencode_go:
+    type: opencode_go
+    api_key: "${OPENCODE_GO_API_KEY}"
+
   ollama:
     type: ollama
     base_url: "http://localhost:11434/v1"

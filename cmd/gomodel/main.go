@@ -26,6 +26,7 @@ import (
 	"gomodel/internal/providers/minimax"
 	"gomodel/internal/providers/ollama"
 	"gomodel/internal/providers/openai"
+	"gomodel/internal/providers/opencodego"
 	"gomodel/internal/providers/openrouter"
 	"gomodel/internal/providers/oracle"
 	"gomodel/internal/providers/vertex"
@@ -131,6 +132,7 @@ func main() {
 	factory.Add(groq.Registration)
 	factory.Add(minimax.Registration)
 	factory.Add(ollama.Registration)
+	factory.Add(opencodego.Registration)
 	factory.Add(vllm.Registration)
 	factory.Add(xai.Registration)
 	factory.Add(xiaomi.Registration)
