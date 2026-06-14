@@ -1,6 +1,10 @@
 package usage
 
-import "testing"
+import (
+	"testing"
+
+	"gomodel/internal/core"
+)
 
 func TestExtractFromRealtimeResponseDone(t *testing.T) {
 	payload := []byte(`{
@@ -33,6 +37,51 @@ func TestExtractFromRealtimeResponseDone(t *testing.T) {
 	if entry.RawData["prompt_cached_tokens"] != 10 {
 		t.Errorf("cached tokens missing/miskeyed: %v", entry.RawData)
 	}
+}
+
+func TestExtractFromRealtimeResponseDoneUSDCost(t *testing.T) {
+	// Mirrors a live gpt-realtime-mini audio turn: 12 input text tokens, 128
+	// output tokens (99 audio + 29 text). With base output $2.40/Mtok and audio
+	// output $20/Mtok, audio must price at the audio rate (not base) and must not
+	// be double-counted: 29*2.40/1e6 + 99*20/1e6 = 0.0020496.
+	ptr := func(f float64) *float64 { return &f }
+	pricing := &core.ModelPricing{
+		InputPerMtok:       ptr(0.60),
+		OutputPerMtok:      ptr(2.40),
+		AudioInputPerMtok:  ptr(10.0),
+		AudioOutputPerMtok: ptr(20.0),
+	}
+	payload := []byte(`{"type":"response.done","response":{"usage":{
+		"input_tokens":12,"output_tokens":128,"total_tokens":140,
+		"input_token_details":{"text_tokens":12},
+		"output_token_details":{"text_tokens":29,"audio_tokens":99}
+	}}}`)
+
+	entry := ExtractFromRealtimeResponseDone(payload, "r", "gpt-realtime-mini", "openai", pricing)
+	if entry == nil || entry.TotalCost == nil {
+		t.Fatal("expected a costed entry")
+	}
+	const wantInput, wantOutput = 7.2e-06, 0.0020496
+	if got := *entry.InputCost; !floatNear(got, wantInput) {
+		t.Errorf("input cost = %g, want %g", got, wantInput)
+	}
+	if got := *entry.OutputCost; !floatNear(got, wantOutput) {
+		t.Errorf("output cost = %g, want %g (29 text@2.40 + 99 audio@20)", got, wantOutput)
+	}
+	if got := *entry.TotalCost; !floatNear(got, wantInput+wantOutput) {
+		t.Errorf("total cost = %g, want %g", got, wantInput+wantOutput)
+	}
+	if entry.CostsCalculationCaveat != "" {
+		t.Errorf("unexpected caveat: %q", entry.CostsCalculationCaveat)
+	}
+}
+
+func floatNear(a, b float64) bool {
+	d := a - b
+	if d < 0 {
+		d = -d
+	}
+	return d < 1e-12
 }
 
 func TestExtractFromRealtimeResponseDonePluralDetails(t *testing.T) {

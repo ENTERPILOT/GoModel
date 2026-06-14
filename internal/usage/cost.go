@@ -105,6 +105,7 @@ var providerMappings = map[string][]tokenCostMapping{
 // "unmapped token field" caveats.
 var informationalFields = map[string]struct{}{
 	"prompt_text_tokens":                    {},
+	"completion_text_tokens":                {},
 	"prompt_image_tokens":                   {},
 	"tool_use_prompt_token_count":           {},
 	"completion_accepted_prediction_tokens": {},
