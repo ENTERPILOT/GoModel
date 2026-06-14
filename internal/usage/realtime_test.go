@@ -35,6 +35,32 @@ func TestExtractFromRealtimeResponseDone(t *testing.T) {
 	}
 }
 
+func TestExtractFromRealtimeResponseDonePluralDetails(t *testing.T) {
+	// Alibaba/Bailian uses the plural "*_tokens_details" spelling; audio tokens
+	// must still be captured and priced.
+	payload := []byte(`{
+		"type": "response.done",
+		"response": {"usage": {
+			"input_tokens": 192, "output_tokens": 11, "total_tokens": 203,
+			"input_tokens_details": {"text_tokens": 192},
+			"output_tokens_details": {"text_tokens": 2, "audio_tokens": 9}
+		}}
+	}`)
+	entry := ExtractFromRealtimeResponseDone(payload, "r", "qwen3-omni-flash-realtime", "bailian")
+	if entry == nil {
+		t.Fatal("expected entry")
+	}
+	if entry.TotalTokens != 203 {
+		t.Errorf("total = %d, want 203", entry.TotalTokens)
+	}
+	if entry.RawData["completion_audio_tokens"] != 9 {
+		t.Errorf("plural output audio tokens not captured: %v", entry.RawData)
+	}
+	if entry.RawData["prompt_text_tokens"] != 192 {
+		t.Errorf("plural input text tokens not captured: %v", entry.RawData)
+	}
+}
+
 func TestExtractFromRealtimeResponseDoneTotalsFallback(t *testing.T) {
 	payload := []byte(`{"type":"response.done","response":{"usage":{"input_tokens":7,"output_tokens":3}}}`)
 	entry := ExtractFromRealtimeResponseDone(payload, "r", "m", "openai")

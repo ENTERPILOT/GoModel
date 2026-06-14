@@ -59,3 +59,6 @@ func realtimeURL(baseURL, model string) (string, error) {
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }
+
+// Compile-time assertion that OpenAI implements the realtime capability.
+var _ core.RealtimeProvider = (*Provider)(nil)

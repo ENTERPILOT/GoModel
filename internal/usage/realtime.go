@@ -11,22 +11,54 @@ import (
 
 const endpointRealtime = "/v1/realtime"
 
+// realtimeTokenDetails is the per-modality token breakdown inside a realtime
+// usage object.
+type realtimeTokenDetails struct {
+	TextTokens   int `json:"text_tokens"`
+	AudioTokens  int `json:"audio_tokens"`
+	CachedTokens int `json:"cached_tokens"`
+}
+
 // realtimeUsage mirrors the usage object carried by a realtime "response.done"
 // server event. Realtime bills text and audio tokens separately in both
 // directions; the breakdown is preserved in RawData for cost attribution.
+//
+// Providers disagree on the detail-field spelling: OpenAI uses the singular
+// "*_token_details" while Alibaba/Bailian uses the plural "*_tokens_details".
+// Both spellings are decoded and merged so audio tokens are priced for either.
 type realtimeUsage struct {
-	TotalTokens       int `json:"total_tokens"`
-	InputTokens       int `json:"input_tokens"`
-	OutputTokens      int `json:"output_tokens"`
-	InputTokenDetails struct {
-		TextTokens   int `json:"text_tokens"`
-		AudioTokens  int `json:"audio_tokens"`
-		CachedTokens int `json:"cached_tokens"`
-	} `json:"input_token_details"`
-	OutputTokenDetails struct {
-		TextTokens  int `json:"text_tokens"`
-		AudioTokens int `json:"audio_tokens"`
-	} `json:"output_token_details"`
+	TotalTokens         int                  `json:"total_tokens"`
+	InputTokens         int                  `json:"input_tokens"`
+	OutputTokens        int                  `json:"output_tokens"`
+	InputTokenDetails   realtimeTokenDetails `json:"input_token_details"`
+	InputTokensDetails  realtimeTokenDetails `json:"input_tokens_details"`
+	OutputTokenDetails  realtimeTokenDetails `json:"output_token_details"`
+	OutputTokensDetails realtimeTokenDetails `json:"output_tokens_details"`
+}
+
+// inputDetails / outputDetails collapse the singular and plural spellings,
+// preferring whichever field a given provider populated.
+func (u realtimeUsage) inputDetails() realtimeTokenDetails {
+	return mergeRealtimeTokenDetails(u.InputTokenDetails, u.InputTokensDetails)
+}
+
+func (u realtimeUsage) outputDetails() realtimeTokenDetails {
+	return mergeRealtimeTokenDetails(u.OutputTokenDetails, u.OutputTokensDetails)
+}
+
+func mergeRealtimeTokenDetails(a, b realtimeTokenDetails) realtimeTokenDetails {
+	return realtimeTokenDetails{
+		TextTokens:   firstNonZero(a.TextTokens, b.TextTokens),
+		AudioTokens:  firstNonZero(a.AudioTokens, b.AudioTokens),
+		CachedTokens: firstNonZero(a.CachedTokens, b.CachedTokens),
+	}
+}
+
+func firstNonZero(a, b int) int {
+	if a != 0 {
+		return a
+	}
+	return b
 }
 
 // ExtractFromRealtimeResponseDone builds a usage entry from a realtime
@@ -68,21 +100,22 @@ func ExtractFromRealtimeResponseDone(payload []byte, requestID, model, provider 
 	// Use the canonical "prompt_"/"completion_" rawData keys that cost.go prices
 	// (see buildRawUsageFromDetails); audio tokens otherwise fall through to base
 	// text rates instead of the configured audio input/output rates.
+	in, out := u.inputDetails(), u.outputDetails()
 	raw := map[string]any{}
-	if u.InputTokenDetails.TextTokens > 0 {
-		raw["prompt_text_tokens"] = u.InputTokenDetails.TextTokens
+	if in.TextTokens > 0 {
+		raw["prompt_text_tokens"] = in.TextTokens
 	}
-	if u.InputTokenDetails.AudioTokens > 0 {
-		raw["prompt_audio_tokens"] = u.InputTokenDetails.AudioTokens
+	if in.AudioTokens > 0 {
+		raw["prompt_audio_tokens"] = in.AudioTokens
 	}
-	if u.InputTokenDetails.CachedTokens > 0 {
-		raw["prompt_cached_tokens"] = u.InputTokenDetails.CachedTokens
+	if in.CachedTokens > 0 {
+		raw["prompt_cached_tokens"] = in.CachedTokens
 	}
-	if u.OutputTokenDetails.TextTokens > 0 {
-		raw["completion_text_tokens"] = u.OutputTokenDetails.TextTokens
+	if out.TextTokens > 0 {
+		raw["completion_text_tokens"] = out.TextTokens
 	}
-	if u.OutputTokenDetails.AudioTokens > 0 {
-		raw["completion_audio_tokens"] = u.OutputTokenDetails.AudioTokens
+	if out.AudioTokens > 0 {
+		raw["completion_audio_tokens"] = out.AudioTokens
 	}
 	if len(raw) > 0 {
 		entry.RawData = raw
