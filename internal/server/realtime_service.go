@@ -140,7 +140,7 @@ func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *co
 	}
 
 	slog.Info("realtime session opened", "request_id", route.requestID, "model", route.model, "provider", route.providerType)
-	err := realtime.Proxy(c.Response(), c.Request(), t, s.usageTap(route))
+	err := realtime.Proxy(c.Response(), c.Request(), t, s.usageTap(ctx, route))
 
 	var de *realtime.DialError
 	if errors.As(err, &de) {
@@ -157,9 +157,14 @@ func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *co
 
 // usageTap returns a frame observer that records one usage entry per realtime
 // "response.done" event, or nil when usage tracking is off (so the proxy skips
-// the tap entirely). usageLogger.Write is non-blocking, so the tap runs inline.
-func (s *realtimeService) usageTap(route realtimeRoute) func([]byte) {
+// the tap entirely). It honors both the global usage setting and per-workflow
+// usage policy, mirroring the other streaming paths. usageLogger.Write is
+// non-blocking, so the tap runs inline.
+func (s *realtimeService) usageTap(ctx context.Context, route realtimeRoute) func([]byte) {
 	if s.usageLogger == nil || !s.usageLogger.Config().Enabled {
+		return nil
+	}
+	if workflow := core.GetWorkflow(ctx); workflow != nil && !workflow.UsageEnabled() {
 		return nil
 	}
 	return func(frame []byte) {
@@ -198,6 +203,10 @@ func realtimeUpstreamHeaders(ctx context.Context, clientHeaders, target http.Hea
 			h.Del(key)
 		}
 	}
+	// Drop the legacy realtime beta header: the GA endpoint rejects it, so a
+	// client that still sends it would otherwise turn a valid session into an
+	// upstream dial failure. Providers that need it set it via the target.
+	h.Del("OpenAI-Beta")
 	for key, values := range target {
 		h.Del(key)
 		for _, value := range values {

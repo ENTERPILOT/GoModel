@@ -139,9 +139,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.EnabledPassthroughProviders != nil {
 		handler.setEnabledPassthroughProviders(cfg.EnabledPassthroughProviders)
 	}
-	if cfg != nil {
-		handler.realtimeEnabled = cfg.RealtimeEnabled
-	}
+	// Mirror the route-registration default below: a nil config enables realtime
+	// so the documented default and the registered route stay consistent.
+	handler.realtimeEnabled = cfg == nil || cfg.RealtimeEnabled
 	if cfg != nil && !passthroughV1PrefixNormalizationEnabled(cfg) {
 		handler.normalizePassthroughV1Prefix = false
 	}

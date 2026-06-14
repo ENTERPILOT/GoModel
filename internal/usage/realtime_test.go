@@ -26,11 +26,12 @@ func TestExtractFromRealtimeResponseDone(t *testing.T) {
 	if entry.InputTokens != 100 || entry.OutputTokens != 50 || entry.TotalTokens != 150 {
 		t.Errorf("tokens = (%d,%d,%d), want (100,50,150)", entry.InputTokens, entry.OutputTokens, entry.TotalTokens)
 	}
-	if entry.RawData["input_audio_tokens"] != 60 || entry.RawData["output_audio_tokens"] != 30 {
-		t.Errorf("audio token breakdown missing: %v", entry.RawData)
+	// Keys must match cost.go's priced rawData keys so audio is billed at audio rates.
+	if entry.RawData["prompt_audio_tokens"] != 60 || entry.RawData["completion_audio_tokens"] != 30 {
+		t.Errorf("audio token breakdown missing/miskeyed: %v", entry.RawData)
 	}
-	if entry.RawData["cached_tokens"] != 10 {
-		t.Errorf("cached tokens missing: %v", entry.RawData)
+	if entry.RawData["prompt_cached_tokens"] != 10 {
+		t.Errorf("cached tokens missing/miskeyed: %v", entry.RawData)
 	}
 }
 

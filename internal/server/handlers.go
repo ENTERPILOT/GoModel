@@ -313,6 +313,12 @@ func (h *Handler) ProviderPassthrough(c *echo.Context) error {
 		if err != nil {
 			return handleError(c, err)
 		}
+		// Realtime upgrades honor the same provider allowlist as the HTTP
+		// passthrough path: a provider disabled for /p/{provider}/... must not be
+		// reachable via a websocket upgrade.
+		if !isEnabledPassthroughProvider(providerType, h.enabledPassthroughProviders) {
+			return handleError(c, h.passthrough().unsupportedPassthroughProviderError(providerType))
+		}
 		// endpoint may carry the query string (e.g. "realtime?model=..."); compare
 		// only the path segment.
 		endpointPath := strings.Trim(strings.SplitN(endpoint, "?", 2)[0], "/")

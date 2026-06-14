@@ -65,21 +65,24 @@ func ExtractFromRealtimeResponseDone(payload []byte, requestID, model, provider 
 		entry.TotalTokens = u.InputTokens + u.OutputTokens
 	}
 
+	// Use the canonical "prompt_"/"completion_" rawData keys that cost.go prices
+	// (see buildRawUsageFromDetails); audio tokens otherwise fall through to base
+	// text rates instead of the configured audio input/output rates.
 	raw := map[string]any{}
 	if u.InputTokenDetails.TextTokens > 0 {
-		raw["input_text_tokens"] = u.InputTokenDetails.TextTokens
+		raw["prompt_text_tokens"] = u.InputTokenDetails.TextTokens
 	}
 	if u.InputTokenDetails.AudioTokens > 0 {
-		raw["input_audio_tokens"] = u.InputTokenDetails.AudioTokens
+		raw["prompt_audio_tokens"] = u.InputTokenDetails.AudioTokens
 	}
 	if u.InputTokenDetails.CachedTokens > 0 {
-		raw["cached_tokens"] = u.InputTokenDetails.CachedTokens
+		raw["prompt_cached_tokens"] = u.InputTokenDetails.CachedTokens
 	}
 	if u.OutputTokenDetails.TextTokens > 0 {
-		raw["output_text_tokens"] = u.OutputTokenDetails.TextTokens
+		raw["completion_text_tokens"] = u.OutputTokenDetails.TextTokens
 	}
 	if u.OutputTokenDetails.AudioTokens > 0 {
-		raw["output_audio_tokens"] = u.OutputTokenDetails.AudioTokens
+		raw["completion_audio_tokens"] = u.OutputTokenDetails.AudioTokens
 	}
 	if len(raw) > 0 {
 		entry.RawData = raw

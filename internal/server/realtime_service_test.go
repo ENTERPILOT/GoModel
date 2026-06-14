@@ -41,20 +41,19 @@ func TestRealtimeUpstreamHeaders(t *testing.T) {
 	client.Set("Authorization", "Bearer client-secret") // must never reach upstream
 	client.Set("Sec-WebSocket-Key", "abc123")           // handshake header, dialer regenerates
 	client.Set("Sec-WebSocket-Version", "13")
-	client.Set("OpenAI-Beta", "stale")
+	client.Set("OpenAI-Beta", "realtime=v1") // legacy header the GA endpoint rejects
 	client.Set("X-Custom", "keep-me")
 
 	target := http.Header{}
 	target.Set("Authorization", "Bearer upstream-key")
-	target.Set("OpenAI-Beta", "realtime=v1")
 
 	got := realtimeUpstreamHeaders(context.Background(), client, target)
 
 	if got.Get("Authorization") != "Bearer upstream-key" {
 		t.Errorf("Authorization = %q, want injected upstream key", got.Get("Authorization"))
 	}
-	if got.Get("OpenAI-Beta") != "realtime=v1" {
-		t.Errorf("OpenAI-Beta = %q, want target value to win", got.Get("OpenAI-Beta"))
+	if got.Get("OpenAI-Beta") != "" {
+		t.Errorf("OpenAI-Beta = %q, want stripped (GA endpoint rejects it)", got.Get("OpenAI-Beta"))
 	}
 	if got.Get("X-Custom") != "keep-me" {
 		t.Errorf("X-Custom = %q, want forwarded", got.Get("X-Custom"))
