@@ -1,12 +1,18 @@
 ---
-title: "Alibaba Cloud Bailian"
-description: "Configure Alibaba Cloud Bailian (百炼 / DashScope) in GoModel, including the max_tokens compatibility shim for models like Qwen."
+title: "Alibaba Cloud Model Studio"
+description: "Configure Alibaba Cloud Model Studio, formerly Bailian (百炼) and also known through DashScope APIs, including the max_tokens compatibility shim for Qwen models."
 icon: "cloud"
 ---
 
-Bailian (百炼) is Alibaba Cloud's model-as-a-service platform for the Qwen
-family of models. GoModel routes to Bailian through its OpenAI-compatible
-endpoint (`/compatible-mode/v1`).
+Alibaba Cloud Model Studio is Alibaba Cloud's model-as-a-service platform for
+the Qwen family of models. The service has also been called Bailian (百炼) and
+DashScope in consoles, SDKs, and API documentation. GoModel routes to it through
+the OpenAI-compatible endpoint (`/compatible-mode/v1`).
+
+<Note>
+  GoModel keeps the provider ID, environment variables, and passthrough path as
+  `bailian`, `BAILIAN_*`, and `/p/bailian/...` for compatibility.
+</Note>
 
 Because Bailian deprecated `max_tokens` in April 2026 in favor of
 `max_completion_tokens`, GoModel automatically maps the standard
@@ -31,7 +37,7 @@ providers:
 
 ## Base URLs
 
-Bailian's OpenAI-compatible API is available in multiple regions. Set
+Model Studio's OpenAI-compatible API is available in multiple regions. Set
 `BAILIAN_BASE_URL` to switch:
 
 | Region | URL |
@@ -43,7 +49,7 @@ Bailian's OpenAI-compatible API is available in multiple regions. Set
 
 ## Model IDs
 
-Common Qwen model identifiers — check the [Bailian model
+Common Qwen model identifiers — check the [Model Studio model
 list](https://www.alibabacloud.com/help/zh/model-studio/model-list) for the
 current catalog:
 
@@ -60,12 +66,13 @@ current catalog:
 
 ## `max_tokens` compatibility
 
-Bailian deprecated `max_tokens` on 2026-04-20 (effective 2026-05-30).
-All Bailian models now require `max_completion_tokens` instead.
+Model Studio deprecated `max_tokens` on 2026-04-20 (effective 2026-05-30).
+Its compatible-mode models now require `max_completion_tokens` instead.
 
 GoModel transparently maps the standard `max_tokens` parameter to
-`max_completion_tokens` for every bailian model — send `max_tokens` as you
-normally would, and GoModel rewrites it before forwarding to Bailian.
+`max_completion_tokens` for every `bailian` provider request — send
+`max_tokens` as you normally would, and GoModel rewrites it before forwarding to
+Model Studio.
 
 ```bash
 # max_tokens=4096 is automatically sent as max_completion_tokens=4096
@@ -99,6 +106,7 @@ curl http://localhost:8080/v1/chat/completions \
 
 ## References
 
+- [Model Studio documentation](https://www.alibabacloud.com/help/en/model-studio/what-is-model-studio)
 - [Bailian documentation](https://www.alibabacloud.com/help/zh/model-studio/)
 - [OpenAI-compatible API reference](https://www.alibabacloud.com/help/zh/model-studio/compatibility-with-openai-responses-api)
 - [Qwen model list](https://www.alibabacloud.com/help/zh/model-studio/model-list)

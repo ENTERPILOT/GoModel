@@ -104,7 +104,7 @@
                     "providers/anthropic",
                     "providers/gemini",
                     "providers/deepseek",
-"providers/bailian",
+                    "providers/bailian",
                     "providers/xiaomi",
                     "providers/vllm",
                     "providers/multiple-ollama",

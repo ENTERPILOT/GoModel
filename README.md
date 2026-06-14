@@ -100,7 +100,7 @@ Example model identifiers are illustrative and subject to change; consult provid
 | OpenRouter    | `OPENROUTER_API_KEY`                                              | `google/gemini-2.5-flash`          |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
 | Z.ai          | `ZAI_API_KEY` (`ZAI_BASE_URL` optional)                           | `glm-5.1`                          |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ✅    |
 | xAI (Grok)    | `XAI_API_KEY`                                                     | `grok-4`                           |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ❌    |
-| Alibaba Cloud Bailian | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional)       | `qwen3-max`                        |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
+| Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional)       | `qwen3-max`                        |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |
 | MiniMax       | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional)                   | `MiniMax-M3`                       |  ✅  |      ✅      |  ✅   |  ❌   |   ❌    |    ✅    |
 | Xiaomi MiMo   | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional)                     | `mimo-v2.5-pro`                    |  ✅  |      ✅      |  ❌   |  ❌   |   ❌    |    ✅    |
 | Azure OpenAI  | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | `gpt-5`                            |  ✅  |      ✅      |  ✅   |  ✅   |   ✅    |    ✅    |

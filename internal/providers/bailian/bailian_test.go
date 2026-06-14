@@ -78,8 +78,8 @@ func TestChatCompletion_MaxTokensMapping(t *testing.T) {
 
 	maxTokens := 4096
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-		Model:    "qwen3-max",
-		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Model:     "qwen3-max",
+		Messages:  []core.Message{{Role: "user", Content: "hi"}},
 		MaxTokens: &maxTokens,
 	})
 	if err != nil {
@@ -162,8 +162,8 @@ func TestStreamChatCompletion_MaxTokensMapping(t *testing.T) {
 
 	maxTokens := 2048
 	_, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
-		Model:    "qwen3-flash",
-		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Model:     "qwen3-flash",
+		Messages:  []core.Message{{Role: "user", Content: "hi"}},
 		MaxTokens: &maxTokens,
 	})
 	if err != nil {
@@ -399,7 +399,6 @@ func TestAdaptBailianRequest_NoMaxTokens(t *testing.T) {
 		t.Fatal("should not set max_completion_tokens when request had none")
 	}
 
-
 }
 func TestNew_UsesRegistrationAndDefaultBaseURL(t *testing.T) {
 	provider := New(providers.ProviderConfig{
@@ -465,7 +464,6 @@ func TestAdaptBailianRequest_PreservesOtherFields(t *testing.T) {
 	}
 }
 
-
 func TestAdaptBailianRequest_RespectsExistingMaxCompletionTokens(t *testing.T) {
 	extra := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 		"max_completion_tokens": json.RawMessage(`200`),
@@ -519,7 +517,7 @@ func TestChatCompletion_UpstreamError(t *testing.T) {
 	provider.SetBaseURL(server.URL)
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-		Model: "qwen3-max",
+		Model:    "qwen3-max",
 		Messages: []core.Message{{Role: "user", Content: "hi"}},
 	})
 	if err == nil {
@@ -537,7 +535,7 @@ func TestChatCompletion_TransportFailure(t *testing.T) {
 	}, llmclient.Hooks{})
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-		Model: "qwen3-max",
+		Model:    "qwen3-max",
 		Messages: []core.Message{{Role: "user", Content: "hi"}},
 	})
 	if err == nil {
@@ -556,7 +554,7 @@ func TestStreamChatCompletion_UpstreamError(t *testing.T) {
 	provider.SetBaseURL(server.URL)
 
 	_, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
-		Model: "qwen3-max",
+		Model:    "qwen3-max",
 		Messages: []core.Message{{Role: "user", Content: "hi"}},
 	})
 	if err == nil {

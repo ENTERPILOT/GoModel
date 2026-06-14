@@ -110,14 +110,9 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
 	adapted, err := adaptPassthroughBody(req.Body)
 	if err != nil {
-		slog.Warn("bailian: passthrough body adaptation failed, forwarding original body",
+		slog.Warn("bailian: passthrough body adaptation failed",
 			"error", err)
-		// Read the original body back so we can still forward it
-		req.Body, err = rewindBody(req.Body, nil)
-		if err != nil {
-			return nil, err
-		}
-		return p.compatible.Passthrough(ctx, req)
+		return nil, err
 	}
 	if adapted != nil {
 		req.Body = adapted
@@ -236,9 +231,8 @@ func adaptBailianRequest(req *core.ChatRequest) *core.ChatRequest {
 
 // adaptPassthroughBody adapts max_tokens -> max_completion_tokens in a raw
 // passthrough request body. It reads the body, parses it as JSON, swaps the
-// field if needed, and returns a new io.ReadCloser with the adapted body.
-// If no adaptation is needed, it returns nil (the caller should rewind the
-// original body). If parsing fails, it returns the error.
+// field if needed, and returns a new io.ReadCloser with the adapted or original
+// body. If parsing fails, the original bytes are forwarded unchanged.
 func adaptPassthroughBody(body io.ReadCloser) (io.ReadCloser, error) {
 	if body == nil {
 		return nil, nil
@@ -257,7 +251,7 @@ func adaptPassthroughBody(body io.ReadCloser) (io.ReadCloser, error) {
 
 	// No max_tokens present — no adaptation needed, rewind original.
 	if _, hasMaxTokens := obj["max_tokens"]; !hasMaxTokens {
-		return nil, nil
+		return io.NopCloser(bytes.NewReader(raw)), nil
 	}
 
 	// Caller already set max_completion_tokens — just remove max_tokens.
@@ -278,25 +272,4 @@ func adaptPassthroughBody(body io.ReadCloser) (io.ReadCloser, error) {
 		return nil, err
 	}
 	return io.NopCloser(bytes.NewReader(adapted)), nil
-}
-
-// rewindBody reads an io.ReadCloser into memory and returns a new ReadCloser
-// over the same bytes, allowing the body to be read again.
-// If fallback is non-nil, it is used when the original body is nil or cannot be read.
-func rewindBody(body io.ReadCloser, fallback []byte) (io.ReadCloser, error) {
-	if body == nil {
-		if fallback != nil {
-			return io.NopCloser(bytes.NewReader(fallback)), nil
-		}
-		return nil, nil
-	}
-	raw, err := io.ReadAll(body)
-	body.Close()
-	if err != nil {
-		if fallback != nil {
-			return io.NopCloser(bytes.NewReader(fallback)), nil
-		}
-		return nil, err
-	}
-	return io.NopCloser(bytes.NewReader(raw)), nil
 }
