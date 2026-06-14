@@ -39,6 +39,10 @@ type ServerConfig struct {
 	// /p/{provider}/... passthrough routes. Default:
 	// ["openai", "anthropic", "openrouter", "zai", "vllm", "deepseek"].
 	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
+	// RealtimeEnabled exposes the realtime (speech-to-speech) websocket endpoint
+	// at /v1/realtime and the /p/{provider}/v1/realtime passthrough upgrade.
+	// Default: true. Only providers implementing realtime accept sessions.
+	RealtimeEnabled bool `yaml:"realtime_enabled" env:"REALTIME_ENABLED"`
 }
 
 var headerNameRegex = regexp.MustCompile(`^[!#$%&'*+\-.^_` + "`" + `|~0-9A-Za-z]+$`)

@@ -761,6 +761,28 @@ func audioUnsupportedError(model string) error {
 	return core.NewInvalidRequestError(fmt.Sprintf("model %q does not support audio operations", model), nil)
 }
 
+// RealtimeTarget resolves the upstream realtime websocket for the model's owning
+// provider, requiring it to implement core.RealtimeProvider. It mirrors the audio
+// routing: resolve the model, narrow to the capability, and forward the bare
+// provider model id.
+func (r *Router) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("realtime request is required", nil)
+	}
+	p, selector, err := r.resolveProvider(ctx, req.Model, req.Provider)
+	if err != nil {
+		return nil, err
+	}
+	rp, ok := p.(core.RealtimeProvider)
+	if !ok {
+		return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support realtime sessions", req.Model), nil)
+	}
+	return rp.RealtimeTarget(ctx, &core.RealtimeRequest{
+		Model:    selector.Model,
+		Provider: selector.Provider,
+	})
+}
+
 // GetProviderType returns the provider type string for the given model.
 // Returns empty string if the model is not found.
 func (r *Router) GetProviderType(model string) string {

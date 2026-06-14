@@ -48,6 +48,7 @@ func buildDefaultConfig() *Config {
 			PprofEnabled:            false,
 			EnablePassthroughRoutes: true,
 			AllowPassthroughV1Alias: true,
+			RealtimeEnabled:         true,
 			EnabledPassthroughProviders: []string{
 				"openai",
 				"anthropic",

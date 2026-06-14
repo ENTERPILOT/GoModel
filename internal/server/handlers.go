@@ -3,6 +3,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/labstack/echo/v5"
@@ -40,6 +41,7 @@ type Handler struct {
 	conversationStore            conversationstore.Store
 	normalizePassthroughV1Prefix bool
 	enabledPassthroughProviders  map[string]struct{}
+	realtimeEnabled              bool
 	responseCache                *responsecache.ResponseCacheMiddleware
 	guardrailsHash               string
 
@@ -249,6 +251,17 @@ func (h *Handler) currentResponseStore() responsestore.Store {
 	return h.responseStore
 }
 
+func (h *Handler) realtime() *realtimeService {
+	return &realtimeService{
+		provider:        h.provider,
+		modelAuthorizer: h.modelAuthorizer,
+		budgetChecker:   h.budgetChecker,
+		usageLogger:     h.usageLogger,
+		pricingResolver: h.pricingResolver,
+		enabled:         h.realtimeEnabled,
+	}
+}
+
 func (h *Handler) passthrough() *passthroughService {
 	return &passthroughService{
 		provider:                     h.provider,
@@ -293,7 +306,40 @@ func (h *Handler) passthrough() *passthroughService {
 // @Router       /p/{provider}/{endpoint} [head]
 // @Router       /p/{provider}/{endpoint} [options]
 func (h *Handler) ProviderPassthrough(c *echo.Context) error {
+	// A websocket upgrade on a passthrough route is a realtime session, not an
+	// HTTP proxy request; relay it through the realtime service instead.
+	if isWebSocketUpgrade(c.Request()) {
+		providerType, _, endpoint, _, err := passthroughExecutionTarget(c, h.provider, h.normalizePassthroughV1Prefix)
+		if err != nil {
+			return handleError(c, err)
+		}
+		// endpoint may carry the query string (e.g. "realtime?model=..."); compare
+		// only the path segment.
+		endpointPath := strings.Trim(strings.SplitN(endpoint, "?", 2)[0], "/")
+		if endpointPath != "realtime" {
+			return handleError(c, core.NewNotFoundError("unsupported realtime passthrough endpoint: "+endpointPath))
+		}
+		return h.realtime().PassthroughRealtime(c, providerType)
+	}
 	return h.passthrough().ProviderPassthrough(c)
+}
+
+// Realtime handles GET /v1/realtime.
+//
+// @Summary      Open a realtime session
+// @Description  Upgrades to a websocket and relays an OpenAI-compatible realtime (speech-to-speech) session to the provider that owns the model named in the ?model= query parameter. Provider credentials are injected by the gateway.
+// @Tags         realtime
+// @Security     BearerAuth
+// @Param        model     query     string  true   "Model that owns the realtime session"
+// @Param        provider  query     string  false  "Optional provider hint"
+// @Success      101       {string}  string  "Switching Protocols"
+// @Failure      400       {object}  core.OpenAIErrorEnvelope
+// @Failure      401       {object}  core.OpenAIErrorEnvelope
+// @Failure      501       {object}  core.OpenAIErrorEnvelope
+// @Failure      502       {object}  core.OpenAIErrorEnvelope
+// @Router       /v1/realtime [get]
+func (h *Handler) Realtime(c *echo.Context) error {
+	return h.realtime().Realtime(c)
 }
 
 // ChatCompletion handles POST /v1/chat/completions

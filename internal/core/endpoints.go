@@ -27,6 +27,7 @@ const (
 	OperationFiles               Operation = "files"
 	OperationAudioSpeech         Operation = "audio_speech"
 	OperationAudioTranscriptions Operation = "audio_transcriptions"
+	OperationRealtime            Operation = "realtime"
 	OperationProviderPassthrough Operation = "provider_passthrough"
 )
 
@@ -130,6 +131,16 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationAudioTranscriptions,
 		}
+	case path == "/v1/realtime":
+		// The realtime endpoint upgrades to a websocket and relays the provider's
+		// event schema verbatim. It is a model interaction (incurs usage, must be
+		// observable) but is not IngressManaged: the handler hijacks the connection
+		// rather than going through the JSON inference pipeline.
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			Dialect:          "openai_compat",
+			Operation:        OperationRealtime,
+		}
 	case strings.HasPrefix(path, "/p/"):
 		return EndpointDescriptor{
 			ModelInteraction: true,
@@ -179,6 +190,8 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 		return BodyModeJSON
 	case OperationAudioTranscriptions:
 		return BodyModeMultipart
+	case OperationRealtime:
+		return BodyModeNone
 	case OperationProviderPassthrough:
 		return BodyModeOpaque
 	default:

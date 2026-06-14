@@ -72,6 +72,7 @@ type Config struct {
 	ConversationStore               conversationstore.Store                // Optional: Conversations lifecycle persistence store
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
+	RealtimeEnabled                 bool                                   // Enable realtime websocket route /v1/realtime and passthrough upgrades
 	EnabledPassthroughProviders     []string                               // Provider types enabled on /p/{provider}/... passthrough routes
 	AllowPassthroughV1Alias         *bool                                  // Allow /p/{provider}/v1/... aliases; nil defaults to true
 	UserPathHeader                  string                                 // Header carrying the request user path (default: X-GoModel-User-Path)
@@ -137,6 +138,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	if cfg != nil && cfg.EnabledPassthroughProviders != nil {
 		handler.setEnabledPassthroughProviders(cfg.EnabledPassthroughProviders)
+	}
+	if cfg != nil {
+		handler.realtimeEnabled = cfg.RealtimeEnabled
 	}
 	if cfg != nil && !passthroughV1PrefixNormalizationEnabled(cfg) {
 		handler.normalizePassthroughV1Prefix = false
@@ -323,6 +327,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/embeddings", handler.Embeddings)
 	e.POST("/v1/audio/speech", handler.AudioSpeech)
 	e.POST("/v1/audio/transcriptions", handler.AudioTranscriptions)
+	if cfg == nil || cfg.RealtimeEnabled {
+		e.GET("/v1/realtime", handler.Realtime)
+	}
 	e.POST("/v1/files", handler.CreateFile)
 	e.GET("/v1/files", handler.ListFiles)
 	e.GET("/v1/files/:id", handler.GetFile)

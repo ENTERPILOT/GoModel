@@ -25,9 +25,14 @@ const (
 	defaultBaseURL = "https://api.openai.com/v1"
 )
 
-// Provider implements the core.Provider interface for OpenAI
+// Provider implements the core.Provider interface for OpenAI.
+// apiKey and baseURL are retained so the provider can build a realtime websocket
+// dial target (see realtime.go); the embedded CompatibleProvider keeps them
+// private otherwise.
 type Provider struct {
 	*CompatibleProvider
+	apiKey  string
+	baseURL string
 }
 
 // New creates a new OpenAI provider.
@@ -39,6 +44,8 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			BaseURL:      baseURL,
 			SetHeaders:   setHeaders,
 		}),
+		apiKey:  cfg.APIKey,
+		baseURL: baseURL,
 	}
 }
 
@@ -51,6 +58,8 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 			BaseURL:      defaultBaseURL,
 			SetHeaders:   setHeaders,
 		}),
+		apiKey:  apiKey,
+		baseURL: defaultBaseURL,
 	}
 }
 
