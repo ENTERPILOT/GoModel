@@ -48,3 +48,14 @@ func TestOpenAIRealtimeURL(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIRealtimeURLTrimsModel(t *testing.T) {
+	got, err := OpenAIRealtimeURL("https://api.openai.com/v1", "  gpt-realtime  ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	u, _ := url.Parse(got)
+	if m := u.Query().Get("model"); m != "gpt-realtime" {
+		t.Errorf("model query = %q, want trimmed %q", m, "gpt-realtime")
+	}
+}

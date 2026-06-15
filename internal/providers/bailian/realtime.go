@@ -51,7 +51,7 @@ func realtimeURL(baseURL, model string) (string, error) {
 	}
 	rt := url.URL{Scheme: scheme, Host: u.Host, Path: "/api-ws/v1/realtime"}
 	q := url.Values{}
-	q.Set("model", model)
+	q.Set("model", strings.TrimSpace(model)) // accept padded input; forward clean (Postel)
 	rt.RawQuery = q.Encode()
 	return rt.String(), nil
 }

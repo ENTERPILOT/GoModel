@@ -69,6 +69,17 @@ func TestRealtimeTarget(t *testing.T) {
 	}
 }
 
+func TestRealtimeTargetOmitsAuthWhenNoKey(t *testing.T) {
+	p := New(providers.ProviderConfig{APIKey: ""}, providers.ProviderOptions{}).(*Provider)
+	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, present := target.Headers["Authorization"]; present {
+		t.Error("Authorization header should be absent when no API key is configured")
+	}
+}
+
 func TestRealtimeTargetFollowsSetBaseURL(t *testing.T) {
 	// SetBaseURL switches the DashScope region; the realtime host must follow.
 	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)

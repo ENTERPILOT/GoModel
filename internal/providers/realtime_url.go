@@ -33,7 +33,7 @@ func OpenAIRealtimeURL(baseURL, model string) (string, error) {
 	}
 	u.Path = strings.TrimRight(u.Path, "/") + "/realtime"
 	q := u.Query()
-	q.Set("model", model)
+	q.Set("model", strings.TrimSpace(model)) // accept padded input; forward clean (Postel)
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }
