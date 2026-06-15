@@ -41,12 +41,31 @@ OPENCODE_GO_MODELS=glm-5.1,kimi-k2.7-code,deepseek-v4-pro
 
 ## Endpoints
 
-OpenCode Zen serves OpenAI-style models on `/chat/completions` and a separate
-set of Anthropic-style models on `/messages`. GoModel's `opencode_go` provider
-routes the **OpenAI-compatible** surface — `/chat/completions`, `/models`, and
-`/v1/responses` (translated to chat completions). This covers the chat coding
-models (GLM, Kimi, DeepSeek, MiMo). Anthropic-style models that require the
-native `/messages` endpoint are not served through this provider.
+OpenCode Zen serves most models on OpenAI-style `/chat/completions` (Bearer
+auth) and a few models only on the Anthropic-native `/messages` endpoint
+(`x-api-key` auth). GoModel routes per model:
+
+- **OpenAI-style models** (GLM, Kimi, DeepSeek, MiMo, MiniMax, most Qwen) go to
+  `/chat/completions`. `/models` and `/v1/responses` (translated to chat
+  completions) use the same path.
+- **Anthropic-only models** are translated to the Anthropic Messages dialect and
+  sent to `/messages`, mirroring how GoModel already serves native Anthropic.
+  Both paths normalize to the same OpenAI-compatible response, so clients see
+  one consistent surface regardless of which model they pick — whether they call
+  `/v1/chat/completions` or `/v1/messages`.
+
+The set of `/messages`-only models is currently maintained manually (default:
+`qwen3.7-max`) because OpenCode Zen does not yet expose per-model endpoint
+metadata. Override it when needed:
+
+```bash
+OPENCODE_GO_MESSAGES_MODELS=qwen3.7-max
+```
+
+<Note>
+  This manual split is temporary and will be replaced by metadata-driven routing
+  once the upstream model list distinguishes endpoints.
+</Note>
 
 ## Not supported
 

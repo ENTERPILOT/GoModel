@@ -2,6 +2,7 @@ package opencodego
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,9 +11,14 @@ import (
 	"gomodel/internal/llmclient"
 )
 
-func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
-	var gotPath string
-	var gotAuth string
+// newTestProvider builds a provider whose OpenAI-compatible and Anthropic
+// /messages paths both point at the same test server.
+func newTestProvider(serverURL string, client *http.Client) *Provider {
+	return NewWithHTTPClient("sk-opencode", serverURL, client, llmclient.Hooks{})
+}
+
+func TestChatCompletion_OpenAIStyleModel_UsesChatCompletions(t *testing.T) {
+	var gotPath, gotAuth string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -27,13 +33,9 @@ func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("sk-opencode", server.URL, server.Client(), llmclient.Hooks{})
-
-	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-		Model: "glm-5.1",
-		Messages: []core.Message{
-			{Role: "user", Content: "hi"},
-		},
+	resp, err := newTestProvider(server.URL, server.Client()).ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "glm-5.1",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletion() error = %v", err)
@@ -46,6 +48,100 @@ func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
 	}
 	if gotAuth != "Bearer sk-opencode" {
 		t.Fatalf("authorization = %q, want Bearer sk-opencode", gotAuth)
+	}
+}
+
+func TestChatCompletion_AnthropicStyleModel_UsesMessages(t *testing.T) {
+	var gotPath, gotAuth, gotAPIKey, gotVersion string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("x-api-key")
+		gotVersion = r.Header.Get("anthropic-version")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_opencode",
+			"model":"qwen3.7-max",
+			"content":[{"type":"text","text":"hello"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":5,"output_tokens":2}
+		}`))
+	}))
+	defer server.Close()
+
+	resp, err := newTestProvider(server.URL, server.Client()).ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "qwen3.7-max",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotPath != "/messages" {
+		t.Fatalf("path = %q, want /messages", gotPath)
+	}
+	if gotAPIKey != "sk-opencode" {
+		t.Fatalf("x-api-key = %q, want sk-opencode", gotAPIKey)
+	}
+	if gotAuth != "" {
+		t.Fatalf("authorization = %q, want empty (messages uses x-api-key)", gotAuth)
+	}
+	if gotVersion == "" {
+		t.Fatal("anthropic-version header missing on /messages request")
+	}
+	if len(resp.Choices) != 1 || resp.Choices[0].Message.Content != "hello" {
+		t.Fatalf("unexpected response: %+v", resp.Choices)
+	}
+}
+
+func TestStreamChatCompletion_RoutesByModel(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    string
+		wantPath string
+	}{
+		{"openai-style", "glm-5.1", "/chat/completions"},
+		{"anthropic-style", "qwen3.7-max", "/messages"},
+		{"prefixed anthropic-style", "opencode_go/qwen3.7-max", "/messages"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotPath string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			}))
+			defer server.Close()
+
+			stream, err := newTestProvider(server.URL, server.Client()).StreamChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    tt.model,
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+			})
+			if err != nil {
+				t.Fatalf("StreamChatCompletion() error = %v", err)
+			}
+			_, _ = io.Copy(io.Discard, stream)
+			_ = stream.Close()
+			if gotPath != tt.wantPath {
+				t.Fatalf("path = %q, want %q", gotPath, tt.wantPath)
+			}
+		})
+	}
+}
+
+func TestMessagesModels_EnvOverride(t *testing.T) {
+	t.Setenv(messagesModelsEnvVar, "foo-model, bar-model ")
+	p := NewWithHTTPClient("sk-opencode", "", nil, llmclient.Hooks{})
+
+	if !p.usesMessages("foo-model") || !p.usesMessages("bar-model") {
+		t.Fatal("override models should route to /messages")
+	}
+	if p.usesMessages("qwen3.7-max") {
+		t.Fatal("default model should not apply when override is set")
+	}
+	if !p.usesMessages("opencode_go/foo-model") {
+		t.Fatal("provider-qualified model should match after prefix strip")
 	}
 }
 
@@ -65,9 +161,7 @@ func TestListModels_NormalizesResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewWithHTTPClient("sk-opencode", server.URL, server.Client(), llmclient.Hooks{})
-
-	resp, err := provider.ListModels(context.Background())
+	resp, err := newTestProvider(server.URL, server.Client()).ListModels(context.Background())
 	if err != nil {
 		t.Fatalf("ListModels() error = %v", err)
 	}
@@ -80,9 +174,7 @@ func TestListModels_NormalizesResponse(t *testing.T) {
 }
 
 func TestEmbeddings_Unsupported(t *testing.T) {
-	provider := NewWithHTTPClient("sk-opencode", "", nil, llmclient.Hooks{})
-
-	_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
+	_, err := newTestProvider("", nil).Embeddings(context.Background(), &core.EmbeddingRequest{
 		Model: "glm-5.1",
 		Input: "hello",
 	})
@@ -99,7 +191,7 @@ func TestEmbeddings_Unsupported(t *testing.T) {
 }
 
 func TestProvider_DoesNotExposeOptionalOpenAICompatibleInterfaces(t *testing.T) {
-	provider := NewWithHTTPClient("sk-opencode", "", nil, llmclient.Hooks{})
+	provider := newTestProvider("", nil)
 
 	if _, ok := any(provider).(core.NativeBatchProvider); ok {
 		t.Fatal("opencode_go provider should not implement native batch provider")

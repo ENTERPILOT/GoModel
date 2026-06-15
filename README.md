@@ -117,8 +117,10 @@ Xiaomi MiMo TTS (`mimo-v2.5-tts*`) and ASR (`mimo-v2.5-asr`) are served through
 `/v1/audio/speech` and `/v1/audio/transcriptions` (translated to MiMo's
 chat-completions audio dialect) as well as directly via chat completions; for
 1M context append `[1m]` to the model ID and list it in `XIAOMI_MODELS`.
-OpenCode Go (OpenCode Zen) exposes OpenAI-compatible chat completions; set
-`OPENCODE_GO_API_KEY` and GoModel defaults the base URL to
+OpenCode Go (OpenCode Zen) routes per model — most models use OpenAI-style
+`/chat/completions`, while `/messages`-only models (default `qwen3.7-max`,
+override with `OPENCODE_GO_MESSAGES_MODELS`) are sent to the Anthropic-native
+endpoint. Set `OPENCODE_GO_API_KEY`; the base URL defaults to
 `https://opencode.ai/zen/go/v1`.
 Configured model lists are available for every provider with
 `<PROVIDER>_MODELS`, for example
