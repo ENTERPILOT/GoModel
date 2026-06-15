@@ -1,4 +1,4 @@
-package openai
+package xai
 
 import (
 	"context"
@@ -9,10 +9,10 @@ import (
 	"gomodel/internal/providers"
 )
 
-// RealtimeTarget implements core.RealtimeProvider for OpenAI's realtime websocket
-// (wss://api.openai.com/v1/realtime). The endpoint is derived from the configured
-// base URL so endpoint overrides and OpenAI-compatible realtime backends work
-// without extra config. Bearer auth is injected here and must never be logged.
+// RealtimeTarget implements core.RealtimeProvider for xAI's Voice Agent API
+// (wss://api.x.ai/v1/realtime), which is largely OpenAI Realtime API compatible.
+// The endpoint shares OpenAI's shape, so the dial URL is derived from the base
+// URL the same way. Bearer auth is injected here and must never be logged.
 func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
 	if req == nil || strings.TrimSpace(req.Model) == "" {
 		return nil, core.NewInvalidRequestError("model is required for realtime sessions", nil)
@@ -27,11 +27,9 @@ func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) 
 	if p.apiKey != "" {
 		headers.Set("Authorization", "Bearer "+p.apiKey)
 	}
-	// Note: the legacy "OpenAI-Beta: realtime=v1" header is intentionally NOT set.
-	// The GA endpoint rejects it ("The Realtime Beta API is no longer supported").
 
 	return &core.RealtimeTarget{URL: endpoint, Headers: headers}, nil
 }
 
-// Compile-time assertion that OpenAI implements the realtime capability.
+// Compile-time assertion that xAI implements the realtime capability.
 var _ core.RealtimeProvider = (*Provider)(nil)
