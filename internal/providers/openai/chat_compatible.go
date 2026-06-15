@@ -62,6 +62,12 @@ func (c *ChatCompatible) SetBaseURL(url string) {
 	c.compatible.SetBaseURL(url)
 }
 
+// GetBaseURL returns the provider's current base URL (reads live from the client,
+// so it reflects SetBaseURL overrides). Used to derive realtime websocket targets.
+func (c *ChatCompatible) GetBaseURL() string {
+	return c.compatible.GetBaseURL()
+}
+
 // ChatCompletion sends a chat completion request to the provider.
 func (c *ChatCompatible) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
 	return c.compatible.ChatCompletion(ctx, req)

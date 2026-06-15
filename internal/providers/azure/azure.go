@@ -29,12 +29,13 @@ type Provider struct {
 	resourceProvider       *openai.CompatibleProvider
 	openAIResourceProvider *openai.CompatibleProvider
 	apiVersion             string
+	apiKey                 string // retained to inject the api-key header on the realtime target
 }
 
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	baseURL := providers.ResolveBaseURL(providerCfg.BaseURL, "https://example.invalid")
 	apiVersion := providers.ResolveAPIVersion(providerCfg.APIVersion, defaultAPIVersion)
-	p := &Provider{apiVersion: apiVersion}
+	p := &Provider{apiVersion: apiVersion, apiKey: providerCfg.APIKey}
 	clientCfg := openai.CompatibleProviderConfig{
 		ProviderName: "azure",
 		BaseURL:      baseURL,
@@ -51,7 +52,7 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 }
 
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	p := &Provider{apiVersion: defaultAPIVersion}
+	p := &Provider{apiVersion: defaultAPIVersion, apiKey: apiKey}
 	cfg := openai.CompatibleProviderConfig{
 		ProviderName: "azure",
 		BaseURL:      "https://example.invalid",
