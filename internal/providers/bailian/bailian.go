@@ -35,8 +35,7 @@ var Registration = providers.Registration{
 // in April 2026).
 type Provider struct {
 	compatible *openai.CompatibleProvider
-	apiKey     string // retained to build the realtime websocket dial target
-	baseURL    string // retained so realtime derives the right region host
+	apiKey     string // retained to inject auth on the realtime websocket target
 }
 
 // New creates a new Bailian provider from a resolved ProviderConfig.
@@ -48,8 +47,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			BaseURL:      baseURL,
 			SetHeaders:   setHeaders,
 		}),
-		apiKey:  cfg.APIKey,
-		baseURL: baseURL,
+		apiKey: cfg.APIKey,
 	}
 }
 
@@ -62,8 +60,7 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 			BaseURL:      defaultBaseURL,
 			SetHeaders:   setHeaders,
 		}),
-		apiKey:  apiKey,
-		baseURL: defaultBaseURL,
+		apiKey: apiKey,
 	}
 }
 

@@ -32,6 +32,23 @@ func TestRealtimeTarget(t *testing.T) {
 	}
 }
 
+func TestRealtimeTargetFollowsSetBaseURL(t *testing.T) {
+	// Realtime must dial the configured upstream, not a stale default: SetBaseURL
+	// (inherited from CompatibleProvider) updates the client, and RealtimeTarget
+	// reads the live base URL, so a custom OpenAI-compatible host is honored and
+	// the injected key never goes to the wrong host.
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p.SetBaseURL("https://custom.example.com/v1")
+
+	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasPrefix(target.URL, "wss://custom.example.com/v1/realtime") {
+		t.Errorf("url = %q, want the SetBaseURL host", target.URL)
+	}
+}
+
 func TestRealtimeTargetMissingModel(t *testing.T) {
 	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
 	if _, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "  "}); err == nil {

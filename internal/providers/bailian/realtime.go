@@ -19,7 +19,7 @@ func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) 
 		return nil, core.NewInvalidRequestError("model is required for realtime sessions", nil)
 	}
 
-	endpoint, err := realtimeURL(p.baseURL, req.Model)
+	endpoint, err := realtimeURL(p.compatible.GetBaseURL(), req.Model)
 	if err != nil {
 		return nil, err
 	}

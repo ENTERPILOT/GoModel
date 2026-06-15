@@ -18,7 +18,7 @@ func (p *Provider) RealtimeTarget(_ context.Context, req *core.RealtimeRequest) 
 		return nil, core.NewInvalidRequestError("model is required for realtime sessions", nil)
 	}
 
-	endpoint, err := providers.OpenAIRealtimeURL(p.baseURL, req.Model)
+	endpoint, err := providers.OpenAIRealtimeURL(p.GetBaseURL(), req.Model)
 	if err != nil {
 		return nil, err
 	}

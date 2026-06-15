@@ -32,18 +32,16 @@ const (
 
 // Provider implements the core.Provider interface for xAI
 type Provider struct {
-	client  *llmclient.Client
-	apiKey  string
-	baseURL string // retained to build the realtime websocket dial target
+	client *llmclient.Client
+	apiKey string
 }
 
 // New creates a new xAI provider.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	baseURL := providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL)
-	p := &Provider{apiKey: providerCfg.APIKey, baseURL: baseURL}
+	p := &Provider{apiKey: providerCfg.APIKey}
 	clientCfg := llmclient.Config{
 		ProviderName:   "xai",
-		BaseURL:        baseURL,
+		BaseURL:        providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
@@ -58,7 +56,7 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	p := &Provider{apiKey: apiKey, baseURL: defaultBaseURL}
+	p := &Provider{apiKey: apiKey}
 	cfg := llmclient.DefaultConfig("xai", defaultBaseURL)
 	cfg.Hooks = hooks
 	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
@@ -68,7 +66,6 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
 	p.client.SetBaseURL(url)
-	p.baseURL = url
 }
 
 // setHeaders sets the required headers for xAI API requests

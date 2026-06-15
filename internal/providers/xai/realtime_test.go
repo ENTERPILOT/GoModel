@@ -28,3 +28,15 @@ func TestRealtimeTarget(t *testing.T) {
 		t.Fatal("expected error for missing model")
 	}
 }
+
+func TestRealtimeTargetFollowsSetBaseURL(t *testing.T) {
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p.SetBaseURL("https://custom.x.example/v1")
+	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasPrefix(target.URL, "wss://custom.x.example/v1/realtime") {
+		t.Errorf("url = %q, want the SetBaseURL host", target.URL)
+	}
+}

@@ -68,3 +68,16 @@ func TestRealtimeTarget(t *testing.T) {
 		t.Fatal("expected error for missing model")
 	}
 }
+
+func TestRealtimeTargetFollowsSetBaseURL(t *testing.T) {
+	// SetBaseURL switches the DashScope region; the realtime host must follow.
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p.SetBaseURL("https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasPrefix(target.URL, "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime") {
+		t.Errorf("url = %q, want the SetBaseURL region host", target.URL)
+	}
+}

@@ -73,6 +73,13 @@ func (p *CompatibleProvider) SetBaseURL(url string) {
 	p.client.SetBaseURL(url)
 }
 
+// GetBaseURL returns the provider's current base URL. It reads from the client so
+// it always reflects SetBaseURL overrides (used to derive the realtime websocket
+// target without a separately retained, staleable copy).
+func (p *CompatibleProvider) GetBaseURL() string {
+	return p.client.BaseURL()
+}
+
 func (p *CompatibleProvider) SetRequestMutator(mutator RequestMutator) {
 	p.requestMutator = mutator
 }
