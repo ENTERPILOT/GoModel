@@ -49,7 +49,12 @@ func (p *Provider) realtimeURL(deployment string) (string, error) {
 	default:
 		return "", core.NewInvalidRequestError("unsupported azure realtime base url scheme: "+u.Scheme, nil)
 	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/openai/realtime"
+	// Strip any existing /openai[/v1] root so a base already pointing at the
+	// OpenAI sub-path doesn't produce /openai/openai/realtime.
+	path := strings.TrimRight(u.Path, "/")
+	path = strings.TrimSuffix(path, "/openai/v1")
+	path = strings.TrimSuffix(path, "/openai")
+	u.Path = path + "/openai/realtime"
 	q := url.Values{}
 	q.Set("api-version", p.apiVersion)
 	q.Set("deployment", deployment)

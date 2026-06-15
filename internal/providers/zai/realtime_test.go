@@ -46,6 +46,21 @@ func TestRealtimeTargetFollowsSetBaseURL(t *testing.T) {
 	}
 }
 
+func TestRealtimeTargetNormalizesCodingPlanBase(t *testing.T) {
+	// The GLM Coding Plan base (/api/coding/paas/v4) must still resolve to the
+	// fixed realtime path /api/paas/v4/realtime, not /api/coding/paas/v4/realtime.
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p.SetBaseURL("https://api.z.ai/api/coding/paas/v4")
+	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "glm-realtime"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	u, _ := url.Parse(target.URL)
+	if u.Path != "/api/paas/v4/realtime" {
+		t.Errorf("path = %q, want /api/paas/v4/realtime", u.Path)
+	}
+}
+
 func TestRealtimeTargetOmitsAuthWhenNoKey(t *testing.T) {
 	p := New(providers.ProviderConfig{APIKey: ""}, providers.ProviderOptions{}).(*Provider)
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})

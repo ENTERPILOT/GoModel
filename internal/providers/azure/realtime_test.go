@@ -44,6 +44,24 @@ func TestRealtimeTarget(t *testing.T) {
 	}
 }
 
+func TestRealtimeTargetStripsExistingOpenAIPath(t *testing.T) {
+	// A base already rooted at /openai must not yield /openai/openai/realtime.
+	for _, base := range []string{
+		"https://myres.openai.azure.com/openai",
+		"https://myres.openai.azure.com/openai/v1",
+	} {
+		p := New(providers.ProviderConfig{APIKey: "k", BaseURL: base}, providers.ProviderOptions{}).(*Provider)
+		target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
+		if err != nil {
+			t.Fatalf("base %q: unexpected error: %v", base, err)
+		}
+		u, _ := url.Parse(target.URL)
+		if u.Path != "/openai/realtime" {
+			t.Errorf("base %q: path = %q, want /openai/realtime", base, u.Path)
+		}
+	}
+}
+
 func TestRealtimeTargetOmitsAuthWhenNoKey(t *testing.T) {
 	p := New(providers.ProviderConfig{
 		APIKey:  "",
