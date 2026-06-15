@@ -17,8 +17,10 @@ func TestOpenAIRealtimeURL(t *testing.T) {
 		{name: "xai https to wss", baseURL: "https://api.x.ai/v1", model: "grok-voice-latest", wantBase: "wss://api.x.ai/v1/realtime"},
 		{name: "trailing slash normalized", baseURL: "https://api.openai.com/v1/", model: "m", wantBase: "wss://api.openai.com/v1/realtime"},
 		{name: "http maps to ws", baseURL: "http://localhost:9000/v1", model: "m", wantBase: "ws://localhost:9000/v1/realtime"},
+		{name: "ws preserved", baseURL: "ws://localhost:9000/v1", model: "m", wantBase: "ws://localhost:9000/v1/realtime"},
 		{name: "wss preserved", baseURL: "wss://example.com/v1", model: "m", wantBase: "wss://example.com/v1/realtime"},
 		{name: "empty base", baseURL: "", model: "m", wantErr: true},
+		{name: "malformed url", baseURL: "http://[::1", model: "m", wantErr: true},
 		{name: "unsupported scheme", baseURL: "ftp://example.com/v1", model: "m", wantErr: true},
 	}
 	for _, tt := range tests {

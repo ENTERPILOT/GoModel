@@ -2,6 +2,7 @@ package xai
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -19,6 +20,13 @@ func TestRealtimeTarget(t *testing.T) {
 	}
 	if !strings.HasPrefix(target.URL, "wss://api.x.ai/v1/realtime?") {
 		t.Errorf("url = %q, want xAI realtime endpoint", target.URL)
+	}
+	parsed, err := url.Parse(target.URL)
+	if err != nil {
+		t.Fatalf("parse target url: %v", err)
+	}
+	if got := parsed.Query().Get("model"); got != "grok-voice-latest" {
+		t.Errorf("model query = %q, want %q", got, "grok-voice-latest")
 	}
 	if got := target.Headers.Get("Authorization"); got != "Bearer "+apiKey {
 		t.Errorf("Authorization = %q, want bearer with key", got)
