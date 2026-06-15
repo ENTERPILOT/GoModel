@@ -55,7 +55,10 @@ func TestRealtimeTargetStripsExistingOpenAIPath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("base %q: unexpected error: %v", base, err)
 		}
-		u, _ := url.Parse(target.URL)
+		u, err := url.Parse(target.URL)
+		if err != nil {
+			t.Fatalf("base %q: parse target url: %v", base, err)
+		}
 		if u.Path != "/openai/realtime" {
 			t.Errorf("base %q: path = %q, want /openai/realtime", base, u.Path)
 		}

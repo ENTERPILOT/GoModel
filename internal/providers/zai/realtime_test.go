@@ -55,7 +55,10 @@ func TestRealtimeTargetNormalizesCodingPlanBase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	u, _ := url.Parse(target.URL)
+	u, err := url.Parse(target.URL)
+	if err != nil {
+		t.Fatalf("parse target url: %v", err)
+	}
 	if u.Path != "/api/paas/v4/realtime" {
 		t.Errorf("path = %q, want /api/paas/v4/realtime", u.Path)
 	}
