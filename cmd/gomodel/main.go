@@ -77,7 +77,7 @@ func startApplication(application lifecycleApp, addr string) error {
 
 // @title          GoModel API
 // @version        1.0
-// @description    AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, DeepSeek, Z.ai, xAI, MiniMax, Xiaomi MiMo, Oracle, Ollama, Bailian). Drop-in OpenAI-compatible API.
+// @description    AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, OpenRouter, DeepSeek, Z.ai, xAI, MiniMax, Xiaomi MiMo, OpenCode Go, Oracle, Ollama, Bailian). Drop-in OpenAI-compatible API.
 // @BasePath       /
 // @schemes        http
 // @securityDefinitions.apikey BearerAuth
