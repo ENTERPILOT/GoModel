@@ -926,14 +926,16 @@ func TestEmbeddings_EmptyInputNoError(t *testing.T) {
 	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1")
 
-	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
-		Model: "nomic-embed-text",
-		Input: []any{},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error for empty input: %v", err)
-	}
-	if resp == nil || len(resp.Data) != 0 {
-		t.Fatalf("expected empty data response, got %+v", resp)
+	for _, empty := range []any{[]any{}, []string{}, "", nil} {
+		resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
+			Model: "nomic-embed-text",
+			Input: empty,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error for empty input %#v: %v", empty, err)
+		}
+		if resp == nil || len(resp.Data) != 0 {
+			t.Fatalf("input %#v: expected empty data response, got %+v", empty, resp)
+		}
 	}
 }

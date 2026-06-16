@@ -92,6 +92,11 @@ func base64ToFloatArray(raw json.RawMessage) (json.RawMessage, bool) {
 	if err := json.Unmarshal(raw, &encoded); err != nil {
 		return nil, false
 	}
+	// Reject oversized payloads before DecodeString allocates the decode buffer,
+	// not just after, so a pathological upstream can't force a large allocation.
+	if len(encoded) > base64.StdEncoding.EncodedLen(maxEmbeddingDims*4) {
+		return nil, false
+	}
 	buf, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil || len(buf) == 0 || len(buf)%4 != 0 || len(buf)/4 > maxEmbeddingDims {
 		return nil, false

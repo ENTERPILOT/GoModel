@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -228,7 +229,9 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 // embeddingInputIsEmpty reports whether an embeddings request carries no input,
 // in which case zero returned vectors is a legitimate result rather than a sign
 // the upstream rejected the request. Input is decoded from JSON, so a batch is a
-// []any and a single value is a string; unknown shapes are treated as non-empty.
+// []any and a single value is a string; the reflection fallback also handles a
+// directly-constructed typed slice (e.g. []string{}) so those aren't misread as
+// the LM-Studio-as-ollama misconfiguration.
 func embeddingInputIsEmpty(input any) bool {
 	switch v := input.(type) {
 	case nil:
@@ -238,6 +241,9 @@ func embeddingInputIsEmpty(input any) bool {
 	case []any:
 		return len(v) == 0
 	default:
+		if rv := reflect.ValueOf(input); rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+			return rv.Len() == 0
+		}
 		return false
 	}
 }
