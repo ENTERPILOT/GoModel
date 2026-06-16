@@ -696,7 +696,7 @@ func (r *Router) StreamResponses(ctx context.Context, req *core.ResponsesRequest
 
 // Embeddings routes the embeddings request to the appropriate provider.
 func (r *Router) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
-	return routeStampedModelResponse(
+	resp, err := routeStampedModelResponse(
 		r,
 		ctx,
 		req.Model,
@@ -706,6 +706,14 @@ func (r *Router) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*c
 		},
 		callEmbeddings,
 	)
+	if err != nil {
+		return nil, err
+	}
+	// Some OpenAI-compatible servers ignore encoding_format and always return
+	// float arrays; re-encode to the format the client asked for so SDKs that
+	// default to base64 (OpenAI, LangChain) don't mis-decode the response.
+	core.NormalizeEmbeddingEncoding(resp, req.EncodingFormat)
+	return resp, nil
 }
 
 // CreateSpeech routes a text-to-speech request to the provider that owns the model.
