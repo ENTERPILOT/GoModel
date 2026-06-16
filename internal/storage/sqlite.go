@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -59,6 +60,14 @@ func NewSQLite(cfg SQLiteConfig) (SQLiteStorage, error) {
 
 func (s *sqliteStorage) DB() *sql.DB {
 	return s.db
+}
+
+// Ping verifies connectivity to the SQLite database.
+func (s *sqliteStorage) Ping(ctx context.Context) error {
+	if s.db == nil {
+		return fmt.Errorf("sqlite database is not initialized")
+	}
+	return s.db.PingContext(ctx)
 }
 
 func (s *sqliteStorage) Close() error {

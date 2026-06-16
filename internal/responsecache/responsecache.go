@@ -221,6 +221,30 @@ func (m *ResponseCacheMiddleware) HandleInternalRequest(
 	}, nil
 }
 
+// UsesRedis reports whether a Redis-backed exact (simple) cache is configured.
+// Only then is the cache a meaningful readiness component worth probing.
+func (m *ResponseCacheMiddleware) UsesRedis() bool {
+	if m == nil || m.simple == nil {
+		return false
+	}
+	_, ok := m.simple.store.(cache.Pinger)
+	return ok
+}
+
+// Ping verifies connectivity to the Redis-backed exact cache. It returns nil
+// when no Redis cache is configured, so callers should gate on UsesRedis first
+// if they need to distinguish "not configured" from "reachable".
+func (m *ResponseCacheMiddleware) Ping(ctx context.Context) error {
+	if m == nil || m.simple == nil {
+		return nil
+	}
+	pinger, ok := m.simple.store.(cache.Pinger)
+	if !ok {
+		return nil
+	}
+	return pinger.Ping(ctx)
+}
+
 // Close waits for any in-flight cache writes to complete, then releases cache resources.
 func (m *ResponseCacheMiddleware) Close() error {
 	if m == nil {

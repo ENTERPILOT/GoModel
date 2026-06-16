@@ -97,3 +97,11 @@ func (s *mongoStorage) Database() *mongo.Database {
 func (s *mongoStorage) Client() *mongo.Client {
 	return s.client
 }
+
+// Ping verifies connectivity to MongoDB.
+func (s *mongoStorage) Ping(ctx context.Context) error {
+	if s.client == nil {
+		return fmt.Errorf("mongodb client is not initialized")
+	}
+	return s.client.Ping(ctx, nil)
+}

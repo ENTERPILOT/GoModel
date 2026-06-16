@@ -9,6 +9,29 @@ import (
 	"time"
 )
 
+func TestSQLitePing(t *testing.T) {
+	store, err := NewSQLite(SQLiteConfig{Path: filepath.Join(t.TempDir(), "ping.db")})
+	if err != nil {
+		t.Fatalf("failed to create SQLite storage: %v", err)
+	}
+
+	hc, ok := store.(HealthChecker)
+	if !ok {
+		t.Fatalf("SQLite storage does not implement HealthChecker")
+	}
+
+	if err := hc.Ping(context.Background()); err != nil {
+		t.Fatalf("Ping() error = %v, want nil", err)
+	}
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := hc.Ping(context.Background()); err == nil {
+		t.Fatal("Ping() after Close() = nil, want error")
+	}
+}
+
 func TestSQLiteConcurrentWriteSafety(t *testing.T) {
 	store, err := NewSQLite(SQLiteConfig{Path: filepath.Join(t.TempDir(), "test.db")})
 	if err != nil {

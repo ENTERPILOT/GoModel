@@ -84,6 +84,16 @@ type Config struct {
 	ResponseCacheMiddleware         *responsecache.ResponseCacheMiddleware // Optional: response cache middleware for cacheable endpoints
 	GuardrailsHash                  string                                 // Optional: SHA-256 hash of active guardrail rules; stored in context post-patch for semantic cache
 	IPExtractor                     echo.IPExtractor                       // Optional: trusted client IP extraction strategy for proxied deployments
+	StorageProbe                    ReadinessProbe                         // Optional: primary storage connectivity check; failure makes /health/ready report not_ready (503)
+	CacheProbe                      ReadinessProbe                         // Optional: Redis cache connectivity check; failure makes /health/ready report degraded (200, non-blocking)
+}
+
+// ReadinessProbe verifies that a dependency the gateway owns is reachable.
+// It is deliberately narrow so the server stays decoupled from concrete storage
+// and cache types. Upstream provider reachability is intentionally NOT a probe:
+// an external provider outage must not pull a healthy gateway out of rotation.
+type ReadinessProbe interface {
+	Ping(ctx context.Context) error
 }
 
 // New creates a new HTTP server
@@ -135,6 +145,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		handler.keepOnlyAliasesAtModelsEndpoint = cfg.KeepOnlyAliasesAtModelsEndpoint
 		handler.responseCache = cfg.ResponseCacheMiddleware
 		handler.guardrailsHash = cfg.GuardrailsHash
+		handler.storageProbe = cfg.StorageProbe
+		handler.cacheProbe = cfg.CacheProbe
 	}
 	if cfg != nil && cfg.EnabledPassthroughProviders != nil {
 		handler.setEnabledPassthroughProviders(cfg.EnabledPassthroughProviders)
@@ -159,7 +171,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	// Build list of paths that skip authentication
-	authSkipPaths := []string{"/health"}
+	authSkipPaths := []string{"/health", "/health/ready"}
 
 	// Determine metrics path
 	metricsPath := "/metrics"
@@ -282,6 +294,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// Public routes
 	e.GET("/health", handler.Health)
+	e.GET("/health/ready", handler.Ready)
 	registerSwagger(e, cfg)
 	if cfg != nil && cfg.MetricsEnabled {
 		e.GET(metricsPath, echo.WrapHandler(promhttp.Handler()))

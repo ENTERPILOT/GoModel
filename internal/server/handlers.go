@@ -44,6 +44,8 @@ type Handler struct {
 	realtimeEnabled              bool
 	responseCache                *responsecache.ResponseCacheMiddleware
 	guardrailsHash               string
+	storageProbe                 ReadinessProbe
+	cacheProbe                   ReadinessProbe
 
 	translatedSvc     *translatedInferenceService // snapshot of handler fields at first use; server.New sets cache/hash before traffic
 	translatedSvcOnce sync.Once

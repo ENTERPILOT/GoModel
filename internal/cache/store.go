@@ -16,6 +16,13 @@ type Store interface {
 	Close() error
 }
 
+// Pinger is an optional capability for stores backed by a network service that
+// can verify connectivity. Network-backed stores (RedisStore) implement it;
+// in-memory stores (MapStore) do not, since they are always reachable.
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
+
 // MapStore is an in-memory Store for testing.
 type MapStore struct {
 	mu   sync.RWMutex

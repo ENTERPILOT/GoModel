@@ -414,6 +414,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		SwaggerEnabled:                  swaggerEnabled,
 	}
 
+	// Wire the readiness storage probe. Storage is a required dependency, so a
+	// failed ping makes /health/ready report not_ready (503). When no storage
+	// backend is active, readiness simply collapses to liveness.
+	if hc, ok := sharedStorage.(storage.HealthChecker); ok {
+		serverCfg.StorageProbe = hc
+	}
+
 	// Initialize admin API and dashboard (behind separate feature flags)
 	adminCfg := appCfg.Admin
 	if !adminCfg.EndpointsEnabled && adminCfg.UIEnabled {
@@ -480,6 +487,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 	closers = append(closers, rcm.Close)
 	serverCfg.ResponseCacheMiddleware = rcm
+
+	// Wire the readiness cache probe only when a Redis-backed exact cache is
+	// configured. The cache is a performance optimization, so a failed ping
+	// reports degraded (200) rather than blocking traffic.
+	if rcm.UsesRedis() {
+		serverCfg.CacheProbe = rcm
+	}
 
 	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(provider, server.InternalChatCompletionExecutorConfig{
 		ModelResolver:          app.aliases.Service,

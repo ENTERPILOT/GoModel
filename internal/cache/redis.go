@@ -74,6 +74,14 @@ func (s *RedisStore) Set(ctx context.Context, key string, value []byte, ttl time
 	return nil
 }
 
+// Ping verifies connectivity to Redis.
+func (s *RedisStore) Ping(ctx context.Context) error {
+	if s.client == nil {
+		return fmt.Errorf("redis client is not initialized")
+	}
+	return s.client.Ping(ctx).Err()
+}
+
 // Close closes the Redis connection.
 func (s *RedisStore) Close() error {
 	if s.client != nil {

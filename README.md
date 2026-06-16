@@ -272,7 +272,8 @@ docker run --rm -p 8080:8080 --env-file .env gomodel
 
 | Endpoint              | Method | Description                                     |
 | --------------------- | ------ | ----------------------------------------------- |
-| `/health`             | GET    | Health check                                    |
+| `/health`             | GET    | Liveness check (always 200 while the process serves) |
+| `/health/ready`       | GET    | Readiness check: pings storage (503 if down) and Redis cache (degraded, still 200) |
 | `/metrics`            | GET    | Prometheus metrics (experimental, when enabled) |
 | `/swagger/index.html` | GET    | Swagger UI (when enabled)                       |
 

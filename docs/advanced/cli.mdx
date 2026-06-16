@@ -13,8 +13,10 @@ the examples below use the long form.
 | Flag               | Description                                              | Default |
 | ------------------ | ------------------------------------------------------- | ------- |
 | `--version`        | Print version information and exit                       | —       |
-| `--health`         | Probe the local `/health` endpoint and exit             | —       |
+| `--health`         | Probe the local `/health` (liveness) endpoint and exit  | —       |
 | `--health-timeout` | Maximum time to wait for the `--health` probe            | `2s`    |
+| `--ready`          | Probe the local `/health/ready` (readiness) endpoint and exit | — |
+| `--ready-timeout`  | Maximum time to wait for the `--ready` probe            | `4s`    |
 
 ## Version
 
@@ -59,3 +61,37 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 Orchestrators (Docker, Compose, Kubernetes) can then detect and restart an
 unhealthy gateway.
+
+## Readiness probe
+
+`--ready` probes `/health/ready`, which reports whether the instance should
+receive traffic. Unlike liveness, readiness checks the dependencies the gateway
+owns:
+
+- **Storage** is required. If the backend (SQLite/PostgreSQL/MongoDB) is
+  unreachable, readiness reports `not_ready` (HTTP `503`).
+- **Redis exact cache** (when configured) is a performance optimization. If it
+  is unreachable, readiness reports `degraded` but stays HTTP `200` — the
+  gateway still serves requests.
+
+Upstream **provider** reachability is deliberately excluded: a provider outage
+must not pull a healthy gateway out of rotation.
+
+```bash
+gomodel --ready
+```
+
+- Exits `0` when the endpoint returns HTTP `200` (`ready` or `degraded`).
+- Exits non-zero on `not_ready` (HTTP `503`), connection refused, or an
+  unexpected status value.
+
+```json
+{ "status": "ready", "components": { "storage": "ok", "cache": "ok" } }
+```
+
+Liveness (`--health`) is the right signal for a Docker `HEALTHCHECK` (restart on
+crash). Readiness (`/health/ready`) is the right signal for a Kubernetes
+`readinessProbe` (gate traffic) — point it at the HTTP endpoint directly or run
+`gomodel --ready` as an exec probe. Keep `--ready-timeout` larger than the
+server's internal per-dependency probe timeout (`2s`) so a slow backend returns
+a clean `not_ready` instead of the client timing out first.

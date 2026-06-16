@@ -104,6 +104,14 @@ func main() {
 		os.Exit(0)
 	}
 
+	if opts.Ready {
+		if err := runReadyProbe(opts.ReadyTimeout); err != nil {
+			fmt.Fprintf(os.Stderr, "readiness check failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	if err := configureLogging(os.Stderr); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to configure logging: %v\n", err)
 		os.Exit(1)

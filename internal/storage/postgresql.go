@@ -60,3 +60,11 @@ func (s *postgresStorage) Close() error {
 func (s *postgresStorage) Pool() *pgxpool.Pool {
 	return s.pool
 }
+
+// Ping verifies connectivity to PostgreSQL.
+func (s *postgresStorage) Ping(ctx context.Context) error {
+	if s.pool == nil {
+		return fmt.Errorf("postgresql pool is not initialized")
+	}
+	return s.pool.Ping(ctx)
+}

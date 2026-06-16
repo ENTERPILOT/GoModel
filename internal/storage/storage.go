@@ -64,6 +64,13 @@ type Storage interface {
 	Close() error
 }
 
+// HealthChecker is implemented by storage backends that can verify
+// connectivity to the underlying database. All concrete backends satisfy it;
+// readiness checks type-assert against this interface.
+type HealthChecker interface {
+	Ping(ctx context.Context) error
+}
+
 // SQLiteStorage exposes a SQLite database handle.
 type SQLiteStorage interface {
 	Storage
