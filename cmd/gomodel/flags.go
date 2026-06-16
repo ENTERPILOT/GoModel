@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"time"
 )
@@ -22,7 +23,13 @@ func parseCLI(args []string, output io.Writer) (cliOptions, error) {
 	flags.BoolVar(&opts.Version, "version", false, "Print version information")
 	flags.BoolVar(&opts.Health, "health", false, "Check the local GoModel health endpoint and exit")
 	flags.DurationVar(&opts.HealthTimeout, "health-timeout", defaultHealthTimeout, "Timeout for --health")
-	return opts, flags.Parse(args)
+	if err := flags.Parse(args); err != nil {
+		return opts, err
+	}
+	if flags.NArg() > 0 {
+		return opts, fmt.Errorf("unexpected arguments: %v", flags.Args())
+	}
+	return opts, nil
 }
 
 func cliParseExitCode(err error) int {

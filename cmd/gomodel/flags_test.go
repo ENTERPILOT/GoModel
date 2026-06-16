@@ -37,6 +37,12 @@ func TestParseCLI_RejectsUnknownFlags(t *testing.T) {
 	}
 }
 
+func TestParseCLI_RejectsPositionalArgs(t *testing.T) {
+	if _, err := parseCLI([]string{"--health", "extra"}, io.Discard); err == nil {
+		t.Fatal("parseCLI(--health extra) error = nil, want error")
+	}
+}
+
 func TestCLIParseExitCode(t *testing.T) {
 	if got := cliParseExitCode(flag.ErrHelp); got != 0 {
 		t.Fatalf("cliParseExitCode(flag.ErrHelp) = %d, want 0", got)
