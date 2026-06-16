@@ -913,9 +913,10 @@ func TestEmbeddings_NoVectorsErrors(t *testing.T) {
 	}
 }
 
-// TestEmbeddings_EmptyInputNoError ensures an empty input batch is not mistaken
-// for the LM-Studio-as-ollama misconfiguration: zero vectors for zero inputs is
-// a legitimate result, not a provider error.
+// TestEmbeddings_EmptyInputNoError ensures an empty input batch (an empty
+// array/slice, including a typed []string{}) is not mistaken for the
+// LM-Studio-as-ollama misconfiguration: zero vectors for an empty batch is a
+// legitimate result, not a provider error.
 func TestEmbeddings_EmptyInputNoError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -926,16 +927,28 @@ func TestEmbeddings_EmptyInputNoError(t *testing.T) {
 	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1")
 
-	for _, empty := range []any{[]any{}, []string{}, "", nil} {
+	for _, empty := range []any{[]any{}, []string{}} {
 		resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
 			Model: "nomic-embed-text",
 			Input: empty,
 		})
 		if err != nil {
-			t.Fatalf("unexpected error for empty input %#v: %v", empty, err)
+			t.Fatalf("unexpected error for empty batch %#v: %v", empty, err)
 		}
 		if resp == nil || len(resp.Data) != 0 {
 			t.Fatalf("input %#v: expected empty data response, got %+v", empty, resp)
+		}
+	}
+
+	// Scalar/nil inputs are NOT empty batches: zero vectors must stay on the
+	// loud-error path so a misconfigured OpenAI-compatible endpoint returning a
+	// 200 error body for "" / null isn't silently swallowed as an empty list.
+	for _, scalar := range []any{"", nil} {
+		if _, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
+			Model: "nomic-embed-text",
+			Input: scalar,
+		}); err == nil {
+			t.Fatalf("input %#v: expected provider error for zero vectors, got nil", scalar)
 		}
 	}
 }

@@ -226,18 +226,18 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 	}, nil
 }
 
-// embeddingInputIsEmpty reports whether an embeddings request carries no input,
-// in which case zero returned vectors is a legitimate result rather than a sign
-// the upstream rejected the request. Input is decoded from JSON, so a batch is a
-// []any and a single value is a string; the reflection fallback also handles a
-// directly-constructed typed slice (e.g. []string{}) so those aren't misread as
-// the LM-Studio-as-ollama misconfiguration.
+// embeddingInputIsEmpty reports whether an embeddings request carries an empty
+// batch — an empty array/slice — for which zero returned vectors is a legitimate
+// result. Input is decoded from JSON (so a batch is []any), but the reflection
+// fallback also covers a directly-constructed typed slice such as []string{}.
+//
+// Scalar ("") and nil inputs are deliberately NOT treated as empty batches: if
+// they come back with zero vectors it more likely means the upstream rejected
+// the request (e.g. an OpenAI-compatible server misconfigured as ollama
+// answering 200 with an error body), which must stay on the loud-error path
+// rather than silently returning an empty list.
 func embeddingInputIsEmpty(input any) bool {
 	switch v := input.(type) {
-	case nil:
-		return true
-	case string:
-		return strings.TrimSpace(v) == ""
 	case []any:
 		return len(v) == 0
 	default:
