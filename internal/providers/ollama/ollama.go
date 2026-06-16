@@ -184,12 +184,14 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 		return nil, err
 	}
 
-	// A successful embeddings call always returns at least one vector. An empty
-	// result means the upstream did not honor the native /api/embed contract —
-	// e.g. an OpenAI-compatible server (LM Studio, vLLM) that has no native
-	// Ollama API and answers 200 with an error body. Fail loudly instead of
-	// returning an empty, OpenAI-shaped list that silently breaks the caller.
-	if len(ollamaResp.Embeddings) == 0 {
+	// A request that carried input always yields at least one vector. Zero
+	// vectors for a non-empty request means the upstream did not honor the
+	// native /api/embed contract — e.g. an OpenAI-compatible server (LM Studio,
+	// vLLM) that has no native Ollama API and answers 200 with an error body.
+	// Fail loudly instead of returning an empty, OpenAI-shaped list that
+	// silently breaks the caller. An empty input batch legitimately returns no
+	// vectors, so leave that case to pass through as an empty response.
+	if len(ollamaResp.Embeddings) == 0 && !embeddingInputIsEmpty(req.Input) {
 		return nil, core.NewProviderError("ollama", http.StatusBadGateway,
 			"ollama embeddings returned no vectors; if this endpoint is an OpenAI-compatible server (e.g. LM Studio), configure it as an \"openai\" or \"vllm\" provider instead of \"ollama\"", nil)
 	}
@@ -221,6 +223,23 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 			TotalTokens:  ollamaResp.PromptEvalCount,
 		},
 	}, nil
+}
+
+// embeddingInputIsEmpty reports whether an embeddings request carries no input,
+// in which case zero returned vectors is a legitimate result rather than a sign
+// the upstream rejected the request. Input is decoded from JSON, so a batch is a
+// []any and a single value is a string; unknown shapes are treated as non-empty.
+func embeddingInputIsEmpty(input any) bool {
+	switch v := input.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(v) == ""
+	case []any:
+		return len(v) == 0
+	default:
+		return false
+	}
 }
 
 // errBatchUnsupported is returned by every batch endpoint because Ollama has

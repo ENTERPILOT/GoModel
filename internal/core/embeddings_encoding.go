@@ -9,6 +9,12 @@ import (
 	"strings"
 )
 
+// maxEmbeddingDims caps how large a single vector may be before encoding
+// conversion is skipped. It sits far above any real embedding model (the
+// largest in common use are a few thousand dimensions) and exists only to bound
+// allocations and prevent the *4 byte-size computation from overflowing.
+const maxEmbeddingDims = 1 << 20
+
 // NormalizeEmbeddingEncoding reconciles a response's embedding encoding with the
 // encoding_format the client requested, keeping responses OpenAI-compatible
 // regardless of provider quirks.
@@ -57,6 +63,12 @@ func floatArrayToBase64(raw json.RawMessage) (json.RawMessage, bool) {
 	if err := json.Unmarshal(raw, &values); err != nil {
 		return nil, false
 	}
+	// Guard the *4 buffer sizing against overflow / absurd payloads. Real
+	// embedding vectors are at most a few thousand dimensions; anything beyond
+	// the cap is left untouched rather than allocated.
+	if len(values) > maxEmbeddingDims {
+		return nil, false
+	}
 	buf := make([]byte, len(values)*4)
 	for i, v := range values {
 		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(float32(v)))
@@ -81,7 +93,7 @@ func base64ToFloatArray(raw json.RawMessage) (json.RawMessage, bool) {
 		return nil, false
 	}
 	buf, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil || len(buf) == 0 || len(buf)%4 != 0 {
+	if err != nil || len(buf) == 0 || len(buf)%4 != 0 || len(buf)/4 > maxEmbeddingDims {
 		return nil, false
 	}
 	values := make([]float64, len(buf)/4)
