@@ -184,6 +184,16 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 		return nil, err
 	}
 
+	// A successful embeddings call always returns at least one vector. An empty
+	// result means the upstream did not honor the native /api/embed contract —
+	// e.g. an OpenAI-compatible server (LM Studio, vLLM) that has no native
+	// Ollama API and answers 200 with an error body. Fail loudly instead of
+	// returning an empty, OpenAI-shaped list that silently breaks the caller.
+	if len(ollamaResp.Embeddings) == 0 {
+		return nil, core.NewProviderError("ollama", http.StatusBadGateway,
+			"ollama embeddings returned no vectors; if this endpoint is an OpenAI-compatible server (e.g. LM Studio), configure it as an \"openai\" or \"vllm\" provider instead of \"ollama\"", nil)
+	}
+
 	data := make([]core.EmbeddingData, len(ollamaResp.Embeddings))
 	for i, emb := range ollamaResp.Embeddings {
 		raw, err := json.Marshal(emb)

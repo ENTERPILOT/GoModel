@@ -873,3 +873,27 @@ func TestEmbeddings_ModelFallback(t *testing.T) {
 		t.Errorf("Model = %q, want %q (should fall back to request model)", resp.Model, "nomic-embed-text")
 	}
 }
+
+// TestEmbeddings_NoVectorsErrors guards the common misconfiguration where an
+// OpenAI-compatible server (e.g. LM Studio) is registered as an "ollama"
+// provider. Such servers answer the native /api/embed path with a 200 and an
+// error body, which unmarshals into zero embeddings. The adapter must surface
+// an error instead of returning an empty, OpenAI-shaped list.
+func TestEmbeddings_NoVectorsErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"error":"Unexpected endpoint or method. (POST /api/embed)"}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1")
+
+	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
+		Model: "text-embedding-nomic-embed-text-v1.5",
+		Input: "hello world",
+	})
+	if err == nil {
+		t.Fatalf("expected error for empty embeddings, got response with %d data entries", len(resp.Data))
+	}
+}

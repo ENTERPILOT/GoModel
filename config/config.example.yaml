@@ -267,6 +267,16 @@ providers:
   #   base_url: "https://api.example.com/v1"
   #   api_key: "..."
 
+  # Example: LM Studio. Despite being "Ollama-like", LM Studio speaks the
+  # OpenAI-compatible API (/v1/chat/completions, /v1/embeddings) and has NO
+  # native Ollama API. Configure it as "openai" (or "vllm"), NOT "ollama" —
+  # the ollama type sends embeddings to Ollama's native /api/embed, which LM
+  # Studio does not implement.
+  # lmstudio:
+  #   type: openai
+  #   base_url: "http://localhost:1234/v1"
+  #   api_key: "lm-studio"  # any non-empty value; LM Studio ignores it
+
   # Example: Groq (OpenAI-compatible)
   # groq:
   #   type: "openai"
