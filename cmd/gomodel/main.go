@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -85,15 +84,25 @@ func startApplication(application lifecycleApp, addr string) error {
 // @in             header
 // @name           Authorization
 func main() {
-	versionFlag := flag.Bool("version", false, "Print version information")
-	flag.Parse()
+	opts, err := parseCLI(os.Args[1:], os.Stderr)
+	if err != nil {
+		os.Exit(cliParseExitCode(err))
+	}
 
-	if *versionFlag {
+	if opts.Version {
 		fmt.Println(version.Info())
 		os.Exit(0)
 	}
 
 	_ = godotenv.Load()
+
+	if opts.Health {
+		if err := runHealthProbe(opts.HealthTimeout); err != nil {
+			fmt.Fprintf(os.Stderr, "health check failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 
 	if err := configureLogging(os.Stderr); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to configure logging: %v\n", err)

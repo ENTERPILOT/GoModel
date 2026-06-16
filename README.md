@@ -276,6 +276,16 @@ docker run --rm -p 8080:8080 --env-file .env gomodel
 | `/metrics`            | GET    | Prometheus metrics (experimental, when enabled) |
 | `/swagger/index.html` | GET    | Swagger UI (when enabled)                       |
 
+### CLI Operations
+
+GoModel accepts both single-dash and double-dash CLI flags. Examples use the
+long form:
+
+```bash
+gomodel --version
+gomodel --health
+```
+
 ---
 
 ## Gateway Configuration

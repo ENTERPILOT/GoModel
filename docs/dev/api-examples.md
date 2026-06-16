@@ -311,6 +311,8 @@ Example response:
 
 ```bash
 curl http://localhost:8080/health
+gomodel --health
+gomodel --version
 ```
 
 ## Client Library Examples
