@@ -18,6 +18,11 @@ import (
 // matches the value documented in the @Param limit annotation below.
 const maxAuditLogLimit = 100
 
+// defaultAuditLogLimit is the effective page size when the caller omits limit.
+// It mirrors the reader's pagination default so the disabled-reader fast path
+// reports the same limit an enabled reader would.
+const defaultAuditLogLimit = 25
+
 // AuditLog handles GET /admin/audit/log
 //
 // @Summary      Get paginated audit log entries
@@ -109,12 +114,16 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 	}
 
 	if h.auditReader == nil {
-		// Echo the requested pagination so the response matches the enabled-reader
+		// Echo the effective pagination so the response matches the enabled-reader
 		// contract. Returning limit:0 here would make the client send limit=0 on
 		// its next request, which fails validation above with a 400.
+		limit := params.Limit
+		if limit <= 0 {
+			limit = defaultAuditLogLimit
+		}
 		return c.JSON(http.StatusOK, auditLogListResponse{
 			Entries: []auditLogEntryResponse{},
-			Limit:   params.Limit,
+			Limit:   limit,
 			Offset:  params.Offset,
 		})
 	}

@@ -337,8 +337,9 @@ func TestIndex_HasNoExternalResources(t *testing.T) {
 	}
 
 	// Match resources the browser actually fetches (src=, href=, CSS url()),
-	// ignoring inline-SVG namespace URIs like http://www.w3.org/2000/svg.
-	loaded := regexp.MustCompile(`(?:src|href)=["']https?://|url\(\s*["']?https?://`)
+	// including protocol-relative (//cdn...) URLs, while ignoring inline-SVG
+	// namespace URIs like http://www.w3.org/2000/svg.
+	loaded := regexp.MustCompile(`(?:src|href)=["'](?:https?:)?//|url\(\s*["']?(?:https?:)?//`)
 	if matches := loaded.FindAllString(rec.Body.String(), -1); len(matches) > 0 {
 		t.Errorf("expected no external (http/https) resources in page HTML, found: %v", matches)
 	}
