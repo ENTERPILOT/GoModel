@@ -134,6 +134,25 @@ jobs:
         # Thresholds are maintained in tests/perf/hotpath_test.go.
         run: make perf-check
 
+  vulncheck:
+    name: Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # Scans the dependency graph against the Go vulnerability database,
+      # reporting only vulnerabilities reachable from our code.
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
   docs-validate:
     name: Docs Validation
     runs-on: ubuntu-latest
@@ -165,6 +184,9 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+
+      - name: Verify module integrity
+        run: go mod verify
 
       - name: Build
         run: go build -v ./cmd/gomodel
