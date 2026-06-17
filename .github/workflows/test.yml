@@ -125,7 +125,7 @@ jobs:
       # contract tags are deliberately skipped — they aren't in the shipped binary.
       - name: Run govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
           govulncheck ./...
           govulncheck -tags=swagger ./...
 
