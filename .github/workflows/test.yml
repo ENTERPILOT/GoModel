@@ -108,6 +108,7 @@ jobs:
   vulncheck:
     name: Vulnerability Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -118,11 +119,15 @@ jobs:
           cache: true
 
       # Scans the dependency graph against the Go vulnerability database,
-      # reporting only vulnerabilities reachable from our code.
+      # reporting only vulnerabilities reachable from our code. The second run
+      # covers the swagger-tagged production build (swagger_enabled.go), which
+      # the default tag set excludes. The tests/* suites behind e2e/integration/
+      # contract tags are deliberately skipped — they aren't in the shipped binary.
       - name: Run govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
+          govulncheck -tags=swagger ./...
 
   docs-validate:
     name: Docs Validation
