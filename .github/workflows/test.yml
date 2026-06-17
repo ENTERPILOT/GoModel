@@ -37,9 +37,24 @@ jobs:
           # the schema fetch is reliable again; track in this PR/branch discussion.
           verify: false
 
-  test-unit:
-    name: Unit Tests
+  # Unit, E2E, integration, and contract suites share identical setup and
+  # differ only in the test command, so they run as one matrix.
+  go-tests:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Unit Tests
+            cmd: make test-race
+            coverage: true
+          - name: E2E Tests
+            cmd: go test -v -tags=e2e -timeout=5m ./tests/e2e/...
+          - name: Integration Tests
+            cmd: go test -v -tags=integration -timeout=10m ./tests/integration/...
+          - name: Contract Replay Tests
+            cmd: go test -v -tags=contract -timeout=5m ./tests/contract/...
     steps:
       - uses: actions/checkout@v6
 
@@ -49,10 +64,11 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Run unit tests
-        run: make test-race
+      - name: Run tests
+        run: ${{ matrix.cmd }}
 
       - name: Upload coverage
+        if: matrix.coverage
         uses: codecov/codecov-action@v7
         with:
           files: ./coverage.out
@@ -72,51 +88,6 @@ jobs:
 
       - name: Run dashboard JavaScript tests
         run: make test-dashboard
-
-  test-e2e:
-    name: E2E Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Run E2E tests
-        run: go test -v -tags=e2e -timeout=5m ./tests/e2e/...
-
-  integration:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Run integration tests
-        run: go test -v -tags=integration -timeout=10m ./tests/integration/...
-
-  test-contract:
-    name: Contract Replay Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Run contract replay tests
-        run: go test -v -tags=contract -timeout=5m ./tests/contract/...
 
   performance:
     name: Performance Guard
@@ -172,10 +143,11 @@ jobs:
         run: npx mint validate
         working-directory: docs
 
+  # Compiling the binary doesn't depend on tests passing, so this runs in
+  # parallel with the test jobs rather than gating behind them.
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [lint, test-unit, test-dashboard, test-e2e, integration, test-contract, performance]
     steps:
       - uses: actions/checkout@v6
 
