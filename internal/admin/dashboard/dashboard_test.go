@@ -317,3 +317,75 @@ func TestStatic_NotFound(t *testing.T) {
 		t.Errorf("expected 404, got %d", rec.Code)
 	}
 }
+
+// TestIndex_HasNoExternalResources guards the offline guarantee: the rendered
+// page must load every script, style, and font from the embedded /admin/static
+// tree, never from a CDN or remote font host.
+func TestIndex_HasNoExternalResources(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.Index(c); err != nil {
+		t.Fatalf("Index() returned error: %v", err)
+	}
+
+	// Match resources the browser actually fetches (src=, href=, CSS url()),
+	// ignoring inline-SVG namespace URIs like http://www.w3.org/2000/svg.
+	loaded := regexp.MustCompile(`(?:src|href)=["']https?://|url\(\s*["']?https?://`)
+	if matches := loaded.FindAllString(rec.Body.String(), -1); len(matches) > 0 {
+		t.Errorf("expected no external (http/https) resources in page HTML, found: %v", matches)
+	}
+	for _, want := range []string{
+		`/admin/static/fonts/inter.css`,
+		`/admin/static/vendor/chart.umd.min.js`,
+		`/admin/static/vendor/alpine.min.js`,
+		`/admin/static/vendor/lucide.min.js`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("expected local asset %q in page HTML", want)
+		}
+	}
+}
+
+// TestStatic_ServesVendoredAssets confirms the vendored libraries and font
+// files are embedded and served, so the dashboard renders without network access.
+func TestStatic_ServesVendoredAssets(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	paths := []string{
+		"/admin/static/vendor/chart.umd.min.js",
+		"/admin/static/vendor/alpine.min.js",
+		"/admin/static/vendor/lucide.min.js",
+		"/admin/static/fonts/inter.css",
+		"/admin/static/fonts/inter-latin.woff2",
+		"/admin/static/fonts/inter-latin-ext.woff2",
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			if err := h.Static(c); err != nil {
+				t.Fatalf("Static() returned error: %v", err)
+			}
+			if rec.Code != http.StatusOK {
+				t.Errorf("expected 200, got %d", rec.Code)
+			}
+			if rec.Body.Len() == 0 {
+				t.Errorf("expected non-empty body for %s", path)
+			}
+		})
+	}
+}

@@ -5,11 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GoModel Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="{{assetURL "favicon.svg"}}">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js" integrity="sha384-XcdcwHqIPULERb2yDEM4R0XaQKU3YnDsrTmjACBZyfdVVqjh6xQ4/DCMd7XLcA6Y" crossorigin="anonymous"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.15.8/dist/cdn.min.js" integrity="sha384-LXWjKwDZz29o7TduNe+r/UxaolHh5FsSvy2W7bDHSZ8jJeGgDeuNnsDNHoxpSgDi" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="{{assetURL "fonts/inter.css"}}">
+    <script src="{{assetURL "vendor/chart.umd.min.js"}}"></script>
+    <script defer src="{{assetURL "vendor/alpine.min.js"}}"></script>
     <link rel="stylesheet" href="{{assetURL "css/dashboard.css"}}">
     <script>
         (function () {
@@ -131,7 +129,7 @@
         </div>
         {{template "typed-confirmation-dialog" .}}
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/lucide@0.577.0/dist/umd/lucide.min.js" integrity="sha384-orgVf2eX2+m1zKAOIi09hD0W6GtVhoOUmqDK+sysYB2JTZ4vS86j4jm+X7a4Nnei" crossorigin="anonymous"></script>
+    <script src="{{assetURL "vendor/lucide.min.js"}}"></script>
     <script src="{{assetURL "js/modules/conversation-helpers.js"}}"></script>
     <script src="{{assetURL "js/modules/icons.js"}}"></script>
     <script src="{{assetURL "js/modules/clipboard.js"}}"></script>

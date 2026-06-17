@@ -135,7 +135,7 @@ test("mono utility only sets the font family and font-size-md carries the 13px s
   assert.match(fontSizeMdRule, /font-size:\s*13px/);
 });
 
-test("dashboard layout pins Chart.js to 4.5.0 and avoids unused htmx", () => {
+test("dashboard layout serves fonts and JS libraries locally for offline use", () => {
   const template = readFixture("../../../templates/layout.html");
 
   assert.match(
@@ -144,16 +144,26 @@ test("dashboard layout pins Chart.js to 4.5.0 and avoids unused htmx", () => {
   );
   assert.match(
     template,
-    /<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/chart\.js@4\.5\.0\/dist\/chart\.umd\.min\.js" integrity="sha384-XcdcwHqIPULERb2yDEM4R0XaQKU3YnDsrTmjACBZyfdVVqjh6xQ4\/DCMd7XLcA6Y" crossorigin="anonymous"><\/script>/,
+    /<link rel="stylesheet" href="{{assetURL "fonts\/inter\.css"}}">/,
   );
   assert.match(
     template,
-    /<script defer src="https:\/\/cdn\.jsdelivr\.net\/npm\/alpinejs@3\.15\.8\/dist\/cdn\.min\.js" integrity="sha384-LXWjKwDZz29o7TduNe\+r\/UxaolHh5FsSvy2W7bDHSZ8jJeGgDeuNnsDNHoxpSgDi" crossorigin="anonymous"><\/script>/,
+    /<script src="{{assetURL "vendor\/chart\.umd\.min\.js"}}"><\/script>/,
   );
   assert.match(
     template,
-    /<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/lucide@0\.577\.0\/dist\/umd\/lucide\.min\.js" integrity="sha384-orgVf2eX2\+m1zKAOIi09hD0W6GtVhoOUmqDK\+sysYB2JTZ4vS86j4jm\+X7a4Nnei" crossorigin="anonymous"><\/script>/,
+    /<script defer src="{{assetURL "vendor\/alpine\.min\.js"}}"><\/script>/,
   );
+  assert.match(
+    template,
+    /<script src="{{assetURL "vendor\/lucide\.min\.js"}}"><\/script>/,
+  );
+  // No external resources: the dashboard must render fully offline.
+  assert.doesNotMatch(
+    template,
+    /https?:\/\/(cdn\.jsdelivr\.net|fonts\.googleapis\.com|fonts\.gstatic\.com)/,
+  );
+  assert.doesNotMatch(template, /<link rel="preconnect"/);
   assert.doesNotMatch(template, /htmx/i);
   assert.match(
     template,

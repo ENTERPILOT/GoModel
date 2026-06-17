@@ -18,7 +18,7 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-//go:embed templates/*.html static/css/*.css static/js/*.js static/js/modules/*.js static/*.svg
+//go:embed templates/*.html static/css/*.css static/js/*.js static/js/modules/*.js static/vendor/*.js static/fonts/*.css static/fonts/*.woff2 static/*.svg
 var content embed.FS
 
 // Handler serves the admin dashboard UI.
