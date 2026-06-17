@@ -200,8 +200,13 @@ func (h *Handler) UsageLog(c *echo.Context) error {
 	}
 
 	if h.usageReader == nil {
+		// Echo the requested pagination so the response matches the enabled-reader
+		// contract. Returning limit:0 here would make the client send limit=0 on
+		// its next request, which fails validation above with a 400.
 		return c.JSON(http.StatusOK, usage.UsageLogResult{
 			Entries: []usage.UsageLogEntry{},
+			Limit:   params.Limit,
+			Offset:  params.Offset,
 		})
 	}
 

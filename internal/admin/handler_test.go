@@ -594,7 +594,9 @@ func TestUsageByUserPath_Error(t *testing.T) {
 
 func TestUsageLog_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/usage/log")
+	// Send pagination like the dashboard does; the disabled-reader response must
+	// echo it back so the client never resends limit=0 (which 400s).
+	c, rec := newHandlerContext("/admin/usage/log?limit=50&offset=0")
 
 	if err := h.UsageLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -609,6 +611,9 @@ func TestUsageLog_NilReader(t *testing.T) {
 	}
 	if len(result.Entries) != 0 {
 		t.Errorf("expected 0 entries, got %d", len(result.Entries))
+	}
+	if result.Limit != 50 {
+		t.Errorf("expected echoed limit 50, got %d", result.Limit)
 	}
 }
 
@@ -746,7 +751,9 @@ func TestUsageLog_WithFilters(t *testing.T) {
 
 func TestAuditLog_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/audit/log")
+	// Send pagination like the dashboard does; the disabled-reader response must
+	// echo it back so the client never resends limit=0 (which 400s).
+	c, rec := newHandlerContext("/admin/audit/log?limit=25&offset=0")
 
 	if err := h.AuditLog(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -761,6 +768,9 @@ func TestAuditLog_NilReader(t *testing.T) {
 	}
 	if len(result.Entries) != 0 {
 		t.Errorf("expected 0 entries, got %d", len(result.Entries))
+	}
+	if result.Limit != 25 {
+		t.Errorf("expected echoed limit 25, got %d", result.Limit)
 	}
 }
 

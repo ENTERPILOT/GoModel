@@ -109,8 +109,13 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 	}
 
 	if h.auditReader == nil {
+		// Echo the requested pagination so the response matches the enabled-reader
+		// contract. Returning limit:0 here would make the client send limit=0 on
+		// its next request, which fails validation above with a 400.
 		return c.JSON(http.StatusOK, auditLogListResponse{
 			Entries: []auditLogEntryResponse{},
+			Limit:   params.Limit,
+			Offset:  params.Offset,
 		})
 	}
 
