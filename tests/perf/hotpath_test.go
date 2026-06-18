@@ -358,9 +358,12 @@ func formatPerfGuardResult(name string, result testing.BenchmarkResult, maxAlloc
 func TestHotPathPerfGuard(t *testing.T) {
 	t.Helper()
 
-	// These ceilings are intentionally generous. They are here to catch obvious
-	// allocation regressions in the hottest code paths, not to freeze the exact
-	// current profile.
+	// Ceilings sit ~10% above the measured baseline: tight enough to catch real
+	// allocation regressions, loose enough to absorb minor Go/dependency drift.
+	// Allocation counts here are deterministic and match across architectures
+	// (linux/amd64 CI == darwin/arm64 local), so these are stable. When a change
+	// legitimately adds allocations, re-measure with `make perf-bench` and bump
+	// the affected ceiling in the same commit.
 	cases := []struct {
 		name      string
 		bench     func(*testing.B)
@@ -370,8 +373,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			name:      "gateway_chat_completion_hot_path",
 			bench:     BenchmarkGatewayHotPathChatCompletion,
-			maxAllocs: 125,
-			maxBytes:  15 * 1024,
+			maxAllocs: 120, // baseline 113
+			maxBytes:  15 * 1024, // baseline ~13.9 KB
 		},
 		{
 			// Production-shaped path: request resolves through a real Router +
@@ -381,20 +384,20 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// full catalog several times per request) would blow these limits.
 			name:      "gateway_chat_completion_hot_path_routed",
 			bench:     BenchmarkGatewayHotPathChatCompletionRouted,
-			maxAllocs: 160,
-			maxBytes:  18 * 1024,
+			maxAllocs: 150, // baseline 137
+			maxBytes:  16 * 1024, // baseline ~14.7 KB
 		},
 		{
 			name:      "openai_responses_stream_converter",
 			bench:     BenchmarkOpenAIResponsesStreamConverter,
-			maxAllocs: 310,
-			maxBytes:  25 * 1024,
+			maxAllocs: 222, // baseline 202
+			maxBytes:  22 * 1024, // baseline ~19.6 KB
 		},
 		{
 			name:      "shared_stream_audit_and_usage_observers",
 			bench:     BenchmarkSharedStreamingAuditAndUsageObservers,
-			maxAllocs: 170,
-			maxBytes:  9 * 1024,
+			maxAllocs: 170, // baseline 159; already tight, no headroom to trim
+			maxBytes:  9 * 1024, // baseline ~8.9 KB; already tight
 		},
 	}
 
