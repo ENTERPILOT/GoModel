@@ -184,12 +184,16 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 
 // StreamChatCompletion returns a raw response body for streaming (caller must close)
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	return p.client.DoStream(ctx, llmclient.Request{
+	stream, err := p.client.DoStream(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/chat/completions",
 		Body:     req.WithStreaming(),
 		Headers:  xGrokConversationHeaders(ctx, req),
 	})
+	if err != nil {
+		return nil, err
+	}
+	return providers.EnsureChatCompletionSSE(stream), nil
 }
 
 // ListModels retrieves the list of available models from xAI

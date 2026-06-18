@@ -6,6 +6,28 @@ import (
 	"testing"
 )
 
+// errAfterReadCloser yields its data once, then fails — simulating a connection
+// that drops mid-body after some bytes have arrived.
+type errAfterReadCloser struct {
+	data []byte
+	err  error
+	done bool
+}
+
+func (r *errAfterReadCloser) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	if len(r.data) == 0 {
+		r.done = true
+	}
+	return n, nil
+}
+
+func (r *errAfterReadCloser) Close() error { return nil }
+
 func TestEnsureChatCompletionSSE_ConvertsBufferedJSON(t *testing.T) {
 	// Upstream ignored stream:true and returned a buffered, non-SSE completion.
 	body := `{"id":"x","object":"chat.completion","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Hi there"}}]}`
@@ -60,6 +82,25 @@ func TestEnsureChatCompletionSSE_PassesThroughSSEWithLeadingComment(t *testing.T
 	}
 	if string(got) != body {
 		t.Fatalf("expected comment-prefixed SSE unchanged, got %q", string(got))
+	}
+}
+
+func TestEnsureChatCompletionSSE_PreservesPartialBodyOnReadError(t *testing.T) {
+	// Upstream began a buffered JSON body, then the connection dropped mid-read.
+	// The partial content must still reach the client, followed by [DONE].
+	partial := `{"id":"x","choices":[{"message":{"content":"Hel`
+	stream := &errAfterReadCloser{data: []byte(partial), err: io.ErrUnexpectedEOF}
+
+	got, err := io.ReadAll(EnsureChatCompletionSSE(stream))
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	out := string(got)
+	if !strings.Contains(out, "Hel") {
+		t.Fatalf("expected partial content preserved, got %q", out)
+	}
+	if !strings.HasSuffix(out, "data: [DONE]\n\n") {
+		t.Fatalf("expected terminal done marker, got %q", out)
 	}
 }
 

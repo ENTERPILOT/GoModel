@@ -149,11 +149,15 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	if err != nil {
 		return nil, err
 	}
-	return p.client.DoStream(ctx, llmclient.Request{
+	stream, err := p.client.DoStream(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/chat/completions",
 		Body:     body,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return providers.EnsureChatCompletionSSE(stream), nil
 }
 
 // ListModels retrieves the list of available models from DeepSeek.

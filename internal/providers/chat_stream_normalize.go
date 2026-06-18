@@ -31,24 +31,37 @@ func EnsureChatCompletionSSE(stream io.ReadCloser) io.ReadCloser {
 	}
 
 	reader := bufio.NewReaderSize(stream, peekForNonSSE)
-	prefix, _ := reader.Peek(peekForNonSSE)
-	if firstNonSpace(prefix) != '{' {
-		// Genuine SSE (or empty): stream through unchanged.
+	if firstNonSpaceByte(reader, peekForNonSSE) != '{' {
+		// Genuine SSE (or empty): stream through unchanged, no buffering.
 		return &bufferedReadCloser{Reader: reader, closer: stream}
 	}
 
 	body, err := io.ReadAll(reader)
 	_ = stream.Close() //nolint:errcheck
-	if err != nil {
+	if err != nil && len(body) == 0 {
+		// The body looked like JSON but nothing arrived before the failure;
+		// still terminate so the client stops waiting instead of hanging.
 		return io.NopCloser(bytes.NewReader(chatDonePayload))
 	}
+	// A partial read (err != nil with body != "") still forwards what arrived so
+	// generated content is never silently dropped; bufferedCompletionToSSE
+	// forwards the raw bytes when they no longer parse as a complete object.
 	return io.NopCloser(bytes.NewReader(bufferedCompletionToSSE(body)))
 }
 
-// firstNonSpace returns the first non-whitespace byte of data, or 0 if none.
-func firstNonSpace(data []byte) byte {
-	for _, b := range data {
-		switch b {
+// firstNonSpaceByte reports the first non-whitespace byte buffered by reader,
+// peeking one byte further at a time so a genuine SSE stream is classified from
+// its first token without blocking until a full buffer fills. It never consumes
+// input, so a passed-through stream is forwarded byte-for-byte. Returns 0 when
+// the stream ends, errors, or yields only whitespace within max bytes.
+func firstNonSpaceByte(r *bufio.Reader, max int) byte {
+	for i := 1; i <= max; i++ {
+		prefix, err := r.Peek(i)
+		if len(prefix) < i {
+			_ = err // EOF or error before any non-space byte was found
+			return 0
+		}
+		switch b := prefix[i-1]; b {
 		case ' ', '\t', '\r', '\n':
 			continue
 		default:
