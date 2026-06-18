@@ -125,11 +125,15 @@ func (p *CompatibleProvider) StreamChatCompletion(ctx context.Context, req *core
 	if err != nil {
 		return nil, err
 	}
-	return p.client.DoStream(ctx, p.prepareRequest(llmclient.Request{
+	stream, err := p.client.DoStream(ctx, p.prepareRequest(llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/chat/completions",
 		Body:     body,
 	}))
+	if err != nil {
+		return nil, err
+	}
+	return providers.EnsureChatCompletionSSE(stream), nil
 }
 
 func (p *CompatibleProvider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
