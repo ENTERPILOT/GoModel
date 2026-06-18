@@ -7,23 +7,34 @@ import (
 	"gomodel/internal/core"
 )
 
-// buildBenchRegistry creates a registry with `providersN` providers each holding
-// `perProvider` models, mirroring a realistic multi-provider catalog.
-func buildBenchRegistry(providersN, perProvider int) *ModelRegistry {
-	entries := make([]registryModelEntry, 0, providersN*perProvider)
-	for p := 0; p < providersN; p++ {
-		name := fmt.Sprintf("prov%d", p)
-		prov := &mockProvider{name: name}
-		for m := 0; m < perProvider; m++ {
-			entries = append(entries, registryModelEntry{
-				provider:     prov,
-				providerName: name,
-				providerType: name,
-				modelID:      fmt.Sprintf("model-%d-%d", p, m),
-			})
-		}
+// buildBenchRegistry creates a registry holding exactly totalModels models,
+// distributed round-robin across providersN providers, mirroring a realistic
+// multi-provider catalog. Model IDs are globally unique (model-<i>) so the count
+// is exact regardless of how it divides across providers.
+func buildBenchRegistry(providersN, totalModels int) *ModelRegistry {
+	provs := make([]*mockProvider, providersN)
+	for p := range provs {
+		provs[p] = &mockProvider{name: fmt.Sprintf("prov%d", p)}
+	}
+	entries := make([]registryModelEntry, 0, totalModels)
+	for i := 0; i < totalModels; i++ {
+		p := i % providersN
+		entries = append(entries, registryModelEntry{
+			provider:     provs[p],
+			providerName: provs[p].name,
+			providerType: provs[p].name,
+			modelID:      fmt.Sprintf("model-%d", i),
+		})
 	}
 	return newTestRegistryWithModels(entries...)
+}
+
+// benchSelector returns a "<provider>/<model>" selector that exists in a registry
+// built by buildBenchRegistry(providersN, totalModels), picking a mid-catalog
+// model. Position is irrelevant to the O(1) index but the model must exist.
+func benchSelector(providersN, totalModels int) string {
+	mid := totalModels / 2
+	return fmt.Sprintf("prov%d/model-%d", mid%providersN, mid)
 }
 
 // BenchmarkResolvePerRequest simulates the resolution calls a single chat
@@ -32,13 +43,13 @@ func buildBenchRegistry(providersN, perProvider int) *ModelRegistry {
 func BenchmarkResolvePerRequest(b *testing.B) {
 	for _, n := range []int{50, 300, 1000} {
 		b.Run(fmt.Sprintf("models=%d", n), func(b *testing.B) {
-			reg := buildBenchRegistry(6, n/6)
+			reg := buildBenchRegistry(6, n)
 			router, err := NewRouter(reg)
 			if err != nil {
 				b.Fatalf("NewRouter: %v", err)
 			}
 			// A mid-catalog qualified selector, the common production case.
-			sel := fmt.Sprintf("prov3/model-3-%d", (n/6)/2)
+			sel := benchSelector(6, n)
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -59,7 +70,7 @@ func BenchmarkResolvePerRequest(b *testing.B) {
 func BenchmarkListModelsWithProvider(b *testing.B) {
 	for _, n := range []int{50, 300, 1000} {
 		b.Run(fmt.Sprintf("models=%d", n), func(b *testing.B) {
-			reg := buildBenchRegistry(6, n/6)
+			reg := buildBenchRegistry(6, n)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {

@@ -171,15 +171,20 @@ func (r *ModelRegistry) buildSelectorIndexLocked() {
 	byType := make(map[string]core.ModelSelector, total)
 	for providerName, providerModels := range r.modelsByProvider {
 		for _, info := range providerModels {
-			publicName := providerName
+			publicName := strings.TrimSpace(providerName)
 			if info.ProviderName != "" {
-				publicName = info.ProviderName
+				publicName = strings.TrimSpace(info.ProviderName)
 			}
 			id := strings.TrimSpace(info.Model.ID)
+			if publicName == "" || id == "" {
+				continue
+			}
+			// Keys are trimmed to match the trimmed lookup inputs and the
+			// previous scan, which compared trimmed fields on both sides.
 			sel := core.ModelSelector{Provider: publicName, Model: info.Model.ID}
 			byName[publicName+"/"+id] = sel
-			if info.ProviderType != "" {
-				typeKey := info.ProviderType + "/" + id
+			if providerType := strings.TrimSpace(info.ProviderType); providerType != "" {
+				typeKey := providerType + "/" + id
 				if existing, ok := byType[typeKey]; !ok || sel.Provider < existing.Provider {
 					byType[typeKey] = sel
 				}
