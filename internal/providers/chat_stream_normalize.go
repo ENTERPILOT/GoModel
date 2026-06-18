@@ -99,12 +99,12 @@ func bufferedCompletionToSSE(body []byte) []byte {
 		}
 	}
 
-	out := make([]byte, 0, len(payload)+len("data: \n\n")+len(chatDonePayload))
-	out = append(out, "data: "...)
-	out = append(out, payload...)
-	out = append(out, '\n', '\n')
-	out = append(out, chatDonePayload...)
-	return out
+	var out bytes.Buffer
+	out.WriteString("data: ")
+	out.Write(payload)
+	out.WriteString("\n\n")
+	out.Write(chatDonePayload)
+	return out.Bytes()
 }
 
 // bufferedReadCloser pairs a buffered reader with the underlying stream's Close.
