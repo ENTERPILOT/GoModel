@@ -36,16 +36,13 @@ func EnsureChatCompletionSSE(stream io.ReadCloser) io.ReadCloser {
 		return &bufferedReadCloser{Reader: reader, closer: stream}
 	}
 
-	body, err := io.ReadAll(reader)
+	// The '{' that classified this body is already buffered, so io.ReadAll
+	// always returns at least that byte; a mid-read failure still yields the
+	// partial bytes. Either way bufferedCompletionToSSE forwards what arrived
+	// (raw when the JSON is truncated) and appends [DONE], so generated content
+	// is never dropped and the client always receives a terminator.
+	body, _ := io.ReadAll(reader)
 	_ = stream.Close() //nolint:errcheck
-	if err != nil && len(body) == 0 {
-		// The body looked like JSON but nothing arrived before the failure;
-		// still terminate so the client stops waiting instead of hanging.
-		return io.NopCloser(bytes.NewReader(chatDonePayload))
-	}
-	// A partial read (err != nil with body != "") still forwards what arrived so
-	// generated content is never silently dropped; bufferedCompletionToSSE
-	// forwards the raw bytes when they no longer parse as a complete object.
 	return io.NopCloser(bytes.NewReader(bufferedCompletionToSSE(body)))
 }
 

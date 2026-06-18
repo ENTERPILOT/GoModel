@@ -184,6 +184,9 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 
 // StreamChatCompletion returns a raw response body for streaming (caller must close)
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("chat request is required", nil)
+	}
 	stream, err := p.client.DoStream(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/chat/completions",
