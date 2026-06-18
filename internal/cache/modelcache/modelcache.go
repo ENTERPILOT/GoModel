@@ -5,8 +5,9 @@ package modelcache
 
 import (
 	"context"
-	"encoding/json"
 	"time"
+
+	"github.com/goccy/go-json"
 )
 
 // ModelCache represents the cached model data structure.

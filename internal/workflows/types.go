@@ -3,10 +3,11 @@ package workflows
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 )

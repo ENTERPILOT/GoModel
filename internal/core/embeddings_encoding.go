@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"math"
 	"strings"
+
+	"github.com/goccy/go-json"
 )
 
 // maxEmbeddingDims caps how large a single vector may be before encoding

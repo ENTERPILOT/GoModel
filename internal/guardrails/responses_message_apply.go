@@ -1,9 +1,10 @@
 package guardrails
 
 import (
-	"encoding/json"
 	"reflect"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 )

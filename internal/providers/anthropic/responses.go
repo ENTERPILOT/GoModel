@@ -3,13 +3,14 @@ package anthropic
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
 

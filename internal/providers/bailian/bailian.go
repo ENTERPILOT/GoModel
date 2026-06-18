@@ -7,10 +7,11 @@ package bailian
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"

@@ -4,11 +4,12 @@ package conversationstore
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 )

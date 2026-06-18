@@ -266,7 +266,7 @@ func (m *ResponseCacheMiddleware) Close() error {
 func internalRequestHeaders(ctx context.Context) http.Header {
 	headers := make(http.Header)
 	if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
-		for key, values := range snapshot.GetHeaders() {
+		for key, values := range snapshot.HeadersView() {
 			key = http.CanonicalHeaderKey(key)
 			if _, allowed := internalRequestHeaderAllowlist[key]; !allowed {
 				continue

@@ -2,9 +2,10 @@
 package openai
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"

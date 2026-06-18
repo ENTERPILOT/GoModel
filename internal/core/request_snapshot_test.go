@@ -71,10 +71,10 @@ func TestNewRequestSnapshot_DefensivelyCopiesMutableFields(t *testing.T) {
 	}
 }
 
-func TestNewRequestSnapshotWithOwnedBody_TakesOwnershipOfCapturedBytes(t *testing.T) {
+func TestNewRequestSnapshotWithOwnedMaps_TakesOwnershipOfCapturedBytes(t *testing.T) {
 	rawBody := []byte(`{"model":"gpt-5-mini"}`)
 
-	snapshot := NewRequestSnapshotWithOwnedBody(
+	snapshot := NewRequestSnapshotWithOwnedMaps(
 		"POST",
 		"/v1/chat/completions",
 		nil,
@@ -114,12 +114,12 @@ func BenchmarkNewRequestSnapshotClonedBody(b *testing.B) {
 	}
 }
 
-func BenchmarkNewRequestSnapshotWithOwnedBody(b *testing.B) {
+func BenchmarkNewRequestSnapshotWithOwnedMaps(b *testing.B) {
 	body := []byte(`{"model":"gpt-5-mini","messages":[{"role":"user","content":"hello world"}],"response_format":{"type":"json_schema"}}`)
 
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = NewRequestSnapshotWithOwnedBody("POST", "/v1/chat/completions", nil, nil, nil, "application/json", body, false, "req-123", nil)
+		_ = NewRequestSnapshotWithOwnedMaps("POST", "/v1/chat/completions", nil, nil, nil, "application/json", body, false, "req-123", nil)
 	}
 }
 

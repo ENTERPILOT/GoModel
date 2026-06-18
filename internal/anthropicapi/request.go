@@ -2,10 +2,11 @@ package anthropicapi
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 )

@@ -1,6 +1,6 @@
 package core
 
-import "encoding/json"
+import "github.com/goccy/go-json"
 
 func (r *BatchRequest) UnmarshalJSON(data []byte) error {
 	var raw struct {

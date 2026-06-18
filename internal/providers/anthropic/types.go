@@ -1,6 +1,6 @@
 package anthropic
 
-import "encoding/json"
+import "github.com/goccy/go-json"
 
 // anthropicThinking represents the thinking configuration for Anthropic's extended thinking.
 // For adaptive-thinking models (Opus 4.6+): {type: "adaptive"} (budget_tokens omitted).

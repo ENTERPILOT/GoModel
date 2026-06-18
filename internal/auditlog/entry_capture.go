@@ -2,11 +2,12 @@ package auditlog
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 )
@@ -211,7 +212,7 @@ func internalJSONAuditHeaders(ctx context.Context, requestID string) http.Header
 		headers.Set(core.UserPathHeaderNameFromContext(ctx), userPath)
 	}
 	if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
-		snapshotHeaders := snapshot.GetHeaders()
+		snapshotHeaders := snapshot.HeadersView()
 		for _, key := range []string{"Traceparent", "Tracestate", "Baggage"} {
 			for _, value := range snapshotHeaders[key] {
 				headers.Add(key, value)

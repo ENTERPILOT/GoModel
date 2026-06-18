@@ -2,11 +2,12 @@
 package live
 
 import (
-	"encoding/json"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/auditlog"
 	"gomodel/internal/usage"

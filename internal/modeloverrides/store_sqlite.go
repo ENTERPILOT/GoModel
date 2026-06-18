@@ -3,10 +3,11 @@ package modeloverrides
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 )
 
 // SQLiteStore stores model overrides in SQLite.

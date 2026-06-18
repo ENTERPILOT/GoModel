@@ -2,12 +2,13 @@ package providers
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
 

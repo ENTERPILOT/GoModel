@@ -1,6 +1,6 @@
 package core
 
-import "encoding/json"
+import "github.com/goccy/go-json"
 
 // StreamOptions controls streaming behavior options.
 // This is used to request usage data in streaming responses.

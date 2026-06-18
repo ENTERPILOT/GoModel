@@ -2,11 +2,12 @@ package modeldata
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/goccy/go-json"
 )
 
 // httpClient is a shared HTTP client for model list fetching.

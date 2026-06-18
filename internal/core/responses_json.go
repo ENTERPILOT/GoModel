@@ -2,8 +2,9 @@ package core
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
+
+	"github.com/goccy/go-json"
 )
 
 // responsesUtilityRequestFields lists the JSON fields recognized on responses

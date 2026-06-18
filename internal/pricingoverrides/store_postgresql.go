@@ -2,10 +2,11 @@ package pricingoverrides
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )

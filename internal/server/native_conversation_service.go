@@ -2,12 +2,13 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"

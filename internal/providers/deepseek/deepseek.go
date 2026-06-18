@@ -3,10 +3,11 @@ package deepseek
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"

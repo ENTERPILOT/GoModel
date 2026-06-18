@@ -1,6 +1,6 @@
 package core
 
-import "encoding/json"
+import "github.com/goccy/go-json"
 
 // BatchRequest is OpenAI-compatible for core fields and extends with inline requests.
 //

@@ -5,11 +5,12 @@ import (
 
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
 	"time"
+
+	"github.com/goccy/go-json"
 )
 
 const sqliteTimestampBoundaryLayout = "2006-01-02T15:04:05"

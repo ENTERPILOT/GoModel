@@ -1,10 +1,11 @@
 package core
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/goccy/go-json"
 )
 
 type canonicalJSONSpec[T any] struct {

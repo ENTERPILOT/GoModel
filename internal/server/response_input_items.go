@@ -1,9 +1,10 @@
 package server
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
 

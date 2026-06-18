@@ -8,11 +8,12 @@ package googlecommon
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"

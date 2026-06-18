@@ -4,7 +4,7 @@
 // independent of which provider ultimately serves the request.
 package anthropicapi
 
-import "encoding/json"
+import "github.com/goccy/go-json"
 
 // MessagesRequest is the Anthropic Messages API request body.
 // System and message content fields are polymorphic on the wire (string or

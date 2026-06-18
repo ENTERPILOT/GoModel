@@ -2,9 +2,10 @@ package responsecache
 
 import (
 	"bytes"
-	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/labstack/echo/v5"
 

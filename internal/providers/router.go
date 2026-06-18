@@ -52,6 +52,14 @@ type modelWithProviderLister interface {
 	ListModelsWithProvider() []ModelWithProvider
 }
 
+// qualifiedSelectorResolver is an optional fast path for qualified selector
+// resolution. Implementations resolve a "<segment>/<modelID>" pair via an O(1)
+// index instead of scanning the catalog. A false result means the caller should
+// fall back to the slower catalog scan for raw/edge-case selectors.
+type qualifiedSelectorResolver interface {
+	ResolveProviderSelector(segment, modelID string) (core.ModelSelector, bool)
+}
+
 type providerModelRefresher interface {
 	RefreshProviderModels(ctx context.Context, providerSelector string) (int, error)
 }
@@ -135,28 +143,23 @@ func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector,
 		return core.ModelSelector{}, false
 	}
 
+	// O(1) fast path: direct provider name/type match. Falls through to the
+	// catalog scan only for raw slash-shaped IDs and other edge cases.
+	if resolver, ok := r.lookup.(qualifiedSelectorResolver); ok {
+		if concrete, ok := resolver.ResolveProviderSelector(providerSegment, modelID); ok {
+			return concrete, true
+		}
+	}
+
+	// Fallback for lookups that don't implement qualifiedSelectorResolver (and for
+	// raw slash-shaped model IDs the fast path can't key on). The parsed-modelID
+	// pass mirrors the fast path for non-indexed lookups; the requested.Model pass
+	// additionally resolves models whose own IDs contain a slash.
 	entries := models.ListModelsWithProvider()
 
-	for _, entry := range entries {
-		if strings.TrimSpace(entry.ProviderName) != providerSegment {
-			continue
-		}
-		if strings.TrimSpace(entry.Model.ID) != modelID {
-			continue
-		}
-		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
+	if concrete, ok := resolveProviderOwnedRawSelector(entries, providerSegment, modelID); ok {
+		return concrete, true
 	}
-
-	for _, entry := range entries {
-		if strings.TrimSpace(entry.ProviderType) != providerSegment {
-			continue
-		}
-		if strings.TrimSpace(entry.Model.ID) != modelID {
-			continue
-		}
-		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
-	}
-
 	if concrete, ok := resolveProviderOwnedRawSelector(entries, providerSegment, requested.Model); ok {
 		return concrete, true
 	}

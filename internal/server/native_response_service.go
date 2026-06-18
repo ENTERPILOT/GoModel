@@ -2,11 +2,12 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/labstack/echo/v5"
 

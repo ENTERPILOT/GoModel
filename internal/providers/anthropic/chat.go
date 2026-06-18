@@ -2,9 +2,10 @@ package anthropic
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"

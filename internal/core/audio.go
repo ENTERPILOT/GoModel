@@ -1,9 +1,10 @@
 package core
 
 import (
-	"encoding/json"
 	"io"
 	"strings"
+
+	"github.com/goccy/go-json"
 )
 
 // AudioSpeechRequest is an OpenAI-compatible POST /v1/audio/speech

@@ -2,11 +2,12 @@ package modelcache
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/goccy/go-json"
 )
 
 // LocalCache implements Cache using local file storage.

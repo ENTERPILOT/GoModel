@@ -3,8 +3,9 @@ package anthropicapi
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"io"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/streaming"
 )

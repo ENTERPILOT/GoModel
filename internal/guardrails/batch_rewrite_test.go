@@ -26,12 +26,12 @@ func TestRewriteGuardedChatBatchBody(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		originalBody   func(orig *core.ChatRequest) json.RawMessage
-		original       *core.ChatRequest
-		modified       *core.ChatRequest
-		wantErrIs      core.ErrorType // empty = expect success
-		wantBodyHas    string         // substring assertion when no error
+		name         string
+		originalBody func(orig *core.ChatRequest) json.RawMessage
+		original     *core.ChatRequest
+		modified     *core.ChatRequest
+		wantErrIs    core.ErrorType // empty = expect success
+		wantBodyHas  string         // substring assertion when no error
 	}{
 		{
 			name:         "nil modified rejected with invalid_request_error",
@@ -55,7 +55,7 @@ func TestRewriteGuardedChatBatchBody(t *testing.T) {
 			wantBodyHas:  `"rewritten"`,
 		},
 		{
-			name: "validation error from message reorder propagates as invalid_request_error",
+			name:         "validation error from message reorder propagates as invalid_request_error",
 			originalBody: originalBody,
 			original:     makeReq("user", "hello"),
 			modified: &core.ChatRequest{

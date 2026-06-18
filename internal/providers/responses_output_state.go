@@ -1,10 +1,11 @@
 package providers
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
 )

@@ -2,10 +2,11 @@ package server
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 )

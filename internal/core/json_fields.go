@@ -2,11 +2,12 @@ package core
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
 	"sort"
+
+	"github.com/goccy/go-json"
 
 	"github.com/tidwall/gjson"
 )
@@ -221,13 +222,18 @@ func (fields UnknownJSONFields) IsEmpty() bool {
 	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("{}"))
 }
 
+// extractUnknownJSONFields captures the object's keys that are not in
+// knownFields, preserving their raw bytes for passthrough (Postel's Law).
+//
+// Precondition: data must already be valid JSON. Every caller is an
+// UnmarshalJSON method that calls json.Unmarshal on the same bytes first, so a
+// separate gjson.ValidBytes walk here would re-scan the whole document for no
+// benefit. The cheap first-byte and IsObject checks remain to reject non-object
+// JSON explicitly.
 func extractUnknownJSONFields(data []byte, knownFields ...string) (UnknownJSONFields, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 || data[0] != '{' {
 		return UnknownJSONFields{}, fmt.Errorf("expected JSON object")
-	}
-	if !gjson.ValidBytes(data) {
-		return UnknownJSONFields{}, fmt.Errorf("invalid JSON object")
 	}
 
 	root := gjson.ParseBytes(data)

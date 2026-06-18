@@ -1,13 +1,14 @@
 package usage
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 )

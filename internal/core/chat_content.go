@@ -2,9 +2,10 @@ package core
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/goccy/go-json"
 )
 
 // ContentPart represents a single OpenAI-compatible multimodal chat content part.

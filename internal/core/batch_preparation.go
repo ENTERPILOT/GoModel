@@ -3,12 +3,13 @@ package core
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"net/http"
 	"strings"
+
+	"github.com/goccy/go-json"
 )
 
 // BatchPreparationMetadata captures request-scoped batch preprocessing effects

@@ -45,11 +45,27 @@ func NewRequestSnapshot(method, path string, routeParams map[string]string, quer
 	return newRequestSnapshot(method, path, routeParams, queryParams, headers, contentType, capturedBody, bodyNotCaptured, requestID, traceMetadata, true, userPath...)
 }
 
-// NewRequestSnapshotWithOwnedBody constructs a RequestSnapshot that takes
-// ownership of capturedBody without cloning it. Callers must ensure the slice
-// will not be mutated after passing it here.
-func NewRequestSnapshotWithOwnedBody(method, path string, routeParams map[string]string, queryParams, headers map[string][]string, contentType string, capturedBody []byte, bodyNotCaptured bool, requestID string, traceMetadata map[string]string, userPath ...string) *RequestSnapshot {
-	return newRequestSnapshot(method, path, routeParams, queryParams, headers, contentType, capturedBody, bodyNotCaptured, requestID, traceMetadata, false, userPath...)
+// NewRequestSnapshotWithOwnedMaps constructs a RequestSnapshot that takes
+// ownership of routeParams, queryParams, traceMetadata, and capturedBody
+// (callers must not mutate them afterwards) while still defensively cloning
+// headers, which is typically the live request header map mutated downstream.
+//
+// Use this on the ingress hot path, where the route/query/trace maps and body
+// are freshly built for the snapshot and would otherwise be cloned for no benefit.
+func NewRequestSnapshotWithOwnedMaps(method, path string, routeParams map[string]string, queryParams, headers map[string][]string, contentType string, capturedBody []byte, bodyNotCaptured bool, requestID string, traceMetadata map[string]string, userPath ...string) *RequestSnapshot {
+	return &RequestSnapshot{
+		Method:          method,
+		Path:            path,
+		UserPath:        firstUserPath(userPath),
+		routeParams:     routeParams,
+		queryParams:     queryParams,
+		headers:         cloneMultiMap(headers),
+		ContentType:     contentType,
+		capturedBody:    capturedBody,
+		BodyNotCaptured: bodyNotCaptured,
+		RequestID:       requestID,
+		traceMetadata:   traceMetadata,
+	}
 }
 
 func newRequestSnapshot(method, path string, routeParams map[string]string, queryParams, headers map[string][]string, contentType string, capturedBody []byte, bodyNotCaptured bool, requestID string, traceMetadata map[string]string, cloneBody bool, userPath ...string) *RequestSnapshot {
@@ -121,6 +137,13 @@ func (s *RequestSnapshot) WithOwnedCapturedBody(capturedBody []byte, bodyNotCapt
 	return &cloned
 }
 
+// The snapshot is immutable after construction and exposes its body, headers,
+// and parameter maps two ways: a Get*/CapturedBody accessor that returns a
+// defensive copy (for callers that need an independently mutable value), and a
+// *View accessor that returns the underlying value with no allocation (for
+// read-only callers). The request hot path uses the View accessors; the copying
+// accessors exist for callers that mutate the result.
+
 // CapturedBody returns a defensive copy of the captured request body bytes.
 func (s *RequestSnapshot) CapturedBody() []byte {
 	if s == nil {
@@ -160,6 +183,15 @@ func (s *RequestSnapshot) GetHeaders() map[string][]string {
 		return nil
 	}
 	return cloneMultiMap(s.headers)
+}
+
+// HeadersView returns the captured request headers without cloning. Callers
+// must treat the returned map as read-only.
+func (s *RequestSnapshot) HeadersView() map[string][]string {
+	if s == nil {
+		return nil
+	}
+	return s.headers
 }
 
 // GetTraceMetadata returns a defensive copy of the captured trace metadata.

@@ -5,11 +5,12 @@ import (
 
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 )
 
 // SQLiteReader implements UsageReader for SQLite databases.

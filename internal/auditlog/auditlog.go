@@ -4,10 +4,11 @@ package auditlog
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 )
 
 // LogStore defines the interface for audit log storage backends.

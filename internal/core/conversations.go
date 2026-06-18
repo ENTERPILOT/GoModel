@@ -2,9 +2,10 @@ package core
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"unicode/utf8"
+
+	"github.com/goccy/go-json"
 )
 
 // ConversationObject is the value of the "object" field on a conversation.

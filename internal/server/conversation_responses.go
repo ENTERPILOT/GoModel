@@ -2,10 +2,11 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/conversationstore"
 	"gomodel/internal/core"

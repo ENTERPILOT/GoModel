@@ -1,11 +1,12 @@
 package providers
 
 import (
-	"encoding/json"
 	"maps"
 	"reflect"
 	"slices"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/config"
 	"gomodel/internal/core"

@@ -2,9 +2,10 @@ package responsecache
 
 import (
 	"bytes"
-	"encoding/json"
 	"sort"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 )

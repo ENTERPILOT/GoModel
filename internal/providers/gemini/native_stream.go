@@ -2,11 +2,12 @@ package gemini
 
 import (
 	"bufio"
-	"encoding/json"
 	"io"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 )

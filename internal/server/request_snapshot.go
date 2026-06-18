@@ -44,7 +44,9 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
 			}
 
-			snapshot := core.NewRequestSnapshotWithOwnedBody(
+			// Query/route/trace maps are freshly built here, so the snapshot can
+			// own them directly; only req.Header is live and gets cloned.
+			snapshot := core.NewRequestSnapshotWithOwnedMaps(
 				req.Method,
 				req.URL.Path,
 				snapshotRouteParams(req.URL.Path, routeParamsMap(c.PathValues())),

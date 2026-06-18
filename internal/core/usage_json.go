@@ -1,7 +1,7 @@
 package core
 
 import (
-	"encoding/json"
+	"github.com/goccy/go-json"
 )
 
 var usageKnownFields = map[string]struct{}{

@@ -1,6 +1,6 @@
 package core
 
-import "encoding/json"
+import "github.com/goccy/go-json"
 
 // ResponsesRequest represents the request body for the Responses API.
 // This is the OpenAI-compatible /v1/responses endpoint. Unknown JSON members

@@ -2,11 +2,12 @@ package providers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 )

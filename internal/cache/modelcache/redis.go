@@ -2,10 +2,11 @@ package modelcache
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/cache"
 )

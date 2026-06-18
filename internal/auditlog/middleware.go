@@ -8,13 +8,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/goccy/go-json"
 
 	"github.com/andybalholm/brotli"
 	"github.com/google/uuid"

@@ -2,8 +2,9 @@ package streaming
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
+
+	"github.com/goccy/go-json"
 )
 
 const maxPendingEventBytes = 256 * 1024

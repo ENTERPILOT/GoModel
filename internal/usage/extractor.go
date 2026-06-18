@@ -2,12 +2,13 @@ package usage
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"maps"
 	"path"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
 

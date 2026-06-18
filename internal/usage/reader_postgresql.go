@@ -4,10 +4,11 @@ import (
 	"gomodel/internal/storage/sqlutil"
 
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )

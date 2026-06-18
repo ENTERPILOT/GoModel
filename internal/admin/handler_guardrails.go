@@ -1,10 +1,11 @@
 package admin
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/labstack/echo/v5"
 

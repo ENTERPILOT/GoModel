@@ -9,7 +9,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -18,6 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 )
 
 const oracleDefaultModel = "openai.gpt-oss-120b"

@@ -2,7 +2,8 @@ package responsecache
 
 import (
 	"bytes"
-	"encoding/json"
+
+	"github.com/goccy/go-json"
 )
 
 // validateCacheableSSE reports whether raw is a complete, cache-safe SSE body.

@@ -3,10 +3,11 @@ package core
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/goccy/go-json"
 )
 
 // ErrorType represents the type of error that occurred

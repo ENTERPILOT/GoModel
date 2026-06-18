@@ -1,8 +1,9 @@
 package providers
 
 import (
-	"encoding/json"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 )

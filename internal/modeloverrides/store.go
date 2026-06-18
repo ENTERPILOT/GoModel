@@ -2,10 +2,11 @@ package modeloverrides
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/modelselectors"
 )

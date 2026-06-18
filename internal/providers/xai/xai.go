@@ -5,11 +5,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 	"gomodel/internal/llmclient"
@@ -108,7 +109,7 @@ func xGrokConversationIDFromSnapshot(ctx context.Context) string {
 	if snapshot == nil {
 		return ""
 	}
-	for key, values := range snapshot.GetHeaders() {
+	for key, values := range snapshot.HeadersView() {
 		if !strings.EqualFold(key, grokConvIDHeader) {
 			continue
 		}

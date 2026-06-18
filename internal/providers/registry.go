@@ -2,13 +2,14 @@
 package providers
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/config"
 	"gomodel/internal/cache/modelcache"
@@ -57,6 +58,14 @@ type ModelRegistry struct {
 	sortedModels             []core.Model
 	sortedModelsWithProvider []ModelWithProvider
 	categoryCache            map[core.ModelCategory][]ModelWithProvider
+
+	// Lazy O(1) resolution index from qualified selector keys ("<segment>/<id>")
+	// to concrete provider-name-qualified selectors. qualifiedByName is keyed by
+	// provider instance name, qualifiedByType by provider type. nil means the
+	// index needs rebuilding; both maps are built together and cleared by
+	// invalidateSortedCaches whenever the catalog changes. Protected by mu.
+	qualifiedByName map[string]core.ModelSelector
+	qualifiedByType map[string]core.ModelSelector
 }
 
 type metadataEnrichmentStats struct {
@@ -100,6 +109,85 @@ func (r *ModelRegistry) invalidateSortedCaches() {
 	r.sortedModels = nil
 	r.sortedModelsWithProvider = nil
 	r.categoryCache = nil
+	r.qualifiedByName = nil
+	r.qualifiedByType = nil
+}
+
+// ResolveProviderSelector resolves a qualified "<segment>/<modelID>" selector,
+// where segment is a provider instance name or a provider type, to the concrete
+// provider-name-qualified selector. Provider-name matches take precedence over
+// provider-type matches, mirroring catalog-scan resolution. Returns ok=false
+// when the segment+model pair is not a direct name/type match so callers can
+// fall back to slower resolution for raw slash-shaped IDs and other edge cases.
+//
+// This is O(1) and exists so the per-request routing path does not copy and
+// linearly scan the entire model catalog.
+func (r *ModelRegistry) ResolveProviderSelector(segment, modelID string) (core.ModelSelector, bool) {
+	segment = strings.TrimSpace(segment)
+	modelID = strings.TrimSpace(modelID)
+	if segment == "" || modelID == "" {
+		return core.ModelSelector{}, false
+	}
+	key := segment + "/" + modelID
+
+	r.mu.RLock()
+	if r.qualifiedByName != nil {
+		sel, ok := lookupSelectorIndex(r.qualifiedByName, r.qualifiedByType, key)
+		r.mu.RUnlock()
+		return sel, ok
+	}
+	r.mu.RUnlock()
+
+	r.mu.Lock()
+	r.buildSelectorIndexLocked()
+	sel, ok := lookupSelectorIndex(r.qualifiedByName, r.qualifiedByType, key)
+	r.mu.Unlock()
+	return sel, ok
+}
+
+func lookupSelectorIndex(byName, byType map[string]core.ModelSelector, key string) (core.ModelSelector, bool) {
+	if sel, ok := byName[key]; ok {
+		return sel, true
+	}
+	if sel, ok := byType[key]; ok {
+		return sel, true
+	}
+	return core.ModelSelector{}, false
+}
+
+// buildSelectorIndexLocked populates the qualified selector index from the
+// current catalog. Caller must hold the write lock. On provider-type collisions
+// it keeps the lexicographically smallest provider name so resolution is
+// deterministic and matches the previous sorted-scan behavior.
+func (r *ModelRegistry) buildSelectorIndexLocked() {
+	if r.qualifiedByName != nil {
+		return
+	}
+	total := 0
+	for _, providerModels := range r.modelsByProvider {
+		total += len(providerModels)
+	}
+	byName := make(map[string]core.ModelSelector, total)
+	byType := make(map[string]core.ModelSelector, total)
+	for providerName, providerModels := range r.modelsByProvider {
+		for _, info := range providerModels {
+			publicName := providerName
+			if info.ProviderName != "" {
+				publicName = info.ProviderName
+			}
+			id := strings.TrimSpace(info.Model.ID)
+			sel := core.ModelSelector{Provider: publicName, Model: info.Model.ID}
+			byName[publicName+"/"+id] = sel
+			if info.ProviderType != "" {
+				typeKey := info.ProviderType + "/" + id
+				if existing, ok := byType[typeKey]; !ok || sel.Provider < existing.Provider {
+					byType[typeKey] = sel
+				}
+			}
+		}
+	}
+	r.qualifiedByName = byName
+	r.qualifiedByType = byType
 }
 
 // RegisterProvider adds a provider to the registry

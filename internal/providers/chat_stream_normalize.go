@@ -3,8 +3,9 @@ package providers
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"io"
+
+	"github.com/goccy/go-json"
 )
 
 // chatDonePayload terminates a chat completions SSE stream.

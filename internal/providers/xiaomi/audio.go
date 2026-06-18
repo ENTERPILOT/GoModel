@@ -3,11 +3,12 @@ package xiaomi
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"io"
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"gomodel/internal/core"
 )

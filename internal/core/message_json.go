@@ -1,8 +1,9 @@
 package core
 
 import (
-	"encoding/json"
 	"strings"
+
+	"github.com/goccy/go-json"
 )
 
 // Message.UnmarshalJSON validates chat request message content, preserves
