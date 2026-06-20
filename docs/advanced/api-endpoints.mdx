@@ -8,28 +8,42 @@ GoModel exposes OpenAI-compatible and Anthropic-compatible APIs, provider-native
 passthrough, and a set of operations endpoints. Admin and dashboard routes are
 documented separately in [Admin Endpoints](/advanced/admin-endpoints).
 
+For request and response details, see the dedicated guides:
+[Responses API](/advanced/responses-api), [Conversations API](/advanced/conversations-api),
+[Anthropic Messages API](/advanced/anthropic-messages-api), and
+[Audio API](/advanced/audio-api).
+
 ## OpenAI-Compatible API
 
-| Endpoint                   | Method | Description                                                                                                  |
-| -------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
-| `/v1/chat/completions`     | POST   | Chat completions (streaming supported)                                                                       |
-| `/v1/responses`            | POST   | OpenAI Responses API                                                                                         |
-| `/v1/conversations`        | POST   | Create a conversation (gateway-managed)                                                                      |
-| `/v1/conversations/{id}`   | GET    | Retrieve a conversation                                                                                      |
-| `/v1/conversations/{id}`   | POST   | Replace conversation metadata in full                                                                        |
-| `/v1/conversations/{id}`   | DELETE | Delete a conversation                                                                                        |
-| `/v1/embeddings`           | POST   | Text embeddings                                                                                              |
-| `/v1/models`               | GET    | List available models                                                                                        |
-| `/v1/files`                | POST   | Upload a file (OpenAI-compatible multipart)                                                                  |
-| `/v1/files`                | GET    | List files                                                                                                   |
-| `/v1/files/{id}`           | GET    | Retrieve file metadata                                                                                       |
-| `/v1/files/{id}`           | DELETE | Delete a file                                                                                                |
-| `/v1/files/{id}/content`   | GET    | Retrieve raw file content                                                                                    |
-| `/v1/batches`              | POST   | Create a native provider batch (OpenAI-compatible schema; inline `requests` supported where provider-native) |
-| `/v1/batches`              | GET    | List stored batches                                                                                          |
-| `/v1/batches/{id}`         | GET    | Retrieve one stored batch                                                                                    |
-| `/v1/batches/{id}/cancel`  | POST   | Cancel a pending batch                                                                                       |
-| `/v1/batches/{id}/results` | GET    | Retrieve native batch results when available                                                                 |
+| Endpoint                          | Method | Description                                                                                                  |
+| --------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| `/v1/chat/completions`            | POST   | Chat completions (streaming supported)                                                                       |
+| `/v1/responses`                   | POST   | Create an OpenAI Responses API response                                                                      |
+| `/v1/responses/{id}`              | GET    | Retrieve a stored response                                                                                   |
+| `/v1/responses/{id}`              | DELETE | Delete a stored response (forwards native deletion where supported)                                          |
+| `/v1/responses/{id}/cancel`       | POST   | Cancel an in-progress response (provider-native where supported)                                             |
+| `/v1/responses/{id}/input_items`  | GET    | List the input items of a stored response                                                                    |
+| `/v1/responses/input_tokens`      | POST   | Count input tokens for a Responses request                                                                   |
+| `/v1/responses/compact`           | POST   | Compact a Responses conversation (provider-native where supported)                                           |
+| `/v1/conversations`               | POST   | Create a conversation (gateway-managed)                                                                      |
+| `/v1/conversations/{id}`          | GET    | Retrieve a conversation                                                                                      |
+| `/v1/conversations/{id}`          | POST   | Replace conversation metadata in full                                                                        |
+| `/v1/conversations/{id}`          | DELETE | Delete a conversation                                                                                        |
+| `/v1/embeddings`                  | POST   | Text embeddings                                                                                              |
+| `/v1/models`                      | GET    | List available models                                                                                        |
+| `/v1/audio/speech`                | POST   | Text-to-speech, returning binary audio                                                                       |
+| `/v1/audio/transcriptions`        | POST   | Speech-to-text from a multipart upload                                                                       |
+| `/v1/realtime`                    | GET    | Realtime speech-to-speech websocket upgrade (when `REALTIME_ENABLED`)                                        |
+| `/v1/files`                       | POST   | Upload a file (OpenAI-compatible multipart)                                                                  |
+| `/v1/files`                       | GET    | List files                                                                                                   |
+| `/v1/files/{id}`                  | GET    | Retrieve file metadata                                                                                       |
+| `/v1/files/{id}`                  | DELETE | Delete a file                                                                                                |
+| `/v1/files/{id}/content`          | GET    | Retrieve raw file content                                                                                    |
+| `/v1/batches`                     | POST   | Create a native provider batch (OpenAI-compatible schema; inline `requests` supported where provider-native) |
+| `/v1/batches`                     | GET    | List stored batches                                                                                          |
+| `/v1/batches/{id}`                | GET    | Retrieve one stored batch                                                                                    |
+| `/v1/batches/{id}/cancel`         | POST   | Cancel a pending batch                                                                                       |
+| `/v1/batches/{id}/results`        | GET    | Retrieve native batch results when available                                                                 |
 
 ## Anthropic-Compatible API
 

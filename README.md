@@ -44,7 +44,7 @@ docker run --rm -p 8080:8080 \
   enterpilot/gomodel
 ```
 
-Full list of environment variables (including all available providers): [.env.template](./.env.template)
+Full list of environment variables (including all available providers): [`.env.template`](./.env.template)
 
 ⚠️ Avoid passing secrets with `-e` on the command line in production — they can leak through shell history and process lists. Use `docker run --env-file .env` to load API keys from a file instead.
 
@@ -139,7 +139,7 @@ the admin REST API and dashboard.
 
 ## Gateway Configuration
 
-GoModel is configured through environment variables and an optional `config.yaml`. Environment variables override YAML values. See the [Configuration reference](./docs/advanced/configuration.mdx) for the full list of settings organized by category, along with [`.env.template`](.env.template) and [`config/config.example.yaml`](config/config.example.yaml).
+GoModel is configured through environment variables and an optional `config.yaml`. Environment variables override YAML values. See the [Configuration reference](./docs/advanced/configuration.mdx) for the full list of settings organized by category, along with [`.env.template`](./.env.template) and [`config/config.example.yaml`](./config/config.example.yaml).
 
 **Quick Start - Authentication:** By default `GOMODEL_MASTER_KEY` is unset. Without this key, API endpoints are unprotected and anyone can call them. This is insecure for production. **Strongly recommend** setting a strong secret before exposing the service. Add `GOMODEL_MASTER_KEY` to your `.env` or environment for production deployments.
 
