@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  A fast and lightweight AI gateway written in Go, providing unified OpenAI- and Anthropic-compatible APIs for OpenAI, Anthropic, Gemini, DeepSeek, xAI, Groq, OpenRouter, Z.ai, Azure OpenAI, Oracle, Ollama, and more.
+  A fast and lightweight AI gateway written in Go, providing unified OpenAI-compatible and Anthropic-compatible APIs for OpenAI, Anthropic, Gemini, DeepSeek, xAI, Groq, OpenRouter, Z.ai, Azure OpenAI, Oracle, Ollama, and more.
 </p>
 
 <a href="docs/dashboard.gif">
@@ -129,7 +129,7 @@ docker run --rm -p 8080:8080 --env-file .env gomodel
 
 ## API Endpoints
 
-GoModel exposes OpenAI- and Anthropic-compatible APIs, provider-native
+GoModel exposes OpenAI-compatible and Anthropic-compatible APIs, provider-native
 passthrough, and operations routes. See the
 [API Endpoints reference](./docs/advanced/api-endpoints.mdx) for the full
 endpoint tables, and [Admin Endpoints](./docs/advanced/admin-endpoints.mdx) for
@@ -142,14 +142,6 @@ the admin REST API and dashboard.
 GoModel is configured through environment variables and an optional `config.yaml`. Environment variables override YAML values. See the [Configuration reference](./docs/advanced/configuration.mdx) for the full list of settings organized by category, along with [`.env.template`](.env.template) and [`config/config.example.yaml`](config/config.example.yaml).
 
 **Quick Start - Authentication:** By default `GOMODEL_MASTER_KEY` is unset. Without this key, API endpoints are unprotected and anyone can call them. This is insecure for production. **Strongly recommend** setting a strong secret before exposing the service. Add `GOMODEL_MASTER_KEY` to your `.env` or environment for production deployments.
-
----
-
-## Response Caching
-
-GoModel has a two-layer response cache that reduces LLM API cost and latency for repeated or semantically similar requests: an exact-match layer (`X-Cache: HIT (exact)`) for byte-identical requests, and a semantic layer (`X-Cache: HIT (semantic)`) that matches paraphrased prompts via embeddings and a KNN vector search. Expected hit rates reach ~60–70% in high-repetition workloads vs. ~18% for exact-match alone.
-
-See [Response Caching](./docs/features/cache.mdx) for setup, supported vector backends, and `user_path` behavior.
 
 ---
 
