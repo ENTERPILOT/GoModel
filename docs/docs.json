@@ -60,6 +60,7 @@
                             "advanced/configuration",
                             "advanced/config-yaml",
                             "advanced/cli",
+                            "advanced/api-endpoints",
                             "advanced/resilience",
                             "advanced/responses-api",
                             "advanced/responses-compatibility",

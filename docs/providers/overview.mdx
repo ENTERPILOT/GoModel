@@ -13,30 +13,69 @@ quirks.
 
 ## Supported providers
 
-| Provider | Credential | Guide |
-| -------- | ---------- | ----- |
-| OpenAI | `OPENAI_API_KEY` | — |
-| Anthropic | `ANTHROPIC_API_KEY` | [Anthropic](/providers/anthropic) |
-| Google Gemini | `GEMINI_API_KEY` | [Google Gemini](/providers/gemini) |
-| Google Vertex AI | `VERTEX_PROJECT` + `VERTEX_LOCATION` + GCP credentials | [Google Vertex AI](/providers/vertex) |
-| DeepSeek | `DEEPSEEK_API_KEY` | [DeepSeek](/providers/deepseek) |
-| Groq | `GROQ_API_KEY` | — |
-| OpenRouter | `OPENROUTER_API_KEY` | — |
-| Z.ai | `ZAI_API_KEY` (`ZAI_BASE_URL` optional) | — |
-| xAI (Grok) | `XAI_API_KEY` | — |
-| MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | — |
-| Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional) | [Alibaba Cloud Model Studio](/providers/bailian) |
-| Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | [Xiaomi MiMo](/providers/xiaomi) |
-| OpenCode Go | `OPENCODE_GO_API_KEY` (`OPENCODE_GO_BASE_URL` optional) | [OpenCode Go](/providers/opencode-go) |
-| Azure OpenAI | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | [Azure OpenAI](/providers/azure) |
-| Amazon Bedrock | `BEDROCK_BASE_URL` (region or endpoint) + AWS credentials | [Amazon Bedrock](/providers/bedrock) |
-| Oracle GenAI | `ORACLE_API_KEY` + `ORACLE_BASE_URL` | [Oracle GenAI](/providers/oracle) |
-| Ollama | `OLLAMA_BASE_URL` | [Ollama](/providers/multiple-ollama) |
-| vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` optional) | [vLLM](/providers/vllm) |
+Example model identifiers are illustrative and subject to change; consult
+provider catalogs for current models. Feature columns reflect gateway API
+support, not every individual model capability exposed by an upstream provider.
 
-See the [README provider table](https://github.com/ENTERPILOT/GoModel#supported-llm-providers)
-for per-provider feature support (chat, Responses, embeddings, files, batches,
-passthrough).
+| Provider | Credential | Example Model | Chat | `/responses` | Embed | Files | Batches | Passthru | Guide |
+| -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
+| OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/providers/anthropic) |
+| Google Gemini | `GEMINI_API_KEY` | `gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [Google Gemini](/providers/gemini) |
+| Google Vertex AI | `VERTEX_PROJECT` + `VERTEX_LOCATION` + GCP credentials | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Google Vertex AI](/providers/vertex) |
+| DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [DeepSeek](/providers/deepseek) |
+| Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
+| OpenRouter | `OPENROUTER_API_KEY` | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Z.ai | `ZAI_API_KEY` (`ZAI_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
+| xAI (Grok) | `XAI_API_KEY` | `grok-4` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
+| Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/providers/bailian) |
+| MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
+| Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/providers/xiaomi) |
+| OpenCode Go | `OPENCODE_GO_API_KEY` (`OPENCODE_GO_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [OpenCode Go](/providers/opencode-go) |
+| Azure OpenAI | `AZURE_API_KEY` + `AZURE_BASE_URL` (`AZURE_API_VERSION` optional) | `gpt-5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Azure OpenAI](/providers/azure) |
+| Oracle GenAI | `ORACLE_API_KEY` + `ORACLE_BASE_URL` | `openai.gpt-oss-120b` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Oracle GenAI](/providers/oracle) |
+| Ollama | `OLLAMA_BASE_URL` | `llama3.2` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Ollama](/providers/multiple-ollama) |
+| vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` optional) | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/providers/vllm) |
+| Amazon Bedrock | `BEDROCK_BASE_URL` (region or endpoint) + AWS credentials | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/providers/bedrock) |
+
+✅ Supported ❌ Unsupported
+
+## Provider notes
+
+- **Z.ai GLM Coding Plan** — set
+  `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
+- **Xiaomi MiMo** — TTS (`mimo-v2.5-tts*`) and ASR (`mimo-v2.5-asr`) are served
+  through `/v1/audio/speech` and `/v1/audio/transcriptions` (translated to
+  MiMo's chat-completions audio dialect) as well as directly via chat
+  completions; for 1M context append `[1m]` to the model ID and list it in
+  `XIAOMI_MODELS`.
+- **OpenCode Go (OpenCode Zen)** — routes per model: most models use
+  OpenAI-style `/chat/completions`, while `/messages`-only models (default
+  `qwen3.7-max`, override with `OPENCODE_GO_MESSAGES_MODELS`) are sent to the
+  Anthropic-native endpoint. Set `OPENCODE_GO_API_KEY`; the base URL defaults to
+  `https://opencode.ai/zen/go/v1`.
+- **Configured model lists** — available for every provider with
+  `<PROVIDER>_MODELS`, for example
+  `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` or
+  `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. DeepSeek defaults to
+  `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only when using a
+  compatible proxy or alternate DeepSeek endpoint. By default,
+  `CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses those lists only when upstream
+  `/models` is unavailable or empty. Set
+  `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models
+  for providers that define a list, skipping their upstream `/models` calls.
+- **vLLM** — set `VLLM_API_KEY` only if the upstream server was started with
+  `--api-key`.
+- **Multiple instances of one provider type** — without `config.yaml`, use
+  suffixed env vars such as `OPENAI_EAST_API_KEY` and `OPENAI_EAST_BASE_URL`;
+  add `OPENAI_EAST_MODELS` to configure that instance's model list. This
+  registers provider `openai-east` with type `openai`. Vertex AI follows the
+  same suffix pattern — `VERTEX_US_PROJECT` registers provider `vertex-us`.
+  Vertex project and location env vars must match the instance prefix: for a
+  suffixed instance such as `VERTEX_US_PROJECT`, also set `VERTEX_US_LOCATION`
+  and any other suffixed settings for that instance, rather than the generic
+  `VERTEX_PROJECT` / `VERTEX_LOCATION`. `VERTEX_AUTH_TYPE` defaults to
+  Application Default Credentials (`gcp_adc`).
 
 ## Why some providers have dedicated pages
 

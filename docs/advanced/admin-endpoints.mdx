@@ -17,26 +17,10 @@ Both are on by default because observability shouldn't be opt-in. If you don't n
 
 ## Configuration
 
-| Variable                              | Description                                      | Default |
-| ------------------------------------- | ------------------------------------------------ | ------- |
-| `ADMIN_ENDPOINTS_ENABLED`             | Enable the admin REST API                        | `true`  |
-| `ADMIN_UI_ENABLED`                    | Enable the admin dashboard UI                    | `true`  |
-| `DASHBOARD_LIVE_LOGS_ENABLED`         | Stream realtime dashboard audit/usage previews   | `true`  |
-| `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | In-memory replay window for live dashboard events | `10000` |
-| `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Max events replayed to one reconnecting client   | `1000`  |
-| `DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS` | Idle stream heartbeat interval in seconds      | `15`    |
-
-Or in YAML:
-
-```yaml
-admin:
-  endpoints_enabled: true
-  ui_enabled: true
-  live_logs_enabled: true
-  live_logs_buffer_size: 10000
-  live_logs_replay_limit: 1000
-  live_logs_heartbeat_seconds: 15
-```
+Admin and dashboard behavior is controlled by environment variables (or the
+equivalent `admin:` YAML block). See
+[Admin configuration](/advanced/configuration#admin) for the full table of
+variables, defaults, and the equivalent `admin:` YAML block.
 
 <Note>
   The dashboard UI requires the REST API to be enabled. If you set
