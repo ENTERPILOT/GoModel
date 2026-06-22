@@ -14,7 +14,6 @@ import (
 	"gomodel/internal/core"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/live"
-	"gomodel/internal/modeloverrides"
 	"gomodel/internal/providers"
 )
 
@@ -173,12 +172,13 @@ func TestRefreshRuntime_SkipsDisabledModelOverrides(t *testing.T) {
 		},
 	}, "openai", "openai")
 
+	// virtualModels is left nil so the alias/model_overrides refresh steps report
+	// skipped, which is what this test asserts.
 	app := &App{
 		config: &config.Config{},
 		providers: &providers.InitResult{
 			Registry: registry,
 		},
-		modelOverrides: &modeloverrides.Result{},
 	}
 
 	report, err := app.RefreshRuntime(context.Background())

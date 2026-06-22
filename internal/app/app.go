@@ -35,6 +35,7 @@ import (
 	"gomodel/internal/server"
 	"gomodel/internal/storage"
 	"gomodel/internal/usage"
+	"gomodel/internal/virtualmodels"
 	"gomodel/internal/workflows"
 )
 
@@ -48,8 +49,7 @@ type App struct {
 	budgets          *budget.Result
 	batch            *batch.Result
 	fileStore        *filestore.Result
-	aliases          *aliases.Result
-	modelOverrides   *modeloverrides.Result
+	virtualModels    *virtualmodels.Result
 	pricingOverrides *pricingoverrides.Result
 	authKeys         *authkeys.Result
 	guardrails       *guardrails.Result
@@ -231,37 +231,31 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	closers = append(closers, app.fileStore.Close)
 	claimSharedStorage(fileStoreResult.Storage)
 
-	// Initialize aliases using shared storage when already available.
-	var aliasResult *aliases.Result
+	// Initialize virtual models (unified aliases + access overrides) using
+	// shared storage when already available.
+	var virtualModelsResult *virtualmodels.Result
 	if sharedStorage != nil {
-		aliasResult, err = aliases.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry)
+		virtualModelsResult, err = virtualmodels.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry)
 	} else {
-		aliasResult, err = aliases.New(ctx, appCfg, providerResult.Registry)
+		virtualModelsResult, err = virtualmodels.New(ctx, appCfg, providerResult.Registry)
 	}
 	if err != nil {
-		return fail("failed to initialize aliases", err)
+		return fail("failed to initialize virtual models", err)
 	}
-	app.aliases = aliasResult
-	closers = append(closers, app.aliases.Close)
-	claimSharedStorage(aliasResult.Storage)
+	app.virtualModels = virtualModelsResult
+	closers = append(closers, app.virtualModels.Close)
+	claimSharedStorage(virtualModelsResult.Storage)
 
-	var modelOverrideResult *modeloverrides.Result
+	// The alias (redirect) engine is always active. The access-override
+	// (policy) engine is only wired as the authorizer when enabled; otherwise a
+	// nil authorizer preserves the historical allow-all behavior.
+	aliasService := app.virtualModels.Service.Aliases()
+	var modelOverrideService *modeloverrides.Service
 	if appCfg.Models.OverridesEnabled {
-		if sharedStorage != nil {
-			modelOverrideResult, err = modeloverrides.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry)
-		} else {
-			modelOverrideResult, err = modeloverrides.New(ctx, appCfg, providerResult.Registry)
-		}
-		if err != nil {
-			return fail("failed to initialize model overrides", err)
-		}
+		modelOverrideService = app.virtualModels.Service.Overrides()
 	} else {
-		modelOverrideResult = &modeloverrides.Result{}
 		slog.Info("model overrides disabled")
 	}
-	app.modelOverrides = modelOverrideResult
-	closers = append(closers, app.modelOverrides.Close)
-	claimSharedStorage(modelOverrideResult.Storage)
 
 	var pricingOverrideResult *pricingoverrides.Result
 	if sharedStorage != nil {
@@ -282,8 +276,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	refreshInterval := workflowRefreshInterval(appCfg)
 	var guardrailExecutor guardrails.ChatCompletionExecutor = app.providers.Router
-	if app.aliases != nil && app.aliases.Service != nil {
-		guardrailExecutor = aliases.NewProviderWithOptions(app.providers.Router, app.aliases.Service, aliases.Options{})
+	if aliasService != nil {
+		guardrailExecutor = aliases.NewProviderWithOptions(app.providers.Router, aliasService, aliases.Options{})
 	}
 
 	// Initialize reusable guardrail definitions using shared storage when already available.
@@ -365,13 +359,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			)
 		}
 	}
-	if app.aliases != nil && app.aliases.Service != nil {
+	if aliasService != nil {
 		batchRequestPreparers = append([]server.BatchRequestPreparer{
-			aliases.NewBatchPreparer(provider, app.aliases.Service),
+			aliases.NewBatchPreparer(provider, aliasService),
 		}, batchRequestPreparers...)
 	}
-	if app.modelOverrides != nil && app.modelOverrides.Service != nil {
-		batchRequestPreparers = append(batchRequestPreparers, modeloverrides.NewBatchPreparer(provider, app.modelOverrides.Service))
+	if modelOverrideService != nil {
+		batchRequestPreparers = append(batchRequestPreparers, modeloverrides.NewBatchPreparer(provider, modelOverrideService))
 	}
 	batchRequestPreparer := server.ComposeBatchRequestPreparers(providerAsNativeFileRouter(provider), batchRequestPreparers...)
 
@@ -395,13 +389,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		UsageLogger:                     usageResult.Logger,
 		BudgetChecker:                   budgetResult.Service,
 		PricingResolver:                 pricingResolver,
-		ModelResolver:                   app.aliases.Service,
-		ModelAuthorizer:                 app.modelOverrides.Service,
+		ModelResolver:                   aliasService,
+		ModelAuthorizer:                 modelOverrideService,
 		FallbackResolver:                fallback.NewResolver(appCfg.Fallback, providerResult.Registry),
 		WorkflowPolicyResolver:          workflowResult.Service,
 		TranslatedRequestPatcher:        translatedRequestPatcher,
 		BatchRequestPreparer:            batchRequestPreparer,
-		ExposedModelLister:              app.aliases.Service,
+		ExposedModelLister:              aliasService,
 		KeepOnlyAliasesAtModelsEndpoint: appCfg.Models.KeepOnlyAliasesAtModelsEndpoint,
 		PassthroughSemanticEnrichers:    cfg.Factory.PassthroughSemanticEnrichers(),
 		BatchStore:                      batchResult.Store,
@@ -437,8 +431,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			providerResult.Registry,
 			providerResult.ConfiguredProviders,
 			authKeyResult.Service,
-			app.aliases.Service,
-			app.modelOverrides.Service,
+			aliasService,
+			modelOverrideService,
 			app.pricingOverrides.Service,
 			workflowResult.Service,
 			app.guardrails.Service,
@@ -497,8 +491,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(provider, server.InternalChatCompletionExecutorConfig{
-		ModelResolver:          app.aliases.Service,
-		ModelAuthorizer:        app.modelOverrides.Service,
+		ModelResolver:          aliasService,
+		ModelAuthorizer:        modelOverrideService,
 		WorkflowPolicyResolver: workflowResult.Service,
 		FallbackResolver:       serverCfg.FallbackResolver,
 		AuditLogger:            auditResult.Logger,
@@ -698,11 +692,11 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 4. Close aliases subsystem.
-	if a.aliases != nil {
-		if err := a.aliases.Close(); err != nil {
-			slog.Error("aliases close error", "error", err)
-			errs = append(errs, fmt.Errorf("aliases close: %w", err))
+	// 4. Close virtual models subsystem (aliases + access overrides).
+	if a.virtualModels != nil {
+		if err := a.virtualModels.Close(); err != nil {
+			slog.Error("virtual models close error", "error", err)
+			errs = append(errs, fmt.Errorf("virtual models close: %w", err))
 		}
 	}
 
@@ -714,15 +708,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 6. Close model overrides subsystem.
-	if a.modelOverrides != nil {
-		if err := a.modelOverrides.Close(); err != nil {
-			slog.Error("model overrides close error", "error", err)
-			errs = append(errs, fmt.Errorf("model overrides close: %w", err))
-		}
-	}
-
-	// 7. Close model pricing overrides subsystem.
+	// 6. Close model pricing overrides subsystem.
 	if a.pricingOverrides != nil {
 		if err := a.pricingOverrides.Close(); err != nil {
 			slog.Error("model pricing overrides close error", "error", err)

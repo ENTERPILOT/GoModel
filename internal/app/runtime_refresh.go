@@ -304,17 +304,17 @@ func (a *App) authKeyService() refreshableService {
 }
 
 func (a *App) aliasService() refreshableService {
-	if a == nil || a.aliases == nil || a.aliases.Service == nil {
+	if a == nil || a.virtualModels == nil || a.virtualModels.Service == nil {
 		return nil
 	}
-	return a.aliases.Service
+	return a.virtualModels.Service.Aliases()
 }
 
 func (a *App) modelOverrideService() refreshableService {
-	if a == nil || a.modelOverrides == nil || a.modelOverrides.Service == nil {
+	if a == nil || a.virtualModels == nil || a.virtualModels.Service == nil {
 		return nil
 	}
-	return a.modelOverrides.Service
+	return a.virtualModels.Service.Overrides()
 }
 
 func (a *App) guardrailService() refreshableService {
