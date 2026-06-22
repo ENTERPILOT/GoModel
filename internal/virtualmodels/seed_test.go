@@ -78,7 +78,7 @@ func TestSeedFromLegacy_CopiesAndIsIdempotent(t *testing.T) {
 	assertSeeded()
 }
 
-func TestSeedFromLegacy_CollisionKeepsRedirect(t *testing.T) {
+func TestSeedFromLegacy_CollisionFailsClosed(t *testing.T) {
 	t.Parallel()
 	conn := newSQLiteStorage(t)
 	ctx := context.Background()
@@ -104,18 +104,9 @@ func TestSeedFromLegacy_CollisionKeepsRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteStore() error = %v", err)
 	}
-	if err := seedFromLegacy(ctx, vmStore, conn); err != nil {
-		t.Fatalf("seedFromLegacy() error = %v", err)
-	}
-
-	got, err := vmStore.List(ctx)
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("len(List()) = %d, want 1 (redirect wins)", len(got))
-	}
-	if !got[0].IsRedirect() {
-		t.Fatalf("kept row IsRedirect() = false, want true (redirect wins on collision)")
+	// A name shared by an alias and an access override must fail the migration
+	// rather than silently dropping the access control.
+	if err := seedFromLegacy(ctx, vmStore, conn); err == nil {
+		t.Fatalf("seedFromLegacy() error = nil, want migration conflict error")
 	}
 }

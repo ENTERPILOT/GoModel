@@ -246,16 +246,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	closers = append(closers, app.virtualModels.Close)
 	claimSharedStorage(virtualModelsResult.Storage)
 
-	// The alias (redirect) engine is always active. The access-override
-	// (policy) engine is only wired as the authorizer when enabled; otherwise a
-	// nil authorizer preserves the historical allow-all behavior.
+	// The alias (redirect) engine is always active. The access-override (policy)
+	// engine is nil when MODEL_OVERRIDES_ENABLED=false, which leaves the gateway
+	// authorizer nil and preserves the historical allow-all behavior.
 	aliasService := app.virtualModels.Service.Aliases()
-	var modelOverrideService *modeloverrides.Service
-	if appCfg.Models.OverridesEnabled {
-		modelOverrideService = app.virtualModels.Service.Overrides()
-	} else {
-		slog.Info("model overrides disabled")
-	}
+	modelOverrideService := app.virtualModels.Service.Overrides()
 
 	var pricingOverrideResult *pricingoverrides.Result
 	if sharedStorage != nil {

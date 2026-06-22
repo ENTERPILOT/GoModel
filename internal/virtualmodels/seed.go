@@ -72,11 +72,15 @@ func seedFromLegacy(ctx context.Context, store Store, conn storage.Storage) erro
 	for _, override := range legacyOverrideRows {
 		vm := vmFromOverride(override)
 		if _, taken := seen[vm.Source]; taken {
-			// Source-namespace collision: a redirect already owns this source.
-			// The masked real model is unreachable anyway; keep the redirect.
-			slog.Warn("virtualmodels: skipping legacy access override during migration; source already used by a redirect",
-				"source", vm.Source)
-			continue
+			// Source-namespace collision: an alias and an access override share
+			// the same name. We must not silently drop the override — that would
+			// remove an access control and could expose a model that was gated.
+			// Fail closed and ask the operator to rename the alias or the
+			// override selector before upgrading.
+			return fmt.Errorf(
+				"virtual models migration conflict: source %q is used by both an alias and an access override; "+
+					"rename the alias or remove/rename the access override (selector %q) before upgrading",
+				vm.Source, override.Selector)
 		}
 		if err := store.Upsert(ctx, vm); err != nil {
 			return fmt.Errorf("seed access override %q: %w", vm.Source, err)
