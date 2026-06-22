@@ -14,6 +14,13 @@ import (
 // ensureSourceKind rejects an upsert that would clobber an existing virtual
 // model of the other kind. Source is a single namespace, so a redirect and an
 // access policy cannot share a name.
+//
+// Callers hold the shared writeMu, so this check-then-write is atomic within a
+// process. Across replicas sharing one database it is best-effort: the guard
+// plus the rarity of the trigger (an alias named identically to an override
+// selector, written concurrently to two replicas) make the residual race
+// acceptable on the admin config plane. A fully atomic guarantee would require
+// a per-backend conditional upsert.
 func ensureSourceKind(ctx context.Context, store Store, source string, wantRedirect bool) error {
 	existing, err := store.Get(ctx, source)
 	if errors.Is(err, ErrNotFound) {
