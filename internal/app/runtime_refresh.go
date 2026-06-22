@@ -314,13 +314,7 @@ func (a *App) modelOverrideService() refreshableService {
 	if a == nil || a.virtualModels == nil || a.virtualModels.Service == nil {
 		return nil
 	}
-	// Overrides() is nil when MODEL_OVERRIDES_ENABLED=false. Return an untyped
-	// nil so the refresh step is skipped rather than wrapping a nil pointer.
-	overrides := a.virtualModels.Service.Overrides()
-	if overrides == nil {
-		return nil
-	}
-	return overrides
+	return a.virtualModels.Service.Overrides()
 }
 
 func (a *App) guardrailService() refreshableService {

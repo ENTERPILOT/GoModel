@@ -5,14 +5,9 @@ import "strings"
 // ModelsConfig holds global model access defaults.
 type ModelsConfig struct {
 	// EnabledByDefault controls whether provider models are available
-	// when no persisted user-path override exists and model overrides are enabled.
+	// when no persisted user-path access override exists.
 	// Default: true.
 	EnabledByDefault bool `yaml:"enabled_by_default" env:"MODELS_ENABLED_BY_DEFAULT"`
-
-	// OverridesEnabled controls whether persisted model access overrides are
-	// loaded, enforced, and exposed through the admin dashboard/API.
-	// Default: true.
-	OverridesEnabled bool `yaml:"overrides_enabled" env:"MODEL_OVERRIDES_ENABLED"`
 
 	// KeepOnlyAliasesAtModelsEndpoint controls whether GET /v1/models hides
 	// provider models and returns only alias-projected model entries.

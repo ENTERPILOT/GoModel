@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -99,7 +98,7 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		return nil, fmt.Errorf("seed virtual models: %w", err)
 	}
 
-	service, err := NewService(store, catalog, cfg.Models.EnabledByDefault, cfg.Models.OverridesEnabled)
+	service, err := NewService(store, catalog, cfg.Models.EnabledByDefault)
 	if err != nil {
 		return nil, err
 	}
@@ -118,19 +117,12 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		overrideInterval = cfg.Workflows.RefreshInterval
 	}
 
-	result := &Result{
-		Service:   service,
-		Store:     store,
-		stopAlias: service.aliases.StartBackgroundRefresh(aliasInterval),
-	}
-	// Only poll/refresh the access-override engine when the feature is enabled,
-	// matching the historical disabled path that never initialized it.
-	if ov := service.Overrides(); ov != nil {
-		result.stopOverride = ov.StartBackgroundRefresh(overrideInterval)
-	} else {
-		slog.Info("model overrides disabled")
-	}
-	return result, nil
+	return &Result{
+		Service:      service,
+		Store:        store,
+		stopAlias:    service.aliases.StartBackgroundRefresh(aliasInterval),
+		stopOverride: service.overrides.StartBackgroundRefresh(overrideInterval),
+	}, nil
 }
 
 func createStore(ctx context.Context, store storage.Storage) (Store, error) {

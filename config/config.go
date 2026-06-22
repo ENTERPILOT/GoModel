@@ -60,7 +60,6 @@ func buildDefaultConfig() *Config {
 		},
 		Models: ModelsConfig{
 			EnabledByDefault:                true,
-			OverridesEnabled:                true,
 			KeepOnlyAliasesAtModelsEndpoint: false,
 			ConfiguredProviderModelsMode:    ConfiguredProviderModelsModeFallback,
 		},

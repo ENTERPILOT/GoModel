@@ -17,8 +17,7 @@ server:
   realtime_enabled: true # env: REALTIME_ENABLED; expose /v1/realtime websocket and /p/{provider}/v1/realtime upgrades (OpenAI only)
 
 models:
-  enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an override allows one or more user paths
-  overrides_enabled: true # env: MODEL_OVERRIDES_ENABLED; load/enforce persisted model overrides and enable dashboard editing
+  enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an access override allows one or more user paths
   configured_provider_models_mode: "fallback" # env: CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models and skips upstream /models for configured lists
 
 cache:

@@ -62,7 +62,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"DASHBOARD_LIVE_LOGS_REPLAY_LIMIT", "DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS",
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING",
 		"FEATURE_FALLBACK_MODE", "FALLBACK_MANUAL_RULES_PATH",
-		"MODEL_OVERRIDES_ENABLED", "MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
+		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
 		"WORKFLOW_REFRESH_INTERVAL",
 	} {
@@ -219,9 +219,6 @@ func TestBuildDefaultConfig(t *testing.T) {
 	}
 	if !cfg.Models.EnabledByDefault {
 		t.Error("expected Models.EnabledByDefault=true")
-	}
-	if !cfg.Models.OverridesEnabled {
-		t.Error("expected Models.OverridesEnabled=true")
 	}
 	if cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
 		t.Error("expected Models.KeepOnlyAliasesAtModelsEndpoint=false")
@@ -566,7 +563,6 @@ server:
   pprof_enabled: true
 models:
   enabled_by_default: false
-  overrides_enabled: false
   keep_only_aliases_at_models_endpoint: true
   configured_provider_models_mode: allowlist
 cache:
@@ -598,9 +594,6 @@ logging:
 		}
 		if cfg.Models.EnabledByDefault {
 			t.Error("expected Models.EnabledByDefault=false from YAML")
-		}
-		if cfg.Models.OverridesEnabled {
-			t.Error("expected Models.OverridesEnabled=false from YAML")
 		}
 		if !cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
 			t.Error("expected Models.KeepOnlyAliasesAtModelsEndpoint=true from YAML")
@@ -1270,7 +1263,6 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 
 	withTempDir(t, func(_ string) {
 		t.Setenv("PORT", "5555")
-		t.Setenv("MODEL_OVERRIDES_ENABLED", "false")
 		t.Setenv("MODELS_ENABLED_BY_DEFAULT", "false")
 		t.Setenv("KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "true")
 		t.Setenv("CONFIGURED_PROVIDER_MODELS_MODE", "allowlist")
@@ -1287,9 +1279,6 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 
 		if cfg.Server.Port != "5555" {
 			t.Errorf("expected port 5555, got %s", cfg.Server.Port)
-		}
-		if cfg.Models.OverridesEnabled {
-			t.Error("expected model overrides to be disabled from env")
 		}
 		if cfg.Models.EnabledByDefault {
 			t.Error("expected models enabled-by-default to be disabled from env")

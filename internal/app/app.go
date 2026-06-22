@@ -246,9 +246,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	closers = append(closers, app.virtualModels.Close)
 	claimSharedStorage(virtualModelsResult.Storage)
 
-	// The alias (redirect) engine is always active. The access-override (policy)
-	// engine is nil when MODEL_OVERRIDES_ENABLED=false, which leaves the gateway
-	// authorizer nil and preserves the historical allow-all behavior.
+	// The unified virtual models service exposes the alias (redirect) engine as
+	// the model resolver and the access-override (policy) engine as the authorizer.
 	aliasService := app.virtualModels.Service.Aliases()
 	modelOverrideService := app.virtualModels.Service.Overrides()
 

@@ -9,38 +9,11 @@ import (
 
 func newTestService(t *testing.T) *Service {
 	t.Helper()
-	svc, err := NewService(newSQLiteVMStore(t), testCatalog(), true, true)
+	svc, err := NewService(newSQLiteVMStore(t), testCatalog(), true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
 	return svc
-}
-
-func TestService_OverridesDisabled(t *testing.T) {
-	t.Parallel()
-	svc, err := NewService(newSQLiteVMStore(t), testCatalog(), true, false)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	ctx := context.Background()
-
-	if svc.Overrides() != nil {
-		t.Fatalf("Overrides() != nil when disabled")
-	}
-	// Redirects still work.
-	if err := svc.Upsert(ctx, VirtualModel{Source: "fast", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Enabled: true}); err != nil {
-		t.Fatalf("Upsert(redirect) error = %v", err)
-	}
-	// Policy writes are rejected while disabled.
-	if err := svc.Upsert(ctx, VirtualModel{Source: "openai/gpt-4o", UserPaths: []string{"/team"}}); err == nil {
-		t.Fatalf("Upsert(policy) error = nil, want rejected while disabled")
-	}
-	if views := svc.ListViews(); len(views) != 1 || views[0].Kind != KindRedirect {
-		t.Fatalf("ListViews() = %#v, want a single redirect", views)
-	}
-	if err := svc.Refresh(ctx); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
 }
 
 func TestService_RedirectResolves(t *testing.T) {
