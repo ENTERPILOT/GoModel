@@ -3,6 +3,7 @@ package virtualmodels
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -106,19 +107,22 @@ func TestSQLiteStore_UpsertAllIsAtomic(t *testing.T) {
 		t.Fatalf("len(List()) = %d, want 2", len(got))
 	}
 
-	// Failure: a cancelled context aborts the transaction and writes nothing —
-	// the table is left untouched rather than partially seeded.
+	// Mid-batch failure: the first row is written inside the transaction, then the
+	// second row fails to encode (a non-finite Weight cannot be JSON-marshalled).
+	// The whole batch must roll back — the first row must not survive.
 	store2 := newSQLiteVMStore(t)
-	cancelled, cancel := context.WithCancel(ctx)
-	cancel()
-	if err := store2.UpsertAll(cancelled, vms); err == nil {
-		t.Fatal("UpsertAll(cancelled ctx) error = nil, want error")
+	err = store2.UpsertAll(ctx, []VirtualModel{
+		{Source: "good", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Enabled: true},
+		{Source: "bad", Targets: []Target{{Provider: "openai", Model: "gpt-4o", Weight: math.Inf(1)}}, Enabled: true},
+	})
+	if err == nil {
+		t.Fatal("UpsertAll(mid-batch failure) error = nil, want error")
 	}
 	got2, err := store2.List(ctx)
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
 	if len(got2) != 0 {
-		t.Fatalf("len(List()) = %d after failed UpsertAll, want 0 (atomic)", len(got2))
+		t.Fatalf("len(List()) = %d after mid-batch failure, want 0 (atomic rollback)", len(got2))
 	}
 }

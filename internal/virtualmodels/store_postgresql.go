@@ -152,7 +152,13 @@ func (s *PostgreSQLStore) UpsertAll(ctx context.Context, vms []VirtualModel) err
 	if err != nil {
 		return fmt.Errorf("begin virtual model seed transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() {
+		// Roll back with a fresh context so cleanup still runs if the seed context
+		// was canceled (mirrors rollbackContext() usage in service.go).
+		rollbackCtx, cancel := rollbackContext()
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
+	}()
 	for _, vm := range vms {
 		args, err := postgresUpsertArgs(vm)
 		if err != nil {
