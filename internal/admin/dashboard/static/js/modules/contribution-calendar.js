@@ -93,13 +93,15 @@
                     days.push({ dateStr: key, value: value, level: 0, empty: false });
                 }
 
-                // Calculate levels based on non-zero values
-                var nonZero = days.filter(function(d) { return d.value > 0; }).map(function(d) { return d.value; });
-                nonZero.sort(function(a, b) { return a - b; });
-                var max = nonZero.length > 0 ? nonZero[nonZero.length - 1] : 0;
+                // Calculate levels relative to the busiest day so intensity
+                // reflects magnitude (a 10K day reads much lighter than a 1M day).
+                var max = 0;
+                for (var i = 0; i < days.length; i++) {
+                    if (days[i].value > max) max = days[i].value;
+                }
 
                 for (var i = 0; i < days.length; i++) {
-                    days[i].level = this.calendarLevel(days[i].value, max, nonZero);
+                    days[i].level = this.calendarLevel(days[i].value, max);
                 }
 
                 // Build weeks (columns)
@@ -123,16 +125,16 @@
                 return weeks;
             },
 
-            calendarLevel(value, max, sortedNonZero) {
-                if (value === 0 || max === 0) return 0;
-                if (!sortedNonZero || sortedNonZero.length === 0) return 0;
-                var len = sortedNonZero.length;
-                var q1 = sortedNonZero[Math.floor(len * 0.25)];
-                var q2 = sortedNonZero[Math.floor(len * 0.5)];
-                var q3 = sortedNonZero[Math.floor(len * 0.75)];
-                if (value <= q1) return 1;
-                if (value <= q2) return 2;
-                if (value <= q3) return 3;
+            calendarLevel(value, max) {
+                if (value <= 0 || max <= 0) return 0;
+                // Log scale against the busiest day: token counts span orders of
+                // magnitude, so a linear ratio collapses every quiet day to the
+                // lightest shade. Logs compress the busy days and spread the quiet
+                // ones, keeping low-volume days distinguishable.
+                var ratio = Math.log(value + 1) / Math.log(max + 1);
+                if (ratio <= 0.25) return 1;
+                if (ratio <= 0.5) return 2;
+                if (ratio <= 0.75) return 3;
                 return 4;
             },
 
