@@ -3,12 +3,29 @@ package virtualmodels
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"gomodel/internal/storage"
 )
+
+// failingUpsertStore wraps a Store and fails Upsert after failAfter successful
+// writes, to exercise the seed's partial-write rollback.
+type failingUpsertStore struct {
+	Store
+	failAfter int
+	count     int
+}
+
+func (s *failingUpsertStore) Upsert(ctx context.Context, vm VirtualModel) error {
+	s.count++
+	if s.count > s.failAfter {
+		return errors.New("simulated write failure")
+	}
+	return s.Store.Upsert(ctx, vm)
+}
 
 func newSQLiteStorage(t *testing.T) storage.SQLiteStorage {
 	t.Helper()
@@ -159,6 +176,36 @@ func TestSeedFromLegacy_CollisionFailsClosed(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("len(List()) = %d after failed seed, want 0 (no partial write)", len(got))
+	}
+}
+
+func TestSeedFromLegacy_RollsBackPartialWriteOnError(t *testing.T) {
+	t.Parallel()
+	conn := newSQLiteStorage(t)
+	ctx := context.Background()
+	db := conn.DB()
+
+	createLegacyTables(t, db)
+	insertLegacyAlias(t, db, "fast", "gpt-4o", "openai", true)
+	insertLegacyAlias(t, db, "slow", "gpt-4o-mini", "openai", true)
+	insertLegacyOverride(t, db, "openai/gpt-4o", "openai", "gpt-4o", `["/team"]`)
+
+	vmStore, err := NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore() error = %v", err)
+	}
+	// Fail the second write; the first must be rolled back so the table is left
+	// empty (not partially seeded, which would skip the rest next startup).
+	failing := &failingUpsertStore{Store: vmStore, failAfter: 1}
+	if err := seedFromLegacy(ctx, failing, conn); err == nil {
+		t.Fatal("seedFromLegacy() error = nil, want write failure")
+	}
+	got, err := vmStore.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("len(List()) = %d after failed seed, want 0 (partial write rolled back)", len(got))
 	}
 }
 

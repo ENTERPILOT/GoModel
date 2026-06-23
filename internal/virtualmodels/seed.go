@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -79,14 +80,36 @@ func seedFromLegacy(ctx context.Context, store Store, conn storage.Storage) erro
 		toSeed = append(toSeed, vm)
 	}
 
+	// Roll back rows already written if a later write fails (DB error, context
+	// cancellation, etc.). A partial seed would otherwise trip the
+	// len(existing) > 0 guard on the next start and skip importing the rest,
+	// leaving previously restricted models without their access controls.
+	written := make([]string, 0, len(toSeed))
 	for _, vm := range toSeed {
 		if err := store.Upsert(ctx, vm); err != nil {
+			rollbackPartialSeed(store, written)
 			return fmt.Errorf("seed virtual model %q: %w", vm.Source, err)
 		}
+		written = append(written, vm.Source)
 	}
 
 	if len(toSeed) > 0 {
 		slog.Info("virtualmodels: seeded virtual_models from legacy aliases and access overrides", "count", len(toSeed))
 	}
 	return nil
+}
+
+// rollbackPartialSeed best-effort deletes rows already written by a failed seed,
+// using a fresh context since the seed's context may itself have been cancelled.
+func rollbackPartialSeed(store Store, sources []string) {
+	if len(sources) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, source := range sources {
+		if err := store.Delete(ctx, source); err != nil {
+			slog.Error("virtualmodels: failed to roll back partial seed", "source", source, "error", err)
+		}
+	}
 }

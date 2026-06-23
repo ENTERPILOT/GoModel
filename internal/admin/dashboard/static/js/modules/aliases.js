@@ -883,7 +883,10 @@
                 let payload;
                 if (desired === false) {
                     payload = { source: selector, enabled: false, user_paths: existingPaths };
-                } else if (existingPolicy && existingPaths.length === 0) {
+                } else if (existingPolicy && existingPaths.length === 0 && access.default_enabled !== false) {
+                    // Removing a path-less policy only enables the model when the
+                    // default is on; in a default-disabled deployment we must keep an
+                    // explicit enabled policy instead of falling back to the default.
                     method = 'DELETE';
                     payload = { source: selector };
                 } else {

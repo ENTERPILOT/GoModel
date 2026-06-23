@@ -414,23 +414,28 @@ func (h *Handler) ListModels(c *echo.Context) error {
 	}
 	if h.exposedModelLister != nil {
 		ctx := c.Request().Context()
-		if scoped, ok := h.exposedModelLister.(UserPathExposedModelLister); ok && h.modelAuthorizer != nil {
-			resp = mergeExposedModelsResponse(resp, scoped.ExposedModelsForUserPath(
-				core.UserPathFromContext(ctx),
-				func(selector core.ModelSelector) bool {
-					return h.modelAuthorizer.AllowsModel(ctx, selector)
-				}))
-		} else if filtered, ok := h.exposedModelLister.(FilteredExposedModelLister); ok && h.modelAuthorizer != nil {
-			resp = mergeExposedModelsResponse(resp, filtered.ExposedModelsFiltered(func(selector core.ModelSelector) bool {
-				return h.modelAuthorizer.AllowsModel(c.Request().Context(), selector)
-			}))
+		// The target-access filter is only available when an authorizer is set.
+		var allow func(core.ModelSelector) bool
+		if h.modelAuthorizer != nil {
+			allow = func(selector core.ModelSelector) bool {
+				return h.modelAuthorizer.AllowsModel(ctx, selector)
+			}
+		}
+		// User-path scoping of redirects is a property of the redirect itself, not
+		// of the authorizer, so it must apply even when no authorizer is configured
+		// (allow is nil there) — otherwise scoped redirect IDs leak to callers
+		// outside their user_paths.
+		if scoped, ok := h.exposedModelLister.(UserPathExposedModelLister); ok {
+			resp = mergeExposedModelsResponse(resp, scoped.ExposedModelsForUserPath(core.UserPathFromContext(ctx), allow))
+		} else if filtered, ok := h.exposedModelLister.(FilteredExposedModelLister); ok && allow != nil {
+			resp = mergeExposedModelsResponse(resp, filtered.ExposedModelsFiltered(allow))
 		} else {
 			exposed := h.exposedModelLister.ExposedModels()
-			if h.modelAuthorizer != nil {
+			if allow != nil {
 				filtered := make([]core.Model, 0, len(exposed))
 				for _, model := range exposed {
 					selector, err := core.ParseModelSelector(model.ID, "")
-					if err != nil || !h.modelAuthorizer.AllowsModel(c.Request().Context(), selector) {
+					if err != nil || !allow(selector) {
 						continue
 					}
 					filtered = append(filtered, model)
