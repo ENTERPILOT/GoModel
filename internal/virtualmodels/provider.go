@@ -7,8 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/goccy/go-json"
-
 	"gomodel/internal/batchrewrite"
 	"gomodel/internal/core"
 )
@@ -19,13 +17,6 @@ type Provider struct {
 	service *Service
 	options Options
 }
-
-type requestRewriteMode int
-
-const (
-	rewriteForRouting requestRewriteMode = iota
-	rewriteForUpstream
-)
 
 // Options controls optional behavior of Provider.
 type Options struct {
@@ -61,7 +52,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.ChatCompletion(ctx, req)
 	}
-	forward, err := rewriteChatRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteChatRequest(ctx, p.service, p.inner, req)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +63,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.StreamChatCompletion(ctx, req)
 	}
-	forward, err := rewriteChatRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteChatRequest(ctx, p.service, p.inner, req)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +106,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.Responses(ctx, req)
 	}
-	forward, err := rewriteResponsesRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteResponsesRequest(ctx, p.service, p.inner, req)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +117,7 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.StreamResponses(ctx, req)
 	}
-	forward, err := rewriteResponsesRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteResponsesRequest(ctx, p.service, p.inner, req)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +128,7 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.Embeddings(ctx, req)
 	}
-	forward, err := rewriteEmbeddingRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteEmbeddingRequest(ctx, p.service, p.inner, req)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +200,7 @@ func (p *Provider) CreateBatch(ctx context.Context, providerType string, req *co
 	if p.options.DisableNativeBatchPreparation {
 		return native.CreateBatch(ctx, providerType, req)
 	}
-	result, err := rewriteBatchSource(ctx, providerType, req, p.service, p.inner, p.batchFileTransport())
+	result, err := rewriteBatchSource(ctx, providerType, req, p.service, p.inner, p.batchFileTransport(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +254,7 @@ func (p *Provider) CreateBatchWithHints(ctx context.Context, providerType string
 	if p.options.DisableNativeBatchPreparation {
 		return hinted.CreateBatchWithHints(ctx, providerType, req)
 	}
-	result, err := rewriteBatchSource(ctx, providerType, req, p.service, p.inner, p.batchFileTransport())
+	result, err := rewriteBatchSource(ctx, providerType, req, p.service, p.inner, p.batchFileTransport(), nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -395,14 +386,7 @@ func (p *Provider) PrepareBatchRequest(ctx context.Context, providerType string,
 	if p.options.DisableNativeBatchPreparation {
 		return &core.BatchRewriteResult{Request: req}, nil
 	}
-	return rewriteBatchSource(ctx, providerType, req, p.service, p.inner, p.batchFileTransport())
-}
-
-func providerValueForMode(selector core.ModelSelector, mode requestRewriteMode) string {
-	if mode == rewriteForUpstream {
-		return ""
-	}
-	return selector.Provider
+	return rewriteBatchSource(ctx, providerType, req, p.service, p.inner, p.batchFileTransport(), nil)
 }
 
 func (p *Provider) nativeBatchRouter() (core.NativeBatchRoutableProvider, error) {
@@ -541,93 +525,48 @@ func validateResolvedProviderType(checker modelSupportChecker, selector core.Mod
 	)
 }
 
-func rewriteChatRequest(ctx context.Context, service *Service, checker modelSupportChecker, req *core.ChatRequest, expectedProviderType string, mode requestRewriteMode) (*core.ChatRequest, error) {
+// rewriteChatRequest resolves a translated chat request's redirect (user-path
+// aware) and rewrites it for routing (the resolved provider is preserved so
+// downstream routing can pick the target). Batch rewriting (which clears the
+// provider and enforces a single provider per batch) lives in batch_preparer.go.
+func rewriteChatRequest(ctx context.Context, service *Service, checker modelSupportChecker, req *core.ChatRequest) (*core.ChatRequest, error) {
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveRedirectRoutableSelector(ctx, service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
+	selector, err := resolveRedirectRoutableSelector(ctx, service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), "")
 	if err != nil {
 		return nil, err
 	}
 	forward := *req
 	forward.Model = selector.Model
-	forward.Provider = providerValueForMode(selector, mode)
+	forward.Provider = selector.Provider
 	return &forward, nil
 }
 
-func rewriteResponsesRequest(ctx context.Context, service *Service, checker modelSupportChecker, req *core.ResponsesRequest, expectedProviderType string, mode requestRewriteMode) (*core.ResponsesRequest, error) {
+func rewriteResponsesRequest(ctx context.Context, service *Service, checker modelSupportChecker, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveRedirectRoutableSelector(ctx, service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
+	selector, err := resolveRedirectRoutableSelector(ctx, service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), "")
 	if err != nil {
 		return nil, err
 	}
 	forward := *req
 	forward.Model = selector.Model
-	forward.Provider = providerValueForMode(selector, mode)
+	forward.Provider = selector.Provider
 	return &forward, nil
 }
 
-func rewriteEmbeddingRequest(ctx context.Context, service *Service, checker modelSupportChecker, req *core.EmbeddingRequest, expectedProviderType string, mode requestRewriteMode) (*core.EmbeddingRequest, error) {
+func rewriteEmbeddingRequest(ctx context.Context, service *Service, checker modelSupportChecker, req *core.EmbeddingRequest) (*core.EmbeddingRequest, error) {
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveRedirectRoutableSelector(ctx, service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
+	selector, err := resolveRedirectRoutableSelector(ctx, service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), "")
 	if err != nil {
 		return nil, err
 	}
 	forward := *req
 	forward.Model = selector.Model
-	forward.Provider = providerValueForMode(selector, mode)
+	forward.Provider = selector.Provider
 	return &forward, nil
-}
-
-func rewriteBatchSource(
-	ctx context.Context,
-	providerType string,
-	req *core.BatchRequest,
-	service *Service,
-	checker modelSupportChecker,
-	fileTransport core.BatchFileTransport,
-) (*core.BatchRewriteResult, error) {
-	return core.RewriteBatchSource(
-		ctx,
-		providerType,
-		req,
-		fileTransport,
-		[]core.Operation{core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings},
-		func(ctx context.Context, _ core.BatchRequestItem, decoded *core.DecodedBatchItemRequest) (json.RawMessage, error) {
-			switch typed := decoded.Request.(type) {
-			case *core.ChatRequest:
-				modified, err := rewriteChatRequest(ctx, service, checker, typed, providerType, rewriteForUpstream)
-				if err != nil {
-					return nil, err
-				}
-				return marshalBatchItem(modified)
-			case *core.ResponsesRequest:
-				modified, err := rewriteResponsesRequest(ctx, service, checker, typed, providerType, rewriteForUpstream)
-				if err != nil {
-					return nil, err
-				}
-				return marshalBatchItem(modified)
-			case *core.EmbeddingRequest:
-				modified, err := rewriteEmbeddingRequest(ctx, service, checker, typed, providerType, rewriteForUpstream)
-				if err != nil {
-					return nil, err
-				}
-				return marshalBatchItem(modified)
-			default:
-				return nil, core.NewInvalidRequestError("unsupported batch item url: "+decoded.Endpoint, nil)
-			}
-		},
-	)
-}
-
-func marshalBatchItem(v any) (json.RawMessage, error) {
-	body, err := json.Marshal(v)
-	if err != nil {
-		return nil, core.NewInvalidRequestError("failed to encode batch item", err)
-	}
-	return body, nil
 }
