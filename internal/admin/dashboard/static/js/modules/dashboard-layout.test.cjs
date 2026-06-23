@@ -1073,7 +1073,7 @@ test("model category tables lazy mount only the active table body", () => {
   );
   assert.match(
     modelsBlock,
-    /class="pagination-btn pagination-btn-primary pagination-btn-with-icon virtual-model-submit-btn"[\s\S]*:disabled="vmSubmitting"[\s\S]*data-lucide="plus" class="form-action-icon" x-show="vmFormMode !== 'edit'"[\s\S]*data-lucide="save" class="form-action-icon" x-show="vmFormMode === 'edit'"[\s\S]*x-text="vmSubmitting \? 'Saving\.\.\.' : \(vmFormMode === 'edit' \? 'Save' : 'Create'\)"/,
+    /class="pagination-btn pagination-btn-primary pagination-btn-with-icon virtual-model-submit-btn"[\s\S]*:disabled="vmSubmitting \|\| vmDeleting"[\s\S]*data-lucide="plus" class="form-action-icon" x-show="vmFormMode !== 'edit'"[\s\S]*data-lucide="save" class="form-action-icon" x-show="vmFormMode === 'edit'"[\s\S]*x-text="vmSubmitting \? 'Saving\.\.\.' : \(vmFormMode === 'edit' \? 'Save' : 'Create'\)"/,
   );
   assert.match(
     modelsBlock,

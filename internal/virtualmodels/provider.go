@@ -61,7 +61,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.ChatCompletion(ctx, req)
 	}
-	forward, err := rewriteChatRequest(p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteChatRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.StreamChatCompletion(ctx, req)
 	}
-	forward, err := rewriteChatRequest(p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteChatRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.Responses(ctx, req)
 	}
-	forward, err := rewriteResponsesRequest(p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteResponsesRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.StreamResponses(ctx, req)
 	}
-	forward, err := rewriteResponsesRequest(p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteResponsesRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 	if p.options.DisableTranslatedRequestProcessing {
 		return p.inner.Embeddings(ctx, req)
 	}
-	forward, err := rewriteEmbeddingRequest(p.service, p.inner, req, "", rewriteForRouting)
+	forward, err := rewriteEmbeddingRequest(ctx, p.service, p.inner, req, "", rewriteForRouting)
 	if err != nil {
 		return nil, err
 	}
@@ -478,8 +478,15 @@ func resolveRedirectModel(service *Service, requested core.RequestedModelSelecto
 	return service.ResolveModel(requested)
 }
 
-func resolveRedirectRequestSelector(service *Service, requested core.RequestedModelSelector) (core.ModelSelector, error) {
-	selector, changed, err := resolveRedirectModel(service, requested)
+// resolveRedirectRequestSelector resolves a request-time selector through the
+// redirect table honoring the caller's user path, so a user_paths-scoped redirect
+// is not applied for callers outside its scope (it falls through to the literal
+// name). Unscoped resolveRedirectModel is kept only for inventory/projection.
+func resolveRedirectRequestSelector(ctx context.Context, service *Service, requested core.RequestedModelSelector) (core.ModelSelector, error) {
+	if service == nil {
+		return requested.Normalize()
+	}
+	selector, changed, err := service.ResolveModelForUserPath(ctx, requested)
 	if err != nil {
 		return core.ModelSelector{}, err
 	}
@@ -489,8 +496,8 @@ func resolveRedirectRequestSelector(service *Service, requested core.RequestedMo
 	return requested.Normalize()
 }
 
-func resolveRedirectRoutableSelector(service *Service, checker modelSupportChecker, requested core.RequestedModelSelector, expectedProviderType string) (core.ModelSelector, error) {
-	selector, err := resolveRedirectRequestSelector(service, requested)
+func resolveRedirectRoutableSelector(ctx context.Context, service *Service, checker modelSupportChecker, requested core.RequestedModelSelector, expectedProviderType string) (core.ModelSelector, error) {
+	selector, err := resolveRedirectRequestSelector(ctx, service, requested)
 	if err != nil {
 		return core.ModelSelector{}, err
 	}
@@ -532,11 +539,11 @@ func validateResolvedProviderType(checker modelSupportChecker, selector core.Mod
 	)
 }
 
-func rewriteChatRequest(service *Service, checker modelSupportChecker, req *core.ChatRequest, expectedProviderType string, mode requestRewriteMode) (*core.ChatRequest, error) {
+func rewriteChatRequest(ctx context.Context, service *Service, checker modelSupportChecker, req *core.ChatRequest, expectedProviderType string, mode requestRewriteMode) (*core.ChatRequest, error) {
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveRedirectRoutableSelector(service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
+	selector, err := resolveRedirectRoutableSelector(ctx, service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
 	if err != nil {
 		return nil, err
 	}
@@ -546,11 +553,11 @@ func rewriteChatRequest(service *Service, checker modelSupportChecker, req *core
 	return &forward, nil
 }
 
-func rewriteResponsesRequest(service *Service, checker modelSupportChecker, req *core.ResponsesRequest, expectedProviderType string, mode requestRewriteMode) (*core.ResponsesRequest, error) {
+func rewriteResponsesRequest(ctx context.Context, service *Service, checker modelSupportChecker, req *core.ResponsesRequest, expectedProviderType string, mode requestRewriteMode) (*core.ResponsesRequest, error) {
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveRedirectRoutableSelector(service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
+	selector, err := resolveRedirectRoutableSelector(ctx, service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
 	if err != nil {
 		return nil, err
 	}
@@ -560,11 +567,11 @@ func rewriteResponsesRequest(service *Service, checker modelSupportChecker, req 
 	return &forward, nil
 }
 
-func rewriteEmbeddingRequest(service *Service, checker modelSupportChecker, req *core.EmbeddingRequest, expectedProviderType string, mode requestRewriteMode) (*core.EmbeddingRequest, error) {
+func rewriteEmbeddingRequest(ctx context.Context, service *Service, checker modelSupportChecker, req *core.EmbeddingRequest, expectedProviderType string, mode requestRewriteMode) (*core.EmbeddingRequest, error) {
 	if req == nil {
 		return nil, nil
 	}
-	selector, err := resolveRedirectRoutableSelector(service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
+	selector, err := resolveRedirectRoutableSelector(ctx, service, checker, core.NewRequestedModelSelector(req.Model, req.Provider), expectedProviderType)
 	if err != nil {
 		return nil, err
 	}
@@ -588,22 +595,22 @@ func rewriteBatchSource(
 		req,
 		fileTransport,
 		[]core.Operation{core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings},
-		func(_ context.Context, _ core.BatchRequestItem, decoded *core.DecodedBatchItemRequest) (json.RawMessage, error) {
+		func(ctx context.Context, _ core.BatchRequestItem, decoded *core.DecodedBatchItemRequest) (json.RawMessage, error) {
 			switch typed := decoded.Request.(type) {
 			case *core.ChatRequest:
-				modified, err := rewriteChatRequest(service, checker, typed, providerType, rewriteForUpstream)
+				modified, err := rewriteChatRequest(ctx, service, checker, typed, providerType, rewriteForUpstream)
 				if err != nil {
 					return nil, err
 				}
 				return marshalBatchItem(modified)
 			case *core.ResponsesRequest:
-				modified, err := rewriteResponsesRequest(service, checker, typed, providerType, rewriteForUpstream)
+				modified, err := rewriteResponsesRequest(ctx, service, checker, typed, providerType, rewriteForUpstream)
 				if err != nil {
 					return nil, err
 				}
 				return marshalBatchItem(modified)
 			case *core.EmbeddingRequest:
-				modified, err := rewriteEmbeddingRequest(service, checker, typed, providerType, rewriteForUpstream)
+				modified, err := rewriteEmbeddingRequest(ctx, service, checker, typed, providerType, rewriteForUpstream)
 				if err != nil {
 					return nil, err
 				}

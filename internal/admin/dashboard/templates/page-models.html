@@ -128,7 +128,7 @@
                 <div class="form-actions">
                     <button type="button" class="pagination-btn" @click="closeVirtualModelForm()">Cancel</button>
                     <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="vmFormHasExisting" :disabled="vmDeleting || vmSubmitting" @click="deleteVirtualModel()">Remove</button>
-                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon virtual-model-submit-btn" :disabled="vmSubmitting">
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon virtual-model-submit-btn" :disabled="vmSubmitting || vmDeleting">
                         <i data-lucide="plus" class="form-action-icon" x-show="vmFormMode !== 'edit'" aria-hidden="true"></i>
                         <i data-lucide="save" class="form-action-icon" x-show="vmFormMode === 'edit'" aria-hidden="true"></i>
                         <span x-text="vmSubmitting ? 'Saving...' : (vmFormMode === 'edit' ? 'Save' : 'Create')"></span>

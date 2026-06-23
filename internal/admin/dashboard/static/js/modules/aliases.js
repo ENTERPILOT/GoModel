@@ -621,7 +621,7 @@
                 this.vmFormHasExisting = Boolean(override);
                 this.vmFormOriginalSource = selector;
                 this.vmFormDefaultEnabled = defaultEnabled;
-                this.vmFormEffectiveEnabled = Boolean(override && override.enabled !== false) || defaultEnabled;
+                this.vmFormEffectiveEnabled = override ? (override.enabled !== false) : defaultEnabled;
                 this.vmFormDisplayName = 'All providers and models';
                 this.vmForm = {
                     source: selector,
@@ -797,6 +797,9 @@
             },
 
             async toggleRowEnabled(row) {
+                if (!this.virtualModelsAvailable) {
+                    return;
+                }
                 if (!row || this.rowTogglingKey === row.key) {
                     return;
                 }
@@ -1049,17 +1052,23 @@
                 this.aliasError = '';
                 this.aliasNotice = '';
 
-                // In create mode warn about clobbering an existing alias or masking a
-                // concrete model. Edit mode locks the source so neither applies.
-                if (this.vmFormMode !== 'edit' && targetModel) {
+                // In create mode warn about clobbering an existing virtual model
+                // (alias or access policy) on the same source, or masking a concrete
+                // model. Edit mode locks the source so none of these apply. The
+                // overwrite check must run even with an empty target, since that is a
+                // policy upsert that can still replace an existing redirect/policy row.
+                if (this.vmFormMode !== 'edit') {
                     const existingAlias = this.findExistingAliasByName(source);
-                    if (existingAlias) {
-                        const overwriteMessage = 'An alias named "' + existingAlias.name + '" already exists. Saving will update that alias. Continue?';
+                    const existingPolicy = existingAlias ? null : this.findModelOverrideView(source);
+                    if (existingAlias || existingPolicy) {
+                        const overwriteMessage = existingAlias
+                            ? 'An alias named "' + existingAlias.name + '" already exists. Saving will update that virtual model. Continue?'
+                            : 'An access policy for "' + source + '" already exists. Saving will update that virtual model. Continue?';
                         if (!this.confirmAction(overwriteMessage)) {
-                            this.vmFormError = 'Choose a different source or edit the existing alias.';
+                            this.vmFormError = 'Choose a different source or edit the existing virtual model.';
                             return;
                         }
-                    } else {
+                    } else if (targetModel) {
                         const matchingModel = this.findConcreteModelByName(source);
                         if (matchingModel) {
                             const modelName = this.qualifiedModelName(matchingModel) || String(matchingModel.model && matchingModel.model.id || '').trim();

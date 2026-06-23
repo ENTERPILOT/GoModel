@@ -84,6 +84,7 @@ func TestSeedFromLegacy_CopiesAndIsIdempotent(t *testing.T) {
 
 	createLegacyTables(t, db)
 	insertLegacyAlias(t, db, "fast", "gpt-4o", "openai", true)
+	insertLegacyAlias(t, db, "slow", "gpt-4o-mini", "openai", false)
 	insertLegacyOverride(t, db, "openai/gpt-4o", "openai", "gpt-4o", `["/team"]`)
 
 	vmStore, err := NewSQLiteStore(db)
@@ -100,18 +101,24 @@ func TestSeedFromLegacy_CopiesAndIsIdempotent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("List() error = %v", err)
 		}
-		if len(got) != 2 {
-			t.Fatalf("len(List()) = %d, want 2 (%#v)", len(got), got)
+		if len(got) != 3 {
+			t.Fatalf("len(List()) = %d, want 3 (%#v)", len(got), got)
 		}
-		byKind := map[string]VirtualModel{}
+		bySource := map[string]VirtualModel{}
 		for _, vm := range got {
-			byKind[vm.Kind()] = vm
+			bySource[vm.Source] = vm
 		}
-		if r, ok := byKind[KindRedirect]; !ok || r.Source != "fast" || len(r.Targets) != 1 {
-			t.Fatalf("redirect not seeded correctly: %#v", byKind)
+		// An enabled legacy alias stays an enabled redirect.
+		if r, ok := bySource["fast"]; !ok || !r.IsRedirect() || len(r.Targets) != 1 || !r.Enabled {
+			t.Fatalf("enabled alias not migrated correctly: %#v", bySource["fast"])
 		}
-		if p, ok := byKind[KindPolicy]; !ok || p.Source != "openai/gpt-4o" || len(p.UserPaths) != 1 {
-			t.Fatalf("policy not seeded correctly: %#v", byKind)
+		// A disabled legacy alias stays a disabled redirect (Enabled is authoritative).
+		if r, ok := bySource["slow"]; !ok || !r.IsRedirect() || r.Enabled {
+			t.Fatalf("disabled alias not migrated correctly: %#v", bySource["slow"])
+		}
+		// A legacy access override becomes an enabled, user-path-restricted policy.
+		if p, ok := bySource["openai/gpt-4o"]; !ok || p.IsRedirect() || len(p.UserPaths) != 1 || !p.Enabled {
+			t.Fatalf("override not migrated correctly: %#v", bySource["openai/gpt-4o"])
 		}
 	}
 	assertSeeded()

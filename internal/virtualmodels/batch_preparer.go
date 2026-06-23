@@ -38,7 +38,7 @@ func (p *BatchPreparer) PrepareBatchRequest(ctx context.Context, providerType st
 			}
 			// Resolve the redirect target and verify catalog support + single
 			// provider per batch, mirroring the alias rewrite pass.
-			resolved, err := resolveRedirectRoutableSelector(p.service, p.provider, requested, providerType)
+			resolved, err := resolveRedirectRoutableSelector(ctx, p.service, p.provider, requested, providerType)
 			if err != nil {
 				return nil, err
 			}
