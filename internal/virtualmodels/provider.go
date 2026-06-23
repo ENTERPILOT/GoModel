@@ -95,7 +95,9 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	for _, model := range resp.Data {
 		dataByID[model.ID] = model
 	}
-	for _, exposed := range p.service.ExposedModels() {
+	// Scope redirects by the caller's user_path so a user_paths-scoped alias is not
+	// listed to callers outside its scope (parity with the server /v1/models path).
+	for _, exposed := range p.service.ExposedModelsForUserPath(core.UserPathFromContext(ctx), nil) {
 		dataByID[exposed.ID] = exposed
 	}
 	data := make([]core.Model, 0, len(dataByID))

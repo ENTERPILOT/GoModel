@@ -13,6 +13,13 @@ import (
 	"gomodel/internal/storage"
 )
 
+// transactionalSeeder is an optional Store capability: an atomic batch write so
+// the legacy seed is all-or-nothing. The SQL stores implement it; backends
+// without transactions fall back to per-row writes with best-effort rollback.
+type transactionalSeeder interface {
+	UpsertAll(ctx context.Context, vms []VirtualModel) error
+}
+
 // seedFromLegacy performs a one-time, idempotent copy of legacy `aliases` and
 // `model_overrides` rows into `virtual_models` when the latter is still empty.
 //
@@ -80,17 +87,25 @@ func seedFromLegacy(ctx context.Context, store Store, conn storage.Storage) erro
 		toSeed = append(toSeed, vm)
 	}
 
-	// Roll back rows already written if a later write fails (DB error, context
-	// cancellation, etc.). A partial seed would otherwise trip the
+	// Prefer an atomic batch write so a failed seed leaves the table untouched
+	// rather than partially populated — a partial seed would otherwise trip the
 	// len(existing) > 0 guard on the next start and skip importing the rest,
-	// leaving previously restricted models without their access controls.
-	written := make([]string, 0, len(toSeed))
-	for _, vm := range toSeed {
-		if err := store.Upsert(ctx, vm); err != nil {
-			rollbackPartialSeed(store, written)
-			return fmt.Errorf("seed virtual model %q: %w", vm.Source, err)
+	// leaving previously restricted models without their access controls. Backends
+	// without transactions (e.g. MongoDB) fall back to per-row writes with
+	// best-effort rollback.
+	if seeder, ok := store.(transactionalSeeder); ok {
+		if err := seeder.UpsertAll(ctx, toSeed); err != nil {
+			return fmt.Errorf("seed virtual models: %w", err)
 		}
-		written = append(written, vm.Source)
+	} else {
+		written := make([]string, 0, len(toSeed))
+		for _, vm := range toSeed {
+			if err := store.Upsert(ctx, vm); err != nil {
+				rollbackPartialSeed(store, written)
+				return fmt.Errorf("seed virtual model %q: %w", vm.Source, err)
+			}
+			written = append(written, vm.Source)
+		}
 	}
 
 	if len(toSeed) > 0 {

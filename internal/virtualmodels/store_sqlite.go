@@ -85,18 +85,7 @@ func (s *SQLiteStore) Get(ctx context.Context, source string) (*VirtualModel, er
 	return &vm, nil
 }
 
-func (s *SQLiteStore) Upsert(ctx context.Context, vm VirtualModel) error {
-	stampUpsert(&vm)
-	targetsJSON, err := encodeTargets(vm.Targets)
-	if err != nil {
-		return err
-	}
-	pathsJSON, err := encodeUserPaths(vm.UserPaths)
-	if err != nil {
-		return err
-	}
-
-	_, err = s.db.ExecContext(ctx, `
+const sqliteUpsertVirtualModelSQL = `
 		INSERT INTO virtual_models (
 			source, targets, strategy, provider_name, model, user_paths, description, enabled, created_at, updated_at
 		)
@@ -110,7 +99,19 @@ func (s *SQLiteStore) Upsert(ctx context.Context, vm VirtualModel) error {
 			description = excluded.description,
 			enabled = excluded.enabled,
 			updated_at = excluded.updated_at
-	`,
+	`
+
+func sqliteUpsertArgs(vm VirtualModel) ([]any, error) {
+	stampUpsert(&vm)
+	targetsJSON, err := encodeTargets(vm.Targets)
+	if err != nil {
+		return nil, err
+	}
+	pathsJSON, err := encodeUserPaths(vm.UserPaths)
+	if err != nil {
+		return nil, err
+	}
+	return []any{
 		strings.TrimSpace(vm.Source),
 		targetsJSON,
 		vm.Strategy,
@@ -121,9 +122,43 @@ func (s *SQLiteStore) Upsert(ctx context.Context, vm VirtualModel) error {
 		boolToSQLite(vm.Enabled),
 		vm.CreatedAt.Unix(),
 		vm.UpdatedAt.Unix(),
-	)
+	}, nil
+}
+
+func (s *SQLiteStore) Upsert(ctx context.Context, vm VirtualModel) error {
+	args, err := sqliteUpsertArgs(vm)
 	if err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, sqliteUpsertVirtualModelSQL, args...); err != nil {
 		return fmt.Errorf("upsert virtual model: %w", err)
+	}
+	return nil
+}
+
+// UpsertAll writes every row in a single transaction, so a failed seed leaves the
+// table untouched rather than partially populated (which would otherwise trip the
+// "already populated" guard and suppress a re-import on the next start).
+func (s *SQLiteStore) UpsertAll(ctx context.Context, vms []VirtualModel) error {
+	if len(vms) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin virtual model seed transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, vm := range vms {
+		args, err := sqliteUpsertArgs(vm)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, sqliteUpsertVirtualModelSQL, args...); err != nil {
+			return fmt.Errorf("upsert virtual model: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit virtual model seed: %w", err)
 	}
 	return nil
 }

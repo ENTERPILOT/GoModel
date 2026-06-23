@@ -84,3 +84,41 @@ func TestSQLiteStore_GetMissingAndDelete(t *testing.T) {
 		t.Fatalf("Get(deleted) error = %v, want ErrNotFound", err)
 	}
 }
+
+func TestSQLiteStore_UpsertAllIsAtomic(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	vms := []VirtualModel{
+		{Source: "fast", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Enabled: true},
+		{Source: "openai/gpt-4o", Enabled: false},
+	}
+
+	// Success: the whole batch is committed.
+	store := newSQLiteVMStore(t)
+	if err := store.UpsertAll(ctx, vms); err != nil {
+		t.Fatalf("UpsertAll() error = %v", err)
+	}
+	got, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(List()) = %d, want 2", len(got))
+	}
+
+	// Failure: a cancelled context aborts the transaction and writes nothing —
+	// the table is left untouched rather than partially seeded.
+	store2 := newSQLiteVMStore(t)
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := store2.UpsertAll(cancelled, vms); err == nil {
+		t.Fatal("UpsertAll(cancelled ctx) error = nil, want error")
+	}
+	got2, err := store2.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(got2) != 0 {
+		t.Fatalf("len(List()) = %d after failed UpsertAll, want 0 (atomic)", len(got2))
+	}
+}
