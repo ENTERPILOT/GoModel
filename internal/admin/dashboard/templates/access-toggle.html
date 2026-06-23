@@ -1,0 +1,10 @@
+{{define "access-toggle"}}
+<button type="button" class="alias-toggle"
+        :class="{ enabled: rowToggleEnabled({{.}}), restricted: rowToggleRestricted({{.}}) }"
+        :disabled="rowTogglingKey === ({{.}}).key || !virtualModelsAvailable"
+        :aria-label="rowToggleAriaLabel({{.}})"
+        @click="toggleRowEnabled({{.}})">
+    <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+    <span x-text="rowToggleLabel({{.}})"></span>
+</button>
+{{end}}

@@ -13,7 +13,9 @@
                         <div class="provider-group-summary" x-show="group.access_summary" x-text="group.access_summary"></div>
                     </div>
                     <div class="alias-actions-cell model-list-actions">
-                        <span class="model-access-state-badge" :class="modelAccessStateClass(group.access)" x-text="modelAccessStateText(group.access)"></span>
+                        <template x-if="group.access.selector">
+                            {{template "access-toggle" "group"}}
+                        </template>
                         <button type="button" class="table-action-btn table-icon-btn"
                             x-show="modelPricingOverridesAvailable && group.provider_name"
                             :class="modelPricingButtonClass(hasProviderPricingOverride(group))"
@@ -65,10 +67,7 @@
                 <td class="model-row-actions">
                     <template x-if="row.is_alias">
                         <div class="alias-actions-cell model-list-actions">
-                            <button type="button" class="alias-toggle" :class="{ enabled: rowToggleEnabled(row), restricted: rowToggleRestricted(row) }" :disabled="rowTogglingKey === row.key" :aria-label="(rowToggleEnabled(row) ? 'Disable alias ' : 'Enable alias ') + row.display_name" @click="toggleRowEnabled(row)">
-                                <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
-                                <span x-text="rowToggleLabel(row)"></span>
-                            </button>
+                            {{template "access-toggle" "row"}}
                             <button type="button" class="table-action-btn table-icon-btn"
                                 x-show="virtualModelsAvailable"
                                 :aria-label="'Edit alias ' + row.alias.name"
@@ -80,10 +79,7 @@
                     </template>
                     <template x-if="!row.is_alias">
                         <div class="alias-actions-cell model-list-actions">
-                            <button type="button" class="alias-toggle" :class="{ enabled: rowToggleEnabled(row), restricted: rowToggleRestricted(row) }" :disabled="rowTogglingKey === row.key || !virtualModelsAvailable" :aria-label="(rowToggleEnabled(row) ? 'Disable ' : 'Enable ') + row.display_name" @click="toggleRowEnabled(row)">
-                                <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
-                                <span x-text="rowToggleLabel(row)"></span>
-                            </button>
+                            {{template "access-toggle" "row"}}
                             <button type="button" class="table-action-btn table-icon-btn"
                                 x-show="modelPricingOverridesAvailable"
                                 :class="modelPricingButtonClass(hasModelPricingOverride(row))"

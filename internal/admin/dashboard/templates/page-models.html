@@ -359,6 +359,9 @@
 
 {{define "model-global-action-buttons"}}
 <div class="alias-actions-cell model-list-actions">
+    <template x-if="virtualModelsAvailable">
+        {{template "access-toggle" "globalScopeRow"}}
+    </template>
     <button type="button" class="table-action-btn table-icon-btn"
         x-show="modelPricingOverridesAvailable"
         :class="modelPricingButtonClass(hasGlobalPricingOverride())"

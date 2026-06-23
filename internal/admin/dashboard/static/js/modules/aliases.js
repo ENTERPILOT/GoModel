@@ -339,6 +339,27 @@
                 return Boolean(this.findModelOverrideView(this.globalOverrideSelector()));
             },
 
+            // globalScopeRow exposes the global "/" scope as a toggle row, so the
+            // global level reuses the same enable/restrict/disable switch as models,
+            // aliases, and provider groups.
+            get globalScopeRow() {
+                const override = this.findModelOverrideView(this.globalOverrideSelector());
+                const defaultEnabled = this.modelOverridesDefaultEnabled();
+                const userPaths = override && Array.isArray(override.user_paths) ? override.user_paths : [];
+                return {
+                    key: 'scope-global',
+                    is_alias: false,
+                    display_name: 'all providers and models',
+                    access: {
+                        selector: this.globalOverrideSelector(),
+                        default_enabled: defaultEnabled,
+                        effective_enabled: override ? (override.enabled !== false) : defaultEnabled,
+                        user_paths: userPaths,
+                        override
+                    }
+                };
+            },
+
             providerGroupDefaultEnabled(providerName, providerType) {
                 const normalizedProviderName = String(providerName || '').trim();
                 const normalizedProviderType = String(providerType || '').trim();
@@ -406,7 +427,10 @@
                 return {
                     selector,
                     default_enabled: defaultEnabled,
-                    effective_enabled: Boolean(inheritedOverride) || defaultEnabled,
+                    // Honor the override's enabled VALUE, not just its presence: a
+                    // disabled policy turns the selector off even though an override
+                    // exists.
+                    effective_enabled: inheritedOverride ? (inheritedOverride.enabled !== false) : defaultEnabled,
                     user_paths: userPaths,
                     override
                 };
@@ -593,15 +617,18 @@
                 this.vmFormSourceLocked = true;
                 this.vmFormHasExisting = Boolean(override);
                 this.vmFormOriginalSource = selector;
+                // Prefer the override's own enabled value; fall back to the backend
+                // effective state only when no override row exists for this selector.
+                const overrideEnabled = override ? (override.enabled !== false) : (access.effective_enabled !== false);
                 this.vmFormDefaultEnabled = access.default_enabled !== false;
-                this.vmFormEffectiveEnabled = access.effective_enabled !== false;
+                this.vmFormEffectiveEnabled = overrideEnabled;
                 this.vmFormDisplayName = row.access_display_name || row.display_name || selector || '';
                 this.vmForm = {
                     source: selector,
                     target_model: '',
                     user_paths: userPaths.join('\n'),
                     description: override && override.description ? override.description : '',
-                    enabled: access.effective_enabled !== false
+                    enabled: overrideEnabled
                 };
                 this.focusEditorField('virtualModelEditor');
             },
@@ -712,18 +739,6 @@
                 return Array.isArray(paths) && paths.length > 0 && paths.indexOf('/') === -1;
             },
 
-            modelAccessStateText(access) {
-                if (!this.modelOverridesAvailable) return '';
-                if (!access) return 'Default';
-                if (access.effective_enabled === false) {
-                    return access.default_enabled === false ? 'Disabled by Default' : 'Disabled';
-                }
-                if (this.modelAccessUserPathsRestrict(access.user_paths)) {
-                    return 'Restricted';
-                }
-                return 'Enabled';
-            },
-
             modelAccessStateClass(access) {
                 if (!this.modelOverridesAvailable) return '';
                 if (!access) return '';
@@ -779,6 +794,22 @@
             // separate access-state pill is needed.
             rowToggleRestricted(row) {
                 return Boolean(row) && !row.is_alias && this.modelAccessStateClass(row.access) === 'is-restricted';
+            },
+
+            // rowToggleAriaLabel describes the toggle for any scope: alias, model
+            // row, provider group, or the global "/" scope.
+            rowToggleAriaLabel(row) {
+                if (!row) {
+                    return '';
+                }
+                const action = this.rowToggleEnabled(row) ? 'Disable ' : 'Enable ';
+                let subject;
+                if (row.is_alias) {
+                    subject = 'alias ' + String(row.alias && row.alias.name || '');
+                } else {
+                    subject = String(row.display_name || (row.access && row.access.selector) || 'model');
+                }
+                return action + subject.trim();
             },
 
             // The edit-modal status switch reuses the same .alias-toggle component

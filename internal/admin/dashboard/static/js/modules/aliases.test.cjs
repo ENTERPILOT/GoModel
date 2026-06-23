@@ -683,12 +683,10 @@ test('override button helpers mark configured selectors', () => {
         module.modelOverrideEditButtonLabel('global model access', true),
         'Edit global model access (virtual model exists)'
     );
-    assert.equal(module.modelAccessStateText({ effective_enabled: true }), 'Enabled');
     assert.equal(module.modelAccessStateClass({ effective_enabled: true }), 'is-enabled');
 
     module.modelOverridesAvailable = false;
 
-    assert.equal(module.modelAccessStateText({ effective_enabled: true }), '');
     assert.equal(module.modelAccessStateClass({ effective_enabled: true }), '');
 });
 
