@@ -101,12 +101,23 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		return nil, err
 	}
 
-	// One ticker now drives the unified store. Use the model cache interval as
-	// the refresh cadence (the redirect side previously used it; the policy side
-	// used a shorter interval, but a single store no longer warrants two loops).
-	refreshInterval := time.Duration(cfg.Cache.Model.RefreshInterval) * time.Second
-	if refreshInterval <= 0 {
-		refreshInterval = time.Hour
+	// One ticker now drives the unified store, but it serves both redirects and
+	// access policies. Use the SHORTER of the two legacy cadences (the redirect
+	// side used the model-cache interval; the policy side used the workflow
+	// interval, defaulting to a minute) so a disable/restrict on one instance
+	// still propagates to other instances as quickly as the policy side did
+	// before unification, rather than lagging up to the model-cache interval.
+	modelInterval := time.Duration(cfg.Cache.Model.RefreshInterval) * time.Second
+	if modelInterval <= 0 {
+		modelInterval = time.Hour
+	}
+	policyInterval := time.Minute
+	if cfg.Workflows.RefreshInterval > 0 {
+		policyInterval = cfg.Workflows.RefreshInterval
+	}
+	refreshInterval := modelInterval
+	if policyInterval < refreshInterval {
+		refreshInterval = policyInterval
 	}
 
 	return &Result{

@@ -231,6 +231,39 @@ func TestService_ExposedModelsProjectsEnabledRedirects(t *testing.T) {
 	}
 }
 
+func TestService_ExposedModelsForUserPathHidesScopedRedirects(t *testing.T) {
+	t.Parallel()
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	if err := svc.Upsert(ctx, VirtualModel{Source: "open", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Enabled: true}); err != nil {
+		t.Fatalf("Upsert(open) error = %v", err)
+	}
+	if err := svc.Upsert(ctx, VirtualModel{Source: "team-only", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, UserPaths: []string{"/team"}, Enabled: true}); err != nil {
+		t.Fatalf("Upsert(team-only) error = %v", err)
+	}
+
+	ids := func(models []core.Model) map[string]bool {
+		out := make(map[string]bool, len(models))
+		for _, m := range models {
+			out[m.ID] = true
+		}
+		return out
+	}
+
+	// Matching caller sees both; non-matching caller sees only the unscoped one.
+	if got := ids(svc.ExposedModelsForUserPath("/team/alice", nil)); !got["open"] || !got["team-only"] {
+		t.Fatalf("ExposedModelsForUserPath(/team/alice) = %v, want open and team-only", got)
+	}
+	if got := ids(svc.ExposedModelsForUserPath("/other", nil)); !got["open"] || got["team-only"] {
+		t.Fatalf("ExposedModelsForUserPath(/other) = %v, want open only (team-only hidden)", got)
+	}
+	// The unscoped filter is unchanged (backward compatible).
+	if got := ids(svc.ExposedModelsFiltered(nil)); !got["open"] || !got["team-only"] {
+		t.Fatalf("ExposedModelsFiltered = %v, want both", got)
+	}
+}
+
 func TestService_ExplicitProviderBypassesRedirect(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t)

@@ -47,14 +47,19 @@ func seedFromLegacy(ctx context.Context, store Store, conn storage.Storage) erro
 		return fmt.Errorf("read legacy model overrides: %w", err)
 	}
 
-	seen := make(map[string]struct{})
+	// Resolve every row and detect source-namespace collisions BEFORE writing
+	// anything. If a collision aborted the seed mid-write, the partially seeded
+	// table would trip the len(existing) > 0 guard on the next startup and the
+	// access overrides would never be imported, leaving redirects without their
+	// access controls. Building the full set first makes the seed all-or-nothing
+	// with respect to collisions.
+	seen := make(map[string]struct{}, len(legacyAliasRows)+len(legacyOverrideRows))
+	toSeed := make([]VirtualModel, 0, len(legacyAliasRows)+len(legacyOverrideRows))
 
 	for _, alias := range legacyAliasRows {
 		vm := alias.toRedirect()
-		if err := store.Upsert(ctx, vm); err != nil {
-			return fmt.Errorf("seed alias %q: %w", vm.Source, err)
-		}
 		seen[vm.Source] = struct{}{}
+		toSeed = append(toSeed, vm)
 	}
 
 	for _, override := range legacyOverrideRows {
@@ -63,21 +68,25 @@ func seedFromLegacy(ctx context.Context, store Store, conn storage.Storage) erro
 			// Source-namespace collision: an alias and an access override share
 			// the same name. We must not silently drop the override — that would
 			// remove an access control and could expose a model that was gated.
-			// Fail closed and ask the operator to rename the alias or the
-			// override selector before upgrading.
+			// Fail closed (before any write) and ask the operator to rename the
+			// alias or the override selector before upgrading.
 			return fmt.Errorf(
 				"virtual models migration conflict: source %q is used by both an alias and an access override; "+
 					"rename the alias or remove/rename the access override (selector %q) before upgrading",
 				vm.Source, override.Selector)
 		}
-		if err := store.Upsert(ctx, vm); err != nil {
-			return fmt.Errorf("seed access override %q: %w", vm.Source, err)
-		}
 		seen[vm.Source] = struct{}{}
+		toSeed = append(toSeed, vm)
 	}
 
-	if len(seen) > 0 {
-		slog.Info("virtualmodels: seeded virtual_models from legacy aliases and access overrides", "count", len(seen))
+	for _, vm := range toSeed {
+		if err := store.Upsert(ctx, vm); err != nil {
+			return fmt.Errorf("seed virtual model %q: %w", vm.Source, err)
+		}
+	}
+
+	if len(toSeed) > 0 {
+		slog.Info("virtualmodels: seeded virtual_models from legacy aliases and access overrides", "count", len(toSeed))
 	}
 	return nil
 }

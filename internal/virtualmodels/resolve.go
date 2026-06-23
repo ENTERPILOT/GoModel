@@ -84,21 +84,32 @@ func (s *Service) GetProviderType(model string) string {
 
 // ExposedModels returns enabled redirects projected as model-list entries.
 func (s *Service) ExposedModels() []core.Model {
-	return s.exposedModelsFiltered(nil)
+	return s.exposedModels("", false, nil)
 }
 
 // ExposedModelsFiltered returns enabled redirects projected as model-list
 // entries, filtered by the concrete target selector.
 func (s *Service) ExposedModelsFiltered(allow func(core.ModelSelector) bool) []core.Model {
-	return s.exposedModelsFiltered(allow)
+	return s.exposedModels("", false, allow)
 }
 
-func (s *Service) exposedModelsFiltered(allow func(core.ModelSelector) bool) []core.Model {
+// ExposedModelsForUserPath is ExposedModelsFiltered plus per-redirect user_path
+// scoping: a redirect carrying user_paths is hidden from callers it would not
+// apply to, so a scoped alias is not listed (its name exposed) to callers
+// outside its scope even though resolution would fall through for them.
+func (s *Service) ExposedModelsForUserPath(userPath string, allow func(core.ModelSelector) bool) []core.Model {
+	return s.exposedModels(userPath, true, allow)
+}
+
+func (s *Service) exposedModels(userPath string, enforceUserPaths bool, allow func(core.ModelSelector) bool) []core.Model {
 	snap := s.snapshot()
 	result := make([]core.Model, 0, len(snap.order))
 	for _, source := range snap.order {
 		entry := snap.redirects[source]
 		if !entry.vm.Enabled {
+			continue
+		}
+		if enforceUserPaths && len(entry.vm.UserPaths) > 0 && !userPathAllowed(userPath, entry.vm.UserPaths) {
 			continue
 		}
 		if allow != nil && !allow(entry.target) {

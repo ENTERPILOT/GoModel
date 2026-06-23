@@ -305,6 +305,7 @@ var _ interface {
 	ResolveRefreshTarget(core.RequestedModelSelector) (core.ModelSelector, bool, error)
 	ExposedModels() []core.Model
 	ExposedModelsFiltered(func(core.ModelSelector) bool) []core.Model
+	ExposedModelsForUserPath(string, func(core.ModelSelector) bool) []core.Model
 	ValidateModelAccess(context.Context, core.ModelSelector) error
 	AllowsModel(context.Context, core.ModelSelector) bool
 	FilterPublicModels(context.Context, []core.Model) []core.Model

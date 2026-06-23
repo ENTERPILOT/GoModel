@@ -16,6 +16,13 @@ type FilteredExposedModelLister interface {
 	ExposedModelsFiltered(allow func(core.ModelSelector) bool) []core.Model
 }
 
+// UserPathExposedModelLister optionally filters exposed models by the effective
+// request user path in addition to their concrete targets, so a redirect scoped
+// to user_paths is not listed to callers outside its scope.
+type UserPathExposedModelLister interface {
+	ExposedModelsForUserPath(userPath string, allow func(core.ModelSelector) bool) []core.Model
+}
+
 func mergeExposedModelsResponse(base *core.ModelsResponse, exposed []core.Model) *core.ModelsResponse {
 	if base == nil {
 		base = &core.ModelsResponse{Object: "list", Data: []core.Model{}}

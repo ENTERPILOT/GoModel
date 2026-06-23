@@ -413,7 +413,14 @@ func (h *Handler) ListModels(c *echo.Context) error {
 		}
 	}
 	if h.exposedModelLister != nil {
-		if filtered, ok := h.exposedModelLister.(FilteredExposedModelLister); ok && h.modelAuthorizer != nil {
+		ctx := c.Request().Context()
+		if scoped, ok := h.exposedModelLister.(UserPathExposedModelLister); ok && h.modelAuthorizer != nil {
+			resp = mergeExposedModelsResponse(resp, scoped.ExposedModelsForUserPath(
+				core.UserPathFromContext(ctx),
+				func(selector core.ModelSelector) bool {
+					return h.modelAuthorizer.AllowsModel(ctx, selector)
+				}))
+		} else if filtered, ok := h.exposedModelLister.(FilteredExposedModelLister); ok && h.modelAuthorizer != nil {
 			resp = mergeExposedModelsResponse(resp, filtered.ExposedModelsFiltered(func(selector core.ModelSelector) bool {
 				return h.modelAuthorizer.AllowsModel(c.Request().Context(), selector)
 			}))

@@ -143,6 +143,16 @@ func TestSeedFromLegacy_CollisionFailsClosed(t *testing.T) {
 	if err := seedFromLegacy(ctx, vmStore, conn); err == nil {
 		t.Fatalf("seedFromLegacy() error = nil, want migration conflict error")
 	}
+	// The collision is detected before any write, so the table must be left
+	// empty — a partial seed would trip the len(existing) > 0 guard next startup
+	// and skip importing the access overrides entirely.
+	got, err := vmStore.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("len(List()) = %d after failed seed, want 0 (no partial write)", len(got))
+	}
 }
 
 func TestSeedFromLegacy_MissingLegacyTablesIsNoOp(t *testing.T) {
