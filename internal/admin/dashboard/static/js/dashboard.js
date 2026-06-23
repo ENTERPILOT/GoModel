@@ -1086,10 +1086,10 @@ function dashboard() {
       "dashboardLiveLogsModule",
     ),
     resolveModuleFactory(
-      typeof dashboardAliasesModule === "function"
-        ? dashboardAliasesModule
+      typeof dashboardVirtualModelsModule === "function"
+        ? dashboardVirtualModelsModule
         : null,
-      "dashboardAliasesModule",
+      "dashboardVirtualModelsModule",
     ),
     resolveModuleFactory(
       typeof dashboardModelPricingOverridesModule === "function"

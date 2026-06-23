@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function loadAliasesModuleFactory(overrides = {}) {
-    const source = fs.readFileSync(path.join(__dirname, 'aliases.js'), 'utf8');
+    const source = fs.readFileSync(path.join(__dirname, 'virtual-models.js'), 'utf8');
     const window = {
         ...(overrides.window || {})
     };
@@ -16,7 +16,7 @@ function loadAliasesModuleFactory(overrides = {}) {
     };
     vm.createContext(context);
     vm.runInContext(source, context);
-    return context.window.dashboardAliasesModule;
+    return context.window.dashboardVirtualModelsModule;
 }
 
 function createAliasesModule(overrides) {
@@ -59,7 +59,7 @@ test('filteredDisplayModels returns stable rows when filter is empty', () => {
         }
     ];
     module.aliases = [];
-    module.aliasesAvailable = true;
+    module.virtualModelsAvailable = true;
     module.modelFilter = '';
     module.syncDisplayModels();
 
@@ -143,8 +143,7 @@ test('fetchVirtualModels parses redirect and policy Views into aliases and overr
     assert.equal(module.modelOverrideViews[0].selector, 'openai/gpt-4o');
     assert.deepEqual(module.modelOverrideViews[0].user_paths, ['/team/alpha']);
     assert.equal(module.virtualModelsAvailable, true);
-    assert.equal(module.aliasesAvailable, true);
-    assert.equal(module.modelOverridesAvailable, true);
+    assert.equal(module.virtualModelsAvailable, true);
 });
 
 test('fetchVirtualModels marks the feature unavailable on 503', async() => {
@@ -159,8 +158,7 @@ test('fetchVirtualModels marks the feature unavailable on 503', async() => {
     await module.fetchVirtualModels();
 
     assert.equal(module.virtualModelsAvailable, false);
-    assert.equal(module.aliasesAvailable, false);
-    assert.equal(module.modelOverridesAvailable, false);
+    assert.equal(module.virtualModelsAvailable, false);
     assert.equal(module.aliases.length, 0);
     assert.equal(module.modelOverrideViews.length, 0);
 });
@@ -525,7 +523,7 @@ test('buildDisplayModels flags model rows with a policy override as carrying a v
         }
     ];
     module.aliases = [];
-    module.aliasesAvailable = true;
+    module.virtualModelsAvailable = true;
     module.syncDisplayModels();
 
     const withOverride = module.displayModels.find((row) => row.display_name === 'openai/gpt-4o');
@@ -588,7 +586,7 @@ test('filteredDisplayModelGroups groups rows by provider_name and applies provid
         }
     ];
     module.aliases = [];
-    module.aliasesAvailable = true;
+    module.virtualModelsAvailable = true;
     module.modelFilter = '';
     module.syncDisplayModels();
 
@@ -652,7 +650,7 @@ test('filteredDisplayModelGroups lets provider-wide overrides replace global pat
         }
     ];
     module.aliases = [];
-    module.aliasesAvailable = true;
+    module.virtualModelsAvailable = true;
     module.modelFilter = '';
     module.syncDisplayModels();
 
@@ -685,7 +683,7 @@ test('override button helpers mark configured selectors', () => {
     );
     assert.equal(module.modelAccessStateClass({ effective_enabled: true }), 'is-enabled');
 
-    module.modelOverridesAvailable = false;
+    module.virtualModelsAvailable = false;
 
     assert.equal(module.modelAccessStateClass({ effective_enabled: true }), '');
 });
@@ -919,8 +917,7 @@ test('virtual model write paths use generation-aware request handling for stale 
             models: [],
             modelOverrideViews: [],
             virtualModelsAvailable: true,
-            aliasesAvailable: true,
-            modelOverridesAvailable: true,
+            virtualModelsAvailable: true,
             needsAuth: false,
             authError: false,
             requestOptions(options) {
@@ -1006,8 +1003,7 @@ test('virtual model editor surfaces nested HTTP error payloads', async() => {
             models: [],
             modelOverrideViews: [],
             virtualModelsAvailable: true,
-            aliasesAvailable: true,
-            modelOverridesAvailable: true,
+            virtualModelsAvailable: true,
             requestOptions(options) {
                 return {
                     ...(options || {}),

@@ -1,11 +1,9 @@
 (function(global) {
-    function dashboardAliasesModule() {
+    function dashboardVirtualModelsModule() {
         return {
             // Unified virtual-models state. `aliases` holds redirect Views mapped to
             // the renderer shape; `modelOverrideViews` holds policy Views.
             virtualModelsAvailable: true,
-            aliasesAvailable: true,
-            modelOverridesAvailable: true,
             aliases: [],
             modelOverrideViews: [],
             displayModels: [],
@@ -53,7 +51,7 @@
                     alias_state_text: ''
                 }));
 
-                if (!this.aliasesAvailable) {
+                if (!this.virtualModelsAvailable) {
                     return rows;
                 }
 
@@ -244,8 +242,6 @@
             setVirtualModelsAvailable(available) {
                 const value = Boolean(available);
                 this.virtualModelsAvailable = value;
-                this.aliasesAvailable = value;
-                this.modelOverridesAvailable = value;
             },
 
             groupDisplayModels(rows) {
@@ -740,7 +736,7 @@
             },
 
             modelAccessStateClass(access) {
-                if (!this.modelOverridesAvailable) return '';
+                if (!this.virtualModelsAvailable) return '';
                 if (!access) return '';
                 if (access.effective_enabled === false) return 'is-disabled';
                 if (this.modelAccessUserPathsRestrict(access.user_paths)) {
@@ -1222,5 +1218,5 @@
         };
     }
 
-    global.dashboardAliasesModule = dashboardAliasesModule;
+    global.dashboardVirtualModelsModule = dashboardVirtualModelsModule;
 })(window);

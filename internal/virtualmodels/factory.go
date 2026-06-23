@@ -101,23 +101,13 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		return nil, err
 	}
 
-	// One ticker now drives the unified store, but it serves both redirects and
-	// access policies. Use the SHORTER of the two legacy cadences (the redirect
-	// side used the model-cache interval; the policy side used the workflow
-	// interval, defaulting to a minute) so a disable/restrict on one instance
-	// still propagates to other instances as quickly as the policy side did
-	// before unification, rather than lagging up to the model-cache interval.
-	modelInterval := time.Duration(cfg.Cache.Model.RefreshInterval) * time.Second
-	if modelInterval <= 0 {
-		modelInterval = time.Hour
-	}
-	policyInterval := time.Minute
-	if cfg.Workflows.RefreshInterval > 0 {
-		policyInterval = cfg.Workflows.RefreshInterval
-	}
-	refreshInterval := modelInterval
-	if policyInterval < refreshInterval {
-		refreshInterval = policyInterval
+	// Virtual models are part of the model-config plane, so the unified store
+	// refreshes on the model-cache cadence — the same interval the provider model
+	// list uses. Cross-instance staleness is therefore identical to the model
+	// cache's; operators tune CACHE_MODEL_REFRESH_INTERVAL for faster propagation.
+	refreshInterval := time.Duration(cfg.Cache.Model.RefreshInterval) * time.Second
+	if refreshInterval <= 0 {
+		refreshInterval = time.Hour
 	}
 
 	return &Result{

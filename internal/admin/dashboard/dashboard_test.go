@@ -66,7 +66,7 @@ func TestIndex_ReturnsHTML(t *testing.T) {
 	if !regexp.MustCompile(`/admin/static/js/dashboard\.js\?v=[0-9a-f]+`).MatchString(rec.Body.String()) {
 		t.Errorf("expected versioned dashboard JS link in page HTML")
 	}
-	if !regexp.MustCompile(`/admin/static/js/modules/aliases\.js\?v=[0-9a-f]+`).MatchString(rec.Body.String()) {
+	if !regexp.MustCompile(`/admin/static/js/modules/virtual-models\.js\?v=[0-9a-f]+`).MatchString(rec.Body.String()) {
 		t.Errorf("expected versioned dashboard module JS link in page HTML")
 	}
 	if !strings.Contains(body, "settings-version-footer") {
@@ -103,7 +103,7 @@ func TestIndex_UsesBasePathForGeneratedURLs(t *testing.T) {
 	if !regexp.MustCompile(`/g/admin/static/js/dashboard\.js\?v=[0-9a-f]+`).MatchString(body) {
 		t.Errorf("expected versioned dashboard JS link to include base path")
 	}
-	if !regexp.MustCompile(`/g/admin/static/js/modules/aliases\.js\?v=[0-9a-f]+`).MatchString(body) {
+	if !regexp.MustCompile(`/g/admin/static/js/modules/virtual-models\.js\?v=[0-9a-f]+`).MatchString(body) {
 		t.Errorf("expected versioned dashboard module JS link to include base path")
 	}
 	if !strings.Contains(body, `href="/g/admin/dashboard/overview"`) {
@@ -206,14 +206,14 @@ func TestStatic_ServesProvidersModuleJS(t *testing.T) {
 	}
 }
 
-func TestStatic_ServesAliasesModuleJS(t *testing.T) {
+func TestStatic_ServesVirtualModelsModuleJS(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New() returned error: %v", err)
 	}
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/static/js/modules/aliases.js", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/static/js/modules/virtual-models.js", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -225,7 +225,7 @@ func TestStatic_ServesAliasesModuleJS(t *testing.T) {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
 	if rec.Body.Len() == 0 {
-		t.Error("expected non-empty body for aliases module JS file")
+		t.Error("expected non-empty body for virtual-models module JS file")
 	}
 }
 
