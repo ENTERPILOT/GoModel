@@ -8,13 +8,12 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/aliases"
 	"gomodel/internal/authkeys"
 	"gomodel/internal/budget"
 	"gomodel/internal/core"
 	"gomodel/internal/guardrails"
-	"gomodel/internal/modeloverrides"
 	"gomodel/internal/pricingoverrides"
+	"gomodel/internal/virtualmodels"
 	"gomodel/internal/workflows"
 )
 
@@ -43,22 +42,21 @@ func validationWriter(isValidation func(error) bool) func(error) error {
 }
 
 var (
-	aliasWriteError     = validationWriter(aliases.IsValidationError)
 	workflowWriteError  = validationWriter(workflows.IsValidationError)
 	authKeyWriteError   = validationWriter(authkeys.IsValidationError)
 	guardrailWriteError = validationWriter(guardrails.IsValidationError)
 )
 
-// modelOverrideWriteError differs from the others: non-validation errors are
-// surfaced as 502 so the dashboard distinguishes provider failures from input issues.
-func modelOverrideWriteError(err error) error {
+// virtualModelWriteError surfaces validation errors as 400 and other failures
+// as 502 so the dashboard distinguishes store/provider failures from input issues.
+func virtualModelWriteError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if modeloverrides.IsValidationError(err) {
+	if virtualmodels.IsValidationError(err) {
 		return core.NewInvalidRequestError(err.Error(), err)
 	}
-	return core.NewProviderError("model_overrides", http.StatusBadGateway, err.Error(), err)
+	return core.NewProviderError("virtual_models", http.StatusBadGateway, err.Error(), err)
 }
 
 func pricingOverrideWriteError(err error) error {
@@ -96,14 +94,6 @@ func deactivateByID(
 		return handleError(c, writeError(err))
 	}
 	return c.NoContent(http.StatusNoContent)
-}
-
-func normalizeModelOverrideSelector(selector string) (string, error) {
-	selector = strings.TrimSpace(selector)
-	if selector == "" {
-		return "", core.NewInvalidRequestError("model override selector is required", nil)
-	}
-	return selector, nil
 }
 
 // modelPricingOverrideSelectorMaxLen caps decoded selectors to a sane size; provider

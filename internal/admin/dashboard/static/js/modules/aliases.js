@@ -1,38 +1,37 @@
 (function(global) {
     function dashboardAliasesModule() {
         return {
-            aliases: [],
+            // Unified virtual-models state. `aliases` holds redirect Views mapped to
+            // the renderer shape; `modelOverrideViews` holds policy Views.
+            virtualModelsAvailable: true,
             aliasesAvailable: true,
             modelOverridesAvailable: true,
+            aliases: [],
             modelOverrideViews: [],
             displayModels: [],
             aliasLoading: false,
             aliasError: '',
-            aliasFormError: '',
             aliasNotice: '',
-            aliasFormOpen: false,
-            aliasSubmitting: false,
-            aliasTogglingName: '',
-            aliasDeletingName: '',
-            aliasFormMode: 'create',
-            aliasFormOriginalName: '',
-            aliasForm: {
-                name: '',
+            rowTogglingKey: '',
+
+            // Unified editor (replaces the old alias modal and access-override modal).
+            vmFormOpen: false,
+            vmFormMode: 'create',
+            vmFormError: '',
+            vmSubmitting: false,
+            vmDeleting: false,
+            vmFormHasExisting: false,
+            vmFormDefaultEnabled: true,
+            vmFormEffectiveEnabled: true,
+            vmFormDisplayName: '',
+            vmFormSourceLocked: false,
+            vmFormOriginalSource: '',
+            vmForm: {
+                source: '',
                 target_model: '',
+                user_paths: '',
                 description: '',
                 enabled: true
-            },
-            modelOverrideFormOpen: false,
-            modelOverrideSubmitting: false,
-            modelOverrideError: '',
-            modelOverrideNotice: '',
-            modelOverrideFormHasExistingOverride: false,
-            modelOverrideFormDefaultEnabled: true,
-            modelOverrideFormEffectiveEnabled: true,
-            modelOverrideFormDisplayName: '',
-            modelOverrideForm: {
-                selector: '',
-                user_paths: ''
             },
 
             buildDisplayModels() {
@@ -43,11 +42,13 @@
                     provider_name: model.provider_name || '',
                     provider_type: model.provider_type || '',
                     model: model.model,
+                    selector: model.selector || '',
                     is_alias: false,
                     alias: null,
                     access: model && model.access ? model.access : null,
                     kind_badge: '',
                     masking_alias: null,
+                    has_virtual_model: false,
                     alias_state_class: '',
                     alias_state_text: ''
                 }));
@@ -77,6 +78,11 @@
                             break;
                         }
                     }
+                    // A real model row carries a virtual model when an access policy
+                    // override exists for its selector.
+                    if (row.access && row.access.override) {
+                        row.has_virtual_model = true;
+                    }
                 }
 
                 for (const alias of this.aliases) {
@@ -92,11 +98,13 @@
                         provider_name: targetModel ? (targetModel.provider_name || '') : '',
                         provider_type: targetModel ? (targetModel.provider_type || alias.provider_type || '') : (alias.provider_type || ''),
                         model: targetModel ? targetModel.model : { id: alias.name, object: 'model' },
+                        selector: '',
                         is_alias: true,
                         alias,
                         access: null,
                         kind_badge: 'Alias',
                         masking_alias: null,
+                        has_virtual_model: true,
                         alias_state_class: this.aliasStateClass(alias),
                         alias_state_text: this.aliasStateText(alias)
                     });
@@ -137,10 +145,11 @@
                 return this.groupDisplayModels(this.filteredDisplayModels);
             },
 
-            defaultAliasForm() {
+            defaultVirtualModelForm() {
                 return {
-                    name: '',
+                    source: '',
                     target_model: '',
+                    user_paths: '',
                     description: '',
                     enabled: true
                 };
@@ -152,71 +161,91 @@
                     : { ...(options || {}), headers: this.headers() };
             },
 
-            async fetchAliases() {
+            // mapRedirectView maps a redirect View into the shape the renderer needs.
+            mapRedirectView(view) {
+                const target = Array.isArray(view.targets) && view.targets.length > 0 ? view.targets[0] : {};
+                return {
+                    name: view.source,
+                    target_provider: target.provider || '',
+                    target_model: target.model || '',
+                    description: view.description || '',
+                    enabled: view.enabled !== false,
+                    valid: Boolean(view.valid),
+                    resolved_model: view.resolved_model || '',
+                    provider_type: view.provider_type || '',
+                    user_paths: Array.isArray(view.user_paths) ? view.user_paths : []
+                };
+            },
+
+            applyVirtualModelViews(views) {
+                const safeViews = Array.isArray(views) ? views : [];
+                const aliases = [];
+                const policies = [];
+                for (const view of safeViews) {
+                    if (!view || typeof view !== 'object') {
+                        continue;
+                    }
+                    if (view.kind === 'redirect') {
+                        aliases.push(this.mapRedirectView(view));
+                    } else if (view.kind === 'policy') {
+                        policies.push({
+                            selector: view.source,
+                            provider_name: view.provider_name || '',
+                            model: view.model || '',
+                            user_paths: Array.isArray(view.user_paths) ? view.user_paths : [],
+                            description: view.description || '',
+                            enabled: view.enabled !== false,
+                            scope_kind: view.scope_kind || ''
+                        });
+                    }
+                }
+                this.aliases = aliases;
+                this.modelOverrideViews = policies;
+            },
+
+            async fetchVirtualModels() {
                 this.aliasLoading = true;
                 this.aliasError = '';
                 try {
                     const request = this.adminRequestOptions();
-                    const res = await fetch('/admin/aliases', request);
+                    const res = await fetch('/admin/virtual-models', request);
                     if (res.status === 503) {
-                        this.aliasesAvailable = false;
+                        this.setVirtualModelsAvailable(false);
                         this.aliases = [];
+                        this.modelOverrideViews = [];
                         this.syncDisplayModels();
                         return;
                     }
-                    const handled = this.handleFetchResponse(res, 'aliases', request);
+                    const handled = this.handleFetchResponse(res, 'virtual models', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
                     }
-                    this.aliasesAvailable = true;
+                    this.setVirtualModelsAvailable(true);
                     if (!handled) {
                         this.aliases = [];
+                        this.modelOverrideViews = [];
                         this.syncDisplayModels();
                         return;
                     }
                     const payload = await res.json();
-                    this.aliases = Array.isArray(payload) ? payload : [];
+                    this.applyVirtualModelViews(payload);
                     this.syncDisplayModels();
                 } catch (e) {
-                    console.error('Failed to fetch aliases:', e);
+                    console.error('Failed to fetch virtual models:', e);
                     this.aliases = [];
-                    this.aliasError = 'Unable to load aliases.';
+                    this.modelOverrideViews = [];
+                    this.aliasError = 'Unable to load virtual models.';
                     this.syncDisplayModels();
                 } finally {
                     this.aliasLoading = false;
                 }
             },
 
-            async fetchModelOverrides() {
-                this.modelOverrideError = '';
-                try {
-                    const request = this.adminRequestOptions();
-                    const res = await fetch('/admin/model-overrides', request);
-                    if (res.status === 503) {
-                        this.modelOverridesAvailable = false;
-                        this.modelOverrideViews = [];
-                        this.syncDisplayModels();
-                        return;
-                    }
-                    const handled = this.handleFetchResponse(res, 'model overrides', request);
-                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
-                        return;
-                    }
-                    this.modelOverridesAvailable = true;
-                    if (!handled) {
-                        this.modelOverrideViews = [];
-                        this.syncDisplayModels();
-                        return;
-                    }
-                    const payload = await res.json();
-                    this.modelOverrideViews = Array.isArray(payload) ? payload : [];
-                    this.syncDisplayModels();
-                } catch (e) {
-                    console.error('Failed to fetch model overrides:', e);
-                    this.modelOverrideViews = [];
-                    this.modelOverrideError = 'Unable to load model overrides.';
-                    this.syncDisplayModels();
-                }
+            setVirtualModelsAvailable(available) {
+                const value = Boolean(available);
+                this.virtualModelsAvailable = value;
+                this.aliasesAvailable = value;
+                this.modelOverridesAvailable = value;
             },
 
             groupDisplayModels(rows) {
@@ -361,7 +390,7 @@
 
             modelOverrideEditButtonLabel(subject, hasOverride) {
                 const base = 'Edit ' + String(subject || 'model access');
-                return hasOverride ? base + ' (override exists)' : base;
+                return hasOverride ? base + ' (virtual model exists)' : base;
             },
 
             providerGroupAccess(providerName, providerType, overridesBySelector) {
@@ -440,6 +469,10 @@
                 const classes = [];
                 if (row.is_alias) {
                     classes.push('alias-row', this.aliasStateClass(row.alias));
+                } else if (row.has_virtual_model) {
+                    // Real model rows carrying a virtual model render alias-like so
+                    // operators can spot them at a glance.
+                    classes.push('alias-row', 'is-valid');
                 }
                 if (!row.is_alias && row.masking_alias) {
                     classes.push('masked-model-row');
@@ -448,6 +481,16 @@
                     classes.push('model-access-disabled-row');
                 }
                 return classes.join(' ');
+            },
+
+            // rowVirtualBadge returns the small badge label shown on a real model row
+            // that carries a virtual model (empty for plain rows and alias rows, which
+            // already show their own Alias badge).
+            rowVirtualBadge(row) {
+                if (!row || row.is_alias || !row.has_virtual_model) {
+                    return '';
+                }
+                return 'Override';
             },
 
             rowAnchorID(row) {
@@ -460,19 +503,6 @@
 
             filterByAlias(aliasName) {
                 this.modelFilter = String(aliasName || '').trim();
-            },
-
-            openAliasCreate(model) {
-                this.aliasFormOpen = true;
-                this.aliasFormMode = 'create';
-                this.aliasFormOriginalName = '';
-                this.aliasFormError = '';
-                this.aliasNotice = '';
-                this.aliasForm = this.defaultAliasForm();
-                if (model && model.model && model.model.id) {
-                    this.aliasForm.target_model = this.qualifiedModelName(model);
-                }
-                this.focusEditorField('aliasEditor');
             },
 
             focusEditorField(refName) {
@@ -504,66 +534,76 @@
                 focusAfterPaint();
             },
 
-            openAliasEdit(alias) {
-                this.aliasFormOpen = true;
-                this.aliasFormMode = 'edit';
-                this.aliasFormOriginalName = alias.name || '';
-                this.aliasFormError = '';
-                this.aliasNotice = '';
-                this.aliasForm = {
-                    name: alias.name || '',
+            // ---- Unified virtual-model editor ----
+
+            // openVirtualModelCreate opens the editor in create mode with an editable
+            // Source. Optionally prefills the Target model from a model row.
+            openVirtualModelCreate(model) {
+                this.resetVirtualModelForm();
+                this.vmFormOpen = true;
+                this.vmFormMode = 'create';
+                this.vmFormSourceLocked = false;
+                this.vmFormDisplayName = 'New virtual model';
+                if (model && model.model && model.model.id) {
+                    this.vmForm.target_model = this.qualifiedModelName(model);
+                }
+                this.focusEditorField('virtualModelEditor');
+            },
+
+            // openVirtualModelEditAlias edits an existing redirect/alias. Source is
+            // locked (renaming happens only through create flows).
+            openVirtualModelEditAlias(alias) {
+                if (!alias) {
+                    return;
+                }
+                this.resetVirtualModelForm();
+                this.vmFormOpen = true;
+                this.vmFormMode = 'edit';
+                this.vmFormSourceLocked = true;
+                this.vmFormHasExisting = true;
+                this.vmFormOriginalSource = alias.name || '';
+                this.vmFormDisplayName = alias.name || '';
+                this.vmForm = {
+                    source: alias.name || '',
                     target_model: alias.target_provider ? alias.target_provider + '/' + alias.target_model : (alias.target_model || ''),
+                    user_paths: (Array.isArray(alias.user_paths) ? alias.user_paths : []).join('\n'),
                     description: alias.description || '',
                     enabled: alias.enabled !== false
                 };
-                this.focusEditorField('aliasEditor');
+                this.focusEditorField('virtualModelEditor');
             },
 
-            closeAliasForm() {
-                this.aliasFormOpen = false;
-                this.aliasFormMode = 'create';
-                this.aliasFormOriginalName = '';
-                this.aliasFormError = '';
-                this.aliasForm = this.defaultAliasForm();
-            },
-
-            defaultModelOverrideForm() {
-                return {
-                    selector: '',
-                    user_paths: ''
-                };
-            },
-
-            normalizeModelOverridePaths(raw) {
-                return String(raw || '')
-                    .split(/\r?\n|,/)
-                    .map((value) => String(value || '').trim())
-                    .filter(Boolean);
-            },
-
-            openModelOverrideEdit(row) {
+            // openVirtualModelEditModel edits the virtual model attached to a real
+            // model row (or seeds a policy for it). Source is locked and prefilled
+            // with the model selector.
+            openVirtualModelEditModel(row) {
                 if (!row || row.is_alias) {
                     return;
                 }
-
                 const access = row.access || {};
                 const override = access.override || null;
                 const userPaths = override && Array.isArray(override.user_paths)
                     ? override.user_paths
                     : (Array.isArray(access.user_paths) ? access.user_paths : []);
+                const selector = this.rowAccessSelector(row);
 
-                this.modelOverrideFormOpen = true;
-                this.modelOverrideError = '';
-                this.modelOverrideNotice = '';
-                this.modelOverrideFormHasExistingOverride = Boolean(override);
-                this.modelOverrideFormDefaultEnabled = access.default_enabled !== false;
-                this.modelOverrideFormEffectiveEnabled = access.effective_enabled !== false;
-                this.modelOverrideFormDisplayName = row.access_display_name || row.display_name || this.qualifiedModelName(row) || '';
-                this.modelOverrideForm = {
-                    selector: this.rowAccessSelector(row),
-                    user_paths: userPaths.join('\n')
+                this.resetVirtualModelForm();
+                this.vmFormOpen = true;
+                this.vmFormMode = 'edit';
+                this.vmFormSourceLocked = true;
+                this.vmFormHasExisting = Boolean(override);
+                this.vmFormOriginalSource = selector;
+                this.vmFormDefaultEnabled = access.default_enabled !== false;
+                this.vmFormEffectiveEnabled = access.effective_enabled !== false;
+                this.vmFormDisplayName = row.access_display_name || row.display_name || selector || '';
+                this.vmForm = {
+                    source: selector,
+                    target_model: '',
+                    user_paths: userPaths.join('\n'),
+                    description: override && override.description ? override.description : '',
+                    enabled: access.effective_enabled !== false
                 };
-                this.focusEditorField('modelOverrideEditor');
+                this.focusEditorField('virtualModelEditor');
             },
 
             openGlobalModelOverrideEdit() {
@@ -574,26 +614,30 @@
                     : [];
                 const defaultEnabled = this.modelOverridesDefaultEnabled();
 
-                this.modelOverrideFormOpen = true;
-                this.modelOverrideError = '';
-                this.modelOverrideNotice = '';
-                this.modelOverrideFormHasExistingOverride = Boolean(override);
-                this.modelOverrideFormDefaultEnabled = defaultEnabled;
-                this.modelOverrideFormEffectiveEnabled = Boolean(override) || defaultEnabled;
-                this.modelOverrideFormDisplayName = 'All providers and models';
-                this.modelOverrideForm = {
-                    selector,
-                    user_paths: userPaths.join('\n')
+                this.resetVirtualModelForm();
+                this.vmFormOpen = true;
+                this.vmFormMode = 'edit';
+                this.vmFormSourceLocked = true;
+                this.vmFormHasExisting = Boolean(override);
+                this.vmFormOriginalSource = selector;
+                this.vmFormDefaultEnabled = defaultEnabled;
+                this.vmFormEffectiveEnabled = Boolean(override && override.enabled !== false) || defaultEnabled;
+                this.vmFormDisplayName = 'All providers and models';
+                this.vmForm = {
+                    source: selector,
+                    target_model: '',
+                    user_paths: userPaths.join('\n'),
+                    description: override && override.description ? override.description : '',
+                    enabled: override ? override.enabled !== false : defaultEnabled
                 };
-                this.focusEditorField('modelOverrideEditor');
+                this.focusEditorField('virtualModelEditor');
             },
 
             openProviderOverrideEdit(group) {
                 if (!group || !group.access || !group.access.selector) {
                     return;
                 }
-
-                this.openModelOverrideEdit({
+                this.openVirtualModelEditModel({
                     display_name: group.display_name,
                     access_display_name: 'All models in ' + group.display_name,
                     provider_name: group.provider_name,
@@ -604,15 +648,31 @@
                 });
             },
 
-            closeModelOverrideForm() {
-                this.modelOverrideFormOpen = false;
-                this.modelOverrideSubmitting = false;
-                this.modelOverrideError = '';
-                this.modelOverrideFormHasExistingOverride = false;
-                this.modelOverrideFormDefaultEnabled = true;
-                this.modelOverrideFormEffectiveEnabled = true;
-                this.modelOverrideFormDisplayName = '';
-                this.modelOverrideForm = this.defaultModelOverrideForm();
+            resetVirtualModelForm() {
+                this.vmFormError = '';
+                this.aliasNotice = '';
+                this.aliasError = '';
+                this.vmSubmitting = false;
+                this.vmDeleting = false;
+                this.vmFormHasExisting = false;
+                this.vmFormDefaultEnabled = true;
+                this.vmFormEffectiveEnabled = true;
+                this.vmFormDisplayName = '';
+                this.vmFormSourceLocked = false;
+                this.vmFormOriginalSource = '';
+                this.vmForm = this.defaultVirtualModelForm();
+            },
+
+            closeVirtualModelForm() {
+                this.vmFormOpen = false;
+                this.resetVirtualModelForm();
+            },
+
+            normalizeUserPaths(raw) {
+                return String(raw || '')
+                    .split(/\r?\n|,/)
+                    .map((value) => String(value || '').trim())
+                    .filter(Boolean);
             },
 
             async aliasResponseMessage(res, fallback) {
@@ -628,19 +688,21 @@
             },
 
             aliasTargetLabel(alias) {
-                if (!alias) return '\u2014';
+                if (!alias) return '—';
                 if (alias.resolved_model) return alias.resolved_model;
                 if (alias.target_provider) return alias.target_provider + '/' + alias.target_model;
-                return alias.target_model || '\u2014';
+                return alias.target_model || '—';
             },
 
             aliasStateClass(alias) {
+                if (!alias) return 'is-invalid';
                 if (alias.enabled === false) return 'is-disabled';
                 if (!alias.valid) return 'is-invalid';
                 return 'is-valid';
             },
 
             aliasStateText(alias) {
+                if (!alias) return 'Invalid';
                 if (alias.enabled === false) return 'Disabled';
                 if (!alias.valid) return 'Invalid';
                 return 'Active';
@@ -690,20 +752,79 @@
                 return parts.join(' · ');
             },
 
-            async toggleAliasEnabled(alias) {
-                if (!alias || !alias.name || this.aliasTogglingName === alias.name) {
+            // ---- Row enable/disable toggle (real models and aliases) ----
+
+            rowToggleEnabled(row) {
+                if (!row) {
+                    return false;
+                }
+                if (row.is_alias) {
+                    return row.alias && row.alias.enabled !== false;
+                }
+                return Boolean(row.access && row.access.effective_enabled !== false);
+            },
+
+            rowToggleLabel(row) {
+                if (this.rowTogglingKey && this.rowTogglingKey === row.key) {
+                    return 'Updating...';
+                }
+                if (this.rowToggleRestricted(row)) {
+                    return 'Restricted';
+                }
+                return this.rowToggleEnabled(row) ? 'Enabled' : 'Disabled';
+            },
+
+            // A model that is enabled but restricted to specific user paths shows
+            // "Restricted" (in the accent color) on the toggle itself, so no
+            // separate access-state pill is needed.
+            rowToggleRestricted(row) {
+                return Boolean(row) && !row.is_alias && this.modelAccessStateClass(row.access) === 'is-restricted';
+            },
+
+            // The edit-modal status switch reuses the same .alias-toggle component
+            // and three states, derived from the form's own fields: it is
+            // Restricted when enabled and scoped to non-global user paths.
+            vmFormToggleRestricted() {
+                return Boolean(this.vmForm && this.vmForm.enabled)
+                    && this.modelAccessUserPathsRestrict(this.normalizeUserPaths(this.vmForm.user_paths));
+            },
+
+            vmFormToggleLabel() {
+                if (!this.vmForm || !this.vmForm.enabled) {
+                    return 'Disabled';
+                }
+                return this.vmFormToggleRestricted() ? 'Restricted' : 'Enabled';
+            },
+
+            async toggleRowEnabled(row) {
+                if (!row || this.rowTogglingKey === row.key) {
+                    return;
+                }
+                if (row.is_alias) {
+                    await this.toggleAliasRow(row);
+                    return;
+                }
+                await this.toggleModelRow(row);
+            },
+
+            async toggleAliasRow(row) {
+                const alias = row.alias;
+                if (!alias || !alias.name) {
                     return;
                 }
 
-                this.aliasTogglingName = alias.name;
+                this.rowTogglingKey = row.key;
                 this.aliasError = '';
                 this.aliasNotice = '';
-                this.aliasFormError = '';
 
+                const targetModel = alias.target_provider
+                    ? alias.target_provider + '/' + alias.target_model
+                    : alias.target_model;
                 const payload = {
-                    name: alias.name,
-                    target_model: alias.target_provider ? alias.target_provider + '/' + alias.target_model : alias.target_model,
+                    source: alias.name,
+                    target_model: targetModel,
                     description: String(alias.description || '').trim(),
+                    user_paths: Array.isArray(alias.user_paths) ? alias.user_paths : [],
                     enabled: alias.enabled === false
                 };
 
@@ -712,10 +833,10 @@
                         method: 'PUT',
                         body: JSON.stringify(payload)
                     });
-                    const res = await fetch('/admin/aliases', request);
+                    const res = await fetch('/admin/virtual-models', request);
                     if (res.status === 503) {
-                        this.aliasesAvailable = false;
-                        this.aliasError = 'Aliases feature is unavailable.';
+                        this.setVirtualModelsAvailable(false);
+                        this.aliasError = 'Virtual models feature is unavailable.';
                         return;
                     }
                     const handled = this.handleFetchResponse(res, 'alias state', request);
@@ -729,16 +850,75 @@
                         return;
                     }
 
-                    await this.fetchAliases();
+                    await this.fetchVirtualModels();
                     this.aliasNotice = payload.enabled ? 'Alias enabled.' : 'Alias disabled.';
-                    if (this.aliasFormOpen && this.aliasFormOriginalName === alias.name) {
-                        this.closeAliasForm();
-                    }
                 } catch (e) {
                     console.error('Failed to toggle alias state:', e);
                     this.aliasError = 'Failed to update alias state.';
                 } finally {
-                    this.aliasTogglingName = '';
+                    this.rowTogglingKey = '';
+                }
+            },
+
+            async toggleModelRow(row) {
+                const access = row.access || {};
+                const selector = this.rowAccessSelector(row);
+                if (!selector) {
+                    return;
+                }
+                const existingPolicy = this.findModelOverrideView(selector);
+                const desired = !(access.effective_enabled !== false);
+                const existingPaths = existingPolicy && Array.isArray(existingPolicy.user_paths)
+                    ? existingPolicy.user_paths
+                    : [];
+
+                this.rowTogglingKey = row.key;
+                this.aliasError = '';
+                this.aliasNotice = '';
+
+                let method = 'PUT';
+                let payload;
+                if (desired === false) {
+                    payload = { source: selector, enabled: false, user_paths: existingPaths };
+                } else if (existingPolicy && existingPaths.length === 0) {
+                    method = 'DELETE';
+                    payload = { source: selector };
+                } else {
+                    payload = { source: selector, enabled: true, user_paths: existingPaths };
+                }
+
+                try {
+                    const request = this.adminRequestOptions({
+                        method,
+                        body: JSON.stringify(payload)
+                    });
+                    const res = await fetch('/admin/virtual-models', request);
+                    if (res.status === 503) {
+                        this.setVirtualModelsAvailable(false);
+                        this.aliasError = 'Virtual models feature is unavailable.';
+                        return;
+                    }
+                    if (!(method === 'DELETE' && res.status === 404)) {
+                        const handled = this.handleFetchResponse(res, 'model access', request);
+                        if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                            return;
+                        }
+                        if (!handled) {
+                            this.aliasError = res.status === 401
+                                ? 'Authentication required.'
+                                : await this.aliasResponseMessage(res, 'Failed to update model access.');
+                            return;
+                        }
+                    }
+
+                    await Promise.all([this.fetchModels(), this.fetchVirtualModels()]);
+                    this.syncDisplayModels();
+                    this.aliasNotice = desired ? 'Model enabled.' : 'Model disabled.';
+                } catch (e) {
+                    console.error('Failed to toggle model access:', e);
+                    this.aliasError = 'Failed to update model access.';
+                } finally {
+                    this.rowTogglingKey = '';
                 }
             },
 
@@ -832,7 +1012,6 @@
                 if (!normalizedName) {
                     return null;
                 }
-
                 for (const alias of this.aliases) {
                     if (this.sameAliasName(alias && alias.name, normalizedName)) {
                         return alias;
@@ -846,7 +1025,6 @@
                 if (!normalizedName) {
                     return null;
                 }
-
                 for (const model of this.models) {
                     if (this.modelKeys(model).has(normalizedName)) {
                         return model;
@@ -855,263 +1033,148 @@
                 return null;
             },
 
-            async submitAliasForm() {
-                const name = String(this.aliasForm.name || '').trim();
-                const targetModel = String(this.aliasForm.target_model || '').trim();
-                let originalName = String(this.aliasFormOriginalName || '').trim();
+            // submitVirtualModelForm saves the unified editor: a filled Target model
+            // makes a redirect/alias, an empty one makes an access policy.
+            async submitVirtualModelForm() {
+                const source = String(this.vmForm.source || '').trim();
+                const targetModel = String(this.vmForm.target_model || '').trim();
+                const userPaths = this.normalizeUserPaths(this.vmForm.user_paths);
 
-                if (!name) {
-                    this.aliasFormError = 'Alias name is required.';
-                    return;
-                }
-                if (!targetModel) {
-                    this.aliasFormError = 'Target model is required.';
+                if (!source) {
+                    this.vmFormError = 'Source is required.';
                     return;
                 }
 
-                this.aliasFormError = '';
+                this.vmFormError = '';
                 this.aliasError = '';
                 this.aliasNotice = '';
 
-                const existingAlias = this.findExistingAliasByName(name);
-                if (existingAlias && !this.sameAliasName(existingAlias.name, originalName)) {
-                    const overwriteMessage = originalName
-                        ? 'An alias named "' + existingAlias.name + '" already exists. Saving will overwrite it and remove "' + originalName + '". Continue?'
-                        : 'An alias named "' + existingAlias.name + '" already exists. Saving will update that alias. Continue?';
-                    if (!window.confirm(overwriteMessage)) {
-                        this.aliasFormError = originalName
-                            ? 'Choose a different alias name to avoid overwriting an existing alias.'
-                            : 'Choose a different alias name or use Edit on the existing alias.';
-                        return;
-                    }
-                    if (!originalName) {
-                        this.aliasFormMode = 'edit';
-                        this.aliasFormOriginalName = existingAlias.name || name;
-                        originalName = this.aliasFormOriginalName;
-                    }
-                }
-
-                const matchingModel = this.findConcreteModelByName(name);
-                if (!existingAlias && matchingModel && !this.sameAliasName(name, originalName)) {
-                    const modelName = this.qualifiedModelName(matchingModel) || String(matchingModel.model && matchingModel.model.id || '').trim();
-                    if (!window.confirm('A model named "' + modelName + '" already exists. Creating this alias will mask that model in the list. Continue?')) {
-                        this.aliasFormError = 'Choose a different alias name to avoid masking an existing model.';
-                        return;
-                    }
-                }
-
-                this.aliasSubmitting = true;
-
-                const payload = {
-                    name,
-                    target_model: targetModel,
-                    description: String(this.aliasForm.description || '').trim(),
-                    enabled: Boolean(this.aliasForm.enabled)
-                };
-
-                try {
-                    const saveRequest = this.adminRequestOptions({
-                        method: 'PUT',
-                        body: JSON.stringify(payload)
-                    });
-                    const saveRes = await fetch('/admin/aliases', saveRequest);
-
-                    if (saveRes.status === 503) {
-                        this.aliasesAvailable = false;
-                        this.aliasFormError = 'Aliases feature is unavailable.';
-                        return;
-                    }
-                    const saveHandled = this.handleFetchResponse(saveRes, 'alias', saveRequest);
-                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(saveHandled)) {
-                        return;
-                    }
-                    if (!saveHandled) {
-                        this.aliasFormError = saveRes.status === 401
-                            ? 'Authentication required.'
-                            : await this.aliasResponseMessage(saveRes, 'Failed to save alias.');
-                        return;
-                    }
-
-                    if (originalName && originalName !== name) {
-                        const deleteRequest = this.adminRequestOptions({
-                            method: 'DELETE',
-                            body: JSON.stringify({ name: originalName })
-                        });
-                        const deleteRes = await fetch('/admin/aliases', deleteRequest);
-                        if (deleteRes.status !== 404) {
-                            const deleteHandled = this.handleFetchResponse(deleteRes, 'previous alias', deleteRequest);
-                            if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(deleteHandled)) {
-                                return;
-                            }
-                            if (!deleteHandled) {
-                                this.aliasFormError = deleteRes.status === 401
-                                    ? 'Authentication required.'
-                                    : await this.aliasResponseMessage(deleteRes, 'The alias was saved with the new name, but the previous alias could not be removed.');
-                                await this.fetchAliases();
+                // In create mode warn about clobbering an existing alias or masking a
+                // concrete model. Edit mode locks the source so neither applies.
+                if (this.vmFormMode !== 'edit' && targetModel) {
+                    const existingAlias = this.findExistingAliasByName(source);
+                    if (existingAlias) {
+                        const overwriteMessage = 'An alias named "' + existingAlias.name + '" already exists. Saving will update that alias. Continue?';
+                        if (!this.confirmAction(overwriteMessage)) {
+                            this.vmFormError = 'Choose a different source or edit the existing alias.';
+                            return;
+                        }
+                    } else {
+                        const matchingModel = this.findConcreteModelByName(source);
+                        if (matchingModel) {
+                            const modelName = this.qualifiedModelName(matchingModel) || String(matchingModel.model && matchingModel.model.id || '').trim();
+                            if (!this.confirmAction('A model named "' + modelName + '" already exists. Creating this alias will mask that model in the list. Continue?')) {
+                                this.vmFormError = 'Choose a different source to avoid masking an existing model.';
                                 return;
                             }
                         }
                     }
-
-                    await this.fetchAliases();
-                    this.closeAliasForm();
-                    this.aliasNotice = originalName && originalName !== name ? 'Alias renamed.' : 'Alias saved.';
-                } catch (e) {
-                    console.error('Failed to save alias:', e);
-                    this.aliasFormError = 'Failed to save alias.';
-                } finally {
-                    this.aliasSubmitting = false;
-                }
-            },
-
-            async deleteAlias(alias) {
-                if (!alias || !alias.name) return;
-                if (!window.confirm('Delete alias "' + alias.name + '"? This cannot be undone.')) {
-                    return;
                 }
 
-                this.aliasDeletingName = alias.name;
-                this.aliasError = '';
-                this.aliasNotice = '';
-                this.aliasFormError = '';
+                this.vmSubmitting = true;
 
-                try {
-                    const request = this.adminRequestOptions({
-                        method: 'DELETE',
-                        body: JSON.stringify({ name: alias.name })
-                    });
-                    const res = await fetch('/admin/aliases', request);
-                    if (res.status === 503) {
-                        this.aliasesAvailable = false;
-                        this.aliasError = 'Aliases feature is unavailable.';
-                        return;
-                    }
-                    const handled = this.handleFetchResponse(res, 'alias', request);
-                    if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
-                        return;
-                    }
-                    if (!handled) {
-                        this.aliasError = res.status === 401
-                            ? 'Authentication required.'
-                            : await this.aliasResponseMessage(res, 'Failed to remove alias.');
-                        return;
-                    }
-
-                    await this.fetchAliases();
-                    if (this.aliasFormOriginalName === alias.name) {
-                        this.closeAliasForm();
-                    }
-                    this.aliasNotice = 'Alias removed.';
-                } catch (e) {
-                    console.error('Failed to delete alias:', e);
-                    this.aliasError = 'Failed to remove alias.';
-                } finally {
-                    this.aliasDeletingName = '';
+                const payload = {
+                    source,
+                    user_paths: userPaths,
+                    description: String(this.vmForm.description || '').trim(),
+                    enabled: Boolean(this.vmForm.enabled)
+                };
+                if (targetModel) {
+                    payload.target_model = targetModel;
                 }
-            },
-
-            async submitModelOverrideForm() {
-                const selector = String(this.modelOverrideForm.selector || '').trim();
-                const userPaths = this.normalizeModelOverridePaths(this.modelOverrideForm.user_paths);
-
-                if (!selector) {
-                    this.modelOverrideError = 'Model selector is required.';
-                    return;
-                }
-                if (userPaths.length === 0) {
-                    this.modelOverrideError = this.modelOverrideFormHasExistingOverride
-                        ? 'Enter at least one user path or remove the override.'
-                        : 'Enter at least one user path before saving.';
-                    return;
-                }
-
-                this.modelOverrideSubmitting = true;
-                this.modelOverrideError = '';
-                this.modelOverrideNotice = '';
-
-                const payload = { selector, user_paths: userPaths };
 
                 try {
                     const request = this.adminRequestOptions({
                         method: 'PUT',
                         body: JSON.stringify(payload)
                     });
-                    const res = await fetch('/admin/model-overrides', request);
+                    const res = await fetch('/admin/virtual-models', request);
                     if (res.status === 503) {
-                        this.modelOverridesAvailable = false;
-                        this.modelOverrideError = 'Model overrides feature is unavailable.';
+                        this.setVirtualModelsAvailable(false);
+                        this.vmFormError = 'Virtual models feature is unavailable.';
                         return;
                     }
-                    const handled = this.handleFetchResponse(res, 'model access', request);
+                    const handled = this.handleFetchResponse(res, 'virtual model', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
                     }
                     if (!handled) {
-                        this.modelOverrideError = res.status === 401
+                        this.vmFormError = res.status === 401
                             ? 'Authentication required.'
-                            : await this.aliasResponseMessage(res, 'Failed to save model access.');
+                            : await this.aliasResponseMessage(res, 'Failed to save virtual model.');
                         return;
                     }
-                    this.modelOverridesAvailable = true;
+                    this.setVirtualModelsAvailable(true);
 
-                    await Promise.all([this.fetchModels(), this.fetchModelOverrides()]);
-                    this.closeModelOverrideForm();
-                    this.modelOverrideNotice = 'Model access saved.';
+                    await Promise.all([this.fetchModels(), this.fetchVirtualModels()]);
+                    this.syncDisplayModels();
+                    this.closeVirtualModelForm();
+                    this.aliasNotice = targetModel ? 'Alias saved.' : 'Model access saved.';
                 } catch (e) {
-                    console.error('Failed to save model override:', e);
-                    this.modelOverrideError = 'Failed to save model access.';
+                    console.error('Failed to save virtual model:', e);
+                    this.vmFormError = 'Failed to save virtual model.';
                 } finally {
-                    this.modelOverrideSubmitting = false;
+                    this.vmSubmitting = false;
                 }
             },
 
-            async deleteModelOverride() {
-                const selector = String(this.modelOverrideForm.selector || '').trim();
-                if (!selector || !this.modelOverrideFormHasExistingOverride) {
+            // deleteVirtualModel removes the virtual model for the editor's source.
+            async deleteVirtualModel() {
+                const source = String(this.vmForm.source || this.vmFormOriginalSource || '').trim();
+                if (!source || !this.vmFormHasExisting) {
                     return;
                 }
-                if (!window.confirm('Remove the model override for "' + selector + '"? This will revert access to inherited/default behavior.')) {
+                if (!this.confirmAction('Remove the virtual model for "' + source + '"? This reverts to inherited/default behavior.')) {
                     return;
                 }
 
-                this.modelOverrideSubmitting = true;
-                this.modelOverrideError = '';
-                this.modelOverrideNotice = '';
+                this.vmDeleting = true;
+                this.vmFormError = '';
+                this.aliasError = '';
+                this.aliasNotice = '';
 
                 try {
                     const request = this.adminRequestOptions({
                         method: 'DELETE',
-                        body: JSON.stringify({ selector })
+                        body: JSON.stringify({ source })
                     });
-                    const res = await fetch('/admin/model-overrides', request);
+                    const res = await fetch('/admin/virtual-models', request);
                     if (res.status === 503) {
-                        this.modelOverridesAvailable = false;
-                        this.modelOverrideError = 'Model overrides feature is unavailable.';
+                        this.setVirtualModelsAvailable(false);
+                        this.vmFormError = 'Virtual models feature is unavailable.';
                         return;
                     }
                     if (res.status !== 404) {
-                        const handled = this.handleFetchResponse(res, 'model access', request);
+                        const handled = this.handleFetchResponse(res, 'virtual model', request);
                         if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                             return;
                         }
                         if (!handled) {
-                            this.modelOverrideError = res.status === 401
+                            this.vmFormError = res.status === 401
                                 ? 'Authentication required.'
-                                : await this.aliasResponseMessage(res, 'Failed to remove model override.');
+                                : await this.aliasResponseMessage(res, 'Failed to remove virtual model.');
                             return;
                         }
                     }
-                    this.modelOverridesAvailable = true;
+                    this.setVirtualModelsAvailable(true);
 
-                    await Promise.all([this.fetchModels(), this.fetchModelOverrides()]);
-                    this.closeModelOverrideForm();
-                    this.modelOverrideNotice = 'Model override removed.';
+                    await Promise.all([this.fetchModels(), this.fetchVirtualModels()]);
+                    this.syncDisplayModels();
+                    this.closeVirtualModelForm();
+                    this.aliasNotice = 'Virtual model removed.';
                 } catch (e) {
-                    console.error('Failed to delete model override:', e);
-                    this.modelOverrideError = 'Failed to remove model override.';
+                    console.error('Failed to delete virtual model:', e);
+                    this.vmFormError = 'Failed to remove virtual model.';
                 } finally {
-                    this.modelOverrideSubmitting = false;
+                    this.vmDeleting = false;
                 }
+            },
+
+            confirmAction(message) {
+                if (typeof global.confirm === 'function') {
+                    return global.confirm(message);
+                }
+                return true;
             }
         };
     }

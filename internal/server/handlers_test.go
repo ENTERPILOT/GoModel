@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
 	batchstore "gomodel/internal/batch"
 	"gomodel/internal/core"
@@ -36,6 +35,7 @@ import (
 	provideradapter "gomodel/internal/providers"
 	"gomodel/internal/responsestore"
 	"gomodel/internal/usage"
+	"gomodel/internal/virtualmodels"
 )
 
 func withRequestSnapshotAndPrompt(req *http.Request, frame *core.RequestSnapshot) *http.Request {
@@ -49,47 +49,56 @@ func withRequestSnapshotAndPrompt(req *http.Request, frame *core.RequestSnapshot
 	return req.WithContext(ctx)
 }
 
+// redirectVM builds a redirect (alias) virtual model for server tests.
+func redirectVM(name, targetModel, targetProvider string, enabled bool) virtualmodels.VirtualModel {
+	return virtualmodels.VirtualModel{
+		Source:  name,
+		Targets: []virtualmodels.Target{{Provider: targetProvider, Model: targetModel}},
+		Enabled: enabled,
+	}
+}
+
 type aliasesTestStore struct {
-	aliases []aliases.Alias
+	rows []virtualmodels.VirtualModel
 }
 
-func newAliasesTestStore(aliasesList ...aliases.Alias) *aliasesTestStore {
-	return &aliasesTestStore{aliases: append([]aliases.Alias(nil), aliasesList...)}
+func newAliasesTestStore(rows ...virtualmodels.VirtualModel) *aliasesTestStore {
+	return &aliasesTestStore{rows: append([]virtualmodels.VirtualModel(nil), rows...)}
 }
 
-func (s *aliasesTestStore) List(_ context.Context) ([]aliases.Alias, error) {
-	return append([]aliases.Alias(nil), s.aliases...), nil
+func (s *aliasesTestStore) List(_ context.Context) ([]virtualmodels.VirtualModel, error) {
+	return append([]virtualmodels.VirtualModel(nil), s.rows...), nil
 }
 
-func (s *aliasesTestStore) Get(_ context.Context, name string) (*aliases.Alias, error) {
-	for _, alias := range s.aliases {
-		if alias.Name == name {
-			copy := alias
-			return &copy, nil
+func (s *aliasesTestStore) Get(_ context.Context, source string) (*virtualmodels.VirtualModel, error) {
+	for _, vm := range s.rows {
+		if vm.Source == source {
+			clone := vm
+			return &clone, nil
 		}
 	}
-	return nil, aliases.ErrNotFound
+	return nil, virtualmodels.ErrNotFound
 }
 
-func (s *aliasesTestStore) Upsert(_ context.Context, alias aliases.Alias) error {
-	for i := range s.aliases {
-		if s.aliases[i].Name == alias.Name {
-			s.aliases[i] = alias
+func (s *aliasesTestStore) Upsert(_ context.Context, vm virtualmodels.VirtualModel) error {
+	for i := range s.rows {
+		if s.rows[i].Source == vm.Source {
+			s.rows[i] = vm
 			return nil
 		}
 	}
-	s.aliases = append(s.aliases, alias)
+	s.rows = append(s.rows, vm)
 	return nil
 }
 
-func (s *aliasesTestStore) Delete(_ context.Context, name string) error {
-	for i := range s.aliases {
-		if s.aliases[i].Name == name {
-			s.aliases = append(s.aliases[:i], s.aliases[i+1:]...)
+func (s *aliasesTestStore) Delete(_ context.Context, source string) error {
+	for i := range s.rows {
+		if s.rows[i].Source == source {
+			s.rows = append(s.rows[:i], s.rows[i+1:]...)
 			return nil
 		}
 	}
-	return aliases.ErrNotFound
+	return virtualmodels.ErrNotFound
 }
 
 func (s *aliasesTestStore) Close() error {
@@ -148,6 +157,22 @@ func (c *aliasesTestCatalog) LookupModel(model string) (*core.Model, bool) {
 	}
 	copy := entry
 	return &copy, true
+}
+
+func (c *aliasesTestCatalog) ProviderNames() []string {
+	seen := map[string]struct{}{}
+	names := make([]string, 0, len(c.providerTypes))
+	for _, providerType := range c.providerTypes {
+		if providerType == "" {
+			continue
+		}
+		if _, ok := seen[providerType]; ok {
+			continue
+		}
+		seen[providerType] = struct{}{}
+		names = append(names, providerType)
+	}
+	return names
 }
 
 type chunkedReadCloser struct {
@@ -1517,9 +1542,9 @@ func TestChatCompletion_ResolvesQualifiedMaskingAliasBeforeHandlerRouting(t *tes
 		},
 	}
 
-	service, err := aliases.NewService(newAliasesTestStore(
-		aliases.Alias{Name: "anthropic/claude-opus-4-6", TargetModel: "gpt-5-nano", TargetProvider: "openai", Enabled: true},
-	), &catalog)
+	service, err := virtualmodels.NewService(newAliasesTestStore(
+		redirectVM("anthropic/claude-opus-4-6", "gpt-5-nano", "openai", true),
+	), &catalog, true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -1552,7 +1577,7 @@ func TestChatCompletion_ResolvesQualifiedMaskingAliasBeforeHandlerRouting(t *tes
 		},
 	}
 
-	provider := aliases.NewProviderWithOptions(inner, service, aliases.Options{})
+	provider := virtualmodels.NewProviderWithOptions(inner, service, virtualmodels.Options{})
 
 	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
@@ -1635,9 +1660,9 @@ func TestChatCompletion_UsesExplicitAliasResolverWithoutProviderDecorator(t *tes
 		},
 	}
 
-	service, err := aliases.NewService(newAliasesTestStore(
-		aliases.Alias{Name: "anthropic/claude-opus-4-6", TargetModel: "gpt-5-nano", TargetProvider: "openai", Enabled: true},
-	), &catalog)
+	service, err := virtualmodels.NewService(newAliasesTestStore(
+		redirectVM("anthropic/claude-opus-4-6", "gpt-5-nano", "openai", true),
+	), &catalog, true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -1742,9 +1767,9 @@ func TestChatCompletion_UsesExplicitAliasResolverWithAliasProviderInventoryOnly(
 		},
 	}
 
-	service, err := aliases.NewService(newAliasesTestStore(
-		aliases.Alias{Name: "anthropic/claude-opus-4-6", TargetModel: "gpt-5-nano", TargetProvider: "openai", Enabled: true},
-	), &catalog)
+	service, err := virtualmodels.NewService(newAliasesTestStore(
+		redirectVM("anthropic/claude-opus-4-6", "gpt-5-nano", "openai", true),
+	), &catalog, true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -1776,7 +1801,7 @@ func TestChatCompletion_UsesExplicitAliasResolverWithAliasProviderInventoryOnly(
 			},
 		},
 	}
-	provider := aliases.NewProviderWithOptions(inner, service, aliases.Options{
+	provider := virtualmodels.NewProviderWithOptions(inner, service, virtualmodels.Options{
 		DisableTranslatedRequestProcessing: true,
 		DisableNativeBatchPreparation:      true,
 	})
@@ -2995,9 +3020,9 @@ func TestListModels_MergesExposedModelsWithoutAliasProviderDecorator(t *testing.
 			"openai/gpt-4o": {ID: "gpt-4o", Object: "model", OwnedBy: "openai"},
 		},
 	}
-	service, err := aliases.NewService(newAliasesTestStore(
-		aliases.Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: true},
-	), catalog)
+	service, err := virtualmodels.NewService(newAliasesTestStore(
+		redirectVM("smart", "gpt-4o", "openai", true),
+	), catalog, true)
 	require.NoError(t, err)
 	require.NoError(t, service.Refresh(context.Background()))
 
@@ -3044,9 +3069,9 @@ func TestListModels_KeepOnlyAliasesOmitsProviderModels(t *testing.T) {
 			"openai/gpt-4o": {ID: "gpt-4o", Object: "model", OwnedBy: "openai"},
 		},
 	}
-	service, err := aliases.NewService(newAliasesTestStore(
-		aliases.Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: true},
-	), catalog)
+	service, err := virtualmodels.NewService(newAliasesTestStore(
+		redirectVM("smart", "gpt-4o", "openai", true),
+	), catalog, true)
 	require.NoError(t, err)
 	require.NoError(t, service.Refresh(context.Background()))
 
@@ -3780,7 +3805,7 @@ func TestBatches_FullURLResponsesItemUsesSharedSelectorExtraction(t *testing.T) 
 }
 
 func TestBatches_UsesExplicitAliasResolverAndBatchPreparerWithoutAliasProviderDecorator(t *testing.T) {
-	store := newAliasesTestStore(aliases.Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: true})
+	store := newAliasesTestStore(redirectVM("smart", "gpt-4o", "openai", true))
 	catalog := &aliasesTestCatalog{
 		supported: map[string]bool{
 			"openai/gpt-4o": true,
@@ -3792,7 +3817,7 @@ func TestBatches_UsesExplicitAliasResolverAndBatchPreparerWithoutAliasProviderDe
 			"openai/gpt-4o": {ID: "gpt-4o", Object: "model"},
 		},
 	}
-	service, err := aliases.NewService(store, catalog)
+	service, err := virtualmodels.NewService(store, catalog, true)
 	require.NoError(t, err)
 	require.NoError(t, service.Refresh(context.Background()))
 
@@ -3810,7 +3835,7 @@ func TestBatches_UsesExplicitAliasResolverAndBatchPreparerWithoutAliasProviderDe
 			RequestCounts: core.BatchRequestCounts{Total: 1},
 		},
 	}
-	aliasBatchPreparer := aliases.NewBatchPreparer(mock, service)
+	aliasBatchPreparer := virtualmodels.NewBatchPreparer(mock, service)
 
 	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
@@ -4240,7 +4265,7 @@ func TestBatches_MixedProviderRejected(t *testing.T) {
 }
 
 func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.T) {
-	store := newAliasesTestStore(aliases.Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: true})
+	store := newAliasesTestStore(redirectVM("smart", "gpt-4o", "openai", true))
 	catalog := &aliasesTestCatalog{
 		supported: map[string]bool{
 			"openai/gpt-4o": true,
@@ -4252,7 +4277,7 @@ func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.
 			"openai/gpt-4o": {ID: "gpt-4o", Object: "model"},
 		},
 	}
-	service, err := aliases.NewService(store, catalog)
+	service, err := virtualmodels.NewService(store, catalog, true)
 	require.NoError(t, err)
 	require.NoError(t, service.Refresh(context.Background()))
 
@@ -4286,7 +4311,7 @@ func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.
 		},
 	}
 
-	provider := aliases.NewProvider(inner, service)
+	provider := virtualmodels.NewProvider(inner, service)
 	handler := NewHandler(provider, nil, nil, nil)
 	batchStore := batchstore.NewMemoryStore()
 	handler.SetBatchStore(batchStore)
@@ -4323,7 +4348,7 @@ func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.
 }
 
 func TestBatches_InputFileRejectsUnsupportedExplicitProviderSelector(t *testing.T) {
-	store := newAliasesTestStore(aliases.Alias{Name: "smart", TargetModel: "claude-3-7-sonnet", TargetProvider: "anthropic", Enabled: true})
+	store := newAliasesTestStore(redirectVM("smart", "claude-3-7-sonnet", "anthropic", true))
 	catalog := &aliasesTestCatalog{
 		supported: map[string]bool{
 			"anthropic/claude-3-7-sonnet": true,
@@ -4335,7 +4360,7 @@ func TestBatches_InputFileRejectsUnsupportedExplicitProviderSelector(t *testing.
 			"anthropic/claude-3-7-sonnet": {ID: "claude-3-7-sonnet", Object: "model"},
 		},
 	}
-	service, err := aliases.NewService(store, catalog)
+	service, err := virtualmodels.NewService(store, catalog, true)
 	require.NoError(t, err)
 	require.NoError(t, service.Refresh(context.Background()))
 
@@ -4350,7 +4375,7 @@ func TestBatches_InputFileRejectsUnsupportedExplicitProviderSelector(t *testing.
 			Data:     []byte("{\"custom_id\":\"chat-1\",\"method\":\"POST\",\"url\":\"/v1/chat/completions\",\"body\":{\"model\":\"smart\",\"provider\":\"openai\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}}\n"),
 		},
 	}
-	aliasBatchPreparer := aliases.NewBatchPreparer(mock, service)
+	aliasBatchPreparer := virtualmodels.NewBatchPreparer(mock, service)
 
 	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
@@ -4426,7 +4451,7 @@ func TestBatches_RollsBackPreparedInputAndUpstreamBatchWhenStoreCreateFails(t *t
 }
 
 func TestBatches_InputFileRejectsDisabledAlias(t *testing.T) {
-	store := newAliasesTestStore(aliases.Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: false})
+	store := newAliasesTestStore(redirectVM("smart", "gpt-4o", "openai", false))
 	catalog := &aliasesTestCatalog{
 		supported: map[string]bool{
 			"openai/gpt-4o": true,
@@ -4438,7 +4463,7 @@ func TestBatches_InputFileRejectsDisabledAlias(t *testing.T) {
 			"openai/gpt-4o": {ID: "gpt-4o", Object: "model"},
 		},
 	}
-	service, err := aliases.NewService(store, catalog)
+	service, err := virtualmodels.NewService(store, catalog, true)
 	require.NoError(t, err)
 	require.NoError(t, service.Refresh(context.Background()))
 
@@ -4454,7 +4479,7 @@ func TestBatches_InputFileRejectsDisabledAlias(t *testing.T) {
 		},
 	}
 
-	provider := aliases.NewProvider(inner, service)
+	provider := virtualmodels.NewProvider(inner, service)
 	handler := NewHandler(provider, nil, nil, nil)
 
 	e := echo.New()
@@ -6380,9 +6405,9 @@ func TestGetFileWithoutProviderUsesProviderInventoryWhenAliasMasksModel(t *testi
 		},
 	}
 
-	service, err := aliases.NewService(newAliasesTestStore(
-		aliases.Alias{Name: "gpt-4o", TargetModel: "claude-3-haiku", Enabled: true},
-	), &catalog)
+	service, err := virtualmodels.NewService(newAliasesTestStore(
+		redirectVM("gpt-4o", "claude-3-haiku", "", true),
+	), &catalog, true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -6419,7 +6444,7 @@ func TestGetFileWithoutProviderUsesProviderInventoryWhenAliasMasksModel(t *testi
 		},
 	}
 
-	provider := aliases.NewProvider(mock, service)
+	provider := virtualmodels.NewProvider(mock, service)
 	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 

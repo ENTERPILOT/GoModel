@@ -82,3 +82,33 @@ the legacy tables.
   and is accepted.
 - Rollback is lossless only before the first virtual-model edit, because new
   writes go only to `virtual_models`.
+
+## Update — single native engine, authoritative `Enabled`, scoped redirects, unified UI
+
+A follow-up change completed the unification the first version staged:
+
+- **One native engine.** The composition over the legacy `aliases` and
+  `modeloverrides` services was replaced by native redirect + policy matching
+  inside `virtualmodels`, operating directly on `VirtualModel` rows behind a
+  single in-memory snapshot. The `internal/aliases` and `internal/modeloverrides`
+  packages were removed; their tested matching logic was ported. (The legacy
+  `aliases` / `model_overrides` tables remain for one release as a rollback
+  net, read only by the one-time seed.)
+- **`Enabled` is authoritative.** A policy row's `Enabled` now governs access: a
+  disabled policy turns its selector off for everyone, an enabled policy with
+  `user_paths` restricts, and a selector with no row follows
+  `MODELS_ENABLED_BY_DEFAULT`. This makes "disable a single model" expressible
+  for the first time and lets the dashboard toggle any model on/off.
+- **Scoped redirects are enforced.** `user_paths` on a redirect row are no longer
+  inert: resolution consults the effective request `user_path` via the optional
+  `gateway.UserPathModelResolver` (`ResolveModelForUserPath`). A redirect applies
+  only for matching callers and falls through to the literal model name
+  otherwise (the use case from the closed upstream PR #387). Exposure at
+  `/v1/models` remains unscoped for redirects.
+- **One admin surface and UI.** A single `GET/PUT/DELETE /admin/virtual-models`
+  endpoint replaces `/admin/aliases` and `/admin/model-overrides`, and the
+  dashboard collapses the separate alias and access-override modals into one
+  virtual-model editor (Source — locked when editing an existing model — an
+  always-present target field, `user_paths`, `enabled`, description) plus a
+  per-row enable/disable toggle and alias-like styling for any model that carries
+  a virtual model.

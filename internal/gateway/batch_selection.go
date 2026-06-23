@@ -96,7 +96,7 @@ func DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver(
 		if err != nil {
 			return BatchExecutionSelection{}, core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
 		}
-		resolvedSelector, _, err := ResolveExecutionSelector(provider, resolver, requested)
+		resolvedSelector, _, err := ResolveExecutionSelector(ctx, provider, resolver, requested)
 		if err != nil {
 			return BatchExecutionSelection{}, core.NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
 		}

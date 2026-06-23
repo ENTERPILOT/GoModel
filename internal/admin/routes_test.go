@@ -60,9 +60,9 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"GET /admin/models",
 		"GET /admin/models/categories",
 
-		"GET /admin/model-overrides",
-		"PUT /admin/model-overrides",
-		"DELETE /admin/model-overrides",
+		"GET /admin/virtual-models",
+		"PUT /admin/virtual-models",
+		"DELETE /admin/virtual-models",
 
 		"GET /admin/model-pricing-overrides",
 		"PUT /admin/model-pricing-overrides",
@@ -71,10 +71,6 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"GET /admin/auth-keys",
 		"POST /admin/auth-keys",
 		"POST /admin/auth-keys/:id/deactivate",
-
-		"GET /admin/aliases",
-		"PUT /admin/aliases",
-		"DELETE /admin/aliases",
 
 		"GET /admin/guardrails/types",
 		"GET /admin/guardrails",

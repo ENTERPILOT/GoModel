@@ -8,16 +8,16 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"gomodel/internal/core"
-	"gomodel/internal/modeloverrides"
 	"gomodel/internal/providers"
+	"gomodel/internal/virtualmodels"
 )
 
 type modelAccessResponse struct {
-	Selector         string                   `json:"selector"`
-	DefaultEnabled   bool                     `json:"default_enabled"`
-	EffectiveEnabled bool                     `json:"effective_enabled"`
-	UserPaths        []string                 `json:"user_paths,omitempty"`
-	Override         *modeloverrides.Override `json:"override,omitempty"`
+	Selector         string                      `json:"selector"`
+	DefaultEnabled   bool                        `json:"default_enabled"`
+	EffectiveEnabled bool                        `json:"effective_enabled"`
+	UserPaths        []string                    `json:"user_paths,omitempty"`
+	Override         *virtualmodels.VirtualModel `json:"override,omitempty"`
 }
 
 type modelInventoryResponse struct {
@@ -80,7 +80,7 @@ func (h *Handler) ListModels(c *echo.Context) error {
 // the service for effective state; otherwise every model is reported as
 // default-on.
 func (h *Handler) modelAccessResolver() func(core.ModelSelector) modelAccessResponse {
-	if h.modelOverrides == nil {
+	if h.virtualModels == nil {
 		return func(selector core.ModelSelector) modelAccessResponse {
 			return modelAccessResponse{
 				Selector:         selector.QualifiedModel(),
@@ -90,14 +90,16 @@ func (h *Handler) modelAccessResolver() func(core.ModelSelector) modelAccessResp
 		}
 	}
 	return func(selector core.ModelSelector) modelAccessResponse {
-		effective := h.modelOverrides.EffectiveState(selector)
+		effective := h.virtualModels.EffectiveState(selector)
 		access := modelAccessResponse{
 			Selector:         effective.Selector,
 			DefaultEnabled:   effective.DefaultEnabled,
 			EffectiveEnabled: effective.Enabled,
 			UserPaths:        append([]string(nil), effective.UserPaths...),
 		}
-		if override, ok := h.modelOverrides.Get(selector.QualifiedModel()); ok && override != nil {
+		// Surface the matching policy row (if exact) so the dashboard can show
+		// which override applied. Redirect rows are not access policies.
+		if override, ok := h.virtualModels.Get(selector.QualifiedModel()); ok && override != nil && !override.IsRedirect() {
 			overrideCopy := *override
 			access.Override = &overrideCopy
 		}

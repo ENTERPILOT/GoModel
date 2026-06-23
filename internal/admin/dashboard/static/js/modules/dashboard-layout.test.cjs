@@ -1069,15 +1069,15 @@ test("model category tables lazy mount only the active table body", () => {
   );
   assert.match(
     modelsBlock,
-    /class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn"[\s\S]*@click="openAliasCreate\(\)"[\s\S]*data-lucide="plus" class="alias-create-icon"[\s\S]*<span>Create(?:&nbsp;| )Alias<\/span>/,
+    /class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn"[\s\S]*@click="openVirtualModelCreate\(\)"[\s\S]*data-lucide="plus" class="alias-create-icon"[\s\S]*<span>Create(?:&nbsp;| )Alias<\/span>/,
   );
   assert.match(
     modelsBlock,
-    /class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-submit-btn"[\s\S]*:disabled="aliasSubmitting"[\s\S]*data-lucide="plus" class="form-action-icon" x-show="aliasFormMode !== 'edit'"[\s\S]*data-lucide="save" class="form-action-icon" x-show="aliasFormMode === 'edit'"[\s\S]*x-text="aliasSubmitting \? 'Saving\.\.\.' : \(aliasFormMode === 'edit' \? 'Save Alias' : 'Create Alias'\)"/,
+    /class="pagination-btn pagination-btn-primary pagination-btn-with-icon virtual-model-submit-btn"[\s\S]*:disabled="vmSubmitting"[\s\S]*data-lucide="plus" class="form-action-icon" x-show="vmFormMode !== 'edit'"[\s\S]*data-lucide="save" class="form-action-icon" x-show="vmFormMode === 'edit'"[\s\S]*x-text="vmSubmitting \? 'Saving\.\.\.' : \(vmFormMode === 'edit' \? 'Save' : 'Create'\)"/,
   );
   assert.match(
     modelsBlock,
-    /class="pagination-btn pagination-btn-primary pagination-btn-with-icon model-access-submit-btn"[\s\S]*:disabled="modelOverrideSubmitting"[\s\S]*data-lucide="save" class="form-action-icon"[\s\S]*x-text="modelOverrideSubmitting \? 'Saving\.\.\.' : 'Save Access'"/,
+    /<button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="vmFormHasExisting"[\s\S]*@click="deleteVirtualModel\(\)">Remove<\/button>/,
   );
   assert.match(
     modelsBlock,
@@ -1113,12 +1113,12 @@ test("alias rows use a shared icon-only edit action", () => {
 
   assert.match(
     modelTableTemplate,
-    /class="table-action-btn table-icon-btn"[\s\S]*:aria-label="'Edit alias ' \+ row\.alias\.name"[\s\S]*@click="openAliasEdit\(row\.alias\)"[\s\S]*{{template "edit-icon"}}/,
+    /class="table-action-btn table-icon-btn"[\s\S]*:aria-label="'Edit alias ' \+ row\.alias\.name"[\s\S]*@click="openVirtualModelEditAlias\(row\.alias\)"[\s\S]*{{template "edit-icon"}}/,
   );
   assert.match(indexTemplate, /{{template "model-table-body" \.}}/);
   assert.match(
     indexTemplate,
-    /x-show="modelOverrideFormOpen" x-ref="modelOverrideEditor"/,
+    /x-show="vmFormOpen" x-ref="virtualModelEditor"/,
   );
   assert.doesNotMatch(
     indexTemplate,
@@ -1215,8 +1215,7 @@ test("modal and conversation close controls use the shared dialog close style", 
     shellTemplate,
     /class="auth-dialog-close dialog-close-btn"[\s\S]*@click="closeAuthDialog\(\)"[\s\S]*{{template "x-icon"}}/,
   );
-  assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close alias editor"[\s\S]*{{template "x-icon"}}/);
-  assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close model access editor"[\s\S]*{{template "x-icon"}}/);
+  assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close virtual model editor"[\s\S]*{{template "x-icon"}}/);
   assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close workflow editor"[\s\S]*{{template "x-icon"}}/);
   assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close guardrail editor"[\s\S]*{{template "x-icon"}}/);
   assert.match(indexTemplate, /class="dialog-close-btn" aria-label="Close budget editor"[\s\S]*{{template "x-icon"}}/);
@@ -1236,8 +1235,7 @@ test("modal and conversation close controls use the shared dialog close style", 
 test("modal escape handlers do not close editors behind the auth dialog", () => {
   const indexTemplate = readDashboardTemplateSource();
 
-  assert.match(indexTemplate, /@keydown\.escape\.window="aliasFormOpen && !authDialogOpen && closeAliasForm\(\)"/);
-  assert.match(indexTemplate, /@keydown\.escape\.window="modelOverrideFormOpen && !authDialogOpen && closeModelOverrideForm\(\)"/);
+  assert.match(indexTemplate, /@keydown\.escape\.window="vmFormOpen && !authDialogOpen && closeVirtualModelForm\(\)"/);
   assert.match(indexTemplate, /@keydown\.escape\.window="workflowFormOpen && !authDialogOpen && closeWorkflowForm\(\)"/);
   assert.match(indexTemplate, /@keydown\.escape\.window="guardrailFormOpen && !authDialogOpen && closeGuardrailForm\(\)"/);
   assert.match(indexTemplate, /@keydown\.escape\.window="authKeyFormOpen && !authDialogOpen && closeAuthKeyForm\(\)"/);

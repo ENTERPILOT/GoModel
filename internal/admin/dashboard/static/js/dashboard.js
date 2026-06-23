@@ -409,8 +409,7 @@ function dashboard() {
       return (
         this.authDialogOpen ||
         (this.page === "models" &&
-          (this.aliasFormOpen ||
-            this.modelOverrideFormOpen ||
+          (this.vmFormOpen ||
             this.modelPricingOverrideFormOpen)) ||
         (this.page === "workflows" && this.workflowFormOpen) ||
         (this.page === "guardrails" && this.guardrailFormOpen) ||
@@ -599,11 +598,8 @@ function dashboard() {
       if (typeof this.fetchProviderStatus === "function") {
         requests.push(this.fetchProviderStatus());
       }
-      if (typeof this.fetchAliases === "function") {
-        requests.push(this.fetchAliases());
-      }
-      if (typeof this.fetchModelOverrides === "function") {
-        requests.push(this.fetchModelOverrides());
+      if (typeof this.fetchVirtualModels === "function") {
+        requests.push(this.fetchVirtualModels());
       }
       if (typeof this.fetchModelPricingOverrides === "function") {
         requests.push(this.fetchModelPricingOverrides());

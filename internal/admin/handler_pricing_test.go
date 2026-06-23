@@ -13,10 +13,10 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/aliases"
 	"gomodel/internal/core"
 	"gomodel/internal/providers"
 	"gomodel/internal/usage"
+	"gomodel/internal/virtualmodels"
 )
 
 type mockPricingRecalculator struct {
@@ -43,20 +43,13 @@ func TestNewHandlerDoesNotWrapNilRegistryAsPricingResolver(t *testing.T) {
 }
 
 func TestRecalculateUsagePricingResolvesAliasAndFilters(t *testing.T) {
-	catalog := newAliasTestCatalog()
+	catalog := newVMTestCatalog()
 	catalog.add("openai/gpt-4o", "openai")
-	service, err := aliases.NewService(newAliasTestStore(aliases.Alias{
-		Name:           "smart",
-		TargetModel:    "gpt-4o",
-		TargetProvider: "openai",
-		Enabled:        true,
-	}), catalog)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	service := newVMService(t, catalog, newVMTestStore(virtualmodels.VirtualModel{
+		Source:  "smart",
+		Targets: []virtualmodels.Target{{Provider: "openai", Model: "gpt-4o"}},
+		Enabled: true,
+	}), true)
 
 	recalculator := &mockPricingRecalculator{
 		result: usage.RecalculatePricingResult{
@@ -67,7 +60,7 @@ func TestRecalculateUsagePricingResolvesAliasAndFilters(t *testing.T) {
 		},
 	}
 	h := NewHandler(nil, providers.NewModelRegistry(),
-		WithAliases(service),
+		WithVirtualModels(service),
 		WithUsagePricingRecalculator(recalculator),
 	)
 

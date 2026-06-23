@@ -161,7 +161,7 @@ func TestRefreshRuntime_RefreshesModelListProvidersAndRegistryCache(t *testing.T
 	}
 }
 
-func TestRefreshRuntime_SkipsDisabledModelOverrides(t *testing.T) {
+func TestRefreshRuntime_SkipsDisabledVirtualModels(t *testing.T) {
 	registry := providers.NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(&runtimeRefreshMockProvider{
 		models: &core.ModelsResponse{
@@ -172,7 +172,7 @@ func TestRefreshRuntime_SkipsDisabledModelOverrides(t *testing.T) {
 		},
 	}, "openai", "openai")
 
-	// virtualModels is left nil so the alias/model_overrides refresh steps report
+	// virtualModels is left nil so the virtual_models refresh step reports
 	// skipped, which is what this test asserts.
 	app := &App{
 		config: &config.Config{},
@@ -186,13 +186,13 @@ func TestRefreshRuntime_SkipsDisabledModelOverrides(t *testing.T) {
 		t.Fatalf("RefreshRuntime() error = %v", err)
 	}
 
-	step := runtimeRefreshStepByName(report.Steps, "model_overrides")
+	step := runtimeRefreshStepByName(report.Steps, "virtual_models")
 	if step == nil {
-		t.Fatalf("model_overrides step missing: %+v", report.Steps)
+		t.Fatalf("virtual_models step missing: %+v", report.Steps)
 		return
 	}
 	if step.Status != admin.RuntimeRefreshStatusSkipped {
-		t.Fatalf("model_overrides step status = %q, want skipped; step=%+v", step.Status, *step)
+		t.Fatalf("virtual_models step status = %q, want skipped; step=%+v", step.Status, *step)
 	}
 }
 

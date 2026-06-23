@@ -13,17 +13,16 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
 	"gomodel/internal/authkeys"
 	"gomodel/internal/budget"
 	"gomodel/internal/core"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/live"
-	"gomodel/internal/modeloverrides"
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
 	"gomodel/internal/usage"
+	"gomodel/internal/virtualmodels"
 	"gomodel/internal/workflows"
 )
 
@@ -35,8 +34,7 @@ type Handler struct {
 	registry            *providers.ModelRegistry
 	pricingResolver     usage.PricingResolver
 	authKeys            *authkeys.Service
-	aliases             *aliases.Service
-	modelOverrides      *modeloverrides.Service
+	virtualModels       *virtualmodels.Service
 	pricingOverrides    *pricingoverrides.Service
 	workflows           *workflows.Service
 	budgets             *budget.Service
@@ -173,10 +171,10 @@ func WithPricingResolver(resolver usage.PricingResolver) Option {
 	}
 }
 
-// WithAliases enables alias administration endpoints.
-func WithAliases(service *aliases.Service) Option {
+// WithVirtualModels enables unified virtual model administration endpoints.
+func WithVirtualModels(service *virtualmodels.Service) Option {
 	return func(h *Handler) {
-		h.aliases = service
+		h.virtualModels = service
 	}
 }
 
@@ -184,13 +182,6 @@ func WithAliases(service *aliases.Service) Option {
 func WithAuthKeys(service *authkeys.Service) Option {
 	return func(h *Handler) {
 		h.authKeys = service
-	}
-}
-
-// WithModelOverrides enables model override administration endpoints.
-func WithModelOverrides(service *modeloverrides.Service) Option {
-	return func(h *Handler) {
-		h.modelOverrides = service
 	}
 }
 

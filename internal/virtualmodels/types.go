@@ -7,17 +7,15 @@
 // balancing). A row without Targets is an ACCESS POLICY: Source is a scoped
 // selector over existing models, gated by UserPaths.
 //
-// To keep v1 behavior identical to today and avoid re-porting subtle resolution
-// logic, the unified service composes the existing aliases and modeloverrides
-// services, feeding each from this single store via role-partitioned adapters.
+// The Service is a single native engine: it operates directly on VirtualModel
+// rows behind one in-memory snapshot, serving both redirect resolution and
+// policy authorization without composing other engines.
 package virtualmodels
 
 import (
 	"time"
 
-	"gomodel/internal/aliases"
 	"gomodel/internal/core"
-	"gomodel/internal/modeloverrides"
 )
 
 // Target is one concrete (provider, model) destination of a redirect.
@@ -25,6 +23,11 @@ type Target struct {
 	Provider string  `json:"provider,omitempty" bson:"provider,omitempty"`
 	Model    string  `json:"model" bson:"model"`
 	Weight   float64 `json:"weight,omitempty" bson:"weight,omitempty"` // inert in v1 (load balancing)
+}
+
+// selector returns the concrete selector this target points to.
+func (t Target) selector() (core.ModelSelector, error) {
+	return core.ParseModelSelector(t.Model, t.Provider)
 }
 
 // VirtualModel is one operator-defined model entry.
@@ -52,6 +55,27 @@ func (v VirtualModel) Kind() string {
 	return KindPolicy
 }
 
+// targetSelector returns the concrete selector the first target points to.
+func (v VirtualModel) targetSelector() (core.ModelSelector, error) {
+	var t Target
+	if len(v.Targets) > 0 {
+		t = v.Targets[0]
+	}
+	return t.selector()
+}
+
+// clone returns a deep copy of the virtual model so snapshot consumers cannot
+// mutate cached slices.
+func (v VirtualModel) clone() VirtualModel {
+	if len(v.Targets) > 0 {
+		v.Targets = append([]Target(nil), v.Targets...)
+	}
+	if len(v.UserPaths) > 0 {
+		v.UserPaths = append([]string(nil), v.UserPaths...)
+	}
+	return v
+}
+
 // Role kinds for the admin view.
 const (
 	KindRedirect = "redirect"
@@ -77,62 +101,25 @@ type View struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// vmFromAlias projects an alias as a redirect virtual model.
-func vmFromAlias(a aliases.Alias) VirtualModel {
-	return VirtualModel{
-		Source:      a.Name,
-		Targets:     []Target{{Provider: a.TargetProvider, Model: a.TargetModel}},
-		Description: a.Description,
-		Enabled:     a.Enabled,
-		CreatedAt:   a.CreatedAt,
-		UpdatedAt:   a.UpdatedAt,
-	}
+// Resolution captures the requested selector and the concrete selector chosen
+// after redirect resolution. Source is the redirect name that matched, if any.
+type Resolution struct {
+	Requested core.ModelSelector
+	Resolved  core.ModelSelector
+	Source    string
 }
 
-// toAlias projects a redirect virtual model back to an alias. v1 uses the first
-// target; multi-target redirects (load balancing) are a later feature.
-func (v VirtualModel) toAlias() aliases.Alias {
-	var t Target
-	if len(v.Targets) > 0 {
-		t = v.Targets[0]
-	}
-	return aliases.Alias{
-		Name:           v.Source,
-		TargetModel:    t.Model,
-		TargetProvider: t.Provider,
-		Description:    v.Description,
-		Enabled:        v.Enabled,
-		CreatedAt:      v.CreatedAt,
-		UpdatedAt:      v.UpdatedAt,
-	}
+// EffectiveState is the compiled access decision for one concrete selector.
+type EffectiveState struct {
+	Selector       string   `json:"selector"`
+	ProviderName   string   `json:"provider_name,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	DefaultEnabled bool     `json:"default_enabled"`
+	Enabled        bool     `json:"enabled"`
+	UserPaths      []string `json:"user_paths,omitempty"`
 }
 
-// vmFromOverride projects an access override as a policy virtual model.
-func vmFromOverride(o modeloverrides.Override) VirtualModel {
-	return VirtualModel{
-		Source:       o.Selector,
-		ProviderName: o.ProviderName,
-		Model:        o.Model,
-		UserPaths:    append([]string(nil), o.UserPaths...),
-		Enabled:      true,
-		CreatedAt:    o.CreatedAt,
-		UpdatedAt:    o.UpdatedAt,
-	}
-}
-
-// toOverride projects a policy virtual model back to an access override.
-func (v VirtualModel) toOverride() modeloverrides.Override {
-	return modeloverrides.Override{
-		Selector:     v.Source,
-		ProviderName: v.ProviderName,
-		Model:        v.Model,
-		UserPaths:    append([]string(nil), v.UserPaths...),
-		CreatedAt:    v.CreatedAt,
-		UpdatedAt:    v.UpdatedAt,
-	}
-}
-
-// Catalog is the combined catalog surface the composed services need.
+// Catalog is the combined catalog surface the native engine needs.
 type Catalog interface {
 	Supports(model string) bool
 	GetProviderType(model string) string

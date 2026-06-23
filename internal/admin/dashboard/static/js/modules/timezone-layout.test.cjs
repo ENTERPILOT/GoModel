@@ -315,11 +315,7 @@ test("modal forms expose form-scoped error alerts", () => {
   );
   assert.match(
     template,
-    /class="form-error" x-show="aliasFormError" x-text="aliasFormError" role="alert" aria-live="assertive"/,
-  );
-  assert.match(
-    template,
-    /class="form-error" x-show="modelOverrideError" x-text="modelOverrideError" role="alert" aria-live="assertive"/,
+    /class="form-error" x-show="vmFormError" x-text="vmFormError" role="alert" aria-live="assertive"/,
   );
   assert.match(
     template,

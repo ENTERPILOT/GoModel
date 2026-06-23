@@ -24,6 +24,24 @@ function createAliasesModule(overrides) {
     return factory();
 }
 
+function stubRequests(module, requests, response) {
+    Object.assign(module, {
+        requestOptions(options) {
+            return { ...(options || {}), headers: {} };
+        },
+        headers() {
+            return {};
+        },
+        handleFetchResponse() {
+            return true;
+        },
+        isStaleAuthFetchResult() {
+            return false;
+        }
+    });
+    return response;
+}
+
 test('filteredDisplayModels returns stable rows when filter is empty', () => {
     const module = createAliasesModule();
     module.models = [
@@ -70,135 +88,451 @@ test('qualifiedModelName prefers selector when available', () => {
     assert.equal(module.qualifiedModelName(model), 'openrouter/openai/gpt-3.5-turbo');
 });
 
-test('model override mutations send selector in JSON body', async() => {
+test('fetchVirtualModels parses redirect and policy Views into aliases and overrides', async() => {
+    const views = [
+        {
+            source: 'smart',
+            kind: 'redirect',
+            targets: [{ provider: 'openai', model: 'gpt-4o' }],
+            description: 'Primary chat alias',
+            enabled: true,
+            resolved_model: 'openai/gpt-4o',
+            provider_type: 'openai',
+            valid: true,
+            user_paths: ['/team/alpha']
+        },
+        {
+            source: 'openai/gpt-4o',
+            kind: 'policy',
+            provider_name: 'openai',
+            model: 'gpt-4o',
+            user_paths: ['/team/alpha'],
+            enabled: true,
+            scope_kind: 'model'
+        }
+    ];
     const requests = [];
     const module = createAliasesModule({
         context: {
             fetch: async(url, request) => {
                 requests.push({ url, request });
-                return {
-                    ok: true,
-                    status: 200,
-                    json: async() => ({})
-                };
+                return { ok: true, status: 200, json: async() => views };
             }
-        },
-        window: {
-            confirm: () => true
         }
     });
+    stubRequests(module);
+    module.models = [];
 
-    Object.assign(module, {
-        modelOverrideForm: {
-            selector: 'openrouter/meta-llama/llama-3.1-8b-instruct',
-            user_paths: '/team/alpha'
-        },
-        modelOverrideFormHasExistingOverride: true,
-        requestOptions(options) {
-            return {
-                ...(options || {}),
-                headers: {}
-            };
-        },
-        handleFetchResponse() {
-            return true;
-        },
-        fetchModels: async() => {},
-        fetchModelOverrides: async() => {}
-    });
+    await module.fetchVirtualModels();
 
-    await module.submitModelOverrideForm();
-    module.modelOverrideForm = {
-        selector: 'openrouter/meta-llama/llama-3.1-8b-instruct',
-        user_paths: '/team/alpha'
-    };
-    module.modelOverrideFormHasExistingOverride = true;
-    await module.deleteModelOverride();
-
-    assert.equal(requests.length, 2);
-    assert.equal(requests[0].url, '/admin/model-overrides');
-    assert.equal(requests[1].url, '/admin/model-overrides');
-    assert.deepEqual(JSON.parse(requests[0].request.body), {
-        selector: 'openrouter/meta-llama/llama-3.1-8b-instruct',
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/admin/virtual-models');
+    assert.equal(module.aliases.length, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(module.aliases[0])), {
+        name: 'smart',
+        target_provider: 'openai',
+        target_model: 'gpt-4o',
+        description: 'Primary chat alias',
+        enabled: true,
+        valid: true,
+        resolved_model: 'openai/gpt-4o',
+        provider_type: 'openai',
         user_paths: ['/team/alpha']
     });
-    assert.deepEqual(JSON.parse(requests[1].request.body), {
-        selector: 'openrouter/meta-llama/llama-3.1-8b-instruct'
+    assert.equal(module.modelOverrideViews.length, 1);
+    assert.equal(module.modelOverrideViews[0].selector, 'openai/gpt-4o');
+    assert.deepEqual(module.modelOverrideViews[0].user_paths, ['/team/alpha']);
+    assert.equal(module.virtualModelsAvailable, true);
+    assert.equal(module.aliasesAvailable, true);
+    assert.equal(module.modelOverridesAvailable, true);
+});
+
+test('fetchVirtualModels marks the feature unavailable on 503', async() => {
+    const module = createAliasesModule({
+        context: {
+            fetch: async() => ({ ok: false, status: 503, json: async() => ({}) })
+        }
+    });
+    stubRequests(module);
+    module.models = [];
+
+    await module.fetchVirtualModels();
+
+    assert.equal(module.virtualModelsAvailable, false);
+    assert.equal(module.aliasesAvailable, false);
+    assert.equal(module.modelOverridesAvailable, false);
+    assert.equal(module.aliases.length, 0);
+    assert.equal(module.modelOverrideViews.length, 0);
+});
+
+test('toggleRowEnabled disabling a real model sends a policy PUT with enabled false', async() => {
+    const requests = [];
+    const fetched = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        }
+    });
+    stubRequests(module);
+    module.models = [];
+    module.modelOverrideViews = [];
+    module.fetchModels = async() => { fetched.push('models'); };
+    module.fetchVirtualModels = async() => { fetched.push('virtual'); };
+
+    const row = {
+        key: 'model:openai/gpt-4o',
+        is_alias: false,
+        display_name: 'openai/gpt-4o',
+        access: {
+            selector: 'openai/gpt-4o',
+            default_enabled: true,
+            effective_enabled: true
+        }
+    };
+
+    await module.toggleRowEnabled(row);
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/admin/virtual-models');
+    assert.equal(requests[0].request.method, 'PUT');
+    assert.deepEqual(JSON.parse(requests[0].request.body), {
+        source: 'openai/gpt-4o',
+        enabled: false,
+        user_paths: []
+    });
+    assert.deepEqual(fetched, ['models', 'virtual']);
+});
+
+test('toggleRowEnabled enabling a real model with an existing path-less policy sends DELETE', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        }
+    });
+    stubRequests(module);
+    module.models = [];
+    module.modelOverrideViews = [
+        { selector: 'openai/gpt-4o', user_paths: [], enabled: false }
+    ];
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+
+    const row = {
+        key: 'model:openai/gpt-4o',
+        is_alias: false,
+        display_name: 'openai/gpt-4o',
+        access: {
+            selector: 'openai/gpt-4o',
+            default_enabled: true,
+            effective_enabled: false
+        }
+    };
+
+    await module.toggleRowEnabled(row);
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].request.method, 'DELETE');
+    assert.deepEqual(JSON.parse(requests[0].request.body), { source: 'openai/gpt-4o' });
+});
+
+test('toggleRowEnabled enabling a real model with restricted paths sends PUT enabled true', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        }
+    });
+    stubRequests(module);
+    module.models = [];
+    module.modelOverrideViews = [
+        { selector: 'openai/gpt-4o', user_paths: ['/team/alpha'], enabled: false }
+    ];
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+
+    const row = {
+        key: 'model:openai/gpt-4o',
+        is_alias: false,
+        display_name: 'openai/gpt-4o',
+        access: {
+            selector: 'openai/gpt-4o',
+            default_enabled: true,
+            effective_enabled: false
+        }
+    };
+
+    await module.toggleRowEnabled(row);
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].request.method, 'PUT');
+    assert.deepEqual(JSON.parse(requests[0].request.body), {
+        source: 'openai/gpt-4o',
+        enabled: true,
+        user_paths: ['/team/alpha']
     });
 });
 
-test('alias mutations send alias name in JSON body', async() => {
+test('toggleRowEnabled flips an alias enabled flag via PUT preserving target', async() => {
     const requests = [];
     const module = createAliasesModule({
         context: {
             fetch: async(url, request) => {
                 requests.push({ url, request });
-                return {
-                    ok: true,
-                    status: 200,
-                    json: async() => ({})
-                };
+                return { ok: true, status: 200, json: async() => ({}) };
             }
-        },
-        window: {
-            confirm: () => true
         }
     });
+    stubRequests(module);
+    module.fetchVirtualModels = async() => {};
 
-    Object.assign(module, {
-        aliases: [],
-        models: [],
-        requestOptions(options) {
-            return {
-                ...(options || {}),
-                headers: {}
-            };
-        },
-        handleFetchResponse() {
-            return true;
-        },
-        fetchAliases: async() => {}
-    });
-
-    await module.toggleAliasEnabled({
-        name: 'openai/smart',
-        target_model: 'gpt-4o',
-        target_provider: 'openai',
-        description: '',
-        enabled: true
-    });
-    module.aliasForm = {
-        name: 'openai/smart',
-        target_model: 'openai/gpt-4o',
-        description: 'smart alias',
-        enabled: true
+    const row = {
+        key: 'alias:smart',
+        is_alias: true,
+        display_name: 'smart',
+        alias: {
+            name: 'smart',
+            target_provider: 'openai',
+            target_model: 'gpt-4o',
+            description: 'chat',
+            enabled: true,
+            user_paths: ['/team/alpha']
+        }
     };
-    module.aliasFormOriginalName = '';
-    await module.submitAliasForm();
-    await module.deleteAlias({ name: 'openai/smart' });
 
-    assert.equal(requests.length, 3);
-    assert.deepEqual(requests.map((request) => request.url), [
-        '/admin/aliases',
-        '/admin/aliases',
-        '/admin/aliases'
-    ]);
-    assert.deepEqual(requests.map((request) => request.request.method), ['PUT', 'PUT', 'DELETE']);
+    await module.toggleRowEnabled(row);
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/admin/virtual-models');
+    assert.equal(requests[0].request.method, 'PUT');
     assert.deepEqual(JSON.parse(requests[0].request.body), {
-        name: 'openai/smart',
+        source: 'smart',
         target_model: 'openai/gpt-4o',
-        description: '',
+        description: 'chat',
+        user_paths: ['/team/alpha'],
         enabled: false
     });
-    assert.deepEqual(JSON.parse(requests[1].request.body), {
-        name: 'openai/smart',
+});
+
+test('openVirtualModelCreate keeps Source editable and seeds the target from a row', () => {
+    const module = createAliasesModule();
+    module.openVirtualModelCreate({
+        provider_name: 'openai',
+        provider_type: 'openai',
+        model: { id: 'gpt-4o' }
+    });
+
+    assert.equal(module.vmFormOpen, true);
+    assert.equal(module.vmFormMode, 'create');
+    assert.equal(module.vmFormSourceLocked, false);
+    assert.equal(module.vmForm.source, '');
+    assert.equal(module.vmForm.target_model, 'openai/gpt-4o');
+});
+
+test('openVirtualModelEditModel locks and prefills the Source with the selector', () => {
+    const module = createAliasesModule();
+    module.openVirtualModelEditModel({
+        display_name: 'openai/gpt-4o',
+        is_alias: false,
+        access: {
+            selector: 'openai/gpt-4o',
+            default_enabled: true,
+            effective_enabled: false,
+            override: { selector: 'openai/gpt-4o', user_paths: ['/team/alpha'], description: 'team only' }
+        },
+        model: { id: 'gpt-4o' }
+    });
+
+    assert.equal(module.vmFormOpen, true);
+    assert.equal(module.vmFormMode, 'edit');
+    assert.equal(module.vmFormSourceLocked, true);
+    assert.equal(module.vmFormHasExisting, true);
+    assert.equal(module.vmForm.source, 'openai/gpt-4o');
+    assert.equal(module.vmForm.target_model, '');
+    assert.equal(module.vmForm.user_paths, '/team/alpha');
+    assert.equal(module.vmForm.description, 'team only');
+});
+
+test('openVirtualModelEditAlias locks and prefills the Source from the alias', () => {
+    const module = createAliasesModule();
+    module.openVirtualModelEditAlias({
+        name: 'smart',
+        target_provider: 'openai',
+        target_model: 'gpt-4o',
+        description: 'Primary chat alias',
+        enabled: true,
+        user_paths: ['/team/alpha']
+    });
+
+    assert.equal(module.vmFormOpen, true);
+    assert.equal(module.vmFormMode, 'edit');
+    assert.equal(module.vmFormSourceLocked, true);
+    assert.equal(module.vmForm.source, 'smart');
+    assert.equal(module.vmForm.target_model, 'openai/gpt-4o');
+    assert.equal(module.vmForm.description, 'Primary chat alias');
+    assert.equal(module.vmForm.user_paths, '/team/alpha');
+    assert.equal(module.vmForm.enabled, true);
+});
+
+test('submitVirtualModelForm sends a redirect payload when target_model is filled', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        },
+        window: { confirm: () => true }
+    });
+    stubRequests(module);
+    module.aliases = [];
+    module.models = [];
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+
+    module.vmFormMode = 'create';
+    module.vmForm = {
+        source: 'smart',
         target_model: 'openai/gpt-4o',
-        description: 'smart alias',
+        user_paths: '/team/alpha\n/team/beta',
+        description: 'chat',
         enabled: true
+    };
+
+    await module.submitVirtualModelForm();
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/admin/virtual-models');
+    assert.equal(requests[0].request.method, 'PUT');
+    assert.deepEqual(JSON.parse(requests[0].request.body), {
+        source: 'smart',
+        user_paths: ['/team/alpha', '/team/beta'],
+        description: 'chat',
+        enabled: true,
+        target_model: 'openai/gpt-4o'
     });
-    assert.deepEqual(JSON.parse(requests[2].request.body), {
-        name: 'openai/smart'
+});
+
+test('submitVirtualModelForm sends a policy payload when target_model is empty', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        }
     });
+    stubRequests(module);
+    module.aliases = [];
+    module.models = [];
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+
+    module.vmFormMode = 'edit';
+    module.vmForm = {
+        source: 'openai/gpt-4o',
+        target_model: '',
+        user_paths: '/team/alpha',
+        description: '',
+        enabled: false
+    };
+
+    await module.submitVirtualModelForm();
+
+    assert.equal(requests.length, 1);
+    const body = JSON.parse(requests[0].request.body);
+    assert.equal(body.source, 'openai/gpt-4o');
+    assert.equal(body.enabled, false);
+    assert.deepEqual(body.user_paths, ['/team/alpha']);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, 'target_model'), false);
+});
+
+test('deleteVirtualModel removes the editor source', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        },
+        window: { confirm: () => true }
+    });
+    stubRequests(module);
+    module.models = [];
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+    module.vmForm = { source: 'openai/gpt-4o', target_model: '', user_paths: '', description: '', enabled: true };
+    module.vmFormHasExisting = true;
+
+    await module.deleteVirtualModel();
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].request.method, 'DELETE');
+    assert.deepEqual(JSON.parse(requests[0].request.body), { source: 'openai/gpt-4o' });
+});
+
+test('displayRowClass renders real models carrying a virtual model as alias-like', () => {
+    const module = createAliasesModule();
+
+    const overrideRow = {
+        is_alias: false,
+        has_virtual_model: true,
+        access: { effective_enabled: true }
+    };
+    assert.equal(module.displayRowClass(overrideRow), 'alias-row is-valid');
+    assert.equal(module.rowVirtualBadge(overrideRow), 'Override');
+
+    const plainRow = { is_alias: false, has_virtual_model: false, access: { effective_enabled: true } };
+    assert.equal(module.displayRowClass(plainRow), '');
+    assert.equal(module.rowVirtualBadge(plainRow), '');
+
+    const aliasRow = { is_alias: true, alias: { enabled: true, valid: true } };
+    assert.equal(module.displayRowClass(aliasRow), 'alias-row is-valid');
+    assert.equal(module.rowVirtualBadge(aliasRow), '');
+});
+
+test('buildDisplayModels flags model rows with a policy override as carrying a virtual model', () => {
+    const module = createAliasesModule();
+    module.models = [
+        {
+            provider_name: 'openai',
+            provider_type: 'openai',
+            access: {
+                selector: 'openai/gpt-4o',
+                default_enabled: true,
+                effective_enabled: true,
+                override: { selector: 'openai/gpt-4o' }
+            },
+            model: { id: 'gpt-4o', object: 'model' }
+        },
+        {
+            provider_name: 'openai',
+            provider_type: 'openai',
+            access: { selector: 'openai/gpt-4o-mini', default_enabled: true, effective_enabled: true },
+            model: { id: 'gpt-4o-mini', object: 'model' }
+        }
+    ];
+    module.aliases = [];
+    module.aliasesAvailable = true;
+    module.syncDisplayModels();
+
+    const withOverride = module.displayModels.find((row) => row.display_name === 'openai/gpt-4o');
+    const without = module.displayModels.find((row) => row.display_name === 'openai/gpt-4o-mini');
+
+    assert.equal(withOverride.has_virtual_model, true);
+    assert.equal(without.has_virtual_model, false);
 });
 
 test('filteredDisplayModelGroups groups rows by provider_name and applies provider-wide overrides', () => {
@@ -347,7 +681,7 @@ test('override button helpers mark configured selectors', () => {
     assert.equal(module.modelOverrideEditButtonClass(false), '');
     assert.equal(
         module.modelOverrideEditButtonLabel('global model access', true),
-        'Edit global model access (override exists)'
+        'Edit global model access (virtual model exists)'
     );
     assert.equal(module.modelAccessStateText({ effective_enabled: true }), 'Enabled');
     assert.equal(module.modelAccessStateClass({ effective_enabled: true }), 'is-enabled');
@@ -358,7 +692,7 @@ test('override button helpers mark configured selectors', () => {
     assert.equal(module.modelAccessStateClass({ effective_enabled: true }), '');
 });
 
-test('openProviderOverrideEdit opens the access editor with provider_name slash selector', () => {
+test('openProviderOverrideEdit opens the unified editor with provider_name slash selector', () => {
     const module = createAliasesModule();
 
     module.openProviderOverrideEdit({
@@ -374,18 +708,19 @@ test('openProviderOverrideEdit opens the access editor with provider_name slash 
         }
     });
 
-    assert.equal(module.modelOverrideFormOpen, true);
-    assert.equal(module.modelOverrideForm.selector, 'openai-primary/');
-    assert.equal(module.modelOverrideFormDisplayName, 'All models in openai-primary');
+    assert.equal(module.vmFormOpen, true);
+    assert.equal(module.vmFormSourceLocked, true);
+    assert.equal(module.vmForm.source, 'openai-primary/');
+    assert.equal(module.vmFormDisplayName, 'All models in openai-primary');
 });
 
-test('openModelOverrideEdit focuses the access editor after opening', () => {
+test('openVirtualModelEditModel focuses the editor after opening', () => {
     let querySelectorCalls = 0;
     const module = createAliasesModule();
     const calls = [];
     let nextTickCallback = null;
     module.$refs = {
-        modelOverrideEditor: {
+        virtualModelEditor: {
             querySelector() {
                 querySelectorCalls++;
                 return {
@@ -400,7 +735,7 @@ test('openModelOverrideEdit focuses the access editor after opening', () => {
         nextTickCallback = callback;
     };
 
-    module.openModelOverrideEdit({
+    module.openVirtualModelEditModel({
         display_name: 'openai/gpt-4o',
         is_alias: false,
         access: {
@@ -414,7 +749,7 @@ test('openModelOverrideEdit focuses the access editor after opening', () => {
         }
     });
 
-    assert.equal(module.modelOverrideFormOpen, true);
+    assert.equal(module.vmFormOpen, true);
     assert.deepEqual(calls, []);
 
     nextTickCallback();
@@ -425,13 +760,13 @@ test('openModelOverrideEdit focuses the access editor after opening', () => {
     ]);
 });
 
-test('openAliasEdit focuses the alias editor after opening', () => {
+test('openVirtualModelEditAlias focuses the editor after opening', () => {
     let querySelectorCalls = 0;
     const module = createAliasesModule();
     const calls = [];
     let nextTickCallback = null;
     module.$refs = {
-        aliasEditor: {
+        virtualModelEditor: {
             querySelector() {
                 querySelectorCalls++;
                 return {
@@ -446,7 +781,7 @@ test('openAliasEdit focuses the alias editor after opening', () => {
         nextTickCallback = callback;
     };
 
-    module.openAliasEdit({
+    module.openVirtualModelEditAlias({
         name: 'smart',
         target_provider: 'openai',
         target_model: 'gpt-4o',
@@ -454,8 +789,8 @@ test('openAliasEdit focuses the alias editor after opening', () => {
         enabled: true
     });
 
-    assert.equal(module.aliasFormOpen, true);
-    assert.equal(module.aliasFormMode, 'edit');
+    assert.equal(module.vmFormOpen, true);
+    assert.equal(module.vmFormMode, 'edit');
     assert.deepEqual(calls, []);
 
     nextTickCallback();
@@ -466,7 +801,7 @@ test('openAliasEdit focuses the alias editor after opening', () => {
     ]);
 });
 
-test('openGlobalModelOverrideEdit opens the access editor with slash selector', () => {
+test('openGlobalModelOverrideEdit opens the unified editor with slash selector', () => {
     const module = createAliasesModule();
     module.models = [
         {
@@ -478,76 +813,86 @@ test('openGlobalModelOverrideEdit opens the access editor with slash selector', 
     module.modelOverrideViews = [
         {
             selector: '/',
-            user_paths: ['/team/alpha']
+            user_paths: ['/team/alpha'],
+            enabled: true
         }
     ];
 
     module.openGlobalModelOverrideEdit();
 
-    assert.equal(module.modelOverrideFormOpen, true);
-    assert.equal(module.modelOverrideForm.selector, '/');
-    assert.equal(module.modelOverrideFormDisplayName, 'All providers and models');
-    assert.equal(module.modelOverrideFormDefaultEnabled, false);
-    assert.equal(module.modelOverrideFormEffectiveEnabled, true);
-    assert.equal(module.modelOverrideForm.user_paths, '/team/alpha');
+    assert.equal(module.vmFormOpen, true);
+    assert.equal(module.vmFormSourceLocked, true);
+    assert.equal(module.vmForm.source, '/');
+    assert.equal(module.vmFormDisplayName, 'All providers and models');
+    assert.equal(module.vmFormDefaultEnabled, false);
+    assert.equal(module.vmFormEffectiveEnabled, true);
+    assert.equal(module.vmForm.user_paths, '/team/alpha');
 });
 
-test('alias write paths use generation-aware request handling for stale auth responses', async() => {
+test('virtual model write paths use generation-aware request handling for stale auth responses', async() => {
     const scenarios = [
         {
-            name: 'toggleAliasEnabled',
+            name: 'toggleRowEnabled-alias',
             run(module) {
-                return module.toggleAliasEnabled({
-                    name: 'short',
-                    target_model: 'openai/gpt-4o',
-                    description: '',
-                    enabled: true
+                return module.toggleRowEnabled({
+                    key: 'alias:short',
+                    is_alias: true,
+                    display_name: 'short',
+                    alias: {
+                        name: 'short',
+                        target_model: 'openai/gpt-4o',
+                        description: '',
+                        enabled: true
+                    }
                 });
             },
             errorKey: 'aliasError'
         },
         {
-            name: 'submitAliasForm',
+            name: 'toggleRowEnabled-model',
+            run(module) {
+                return module.toggleRowEnabled({
+                    key: 'model:openai/gpt-4o',
+                    is_alias: false,
+                    display_name: 'openai/gpt-4o',
+                    access: { selector: 'openai/gpt-4o', default_enabled: true, effective_enabled: true }
+                });
+            },
+            errorKey: 'aliasError'
+        },
+        {
+            name: 'submitVirtualModelForm',
             setup(module) {
-                module.aliasForm = {
-                    name: 'short',
+                module.vmForm = {
+                    source: 'short',
                     target_model: 'openai/gpt-4o',
+                    user_paths: '',
                     description: '',
                     enabled: true
                 };
-                module.aliasFormOriginalName = '';
+                module.vmFormMode = 'edit';
             },
             run(module) {
-                return module.submitAliasForm();
+                return module.submitVirtualModelForm();
             },
-            errorKey: 'aliasFormError'
+            errorKey: 'vmFormError'
         },
         {
-            name: 'submitModelOverrideForm',
+            name: 'deleteVirtualModel',
             setup(module) {
-                module.modelOverrideForm = {
-                    selector: 'openai/gpt-4o',
-                    user_paths: '/team/alpha'
+                module.vmForm = {
+                    source: 'openai/gpt-4o',
+                    target_model: '',
+                    user_paths: '/team/alpha',
+                    description: '',
+                    enabled: true
                 };
+                module.vmFormHasExisting = true;
             },
             run(module) {
-                return module.submitModelOverrideForm();
+                return module.deleteVirtualModel();
             },
-            errorKey: 'modelOverrideError'
-        },
-        {
-            name: 'deleteModelOverride',
-            setup(module) {
-                module.modelOverrideForm = {
-                    selector: 'openai/gpt-4o',
-                    user_paths: '/team/alpha'
-                };
-                module.modelOverrideFormHasExistingOverride = true;
-            },
-            run(module) {
-                return module.deleteModelOverride();
-            },
-            errorKey: 'modelOverrideError'
+            errorKey: 'vmFormError'
         }
     ];
 
@@ -575,6 +920,7 @@ test('alias write paths use generation-aware request handling for stale auth res
             aliases: [],
             models: [],
             modelOverrideViews: [],
+            virtualModelsAvailable: true,
             aliasesAvailable: true,
             modelOverridesAvailable: true,
             needsAuth: false,
@@ -596,14 +942,11 @@ test('alias write paths use generation-aware request handling for stale auth res
             isStaleAuthFetchResult(result) {
                 return result === 'STALE_AUTH';
             },
-            fetchAliases() {
-                throw new Error('fetchAliases should not run for stale auth in ' + scenario.name);
+            fetchVirtualModels() {
+                throw new Error('fetchVirtualModels should not run for stale auth in ' + scenario.name);
             },
             fetchModels() {
                 throw new Error('fetchModels should not run for stale auth in ' + scenario.name);
-            },
-            fetchModelOverrides() {
-                throw new Error('fetchModelOverrides should not run for stale auth in ' + scenario.name);
             }
         });
         if (scenario.setup) {
@@ -622,36 +965,24 @@ test('alias write paths use generation-aware request handling for stale auth res
     }
 });
 
-test('alias and model override forms surface nested HTTP error payloads', async() => {
+test('virtual model editor surfaces nested HTTP error payloads', async() => {
     const scenarios = [
         {
-            name: 'submitAliasForm',
-            message: 'alias target model is required',
-            errorKey: 'aliasFormError',
+            name: 'submitVirtualModelForm',
+            message: 'target model is required',
+            errorKey: 'vmFormError',
             setup(module) {
-                module.aliasForm = {
-                    name: 'short',
+                module.vmForm = {
+                    source: 'short',
                     target_model: 'openai/gpt-4o',
+                    user_paths: '',
                     description: '',
                     enabled: true
                 };
+                module.vmFormMode = 'edit';
             },
             run(module) {
-                return module.submitAliasForm();
-            }
-        },
-        {
-            name: 'submitModelOverrideForm',
-            message: 'user path is outside allowed scope',
-            errorKey: 'modelOverrideError',
-            setup(module) {
-                module.modelOverrideForm = {
-                    selector: 'openai/gpt-4o',
-                    user_paths: '/team/alpha'
-                };
-            },
-            run(module) {
-                return module.submitModelOverrideForm();
+                return module.submitVirtualModelForm();
             }
         }
     ];
@@ -676,6 +1007,7 @@ test('alias and model override forms surface nested HTTP error payloads', async(
             aliases: [],
             models: [],
             modelOverrideViews: [],
+            virtualModelsAvailable: true,
             aliasesAvailable: true,
             modelOverridesAvailable: true,
             requestOptions(options) {
@@ -693,14 +1025,11 @@ test('alias and model override forms surface nested HTTP error payloads', async(
             isStaleAuthFetchResult() {
                 return false;
             },
-            fetchAliases() {
-                throw new Error('fetchAliases should not run for ' + scenario.name);
+            fetchVirtualModels() {
+                throw new Error('fetchVirtualModels should not run for ' + scenario.name);
             },
             fetchModels() {
                 throw new Error('fetchModels should not run for ' + scenario.name);
-            },
-            fetchModelOverrides() {
-                throw new Error('fetchModelOverrides should not run for ' + scenario.name);
             }
         });
 

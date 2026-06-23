@@ -18,7 +18,6 @@ import (
 	"gomodel/config"
 	"gomodel/internal/admin"
 	"gomodel/internal/admin/dashboard"
-	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
 	"gomodel/internal/authkeys"
 	"gomodel/internal/batch"
@@ -28,7 +27,6 @@ import (
 	"gomodel/internal/filestore"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/live"
-	"gomodel/internal/modeloverrides"
 	"gomodel/internal/pricingoverrides"
 	"gomodel/internal/providers"
 	"gomodel/internal/responsecache"
@@ -246,10 +244,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	closers = append(closers, app.virtualModels.Close)
 	claimSharedStorage(virtualModelsResult.Storage)
 
-	// The unified virtual models service exposes the alias (redirect) engine as
-	// the model resolver and the access-override (policy) engine as the authorizer.
-	aliasService := app.virtualModels.Service.Aliases()
-	modelOverrideService := app.virtualModels.Service.Overrides()
+	// The unified virtual models service is the single engine: it serves model
+	// resolution (redirects), access authorization (policies), and exposed-model
+	// listing.
+	vm := app.virtualModels.Service
 
 	var pricingOverrideResult *pricingoverrides.Result
 	if sharedStorage != nil {
@@ -270,8 +268,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	refreshInterval := workflowRefreshInterval(appCfg)
 	var guardrailExecutor guardrails.ChatCompletionExecutor = app.providers.Router
-	if aliasService != nil {
-		guardrailExecutor = aliases.NewProviderWithOptions(app.providers.Router, aliasService, aliases.Options{})
+	if vm != nil {
+		guardrailExecutor = virtualmodels.NewProviderWithOptions(app.providers.Router, vm, virtualmodels.Options{})
 	}
 
 	// Initialize reusable guardrail definitions using shared storage when already available.
@@ -353,13 +351,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			)
 		}
 	}
-	if aliasService != nil {
+	if vm != nil {
+		// One combined preparer rewrites redirect sources and validates access,
+		// replacing the previous two-preparer pipeline.
 		batchRequestPreparers = append([]server.BatchRequestPreparer{
-			aliases.NewBatchPreparer(provider, aliasService),
+			virtualmodels.NewBatchPreparer(provider, vm),
 		}, batchRequestPreparers...)
-	}
-	if modelOverrideService != nil {
-		batchRequestPreparers = append(batchRequestPreparers, modeloverrides.NewBatchPreparer(provider, modelOverrideService))
 	}
 	batchRequestPreparer := server.ComposeBatchRequestPreparers(providerAsNativeFileRouter(provider), batchRequestPreparers...)
 
@@ -383,13 +380,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		UsageLogger:                     usageResult.Logger,
 		BudgetChecker:                   budgetResult.Service,
 		PricingResolver:                 pricingResolver,
-		ModelResolver:                   aliasService,
-		ModelAuthorizer:                 modelOverrideService,
+		ModelResolver:                   vm,
+		ModelAuthorizer:                 vm,
 		FallbackResolver:                fallback.NewResolver(appCfg.Fallback, providerResult.Registry),
 		WorkflowPolicyResolver:          workflowResult.Service,
 		TranslatedRequestPatcher:        translatedRequestPatcher,
 		BatchRequestPreparer:            batchRequestPreparer,
-		ExposedModelLister:              aliasService,
+		ExposedModelLister:              vm,
 		KeepOnlyAliasesAtModelsEndpoint: appCfg.Models.KeepOnlyAliasesAtModelsEndpoint,
 		PassthroughSemanticEnrichers:    cfg.Factory.PassthroughSemanticEnrichers(),
 		BatchStore:                      batchResult.Store,
@@ -425,8 +422,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			providerResult.Registry,
 			providerResult.ConfiguredProviders,
 			authKeyResult.Service,
-			aliasService,
-			modelOverrideService,
+			vm,
 			app.pricingOverrides.Service,
 			workflowResult.Service,
 			app.guardrails.Service,
@@ -485,8 +481,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(provider, server.InternalChatCompletionExecutorConfig{
-		ModelResolver:          aliasService,
-		ModelAuthorizer:        modelOverrideService,
+		ModelResolver:          vm,
+		ModelAuthorizer:        vm,
 		WorkflowPolicyResolver: workflowResult.Service,
 		FallbackResolver:       serverCfg.FallbackResolver,
 		AuditLogger:            auditResult.Logger,
@@ -835,8 +831,7 @@ func initAdmin(
 	registry *providers.ModelRegistry,
 	configuredProviders []providers.SanitizedProviderConfig,
 	authKeyService *authkeys.Service,
-	aliasService *aliases.Service,
-	modelOverrideService *modeloverrides.Service,
+	virtualModelService *virtualmodels.Service,
 	pricingOverrideService *pricingoverrides.Service,
 	workflowService *workflows.Service,
 	guardrailService *guardrails.Service,
@@ -894,8 +889,7 @@ func initAdmin(
 		admin.WithPricingResolver(pricingOverrideService),
 		admin.WithAuditReader(auditReader),
 		admin.WithAuthKeys(authKeyService),
-		admin.WithAliases(aliasService),
-		admin.WithModelOverrides(modelOverrideService),
+		admin.WithVirtualModels(virtualModelService),
 		admin.WithPricingOverrides(pricingOverrideService),
 		admin.WithWorkflows(workflowService),
 		admin.WithGuardrailService(guardrailService),

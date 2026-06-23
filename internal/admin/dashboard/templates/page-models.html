@@ -11,13 +11,11 @@
 
     <!-- Auth Error Banner -->
     {{template "auth-banner" .}}
-    <div class="alert alert-warning" x-show="!aliasesAvailable && !authError">
-        Aliases feature is unavailable.
+    <div class="alert alert-warning" x-show="!virtualModelsAvailable && !authError">
+        Virtual models feature is unavailable.
     </div>
-    <div class="alert alert-warning" x-show="aliasError && !authError" x-text="aliasError"></div>
+    <div class="alert alert-warning" x-show="aliasError && !authError && !vmFormOpen" x-text="aliasError"></div>
     <div class="alert alert-success" x-show="aliasNotice" x-text="aliasNotice"></div>
-    <div class="alert alert-warning" x-show="modelOverrideError && !authError && !modelOverrideFormOpen" x-text="modelOverrideError"></div>
-    <div class="alert alert-success" x-show="modelOverrideNotice && !modelOverrideError" x-text="modelOverrideNotice"></div>
     <div class="alert alert-warning" x-show="modelPricingOverrideError && !authError && !modelPricingOverrideFormOpen" x-text="modelPricingOverrideError"></div>
     <div class="alert alert-success" x-show="modelPricingOverrideNotice && !modelPricingOverrideError" x-text="modelPricingOverrideNotice"></div>
 
@@ -32,7 +30,7 @@
     </div>
 
     <!-- Filter -->
-    <div class="table-toolbar" x-show="displayModels.length > 0 || modelFilter || aliasesAvailable">
+    <div class="table-toolbar" x-show="displayModels.length > 0 || modelFilter || virtualModelsAvailable">
         <div class="table-toolbar-main">
             <div class="filter-input-wrap">
                 <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
@@ -40,7 +38,7 @@
             </div>
         </div>
         <div class="table-toolbar-actions">
-            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn" x-show="aliasesAvailable" @click="openAliasCreate()">
+            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn" x-show="virtualModelsAvailable" @click="openVirtualModelCreate()">
                 <i data-lucide="plus" class="alias-create-icon" aria-hidden="true"></i>
                 <span>Create&nbsp;Alias</span>
             </button>
@@ -54,125 +52,86 @@
 
     <div class="editor-modal-backdrop"
          x-cloak
-         x-show="aliasFormOpen"
+         x-show="vmFormOpen"
          x-transition.opacity.duration.160ms
          aria-hidden="true"></div>
     <div class="editor-modal-shell"
          x-cloak
-         x-show="aliasFormOpen"
+         x-show="vmFormOpen"
          x-transition.opacity.duration.160ms
-         @click="closeAliasForm()"
-         @keydown.escape.window="aliasFormOpen && !authDialogOpen && closeAliasForm()">
-        <div class="model-editor" x-show="aliasFormOpen" x-ref="aliasEditor" role="dialog" aria-modal="true" aria-label="Alias editor" @click.stop>
-            <form class="form" @submit.prevent="submitAliasForm()">
+         @click="closeVirtualModelForm()"
+         @keydown.escape.window="vmFormOpen && !authDialogOpen && closeVirtualModelForm()">
+        <div class="model-editor" x-show="vmFormOpen" x-ref="virtualModelEditor" role="dialog" aria-modal="true" aria-label="Virtual model editor" @click.stop>
+            <form class="form" @submit.prevent="submitVirtualModelForm()">
                 <div class="editor-header">
                     <div>
-                        <h3 x-text="aliasFormMode === 'edit' ? 'Edit alias' : 'Create alias'"></h3>
+                        <p class="form-kicker" x-text="vmFormMode === 'edit' ? 'Edit virtual model' : 'New virtual model'"></p>
+                        <h3 x-text="vmFormDisplayName || vmForm.source || 'Virtual model'"></h3>
                     </div>
-                    <button type="button" class="dialog-close-btn" aria-label="Close alias editor" @click="closeAliasForm()">
+                    <button type="button" class="dialog-close-btn" aria-label="Close virtual model editor" @click="closeVirtualModelForm()">
                         {{template "x-icon"}}
                     </button>
                 </div>
 
                 <div class="form-grid">
                     <div class="form-field">
-                        <label class="form-field-label" for="alias-name">Alias name</label>
-                        <input id="alias-name" type="text" class="mono" placeholder="smart" x-model="aliasForm.name" data-modal-autofocus>
+                        <label class="form-field-label" for="virtual-model-source">Source</label>
+                        <input id="virtual-model-source" type="text" class="mono" placeholder="smart" x-model="vmForm.source" :disabled="vmFormSourceLocked" data-modal-autofocus>
                     </div>
 
                     <div class="form-field">
-                        <label class="form-field-label" for="alias-target-model">Target model</label>
-                        <input id="alias-target-model" type="text" list="alias-model-options" class="mono" placeholder="openai/gpt-4o" x-model="aliasForm.target_model">
+                        <label class="form-field-label" for="virtual-model-target">Target model</label>
+                        <input id="virtual-model-target" type="text" list="virtual-model-target-options" class="mono" placeholder="openai/gpt-4o" x-model="vmForm.target_model">
                     </div>
                 </div>
 
-                <datalist id="alias-model-options">
+                <datalist id="virtual-model-target-options">
                     <template x-for="m in models" :key="qualifiedModelName(m)">
                         <option :value="qualifiedModelName(m)" x-text="qualifiedModelName(m)"></option>
                     </template>
                 </datalist>
 
-                <div class="form-field">
-                    <label class="form-field-label" for="alias-description">Description</label>
-                    <textarea id="alias-description" rows="3" placeholder="Optional description" x-model="aliasForm.description"></textarea>
-                </div>
-
                 <p class="form-hint">
-                    Aliases are not supported on pass-through endpoints.
+                    Fill <strong>Target model</strong> to make this a redirect/alias; leave it empty to make it an access policy on the <code>Source</code> selector. The selector uses <code>/</code> for all providers and models, <code>{provider_name}/</code> for one provider, or <code>{provider_name}/{model}</code> for one model. <code>user_paths</code> is matched against the effective request <code>user_path</code>: the managed API key <code>user_path</code> when present, otherwise the configured user path request header.
                 </p>
-
-                <label class="alias-checkbox">
-                    <input type="checkbox" x-model="aliasForm.enabled">
-                    <span>Alias is enabled</span>
-                </label>
-
-                <p class="form-hint" x-show="aliasFormMode === 'edit'">
-                    Renaming an alias creates the new name first, then removes the old one.
-                </p>
-
-                <p class="form-error" x-show="aliasFormError" x-text="aliasFormError" role="alert" aria-live="assertive"></p>
-
-                <div class="form-actions">
-                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-submit-btn" :disabled="aliasSubmitting">
-                        <i data-lucide="plus" class="form-action-icon" x-show="aliasFormMode !== 'edit'" aria-hidden="true"></i>
-                        <i data-lucide="save" class="form-action-icon" x-show="aliasFormMode === 'edit'" aria-hidden="true"></i>
-                        <span x-text="aliasSubmitting ? 'Saving...' : (aliasFormMode === 'edit' ? 'Save Alias' : 'Create Alias')"></span>
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <div class="editor-modal-backdrop"
-         x-cloak
-         x-show="modelOverrideFormOpen"
-         x-transition.opacity.duration.160ms
-         aria-hidden="true"></div>
-    <div class="editor-modal-shell"
-         x-cloak
-         x-show="modelOverrideFormOpen"
-         x-transition.opacity.duration.160ms
-         @click="closeModelOverrideForm()"
-         @keydown.escape.window="modelOverrideFormOpen && !authDialogOpen && closeModelOverrideForm()">
-        <div class="model-editor" x-show="modelOverrideFormOpen" x-ref="modelOverrideEditor" role="dialog" aria-modal="true" aria-label="Model access editor" @click.stop>
-            <form class="form" @submit.prevent="submitModelOverrideForm()">
-                    <div class="editor-header">
-                        <div>
-                        <p class="form-kicker">Access override</p>
-                        <h3 x-text="modelOverrideFormDisplayName || modelOverrideForm.selector || 'Access'"></h3>
-                        </div>
-                        <button type="button" class="dialog-close-btn" aria-label="Close model access editor" @click="closeModelOverrideForm()">
-                            {{template "x-icon"}}
-                        </button>
-                </div>
+                <p class="form-hint" x-show="vmFormMode === 'edit'" x-text="'Default enabled: ' + (vmFormDefaultEnabled ? 'yes' : 'no') + ' · Effective now: ' + (vmFormEffectiveEnabled ? 'yes' : 'no')"></p>
 
                 <div class="form-field">
-                    <label class="form-field-label" for="model-override-selector">Selector</label>
-                    <input id="model-override-selector" type="text" class="mono" x-model="modelOverrideForm.selector" disabled>
-                </div>
-
-                <p class="form-hint">
-                    The selector uses <code>/</code> for all providers and models, <code>{provider_name}/</code> for one provider, or <code>{provider_name}/{model}</code> for one model. <code>user_paths</code> is matched against the effective request <code>user_path</code>: the managed API key <code>user_path</code> when present, otherwise the configured user path request header.
-                </p>
-                <p class="form-hint" x-text="'Default enabled: ' + (modelOverrideFormDefaultEnabled ? 'yes' : 'no') + ' · Effective now: ' + (modelOverrideFormEffectiveEnabled ? 'yes' : 'no')"></p>
-
-                <div class="form-field">
-                    <label class="form-field-label" for="model-override-user-paths">User Paths</label>
-                    <textarea id="model-override-user-paths" rows="4" class="mono" placeholder="/&#10;/team/alpha&#10;/non-existing" x-model="modelOverrideForm.user_paths" data-modal-autofocus></textarea>
+                    <label class="form-field-label" for="virtual-model-user-paths">User Paths</label>
+                    <textarea id="virtual-model-user-paths" rows="4" class="mono" placeholder="/&#10;/team/alpha&#10;/non-existing" x-model="vmForm.user_paths"></textarea>
                 </div>
 
                 <p class="form-hint">
                     Use <code>/</code> to allow every user path. Use a team path to restrict to that subtree, or an unused path to make the selector unavailable.
                 </p>
 
-                <p class="form-error" x-show="modelOverrideError" x-text="modelOverrideError" role="alert" aria-live="assertive"></p>
+                <div class="form-field">
+                    <label class="form-field-label" for="virtual-model-description">Description</label>
+                    <textarea id="virtual-model-description" rows="3" placeholder="Optional description" x-model="vmForm.description"></textarea>
+                </div>
+
+                <div class="form-field">
+                    <span class="form-field-label">Status</span>
+                    <div>
+                        <button type="button" class="alias-toggle"
+                                :class="{ enabled: vmForm.enabled, restricted: vmFormToggleRestricted() }"
+                                :aria-label="(vmForm.enabled ? 'Disable' : 'Enable') + ' virtual model'"
+                                @click="vmForm.enabled = !vmForm.enabled">
+                            <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                            <span x-text="vmFormToggleLabel()"></span>
+                        </button>
+                    </div>
+                </div>
+
+                <p class="form-error" x-show="vmFormError" x-text="vmFormError" role="alert" aria-live="assertive"></p>
 
                 <div class="form-actions">
-                    <button type="button" class="pagination-btn" @click="closeModelOverrideForm()">Cancel</button>
-                    <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="modelOverrideFormHasExistingOverride" :disabled="modelOverrideSubmitting" @click="deleteModelOverride()">Remove Override</button>
-                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon model-access-submit-btn" :disabled="modelOverrideSubmitting">
-                        <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
-                        <span x-text="modelOverrideSubmitting ? 'Saving...' : 'Save Access'"></span>
+                    <button type="button" class="pagination-btn" @click="closeVirtualModelForm()">Cancel</button>
+                    <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="vmFormHasExisting" :disabled="vmDeleting || vmSubmitting" @click="deleteVirtualModel()">Remove</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon virtual-model-submit-btn" :disabled="vmSubmitting">
+                        <i data-lucide="plus" class="form-action-icon" x-show="vmFormMode !== 'edit'" aria-hidden="true"></i>
+                        <i data-lucide="save" class="form-action-icon" x-show="vmFormMode === 'edit'" aria-hidden="true"></i>
+                        <span x-text="vmSubmitting ? 'Saving...' : (vmFormMode === 'edit' ? 'Save' : 'Create')"></span>
                     </button>
                 </div>
             </form>
@@ -409,7 +368,7 @@
         {{template "dollar-icon"}}
     </button>
     <button type="button" class="table-action-btn table-icon-btn"
-        x-show="modelOverridesAvailable"
+        x-show="virtualModelsAvailable"
         :class="modelOverrideEditButtonClass(hasGlobalModelOverride())"
         :aria-label="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"
         :title="modelOverrideEditButtonLabel('global model access', hasGlobalModelOverride())"

@@ -406,8 +406,8 @@ func (h *Handler) recalculatePricingSelector(raw string) (provider, model string
 		return "", "", nil
 	}
 
-	if h.aliases != nil {
-		selector, changed, err := h.aliases.ResolveModel(core.NewRequestedModelSelector(raw, ""))
+	if h.virtualModels != nil {
+		selector, changed, err := h.virtualModels.ResolveModel(core.NewRequestedModelSelector(raw, ""))
 		if err != nil {
 			return "", "", core.NewInvalidRequestError("invalid selector: "+err.Error(), err)
 		}

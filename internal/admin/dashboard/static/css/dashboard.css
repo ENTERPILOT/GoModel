@@ -1863,6 +1863,17 @@ td.col-price {
   background: #fff;
 }
 
+/* Restricted: an enabled model scoped to specific user paths. Reuses the
+   accent color of the former access-state pill, on the toggle itself. */
+.alias-toggle.restricted {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+}
+
+.alias-toggle.restricted .alias-toggle-track {
+  background: color-mix(in srgb, var(--accent) 55%, var(--bg));
+}
+
 .editor-header {
   display: flex;
   align-items: flex-start;

@@ -13,6 +13,15 @@ type ModelResolver interface {
 	ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
+// UserPathModelResolver is an optional ModelResolver that resolves with
+// awareness of the effective request user path, so a redirect (alias) can be
+// scoped to specific user_paths and fall through to the literal model name for
+// callers that do not match. Resolvers that do not implement it are resolved
+// unscoped via ResolveModel.
+type UserPathModelResolver interface {
+	ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
+}
+
 // FallbackResolver resolves alternate concrete model selectors for a translated
 // request after the primary selector has already been resolved.
 type FallbackResolver interface {

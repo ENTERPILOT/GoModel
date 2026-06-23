@@ -9,8 +9,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
-	"gomodel/internal/aliases"
-	"gomodel/internal/modeloverrides"
 	"gomodel/internal/storage"
 )
 
@@ -18,8 +16,8 @@ import (
 // `model_overrides` rows into `virtual_models` when the latter is still empty.
 //
 // REMOVE-LATER (cleanup milestone: one release after virtual models ship).
-// Once all environments run the unified store, delete this file, the legacy
-// aliases/modeloverrides packages, and their tables/collections.
+// Once all environments run the unified store, delete this file, seed_legacy.go,
+// and the legacy aliases/model_overrides tables/collections.
 func seedFromLegacy(ctx context.Context, store Store, conn storage.Storage) error {
 	existing, err := store.List(ctx)
 	if err != nil {
@@ -30,47 +28,37 @@ func seedFromLegacy(ctx context.Context, store Store, conn storage.Storage) erro
 		return nil
 	}
 
-	legacyAliases, err := storage.ResolveBackend[aliases.Store](
+	legacyAliasRows, err := storage.ResolveBackend[[]legacyAlias](
 		conn,
-		func(db *sql.DB) (aliases.Store, error) { return aliases.NewSQLiteStore(db) },
-		func(pool *pgxpool.Pool) (aliases.Store, error) { return aliases.NewPostgreSQLStore(ctx, pool) },
-		func(db *mongo.Database) (aliases.Store, error) { return aliases.NewMongoDBStore(db) },
+		func(db *sql.DB) ([]legacyAlias, error) { return readLegacyAliasesSQLite(ctx, db) },
+		func(pool *pgxpool.Pool) ([]legacyAlias, error) { return readLegacyAliasesPostgreSQL(ctx, pool) },
+		func(db *mongo.Database) ([]legacyAlias, error) { return readLegacyAliasesMongo(ctx, db) },
 	)
 	if err != nil {
-		return fmt.Errorf("open legacy aliases store: %w", err)
+		return fmt.Errorf("read legacy aliases: %w", err)
 	}
-	legacyOverrides, err := storage.ResolveBackend[modeloverrides.Store](
+	legacyOverrideRows, err := storage.ResolveBackend[[]legacyOverride](
 		conn,
-		func(db *sql.DB) (modeloverrides.Store, error) { return modeloverrides.NewSQLiteStore(db) },
-		func(pool *pgxpool.Pool) (modeloverrides.Store, error) {
-			return modeloverrides.NewPostgreSQLStore(ctx, pool)
-		},
-		func(db *mongo.Database) (modeloverrides.Store, error) { return modeloverrides.NewMongoDBStore(db) },
+		func(db *sql.DB) ([]legacyOverride, error) { return readLegacyOverridesSQLite(ctx, db) },
+		func(pool *pgxpool.Pool) ([]legacyOverride, error) { return readLegacyOverridesPostgreSQL(ctx, pool) },
+		func(db *mongo.Database) ([]legacyOverride, error) { return readLegacyOverridesMongo(ctx, db) },
 	)
 	if err != nil {
-		return fmt.Errorf("open legacy model overrides store: %w", err)
+		return fmt.Errorf("read legacy model overrides: %w", err)
 	}
 
 	seen := make(map[string]struct{})
 
-	legacyAliasRows, err := legacyAliases.List(ctx)
-	if err != nil {
-		return fmt.Errorf("list legacy aliases: %w", err)
-	}
 	for _, alias := range legacyAliasRows {
-		vm := vmFromAlias(alias)
+		vm := alias.toRedirect()
 		if err := store.Upsert(ctx, vm); err != nil {
 			return fmt.Errorf("seed alias %q: %w", vm.Source, err)
 		}
 		seen[vm.Source] = struct{}{}
 	}
 
-	legacyOverrideRows, err := legacyOverrides.List(ctx)
-	if err != nil {
-		return fmt.Errorf("list legacy model overrides: %w", err)
-	}
 	for _, override := range legacyOverrideRows {
-		vm := vmFromOverride(override)
+		vm := override.toPolicy()
 		if _, taken := seen[vm.Source]; taken {
 			// Source-namespace collision: an alias and an access override share
 			// the same name. We must not silently drop the override — that would

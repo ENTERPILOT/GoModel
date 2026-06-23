@@ -71,7 +71,7 @@ func ResolveRequestModelWithAuthorizer(
 ) (*core.RequestModelResolution, error) {
 	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
 
-	resolvedSelector, aliasApplied, err := ResolveExecutionSelector(provider, resolver, requested)
+	resolvedSelector, aliasApplied, err := ResolveExecutionSelector(ctx, provider, resolver, requested)
 	refreshed := false
 	if err != nil {
 		var refreshErr error
@@ -82,7 +82,7 @@ func ResolveRequestModelWithAuthorizer(
 		if !refreshed {
 			return nil, core.NewInvalidRequestError(err.Error(), err)
 		}
-		resolvedSelector, aliasApplied, err = ResolveExecutionSelector(provider, resolver, requested)
+		resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
 		if err != nil {
 			return nil, core.NewInvalidRequestError(err.Error(), err)
 		}
@@ -103,7 +103,7 @@ func ResolveRequestModelWithAuthorizer(
 				return nil, refreshErr
 			}
 			if refreshed {
-				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(provider, resolver, requested)
+				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
 				if err != nil {
 					return nil, core.NewInvalidRequestError(err.Error(), err)
 				}
@@ -122,7 +122,7 @@ func ResolveRequestModelWithAuthorizer(
 				return nil, refreshErr
 			}
 			if refreshed {
-				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(provider, resolver, requested)
+				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
 				if err != nil {
 					return nil, core.NewInvalidRequestError(err.Error(), err)
 				}
@@ -187,8 +187,11 @@ func refreshProviderModelsForResolution(
 	return true, err
 }
 
-// ResolveExecutionSelector applies explicit and provider-owned selector resolution.
+// ResolveExecutionSelector applies explicit and provider-owned selector
+// resolution. ctx carries the effective request user path so a resolver that
+// implements UserPathModelResolver can apply user_path-scoped redirects.
 func ResolveExecutionSelector(
+	ctx context.Context,
 	provider core.RoutableProvider,
 	resolver ModelResolver,
 	requested core.RequestedModelSelector,
@@ -202,7 +205,7 @@ func ResolveExecutionSelector(
 	)
 
 	if resolver != nil {
-		resolvedSelector, aliasApplied, err = resolver.ResolveModel(requested)
+		resolvedSelector, aliasApplied, err = resolveRequestedModel(ctx, resolver, requested)
 		if err != nil {
 			return core.ModelSelector{}, false, err
 		}
@@ -227,4 +230,14 @@ func ResolveExecutionSelector(
 
 	resolvedSelector, err = requested.Normalize()
 	return resolvedSelector, aliasApplied, err
+}
+
+// resolveRequestedModel resolves through a UserPathModelResolver when the
+// resolver implements it (applying user_path-scoped redirects), falling back to
+// the unscoped ModelResolver otherwise.
+func resolveRequestedModel(ctx context.Context, resolver ModelResolver, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	if scoped, ok := resolver.(UserPathModelResolver); ok {
+		return scoped.ResolveModelForUserPath(ctx, requested)
+	}
+	return resolver.ResolveModel(requested)
 }

@@ -21,10 +21,9 @@ type Result struct {
 	Store   Store
 	Storage storage.Storage
 
-	stopAlias    func()
-	stopOverride func()
-	closeOnce    sync.Once
-	closeErr     error
+	stopRefresh func()
+	closeOnce   sync.Once
+	closeErr    error
 }
 
 // Close releases resources held by the virtual models subsystem.
@@ -33,13 +32,9 @@ func (r *Result) Close() error {
 		return nil
 	}
 	r.closeOnce.Do(func() {
-		if r.stopAlias != nil {
-			r.stopAlias()
-			r.stopAlias = nil
-		}
-		if r.stopOverride != nil {
-			r.stopOverride()
-			r.stopOverride = nil
+		if r.stopRefresh != nil {
+			r.stopRefresh()
+			r.stopRefresh = nil
 		}
 
 		var errs []error
@@ -106,22 +101,18 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		return nil, err
 	}
 
-	// Mirror the legacy refresh cadences: aliases use the model cache interval,
-	// access overrides use the workflows interval.
-	aliasInterval := time.Duration(cfg.Cache.Model.RefreshInterval) * time.Second
-	if aliasInterval <= 0 {
-		aliasInterval = time.Hour
-	}
-	overrideInterval := time.Minute
-	if cfg.Workflows.RefreshInterval > 0 {
-		overrideInterval = cfg.Workflows.RefreshInterval
+	// One ticker now drives the unified store. Use the model cache interval as
+	// the refresh cadence (the redirect side previously used it; the policy side
+	// used a shorter interval, but a single store no longer warrants two loops).
+	refreshInterval := time.Duration(cfg.Cache.Model.RefreshInterval) * time.Second
+	if refreshInterval <= 0 {
+		refreshInterval = time.Hour
 	}
 
 	return &Result{
-		Service:      service,
-		Store:        store,
-		stopAlias:    service.aliases.StartBackgroundRefresh(aliasInterval),
-		stopOverride: service.overrides.StartBackgroundRefresh(overrideInterval),
+		Service:     service,
+		Store:       store,
+		stopRefresh: service.StartBackgroundRefresh(refreshInterval),
 	}, nil
 }
 

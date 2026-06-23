@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gomodel/internal/aliases"
 	"gomodel/internal/auditlog"
 	"gomodel/internal/core"
+	"gomodel/internal/virtualmodels"
 )
 
 type explodingValidationReadCloser struct{}
@@ -714,7 +714,7 @@ func TestModelValidation_RegistryNotInitializedReturnsGatewayError(t *testing.T)
 }
 
 func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t *testing.T) {
-	store := newAliasesTestStore(aliases.Alias{Name: "smart", TargetModel: "gpt-4o", TargetProvider: "openai", Enabled: false})
+	store := newAliasesTestStore(redirectVM("smart", "gpt-4o", "openai", false))
 	catalog := &aliasesTestCatalog{
 		supported: map[string]bool{
 			"openai/gpt-4o": true,
@@ -726,7 +726,7 @@ func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t
 			"openai/gpt-4o": {ID: "gpt-4o", Object: "model"},
 		},
 	}
-	service, err := aliases.NewService(store, catalog)
+	service, err := virtualmodels.NewService(store, catalog, true)
 	require.NoError(t, err)
 	require.NoError(t, service.Refresh(context.Background()))
 
@@ -736,7 +736,7 @@ func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t
 			"openai/gpt-4o": "openai",
 		},
 	}
-	provider := aliases.NewProvider(inner, service)
+	provider := virtualmodels.NewProvider(inner, service)
 
 	e := echo.New()
 	handlerCalled := false
@@ -997,9 +997,9 @@ func TestModelValidation_ResolvesQualifiedMaskingAliasBeforeProviderParsing(t *t
 		},
 	}
 
-	service, err := aliases.NewService(newAliasesTestStore(
-		aliases.Alias{Name: "anthropic/claude-opus-4-6", TargetModel: "gpt-5-nano", TargetProvider: "openai", Enabled: true},
-	), &catalog)
+	service, err := virtualmodels.NewService(newAliasesTestStore(
+		redirectVM("anthropic/claude-opus-4-6", "gpt-5-nano", "openai", true),
+	), &catalog, true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -1014,7 +1014,7 @@ func TestModelValidation_ResolvesQualifiedMaskingAliasBeforeProviderParsing(t *t
 			"openai/gpt-5-nano":         "openai",
 		},
 	}
-	provider := aliases.NewProvider(inner, service)
+	provider := virtualmodels.NewProvider(inner, service)
 
 	e := echo.New()
 	var (
@@ -1063,9 +1063,9 @@ func TestWorkflowResolutionWithResolver_UsesExplicitAliasResolverWithoutProvider
 		},
 	}
 
-	service, err := aliases.NewService(newAliasesTestStore(
-		aliases.Alias{Name: "anthropic/claude-opus-4-6", TargetModel: "gpt-5-nano", TargetProvider: "openai", Enabled: true},
-	), &catalog)
+	service, err := virtualmodels.NewService(newAliasesTestStore(
+		redirectVM("anthropic/claude-opus-4-6", "gpt-5-nano", "openai", true),
+	), &catalog, true)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}

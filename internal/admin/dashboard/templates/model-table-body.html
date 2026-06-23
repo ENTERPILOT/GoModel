@@ -23,7 +23,7 @@
                             {{template "dollar-icon"}}
                         </button>
                         <button type="button" class="table-action-btn table-icon-btn"
-                            x-show="modelOverridesAvailable && group.access.selector"
+                            x-show="virtualModelsAvailable && group.access.selector"
                             :class="modelOverrideEditButtonClass(hasAccessOverride(group.access))"
                             :aria-label="modelOverrideEditButtonLabel('provider access for ' + group.display_name, hasAccessOverride(group.access))"
                             :title="modelOverrideEditButtonLabel('provider access for ' + group.display_name, hasAccessOverride(group.access))"
@@ -41,6 +41,7 @@
                         <div class="model-name-primary">
                             <span class="mono font-size-md" x-text="row.display_name"></span>
                             <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
+                            <span class="alias-kind-badge" x-show="!row.is_alias && rowVirtualBadge(row)" x-text="rowVirtualBadge(row)"></span>
                         </div>
                         <div class="model-name-secondary" x-show="row.is_alias">
                             Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
@@ -64,28 +65,25 @@
                 <td class="model-row-actions">
                     <template x-if="row.is_alias">
                         <div class="alias-actions-cell model-list-actions">
-                            <button type="button" class="alias-toggle" :class="{ enabled: row.alias.enabled !== false }" :disabled="aliasTogglingName === row.alias.name" @click="toggleAliasEnabled(row.alias)">
+                            <button type="button" class="alias-toggle" :class="{ enabled: rowToggleEnabled(row), restricted: rowToggleRestricted(row) }" :disabled="rowTogglingKey === row.key" :aria-label="(rowToggleEnabled(row) ? 'Disable alias ' : 'Enable alias ') + row.display_name" @click="toggleRowEnabled(row)">
                                 <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
-                                <span x-text="aliasTogglingName === row.alias.name ? 'Updating...' : (row.alias.enabled !== false ? 'Active' : 'Disabled')"></span>
+                                <span x-text="rowToggleLabel(row)"></span>
                             </button>
                             <button type="button" class="table-action-btn table-icon-btn"
+                                x-show="virtualModelsAvailable"
                                 :aria-label="'Edit alias ' + row.alias.name"
                                 :title="'Edit alias ' + row.alias.name"
-                                @click="openAliasEdit(row.alias)">
+                                @click="openVirtualModelEditAlias(row.alias)">
                                 {{template "edit-icon"}}
-                            </button>
-                            <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
-                                :disabled="aliasDeletingName === row.alias.name"
-                                :aria-label="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                :title="aliasDeletingName === row.alias.name ? 'Removing alias ' + row.alias.name : 'Delete alias ' + row.alias.name"
-                                @click="deleteAlias(row.alias)">
-                                {{template "x-icon"}}
                             </button>
                         </div>
                     </template>
                     <template x-if="!row.is_alias">
                         <div class="alias-actions-cell model-list-actions">
-                            <span class="model-access-state-badge" :class="modelAccessStateClass(row.access)" x-text="modelAccessStateText(row.access)"></span>
+                            <button type="button" class="alias-toggle" :class="{ enabled: rowToggleEnabled(row), restricted: rowToggleRestricted(row) }" :disabled="rowTogglingKey === row.key || !virtualModelsAvailable" :aria-label="(rowToggleEnabled(row) ? 'Disable ' : 'Enable ') + row.display_name" @click="toggleRowEnabled(row)">
+                                <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                                <span x-text="rowToggleLabel(row)"></span>
+                            </button>
                             <button type="button" class="table-action-btn table-icon-btn"
                                 x-show="modelPricingOverridesAvailable"
                                 :class="modelPricingButtonClass(hasModelPricingOverride(row))"
@@ -95,11 +93,11 @@
                                 {{template "dollar-icon"}}
                             </button>
                             <button type="button" class="table-action-btn table-icon-btn"
-                                x-show="modelOverridesAvailable"
+                                x-show="virtualModelsAvailable"
                                 :class="modelOverrideEditButtonClass(hasAccessOverride(row.access))"
                                 :aria-label="modelOverrideEditButtonLabel('model access for ' + row.display_name, hasAccessOverride(row.access))"
                                 :title="modelOverrideEditButtonLabel('model access for ' + row.display_name, hasAccessOverride(row.access))"
-                                @click="openModelOverrideEdit(row)">
+                                @click="openVirtualModelEditModel(row)">
                                 {{template "edit-icon"}}
                             </button>
                         </div>

@@ -45,9 +45,9 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/models", h.ListModels)
 	g.GET("/models/categories", h.ListCategories)
 
-	g.GET("/model-overrides", h.ListModelOverrides)
-	g.PUT("/model-overrides", h.UpsertModelOverride)
-	g.DELETE("/model-overrides", h.DeleteModelOverride)
+	g.GET("/virtual-models", h.ListVirtualModels)
+	g.PUT("/virtual-models", h.UpsertVirtualModel)
+	g.DELETE("/virtual-models", h.DeleteVirtualModel)
 
 	g.GET("/model-pricing-overrides", h.ListModelPricingOverrides)
 	g.PUT("/model-pricing-overrides", h.UpsertModelPricingOverride)
@@ -56,10 +56,6 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/auth-keys", h.ListAuthKeys)
 	g.POST("/auth-keys", h.CreateAuthKey)
 	g.POST("/auth-keys/:id/deactivate", h.DeactivateAuthKey)
-
-	g.GET("/aliases", h.ListAliases)
-	g.PUT("/aliases", h.UpsertAlias)
-	g.DELETE("/aliases", h.DeleteAlias)
 
 	g.GET("/guardrails/types", h.ListGuardrailTypes)
 	g.GET("/guardrails", h.ListGuardrails)

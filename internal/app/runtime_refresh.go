@@ -126,10 +126,7 @@ func (a *App) RefreshRuntime(ctx context.Context) (admin.RuntimeRefreshReport, e
 	if err := a.runRefreshableServiceStep(&report, "auth_keys", a.authKeyService(), ctx); err != nil {
 		return report, err
 	}
-	if err := a.runRefreshableServiceStep(&report, "aliases", a.aliasService(), ctx); err != nil {
-		return report, err
-	}
-	if err := a.runRefreshableServiceStep(&report, "model_overrides", a.modelOverrideService(), ctx); err != nil {
+	if err := a.runRefreshableServiceStep(&report, "virtual_models", a.virtualModelsService(), ctx); err != nil {
 		return report, err
 	}
 	if err := a.runRefreshableServiceStep(&report, "guardrails", a.guardrailService(), ctx); err != nil {
@@ -303,18 +300,11 @@ func (a *App) authKeyService() refreshableService {
 	return a.authKeys.Service
 }
 
-func (a *App) aliasService() refreshableService {
+func (a *App) virtualModelsService() refreshableService {
 	if a == nil || a.virtualModels == nil || a.virtualModels.Service == nil {
 		return nil
 	}
-	return a.virtualModels.Service.Aliases()
-}
-
-func (a *App) modelOverrideService() refreshableService {
-	if a == nil || a.virtualModels == nil || a.virtualModels.Service == nil {
-		return nil
-	}
-	return a.virtualModels.Service.Overrides()
+	return a.virtualModels.Service
 }
 
 func (a *App) guardrailService() refreshableService {
