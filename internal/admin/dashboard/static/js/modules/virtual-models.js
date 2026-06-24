@@ -1182,7 +1182,7 @@
                     const existingPolicy = existingAlias ? null : this.findModelOverrideView(source);
                     if (existingAlias || existingPolicy) {
                         const overwriteMessage = existingAlias
-                            ? 'An alias named "' + existingAlias.name + '" already exists. Saving will update that virtual model. Continue?'
+                            ? 'A virtual model named "' + existingAlias.name + '" already exists. Saving will update that virtual model. Continue?'
                             : 'An access policy for "' + source + '" already exists. Saving will update that virtual model. Continue?';
                         if (!this.confirmAction(overwriteMessage)) {
                             this.vmFormError = 'Choose a different source or edit the existing virtual model.';

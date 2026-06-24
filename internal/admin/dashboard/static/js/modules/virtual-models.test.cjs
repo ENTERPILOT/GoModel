@@ -421,6 +421,44 @@ test('submitVirtualModelForm sends a redirect payload when target_model is fille
     });
 });
 
+test('submitVirtualModelForm names existing aliases as virtual models in overwrite confirmation', async() => {
+    const requests = [];
+    const confirms = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        },
+        window: {
+            confirm(message) {
+                confirms.push(message);
+                return false;
+            }
+        }
+    });
+    stubRequests(module);
+    module.aliases = [{ name: 'smart', enabled: true, valid: true }];
+    module.models = [];
+    module.vmFormMode = 'create';
+    module.vmForm = {
+        source: 'smart',
+        target_model: 'openai/gpt-4o',
+        user_paths: '',
+        description: '',
+        enabled: true
+    };
+
+    await module.submitVirtualModelForm();
+
+    assert.deepEqual(confirms, [
+        'A virtual model named "smart" already exists. Saving will update that virtual model. Continue?'
+    ]);
+    assert.equal(requests.length, 0);
+    assert.equal(module.vmFormError, 'Choose a different source or edit the existing virtual model.');
+});
+
 test('submitVirtualModelForm sends a policy payload when target_model is empty', async() => {
     const requests = [];
     const module = createAliasesModule({
