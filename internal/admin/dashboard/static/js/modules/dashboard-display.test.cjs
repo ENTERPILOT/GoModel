@@ -93,6 +93,13 @@ test('qualifiedModelDisplay does not duplicate an existing exact provider prefix
     );
 });
 
+test('formatCost uses data placeholder for missing values', () => {
+    const app = loadDashboardApp();
+
+    assert.equal(app.formatCost(null), '---');
+    assert.equal(app.formatCost(undefined), '---');
+});
+
 test('system theme media changes rerender all dashboard charts', () => {
     let mediaChangeHandler = null;
     const app = loadDashboardApp({

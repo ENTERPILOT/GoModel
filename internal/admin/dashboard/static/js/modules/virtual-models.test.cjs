@@ -492,6 +492,16 @@ test('displayRowClass renders real models carrying a virtual model as alias-like
     assert.equal(module.displayRowClass(overrideRow), 'alias-row is-valid');
     assert.equal(module.rowVirtualBadge(overrideRow), 'Override');
 
+    const redirectRow = {
+        is_alias: false,
+        has_virtual_model: true,
+        masking_alias: { name: 'openai/gpt-4o' },
+        access: { effective_enabled: true }
+    };
+    assert.equal(module.displayRowClass(redirectRow), 'alias-row is-valid masked-model-row');
+    assert.equal(module.rowVirtualBadge(redirectRow), 'Redirect');
+    assert.equal(module.rowRedirectCanRemove(redirectRow), true);
+
     const plainRow = { is_alias: false, has_virtual_model: false, access: { effective_enabled: true } };
     assert.equal(module.displayRowClass(plainRow), '');
     assert.equal(module.rowVirtualBadge(plainRow), '');
@@ -531,6 +541,147 @@ test('buildDisplayModels flags model rows with a policy override as carrying a v
 
     assert.equal(withOverride.has_virtual_model, true);
     assert.equal(without.has_virtual_model, false);
+});
+
+test('buildDisplayModels combines source-backed redirects with the concrete model row', () => {
+    const module = createAliasesModule();
+    module.models = [
+        {
+            provider_name: 'openai',
+            provider_type: 'openai',
+            selector: 'openai/gpt-4o',
+            model: { id: 'gpt-4o', object: 'model' }
+        },
+        {
+            provider_name: 'openrouter',
+            provider_type: 'openrouter',
+            selector: 'openrouter/anthropic/claude-fable-5',
+            model: { id: 'anthropic/claude-fable-5', object: 'model' }
+        }
+    ];
+    module.aliases = [
+        {
+            name: 'smart',
+            target_provider: 'openai',
+            target_model: 'gpt-4o',
+            enabled: true,
+            valid: true
+        },
+        {
+            name: 'openai/gpt-4o',
+            target_provider: 'openai',
+            target_model: 'gpt-4o',
+            enabled: true,
+            valid: true
+        },
+        {
+            name: 'anthropic/claude-fable-5',
+            target_provider: 'openrouter',
+            target_model: 'anthropic/claude-fable-5',
+            resolved_model: 'openrouter/anthropic/claude-fable-5',
+            enabled: true,
+            valid: true
+        }
+    ];
+    module.virtualModelsAvailable = true;
+    module.syncDisplayModels();
+
+    const aliasOnly = module.displayModels.find((row) => row.key === 'alias:smart');
+    const modelBackedAliasRow = module.displayModels.find((row) => row.key === 'alias:openai/gpt-4o');
+    const modelBacked = module.displayModels.find((row) => row.key === 'model:openai/gpt-4o');
+    const nestedTargetAlias = module.displayModels.find((row) => row.key === 'alias:anthropic/claude-fable-5');
+
+    assert.equal(aliasOnly.kind_badge, 'Virtual Model');
+    assert.equal(aliasOnly.source_model_exists, false);
+    assert.equal(module.aliasRowCanRemove(aliasOnly), true);
+    assert.equal(modelBackedAliasRow, undefined);
+    assert.equal(modelBacked.masking_alias.name, 'openai/gpt-4o');
+    assert.equal(module.rowVirtualBadge(modelBacked), 'Redirect');
+    assert.equal(module.rowRedirectCanRemove(modelBacked), true);
+    assert.equal(nestedTargetAlias.secondary_name, 'openrouter/anthropic/claude-fable-5');
+    assert.equal(nestedTargetAlias.source_model_exists, false);
+    assert.equal(module.aliasRowCanRemove(nestedTargetAlias), true);
+});
+
+test('removeAliasRow confirms and deletes an alias-only virtual model', async() => {
+    const requests = [];
+    const confirms = [];
+    const fetched = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        },
+        window: {
+            confirm(message) {
+                confirms.push(message);
+                return true;
+            }
+        }
+    });
+    stubRequests(module);
+    module.models = [];
+    module.fetchModels = async() => { fetched.push('models'); };
+    module.fetchVirtualModels = async() => { fetched.push('virtual'); };
+    module.syncDisplayModels = () => { fetched.push('sync'); };
+
+    await module.removeAliasRow({
+        key: 'alias:smart',
+        is_alias: true,
+        source_model_exists: false,
+        alias: { name: 'smart' }
+    });
+
+    assert.deepEqual(confirms, ['Remove the virtual model alias "smart"?']);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/admin/virtual-models');
+    assert.equal(requests[0].request.method, 'DELETE');
+    assert.deepEqual(JSON.parse(requests[0].request.body), { source: 'smart' });
+    assert.deepEqual(fetched, ['models', 'virtual', 'sync']);
+    assert.equal(module.aliasNotice, 'Virtual model removed.');
+    assert.equal(module.rowDeletingKey, '');
+});
+
+test('removeRedirectRow confirms and deletes a source-backed redirect', async() => {
+    const requests = [];
+    const confirms = [];
+    const fetched = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        },
+        window: {
+            confirm(message) {
+                confirms.push(message);
+                return true;
+            }
+        }
+    });
+    stubRequests(module);
+    module.fetchModels = async() => { fetched.push('models'); };
+    module.fetchVirtualModels = async() => { fetched.push('virtual'); };
+    module.syncDisplayModels = () => { fetched.push('sync'); };
+
+    await module.removeRedirectRow({
+        key: 'model:openai/gpt-4o',
+        is_alias: false,
+        display_name: 'openai/gpt-4o',
+        masking_alias: { name: 'openai/gpt-4o' }
+    });
+
+    assert.deepEqual(confirms, ['Remove the redirect for "openai/gpt-4o"?']);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/admin/virtual-models');
+    assert.equal(requests[0].request.method, 'DELETE');
+    assert.deepEqual(JSON.parse(requests[0].request.body), { source: 'openai/gpt-4o' });
+    assert.deepEqual(fetched, ['models', 'virtual', 'sync']);
+    assert.equal(module.aliasNotice, 'Virtual model removed.');
+    assert.equal(module.rowDeletingKey, '');
 });
 
 test('filteredDisplayModelGroups groups rows by provider_name and applies provider-wide overrides', () => {

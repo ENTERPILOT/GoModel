@@ -1,5 +1,6 @@
 (function(global) {
     const PROVIDER_STATUS_DETAILS_STORAGE_KEY = 'gomodel_provider_status_details_expanded';
+    const PROVIDER_STATUS_POLL_MS = 3000;
 
     function browserStorage() {
         try {
@@ -12,6 +13,7 @@
     function dashboardProvidersModule() {
         return {
             providerStatusDetailsExpanded: false,
+            providerStatusPollTimer: null,
 
             emptyProviderStatus() {
                 return {
@@ -27,16 +29,14 @@
             },
 
             initProviderStatusPreferences() {
-                const storage = browserStorage();
-                if (!storage) {
-                    this.providerStatusDetailsExpanded = false;
-                    return;
-                }
-
+                this.providerStatusDetailsExpanded = false;
                 try {
-                    this.providerStatusDetailsExpanded = storage.getItem(PROVIDER_STATUS_DETAILS_STORAGE_KEY) === 'true';
+                    const storage = browserStorage();
+                    if (storage) {
+                        storage.setItem(PROVIDER_STATUS_DETAILS_STORAGE_KEY, 'false');
+                    }
                 } catch (_) {
-                    this.providerStatusDetailsExpanded = false;
+                    // Ignore storage failures; details still start collapsed.
                 }
             },
 
@@ -58,7 +58,46 @@
             },
 
             providerStatusDetailsToggleLabel() {
-                return this.providerStatusDetailsExpanded ? 'Hide Details' : 'Show Details';
+                return this.providerStatusDetailsExpanded ? 'Show Details' : 'Hide Details';
+            },
+
+            providerStatusNeedsPolling() {
+                const providers = this.providerStatus && Array.isArray(this.providerStatus.providers)
+                    ? this.providerStatus.providers
+                    : [];
+                return providers.some((provider) => {
+                    const label = String(provider && provider.status_label || '').trim().toLowerCase();
+                    return label === 'starting';
+                });
+            },
+
+            clearProviderStatusRefresh() {
+                if (!this.providerStatusPollTimer) {
+                    return;
+                }
+                const clearTimer = global.clearTimeout || (typeof clearTimeout === 'function' ? clearTimeout : null);
+                if (typeof clearTimer === 'function') {
+                    clearTimer(this.providerStatusPollTimer);
+                }
+                this.providerStatusPollTimer = null;
+            },
+
+            scheduleProviderStatusRefresh() {
+                this.clearProviderStatusRefresh();
+                if (!this.providerStatusNeedsPolling()) {
+                    return;
+                }
+                const setTimer = global.setTimeout || (typeof setTimeout === 'function' ? setTimeout : null);
+                if (typeof setTimer !== 'function') {
+                    return;
+                }
+                this.providerStatusPollTimer = setTimer(() => {
+                    this.providerStatusPollTimer = null;
+                    if (typeof this.fetchProviderStatus === 'function') {
+                        return this.fetchProviderStatus();
+                    }
+                    return null;
+                }, PROVIDER_STATUS_POLL_MS);
             },
 
             async fetchProviderStatus() {
@@ -81,6 +120,7 @@
                     }
                     if (!handled) {
                         this.providerStatus = this.emptyProviderStatus();
+                        this.clearProviderStatusRefresh();
                         return;
                     }
                     const payload = await res.json();
@@ -96,12 +136,14 @@
                     if (!Array.isArray(this.providerStatus.providers)) {
                         this.providerStatus.providers = [];
                     }
+                    this.scheduleProviderStatusRefresh();
                 } catch (e) {
                     if (typeof this._isAbortError === 'function' && this._isAbortError(e)) {
                         return;
                     }
                     console.error('Failed to fetch provider status:', e);
                     this.providerStatus = this.emptyProviderStatus();
+                    this.clearProviderStatusRefresh();
                 } finally {
                     if (typeof this._clearAbortableRequest === 'function') {
                         this._clearAbortableRequest('_providerStatusFetchController', controller);

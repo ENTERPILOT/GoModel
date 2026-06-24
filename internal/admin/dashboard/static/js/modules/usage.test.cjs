@@ -61,6 +61,46 @@ test('usageEntryCacheLabel returns capitalized cache type or dash', () => {
     assert.equal(module.usageEntryCacheLabel({ cache_type: 'other' }), '-');
 });
 
+test('summaryTotalTokens uses total tokens and falls back to input plus output', () => {
+    const module = createUsageModule();
+
+    module.summary = {
+        total_input_tokens: 120,
+        total_output_tokens: 30,
+        total_tokens: 155
+    };
+    assert.equal(module.summaryTotalTokens(), 155);
+
+    module.summary = {
+        total_input_tokens: '120',
+        total_output_tokens: 30,
+        total_tokens: null
+    };
+    assert.equal(module.summaryTotalTokens(), 150);
+
+    module.summary = null;
+    assert.equal(module.summaryTotalTokens(), 0);
+});
+
+test('cacheOverviewTotalTokens sums local cache input and output tokens', () => {
+    const module = createUsageModule();
+
+    module.cacheOverview = {
+        summary: {
+            total_input_tokens: '120',
+            total_output_tokens: 30
+        }
+    };
+
+    assert.equal(module.cacheOverviewTotalTokens(), 150);
+
+    module.cacheOverview = { summary: { total_input_tokens: null, total_output_tokens: 'bad' } };
+    assert.equal(module.cacheOverviewTotalTokens(), 0);
+
+    module.cacheOverview = null;
+    assert.equal(module.cacheOverviewTotalTokens(), 0);
+});
+
 test('hasProviderCache detects positive cached_input_tokens', () => {
     const module = createUsageModule();
 

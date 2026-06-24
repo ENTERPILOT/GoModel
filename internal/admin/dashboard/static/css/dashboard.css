@@ -1289,6 +1289,12 @@ body.dashboard-modal-open {
   padding: 20px;
 }
 
+@media (min-width: 720px) {
+  .card-wide {
+    grid-column: span 2;
+  }
+}
+
 .card-label {
   font-size: 12px;
   font-weight: 600;
@@ -1302,6 +1308,36 @@ body.dashboard-modal-open {
   font-size: 28px;
   font-weight: 700;
   letter-spacing: -0.5px;
+}
+
+.cache-token-value {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  line-height: 1;
+}
+
+.cache-token-part {
+  align-items: center;
+  display: inline-flex;
+}
+
+.cache-token-operator {
+  color: var(--text-muted);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.cache-token-marker {
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+  margin-left: 2px;
+  text-transform: uppercase;
 }
 
 /* Chart */
@@ -1481,6 +1517,10 @@ input:is([type="text"], [type="date"], [type="number"]):focus {
   text-align: right;
 }
 
+.data-table th.col-price {
+  text-align: right;
+}
+
 td.col-price {
   font-family: "SF Mono", Menlo, Consolas, monospace;
   font-size: 13px;
@@ -1509,6 +1549,38 @@ td.col-price {
   color: var(--text-muted);
   padding: 48px 0;
   font-size: 14px;
+}
+
+.empty-state-icon {
+  display: block;
+  width: auto;
+  height: auto;
+  max-height: 160px;
+  margin: 0 auto;
+  color: var(--text-muted);
+}
+
+.empty-state-icon text {
+  font-family: inherit;
+  font-weight: 600;
+  fill: var(--text-muted);
+}
+
+/* Empty-state illustration (with baked-in label) centered over the blank usage chart, filling its height. */
+.chart-empty-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.chart-empty-overlay .empty-state-icon {
+  width: auto;
+  height: auto;
+  max-height: 195px;
+  max-width: 90%;
 }
 
 .loading-state {
@@ -2036,14 +2108,6 @@ textarea:focus {
 
 .data-table tr.alias-row.is-disabled:hover td {
   background: var(--bg-surface-hover);
-  opacity: 0.72;
-}
-
-.data-table tr.masked-model-row td {
-  opacity: 0.58;
-}
-
-.data-table tr.masked-model-row:hover td {
   opacity: 0.72;
 }
 

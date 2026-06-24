@@ -245,12 +245,22 @@ test("overview page shows provider status summary and per-provider cards keyed b
   );
   assert.match(
     indexTemplate,
-    /Local Cache Output Tokens[\s\S]*class="card provider-status-flag"[\s\S]*<!-- Usage Chart -->/,
+    /class="card card-wide"[\s\S]*<div class="card-label">Tokens<\/div>[\s\S]*class="cache-token-part" title="Input tokens"[\s\S]*summary\.total_input_tokens[\s\S]*class="cache-token-marker">i<\/span>[\s\S]*class="cache-token-part" title="Output tokens"[\s\S]*summary\.total_output_tokens[\s\S]*class="cache-token-marker">o<\/span>[\s\S]*summaryTotalTokens\(\)[\s\S]*<div class="card-label">Total Requests<\/div>/,
   );
+  assert.doesNotMatch(indexTemplate, /<div class="card-label">Input Tokens<\/div>/);
+  assert.doesNotMatch(indexTemplate, /<div class="card-label">Output Tokens<\/div>/);
+  assert.doesNotMatch(indexTemplate, /<div class="card-label">Total Tokens<\/div>/);
+  assert.match(
+    indexTemplate,
+    /class="card card-wide" x-show="cacheAnalyticsEnabled\(\)"[\s\S]*<div class="card-label">Local Cache<\/div>[\s\S]*class="cache-token-part" title="Input tokens"[\s\S]*class="cache-token-marker">i<\/span>[\s\S]*class="cache-token-part" title="Output tokens"[\s\S]*class="cache-token-marker">o<\/span>[\s\S]*cacheOverviewTotalTokens\(\)[\s\S]*class="card provider-status-flag"[\s\S]*<!-- Usage Chart -->/,
+  );
+  assert.doesNotMatch(indexTemplate, /Local Cache Input Tokens/);
+  assert.doesNotMatch(indexTemplate, /Local Cache Output Tokens/);
   assert.match(
     indexTemplate,
     /<div class="card-label">Provider Status<\/div>[\s\S]*class="card-value provider-status-value"[\s\S]*providerStatusRatioText\(\)/,
   );
+  assert.match(css, /\.card-wide\s*\{\s*grid-column:\s*span 2;/);
   assert.match(
     indexTemplate,
     /class="provider-status-card-link"[\s\S]*x-show="providerStatusHasIssues\(\)"[\s\S]*@click="scrollToProviderStatusSection\(\)"/,
@@ -1053,6 +1063,18 @@ test("model category tables lazy mount only the active table body", () => {
   );
   assert.match(
     modelsBlock,
+    /<th class="col-price">Input \/ Output \(\$\/MTok\)<\/th>/,
+  );
+  assert.doesNotMatch(
+    modelsBlock,
+    /<th class="col-price">Output<br>\$\/MTok<\/th>/,
+  );
+  assert.match(
+    modelsBlock,
+    /activeCategory === 'embedding'[\s\S]*<th class="col-price">Input<br>\$\/MTok<\/th>/,
+  );
+  assert.match(
+    modelsBlock,
     /class="loading-state" x-show="modelsLoading && !authError" role="status" aria-live="polite"/,
   );
   assert.match(
@@ -1069,11 +1091,15 @@ test("model category tables lazy mount only the active table body", () => {
   );
   assert.match(
     modelsBlock,
-    /class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn"[\s\S]*@click="openVirtualModelCreate\(\)"[\s\S]*data-lucide="plus" class="alias-create-icon"[\s\S]*<span>Create(?:&nbsp;| )Alias<\/span>/,
+    /class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn"[\s\S]*aria-label="New virtual model alias"[\s\S]*title="Alias"[\s\S]*@click="openVirtualModelCreate\(\)"[\s\S]*data-lucide="plus" class="alias-create-icon"[\s\S]*<span>New(?:&nbsp;| )virtual(?:&nbsp;| )model<\/span>/,
   );
   assert.match(
     modelsBlock,
     /class="pagination-btn pagination-btn-primary pagination-btn-with-icon virtual-model-submit-btn"[\s\S]*:disabled="vmSubmitting \|\| vmDeleting"[\s\S]*data-lucide="plus" class="form-action-icon" x-show="vmFormMode !== 'edit'"[\s\S]*data-lucide="save" class="form-action-icon" x-show="vmFormMode === 'edit'"[\s\S]*x-text="vmSubmitting \? 'Saving\.\.\.' : \(vmFormMode === 'edit' \? 'Save' : 'Create'\)"/,
+  );
+  assert.doesNotMatch(
+    modelsBlock,
+    /class="form-kicker" x-text="vmFormMode === 'edit' \? 'Edit virtual model' : 'New virtual model'"/,
   );
   assert.match(
     modelsBlock,
@@ -1102,10 +1128,14 @@ test("model category tables lazy mount only the active table body", () => {
 
   const spinnerRule = readCSSRule(css, ".loading-spinner");
   assert.match(spinnerRule, /animation:\s*loading-spin 0\.8s linear infinite/);
+
+  const priceColumnRule = readCSSRule(css, ".data-table th.col-price");
+  assert.match(priceColumnRule, /text-align:\s*right/);
 });
 
 test("alias rows use a shared icon-only edit action", () => {
   const indexTemplate = readDashboardTemplateSource();
+  const css = readFixture("../../css/dashboard.css");
   const modelTableTemplate = readFixture(
     "../../../templates/model-table-body.html",
   );
@@ -1113,8 +1143,25 @@ test("alias rows use a shared icon-only edit action", () => {
 
   assert.match(
     modelTableTemplate,
-    /class="table-action-btn table-icon-btn"[\s\S]*:aria-label="'Edit alias ' \+ row\.alias\.name"[\s\S]*@click="openVirtualModelEditAlias\(row\.alias\)"[\s\S]*{{template "edit-icon"}}/,
+    /class="table-action-btn table-action-btn-danger table-icon-btn"[\s\S]*x-show="virtualModelsAvailable && aliasRowCanRemove\(row\)"[\s\S]*@click="removeAliasRow\(row\)"[\s\S]*{{template "trash-icon"}}[\s\S]*class="table-action-btn table-icon-btn"[\s\S]*:aria-label="'Edit alias ' \+ row\.alias\.name"[\s\S]*@click="openVirtualModelEditAlias\(row\.alias\)"[\s\S]*{{template "edit-icon"}}/,
   );
+  assert.match(
+    modelTableTemplate,
+    /x-show="activeCategory === 'all' \|\| activeCategory === 'text_generation'" x-text="formatPrice\(modelRowPricing\(row\)\?\.input_per_mtok\) \+ ' \/ ' \+ formatPrice\(modelRowPricing\(row\)\?\.output_per_mtok\)"/,
+  );
+  assert.match(
+    modelTableTemplate,
+    /x-show="activeCategory === 'embedding'" x-text="formatPrice\(modelRowPricing\(row\)\?\.input_per_mtok\)"/,
+  );
+  assert.match(
+    modelTableTemplate,
+    /Redirects to <span class="mono font-size-md" x-text="aliasTargetLabel\(row\.masking_alias\)"><\/span>/,
+  );
+  assert.match(
+    modelTableTemplate,
+    /x-show="modelPricingOverridesAvailable"[\s\S]*@click="openModelPricingOverrideEdit\(row\)"[\s\S]*{{template "dollar-icon"}}[\s\S]*class="table-action-btn table-action-btn-danger table-icon-btn"[\s\S]*x-show="virtualModelsAvailable && rowRedirectCanRemove\(row\)"[\s\S]*@click="removeRedirectRow\(row\)"[\s\S]*{{template "trash-icon"}}/,
+  );
+  assert.doesNotMatch(css, /\.data-table tr\.masked-model-row td/);
   assert.match(indexTemplate, /{{template "model-table-body" \.}}/);
   assert.match(
     indexTemplate,

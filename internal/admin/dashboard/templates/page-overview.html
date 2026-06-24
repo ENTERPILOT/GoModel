@@ -20,21 +20,23 @@
 
     <!-- Summary Cards -->
     <div class="cards">
+        <div class="card card-wide">
+            <div class="card-label">Tokens</div>
+            <div class="card-value cache-token-value">
+                <span class="cache-token-part" title="Input tokens">
+                    <span x-text="formatNumber(summary.total_input_tokens)">-</span><span class="cache-token-marker">i</span>
+                </span>
+                <span class="cache-token-operator">+</span>
+                <span class="cache-token-part" title="Output tokens">
+                    <span x-text="formatNumber(summary.total_output_tokens)">-</span><span class="cache-token-marker">o</span>
+                </span>
+                <span class="cache-token-operator">=</span>
+                <span x-text="formatNumber(summaryTotalTokens())" title="Total tokens">-</span>
+            </div>
+        </div>
         <div class="card">
             <div class="card-label">Total Requests</div>
             <div class="card-value" x-text="formatNumber(summary.total_requests)">-</div>
-        </div>
-        <div class="card">
-            <div class="card-label">Input Tokens</div>
-            <div class="card-value" x-text="formatNumber(summary.total_input_tokens)">-</div>
-        </div>
-        <div class="card">
-            <div class="card-label">Output Tokens</div>
-            <div class="card-value" x-text="formatNumber(summary.total_output_tokens)">-</div>
-        </div>
-        <div class="card">
-            <div class="card-label">Total Tokens</div>
-            <div class="card-value" x-text="formatNumber(summary.total_tokens)">-</div>
         </div>
         <div class="card">
             <div class="card-label">Estimated Cost</div>
@@ -44,13 +46,19 @@
             <div class="card-label">Cache Hits</div>
             <div class="card-value" x-text="formatNumber(cacheOverview.summary.total_hits)">-</div>
         </div>
-        <div class="card" x-show="cacheAnalyticsEnabled()">
-            <div class="card-label">Local Cache Input Tokens</div>
-            <div class="card-value" x-text="formatNumber(cacheOverview.summary.total_input_tokens)">-</div>
-        </div>
-        <div class="card" x-show="cacheAnalyticsEnabled()">
-            <div class="card-label">Local Cache Output Tokens</div>
-            <div class="card-value" x-text="formatNumber(cacheOverview.summary.total_output_tokens)">-</div>
+        <div class="card card-wide" x-show="cacheAnalyticsEnabled()">
+            <div class="card-label">Local Cache</div>
+            <div class="card-value cache-token-value">
+                <span class="cache-token-part" title="Input tokens">
+                    <span x-text="formatNumber(cacheOverview.summary.total_input_tokens)">-</span><span class="cache-token-marker">i</span>
+                </span>
+                <span class="cache-token-operator">+</span>
+                <span class="cache-token-part" title="Output tokens">
+                    <span x-text="formatNumber(cacheOverview.summary.total_output_tokens)">-</span><span class="cache-token-marker">o</span>
+                </span>
+                <span class="cache-token-operator">=</span>
+                <span x-text="formatNumber(cacheOverviewTotalTokens())" title="Total tokens">-</span>
+            </div>
         </div>
         <div class="card provider-status-flag" x-show="providerStatus.summary.total > 0" :class="providerStatusSummaryClass()">
             <div class="card-label">Provider Status</div>
@@ -71,8 +79,8 @@
         <h3 x-text="chartTitle()">Daily Token Usage</h3>
         <div class="chart-wrapper">
             <canvas id="usageChart"></canvas>
+            <div class="chart-empty-overlay" x-show="daily.length === 0 && !loading && !authError">{{template "no-data-icon"}}</div>
         </div>
-        <p class="empty-state" x-show="daily.length === 0 && !loading && !authError">No usage data yet.</p>
     </div>
 
     <!-- Contribution Calendar -->

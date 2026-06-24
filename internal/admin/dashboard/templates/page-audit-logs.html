@@ -113,7 +113,7 @@
             </template>
         </div>
 
-        <p class="empty-state" x-show="auditLog.entries.length === 0 && !loading && !authError">No audit log entries found.</p>
+        <div class="empty-state" x-show="auditLog.entries.length === 0 && !loading && !authError">{{template "no-data-icon"}}</div>
 
         {{template "pagination" "auditLog"}}
     </div>

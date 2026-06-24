@@ -215,7 +215,7 @@
                 </tbody>
             </table>
         </div>
-        <p class="empty-state" x-show="usageLog.entries.length === 0 && !loading && !authError">No usage log entries found.</p>
+        <div class="empty-state" x-show="usageLog.entries.length === 0 && !loading && !authError">{{template "no-data-icon"}}</div>
         <!-- Pagination -->
         {{template "pagination" "usageLog"}}
     </div>

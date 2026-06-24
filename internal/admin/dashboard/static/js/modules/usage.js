@@ -39,6 +39,26 @@
                 };
             },
 
+            summaryTotalTokens() {
+                const summary = this.summary || {};
+                if (summary.total_tokens !== null && summary.total_tokens !== undefined) {
+                    const total = Number(summary.total_tokens);
+                    if (Number.isFinite(total)) {
+                        return total;
+                    }
+                }
+                const input = Number(summary.total_input_tokens || 0);
+                const output = Number(summary.total_output_tokens || 0);
+                return (Number.isFinite(input) ? input : 0) + (Number.isFinite(output) ? output : 0);
+            },
+
+            cacheOverviewTotalTokens() {
+                const summary = this.cacheOverview && this.cacheOverview.summary ? this.cacheOverview.summary : {};
+                const input = Number(summary.total_input_tokens || 0);
+                const output = Number(summary.total_output_tokens || 0);
+                return (Number.isFinite(input) ? input : 0) + (Number.isFinite(output) ? output : 0);
+            },
+
             cacheAnalyticsEnabled() {
                 return typeof this.workflowRuntimeBooleanFlag === 'function'
                     ? this.workflowRuntimeBooleanFlag('CACHE_ENABLED', false)

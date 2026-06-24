@@ -2,7 +2,7 @@
 <template x-for="group in filteredDisplayModelGroups" :key="group.key">
     <tbody>
         <tr class="provider-group-row">
-            <td :colspan="activeCategory === 'embedding' || activeCategory === 'image' ? 3 : (activeCategory === 'all' || activeCategory === 'text_generation' ? 6 : 4)">
+            <td :colspan="activeCategory === 'embedding' || activeCategory === 'image' ? 3 : (activeCategory === 'text_generation' ? 5 : (activeCategory === 'all' ? 4 : 4))">
                 <div class="provider-group-header">
                     <div class="provider-group-meta">
                         <div class="provider-group-title">
@@ -49,13 +49,13 @@
                             Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>
                         </div>
                         <div class="model-name-secondary" x-show="!row.is_alias && row.masking_alias">
-                            Masked by alias to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
+                            Redirects to <span class="mono font-size-md" x-text="aliasTargetLabel(row.masking_alias)"></span>
                         </div>
                     </div>
                 </td>
                 <td x-show="activeCategory === 'all' || activeCategory === 'text_generation'" x-text="(row.model.metadata?.modes ?? []).join(', ') || '-'"></td>
-                <td class="col-price" x-show="activeCategory === 'all' || activeCategory === 'text_generation' || activeCategory === 'embedding'" x-text="formatPrice(modelRowPricing(row)?.input_per_mtok)"></td>
-                <td class="col-price" x-show="activeCategory === 'all' || activeCategory === 'text_generation'" x-text="formatPrice(modelRowPricing(row)?.output_per_mtok)"></td>
+                <td class="col-price" x-show="activeCategory === 'all' || activeCategory === 'text_generation'" x-text="formatPrice(modelRowPricing(row)?.input_per_mtok) + ' / ' + formatPrice(modelRowPricing(row)?.output_per_mtok)"></td>
+                <td class="col-price" x-show="activeCategory === 'embedding'" x-text="formatPrice(modelRowPricing(row)?.input_per_mtok)"></td>
                 <td class="col-price" x-show="activeCategory === 'text_generation'" x-text="formatPrice(modelRowPricing(row)?.cached_input_per_mtok)"></td>
                 <td class="col-price" x-show="activeCategory === 'image'" x-text="formatPriceFine(modelRowPricing(row)?.per_image)"></td>
                 <td class="col-price" x-show="activeCategory === 'audio'" x-text="formatPriceFine(modelRowPricing(row)?.per_second_input)"></td>
@@ -68,6 +68,14 @@
                     <template x-if="row.is_alias">
                         <div class="alias-actions-cell model-list-actions">
                             {{template "access-toggle" "row"}}
+                            <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                x-show="virtualModelsAvailable && aliasRowCanRemove(row)"
+                                :aria-label="rowDeletingKey === row.key ? 'Removing alias ' + row.alias.name : 'Remove alias ' + row.alias.name"
+                                :title="rowDeletingKey === row.key ? 'Removing alias ' + row.alias.name : 'Remove alias ' + row.alias.name"
+                                :disabled="rowDeletingKey === row.key"
+                                @click="removeAliasRow(row)">
+                                {{template "trash-icon"}}
+                            </button>
                             <button type="button" class="table-action-btn table-icon-btn"
                                 x-show="virtualModelsAvailable"
                                 :aria-label="'Edit alias ' + row.alias.name"
@@ -87,6 +95,14 @@
                                 :title="modelPricingButtonLabel('model pricing for ' + row.display_name, hasModelPricingOverride(row))"
                                 @click="openModelPricingOverrideEdit(row)">
                                 {{template "dollar-icon"}}
+                            </button>
+                            <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                x-show="virtualModelsAvailable && rowRedirectCanRemove(row)"
+                                :aria-label="rowDeletingKey === row.key ? 'Removing redirect for ' + row.display_name : 'Remove redirect for ' + row.display_name"
+                                :title="rowDeletingKey === row.key ? 'Removing redirect for ' + row.display_name : 'Remove redirect for ' + row.display_name"
+                                :disabled="rowDeletingKey === row.key"
+                                @click="removeRedirectRow(row)">
+                                {{template "trash-icon"}}
                             </button>
                             <button type="button" class="table-action-btn table-icon-btn"
                                 x-show="virtualModelsAvailable"

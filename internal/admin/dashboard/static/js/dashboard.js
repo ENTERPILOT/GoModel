@@ -944,7 +944,7 @@ function dashboard() {
     },
 
     formatCost(v) {
-      if (v == null || v === undefined) return "N/A";
+      if (v == null || v === undefined) return "---";
       if (v > 0 && v < 0.0001) return "<$0.0001";
       return "$" + v.toFixed(4).replace(/(\.\d{2}\d*?)0+$/, "$1");
     },

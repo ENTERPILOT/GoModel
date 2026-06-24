@@ -375,7 +375,7 @@
             budgetAmountLabel(value) {
                 const amount = Number(value);
                 if (!Number.isFinite(amount)) {
-                    return 'N/A';
+                    return '---';
                 }
                 if (typeof this.formatCost === 'function') {
                     return this.formatCost(amount);

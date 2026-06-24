@@ -11,6 +11,7 @@
             aliasError: '',
             aliasNotice: '',
             rowTogglingKey: '',
+            rowDeletingKey: '',
 
             // Unified editor (replaces the old alias modal and access-override modal).
             vmFormOpen: false,
@@ -55,26 +56,26 @@
                     return rows;
                 }
 
-                const maskingAliases = new Map();
+                const redirectsBySource = new Map();
                 for (const alias of this.aliases) {
                     const aliasName = String(alias && alias.name || '').trim().toLowerCase();
                     if (!aliasName || alias.enabled === false || !alias.valid) {
                         continue;
                     }
-                    maskingAliases.set(aliasName, alias);
+                    redirectsBySource.set(aliasName, alias);
                 }
 
                 for (const row of rows) {
-                    for (const key of this.modelIdentifierKeys(
-                        row.model && row.model.id,
-                        row.provider_type,
-                        row.provider_name,
-                        row.display_name
-                    )) {
-                        if (maskingAliases.has(key)) {
-                            row.masking_alias = maskingAliases.get(key);
-                            break;
-                        }
+                    const sourceKeys = [
+                        String(row.display_name || '').trim().toLowerCase(),
+                        String(row.selector || '').trim().toLowerCase()
+                    ].filter(Boolean);
+                    for (const key of sourceKeys) {
+                        const redirect = redirectsBySource.get(key);
+                        if (!redirect) continue;
+                        row.masking_alias = redirect;
+                        row.has_virtual_model = true;
+                        break;
                     }
                     // A real model row carries a virtual model when an access policy
                     // override exists for its selector.
@@ -84,6 +85,9 @@
                 }
 
                 for (const alias of this.aliases) {
+                    if (alias && alias.enabled !== false && alias.valid && this.hasConcreteSourceModel(alias.name)) {
+                        continue;
+                    }
                     const targetModel = this.findConcreteModelForAlias(alias);
                     if (!targetModel && this.activeCategory && this.activeCategory !== 'all') {
                         continue;
@@ -100,8 +104,9 @@
                         is_alias: true,
                         alias,
                         access: null,
-                        kind_badge: 'Alias',
+                        kind_badge: 'Virtual Model',
                         masking_alias: null,
+                        source_model_exists: this.hasConcreteSourceModel(alias.name),
                         has_virtual_model: true,
                         alias_state_class: this.aliasStateClass(alias),
                         alias_state_text: this.aliasStateText(alias)
@@ -505,12 +510,23 @@
 
             // rowVirtualBadge returns the small badge label shown on a real model row
             // that carries a virtual model (empty for plain rows and alias rows, which
-            // already show their own Alias badge).
+            // already show their own Virtual Model badge).
             rowVirtualBadge(row) {
                 if (!row || row.is_alias || !row.has_virtual_model) {
                     return '';
                 }
+                if (row.masking_alias) {
+                    return 'Redirect';
+                }
                 return 'Override';
+            },
+
+            aliasRowCanRemove(row) {
+                return Boolean(row && row.is_alias && row.alias && row.alias.name && !row.source_model_exists);
+            },
+
+            rowRedirectCanRemove(row) {
+                return Boolean(row && !row.is_alias && row.masking_alias && row.masking_alias.name);
             },
 
             rowAnchorID(row) {
@@ -955,6 +971,73 @@
                 }
             },
 
+            async removeAliasRow(row) {
+                if (!this.aliasRowCanRemove(row) || this.rowDeletingKey === row.key) {
+                    return;
+                }
+                const source = String(row.alias.name || '').trim();
+                if (!source) {
+                    return;
+                }
+                await this.removeVirtualModelSource(source, row.key, 'Remove the virtual model alias "' + source + '"?');
+            },
+
+            async removeRedirectRow(row) {
+                if (!this.rowRedirectCanRemove(row) || this.rowDeletingKey === row.key) {
+                    return;
+                }
+                const source = String(row.masking_alias.name || '').trim();
+                if (!source) {
+                    return;
+                }
+                await this.removeVirtualModelSource(source, row.key, 'Remove the redirect for "' + source + '"?');
+            },
+
+            async removeVirtualModelSource(source, rowKey, confirmMessage) {
+                if (!this.confirmAction(confirmMessage)) {
+                    return;
+                }
+
+                this.rowDeletingKey = rowKey;
+                this.aliasError = '';
+                this.aliasNotice = '';
+
+                try {
+                    const request = this.adminRequestOptions({
+                        method: 'DELETE',
+                        body: JSON.stringify({ source })
+                    });
+                    const res = await fetch('/admin/virtual-models', request);
+                    if (res.status === 503) {
+                        this.setVirtualModelsAvailable(false);
+                        this.aliasError = 'Virtual models feature is unavailable.';
+                        return;
+                    }
+                    if (res.status !== 404) {
+                        const handled = this.handleFetchResponse(res, 'virtual model', request);
+                        if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                            return;
+                        }
+                        if (!handled) {
+                            this.aliasError = res.status === 401
+                                ? 'Authentication required.'
+                                : await this.aliasResponseMessage(res, 'Failed to remove virtual model.');
+                            return;
+                        }
+                    }
+                    this.setVirtualModelsAvailable(true);
+
+                    await Promise.all([this.fetchModels(), this.fetchVirtualModels()]);
+                    this.syncDisplayModels();
+                    this.aliasNotice = 'Virtual model removed.';
+                } catch (e) {
+                    console.error('Failed to delete virtual model:', e);
+                    this.aliasError = 'Failed to remove virtual model.';
+                } finally {
+                    this.rowDeletingKey = '';
+                }
+            },
+
             modelKeys(model) {
                 return this.modelIdentifierKeys(
                     model && model.model ? model.model.id : '',
@@ -1064,6 +1147,18 @@
                     }
                 }
                 return null;
+            },
+
+            hasConcreteSourceModel(name) {
+                const normalizedName = this.normalizedAliasName(name);
+                if (!normalizedName) {
+                    return false;
+                }
+                return this.models.some((model) => {
+                    const qualified = this.normalizedAliasName(this.qualifiedModelName(model));
+                    const selector = this.normalizedAliasName(model && model.selector);
+                    return qualified === normalizedName || (selector && selector === normalizedName);
+                });
             },
 
             // submitVirtualModelForm saves the unified editor: a filled Target model

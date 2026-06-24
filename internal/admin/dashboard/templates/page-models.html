@@ -38,9 +38,9 @@
             </div>
         </div>
         <div class="table-toolbar-actions">
-            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn" x-show="virtualModelsAvailable" @click="openVirtualModelCreate()">
+            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon alias-create-btn" x-show="virtualModelsAvailable" aria-label="New virtual model alias" title="Alias" @click="openVirtualModelCreate()">
                 <i data-lucide="plus" class="alias-create-icon" aria-hidden="true"></i>
-                <span>Create&nbsp;Alias</span>
+                <span>New&nbsp;virtual&nbsp;model</span>
             </button>
         </div>
     </div>
@@ -65,7 +65,6 @@
             <form class="form" @submit.prevent="submitVirtualModelForm()">
                 <div class="editor-header">
                     <div>
-                        <p class="form-kicker" x-text="vmFormMode === 'edit' ? 'Edit virtual model' : 'New virtual model'"></p>
                         <h3 x-text="vmFormDisplayName || vmForm.source || 'Virtual model'"></h3>
                     </div>
                     <button type="button" class="dialog-close-btn" aria-label="Close virtual model editor" @click="closeVirtualModelForm()">
@@ -256,8 +255,7 @@
                 <tr>
                     <th>Model</th>
                     <th>Modes</th>
-                    <th class="col-price">Input<br>$/MTok</th>
-                    <th class="col-price">Output<br>$/MTok</th>
+                    <th class="col-price">Input / Output ($/MTok)</th>
                     <th class="col-price" x-show="activeCategory === 'text_generation'">Cached $/MTok</th>
                     <th class="model-actions-header">{{template "model-global-action-buttons" .}}</th>
                 </tr>

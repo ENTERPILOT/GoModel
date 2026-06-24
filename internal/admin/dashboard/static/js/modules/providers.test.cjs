@@ -76,7 +76,7 @@ test('provider helper methods format configured models and resilience summaries'
     assert.equal(module.providerTypeLabel({ name: 'azure-east', config: { type: 'azure' } }), 'azure');
 });
 
-test('provider detail toggle persists in browser storage and last check formatting uses time-only text', () => {
+test('provider detail toggle starts collapsed, persists toggles, and last check formatting uses time-only text', () => {
     const storage = {
         values: new Map([['gomodel_provider_status_details_expanded', 'true']]),
         getItem(key) {
@@ -91,12 +91,14 @@ test('provider detail toggle persists in browser storage and last check formatti
     });
 
     module.initProviderStatusPreferences();
-    assert.equal(module.providerStatusDetailsExpanded, true);
+    assert.equal(module.providerStatusDetailsExpanded, false);
     assert.equal(module.providerStatusDetailsToggleLabel(), 'Hide Details');
+    assert.equal(storage.getItem('gomodel_provider_status_details_expanded'), 'false');
 
     module.toggleProviderStatusDetails();
-    assert.equal(module.providerStatusDetailsExpanded, false);
-    assert.equal(storage.getItem('gomodel_provider_status_details_expanded'), 'false');
+    assert.equal(module.providerStatusDetailsExpanded, true);
+    assert.equal(module.providerStatusDetailsToggleLabel(), 'Show Details');
+    assert.equal(storage.getItem('gomodel_provider_status_details_expanded'), 'true');
 
     module.formatTimestamp = (value) => value === '2026-04-10T12:00:00Z'
         ? '2026-04-10 14:00:00'
@@ -110,6 +112,57 @@ test('provider detail toggle persists in browser storage and last check formatti
 
     assert.equal(module.providerLastCheckedTime(provider), '14:00:00');
     assert.equal(module.providerLastCheckedTitle(provider), '2026-04-10 14:00:00');
+});
+
+test('provider status polling refreshes while any provider is starting', async() => {
+    const timers = [];
+    const cleared = [];
+    const responses = [
+        {
+            summary: { total: 1, healthy: 0, degraded: 1, unhealthy: 0, overall_status: 'degraded' },
+            providers: [{ name: 'openai', status_label: 'Starting' }]
+        },
+        {
+            summary: { total: 1, healthy: 1, degraded: 0, unhealthy: 0, overall_status: 'healthy' },
+            providers: [{ name: 'openai', status_label: 'Healthy' }]
+        }
+    ];
+    let fetches = 0;
+    const module = createProvidersModule({
+        window: {
+            setTimeout(callback, ms) {
+                const timer = { callback, ms };
+                timers.push(timer);
+                return timer;
+            },
+            clearTimeout(timer) {
+                cleared.push(timer);
+            }
+        },
+        fetch: async() => ({
+            ok: true,
+            status: 200,
+            json: async() => responses[Math.min(fetches++, responses.length - 1)]
+        })
+    });
+
+    module._startAbortableRequest = () => null;
+    module._clearAbortableRequest = () => {};
+    module.requestOptions = () => ({ headers: {} });
+    module.handleFetchResponse = () => true;
+    module.isStaleAuthFetchResult = () => false;
+
+    await module.fetchProviderStatus();
+
+    assert.equal(module.providerStatusNeedsPolling(), true);
+    assert.equal(timers.length, 1);
+    assert.equal(timers[0].ms, 3000);
+
+    await timers[0].callback();
+
+    assert.equal(fetches, 2);
+    assert.equal(module.providerStatusNeedsPolling(), false);
+    assert.equal(module.providerStatusPollTimer, null);
 });
 
 test('fetchProviderStatus ignores responses whose request signal was aborted', async() => {
