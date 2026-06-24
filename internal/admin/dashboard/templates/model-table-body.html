@@ -72,7 +72,7 @@
                                 x-show="virtualModelsAvailable && aliasRowCanRemove(row)"
                                 :aria-label="rowDeletingKey === row.key ? 'Removing alias ' + row.alias.name : 'Remove alias ' + row.alias.name"
                                 :title="rowDeletingKey === row.key ? 'Removing alias ' + row.alias.name : 'Remove alias ' + row.alias.name"
-                                :disabled="rowDeletingKey === row.key"
+                                :disabled="Boolean(rowDeletingKey)"
                                 @click="removeAliasRow(row)">
                                 {{template "trash-icon"}}
                             </button>
@@ -100,7 +100,7 @@
                                 x-show="virtualModelsAvailable && rowRedirectCanRemove(row)"
                                 :aria-label="rowDeletingKey === row.key ? 'Removing redirect for ' + row.display_name : 'Remove redirect for ' + row.display_name"
                                 :title="rowDeletingKey === row.key ? 'Removing redirect for ' + row.display_name : 'Remove redirect for ' + row.display_name"
-                                :disabled="rowDeletingKey === row.key"
+                                :disabled="Boolean(rowDeletingKey)"
                                 @click="removeRedirectRow(row)">
                                 {{template "trash-icon"}}
                             </button>

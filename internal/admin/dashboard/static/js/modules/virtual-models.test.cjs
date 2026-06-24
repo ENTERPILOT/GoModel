@@ -509,6 +509,11 @@ test('displayRowClass renders real models carrying a virtual model as alias-like
     const aliasRow = { is_alias: true, alias: { enabled: true, valid: true } };
     assert.equal(module.displayRowClass(aliasRow), 'alias-row is-valid');
     assert.equal(module.rowVirtualBadge(aliasRow), '');
+    assert.equal(module.aliasRowCanRemove({
+        is_alias: true,
+        source_model_exists: true,
+        alias: { name: 'openai/gpt-4o' }
+    }), true);
 });
 
 test('buildDisplayModels flags model rows with a policy override as carrying a virtual model', () => {
@@ -683,6 +688,45 @@ test('removeRedirectRow confirms and deletes a source-backed redirect', async() 
     assert.deepEqual(JSON.parse(requests[0].request.body), { source: 'openai/gpt-4o' });
     assert.deepEqual(fetched, ['models', 'virtual', 'sync']);
     assert.equal(module.aliasNotice, 'Virtual model removed.');
+    assert.equal(module.rowDeletingKey, '');
+});
+
+test('row virtual model deletes are serialized while a delete is in flight', async() => {
+    const requests = [];
+    let finishFirstDelete;
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                await new Promise((resolve) => { finishFirstDelete = resolve; });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        },
+        window: { confirm: () => true }
+    });
+    stubRequests(module);
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+    module.syncDisplayModels = () => {};
+
+    const firstDelete = module.removeAliasRow({
+        key: 'alias:first',
+        is_alias: true,
+        alias: { name: 'first' }
+    });
+    await Promise.resolve();
+
+    await module.removeAliasRow({
+        key: 'alias:second',
+        is_alias: true,
+        alias: { name: 'second' }
+    });
+
+    assert.equal(requests.length, 1);
+    assert.deepEqual(JSON.parse(requests[0].request.body), { source: 'first' });
+
+    finishFirstDelete();
+    await firstDelete;
     assert.equal(module.rowDeletingKey, '');
 });
 

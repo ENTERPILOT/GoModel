@@ -518,7 +518,7 @@
             },
 
             aliasRowCanRemove(row) {
-                return Boolean(row && row.is_alias && row.alias && row.alias.name && !row.source_model_exists);
+                return Boolean(row && row.is_alias && row.alias && row.alias.name);
             },
 
             rowRedirectCanRemove(row) {
@@ -968,7 +968,7 @@
             },
 
             async removeAliasRow(row) {
-                if (!this.aliasRowCanRemove(row) || this.rowDeletingKey === row.key) {
+                if (!this.aliasRowCanRemove(row) || this.rowDeletingKey) {
                     return;
                 }
                 const source = String(row.alias.name || '').trim();
@@ -979,7 +979,7 @@
             },
 
             async removeRedirectRow(row) {
-                if (!this.rowRedirectCanRemove(row) || this.rowDeletingKey === row.key) {
+                if (!this.rowRedirectCanRemove(row) || this.rowDeletingKey) {
                     return;
                 }
                 const source = String(row.masking_alias.name || '').trim();
@@ -990,6 +990,9 @@
             },
 
             async removeVirtualModelSource(source, rowKey, confirmMessage) {
+                if (this.rowDeletingKey) {
+                    return;
+                }
                 if (!this.confirmAction(confirmMessage)) {
                     return;
                 }
