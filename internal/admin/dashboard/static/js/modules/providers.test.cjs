@@ -78,7 +78,7 @@ test('provider helper methods format configured models and resilience summaries'
 
 test('provider detail toggle starts collapsed, persists toggles, and last check formatting uses time-only text', () => {
     const storage = {
-        values: new Map([['gomodel_provider_status_details_expanded', 'true']]),
+        values: new Map(),
         getItem(key) {
             return this.values.has(key) ? this.values.get(key) : null;
         },
@@ -98,6 +98,14 @@ test('provider detail toggle starts collapsed, persists toggles, and last check 
     module.toggleProviderStatusDetails();
     assert.equal(module.providerStatusDetailsExpanded, true);
     assert.equal(module.providerStatusDetailsToggleLabel(), 'Show Details');
+    assert.equal(storage.getItem('gomodel_provider_status_details_expanded'), 'true');
+
+    const reloadedModule = createProvidersModule({
+        window: { localStorage: storage }
+    });
+    reloadedModule.initProviderStatusPreferences();
+    assert.equal(reloadedModule.providerStatusDetailsExpanded, true);
+    assert.equal(reloadedModule.providerStatusDetailsToggleLabel(), 'Show Details');
     assert.equal(storage.getItem('gomodel_provider_status_details_expanded'), 'true');
 
     module.formatTimestamp = (value) => value === '2026-04-10T12:00:00Z'

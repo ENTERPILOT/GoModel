@@ -66,11 +66,7 @@
                 }
 
                 for (const row of rows) {
-                    const sourceKeys = [
-                        String(row.display_name || '').trim().toLowerCase(),
-                        String(row.selector || '').trim().toLowerCase()
-                    ].filter(Boolean);
-                    for (const key of sourceKeys) {
+                    for (const key of this.modelKeys(row)) {
                         const redirect = redirectsBySource.get(key);
                         if (!redirect) continue;
                         row.masking_alias = redirect;
@@ -1154,11 +1150,7 @@
                 if (!normalizedName) {
                     return false;
                 }
-                return this.models.some((model) => {
-                    const qualified = this.normalizedAliasName(this.qualifiedModelName(model));
-                    const selector = this.normalizedAliasName(model && model.selector);
-                    return qualified === normalizedName || (selector && selector === normalizedName);
-                });
+                return this.models.some((model) => this.modelKeys(model).has(normalizedName));
             },
 
             // submitVirtualModelForm saves the unified editor: a filled Target model

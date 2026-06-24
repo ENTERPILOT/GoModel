@@ -944,9 +944,11 @@ function dashboard() {
     },
 
     formatCost(v) {
-      if (v == null || v === undefined) return "---";
-      if (v > 0 && v < 0.0001) return "<$0.0001";
-      return "$" + v.toFixed(4).replace(/(\.\d{2}\d*?)0+$/, "$1");
+      if (v == null) return "---";
+      const cost = Number(v);
+      if (!Number.isFinite(cost)) return "---";
+      if (cost > 0 && cost < 0.0001) return "<$0.0001";
+      return "$" + cost.toFixed(4).replace(/(\.\d{2}\d*?)0+$/, "$1");
     },
 
     formatCostTooltip(entry) {

@@ -33,7 +33,12 @@
                 try {
                     const storage = browserStorage();
                     if (storage) {
-                        storage.setItem(PROVIDER_STATUS_DETAILS_STORAGE_KEY, 'false');
+                        const stored = storage.getItem(PROVIDER_STATUS_DETAILS_STORAGE_KEY);
+                        if (stored === 'true' || stored === 'false') {
+                            this.providerStatusDetailsExpanded = stored === 'true';
+                        } else {
+                            storage.setItem(PROVIDER_STATUS_DETAILS_STORAGE_KEY, 'false');
+                        }
                     }
                 } catch (_) {
                     // Ignore storage failures; details still start collapsed.

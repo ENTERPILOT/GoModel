@@ -98,6 +98,9 @@ test('formatCost uses data placeholder for missing values', () => {
 
     assert.equal(app.formatCost(null), '---');
     assert.equal(app.formatCost(undefined), '---');
+    assert.equal(app.formatCost(NaN), '---');
+    assert.equal(app.formatCost(Infinity), '---');
+    assert.equal(app.formatCost('0.25'), '$0.25');
 });
 
 test('system theme media changes rerender all dashboard charts', () => {

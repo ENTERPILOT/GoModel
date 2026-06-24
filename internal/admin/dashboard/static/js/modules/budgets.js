@@ -373,6 +373,9 @@
             },
 
             budgetAmountLabel(value) {
+                if (value == null) {
+                    return '---';
+                }
                 const amount = Number(value);
                 if (!Number.isFinite(amount)) {
                     return '---';

@@ -568,7 +568,7 @@ test('buildDisplayModels combines source-backed redirects with the concrete mode
             valid: true
         },
         {
-            name: 'openai/gpt-4o',
+            name: 'gpt-4o',
             target_provider: 'openai',
             target_model: 'gpt-4o',
             enabled: true,
@@ -587,20 +587,22 @@ test('buildDisplayModels combines source-backed redirects with the concrete mode
     module.syncDisplayModels();
 
     const aliasOnly = module.displayModels.find((row) => row.key === 'alias:smart');
-    const modelBackedAliasRow = module.displayModels.find((row) => row.key === 'alias:openai/gpt-4o');
+    const modelBackedAliasRow = module.displayModels.find((row) => row.key === 'alias:gpt-4o');
     const modelBacked = module.displayModels.find((row) => row.key === 'model:openai/gpt-4o');
     const nestedTargetAlias = module.displayModels.find((row) => row.key === 'alias:anthropic/claude-fable-5');
+    const nestedTargetModel = module.displayModels.find((row) => row.key === 'model:openrouter/anthropic/claude-fable-5');
 
     assert.equal(aliasOnly.kind_badge, 'Virtual Model');
     assert.equal(aliasOnly.source_model_exists, false);
     assert.equal(module.aliasRowCanRemove(aliasOnly), true);
     assert.equal(modelBackedAliasRow, undefined);
-    assert.equal(modelBacked.masking_alias.name, 'openai/gpt-4o');
+    assert.equal(modelBacked.masking_alias.name, 'gpt-4o');
     assert.equal(module.rowVirtualBadge(modelBacked), 'Redirect');
     assert.equal(module.rowRedirectCanRemove(modelBacked), true);
-    assert.equal(nestedTargetAlias.secondary_name, 'openrouter/anthropic/claude-fable-5');
-    assert.equal(nestedTargetAlias.source_model_exists, false);
-    assert.equal(module.aliasRowCanRemove(nestedTargetAlias), true);
+    assert.equal(nestedTargetAlias, undefined);
+    assert.equal(nestedTargetModel.masking_alias.name, 'anthropic/claude-fable-5');
+    assert.equal(module.rowVirtualBadge(nestedTargetModel), 'Redirect');
+    assert.equal(module.rowRedirectCanRemove(nestedTargetModel), true);
 });
 
 test('removeAliasRow confirms and deletes an alias-only virtual model', async() => {
