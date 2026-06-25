@@ -92,6 +92,33 @@ function ensureRequiredProperty(schemaName, propertyName) {
   target.required = Array.from(required).sort();
 }
 
+// Swagger 2 mirror of the bounds applied in openapi-postprocess.mjs so the
+// runtime spec advertises the same array limits as the published OpenAPI.
+function applyStringArrayPropertyBounds(schemaName, propertyName, maxItems, itemMaxLength) {
+  const target = schema(schemaName);
+  const property = target.properties?.[propertyName];
+  if (!property || property.type !== "array") {
+    throw new Error(`expected array property ${propertyName} on definition: ${schemaName}`);
+  }
+  property.maxItems = maxItems;
+  property.items = property.items || {};
+  property.items.maxLength = itemMaxLength;
+}
+
+function applyArrayMaxItems(operationPath, method, statusCode, maxItems) {
+  const op = spec.paths?.[operationPath]?.[method];
+  if (!op) {
+    throw new Error(`missing operation: ${method.toUpperCase()} ${operationPath}`);
+  }
+  const response = op.responses?.[statusCode];
+  // Swagger 2 carries the response schema directly under `schema`.
+  const schemaRef = response?.schema;
+  if (!schemaRef || schemaRef.type !== "array") {
+    throw new Error(`expected array schema on ${method.toUpperCase()} ${operationPath} ${statusCode}`);
+  }
+  schemaRef.maxItems = maxItems;
+}
+
 function ensureAnthropicContentBlockSchema() {
   if (!spec.definitions) {
     throw new Error("missing Swagger definitions");
@@ -123,6 +150,13 @@ function applyAnthropicMessageSchemas() {
 
 applyAnthropicMessageSchemas();
 ensureRequiredProperty("core.ResponsesConversationRef", "id");
+
+// Virtual-models admin contract: mirror the required field and array bounds the
+// OpenAPI postprocess applies, so the embedded Swagger 2 spec matches.
+ensureRequiredProperty("admin.upsertVirtualModelRequest", "source");
+ensureRequiredProperty("admin.deleteVirtualModelRequest", "source");
+applyStringArrayPropertyBounds("admin.upsertVirtualModelRequest", "user_paths", 100, 1024);
+applyArrayMaxItems("/admin/virtual-models", "get", "200", 10000);
 for (const name of [
   "core.ResponsesRequest",
   "core.ResponseInputTokensRequest",

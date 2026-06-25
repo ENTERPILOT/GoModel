@@ -57,7 +57,7 @@ func (h *Handler) ListVirtualModels(c *echo.Context) error {
 // @Success      200            {object}  virtualmodels.View
 // @Failure      400            {object}  core.GatewayError
 // @Failure      401            {object}  core.GatewayError
-// @Failure      500            {object}  core.GatewayError
+// @Failure      502            {object}  core.GatewayError
 // @Failure      503            {object}  core.GatewayError
 // @Router       /admin/virtual-models [put]
 func (h *Handler) UpsertVirtualModel(c *echo.Context) error {
@@ -100,6 +100,7 @@ func (h *Handler) UpsertVirtualModel(c *echo.Context) error {
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
 // @Failure      404       {object}  core.GatewayError
+// @Failure      502       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
 // @Router       /admin/virtual-models [delete]
 func (h *Handler) DeleteVirtualModel(c *echo.Context) error {

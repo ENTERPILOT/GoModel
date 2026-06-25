@@ -1416,7 +1416,8 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/virtualmodels.View"
-                            }
+                            },
+                            "maxItems": 10000
                         }
                     },
                     "401": {
@@ -1479,8 +1480,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.GatewayError"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -1538,6 +1539,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -4306,7 +4313,10 @@ const docTemplate = `{
                 "source": {
                     "type": "string"
                 }
-            }
+            },
+            "required": [
+                "source"
+            ]
         },
         "admin.modelAccessResponse": {
             "type": "object",
@@ -4482,10 +4492,15 @@ const docTemplate = `{
                 "user_paths": {
                     "type": "array",
                     "items": {
-                        "type": "string"
-                    }
+                        "type": "string",
+                        "maxLength": 1024
+                    },
+                    "maxItems": 100
                 }
-            }
+            },
+            "required": [
+                "source"
+            ]
         },
         "anthropicapi.CountTokensResponse": {
             "type": "object",
