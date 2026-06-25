@@ -198,6 +198,35 @@ function createUsageLogApp(overrides = {}) {
     return { app, fetchCalls };
 }
 
+test('fetchUsage clears stale cache overview when the summary refresh fails', async () => {
+    const factory = loadUsageModuleFactory({
+        fetch: async () => ({ async json() { return {}; } })
+    });
+    const app = Object.assign(
+        {
+            days: '30',
+            interval: 'daily',
+            page: 'overview',
+            customStartDate: null,
+            customEndDate: null,
+            requestOptions() { return { headers: {} }; },
+            handleFetchResponse() { return false; }, // simulate a failed refresh
+            renderChart() {}
+        },
+        factory()
+    );
+    // Data left over from a previous, successful period.
+    app.summary = { total_requests: 999, total_input_tokens: 5000 };
+    app.cacheOverview = { summary: { total_hits: 42, total_input_tokens: 1000 }, daily: [{}] };
+
+    await app.fetchUsage();
+
+    assert.equal(app.summary.total_requests, 0);
+    assert.equal(app.cacheOverview.summary.total_hits, 0);
+    assert.equal(app.cacheOverview.summary.total_input_tokens, 0);
+    assert.equal(app.cacheOverview.daily.length, 0);
+});
+
 test('fetchUsageLog includes cache_mode=all by default so cached records are returned', async () => {
     const { app, fetchCalls } = createUsageLogApp();
 

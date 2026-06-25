@@ -294,8 +294,12 @@
                         return;
                     }
                     if (!summaryHandled || !dailyHandled) {
+                        // Reset cache overview too: Total Requests and the cache
+                        // meter derive from it, so leaving it stale would show the
+                        // previous period's cache hits next to the empty summary.
                         this.summary = this.emptyUsageSummary();
                         this.daily = [];
+                        this.cacheOverview = this.emptyCacheOverview();
                         this.renderChart();
                         return;
                     }
