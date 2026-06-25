@@ -277,6 +277,16 @@ func TestUsageSummary_NilReaderZeroesCacheSplit(t *testing.T) {
 	if err := h.UsageSummary(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
+	// Assert the keys are present (not just absent-as-zero) so a dropped field
+	// can't masquerade as a zero value after unmarshalling.
+	body := rec.Body.String()
+	for _, key := range []string{"uncached_input_tokens", "cached_input_tokens", "cache_write_input_tokens"} {
+		if !containsString(body, key) {
+			t.Errorf("expected %q in nil-reader response body, got: %s", key, body)
+		}
+	}
+
 	var summary usage.UsageSummary
 	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)

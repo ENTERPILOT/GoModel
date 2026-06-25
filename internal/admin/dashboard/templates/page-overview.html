@@ -100,11 +100,11 @@
     <div class="chart-container">
         <div class="chart-container-header">
             <h3 x-text="chartTitle()">Daily Token Usage</h3>
-            <div class="interval-picker">
-                <button type="button" class="interval-btn" :class="{active: interval==='daily'}" @click="setInterval('daily')">Daily</button>
-                <button type="button" class="interval-btn" :class="{active: interval==='weekly'}" @click="setInterval('weekly')">Weekly</button>
-                <button type="button" class="interval-btn" :class="{active: interval==='monthly'}" @click="setInterval('monthly')">Monthly</button>
-                <button type="button" class="interval-btn" :class="{active: interval==='yearly'}" @click="setInterval('yearly')">Yearly</button>
+            <div class="interval-picker" role="group" aria-label="Usage chart interval">
+                <button type="button" class="interval-btn" :class="{active: interval==='daily'}" :aria-pressed="interval==='daily'" @click="setInterval('daily')">Daily</button>
+                <button type="button" class="interval-btn" :class="{active: interval==='weekly'}" :aria-pressed="interval==='weekly'" @click="setInterval('weekly')">Weekly</button>
+                <button type="button" class="interval-btn" :class="{active: interval==='monthly'}" :aria-pressed="interval==='monthly'" @click="setInterval('monthly')">Monthly</button>
+                <button type="button" class="interval-btn" :class="{active: interval==='yearly'}" :aria-pressed="interval==='yearly'" @click="setInterval('yearly')">Yearly</button>
             </div>
         </div>
         <div class="chart-wrapper">
