@@ -313,11 +313,15 @@
                     }
                     this.summary = summary;
                     this.daily = daily;
+                    // Clear the previous period's cache overview before the first
+                    // render so the cache meter and Total Requests don't briefly
+                    // mix it with the new summary while it reloads.
+                    if (this.cacheOverviewVisible()) {
+                        this.cacheOverview = this.emptyCacheOverview();
+                    }
                     this.renderChart();
                     if (this.cacheOverviewVisible() && this.cacheAnalyticsEnabled()) {
                         this.fetchCacheOverview();
-                    } else if (this.cacheOverviewVisible()) {
-                        this.cacheOverview = this.emptyCacheOverview();
                     }
                     if (this.page === 'usage') this.fetchUsagePage();
                     if (this.page === 'audit-logs') this.fetchAuditLog(true);

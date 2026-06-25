@@ -227,6 +227,36 @@ test('fetchUsage clears stale cache overview when the summary refresh fails', as
     assert.equal(app.cacheOverview.daily.length, 0);
 });
 
+test('fetchUsage clears the previous cache overview before reloading on a range switch', async () => {
+    let cacheFetches = 0;
+    const factory = loadUsageModuleFactory({
+        fetch: async () => ({ async json() { return {}; } })
+    });
+    const app = Object.assign(
+        {
+            days: '7',
+            interval: 'daily',
+            page: 'overview',
+            customStartDate: null,
+            customEndDate: null,
+            requestOptions() { return { headers: {} }; },
+            handleFetchResponse() { return true; }, // success
+            renderChart() {}
+        },
+        factory()
+    );
+    app.cacheAnalyticsEnabled = () => true;
+    app.fetchCacheOverview = () => { cacheFetches++; }; // stub: does not repopulate
+    // Previous period's cache overview still in place.
+    app.cacheOverview = { summary: { total_hits: 42, total_input_tokens: 1000 }, daily: [{}] };
+
+    await app.fetchUsage();
+
+    // Cleared synchronously before the async reload, so the meter can't show the old period.
+    assert.equal(app.cacheOverview.summary.total_hits, 0);
+    assert.equal(cacheFetches, 1);
+});
+
 test('fetchUsageLog includes cache_mode=all by default so cached records are returned', async () => {
     const { app, fetchCalls } = createUsageLogApp();
 
