@@ -489,7 +489,7 @@ curl -fsS "$BASE_URL/admin/audit/conversation?log_id=$AUDIT_ID&limit=5" \
 Reads current aliases.
 
 ```bash
-curl -fsS "$BASE_URL/admin/aliases" | jq -e 'type == "array"' >/dev/null
+curl -fsS "$BASE_URL/admin/virtual-models" | jq -e 'type == "array"' >/dev/null
 ```
 
 ## 2. Alias administration
@@ -499,10 +499,10 @@ curl -fsS "$BASE_URL/admin/aliases" | jq -e 'type == "array"' >/dev/null
 Creates an alias pointing to the newest cheap OpenAI model.
 
 ```bash
-curl -fsS -X PUT "$BASE_URL/admin/aliases" \
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"name\":\"$QA_OPENAI_ALIAS\",\"target_model\":\"gpt-4.1-nano\",\"target_provider\":\"openai\",\"description\":\"QA alias for release e2e\"}" \
-  | jq -e --arg name "$QA_OPENAI_ALIAS" '.name == $name and .target_model == "gpt-4.1-nano" and .target_provider == "openai" and .enabled == true' >/dev/null
+  -d "{\"source\":\"$QA_OPENAI_ALIAS\",\"target_model\":\"openai/gpt-4.1-nano\",\"description\":\"QA alias for release e2e\"}" \
+  | jq -e --arg source "$QA_OPENAI_ALIAS" '.source == $source and .kind == "redirect" and .resolved_model == "openai/gpt-4.1-nano" and .provider_type == "openai" and .targets[0].provider == "openai" and .targets[0].model == "gpt-4.1-nano" and .enabled == true' >/dev/null
 ```
 
 ### S14 Create Anthropic alias
@@ -510,10 +510,10 @@ curl -fsS -X PUT "$BASE_URL/admin/aliases" \
 Creates an alias pointing to `claude-sonnet-4-6`.
 
 ```bash
-curl -fsS -X PUT "$BASE_URL/admin/aliases" \
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"name\":\"$QA_ANTHROPIC_ALIAS\",\"target_model\":\"claude-sonnet-4-6\",\"target_provider\":\"anthropic\",\"description\":\"QA alias for anthropic reasoning\"}" \
-  | jq -e --arg name "$QA_ANTHROPIC_ALIAS" '.name == $name and .target_model == "claude-sonnet-4-6" and .target_provider == "anthropic" and .enabled == true' >/dev/null
+  -d "{\"source\":\"$QA_ANTHROPIC_ALIAS\",\"target_model\":\"anthropic/claude-sonnet-4-6\",\"description\":\"QA alias for anthropic reasoning\"}" \
+  | jq -e --arg source "$QA_ANTHROPIC_ALIAS" '.source == $source and .kind == "redirect" and .resolved_model == "anthropic/claude-sonnet-4-6" and .provider_type == "anthropic" and .targets[0].provider == "anthropic" and .targets[0].model == "claude-sonnet-4-6" and .enabled == true' >/dev/null
 ```
 
 ### S15 Verify aliases are exposed in `/v1/models`
@@ -1174,9 +1174,9 @@ Removes the per-run OpenAI alias.
 
 ```bash
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s59.headers.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o /dev/null -X DELETE "$BASE_URL/admin/aliases" \
+curl -sS -D "$HEADERS_FILE" -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"name\":\"$QA_OPENAI_ALIAS\"}"
+  -d "{\"source\":\"$QA_OPENAI_ALIAS\"}"
 sed -n '1,20p' "$HEADERS_FILE"
 grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"
 ```
@@ -1187,9 +1187,9 @@ Removes the per-run Anthropic alias.
 
 ```bash
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s60.headers.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o /dev/null -X DELETE "$BASE_URL/admin/aliases" \
+curl -sS -D "$HEADERS_FILE" -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"name\":\"$QA_ANTHROPIC_ALIAS\"}"
+  -d "{\"source\":\"$QA_ANTHROPIC_ALIAS\"}"
 sed -n '1,20p' "$HEADERS_FILE"
 grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"
 ```
@@ -2115,9 +2115,9 @@ endpoints.
 
 ```bash
 MESSAGES_ALIAS="qa-messages-alias-$QA_SUFFIX"
-curl -fsS -X PUT "$BASE_URL/admin/aliases" \
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"name\":\"$MESSAGES_ALIAS\",\"target_model\":\"gpt-4.1-nano\",\"target_provider\":\"openai\",\"description\":\"QA messages alias\"}" \
+  -d "{\"source\":\"$MESSAGES_ALIAS\",\"target_model\":\"openai/gpt-4.1-nano\",\"description\":\"QA messages alias\"}" \
   >/dev/null
 RESP_FILE="$QA_RUN_DIR/s104.messages.json"
 curl -fsS "$BASE_URL/v1/messages" \
@@ -2126,9 +2126,9 @@ curl -fsS "$BASE_URL/v1/messages" \
   > "$RESP_FILE"
 jq '{type,role,model,content}' "$RESP_FILE"
 jq -e '.type == "message" and any(.content[]; .type == "text" and (.text | contains("QA_MESSAGES_ALIAS_OK")))' "$RESP_FILE" >/dev/null
-curl -fsS -X DELETE "$BASE_URL/admin/aliases" \
+curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"name\":\"$MESSAGES_ALIAS\"}" >/dev/null
+  -d "{\"source\":\"$MESSAGES_ALIAS\"}" >/dev/null
 ```
 
 ### S105 Missing `max_tokens` is rejected with an Anthropic error envelope (negative)
