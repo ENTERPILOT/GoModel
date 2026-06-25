@@ -32,13 +32,13 @@
             <div class="card-label">Total Requests</div>
             <div class="card-value" x-text="formatNumber(summaryTotalRequests())" :title="summaryTotalRequestsTitle()">-</div>
         </div>
-        <div class="card">
-            <div class="card-label">Estimated Cost</div>
-            <div class="card-value" x-text="formatCost(summary.total_cost)">-</div>
-        </div>
         <div class="card" x-show="cacheAnalyticsEnabled()">
             <div class="card-label">Cache Hits</div>
             <div class="card-value" x-text="formatNumber(cacheOverview.summary.total_hits)">-</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Estimated Cost</div>
+            <div class="card-value" x-text="formatCost(summary.total_cost)">-</div>
         </div>
         <div class="card card-wide" x-show="cacheAnalyticsEnabled()">
             <div class="card-label">Local Cache</div>
