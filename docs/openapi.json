@@ -881,233 +881,6 @@
         }
       }
     },
-    "/admin/model-overrides": {
-      "get": {
-        "description": "Lists persisted model access overrides by global, provider-wide, model-wide, or exact selector.\nSelectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
-        "tags": [
-          "admin"
-        ],
-        "summary": "List model access overrides",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/modeloverrides.View"
-                  },
-                  "maxItems": 10000,
-                  "description": "Bounded by maxItems=10000."
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Service Unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "x-mint": {
-          "metadata": {
-            "sidebarTitle": "/admin/model-overrides"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "admin"
-        ],
-        "summary": "Create or update one model access override",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/admin.upsertModelOverrideRequest"
-              }
-            }
-          },
-          "description": "Model selector and allowed user paths",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/modeloverrides.View"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad Request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal Server Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "Bad Gateway",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Service Unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "x-mint": {
-          "metadata": {
-            "sidebarTitle": "/admin/model-overrides"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "admin"
-        ],
-        "summary": "Delete one model access override",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/admin.deleteModelOverrideRequest"
-              }
-            }
-          },
-          "description": "Model selector to remove",
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "400": {
-            "description": "Bad Request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not Found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "Bad Gateway",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Service Unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "x-mint": {
-          "metadata": {
-            "sidebarTitle": "/admin/model-overrides"
-          }
-        }
-      }
-    },
     "/admin/model-pricing-overrides": {
       "get": {
         "description": "Lists persisted USD pricing overrides. Selectors support global \"/\", provider-wide \"provider/\", model-wide \"model\", and exact \"provider/model\" scopes.",
@@ -2078,6 +1851,212 @@
         "x-mint": {
           "metadata": {
             "sidebarTitle": "/admin/usage/user-paths"
+          }
+        }
+      }
+    },
+    "/admin/virtual-models": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List virtual models (redirects and access policies)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/virtualmodels.View"
+                  },
+                  "maxItems": 10000,
+                  "description": "Bounded by maxItems=10000."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/virtual-models"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create or update one virtual model",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.upsertVirtualModelRequest"
+              }
+            }
+          },
+          "description": "Virtual model definition",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/virtualmodels.View"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/virtual-models"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete one virtual model",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.deleteVirtualModelRequest"
+              }
+            }
+          },
+          "description": "Virtual model source to remove",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/virtual-models"
           }
         }
       }
@@ -6391,7 +6370,7 @@
           "budget_key"
         ]
       },
-      "admin.deleteModelOverrideRequest": {
+      "admin.deleteModelPricingOverrideRequest": {
         "type": "object",
         "properties": {
           "selector": {
@@ -6402,15 +6381,15 @@
           "selector"
         ]
       },
-      "admin.deleteModelPricingOverrideRequest": {
+      "admin.deleteVirtualModelRequest": {
         "type": "object",
         "properties": {
-          "selector": {
+          "source": {
             "type": "string"
           }
         },
         "required": [
-          "selector"
+          "source"
         ]
       },
       "admin.modelAccessResponse": {
@@ -6423,7 +6402,7 @@
             "type": "boolean"
           },
           "override": {
-            "$ref": "#/components/schemas/modeloverrides.Override"
+            "$ref": "#/components/schemas/virtualmodels.VirtualModel"
           },
           "selector": {
             "type": "string"
@@ -6565,25 +6544,6 @@
           "budget_key"
         ]
       },
-      "admin.upsertModelOverrideRequest": {
-        "type": "object",
-        "properties": {
-          "selector": {
-            "type": "string"
-          },
-          "user_paths": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "maxLength": 1024
-            },
-            "maxItems": 100
-          }
-        },
-        "required": [
-          "selector"
-        ]
-      },
       "admin.upsertModelPricingOverrideRequest": {
         "type": "object",
         "properties": {
@@ -6597,6 +6557,34 @@
         "required": [
           "pricing",
           "selector"
+        ]
+      },
+      "admin.upsertVirtualModelRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target_model": {
+            "type": "string"
+          },
+          "user_paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "source"
         ]
       },
       "anthropicapi.CountTokensResponse": {
@@ -8643,76 +8631,6 @@
           }
         }
       },
-      "modeloverrides.Override": {
-        "type": "object",
-        "properties": {
-          "created_at": {
-            "type": "string"
-          },
-          "model": {
-            "type": "string"
-          },
-          "provider_name": {
-            "type": "string"
-          },
-          "selector": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          },
-          "user_paths": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "modeloverrides.ScopeKind": {
-        "type": "string",
-        "enum": [
-          "global",
-          "model",
-          "provider",
-          "provider_model"
-        ],
-        "x-enum-varnames": [
-          "ModelScopeGlobal",
-          "ModelScopeModel",
-          "ModelScopeProvider",
-          "ModelScopeProviderModel"
-        ]
-      },
-      "modeloverrides.View": {
-        "type": "object",
-        "properties": {
-          "created_at": {
-            "type": "string"
-          },
-          "model": {
-            "type": "string"
-          },
-          "provider_name": {
-            "type": "string"
-          },
-          "scope_kind": {
-            "$ref": "#/components/schemas/modeloverrides.ScopeKind"
-          },
-          "selector": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          },
-          "user_paths": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      },
       "pricingoverrides.Pricing": {
         "type": "object",
         "properties": {
@@ -9172,6 +9090,119 @@
           },
           "user_path": {
             "type": "string"
+          }
+        }
+      },
+      "virtualmodels.Target": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "weight": {
+            "description": "inert in v1 (load balancing)",
+            "type": "number"
+          }
+        }
+      },
+      "virtualmodels.View": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "provider_type": {
+            "type": "string"
+          },
+          "resolved_model": {
+            "type": "string"
+          },
+          "scope_kind": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "strategy": {
+            "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/virtualmodels.Target"
+            }
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "user_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        }
+      },
+      "virtualmodels.VirtualModel": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "strategy": {
+            "description": "inert in v1",
+            "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/virtualmodels.Target"
+            }
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "user_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

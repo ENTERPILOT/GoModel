@@ -19,6 +19,12 @@
     "api": {
         "url": "full"
     },
+    "redirects": [
+        {
+            "source": "/features/aliases",
+            "destination": "/features/virtual-models"
+        }
+    ],
     "navigation": {
         "global": {
             "anchors": [
@@ -45,7 +51,7 @@
                         "group": "Features",
                         "icon": "sparkles",
                         "pages": [
-                            "features/aliases",
+                            "features/virtual-models",
                             "features/user-path",
                             "features/passthrough-api",
                             "features/budgets",

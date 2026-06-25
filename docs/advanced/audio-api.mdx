@@ -12,7 +12,7 @@ and speech-to-text (STT). Clients and SDKs that already call OpenAI's
 `/v1/audio/*` routes can point at GoModel unchanged.
 
 Requests route **by model** through the same registry used for chat and
-embeddings, so `model` selection, `provider` hints, model aliases, per-key model
+embeddings, so `model` selection, `provider` hints, virtual models, per-key model
 access rules ([user paths](/features/user-path)), and budgets all apply. Audio is
 served by OpenAI and the OpenAI-compatible providers (OpenRouter, Azure OpenAI,
 vLLM, Oracle, MiniMax, Z.ai); a provider that doesn't support audio returns a

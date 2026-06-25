@@ -13,7 +13,7 @@ type MessagesRequest struct {
 	Model         string          `json:"model"`
 	Messages      []Message       `json:"messages"`
 	MaxTokens     int             `json:"max_tokens"`
-	System        json.RawMessage `json:"system,omitempty"`
+	System        json.RawMessage `json:"system,omitempty" swaggertype:"object"`
 	Metadata      *Metadata       `json:"metadata,omitempty"`
 	StopSequences []string        `json:"stop_sequences,omitempty"`
 	Stream        bool            `json:"stream,omitempty"`
@@ -34,7 +34,7 @@ type Metadata struct {
 // array of ContentBlock values.
 type Message struct {
 	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"`
+	Content json.RawMessage `json:"content" swaggertype:"object"`
 }
 
 // ContentBlock is one element of an Anthropic message content array. The struct
@@ -49,10 +49,10 @@ type ContentBlock struct {
 	// tool_use
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
+	Input json.RawMessage `json:"input,omitempty" swaggertype:"object"`
 	// tool_result
 	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   json.RawMessage `json:"content,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty" swaggertype:"object"`
 	IsError   bool            `json:"is_error,omitempty"`
 }
 
@@ -71,7 +71,7 @@ type Tool struct {
 	Type        string          `json:"type,omitempty"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty" swaggertype:"object"`
 }
 
 // ToolChoice constrains how the model selects tools.
@@ -106,7 +106,7 @@ type ResponseContentBlock struct {
 	Thinking string          `json:"thinking,omitempty"`
 	ID       string          `json:"id,omitempty"`
 	Name     string          `json:"name,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
+	Input    json.RawMessage `json:"input,omitempty" swaggertype:"object"`
 }
 
 // Usage reports Anthropic-style token usage.

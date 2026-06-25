@@ -83,8 +83,8 @@ AZURE_EMBED_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/t
 
 This registers `azure-gpt5` and `azure-embed`. To expose every deployment under
 one resource through a single provider, point `AZURE_BASE_URL` at the resource
-root (no `/deployments/...`) and use aliases or `AZURE_MODELS` to advertise
-specific deployment names.
+root (no `/deployments/...`) and use [virtual models](/features/virtual-models) or
+`AZURE_MODELS` to advertise specific deployment names.
 
 ## Notes
 

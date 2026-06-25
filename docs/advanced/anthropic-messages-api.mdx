@@ -12,7 +12,7 @@ in addition to its OpenAI-compatible API. Clients and SDKs that speak the Anthro
 format can point at GoModel unchanged.
 
 The request is translated to GoModel's canonical chat type at ingress and runs through
-the same pipeline as `/v1/chat/completions` — so model aliases, workflow policy,
+the same pipeline as `/v1/chat/completions` — so virtual models, workflow policy,
 budgets, failover, the response cache, usage/cost tracking, and audit logging all
 apply. Because every provider implements chat completion, an Anthropic-format request
 can be routed to **any** configured provider (OpenAI, Gemini, Bedrock, and others),

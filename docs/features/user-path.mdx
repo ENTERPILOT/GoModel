@@ -39,9 +39,9 @@ usage tracking, and model access checks run.
 
 ## Model access
 
-Model access overrides are enabled by default. They can use `user_paths` to
-limit a selector to a subtree.
-Selectors can target:
+Model access policies are enabled by default. A policy is a virtual model with
+no target; it can use `user_paths` to limit a selector to a subtree, or be
+disabled to turn the selector off entirely. Selectors can target:
 
 - `/` for all providers and models
 - `{provider_name}/` for one configured provider
@@ -55,7 +55,9 @@ For example:
 
 This allows `/team/alpha` and its descendants, such as `/team/alpha/service`.
 
-Use `Models -> Access override` in the dashboard to manage these rules.
+Use `Models -> New virtual model` in the dashboard to manage these rules: leave
+**Target model** empty to create an access policy on the **Source** selector.
+See [Virtual Models](/features/virtual-models) for redirects (aliases).
 
 ## Exposed models
 

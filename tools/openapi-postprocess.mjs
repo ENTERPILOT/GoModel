@@ -432,14 +432,14 @@ ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
 ensureRequiredProperty("admin.upsertBudgetRequest", "amount");
 ensureRequiredProperty("admin.upsertBudgetRequest", "budget_key");
 ensureRequiredProperty("admin.deleteBudgetRequest", "budget_key");
-ensureRequiredProperty("admin.upsertModelOverrideRequest", "selector");
-ensureRequiredProperty("admin.deleteModelOverrideRequest", "selector");
+ensureRequiredProperty("admin.upsertVirtualModelRequest", "source");
+ensureRequiredProperty("admin.deleteVirtualModelRequest", "source");
 ensureRequiredProperty("admin.upsertModelPricingOverrideRequest", "selector");
 ensureRequiredProperty("admin.upsertModelPricingOverrideRequest", "pricing");
 ensureRequiredProperty("admin.deleteModelPricingOverrideRequest", "selector");
 ensureRequiredProperty("core.ResponsesConversationRef", "id");
 applyBudgetKeySchemaConstraints();
-applyStringArrayPropertyBounds("admin.upsertModelOverrideRequest", "user_paths", 100, 1024);
+applyStringArrayPropertyBounds("admin.upsertVirtualModelRequest", "user_paths", 100, 1024);
 applyPricingSchemaConstraints();
 applyPathSidebarTitles();
 
@@ -448,14 +448,9 @@ applyPathSidebarTitles();
 // runtime registry is bounded by configured providers and the backing
 // model list; 10000 leaves substantial headroom for that worst case.
 applyArrayMaxItems("/admin/models", "get", "200", 10000);
-applyArrayMaxItems("/admin/model-overrides", "get", "200", 10000);
+applyArrayMaxItems("/admin/virtual-models", "get", "200", 10000);
 applyArrayMaxItems("/admin/model-pricing-overrides", "get", "200", 10000);
 
-applyStringEnum(
-  "modeloverrides.ScopeKind",
-  ["global", "model", "provider", "provider_model"],
-  ["ModelScopeGlobal", "ModelScopeModel", "ModelScopeProvider", "ModelScopeProviderModel"],
-);
 applyStringEnum(
   "pricingoverrides.ScopeKind",
   ["global", "model", "provider", "provider_model"],
