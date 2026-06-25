@@ -2,8 +2,12 @@ package usage
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 )
 
 // UsageQueryParams specifies the query parameters for usage data retrieval.
@@ -17,14 +21,75 @@ type UsageQueryParams struct {
 }
 
 // UsageSummary holds aggregated usage statistics over a time period.
+//
+// The *_input_tokens split fields (uncached/cached/cache-write) are the
+// provider prompt-cache breakdown of the input, summed per row via
+// addInputSegments which reuses EntryInputSegments. Their sum is the
+// provider-side "input parts" total; for additive-accounting providers
+// (Anthropic) it exceeds TotalInput, which only sums the input_tokens column.
+// Storage layers populate them by streaming rows; they are zero when the
+// reader is disabled.
 type UsageSummary struct {
-	TotalRequests   int      `json:"total_requests"`
-	TotalInput      int64    `json:"total_input_tokens"`
-	TotalOutput     int64    `json:"total_output_tokens"`
-	TotalTokens     int64    `json:"total_tokens"`
-	TotalInputCost  *float64 `json:"total_input_cost"`
-	TotalOutputCost *float64 `json:"total_output_cost"`
-	TotalCost       *float64 `json:"total_cost"`
+	TotalRequests         int      `json:"total_requests"`
+	TotalInput            int64    `json:"total_input_tokens"`
+	TotalOutput           int64    `json:"total_output_tokens"`
+	TotalTokens           int64    `json:"total_tokens"`
+	UncachedInputTokens   int64    `json:"uncached_input_tokens"`
+	CachedInputTokens     int64    `json:"cached_input_tokens"`
+	CacheWriteInputTokens int64    `json:"cache_write_input_tokens"`
+	TotalInputCost        *float64 `json:"total_input_cost"`
+	TotalOutputCost       *float64 `json:"total_output_cost"`
+	TotalCost             *float64 `json:"total_cost"`
+}
+
+// addInputSegments folds one usage row's provider-cache split into the summary
+// totals, reusing EntryInputSegments so every storage backend shares the single
+// source of truth for the provider-specific quirks (field-name coalescing and
+// the Anthropic additive-vs-subset accounting). Callers stream only the minimal
+// columns; cache_type is irrelevant because the summary covers provider
+// (uncached-mode) rows.
+func (s *UsageSummary) addInputSegments(inputTokens int, provider string, rawData map[string]any) {
+	uncached, cached, cacheWrite := EntryInputSegments(UsageLogEntry{
+		InputTokens: inputTokens,
+		Provider:    provider,
+		RawData:     rawData,
+	})
+	s.UncachedInputTokens += uncached
+	s.CachedInputTokens += cached
+	s.CacheWriteInputTokens += cacheWrite
+}
+
+// inputSegmentRows is the minimal row cursor shared by the SQL backends when
+// folding the provider prompt-cache split; both pgx.Rows and *sql.Rows satisfy it.
+type inputSegmentRows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}
+
+// foldInputSegments scans (input_tokens, provider, raw_data) rows and folds each
+// into the summary via addInputSegments, so the SQLite and PostgreSQL readers
+// share one row-handling path (only the query/driver differs between them).
+func foldInputSegments(rows inputSegmentRows, summary *UsageSummary) error {
+	for rows.Next() {
+		var inputTokens int
+		var provider string
+		var rawDataJSON *string
+		if err := rows.Scan(&inputTokens, &provider, &rawDataJSON); err != nil {
+			return fmt.Errorf("failed to scan usage input segment row: %w", err)
+		}
+		var rawData map[string]any
+		if rawDataJSON != nil && *rawDataJSON != "" {
+			if err := json.Unmarshal([]byte(*rawDataJSON), &rawData); err != nil {
+				slog.Warn("failed to unmarshal raw_data JSON", "error", err)
+			}
+		}
+		summary.addInputSegments(inputTokens, provider, rawData)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating usage input segment rows: %w", err)
+	}
+	return nil
 }
 
 // ModelUsage holds per-model token usage aggregates.

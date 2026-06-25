@@ -151,7 +151,45 @@ func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams)
 		return nil, fmt.Errorf("error iterating usage summary cursor: %w", err)
 	}
 
+	if err := r.accumulateInputSegments(ctx, matchFilters, summary); err != nil {
+		return nil, err
+	}
+
 	return summary, nil
+}
+
+// accumulateInputSegments streams the matched documents and folds each row's
+// provider prompt-cache split into the summary, reusing EntryInputSegments. The
+// $group aggregate above cannot return per-document raw_data, so this is a
+// second pass over the same filter projecting only the needed fields. This is
+// the dashboard summary path, not a request hot path.
+func (r *MongoDBReader) accumulateInputSegments(ctx context.Context, matchFilters bson.D, summary *UsageSummary) error {
+	projection := bson.D{
+		{Key: "input_tokens", Value: 1},
+		{Key: "provider", Value: 1},
+		{Key: "raw_data", Value: 1},
+	}
+	cursor, err := r.collection.Find(ctx, matchFilters, options.Find().SetProjection(projection))
+	if err != nil {
+		return fmt.Errorf("failed to query usage input segments: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	for cursor.Next(ctx) {
+		var row struct {
+			InputTokens int            `bson:"input_tokens"`
+			Provider    string         `bson:"provider"`
+			RawData     map[string]any `bson:"raw_data"`
+		}
+		if err := cursor.Decode(&row); err != nil {
+			return fmt.Errorf("failed to decode usage input segment row: %w", err)
+		}
+		summary.addInputSegments(row.InputTokens, row.Provider, row.RawData)
+	}
+	if err := cursor.Err(); err != nil {
+		return fmt.Errorf("error iterating usage input segment cursor: %w", err)
+	}
+	return nil
 }
 
 // GetUsageByModel returns token and cost totals grouped by model and provider.

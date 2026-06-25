@@ -18,6 +18,15 @@
   --danger: #ef4444;
   --prompt-cache-color: #40a811;
   --prompt-cache-color-bg: color-mix(in srgb, var(--prompt-cache-color) 14%, var(--bg-surface));
+  /* Cache meter segments. Declared once as semantic aliases: --accent/--info
+     are re-themed per mode, and var() resolves lazily per element, so these
+     stay theme-correct without duplicating across the light/dark blocks. */
+  --cache-meter-uncached: var(--accent);
+  /* Two distinct greens: a deep emerald (darkened --success) for local hits,
+     lime --prompt-cache-color for provider prompt-cache reads. --success is the
+     same in both themes, so the mix stays theme-consistent. */
+  --cache-meter-local: color-mix(in srgb, var(--success) 58%, #000);
+  --cache-meter-prompt: var(--prompt-cache-color);
   --sidebar-width: 240px;
   --radius: 8px;
   --chart-grid: #2a2826;
@@ -1149,6 +1158,12 @@ body.dashboard-modal-open {
   letter-spacing: -0.02em;
 }
 
+/* Provider docs help icon — reuses the standard help-toggle badge as a link. */
+.provider-doc-help {
+  align-self: center;
+  text-decoration: none;
+}
+
 .provider-status-name-type {
   font-size: 11px;
   font-weight: 700;
@@ -1341,6 +1356,114 @@ body.dashboard-modal-open {
 }
 
 /* Chart */
+.cache-meter {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 28px;
+}
+
+.cache-meter-header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-bottom: 16px;
+}
+
+.cache-meter-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.cache-meter-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.cache-meter-bar {
+  display: flex;
+  width: 100%;
+  height: 28px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-surface-hover);
+}
+
+.cache-meter-segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-width: 3px;
+  overflow: hidden;
+  transition: width 0.3s ease;
+}
+
+.cache-meter-segment-label {
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  /* Keeps white legible on the lighter brown slice in dark mode. */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.cache-meter-segment + .cache-meter-segment {
+  box-shadow: -1px 0 0 var(--bg-surface);
+}
+
+.cache-meter-bar.is-empty {
+  height: auto;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  background: var(--bg-surface-hover);
+}
+
+.cache-meter-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin-top: 16px;
+}
+
+.cache-meter-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.cache-meter-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.cache-meter-legend-label {
+  color: var(--text);
+}
+
+.cache-meter-legend-pct {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.cache-meter-legend-tokens {
+  color: var(--text-muted);
+}
+
+.cache-meter-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 .chart-container {
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -1352,6 +1475,20 @@ body.dashboard-modal-open {
   font-size: 16px;
   font-weight: 600;
   margin-bottom: 16px;
+}
+
+/* Chart header: title on the left, interval picker on the right. */
+.chart-container-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.chart-container-header h3 {
+  margin-bottom: 0;
 }
 
 .chart-wrapper {

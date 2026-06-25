@@ -47,7 +47,25 @@ func (r *SQLiteReader) GetSummary(ctx context.Context, params UsageQueryParams) 
 		return nil, fmt.Errorf("failed to query usage summary: %w", err)
 	}
 
+	if err := r.accumulateInputSegments(ctx, where, args, summary); err != nil {
+		return nil, err
+	}
+
 	return summary, nil
+}
+
+// accumulateInputSegments streams the matched rows and folds each row's
+// provider prompt-cache split into the summary. It runs a second pass (the
+// aggregate above cannot also return per-row raw_data) over the same filter,
+// selecting only the columns EntryInputSegments needs. This is the dashboard
+// summary path, not a request hot path.
+func (r *SQLiteReader) accumulateInputSegments(ctx context.Context, where string, args []any, summary *UsageSummary) error {
+	rows, err := r.db.QueryContext(ctx, `SELECT input_tokens, provider, raw_data FROM usage`+where, args...)
+	if err != nil {
+		return fmt.Errorf("failed to query usage input segments: %w", err)
+	}
+	defer rows.Close()
+	return foldInputSegments(rows, summary)
 }
 
 // GetUsageByModel returns token and cost totals grouped by model and provider.

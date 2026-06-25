@@ -6915,6 +6915,12 @@ const docTemplate = `{
         "usage.UsageSummary": {
             "type": "object",
             "properties": {
+                "cache_write_input_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
                 "total_cost": {
                     "type": "number"
                 },
@@ -6934,6 +6940,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "total_tokens": {
+                    "type": "integer"
+                },
+                "uncached_input_tokens": {
                     "type": "integer"
                 }
             }

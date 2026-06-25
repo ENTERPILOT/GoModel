@@ -5,12 +5,6 @@
     <div class="page-header">
         <h2>Usage Overview</h2>
         <div class="page-header-controls">
-            <div class="interval-picker">
-                <button type="button" class="interval-btn" :class="{active: interval==='daily'}" @click="setInterval('daily')">Daily</button>
-                <button type="button" class="interval-btn" :class="{active: interval==='weekly'}" @click="setInterval('weekly')">Weekly</button>
-                <button type="button" class="interval-btn" :class="{active: interval==='monthly'}" @click="setInterval('monthly')">Monthly</button>
-                <button type="button" class="interval-btn" :class="{active: interval==='yearly'}" @click="setInterval('yearly')">Yearly</button>
-            </div>
             {{template "date-picker" .}}
         </div>
     </div>
@@ -36,7 +30,7 @@
         </div>
         <div class="card">
             <div class="card-label">Total Requests</div>
-            <div class="card-value" x-text="formatNumber(summary.total_requests)">-</div>
+            <div class="card-value" x-text="formatNumber(summaryTotalRequests())" :title="summaryTotalRequestsTitle()">-</div>
         </div>
         <div class="card">
             <div class="card-label">Estimated Cost</div>
@@ -74,9 +68,45 @@
         </div>
     </div>
 
+    <!-- Cache Meter -->
+    <div class="cache-meter">
+        <div class="cache-meter-header">
+            <h3>Tokens</h3>
+            <span class="cache-meter-subtitle">Share of input tokens over the selected period</span>
+        </div>
+        <div class="cache-meter-bar" :class="{ 'is-empty': !cacheMeterVisible() }" role="img" :aria-label="cacheMeterAriaLabel()">
+            <template x-for="seg in cacheMeterSegments()" :key="seg.key">
+                <div class="cache-meter-segment"
+                     :style="'width: ' + seg.pct + '%; background: var(' + seg.colorVar + ')'"
+                     :title="cacheMeterSegmentTitle(seg)">
+                    <span class="cache-meter-segment-label" x-show="seg.pct >= 8" x-text="seg.pct + '%'"></span>
+                </div>
+            </template>
+            <span class="cache-meter-empty" x-show="!cacheMeterVisible()">No usage in the selected period yet</span>
+        </div>
+        <div class="cache-meter-legend">
+            <template x-for="seg in cacheMeterCategories()" :key="seg.key">
+                <div class="cache-meter-legend-item" :title="cacheMeterSegmentTitle(seg)">
+                    <span class="cache-meter-swatch" :style="'background: var(' + seg.colorVar + ')'"></span>
+                    <span class="cache-meter-legend-label" x-text="seg.label">-</span>
+                    <span class="cache-meter-legend-pct mono" x-text="seg.pct + '%'">-</span>
+                    <span class="cache-meter-legend-tokens mono" x-text="formatNumber(seg.tokens)">-</span>
+                </div>
+            </template>
+        </div>
+    </div>
+
     <!-- Usage Chart -->
     <div class="chart-container">
-        <h3 x-text="chartTitle()">Daily Token Usage</h3>
+        <div class="chart-container-header">
+            <h3 x-text="chartTitle()">Daily Token Usage</h3>
+            <div class="interval-picker">
+                <button type="button" class="interval-btn" :class="{active: interval==='daily'}" @click="setInterval('daily')">Daily</button>
+                <button type="button" class="interval-btn" :class="{active: interval==='weekly'}" @click="setInterval('weekly')">Weekly</button>
+                <button type="button" class="interval-btn" :class="{active: interval==='monthly'}" @click="setInterval('monthly')">Monthly</button>
+                <button type="button" class="interval-btn" :class="{active: interval==='yearly'}" @click="setInterval('yearly')">Yearly</button>
+            </div>
+        </div>
         <div class="chart-wrapper">
             <canvas id="usageChart"></canvas>
             <div class="chart-empty-overlay" x-show="daily.length === 0 && !loading && !authError">{{template "no-data-icon"}}</div>
@@ -167,6 +197,15 @@
                             <h4 class="provider-status-name">
                                 <span x-text="provider.name"></span>
                                 <span class="provider-status-name-type" x-show="providerTypeLabel(provider)" x-text="'(' + providerTypeLabel(provider) + ')'"></span>
+                                <a class="inline-help-toggle provider-doc-help"
+                                   x-show="providerDocUrl(provider)"
+                                   :href="providerDocUrl(provider)"
+                                   target="_blank"
+                                   rel="noopener noreferrer"
+                                   :aria-label="'View ' + (providerTypeLabel(provider) || provider.name) + ' provider docs'"
+                                   :title="'View ' + (providerTypeLabel(provider) || provider.name) + ' provider docs'">
+                                    <span class="inline-help-toggle-icon" aria-hidden="true">?</span>
+                                </a>
                             </h4>
                         </div>
                         <span class="provider-status-pill" :class="providerStatusBadgeClass(provider.status)" x-text="provider.status_label"></span>

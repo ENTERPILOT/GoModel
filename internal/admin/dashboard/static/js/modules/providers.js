@@ -2,6 +2,25 @@
     const PROVIDER_STATUS_DETAILS_STORAGE_KEY = 'gomodel_provider_status_details_expanded';
     const PROVIDER_STATUS_POLL_MS = 3000;
 
+    // Provider types that have a dedicated docs page at
+    // gomodel.enterpilot.io/docs/providers/. Keyed by provider type; the value
+    // is the docs slug (identical to the type except opencode_go → opencode-go).
+    // Types absent here get no help icon — that is the "doc exists" gate.
+    const PROVIDER_DOCS_BASE_URL = 'https://gomodel.enterpilot.io/docs/providers/';
+    const PROVIDER_DOC_SLUGS = {
+        anthropic: 'anthropic',
+        azure: 'azure',
+        bailian: 'bailian',
+        bedrock: 'bedrock',
+        deepseek: 'deepseek',
+        gemini: 'gemini',
+        opencode_go: 'opencode-go',
+        oracle: 'oracle',
+        vertex: 'vertex',
+        vllm: 'vllm',
+        xiaomi: 'xiaomi'
+    };
+
     function browserStorage() {
         try {
             return global.localStorage || null;
@@ -247,6 +266,18 @@
                     return '';
                 }
                 return type;
+            },
+
+            // Docs URL for a provider's type, or '' when no provider-specific
+            // page exists (the help icon is shown only when this is non-empty).
+            // Uses the raw type so it still resolves when the (type) label is
+            // hidden because the provider name equals its type.
+            providerDocUrl(provider) {
+                const type = String(
+                    (provider && (provider.type || (provider.config && provider.config.type))) || ''
+                ).trim().toLowerCase();
+                const slug = type ? PROVIDER_DOC_SLUGS[type] : '';
+                return slug ? PROVIDER_DOCS_BASE_URL + slug : '';
             },
 
             providerRetrySummary(provider) {

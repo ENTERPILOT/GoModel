@@ -76,6 +76,23 @@ test('provider helper methods format configured models and resilience summaries'
     assert.equal(module.providerTypeLabel({ name: 'azure-east', config: { type: 'azure' } }), 'azure');
 });
 
+test('providerDocUrl links provider types with docs and stays empty otherwise', () => {
+    const module = createProvidersModule();
+
+    // Types with a dedicated docs page.
+    assert.equal(module.providerDocUrl({ type: 'anthropic' }), 'https://gomodel.enterpilot.io/docs/providers/anthropic');
+    assert.equal(module.providerDocUrl({ config: { type: 'bedrock' } }), 'https://gomodel.enterpilot.io/docs/providers/bedrock');
+    // Type slug differs from the docs slug.
+    assert.equal(module.providerDocUrl({ type: 'opencode_go' }), 'https://gomodel.enterpilot.io/docs/providers/opencode-go');
+    // Resolves even when the (type) label is hidden because name === type.
+    assert.equal(module.providerDocUrl({ name: 'gemini', type: 'GEMINI' }), 'https://gomodel.enterpilot.io/docs/providers/gemini');
+    // Types without a provider-specific doc → no link (no icon).
+    assert.equal(module.providerDocUrl({ type: 'openai' }), '');
+    assert.equal(module.providerDocUrl({ type: 'ollama' }), '');
+    assert.equal(module.providerDocUrl({ name: 'mystery' }), '');
+    assert.equal(module.providerDocUrl(null), '');
+});
+
 test('provider detail toggle starts collapsed, persists toggles, and last check formatting uses time-only text', () => {
     const storage = {
         values: new Map(),

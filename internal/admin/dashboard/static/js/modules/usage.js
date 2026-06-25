@@ -18,6 +18,9 @@
                     total_input_tokens: 0,
                     total_output_tokens: 0,
                     total_tokens: 0,
+                    uncached_input_tokens: 0,
+                    cached_input_tokens: 0,
+                    cache_write_input_tokens: 0,
                     total_input_cost: null,
                     total_output_cost: null,
                     total_cost: null
@@ -52,6 +55,29 @@
                 return (Number.isFinite(input) ? input : 0) + (Number.isFinite(output) ? output : 0);
             },
 
+            // Local response-cache hits over the period. The summary endpoint
+            // counts provider (uncached-mode) requests only, so hits live in the
+            // cache overview. Zero when cache analytics is off (overview unfetched).
+            summaryCacheHits() {
+                if (!this.cacheAnalyticsEnabled()) return 0;
+                const cacheSummary = this.cacheOverview && this.cacheOverview.summary ? this.cacheOverview.summary : {};
+                const hits = Number(cacheSummary.total_hits || 0);
+                return Number.isFinite(hits) && hits > 0 ? hits : 0;
+            },
+
+            // Total requests including local cache hits (provider requests + hits).
+            summaryTotalRequests() {
+                const requests = Number((this.summary && this.summary.total_requests) || 0);
+                return (Number.isFinite(requests) ? requests : 0) + this.summaryCacheHits();
+            },
+
+            summaryTotalRequestsTitle() {
+                const hits = this.summaryCacheHits();
+                if (hits <= 0) return '';
+                const provider = this.summaryTotalRequests() - hits;
+                return this.formatNumber(provider) + ' to providers + ' + this.formatNumber(hits) + ' from cache';
+            },
+
             cacheOverviewTotalTokens() {
                 const summary = this.cacheOverview && this.cacheOverview.summary ? this.cacheOverview.summary : {};
                 const input = Number(summary.total_input_tokens || 0);
@@ -63,6 +89,104 @@
                 return typeof this.workflowRuntimeBooleanFlag === 'function'
                     ? this.workflowRuntimeBooleanFlag('CACHE_ENABLED', false)
                     : false;
+            },
+
+            // --- Cache meter (overview) ---
+            // Splits the selected period's input tokens into three buckets that
+            // sum to 100%: not-cached, locally-cached (GoModel response cache),
+            // and prompt-cached (provider cache reads). The provider split comes
+            // from /admin/usage/summary (uncached/cached/cache-write over provider
+            // rows); the local slice from /admin/cache/overview. Both already
+            // refresh with the period, so the meter follows the picker for free.
+            cacheMeterRawSegments() {
+                const positive = (value) => {
+                    const n = Number(value || 0);
+                    return Number.isFinite(n) && n > 0 ? n : 0;
+                };
+                const summary = this.summary || {};
+                const uncached = positive(summary.uncached_input_tokens);
+                const promptCached = positive(summary.cached_input_tokens);
+                const cacheWrite = positive(summary.cache_write_input_tokens);
+                const cacheSummary = this.cacheOverview && this.cacheOverview.summary ? this.cacheOverview.summary : {};
+                const locallyCached = this.cacheAnalyticsEnabled() ? positive(cacheSummary.total_input_tokens) : 0;
+                return [
+                    {
+                        key: 'uncached',
+                        label: 'Regular',
+                        tokens: uncached + cacheWrite,
+                        colorVar: '--cache-meter-uncached',
+                        note: cacheWrite > 0 ? 'Includes ' + this.formatNumber(cacheWrite) + ' cache-write tokens' : ''
+                    },
+                    {
+                        key: 'local',
+                        label: 'Locally cached',
+                        tokens: locallyCached,
+                        colorVar: '--cache-meter-local',
+                        note: 'Served from GoModel response cache'
+                    },
+                    {
+                        key: 'prompt',
+                        label: 'Prompt cached',
+                        tokens: promptCached,
+                        colorVar: '--cache-meter-prompt',
+                        note: 'Provider prompt-cache reads'
+                    }
+                ];
+            },
+
+            cacheMeterTotal() {
+                return this.cacheMeterRawSegments().reduce((sum, seg) => sum + seg.tokens, 0);
+            },
+
+            cacheMeterVisible() {
+                return this.cacheMeterTotal() > 0;
+            },
+
+            // The three fixed categories with integer percentages. Largest-
+            // remainder rounding keeps the percents summing to exactly 100 when
+            // there is data; with no usage every category is 0% so the meter can
+            // still render as an empty key. Used by the legend (all three shown)
+            // and, filtered to non-zero, by the bar segments.
+            cacheMeterCategories() {
+                const categories = this.cacheMeterRawSegments();
+                const total = categories.reduce((sum, seg) => sum + seg.tokens, 0);
+                if (total <= 0) {
+                    return categories.map((seg) => Object.assign({}, seg, { pct: 0 }));
+                }
+                const withPct = categories.map((seg) => {
+                    const exact = (seg.tokens / total) * 100;
+                    const floor = Math.floor(exact);
+                    return Object.assign({}, seg, { pct: floor, remainder: exact - floor });
+                });
+                let leftover = 100 - withPct.reduce((sum, seg) => sum + seg.pct, 0);
+                withPct
+                    .map((seg, index) => ({ index, remainder: seg.remainder, tokens: seg.tokens }))
+                    .filter((entry) => entry.tokens > 0)
+                    .sort((a, b) => b.remainder - a.remainder)
+                    .forEach((entry) => {
+                        if (leftover > 0) {
+                            withPct[entry.index].pct += 1;
+                            leftover -= 1;
+                        }
+                    });
+                return withPct;
+            },
+
+            // Non-zero categories only, so the bar never renders zero-width
+            // slivers. Empty when there is no usage.
+            cacheMeterSegments() {
+                return this.cacheMeterCategories().filter((seg) => seg.tokens > 0);
+            },
+
+            cacheMeterSegmentTitle(segment) {
+                const parts = [segment.label + ': ' + this.formatNumber(segment.tokens) + ' input tokens (' + segment.pct + '%)'];
+                if (segment.note) parts.push(segment.note);
+                return parts.join('\n');
+            },
+
+            cacheMeterAriaLabel() {
+                const parts = this.cacheMeterSegments().map((seg) => seg.label + ' ' + seg.pct + '%');
+                return 'Cache breakdown of input tokens — ' + (parts.length ? parts.join(', ') : 'no data');
             },
 
             cacheOverviewVisible() {

@@ -216,3 +216,134 @@ test('fetchUsageLog switches to cache_mode=uncached when hide-cached toggle is o
     assert.equal(fetchCalls.length, 1);
     assert.match(fetchCalls[0].url, /cache_mode=uncached/);
 });
+
+function createCacheMeterModule({ summary = {}, cacheOverview = null, cacheEnabled = false } = {}) {
+    const module = createUsageModule();
+    module.formatNumber = (n) => String(n);
+    module.workflowRuntimeBooleanFlag = (flag, def) => (flag === 'CACHE_ENABLED' ? cacheEnabled : def);
+    module.summary = { ...module.emptyUsageSummary(), ...summary };
+    module.cacheOverview = cacheOverview || module.emptyCacheOverview();
+    return module;
+}
+
+test('cacheMeterSegments splits input tokens token-weighted and percents sum to 100', () => {
+    const module = createCacheMeterModule({
+        summary: { uncached_input_tokens: 600, cached_input_tokens: 300, cache_write_input_tokens: 0 },
+        cacheOverview: { summary: { total_input_tokens: 100 }, daily: [] },
+        cacheEnabled: true
+    });
+
+    const segments = module.cacheMeterSegments();
+    const byKey = Object.fromEntries(segments.map((s) => [s.key, s]));
+
+    assert.equal(module.cacheMeterTotal(), 1000);
+    assert.equal(module.cacheMeterVisible(), true);
+    assert.equal(byKey.uncached.pct, 60);
+    assert.equal(byKey.local.pct, 10);
+    assert.equal(byKey.prompt.pct, 30);
+    assert.equal(byKey.uncached.tokens, 600);
+    assert.equal(byKey.local.tokens, 100);
+    assert.equal(byKey.prompt.tokens, 300);
+    assert.equal(segments.reduce((sum, s) => sum + s.pct, 0), 100);
+});
+
+test('cacheMeterVisible is false and segments empty when there is no usage', () => {
+    const module = createCacheMeterModule();
+
+    assert.equal(module.cacheMeterTotal(), 0);
+    assert.equal(module.cacheMeterVisible(), false);
+    assert.equal(module.cacheMeterSegments().length, 0);
+});
+
+test('cacheMeterSegments folds cache-write tokens into the not-cached slice', () => {
+    const module = createCacheMeterModule({
+        summary: { uncached_input_tokens: 50, cached_input_tokens: 0, cache_write_input_tokens: 50 }
+    });
+
+    const segments = module.cacheMeterSegments();
+
+    assert.equal(segments.length, 1);
+    assert.equal(segments[0].key, 'uncached');
+    assert.equal(segments[0].tokens, 100);
+    assert.equal(segments[0].pct, 100);
+    assert.match(module.cacheMeterSegmentTitle(segments[0]), /cache-write/);
+});
+
+test('cacheMeterSegments omits the local slice when cache analytics are disabled', () => {
+    const module = createCacheMeterModule({
+        summary: { uncached_input_tokens: 70, cached_input_tokens: 30 },
+        cacheOverview: { summary: { total_input_tokens: 999 }, daily: [] },
+        cacheEnabled: false
+    });
+
+    const keys = module.cacheMeterSegments().map((s) => s.key);
+
+    assert.equal(keys.join(','), 'uncached,prompt');
+    assert.equal(module.cacheMeterTotal(), 100);
+});
+
+test('cacheMeterSegments uses largest-remainder rounding so thirds still total 100', () => {
+    const module = createCacheMeterModule({
+        summary: { uncached_input_tokens: 1, cached_input_tokens: 1 },
+        cacheOverview: { summary: { total_input_tokens: 1 }, daily: [] },
+        cacheEnabled: true
+    });
+
+    const segments = module.cacheMeterSegments();
+
+    assert.equal(segments.length, 3);
+    assert.equal(segments.reduce((sum, s) => sum + s.pct, 0), 100);
+});
+
+test('cacheMeterCategories always returns all three categories at 0% when empty', () => {
+    const module = createCacheMeterModule();
+
+    const categories = module.cacheMeterCategories();
+
+    assert.equal(categories.length, 3);
+    assert.equal(categories.map((c) => c.key).join(','), 'uncached,local,prompt');
+    assert.equal(categories.every((c) => c.pct === 0), true);
+    // The bar stays empty while the legend key still renders all three.
+    assert.equal(module.cacheMeterSegments().length, 0);
+    assert.equal(module.cacheMeterVisible(), false);
+});
+
+test('summaryTotalRequests adds local cache hits when analytics enabled', () => {
+    const module = createCacheMeterModule({
+        summary: { total_requests: 40 },
+        cacheOverview: { summary: { total_hits: 10, total_input_tokens: 0 }, daily: [] },
+        cacheEnabled: true
+    });
+
+    assert.equal(module.summaryTotalRequests(), 50);
+    assert.equal(module.summaryCacheHits(), 10);
+    assert.match(module.summaryTotalRequestsTitle(), /40 to providers \+ 10 from cache/);
+});
+
+test('summaryTotalRequests excludes cache hits when analytics disabled', () => {
+    const module = createCacheMeterModule({
+        summary: { total_requests: 40 },
+        cacheOverview: { summary: { total_hits: 10 }, daily: [] },
+        cacheEnabled: false
+    });
+
+    assert.equal(module.summaryTotalRequests(), 40);
+    assert.equal(module.summaryCacheHits(), 0);
+    assert.equal(module.summaryTotalRequestsTitle(), '');
+});
+
+test('cacheMeterCategories keeps zero categories alongside non-zero ones', () => {
+    const module = createCacheMeterModule({
+        summary: { uncached_input_tokens: 70, cached_input_tokens: 30 },
+        cacheEnabled: true
+    });
+
+    const byKey = Object.fromEntries(module.cacheMeterCategories().map((c) => [c.key, c]));
+
+    assert.equal(byKey.uncached.pct, 70);
+    assert.equal(byKey.prompt.pct, 30);
+    assert.equal(byKey.local.pct, 0);
+    assert.equal(module.cacheMeterCategories().reduce((sum, c) => sum + c.pct, 0), 100);
+    // The zero local slice is in the legend but not in the rendered bar.
+    assert.equal(module.cacheMeterSegments().length, 2);
+});

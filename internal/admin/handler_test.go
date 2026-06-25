@@ -228,6 +228,64 @@ func TestUsageSummary_Success(t *testing.T) {
 	}
 }
 
+func TestUsageSummary_IncludesCacheSplitFields(t *testing.T) {
+	reader := &mockUsageReader{
+		summary: &usage.UsageSummary{
+			TotalRequests:         10,
+			TotalInput:            1000,
+			UncachedInputTokens:   600,
+			CachedInputTokens:     350,
+			CacheWriteInputTokens: 50,
+		},
+	}
+	h := NewHandler(reader, nil)
+	c, rec := newHandlerContext("/admin/usage/summary?days=30")
+
+	if err := h.UsageSummary(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	for _, key := range []string{"uncached_input_tokens", "cached_input_tokens", "cache_write_input_tokens"} {
+		if !containsString(body, key) {
+			t.Errorf("expected %q in response body, got: %s", key, body)
+		}
+	}
+
+	var summary usage.UsageSummary
+	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if summary.UncachedInputTokens != 600 {
+		t.Errorf("expected 600 uncached input tokens, got %d", summary.UncachedInputTokens)
+	}
+	if summary.CachedInputTokens != 350 {
+		t.Errorf("expected 350 cached input tokens, got %d", summary.CachedInputTokens)
+	}
+	if summary.CacheWriteInputTokens != 50 {
+		t.Errorf("expected 50 cache-write input tokens, got %d", summary.CacheWriteInputTokens)
+	}
+}
+
+func TestUsageSummary_NilReaderZeroesCacheSplit(t *testing.T) {
+	h := NewHandler(nil, nil)
+	c, rec := newHandlerContext("/admin/usage/summary?days=30")
+
+	if err := h.UsageSummary(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var summary usage.UsageSummary
+	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if summary.UncachedInputTokens != 0 || summary.CachedInputTokens != 0 || summary.CacheWriteInputTokens != 0 {
+		t.Errorf("expected zero cache split for nil reader, got %+v", summary)
+	}
+}
+
 func TestUsageSummary_GatewayError(t *testing.T) {
 	reader := &mockUsageReader{
 		summaryErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
