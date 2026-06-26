@@ -65,10 +65,14 @@ def locate(target, res, audit):
     return False, None
 
 
-def evaluate(case, res, audit, audit_attempted):
+def evaluate(case, res, audit, audit_attempted, variables=None):
     """Return (status, checks, detail). checks: [{where, ok, hard, reason}]."""
     checks = []
     expect = case.get("expect", {})
+    if variables:
+        # Resolve ${var} references (e.g. a captured ${conversation_id}) in
+        # assertion operands, the same way request paths/bodies are interpolated.
+        expect = config.interpolate_vars(expect, variables)
 
     if res.error:
         return "ERROR", checks, res.error
@@ -298,25 +302,24 @@ def main():
         try:
             res, audit, attempted, skip = run_case(case, client, models, variables,
                                                     do_audit=not args.no_audit)
+
+            if skip:
+                results.append(_record(case, "SKIP", [], skip, res, audit, time.time() - t0))
+                print(f"skip {case['id']}: {skip}")
+                continue
+
+            if audit and (audit.get("data") or {}).get("request_body") is not None:
+                audit_bodies_seen = True
+
+            status, checks, detail = evaluate(case, res, audit, attempted, variables)
+            rec = _record(case, status, checks, detail, res, audit, time.time() - t0)
+            results.append(rec)
+            print(f"{report.STATUS_GLYPH.get(status, status):4} {case['id']}: {detail}")
         except Exception as e:  # noqa: BLE001 — never let one case abort the run
-            res, audit, attempted, skip = None, None, False, None
             err = f"{type(e).__name__}: {e}"
             results.append(_record(case, "ERROR", [], err, None, None, time.time() - t0))
             print(f"ERR  {case['id']}: {err}")
             continue
-
-        if skip:
-            results.append(_record(case, "SKIP", [], skip, res, audit, time.time() - t0))
-            print(f"skip {case['id']}: {skip}")
-            continue
-
-        if audit and (audit.get("data") or {}).get("request_body") is not None:
-            audit_bodies_seen = True
-
-        status, checks, detail = evaluate(case, res, audit, attempted)
-        rec = _record(case, status, checks, detail, res, audit, time.time() - t0)
-        results.append(rec)
-        print(f"{report.STATUS_GLYPH.get(status, status):4} {case['id']}: {detail}")
 
     meta = {"gateway": args.gateway, "run_id": run_id, "user_path": user_path,
             "audit_bodies": audit_bodies_seen, "models": models}

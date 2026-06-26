@@ -87,7 +87,12 @@ def _write_markdown(out_dir, results, meta):
     for r in results:
         q = quality_score(r)
         qs = f"{q}%" if q is not None else ""
-        modality = ",".join(r.get("modality") or [])
+        mod = r.get("modality")
+        if isinstance(mod, str):
+            mod = [mod]
+        elif not isinstance(mod, list):
+            mod = []
+        modality = ",".join(str(m) for m in mod)
         L.append(f"| {r['status']} | `{r['id']}` | {r.get('group','')} | "
                  f"{r.get('provider','')} | {modality} | {r['http'] or ''} | {qs} | "
                  f"{_md(r['detail'])} |")

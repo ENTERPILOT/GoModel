@@ -31,10 +31,10 @@
       "status": 200,
       "response": [
         {"path": "$.object", "equals": "conversation"},
-        {"path": "$.id", "not_empty": true}
+        {"path": "$.id", "equals": "${conversation_id}"}
       ]
     },
-    "notes": "Reads back the conversation created above (uses ${conversation_id})."
+    "notes": "Reads back the conversation created above; the returned id must equal the captured ${conversation_id}."
   },
   {
     "id": "conversations.use_in_responses",
@@ -52,9 +52,12 @@
     },
     "expect": {
       "status": 200,
-      "response": [{"path": "$.status", "equals": "completed"}]
+      "response": [
+        {"path": "$.status", "equals": "completed"},
+        {"path": "$.conversation.id", "equals": "${conversation_id}"}
+      ]
     },
-    "notes": "Responses request bound to a conversation id (stateful threading)."
+    "notes": "Responses request bound to a conversation id (stateful threading); the response must carry the same ${conversation_id} it was attached to."
   },
   {
     "id": "conversations.update",
@@ -67,9 +70,12 @@
     },
     "expect": {
       "status": 200,
-      "response": [{"path": "$.object", "equals": "conversation"}]
+      "response": [
+        {"path": "$.object", "equals": "conversation"},
+        {"path": "$.id", "equals": "${conversation_id}"}
+      ]
     },
-    "notes": "Metadata update on an existing conversation."
+    "notes": "Metadata update on an existing conversation; the update must return the same ${conversation_id}."
   },
   {
     "id": "conversations.delete",
@@ -84,9 +90,10 @@
       "status": 200,
       "response": [
         {"path": "$.object", "equals": "conversation.deleted"},
+        {"path": "$.id", "equals": "${conversation_id}"},
         {"path": "$.deleted", "equals": true}
       ]
     },
-    "notes": "Tears down the conversation created at the start of the flow."
+    "notes": "Tears down the conversation created at the start of the flow; the deletion ack must reference the same ${conversation_id}."
   }
 ]

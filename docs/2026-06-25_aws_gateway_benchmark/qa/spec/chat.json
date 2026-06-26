@@ -52,7 +52,7 @@
     "expect": {
       "status": 200,
       "stream": {"min_events": 2, "terminal": "[DONE]", "text": [{"not_empty": true}]},
-      "quality": [{"target": "stream", "contains_any": ["red", "blue", "yellow", "green"]}]
+      "quality": [{"target": "stream", "contains_any": ["red", "blue", "yellow"]}]
     },
     "notes": "SSE framing + terminal marker for chat dialect."
   },
@@ -75,9 +75,10 @@
     "expect": {
       "status": 200,
       "stream": {"min_events": 2, "terminal": "[DONE]"},
+      "audit": [{"path": "$.usage.total_tokens", "gt": 0}],
       "quality": [{"target": "stream", "not_empty": true}]
     },
-    "notes": "stream_options must survive translation; usage chunk is provider-shaped."
+    "notes": "stream_options must survive translation; the usage chunk is provider-shaped. For a stream the gateway can only derive usage from the streamed usage chunk, so a recorded usage.total_tokens>0 proves the chunk was emitted and not dropped."
   },
   {
     "id": "chat.openai.vision_data_url",

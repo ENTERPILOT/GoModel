@@ -48,7 +48,8 @@ services:
 
   litellm:
     profiles: ["all", "litellm"]
-    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-stable}
+    # Pinned by digest for a reproducible comparison (override via LITELLM_IMAGE).
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-stable@sha256:afdc3cc37493d4f86d485ad7ac4445e7154c568a8d47c01bad15c9cf062c66b5}
     depends_on: [mock]
     ports:
       - "4000:4000"
@@ -59,7 +60,8 @@ services:
 
   portkey:
     profiles: ["all", "portkey"]
-    image: ${PORTKEY_IMAGE:-portkeyai/gateway:latest}
+    # Pinned by digest for a reproducible comparison (override via PORTKEY_IMAGE).
+    image: ${PORTKEY_IMAGE:-portkeyai/gateway:latest@sha256:97f094d9c8a764cbfaa2a7138c0017b247ca923bb06db1b4c13b7f8a33b5200d}
     depends_on: [mock]
     ports:
       - "8787:8787"
@@ -69,7 +71,8 @@ services:
 
   bifrost:
     profiles: ["all", "bifrost"]
-    image: ${BIFROST_IMAGE:-maximhq/bifrost:latest}
+    # Pinned by digest for a reproducible comparison (override via BIFROST_IMAGE).
+    image: ${BIFROST_IMAGE:-maximhq/bifrost:latest@sha256:6f20c020cd326199c050e6b15ba18131a6f7ac8627a9a4276750f83e92af2253}
     depends_on: [mock]
     ports:
       - "8089:8089"

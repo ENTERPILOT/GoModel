@@ -32,6 +32,9 @@
       "status": 200,
       "response": [
         {"path": "$.data", "length_gte": 3},
+        {"path": "$.data[0].index", "equals": 0},
+        {"path": "$.data[1].index", "equals": 1},
+        {"path": "$.data[2].index", "equals": 2},
         {"path": "$.data[2].embedding", "length_gte": 256}
       ]
     },

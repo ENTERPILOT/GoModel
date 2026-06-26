@@ -126,10 +126,17 @@ def get_json(url, timeout=10):
 
 
 def mock_reset():
+    # Fail fast: a silently failed reset would attribute stale upstream calls to
+    # the wrong gateway/case and corrupt the captured corpus.
     try:
-        urllib.request.urlopen(urllib.request.Request(MOCK + "/__reset", data=b"", method="POST"), timeout=5).read()
-    except Exception:  # noqa: BLE001
-        pass
+        resp = urllib.request.urlopen(
+            urllib.request.Request(MOCK + "/__reset", data=b"", method="POST"), timeout=5)
+        status = getattr(resp, "status", 200) or 200
+        resp.read()
+    except Exception as e:  # noqa: BLE001
+        sys.exit(f"mock reset failed ({MOCK}/__reset): {e} — aborting to avoid a corrupt corpus")
+    if status >= 400:
+        sys.exit(f"mock reset returned HTTP {status} ({MOCK}/__reset) — aborting to avoid a corrupt corpus")
 
 
 def wait_ready(gw, tries=60):
@@ -162,7 +169,10 @@ def main():
     ap.add_argument("--gateways", default=",".join(ORDER))
     args = ap.parse_args()
 
-    gateways = [g for g in args.gateways.split(",") if g in GATEWAYS]
+    gateways = [g.strip() for g in args.gateways.split(",") if g.strip()]
+    unknown = [g for g in gateways if g not in GATEWAYS]
+    if unknown:
+        ap.error(f"unknown gateway(s): {', '.join(unknown)}; valid options: {', '.join(ORDER)}")
     corpus = json.load(open(args.corpus, encoding="utf-8"))
 
     if get_json(MOCK + "/__log") is None:

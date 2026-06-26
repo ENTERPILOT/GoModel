@@ -153,7 +153,7 @@ are measured under load on the same box.
 | Docker image (compressed pull) | **`16 MB`** | `77 MB` | `59 MB` | `372 MB` |
 | Workload coverage | `6/6` | `6/6` | `4/6` | `6/6` |
 | Vendor-agnostic | Yes | Partial † | Yes | Yes |
-| Open-source | Yes / Partial ‡ | Partial ‡ | Partial ‡ | Yes |
+| Open-source | Yes ‡ | Partial ‡ | Partial ‡ | Yes |
 
 Same numbers, at a glance:
 

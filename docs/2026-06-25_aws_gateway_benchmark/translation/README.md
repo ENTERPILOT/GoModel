@@ -32,7 +32,7 @@ A recording mock (not real providers) is the only way to observe the translated
 
 ## Pieces
 
-```
+```text
 docker-compose.yml   mock (MOCK_RECORD=1) + all 4 gateways, reusing ../remote configs
 corpus.json          12 gateway-agnostic cases across chat/responses/messages, stream + not
 capture.py           resets the mock, sends each case through each gateway, records 4 artifacts
@@ -66,7 +66,7 @@ No real provider keys or spend — every gateway talks to the local mock.
 
 | gateway | port | model | messages path | extra headers |
 |---|--|---|---|---|
-| GoModel | 8080 | `gpt-4o-mini` | `/v1/messages` | — |
+| GoModel | 18080 | `gpt-4o-mini` | `/v1/messages` | — |
 | LiteLLM | 4000 | `gpt-4o-mini` | `/v1/messages` | — |
 | Portkey | 8787 | `gpt-4o-mini` | `/v1/messages` | `x-portkey-provider`, `x-portkey-custom-host` |
 | Bifrost | 8089 | `openai/gpt-4o-mini` | `/anthropic/v1/messages` | — |

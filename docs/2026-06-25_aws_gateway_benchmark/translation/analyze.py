@@ -58,10 +58,16 @@ def split():
         print("  ", cid)
 
 
+def _esc(s):
+    # AI-authored cell values may contain `|` or newlines that would break the
+    # Markdown table; escape pipes and collapse newlines to spaces.
+    return str(s).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
 def _cell(items):
     if not items:
         return "—"
-    return "; ".join(str(x) for x in items)[:120]
+    return _esc("; ".join(str(x) for x in items)[:120])
 
 
 def render():
@@ -112,10 +118,10 @@ def render():
             if not v:
                 L.append(f"| {g} | — | — | — | — | — | — | — |")
                 continue
-            L.append(f"| {g} | {v.get('upstream_path','—')} | {_cell(v.get('request_added'))} | "
+            L.append(f"| {g} | {_esc(v.get('upstream_path','—'))} | {_cell(v.get('request_added'))} | "
                      f"{_cell(v.get('request_dropped'))} | {_cell(v.get('request_renamed'))} | "
                      f"{_cell(v.get('response_extras_preserved'))} | {_cell(v.get('response_extras_dropped'))} | "
-                     f"{v.get('fidelity_score','—')} |")
+                     f"{_esc(v.get('fidelity_score','—'))} |")
         L.append("")
         if a.get("cross_gateway_findings"):
             L.append("**Findings:**")

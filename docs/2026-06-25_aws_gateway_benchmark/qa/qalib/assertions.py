@@ -50,9 +50,9 @@ def apply_operator(assertion, found, value):
             empty = value is None or value == "" or value == [] or value == {}
             return (not empty), f"non-empty (got {_short(value)})"
         if op == "contains":
-            return expected.lower() in str(value).lower(), f"contains {expected!r}"
+            return str(expected).lower() in str(value).lower(), f"contains {expected!r}"
         if op == "not_contains":
-            return expected.lower() not in str(value).lower(), f"not contains {expected!r}"
+            return str(expected).lower() not in str(value).lower(), f"not contains {expected!r}"
         if op == "contains_any":
             hay = str(value).lower()
             hit = next((w for w in expected if str(w).lower() in hay), None)
