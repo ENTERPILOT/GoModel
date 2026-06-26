@@ -227,6 +227,33 @@ test('fetchUsage clears stale cache overview when the summary refresh fails', as
     assert.equal(app.cacheOverview.daily.length, 0);
 });
 
+test('fetchUsage clears stale data when the request throws (network error)', async () => {
+    const factory = loadUsageModuleFactory({
+        fetch: async () => { throw new Error('network down'); }
+    });
+    const app = Object.assign(
+        {
+            days: '30',
+            interval: 'daily',
+            page: 'overview',
+            customStartDate: null,
+            customEndDate: null,
+            requestOptions() { return { headers: {} }; },
+            handleFetchResponse() { return true; },
+            renderChart() {}
+        },
+        factory()
+    );
+    app.summary = { total_requests: 999, total_input_tokens: 5000 };
+    app.cacheOverview = { summary: { total_hits: 42, total_input_tokens: 1000 }, daily: [{}] };
+
+    await app.fetchUsage();
+
+    assert.equal(app.summary.total_requests, 0);
+    assert.equal(app.cacheOverview.summary.total_hits, 0);
+    assert.equal(app.cacheOverview.daily.length, 0);
+});
+
 test('fetchUsage clears the previous cache overview before reloading on a range switch', async () => {
     let cacheFetches = 0;
     const factory = loadUsageModuleFactory({

@@ -330,6 +330,12 @@
                         return;
                     }
                     console.error('Failed to fetch usage:', e);
+                    // Match the handled-failure branch: a fetch()/json() rejection
+                    // must not leave the previous period's data rendered.
+                    this.summary = this.emptyUsageSummary();
+                    this.daily = [];
+                    this.cacheOverview = this.emptyCacheOverview();
+                    this.renderChart();
                 } finally {
                     if (typeof this._clearAbortableRequest === 'function') {
                         this._clearAbortableRequest('_usageFetchController', controller);
