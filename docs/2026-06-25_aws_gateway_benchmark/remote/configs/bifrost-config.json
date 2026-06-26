@@ -1,0 +1,60 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+  "client": {
+    "drop_excess_requests": false,
+    "initial_pool_size": 5000,
+    "enable_logging": false,
+    "enforce_auth_on_inference": false,
+    "allowed_origins": [
+      "*"
+    ]
+  },
+  "config_store": {
+    "enabled": true,
+    "type": "sqlite",
+    "config": {
+      "path": "/app/data/config.db"
+    }
+  },
+  "logs_store": {
+    "enabled": false
+  },
+  "providers": {
+    "openai": {
+      "keys": [
+        {
+          "name": "mock",
+          "value": "sk-bench-test-key",
+          "models": [
+            "gpt-4o-mini"
+          ],
+          "weight": 1
+        }
+      ],
+      "network_config": {
+        "base_url": "http://mock:9999",
+        "default_request_timeout_in_seconds": 60,
+        "max_retries": 0,
+        "allow_private_network": true
+      }
+    },
+    "anthropic": {
+      "keys": [
+        {
+          "name": "mock",
+          "value": "sk-bench-test-key",
+          "models": [
+            "claude-3-5-sonnet"
+          ],
+          "weight": 1
+        }
+      ],
+      "network_config": {
+        "base_url": "http://mock:9999",
+        "default_request_timeout_in_seconds": 60,
+        "max_retries": 0,
+        "allow_private_network": true
+      }
+    }
+  }
+}

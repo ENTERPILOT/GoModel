@@ -1,0 +1,99 @@
+# Benchmark topology: a shared mock backend plus exactly one gateway at a time.
+#
+# Each gateway lives in its own profile so we can bring them up sequentially and
+# never let them contend for the (single-vCPU, free-tier) instance:
+#
+#   docker compose --profile gomodel up -d   # mock + gomodel
+#   docker compose --profile litellm up -d   # mock + litellm
+#   docker compose --profile portkey up -d   # mock + portkey
+#
+# The mock has no profile, so it starts alongside whichever gateway is selected.
+# The load generator is run separately via `docker run --network benchnet`.
+#
+# Image refs are overridable via env so exact versions/digests stay pinnable.
+
+networks:
+  default:
+    name: benchnet
+
+services:
+  mock:
+    image: ${BENCH_TOOLS_IMAGE:-bench-tools:local}
+    command: ["/mock"]
+    environment:
+      - MOCK_PORT=9999
+    ports:
+      - "9999:9999"   # published so the runner can record a no-gateway baseline
+    restart: "no"
+
+  gomodel:
+    profiles: ["gomodel"]
+    image: ${GOMODEL_IMAGE:-gomodel-bench:local}
+    depends_on: [mock]
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - GOMODEL_MASTER_KEY=
+      - OPENAI_API_KEY=sk-bench-test-key
+      - OPENAI_BASE_URL=http://mock:9999/v1
+      - LOGGING_ENABLED=false
+      - USAGE_ENABLED=false
+      - METRICS_ENABLED=false
+      - SWAGGER_ENABLED=false
+      - PPROF_ENABLED=false
+      - ENABLE_PASSTHROUGH_ROUTES=false
+      # Config parity with the no-retry / no-breaker peers (LiteLLM, Bifrost):
+      #  - retries off (default is 3).
+      #  - circuit breaker effectively disabled. It has no on/off env, so set an
+      #    unreachable failure threshold. This matters under load: a few transient
+      #    upstream errors at high concurrency were tripping the default breaker
+      #    (threshold 5), which then blanket-503'd every request ("circuit breaker
+      #    is open") and made GoModel's own capacity/resource numbers read as ~0.
+      #    No other gateway has a breaker, so disabling it keeps the test fair.
+      - RETRY_MAX_RETRIES=0
+      - CIRCUIT_BREAKER_FAILURE_THRESHOLD=1000000000
+      - STORAGE_TYPE=sqlite
+      - SQLITE_PATH=/app/data/gomodel-bench.db
+      - GOMODEL_CACHE_DIR=/app/.cache
+    restart: "no"
+
+  litellm:
+    profiles: ["litellm"]
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-stable}
+    depends_on: [mock]
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./configs/litellm-config.yaml:/app/config.yaml:ro
+    # LiteLLM's own recommendation is one worker per CPU core. run-on-instance.sh
+    # sets LITELLM_NUM_WORKERS=$(nproc) so this matches the box (2 on c7i.large),
+    # giving LiteLLM the same multi-core access the Go gateways get for free.
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "${LITELLM_NUM_WORKERS:-1}"]
+    restart: "no"
+
+  portkey:
+    profiles: ["portkey"]
+    image: ${PORTKEY_IMAGE:-portkeyai/gateway:latest}
+    depends_on: [mock]
+    ports:
+      - "8787:8787"
+    environment:
+      # Allow the mock service hostname through Portkey's SSRF/private-IP filter.
+      - TRUSTED_CUSTOM_HOSTS=mock
+    restart: "no"
+
+  bifrost:
+    profiles: ["bifrost"]
+    image: ${BIFROST_IMAGE:-maximhq/bifrost:latest}
+    depends_on: [mock]
+    ports:
+      - "8089:8089"
+    environment:
+      - APP_PORT=8089
+      - APP_HOST=0.0.0.0       # bind all interfaces (default binds localhost)
+    volumes:
+      # Provider config (openai + anthropic -> mock); /app/data stays writable
+      # for Bifrost's sqlite config store.
+      - ./configs/bifrost-config.json:/app/data/config.json:ro
+    restart: "no"

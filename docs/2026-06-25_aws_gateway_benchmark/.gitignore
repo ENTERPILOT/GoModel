@@ -1,0 +1,9 @@
+# Benchmark outputs and local Terraform state / secrets — never commit.
+output/
+remote/results/
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/bench_key.pem
+*.tar.gz

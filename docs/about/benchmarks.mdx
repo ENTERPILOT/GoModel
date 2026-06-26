@@ -1,134 +1,99 @@
 ---
 title: "Benchmarks"
-description: "A summary of GoModel benchmark results, with links to full write-ups and methodology."
+description: "A short, up-to-date summary of GoModel benchmark results, with a link to the full write-up and the tooling to reproduce it."
 icon: "gauge"
 ---
 
 ## Benchmark snapshot
 
-This page is a short reference for one public benchmark run comparing GoModel
-and LiteLLM on OpenAI-compatible traffic.
+This page is a short reference for our latest public benchmark: GoModel against
+**LiteLLM, Portkey, and Bifrost**, all pointed at the same instant mock backend so
+the numbers reflect gateway overhead, not model latency.
 
-The full article contains the complete write-up, all charts, and the original
-discussion:
-[GoModel vs LiteLLM Benchmark: Speed, Throughput, and Resource Usage](https://enterpilot.io/blog/gomodel-vs-litellm-benchmark/).
+The full article has the complete write-up, all the context, and the charts:
+[AI Gateway Benchmark 2026: GoModel vs LiteLLM, Portkey & Bifrost](https://enterpilot.io/blog/gomodel-vs-litellm-portkey-bifrost-june-2026/).
 
 <Note>
-  This benchmark is a point-in-time snapshot published on March 5, 2026. Treat
-  it as data, not dogma. Gateway performance depends on workload, provider mix,
-  deployment setup, and tuning.
+  This is a point-in-time snapshot from a June 2026 run on AWS. Treat it as data,
+  not dogma. Gateway performance depends on your workload, provider mix, deployment
+  setup, and tuning. Older runs (March 2026, LiteLLM only, on localhost) are still
+  on the blog for history.
 </Note>
 
-## Visual snapshot
+## What we tested
 
-![Benchmark dashboard from the original blog post](./images/benchmark-dashboard.png)
+A simple, like-for-like setup:
 
-Chart source and full context:
-[Original benchmark post](https://enterpilot.io/blog/gomodel-vs-litellm-benchmark/).
+- One gateway at a time, in Docker, on an AWS `c7i.large` (2 vCPU, 4 GiB).
+- The same shared mock backend for everyone, so we measure only gateway overhead.
+- Six workloads: chat completions, the Responses API, and Anthropic messages -
+  each streaming and non-streaming.
+- `8,000` requests per workload at concurrency `10`, across two randomized-order
+  trials (latency is the median across them).
+- Fair config: retries off for everyone, GoModel's circuit breaker off, and
+  LiteLLM run at its recommended one worker per CPU core.
 
 ## At a glance
 
-In this benchmark run, GoModel came out ahead on the main operational signals
-most teams care about:
+GoModel came out ahead on every operational signal most teams care about:
+the tightest latency tail, the highest sustained throughput, the smallest image
+and memory, and the fastest cold start.
 
-- Added latency
-- Throughput under concurrency
-- CPU overhead
-- Memory overhead
+| Gateway | p50 (ms) | p99 (ms) | Throughput (req/s) | Peak RAM | Image (compressed) | Cold start |
+| --- | --- | --- | --- | --- | --- | --- |
+| **GoModel** | **`1.8`** | **`6.9`** | **`4,900`** | **`37 MB`** | **`16 MB`** | **`0.56 s`** |
+| Bifrost | `2.5` | `18.3` | `3,100` | `143 MB` | `77 MB` | `7.1 s` |
+| Portkey | `9.7` | `30.5` | `950` | `112 MB` | `59 MB` | `1.1 s` |
+| LiteLLM | `30.6` | `39.3` | `324` | `2.3 GB` | `372 MB` | `25.5 s` |
 
-## Test shape
-
-The comparison used a simple like-for-like setup:
-
-- OpenAI-compatible `/v1/chat/completions`
-- The same prompt and request shape on both sides
-- Concurrency levels of `1`, `4`, and `8`
-- A focus on clean runs with `0%` errors
-- Metrics including req/s, latency percentiles, CPU usage, and RSS memory
-
-This docs page keeps only the primary comparison matrix from the blog post.
-
-## Reference table
-
-| Gateway | Concurrency | Success | Error % | Req/s | p50 ms | p95 ms | p99 ms | CPU avg % | RSS avg MB |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| GoModel | `1` | `12/12` | `0.00` | `9.61` | `86.4` | `141.1` | `144.4` | `0.81` | `45.4` |
-| GoModel | `4` | `12/12` | `0.00` | `44.66` | `56.1` | `139.5` | `139.5` | `0.23` | `46.0` |
-| GoModel | `8` | `12/12` | `0.00` | `52.75` | `98.4` | `130.6` | `131.1` | `1.13` | `46.0` |
-| LiteLLM | `1` | `12/12` | `0.00` | `8.64` | `96.2` | `190.3` | `213.9` | `9.21` | `320.3` |
-| LiteLLM | `4` | `12/12` | `0.00` | `36.82` | `104.7` | `149.5` | `149.5` | `5.20` | `320.8` |
-| LiteLLM | `8` | `12/12` | `0.00` | `35.81` | `188.7` | `244.4` | `244.9` | `5.95` | `321.5` |
+Latency is chat completions, non-streaming (representative). Throughput is the
+sustained rate from a separate concurrency sweep. Image size is the compressed
+pull size.
 
 ## Key readouts
 
-Some useful reads from that March 5, 2026 run:
-
-- Lower p95 latency at every tested concurrency level.
-- Higher throughput across the benchmark matrix.
-- `45-46 MB` RSS, while LiteLLM stayed near `320-321 MB`.
-- Less CPU in these runs.
-
-At the highest tested concurrency, GoModel reached `52.75 req/s` versus
-LiteLLM at `35.81 req/s`.
+- GoModel has both the lowest median (`1.8 ms`) and the tightest tail (`6.9 ms`).
+- It pushes the most traffic per box (`~4,900 req/s`) and the most per CPU core.
+- It is the smallest to ship and run: a `16 MB` compressed image and `37 MB` of
+  RAM under load, ready to serve `0.56 s` after launch.
+- LiteLLM, even at its recommended multi-worker config, uses `~2.3 GB` of RAM and
+  takes `~25 s` to start - the cost of Python on the hot path.
+- Portkey did not serve the Anthropic messages dialect in this single-provider
+  setup, so it covers 4 of the 6 workloads.
 
 ## Reproduce it yourself
 
-All the tooling used in the published benchmark is available in this repository.
+The whole thing is one command. It provisions a small AWS box, runs all four
+gateways against the same mock backend, prints the tables, and tears the
+infrastructure back down on its own.
 
-### Prerequisites
+<Warning>
+  This runs on **paid** AWS infrastructure, not the free tier. A `c7i.large` is
+  about $0.09/hour and the run self-destructs within an hour or two, so budget
+  **under $1** per run to be safe. If you pass `KEEP=1` or a teardown fails, you
+  keep paying until you destroy the box - so confirm it is gone.
+</Warning>
 
-- Go 1.26.4+
-- Python 3.10+ with `matplotlib` and `numpy`
-- `jq`, `curl`
-- A Groq API key (or any OpenAI-compatible provider — adjust the script)
-- `litellm[proxy]` (`pip install "litellm[proxy]"`)
-
-### Scripts
-
-The benchmark suite lives in [`docs/about/benchmark-tools/`](https://github.com/ENTERPILOT/GoModel/tree/main/docs/about/benchmark-tools):
-
-| File | Purpose |
-| --- | --- |
-| [`compare.sh`](https://github.com/ENTERPILOT/GoModel/blob/main/docs/about/benchmark-tools/compare.sh) | Builds GoModel, starts both gateways, runs the full benchmark matrix, and writes a `REPORT.md` |
-| [`bench_main.go`](https://github.com/ENTERPILOT/GoModel/blob/main/docs/about/benchmark-tools/bench_main.go) | Source for the `bench` CLI that sends requests and collects latency + process metrics |
-| [`plot_benchmark_charts.py`](https://github.com/ENTERPILOT/GoModel/blob/main/docs/about/benchmark-tools/plot_benchmark_charts.py) | Generates per-metric charts and a combined dashboard from the JSON results |
-
-### Quick start
+The harness lives in the repo at
+[`docs/2026-06-25_aws_gateway_benchmark/`](https://github.com/ENTERPILOT/GoModel/tree/main/docs/2026-06-25_aws_gateway_benchmark):
 
 ```bash
-# 1. Clone GoModel and set up your .env with GROQ_API_KEY
+# Needs Docker, Terraform, and AWS credentials
 git clone https://github.com/ENTERPILOT/GoModel.git
-cd gomodel
-echo "GROQ_API_KEY=gsk_..." > .env
-
-# 2. Run the full comparison (builds GoModel, starts LiteLLM, benchmarks both)
-bash docs/about/benchmark-tools/compare.sh
-
-# 3. Generate charts from the latest result
-pip install matplotlib numpy
-python3 docs/about/benchmark-tools/plot_benchmark_charts.py benchmark-results/<timestamp>
+cd gomodel/docs/2026-06-25_aws_gateway_benchmark
+./run.sh
 ```
 
-The script creates a timestamped directory under `benchmark-results/` containing
-JSON result files, gateway logs, and a `REPORT.md` with the results table.
-
-### Tuning
-
-You can override defaults via environment variables:
-
-```bash
-REQUESTS=100 CONCURRENCIES="1 4 8 16" MAX_TOKENS=16 bash docs/about/benchmark-tools/compare.sh
-```
-
-See the top of `compare.sh` for the full list of knobs.
+Knobs like `N` (requests per workload) and `REPEATS` (trials) are env vars, e.g.
+`N=20000 REPEATS=5 ./run.sh` for a heavier run. For a quick local check against
+just LiteLLM, the older localhost harness is still in
+[`docs/about/benchmark-tools/`](https://github.com/ENTERPILOT/GoModel/tree/main/docs/about/benchmark-tools).
 
 ## Why this page is short
 
-This page is intentionally shorter and more operational than the blog version.
-
-It exists so docs readers can see the benchmark result quickly without reading a
-full article inside the product docs. If you want the full narrative, more
-charts, and the original context, use the source post.
+It is meant to give you the result fast, inside the product docs, without a full
+article. For the narrative, the charts, and the methodology details, read the
+[full post](https://enterpilot.io/blog/gomodel-vs-litellm-portkey-bifrost-june-2026/).
 
 No single benchmark settles the question for every environment. If you are
 evaluating gateways seriously, reproduce the test against your own traffic and
