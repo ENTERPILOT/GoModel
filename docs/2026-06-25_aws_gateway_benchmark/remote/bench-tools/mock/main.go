@@ -95,8 +95,10 @@ var rec struct {
 }
 
 var sensitiveHeaders = map[string]bool{
-	"authorization": true, "x-api-key": true, "api-key": true,
+	"authorization": true, "proxy-authorization": true,
+	"x-api-key": true, "api-key": true,
 	"x-portkey-api-key": true, "x-goog-api-key": true,
+	"cookie": true,
 }
 
 // begin reads and (in recording mode) captures the request, returning the entry
@@ -357,15 +359,29 @@ type streamReq struct {
 	Stream bool `json:"stream"`
 }
 
+// recordResponse stores the canned response on the entry. In recording mode the
+// entry is already appended to rec.entries and read concurrently by /__log and
+// /__last, so the write is guarded by the same lock those readers hold. Outside
+// recording mode the entry is a throwaway, so the store is skipped entirely and
+// the deterministic serve path is unaffected.
+func recordResponse(e *entry, v any) {
+	if !recording() {
+		return
+	}
+	rec.mu.Lock()
+	e.Response = v
+	rec.mu.Unlock()
+}
+
 // respond writes a non-stream JSON response and records it on the entry.
 func respond(w http.ResponseWriter, e *entry, v map[string]any) {
-	e.Response = v
+	recordResponse(e, v)
 	writeJSON(w, v)
 }
 
 // setStreamResp records a compact description of a streamed canned response.
 func setStreamResp(e *entry, kind string) {
-	e.Response = map[string]any{"stream": true, "event_kind": kind, "text": fullText()}
+	recordResponse(e, map[string]any{"stream": true, "event_kind": kind, "text": fullText()})
 }
 
 func beginSSE(w http.ResponseWriter) http.Flusher {

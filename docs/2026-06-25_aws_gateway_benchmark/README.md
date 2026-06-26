@@ -1,6 +1,7 @@
 # AWS gateway latency & resource benchmark — GoModel vs LiteLLM vs Portkey vs Bifrost
 
-A reproducible, one-command benchmark that provisions a free-tier AWS instance,
+A reproducible, one-command benchmark that provisions a small AWS instance
+(c7i.large by default — a few cents per run, not free-tier),
 runs four AI gateways through identical workloads against a deterministic mock
 backend, measures latency and resource cost, and tears the infrastructure down.
 
@@ -51,8 +52,8 @@ terminal event (Bifrost) is still measured to last-byte rather than hanging.
 
 ## Layout
 
-```
-terraform/            free-tier EC2 + SSH key + security group (apply/destroy)
+```text
+terraform/            EC2 + SSH key + security group (apply/destroy)
 remote/               everything shipped to and run on the instance
   bench-tools/        Go mock backend + loadgen (one small image)
   configs/            litellm config
@@ -106,17 +107,17 @@ cd remote && N=30 C=5 GATEWAYS="gomodel litellm portkey bifrost" ./run-on-instan
   **digests** are recorded in each `*_image.json` so a run is fully traceable.
 - **AMI** resolves to the latest Amazon Linux 2023 via SSM (reproducible by
   policy). Pin `var.ami_id` for a byte-identical OS.
-- **Free tier**: defaults to **t2.micro** — the 12-month-free-tier instance in
-  us-east-1 — with `standard` CPU credits (no surprise burst charges), a 20 GiB
-  gp3 root volume (free tier allows 30 GiB), the default VPC (no paid NAT/EIP),
-  and an Amazon Linux 2023 AMI. Image pulls are inbound traffic (free). In
-  regions where t2.micro is unavailable, set `INSTANCE_TYPE=t3.micro` (the
-  free-tier instance there). Newer accounts on AWS's credit-based free plan stay
-  within credit for a single short run.
-- **t2.micro is burstable** (1 vCPU, CPU-credit throttled). Treat absolute
-  latency as *indicative*; the value is the *relative* comparison on identical
-  hardware. Gateways run **one at a time** so they never contend, and the load is
-  kept modest (N=500, c=10) to stay within launch credits. For production-grade
-  absolute numbers, set `INSTANCE_TYPE=c7i.large` (not free tier).
-- **Cost**: a single free-tier instance for ~15–30 min — $0 within free-tier
-  allowance, otherwise a few cents.
+- **Default instance**: **c7i.large** (2 vCPU, 4 GiB, non-burstable) — a stable
+  tail with no CPU-credit drift, the right reference for latency/p99. It is **not**
+  free-tier eligible (~$0.09/hr on-demand in us-east-1). It uses a 20 GiB gp3 root
+  volume, the default VPC (no paid NAT/EIP), and an Amazon Linux 2023 AMI; image
+  pulls are inbound traffic (free). Gateways run **one at a time** so they never
+  contend.
+- **Free-tier option**: set `INSTANCE_TYPE=t2.micro` (1 vCPU, burstable — the
+  12-month-free-tier instance in us-east-1; use `t3.micro` where t2 is
+  unavailable). It runs with `standard` CPU credits (no surprise burst charges).
+  Being burstable and CPU-credit throttled, treat its absolute latencies as
+  *indicative* — the value is the *relative* comparison on identical hardware; keep
+  the load modest to stay within launch credits.
+- **Cost**: a single default `c7i.large` for ~15–30 min is a few cents
+  (~$0.09/hr); the t2.micro free-tier option stays within the free-tier allowance.

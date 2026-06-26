@@ -1,7 +1,7 @@
 # Benchmark topology: a shared mock backend plus exactly one gateway at a time.
 #
 # Each gateway lives in its own profile so we can bring them up sequentially and
-# never let them contend for the (single-vCPU, free-tier) instance:
+# never let them contend for the instance (a 2-vCPU c7i.large by default):
 #
 #   docker compose --profile gomodel up -d   # mock + gomodel
 #   docker compose --profile litellm up -d   # mock + litellm

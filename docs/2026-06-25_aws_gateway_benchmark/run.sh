@@ -71,6 +71,14 @@ IP="$(cd "$TF_DIR" && $TF output -raw public_ip)"
 KEY="$(cd "$TF_DIR" && $TF output -raw ssh_private_key_path)"
 USER="$(cd "$TF_DIR" && $TF output -raw ssh_user)"
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$KEY")
+# rsync's -e takes a single shell-word string that it re-splits, so building it
+# with "${SSH_OPTS[*]}" would lose quoting if a path (e.g. the key) contained a
+# space. Quote each option with printf %q so the rsh command survives that split.
+rsync_rsh() {
+  local s=ssh opt
+  for opt in "${SSH_OPTS[@]}"; do printf -v opt '%q' "$opt"; s+=" $opt"; done
+  printf '%s' "$s"
+}
 echo "  instance: $USER@$IP  (key: $KEY)"
 [[ -f "$KEY" ]] || { err "private key not found at $KEY"; exit 1; }
 
@@ -96,7 +104,7 @@ echo "  ready"
 # ── 4. Ship harness + image, run ───────────────────────────────────
 log "Shipping harness to instance"
 ssh "${SSH_OPTS[@]}" "$USER@$IP" 'rm -rf ~/bench && mkdir -p ~/bench'
-rsync -az -e "ssh ${SSH_OPTS[*]}" --exclude results "$REMOTE_DIR/" "$USER@$IP:~/bench/"
+rsync -az -e "$(rsync_rsh)" --exclude results "$REMOTE_DIR/" "$USER@$IP:~/bench/"
 scp "${SSH_OPTS[@]}" "$IMAGE_TAR" "$USER@$IP:~/gomodel-bench-amd64.tar.gz"
 
 log "Loading GoModel image on instance"
@@ -139,7 +147,7 @@ ssh "${SSH_OPTS[@]}" "$USER@$IP" 'echo "--- tail of remote run.log ---"; tail -2
 # ── 5. Collect + summarize ─────────────────────────────────────────
 log "Collecting results -> $OUT_DIR"
 mkdir -p "$OUT_DIR"
-rsync -az -e "ssh ${SSH_OPTS[*]}" "$USER@$IP:~/bench/results/" "$OUT_DIR/"
+rsync -az -e "$(rsync_rsh)" "$USER@$IP:~/bench/results/" "$OUT_DIR/"
 
 if command -v python3 >/dev/null; then
   python3 "$SCRIPT_DIR/scripts/summarize.py" --results-dir "$OUT_DIR" | tee "$OUT_DIR/summary.txt"

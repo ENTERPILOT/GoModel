@@ -19,7 +19,8 @@ output "ssh_private_key_path" {
 }
 
 output "instance_id" {
-  value = aws_instance.bench.id
+  description = "EC2 instance ID of the benchmark instance."
+  value       = aws_instance.bench.id
 }
 
 output "ami_id" {

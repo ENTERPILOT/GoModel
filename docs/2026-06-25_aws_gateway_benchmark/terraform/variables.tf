@@ -17,9 +17,14 @@ variable "instance_type" {
 }
 
 variable "ssh_ingress_cidr" {
-  description = "CIDR allowed to SSH in. Set to <your-ip>/32. Defaults to fully open if left empty (NOT recommended)."
+  description = "CIDR allowed to SSH in. Must be set explicitly to <your-ip>/32 (run.sh passes it automatically). No default, so the security group is never left open to the world."
   type        = string
-  default     = "0.0.0.0/0"
+  default     = ""
+
+  validation {
+    condition     = can(cidrhost(var.ssh_ingress_cidr, 0))
+    error_message = "ssh_ingress_cidr must be a valid CIDR you pass explicitly (e.g. 203.0.113.4/32); it has no default to avoid a world-open (0.0.0.0/0) SSH rule."
+  }
 }
 
 variable "ami_id" {
@@ -38,6 +43,12 @@ variable "compose_plugin_version" {
   description = "Pinned Docker Compose v2 plugin version installed via user-data."
   type        = string
   default     = "v2.29.7"
+}
+
+variable "compose_plugin_sha256" {
+  description = "Expected SHA-256 of the docker-compose-linux-x86_64 binary for compose_plugin_version (from the release's published .sha256). Update together with compose_plugin_version."
+  type        = string
+  default     = "383ce6698cd5d5bbf958d2c8489ed75094e34a77d340404d9f32c4ae9e12baf0"
 }
 
 variable "tags" {

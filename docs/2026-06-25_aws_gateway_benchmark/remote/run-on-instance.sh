@@ -25,7 +25,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR" || exit 1
 RESULTS_DIR="$SCRIPT_DIR/results"
 COMPOSE=(docker compose -p bench)
 
@@ -210,8 +210,14 @@ record_image() {  # gateway image_ref -> results/<gw>_image.json
   size="$(docker image inspect "$ref" --format '{{.Size}}' 2>/dev/null || echo 0)"
   digest="$(docker image inspect "$ref" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}' 2>/dev/null || echo unknown)"
   # Compressed size = what you actually pull/store: gzip the saved image (uniform
-  # across the locally-built gomodel image and the pulled competitor images).
-  compressed="$(docker save "$ref" 2>/dev/null | gzip -c | wc -c | tr -d ' ' || echo 0)"
+  # across the locally-built gomodel image and the pulled competitor images). A
+  # failed `docker save` (pipefail) or a non-numeric result would corrupt the JSON,
+  # so bail out without writing the file rather than emit garbage.
+  if ! compressed="$(docker save "$ref" 2>/dev/null | gzip -c | wc -c | tr -d ' ')" \
+     || [[ ! "$compressed" =~ ^[0-9]+$ ]]; then
+    echo "  WARN: docker save failed for $ref — skipping ${gw}_image.json" >&2
+    return 1
+  fi
   printf '{"gateway":"%s","image":"%s","size_bytes":%s,"size_mb":%.1f,"compressed_bytes":%s,"compressed_mb":%.1f,"digest":"%s"}\n' \
     "$gw" "$ref" "${size:-0}" "$(awk "BEGIN{print ${size:-0}/1048576}")" \
     "${compressed:-0}" "$(awk "BEGIN{print ${compressed:-0}/1048576}")" "$digest" \

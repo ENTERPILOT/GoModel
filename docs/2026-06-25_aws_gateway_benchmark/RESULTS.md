@@ -121,7 +121,7 @@ Portkey, ~20× LiteLLM), the smallest image (**47 MB**), the smallest footprint
   transient errors under the c=128 sweep would otherwise trip it and blanket-503 its
   own capacity); **LiteLLM at one worker per core (`num_workers`=vCPUs)**, its own
   production recommendation, set automatically from `nproc`.
-- **Warm-up** — 200 global + 50 per-variant requests; the per-variant warmup
+- **Warmup** — 200 global + 50 per-variant requests; the per-variant warmup
   neutralizes LiteLLM's lazy per-dialect imports and, with >1 worker, warms each
   worker before measuring.
 - **Throughput vs latency separated** — capacity comes from a time-boxed concurrency

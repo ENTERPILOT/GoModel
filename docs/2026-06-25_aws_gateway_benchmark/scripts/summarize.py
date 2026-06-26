@@ -156,7 +156,8 @@ def main():
     print("\nLATENCY  (ms; rps = completed req/s @ c={})".format(meta.get("concurrency", "?")))
     hdr = (f"{'target':9} {'variant':18} {'ok/fail':>11} {'rps':>7} {'p50':>7} "
            f"{'p99':>7} {'p99 range':>15} {'ttft':>7} {'ovhd':>7}")
-    print(hdr); print("-" * len(hdr))
+    print(hdr)
+    print("-" * len(hdr))
     for t in targets:
         summary["latency"][t] = {}
         for dialect, mode in VARIANTS:
@@ -181,7 +182,8 @@ def main():
     if sweep_targets:
         concs = sorted({c for t in sweep_targets for c in sweep_curve(rd, t)})
         hdrc = f"{'target':9} " + " ".join(f"c{c:>6}" for c in concs) + f" {'peak':>8} {'@c':>4} {'knee':>5}"
-        print(hdrc); print("-" * len(hdrc))
+        print(hdrc)
+        print("-" * len(hdrc))
         for t in sweep_targets:
             curve = sweep_curve(rd, t)
             s = sweep_stats(curve)
@@ -197,7 +199,8 @@ def main():
     print("RESOURCES  (per gateway; img_zip = compressed pull size)")
     hdr2 = (f"{'gateway':9} {'img_zip':>8} {'img_disk':>9} {'startup_s':>10} {'idle_mb':>9} "
             f"{'peak_mb':>9} {'avg_cpu%':>9} {'load_rps':>9} {'rps/cpu%':>9}")
-    print(hdr2); print("-" * len(hdr2))
+    print(hdr2)
+    print("-" * len(hdr2))
     for t in [x for x in targets if x != "baseline"]:
         img = load(os.path.join(rd, f"{t}_image.json")) or {}
         res = load(os.path.join(rd, f"{t}_resources.json")) or {}

@@ -74,6 +74,40 @@ func main() {
 		os.Exit(2)
 	}
 
+	// Fail fast on nonsensical flags before doing any work, with a clear message
+	// per offending flag, so a typo can't silently produce an empty/garbage run.
+	var bad []string
+	if *c <= 0 {
+		bad = append(bad, "-c (concurrency) must be > 0")
+	}
+	if *duration < 0 {
+		bad = append(bad, "-duration must be >= 0")
+	}
+	if *duration == 0 && *n <= 0 {
+		bad = append(bad, "-n (request count) must be > 0 in fixed-count mode (-duration unset)")
+	}
+	if *timeout <= 0 {
+		bad = append(bad, "-timeout must be > 0")
+	}
+	if *idle <= 0 {
+		bad = append(bad, "-idle must be > 0")
+	}
+	if *maxWall < 0 {
+		bad = append(bad, "-max-wall must be >= 0")
+	}
+	switch *dialect {
+	case "chat", "responses", "messages":
+	default:
+		bad = append(bad, "-dialect must be one of chat|responses|messages")
+	}
+	if len(bad) > 0 {
+		fmt.Fprintln(os.Stderr, "invalid flags:")
+		for _, m := range bad {
+			fmt.Fprintln(os.Stderr, "  "+m)
+		}
+		os.Exit(2)
+	}
+
 	body := buildBody(*dialect, *model, *stream)
 	// Tuned transport: keep a full set of hot keep-alive connections for the
 	// configured concurrency so the measured window isn't paying TCP setup. The

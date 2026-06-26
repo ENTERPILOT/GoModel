@@ -108,10 +108,13 @@ locals {
     systemctl enable --now docker
     usermod -aG docker ec2-user
 
-    # Docker Compose v2 plugin (pinned).
+    # Docker Compose v2 plugin (pinned version + verified SHA-256). A corrupted or
+    # tampered download fails provisioning (set -e) instead of installing a bad
+    # binary. Update compose_plugin_sha256 whenever compose_plugin_version changes.
     mkdir -p /usr/libexec/docker/cli-plugins
     curl -fsSL -o /usr/libexec/docker/cli-plugins/docker-compose \
       "https://github.com/docker/compose/releases/download/${var.compose_plugin_version}/docker-compose-linux-x86_64"
+    echo "${var.compose_plugin_sha256}  /usr/libexec/docker/cli-plugins/docker-compose" | sha256sum -c -
     chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
     # Readiness marker the orchestrator polls for.
@@ -142,6 +145,14 @@ resource "aws_instance" "bench" {
   root_block_device {
     volume_type = "gp3"
     volume_size = var.root_volume_gb
+    encrypted   = true
+  }
+
+  # Require IMDSv2 (token-authenticated metadata) and keep the endpoint enabled so
+  # the harness can still read instance-type/region from IMDS.
+  metadata_options {
+    http_tokens   = "required"
+    http_endpoint = "enabled"
   }
 
   tags = merge(var.tags, { Name = "gomodel-gateway-benchmark" })
