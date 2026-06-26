@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 242" width="660" height="242" role="img" aria-label="Sustained throughput (req/s, higher is better). GoModel 4,900, Bifrost 3,100, Portkey 950, LiteLLM 324." font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif">
+  <rect x="0.5" y="0.5" width="659" height="241" rx="14" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="24" y="32" font-size="16" font-weight="700" fill="#0f172a">Sustained throughput</text>
+  <text x="636" y="32" text-anchor="end" font-size="12" fill="#64748b">req/s · higher is better</text>
+  <g>
+    <text x="80" y="71" text-anchor="end" dominant-baseline="middle" font-size="14" font-weight="700" fill="#0f172a">GoModel</text>
+    <rect x="92" y="56" width="490.0" height="30" rx="5" fill="#1e7ab5"/>
+    <text x="591.0" y="71" dominant-baseline="middle" font-size="13" font-weight="700" fill="#1e7ab5">4,900</text>
+    <text x="80" y="117" text-anchor="end" dominant-baseline="middle" font-size="14" font-weight="500" fill="#64748b">Bifrost</text>
+    <rect x="92" y="102" width="310.0" height="30" rx="5" fill="#cbd5e1"/>
+    <text x="411.0" y="117" dominant-baseline="middle" font-size="13" font-weight="600" fill="#334155">3,100</text>
+    <text x="80" y="163" text-anchor="end" dominant-baseline="middle" font-size="14" font-weight="500" fill="#64748b">Portkey</text>
+    <rect x="92" y="148" width="95.0" height="30" rx="5" fill="#cbd5e1"/>
+    <text x="196.0" y="163" dominant-baseline="middle" font-size="13" font-weight="600" fill="#334155">950</text>
+    <text x="80" y="209" text-anchor="end" dominant-baseline="middle" font-size="14" font-weight="500" fill="#64748b">LiteLLM</text>
+    <rect x="92" y="194" width="32.4" height="30" rx="5" fill="#cbd5e1"/>
+    <text x="133.4" y="209" dominant-baseline="middle" font-size="13" font-weight="600" fill="#334155">324</text>
+  </g>
+</svg>

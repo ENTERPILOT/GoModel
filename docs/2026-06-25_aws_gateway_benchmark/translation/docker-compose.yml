@@ -1,0 +1,81 @@
+# Translation-fidelity topology: all four gateways at once, every one pointed at
+# a single RECORDING mock backend (MOCK_RECORD=1). Because the capture runner
+# sends one request at a time and resets the mock before each, the shared mock
+# cleanly attributes each upstream call to the gateway+case that produced it.
+#
+#   docker compose --profile all up -d   # mock + gomodel + litellm + portkey + bifrost
+#
+# Gateways are on different host ports so they can run simultaneously. Configs
+# and the bench-tools build context are reused from ../remote.
+
+networks:
+  default:
+    name: xlatenet
+
+services:
+  mock:
+    build: ../remote/bench-tools
+    command: ["/mock"]
+    environment:
+      - MOCK_PORT=9999
+      - MOCK_RECORD=1
+    ports:
+      - "9999:9999"
+    restart: "no"
+
+  gomodel:
+    profiles: ["all", "gomodel"]
+    image: ${GOMODEL_IMAGE:-gomodel-bench:local}
+    depends_on: [mock]
+    ports:
+      # Host 18080 to avoid clashing with a local dev gomodel on 8080.
+      - "${GOMODEL_HOST_PORT:-18080}:8080"
+    environment:
+      - PORT=8080
+      - GOMODEL_MASTER_KEY=
+      - OPENAI_API_KEY=sk-bench-test-key
+      - OPENAI_BASE_URL=http://mock:9999/v1
+      - LOGGING_ENABLED=false
+      - USAGE_ENABLED=false
+      - METRICS_ENABLED=false
+      - SWAGGER_ENABLED=false
+      - PPROF_ENABLED=false
+      - ENABLE_PASSTHROUGH_ROUTES=false
+      - STORAGE_TYPE=sqlite
+      - SQLITE_PATH=/app/data/gomodel-xlate.db
+      - GOMODEL_CACHE_DIR=/app/.cache
+    restart: "no"
+
+  litellm:
+    profiles: ["all", "litellm"]
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-stable}
+    depends_on: [mock]
+    ports:
+      - "4000:4000"
+    volumes:
+      - ../remote/configs/litellm-config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
+    restart: "no"
+
+  portkey:
+    profiles: ["all", "portkey"]
+    image: ${PORTKEY_IMAGE:-portkeyai/gateway:latest}
+    depends_on: [mock]
+    ports:
+      - "8787:8787"
+    environment:
+      - TRUSTED_CUSTOM_HOSTS=mock
+    restart: "no"
+
+  bifrost:
+    profiles: ["all", "bifrost"]
+    image: ${BIFROST_IMAGE:-maximhq/bifrost:latest}
+    depends_on: [mock]
+    ports:
+      - "8089:8089"
+    environment:
+      - APP_PORT=8089
+      - APP_HOST=0.0.0.0
+    volumes:
+      - ../remote/configs/bifrost-config.json:/app/data/config.json:ro
+    restart: "no"

@@ -1,0 +1,153 @@
+[
+  {
+    "id": "chat.simple",
+    "dialect": "chat",
+    "stream": false,
+    "note": "Baseline: does the body pass through unchanged? what auth/headers are injected upstream?",
+    "body": {
+      "model": "gpt-4o-mini",
+      "messages": [{"role": "user", "content": "What is the capital of France?"}]
+    }
+  },
+  {
+    "id": "chat.stream",
+    "dialect": "chat",
+    "stream": true,
+    "note": "Streaming framing: chunk shape, terminal marker, whether stream_options is forwarded.",
+    "body": {
+      "model": "gpt-4o-mini",
+      "messages": [{"role": "user", "content": "Count to three."}],
+      "stream": true,
+      "stream_options": {"include_usage": true}
+    }
+  },
+  {
+    "id": "chat.multiturn_system",
+    "dialect": "chat",
+    "stream": false,
+    "note": "System role + multi-turn: is the system message preserved in place and message order kept?",
+    "body": {
+      "model": "gpt-4o-mini",
+      "messages": [
+        {"role": "system", "content": "You are a terse assistant."},
+        {"role": "user", "content": "Largest planet?"},
+        {"role": "assistant", "content": "Jupiter."},
+        {"role": "user", "content": "Smallest?"}
+      ]
+    }
+  },
+  {
+    "id": "chat.params",
+    "dialect": "chat",
+    "stream": false,
+    "note": "Sampling params fidelity: which of these survive verbatim upstream (temperature/top_p/penalties/stop/seed/max_tokens)?",
+    "body": {
+      "model": "gpt-4o-mini",
+      "messages": [{"role": "user", "content": "Say ok."}],
+      "temperature": 0.3,
+      "top_p": 0.8,
+      "frequency_penalty": 0.5,
+      "presence_penalty": 0.2,
+      "stop": ["\n\n"],
+      "seed": 42,
+      "max_tokens": 64
+    }
+  },
+  {
+    "id": "chat.extra_fields",
+    "dialect": "chat",
+    "stream": false,
+    "note": "KEY: unknown/extra fields. Which gateways forward them verbatim vs strip them (e.g. LiteLLM drop_params)?",
+    "body": {
+      "model": "gpt-4o-mini",
+      "messages": [{"role": "user", "content": "Say ok."}],
+      "metadata": {"qa_case": "extra-fields"},
+      "x_qa_marker": "keep-123",
+      "user": "qa-user-1"
+    }
+  },
+  {
+    "id": "chat.tools",
+    "dialect": "chat",
+    "stream": false,
+    "note": "Tool/function definitions and tool_choice: forwarded faithfully?",
+    "body": {
+      "model": "gpt-4o-mini",
+      "messages": [{"role": "user", "content": "Weather in Paris?"}],
+      "tools": [{"type": "function", "function": {
+        "name": "get_weather",
+        "description": "Get weather for a city",
+        "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}
+      }}],
+      "tool_choice": "auto"
+    }
+  },
+  {
+    "id": "chat.response_format",
+    "dialect": "chat",
+    "stream": false,
+    "note": "Structured-output directive: is response_format forwarded?",
+    "body": {
+      "model": "gpt-4o-mini",
+      "messages": [{"role": "user", "content": "Return JSON with capital of Spain."}],
+      "response_format": {"type": "json_object"}
+    }
+  },
+  {
+    "id": "chat.vision",
+    "dialect": "chat",
+    "stream": false,
+    "note": "Multimodal content parts: how is an image_url part forwarded upstream?",
+    "body": {
+      "model": "gpt-4o-mini",
+      "messages": [{"role": "user", "content": [
+        {"type": "text", "text": "What color?"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="}}
+      ]}]
+    }
+  },
+  {
+    "id": "responses.simple",
+    "dialect": "responses",
+    "stream": false,
+    "note": "Responses API: how is `input` translated for each gateway's upstream provider call?",
+    "body": {
+      "model": "gpt-4o-mini",
+      "input": "What is the capital of France?"
+    }
+  },
+  {
+    "id": "responses.stream",
+    "dialect": "responses",
+    "stream": true,
+    "note": "Responses streaming: event protocol the gateway returns to the client.",
+    "body": {
+      "model": "gpt-4o-mini",
+      "input": "Count to three.",
+      "stream": true
+    }
+  },
+  {
+    "id": "messages.simple",
+    "dialect": "messages",
+    "stream": false,
+    "note": "Anthropic Messages in: what upstream dialect/path does each gateway emit (native messages vs translated chat)?",
+    "body": {
+      "model": "gpt-4o-mini",
+      "max_tokens": 64,
+      "messages": [{"role": "user", "content": "What is the capital of France?"}]
+    }
+  },
+  {
+    "id": "messages.stream",
+    "dialect": "messages",
+    "stream": true,
+    "note": "Anthropic Messages streaming translation.",
+    "body": {
+      "model": "gpt-4o-mini",
+      "max_tokens": 64,
+      "stream": true,
+      "messages": [{"role": "user", "content": "Count to three."}]
+    }
+  }
+]

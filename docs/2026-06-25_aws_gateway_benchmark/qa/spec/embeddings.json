@@ -1,0 +1,40 @@
+[
+  {
+    "id": "embeddings.openai.single",
+    "title": "Embeddings: single string input",
+    "provider": "openai",
+    "modality": ["embeddings"],
+    "request": {
+      "path": "/v1/embeddings",
+      "body": {"model": "@openai.embed", "input": "GoModel is an AI gateway."}
+    },
+    "expect": {
+      "status": 200,
+      "response": [
+        {"path": "$.object", "equals": "list"},
+        {"path": "$.data[0].object", "equals": "embedding"},
+        {"path": "$.data[0].embedding", "length_gte": 256}
+      ],
+      "audit": [{"path": "$.provider", "equals": "openai"}]
+    },
+    "notes": "Embedding vector of expected dimensionality returned in OpenAI list shape."
+  },
+  {
+    "id": "embeddings.openai.batch",
+    "title": "Embeddings: batch input array",
+    "provider": "openai",
+    "modality": ["embeddings"],
+    "request": {
+      "path": "/v1/embeddings",
+      "body": {"model": "@openai.embed", "input": ["alpha", "beta", "gamma"]}
+    },
+    "expect": {
+      "status": 200,
+      "response": [
+        {"path": "$.data", "length_gte": 3},
+        {"path": "$.data[2].embedding", "length_gte": 256}
+      ]
+    },
+    "notes": "Batched inputs produce one embedding per item, order preserved."
+  }
+]

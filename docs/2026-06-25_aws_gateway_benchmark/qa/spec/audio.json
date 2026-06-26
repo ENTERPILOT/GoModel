@@ -1,0 +1,75 @@
+[
+  {
+    "id": "audio.openai.tts_mp3",
+    "title": "TTS: synthesize speech (mp3)",
+    "provider": "openai",
+    "modality": ["audio"],
+    "request": {
+      "path": "/v1/audio/speech",
+      "body": {"model": "@openai.tts", "voice": "alloy", "input": "The quick brown fox jumps over the lazy dog.", "response_format": "mp3"}
+    },
+    "expect": {
+      "status": 200,
+      "body": [
+        {"field": "content_type", "contains": "audio/"},
+        {"field": "bytes", "gte": 2000}
+      ]
+    },
+    "notes": "Text-to-speech returns binary audio with an audio/* content type."
+  },
+  {
+    "id": "audio.openai.tts_wav",
+    "title": "TTS: response_format wav changes content type",
+    "provider": "openai",
+    "modality": ["audio"],
+    "request": {
+      "path": "/v1/audio/speech",
+      "body": {"model": "@openai.tts", "voice": "alloy", "input": "Hello world.", "response_format": "wav"}
+    },
+    "expect": {
+      "status": 200,
+      "body": [
+        {"field": "content_type", "contains": "audio/wav"},
+        {"field": "bytes", "gte": 2000}
+      ]
+    },
+    "notes": "response_format must drive the response MIME type (audio/wav)."
+  },
+  {
+    "id": "audio.openai.tts_stt_json",
+    "title": "STT: round-trip TTS -> transcription (json) recovers the words",
+    "provider": "openai",
+    "modality": ["audio"],
+    "request": {
+      "produce": "tts_then_stt",
+      "tts": {"model": "@openai.tts", "voice": "alloy", "input": "Benchmark gateways measure latency and cost.", "response_format": "mp3"},
+      "stt": {"model": "@openai.stt", "response_format": "json"}
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.text", "not_empty": true}],
+      "quality": [{"target": "response:$.text", "contains_any": ["benchmark", "gateway", "latency", "cost"]}]
+    },
+    "notes": "Self-contained modality round-trip: synthesize known text, transcribe it, assert the words come back. No external audio fixture."
+  },
+  {
+    "id": "audio.openai.tts_stt_text",
+    "title": "STT: response_format text returns plain text",
+    "provider": "openai",
+    "modality": ["audio"],
+    "request": {
+      "produce": "tts_then_stt",
+      "tts": {"model": "@openai.tts", "voice": "alloy", "input": "Speech to text in plain format.", "response_format": "mp3"},
+      "stt": {"model": "@openai.stt", "response_format": "text"}
+    },
+    "expect": {
+      "status": 200,
+      "body": [
+        {"field": "content_type", "contains": "text/"},
+        {"field": "text", "not_empty": true}
+      ],
+      "quality": [{"target": "body.text", "contains_any": ["speech", "text", "plain", "format"]}]
+    },
+    "notes": "Transcription response_format=text returns text/plain, not JSON."
+  }
+]

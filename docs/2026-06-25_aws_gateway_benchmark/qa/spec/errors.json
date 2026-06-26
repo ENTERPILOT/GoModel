@@ -1,0 +1,82 @@
+[
+  {
+    "id": "errors.unknown_model",
+    "title": "Errors: unknown model returns a normalized OpenAI-style error",
+    "provider": "openai",
+    "modality": ["errors"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {"model": "definitely-not-a-real-model-zzz", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 8}
+    },
+    "expect": {
+      "status": [400, 404],
+      "response": [
+        {"path": "$.error.message", "not_empty": true},
+        {"path": "$.error.type", "present": true, "hard": false}
+      ]
+    },
+    "notes": "Routing failure surfaces as a clean error envelope, not a 5xx or hang."
+  },
+  {
+    "id": "errors.anthropic_audio_rejected",
+    "title": "Errors: unsupported input_audio on Anthropic chat is rejected gracefully",
+    "provider": "anthropic",
+    "modality": ["errors", "audio"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@anthropic.chat",
+        "messages": [{"role": "user", "content": [
+          {"type": "text", "text": "Transcribe this."},
+          {"type": "input_audio", "input_audio": {"data": "AAAA", "format": "mp3"}}
+        ]}],
+        "max_tokens": 32
+      }
+    },
+    "expect": {
+      "status": [400, 415, 422],
+      "response": [{"path": "$.error.message", "not_empty": true}]
+    },
+    "notes": "Anthropic chat does not support input_audio; the gateway must reject with a 4xx invalid-request error rather than crash or forward garbage. A non-4xx here is itself the finding."
+  },
+  {
+    "id": "errors.openai_unknown_field_forwarded",
+    "title": "Behavior: unknown top-level fields are forwarded verbatim (provider rejects)",
+    "provider": "openai",
+    "modality": ["errors", "preservation"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@openai.chat",
+        "messages": [{"role": "user", "content": "hi"}],
+        "x_qa_marker": "keep-123",
+        "max_tokens": 8
+      }
+    },
+    "expect": {
+      "status": [400],
+      "response": [
+        {"path": "$.error.message", "not_empty": true},
+        {"path": "$.error.message", "contains": "x_qa_marker", "hard": false},
+        {"path": "$.error.type", "equals": "invalid_request_error", "hard": false}
+      ],
+      "audit": [{"path": "$.data.request_body.x_qa_marker", "equals": "keep-123", "hard": false}]
+    },
+    "notes": "Documented finding (2026-06): GoModel does not strip unrecognized top-level fields; it forwards them, so a strict provider (OpenAI) returns 400 'Unrecognized request argument'. The audit confirms the field was captured inbound and passed through. If the gateway later sanitizes unknown fields, change expect.status to 200."
+  },
+  {
+    "id": "errors.malformed_json",
+    "title": "Errors: malformed JSON body returns 400",
+    "provider": "openai",
+    "modality": ["errors"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "raw_body": "{\"model\": \"@openai.chat\", \"messages\": [ "
+    },
+    "expect": {
+      "status": [400],
+      "response": [{"path": "$.error.message", "not_empty": true}]
+    },
+    "notes": "Truncated JSON must yield a 400 with a clear error message (raw_body is sent verbatim)."
+  }
+]

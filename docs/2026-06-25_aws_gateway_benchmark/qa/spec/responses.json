@@ -1,0 +1,198 @@
+[
+  {
+    "id": "responses.openai.basic_string",
+    "title": "Responses: plain string input",
+    "provider": "openai",
+    "modality": ["text"],
+    "request": {
+      "path": "/v1/responses",
+      "body": {"model": "@openai.chat", "input": "What is the capital of France? One word.", "max_output_tokens": 64}
+    },
+    "expect": {
+      "status": 200,
+      "response": [
+        {"path": "$.object", "equals": "response"},
+        {"path": "$.status", "equals": "completed"},
+        {"path": "$.output[0].content[0].text", "not_empty": true}
+      ],
+      "audit": [{"path": "$.provider", "equals": "openai"}],
+      "quality": [{"target": "response:$.output[0].content[0].text", "contains_any": ["paris"]}]
+    },
+    "notes": "Native Responses shape: output[].content[].text, status=completed."
+  },
+  {
+    "id": "responses.openai.instructions",
+    "title": "Responses: instructions + string input",
+    "provider": "openai",
+    "modality": ["text"],
+    "request": {
+      "path": "/v1/responses",
+      "body": {"model": "@openai.chat", "instructions": "Answer in exactly one word.", "input": "Largest ocean?", "max_output_tokens": 64}
+    },
+    "expect": {
+      "status": 200,
+      "response": [
+        {"path": "$.status", "equals": "completed"},
+        {"path": "$.output[0].content[0].text", "not_empty": true}
+      ],
+      "quality": [{"target": "response:$.output[0].content[0].text", "contains_any": ["pacific"]}]
+    },
+    "notes": "instructions become a system-equivalent prompt."
+  },
+  {
+    "id": "responses.openai.multimodal_image",
+    "title": "Responses: multi-part input_text + input_image",
+    "provider": "openai",
+    "modality": ["vision"],
+    "request": {
+      "path": "/v1/responses",
+      "body": {
+        "model": "@openai.vision",
+        "input": [{"role": "user", "content": [
+          {"type": "input_text", "text": "One word: dominant color?"},
+          {"type": "input_image", "image_url": "@image.red"}
+        ]}],
+        "max_output_tokens": 32
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.output[0].content[0].text", "not_empty": true}],
+      "quality": [{"target": "response:$.output[0].content[0].text", "contains_any": ["red"]}]
+    },
+    "notes": "input_image content part normalized to a chat image part."
+  },
+  {
+    "id": "responses.openai.stream",
+    "title": "Responses: streaming output_text deltas + response.completed",
+    "provider": "openai",
+    "modality": ["text", "streaming"],
+    "request": {
+      "path": "/v1/responses",
+      "stream": true,
+      "body": {"model": "@openai.chat", "input": "Count from 1 to 3.", "stream": true, "max_output_tokens": 64}
+    },
+    "expect": {
+      "status": 200,
+      "stream": {"min_events": 2, "terminal": "response.completed", "text": [{"not_empty": true}]}
+    },
+    "notes": "Responses SSE event protocol (output_text.delta -> response.completed)."
+  },
+  {
+    "id": "responses.openai.tools",
+    "title": "Responses: function tool",
+    "provider": "openai",
+    "modality": ["tools"],
+    "request": {
+      "path": "/v1/responses",
+      "body": {
+        "model": "@openai.chat",
+        "input": "Use the tool to get the weather in Rome.",
+        "tools": [{"type": "function", "name": "get_weather", "description": "weather for a city", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}],
+        "max_output_tokens": 128
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.status", "equals": "completed"}],
+      "quality": [{"target": "response:$.output[0].type", "contains_any": ["function_call", "message"]}]
+    },
+    "notes": "Responses tool schema (flat name/parameters) handled."
+  },
+  {
+    "id": "responses.openai.structured_text_format",
+    "title": "Responses: structured output via text.format json_schema",
+    "provider": "openai",
+    "modality": ["structured"],
+    "request": {
+      "path": "/v1/responses",
+      "body": {
+        "model": "@openai.chat",
+        "input": "Capital of Spain.",
+        "text": {"format": {"type": "json_schema", "name": "cap", "strict": true, "schema": {"type": "object", "properties": {"capital": {"type": "string"}}, "required": ["capital"], "additionalProperties": false}}},
+        "max_output_tokens": 64
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.output[0].content[0].text", "not_empty": true}],
+      "quality": [{"target": "response:$.output[0].content[0].text", "contains_any": ["madrid"]}]
+    },
+    "notes": "text.format maps to chat response_format/json_schema for non-native providers."
+  },
+  {
+    "id": "responses.openai.reasoning_effort",
+    "title": "Responses: reasoning model with effort",
+    "provider": "openai",
+    "modality": ["reasoning"],
+    "request": {
+      "path": "/v1/responses",
+      "body": {"model": "@openai.reasoning", "input": "What is 6 times 7? Number only.", "reasoning": {"effort": "low"}, "max_output_tokens": 2000}
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.status", "equals": "completed"}],
+      "quality": [{"target": "response:$.output[0].content[0].text", "contains_any": ["42"]}]
+    },
+    "notes": "reasoning.effort accepted on the Responses API."
+  },
+  {
+    "id": "responses.openai.metadata_preserved",
+    "title": "Responses: metadata (valid optional field) is preserved",
+    "provider": "openai",
+    "modality": ["preservation"],
+    "request": {
+      "path": "/v1/responses",
+      "body": {"model": "@openai.chat", "input": "Say OK.", "metadata": {"qa_case": "resp-extra"}, "max_output_tokens": 16}
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.status", "equals": "completed"}],
+      "audit": [{"path": "$.data.request_body.metadata.qa_case", "equals": "resp-extra", "hard": false}]
+    },
+    "notes": "metadata is a first-class Responses field; audit confirms the gateway recorded it as sent."
+  },
+  {
+    "id": "responses.anthropic.basic",
+    "title": "Responses adapter -> Anthropic",
+    "provider": "anthropic",
+    "modality": ["text"],
+    "request": {
+      "path": "/v1/responses",
+      "body": {"model": "@anthropic.chat", "input": "Capital of Germany? One word.", "max_output_tokens": 64}
+    },
+    "expect": {
+      "status": 200,
+      "response": [
+        {"path": "$.status", "equals": "completed"},
+        {"path": "$.output[0].content[0].text", "not_empty": true}
+      ],
+      "audit": [{"path": "$.provider", "equals": "anthropic"}],
+      "quality": [{"target": "response:$.output[0].content[0].text", "contains_any": ["berlin"]}]
+    },
+    "notes": "Non-native provider served through the Responses->chat adapter and renormalized to Responses shape."
+  },
+  {
+    "id": "responses.gemini.image",
+    "title": "Responses adapter -> Gemini with image input",
+    "provider": "gemini",
+    "modality": ["vision"],
+    "request": {
+      "path": "/v1/responses",
+      "body": {
+        "model": "@gemini.vision",
+        "input": [{"role": "user", "content": [
+          {"type": "input_text", "text": "One word: color?"},
+          {"type": "input_image", "image_url": "@image.blue"}
+        ]}],
+        "max_output_tokens": 32
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.output[0].content[0].text", "not_empty": true}],
+      "quality": [{"target": "response:$.output[0].content[0].text", "contains_any": ["blue"]}]
+    },
+    "notes": "Responses multimodal input adapted to Gemini inline_data."
+  }
+]

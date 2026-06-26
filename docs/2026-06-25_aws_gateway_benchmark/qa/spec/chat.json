@@ -1,0 +1,447 @@
+[
+  {
+    "id": "chat.openai.multiturn",
+    "title": "OpenAI chat: multi-turn system+user+assistant+user",
+    "provider": "openai",
+    "modality": ["text"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@openai.chat",
+        "messages": [
+          {"role": "system", "content": "You are a terse assistant. Answer in one short sentence."},
+          {"role": "user", "content": "Name the largest planet in the solar system."},
+          {"role": "assistant", "content": "Jupiter."},
+          {"role": "user", "content": "And the smallest?"}
+        ],
+        "max_tokens": 64
+      }
+    },
+    "expect": {
+      "status": 200,
+      "headers": [{"name": "X-Request-Id", "present": true}],
+      "response": [
+        {"path": "$.object", "equals": "chat.completion"},
+        {"path": "$.choices[0].message.role", "equals": "assistant"},
+        {"path": "$.choices[0].message.content", "not_empty": true},
+        {"path": "$.usage.total_tokens", "gt": 0}
+      ],
+      "audit": [
+        {"path": "$.provider", "equals": "openai"},
+        {"path": "$.resolved_model", "not_empty": true}
+      ],
+      "quality": [{"target": "response:$.choices[0].message.content", "contains_any": ["mercury"]}]
+    },
+    "notes": "Baseline conversational correctness + OpenAI usage normalization + audit routing."
+  },
+  {
+    "id": "chat.openai.stream",
+    "title": "OpenAI chat: streaming deltas terminate with [DONE]",
+    "provider": "openai",
+    "modality": ["text", "streaming"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "stream": true,
+      "body": {
+        "model": "@openai.chat",
+        "messages": [{"role": "user", "content": "List three primary colors, comma separated."}],
+        "stream": true,
+        "max_tokens": 64
+      }
+    },
+    "expect": {
+      "status": 200,
+      "stream": {"min_events": 2, "terminal": "[DONE]", "text": [{"not_empty": true}]},
+      "quality": [{"target": "stream", "contains_any": ["red", "blue", "yellow", "green"]}]
+    },
+    "notes": "SSE framing + terminal marker for chat dialect."
+  },
+  {
+    "id": "chat.openai.stream_usage",
+    "title": "OpenAI chat: stream_options include_usage emits a usage chunk",
+    "provider": "openai",
+    "modality": ["text", "streaming"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "stream": true,
+      "body": {
+        "model": "@openai.chat",
+        "messages": [{"role": "user", "content": "Say hi."}],
+        "stream": true,
+        "stream_options": {"include_usage": true},
+        "max_tokens": 32
+      }
+    },
+    "expect": {
+      "status": 200,
+      "stream": {"min_events": 2, "terminal": "[DONE]"},
+      "quality": [{"target": "stream", "not_empty": true}]
+    },
+    "notes": "stream_options must survive translation; usage chunk is provider-shaped."
+  },
+  {
+    "id": "chat.openai.vision_data_url",
+    "title": "OpenAI chat: vision via inline image_url (data URL)",
+    "provider": "openai",
+    "modality": ["vision"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@openai.vision",
+        "messages": [{"role": "user", "content": [
+          {"type": "text", "text": "What is the single dominant color of this image? Answer with one word."},
+          {"type": "image_url", "image_url": {"url": "@image.red"}}
+        ]}],
+        "max_tokens": 32
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.choices[0].message.content", "not_empty": true}],
+      "quality": [{"target": "response:$.choices[0].message.content", "contains_any": ["red"]}]
+    },
+    "notes": "Multimodal content-part passthrough; deterministic solid-color fixture."
+  },
+  {
+    "id": "chat.openai.tools_call",
+    "title": "OpenAI chat: function/tool calling is emitted",
+    "provider": "openai",
+    "modality": ["tools"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@openai.chat",
+        "messages": [{"role": "user", "content": "What is the weather in Paris? Use the tool."}],
+        "tools": [{"type": "function", "function": {
+          "name": "get_weather",
+          "description": "Get current weather for a city",
+          "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}
+        }}],
+        "tool_choice": "required",
+        "max_tokens": 128
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [
+        {"path": "$.choices[0].message.tool_calls[0].function.name", "equals": "get_weather"},
+        {"path": "$.choices[0].finish_reason", "equals": "tool_calls"}
+      ]
+    },
+    "notes": "tool_choice=required must force a structured tool call."
+  },
+  {
+    "id": "chat.openai.tools_roundtrip",
+    "title": "OpenAI chat: tool result fed back yields a final answer",
+    "provider": "openai",
+    "modality": ["tools"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@openai.chat",
+        "messages": [
+          {"role": "user", "content": "What is the weather in Paris?"},
+          {"role": "assistant", "content": null, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\":\"Paris\"}"}}]},
+          {"role": "tool", "tool_call_id": "call_1", "content": "{\"temp_c\": 21, \"summary\": \"sunny\"}"}
+        ],
+        "max_tokens": 64
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.choices[0].message.content", "not_empty": true}],
+      "quality": [{"target": "response:$.choices[0].message.content", "contains_any": ["21", "sunny", "sun"]}]
+    },
+    "notes": "Assistant tool_calls + role:tool message round-trip translation."
+  },
+  {
+    "id": "chat.openai.structured_json_schema",
+    "title": "OpenAI chat: structured output via response_format json_schema",
+    "provider": "openai",
+    "modality": ["structured"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@openai.chat",
+        "messages": [{"role": "user", "content": "Give the capital of France."}],
+        "response_format": {"type": "json_schema", "json_schema": {
+          "name": "capital",
+          "strict": true,
+          "schema": {"type": "object", "properties": {"country": {"type": "string"}, "capital": {"type": "string"}}, "required": ["country", "capital"], "additionalProperties": false}
+        }},
+        "max_tokens": 64
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.choices[0].message.content", "not_empty": true}],
+      "quality": [{"target": "response:$.choices[0].message.content", "contains_any": ["paris"]}]
+    },
+    "notes": "response_format must pass through and constrain output."
+  },
+  {
+    "id": "chat.openai.reasoning_max_tokens_mapping",
+    "title": "OpenAI reasoning: max_tokens accepted, temperature tolerated (Postel)",
+    "provider": "openai",
+    "modality": ["reasoning"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@openai.reasoning",
+        "messages": [{"role": "user", "content": "What is 17 + 25? Reply with the number only."}],
+        "max_tokens": 2000,
+        "temperature": 0.5
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.choices[0].message.content", "not_empty": true}],
+      "audit": [
+        {"path": "$.provider", "equals": "openai"},
+        {"path": "$.data.request_body.max_tokens", "present": true, "hard": false}
+      ],
+      "quality": [{"target": "response:$.choices[0].message.content", "contains_any": ["42"]}]
+    },
+    "notes": "Reasoning models reject max_tokens/temperature upstream; a 200 proves the gateway mapped max_tokens->max_completion_tokens and dropped temperature. Audit shows the inbound body is preserved verbatim."
+  },
+  {
+    "id": "chat.openai.optional_field_preserved",
+    "title": "OpenAI chat: a valid optional field (user) is preserved end-to-end",
+    "provider": "openai",
+    "modality": ["text", "preservation"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "headers": {"X-QA-Marker": "keep-123"},
+      "body": {
+        "model": "@openai.chat",
+        "messages": [{"role": "user", "content": "Reply with the word OK."}],
+        "user": "qa-user-001",
+        "max_tokens": 16
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.choices[0].message.content", "not_empty": true}],
+      "audit": [
+        {"path": "$.data.request_body.user", "equals": "qa-user-001", "hard": false}
+      ]
+    },
+    "notes": "A provider-valid optional field round-trips: request succeeds and the audit confirms the gateway recorded it verbatim. (Unknown/unrecognized fields are a separate case — see errors.openai_unknown_field_forwarded.)"
+  },
+  {
+    "id": "chat.openai.provider_extras_preserved",
+    "title": "OpenAI chat: provider-specific response extras survive normalization",
+    "provider": "openai",
+    "modality": ["preservation"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@openai.chat",
+        "messages": [{"role": "user", "content": "Say hi."}],
+        "max_tokens": 16
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [
+        {"path": "$.id", "not_empty": true},
+        {"path": "$.created", "gt": 0},
+        {"path": "$.model", "not_empty": true},
+        {"path": "$.system_fingerprint", "present": true, "hard": false},
+        {"path": "$.service_tier", "present": true, "hard": false}
+      ]
+    },
+    "notes": "Normalization should preserve provider extras (system_fingerprint/service_tier) rather than strip to a minimal schema."
+  },
+  {
+    "id": "chat.anthropic.basic",
+    "title": "Anthropic via chat/completions: OpenAI-shaped response",
+    "provider": "anthropic",
+    "modality": ["text"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@anthropic.chat",
+        "messages": [
+          {"role": "system", "content": "Be concise."},
+          {"role": "user", "content": "Name the capital of Japan in one word."}
+        ],
+        "max_tokens": 64
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [
+        {"path": "$.object", "equals": "chat.completion"},
+        {"path": "$.choices[0].message.content", "not_empty": true},
+        {"path": "$.usage.completion_tokens", "gt": 0}
+      ],
+      "audit": [{"path": "$.provider", "equals": "anthropic"}],
+      "quality": [{"target": "response:$.choices[0].message.content", "contains_any": ["tokyo"]}]
+    },
+    "notes": "Claude served through the OpenAI chat dialect; Anthropic input/output token usage normalized to prompt/completion."
+  },
+  {
+    "id": "chat.anthropic.stream",
+    "title": "Anthropic via chat/completions: streaming normalized to [DONE]",
+    "provider": "anthropic",
+    "modality": ["text", "streaming"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "stream": true,
+      "body": {
+        "model": "@anthropic.chat",
+        "messages": [{"role": "user", "content": "Count from 1 to 3."}],
+        "stream": true,
+        "max_tokens": 64
+      }
+    },
+    "expect": {
+      "status": 200,
+      "stream": {"min_events": 2, "terminal": "[DONE]", "text": [{"not_empty": true}]}
+    },
+    "notes": "Anthropic SSE converted into OpenAI chat-stream framing with a [DONE] terminator."
+  },
+  {
+    "id": "chat.anthropic.vision",
+    "title": "Anthropic via chat/completions: vision image_url",
+    "provider": "anthropic",
+    "modality": ["vision"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@anthropic.vision",
+        "messages": [{"role": "user", "content": [
+          {"type": "text", "text": "One word: what is the dominant color?"},
+          {"type": "image_url", "image_url": {"url": "@image.blue"}}
+        ]}],
+        "max_tokens": 32
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.choices[0].message.content", "not_empty": true}],
+      "quality": [{"target": "response:$.choices[0].message.content", "contains_any": ["blue"]}]
+    },
+    "notes": "image_url data URL mapped to an Anthropic base64 image block."
+  },
+  {
+    "id": "chat.anthropic.params_fidelity",
+    "title": "Anthropic via chat/completions: sampling params + stop honored",
+    "provider": "anthropic",
+    "modality": ["text"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@anthropic.chat",
+        "messages": [{"role": "user", "content": "Write the word DONE then stop."}],
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "stop": ["\n\n"],
+        "max_tokens": 32
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.choices[0].message.content", "not_empty": true}]
+    },
+    "notes": "temperature/top_p/stop translated to Anthropic equivalents without error."
+  },
+  {
+    "id": "chat.gemini.basic",
+    "title": "Gemini via chat/completions: native API path",
+    "provider": "gemini",
+    "modality": ["text"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@gemini.chat",
+        "messages": [
+          {"role": "system", "content": "Be concise."},
+          {"role": "user", "content": "Capital of Italy in one word?"}
+        ],
+        "max_tokens": 64
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [
+        {"path": "$.object", "equals": "chat.completion"},
+        {"path": "$.choices[0].message.content", "not_empty": true},
+        {"path": "$.usage.total_tokens", "gt": 0}
+      ],
+      "audit": [{"path": "$.provider", "equals": "gemini"}],
+      "quality": [{"target": "response:$.choices[0].message.content", "contains_any": ["rome"]}]
+    },
+    "notes": "Gemini native contents/parts mapping + usageMetadata normalization (USE_GOOGLE_GEMINI_NATIVE_API default true)."
+  },
+  {
+    "id": "chat.gemini.stream",
+    "title": "Gemini via chat/completions: streaming",
+    "provider": "gemini",
+    "modality": ["text", "streaming"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "stream": true,
+      "body": {
+        "model": "@gemini.chat",
+        "messages": [{"role": "user", "content": "Name two oceans, comma separated."}],
+        "stream": true,
+        "max_tokens": 64
+      }
+    },
+    "expect": {
+      "status": 200,
+      "stream": {"min_events": 2, "terminal": "[DONE]", "text": [{"not_empty": true}]}
+    },
+    "notes": "Gemini native stream translated to OpenAI chat-stream framing."
+  },
+  {
+    "id": "chat.gemini.vision",
+    "title": "Gemini via chat/completions: vision inline image",
+    "provider": "gemini",
+    "modality": ["vision"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@gemini.vision",
+        "messages": [{"role": "user", "content": [
+          {"type": "text", "text": "One word: dominant color?"},
+          {"type": "image_url", "image_url": {"url": "@image.green"}}
+        ]}],
+        "max_tokens": 32
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.choices[0].message.content", "not_empty": true}],
+      "quality": [{"target": "response:$.choices[0].message.content", "contains_any": ["green"]}]
+    },
+    "notes": "image_url data URL mapped to Gemini inline_data."
+  },
+  {
+    "id": "chat.gemini.tools",
+    "title": "Gemini via chat/completions: function calling",
+    "provider": "gemini",
+    "modality": ["tools"],
+    "request": {
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "@gemini.chat",
+        "messages": [{"role": "user", "content": "Use the tool to get the weather in Berlin."}],
+        "tools": [{"type": "function", "function": {
+          "name": "get_weather",
+          "description": "Get weather for a city",
+          "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}
+        }}],
+        "max_tokens": 128
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.choices[0].message.tool_calls[0].function.name", "equals": "get_weather", "hard": false}],
+      "quality": [{"target": "response:$.choices[0].message.tool_calls[0].function.name", "contains": "weather"}]
+    },
+    "notes": "Gemini functionCall mapped to OpenAI tool_calls (soft: model may answer directly)."
+  }
+]

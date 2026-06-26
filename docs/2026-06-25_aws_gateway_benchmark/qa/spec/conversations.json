@@ -1,0 +1,92 @@
+[
+  {
+    "id": "conversations.create",
+    "title": "Conversations: create",
+    "provider": "openai",
+    "modality": ["stateful"],
+    "request": {
+      "path": "/v1/conversations",
+      "body": {"metadata": {"qa": "conv-flow"}}
+    },
+    "capture": {"conversation_id": "$.id"},
+    "expect": {
+      "status": 200,
+      "response": [
+        {"path": "$.object", "equals": "conversation"},
+        {"path": "$.id", "not_empty": true}
+      ]
+    },
+    "notes": "Creates a conversation and captures its id for the rest of this flow (cases run in order)."
+  },
+  {
+    "id": "conversations.get",
+    "title": "Conversations: retrieve by id",
+    "provider": "openai",
+    "modality": ["stateful"],
+    "request": {
+      "method": "GET",
+      "path": "/v1/conversations/${conversation_id}"
+    },
+    "expect": {
+      "status": 200,
+      "response": [
+        {"path": "$.object", "equals": "conversation"},
+        {"path": "$.id", "not_empty": true}
+      ]
+    },
+    "notes": "Reads back the conversation created above (uses ${conversation_id})."
+  },
+  {
+    "id": "conversations.use_in_responses",
+    "title": "Conversations: link a Responses call to a conversation",
+    "provider": "openai",
+    "modality": ["stateful", "text"],
+    "request": {
+      "path": "/v1/responses",
+      "body": {
+        "model": "@openai.chat",
+        "conversation": {"id": "${conversation_id}"},
+        "input": "Remember the number 7.",
+        "max_output_tokens": 32
+      }
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.status", "equals": "completed"}]
+    },
+    "notes": "Responses request bound to a conversation id (stateful threading)."
+  },
+  {
+    "id": "conversations.update",
+    "title": "Conversations: update metadata",
+    "provider": "openai",
+    "modality": ["stateful"],
+    "request": {
+      "path": "/v1/conversations/${conversation_id}",
+      "body": {"metadata": {"qa": "conv-flow", "stage": "updated"}}
+    },
+    "expect": {
+      "status": 200,
+      "response": [{"path": "$.object", "equals": "conversation"}]
+    },
+    "notes": "Metadata update on an existing conversation."
+  },
+  {
+    "id": "conversations.delete",
+    "title": "Conversations: delete",
+    "provider": "openai",
+    "modality": ["stateful"],
+    "request": {
+      "method": "DELETE",
+      "path": "/v1/conversations/${conversation_id}"
+    },
+    "expect": {
+      "status": 200,
+      "response": [
+        {"path": "$.object", "equals": "conversation.deleted"},
+        {"path": "$.deleted", "equals": true}
+      ]
+    },
+    "notes": "Tears down the conversation created at the start of the flow."
+  }
+]

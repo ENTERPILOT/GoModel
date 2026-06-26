@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 242" width="660" height="242" role="img" aria-label="Peak memory under load (RAM, lower is better). GoModel 37 MB, Bifrost 143 MB, Portkey 112 MB, LiteLLM 2.3 GB." font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif">
+  <rect x="0.5" y="0.5" width="659" height="241" rx="14" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="24" y="32" font-size="16" font-weight="700" fill="#0f172a">Peak memory under load</text>
+  <text x="636" y="32" text-anchor="end" font-size="12" fill="#64748b">RAM · lower is better</text>
+  <g>
+    <text x="80" y="71" text-anchor="end" dominant-baseline="middle" font-size="14" font-weight="700" fill="#0f172a">GoModel</text>
+    <rect x="92" y="56" width="8.0" height="30" rx="5" fill="#1e7ab5"/>
+    <text x="109.0" y="71" dominant-baseline="middle" font-size="13" font-weight="700" fill="#1e7ab5">37 MB</text>
+    <text x="80" y="117" text-anchor="end" dominant-baseline="middle" font-size="14" font-weight="500" fill="#64748b">Bifrost</text>
+    <rect x="92" y="102" width="30.8" height="30" rx="5" fill="#cbd5e1"/>
+    <text x="131.8" y="117" dominant-baseline="middle" font-size="13" font-weight="600" fill="#334155">143 MB</text>
+    <text x="80" y="163" text-anchor="end" dominant-baseline="middle" font-size="14" font-weight="500" fill="#64748b">Portkey</text>
+    <rect x="92" y="148" width="24.2" height="30" rx="5" fill="#cbd5e1"/>
+    <text x="125.2" y="163" dominant-baseline="middle" font-size="13" font-weight="600" fill="#334155">112 MB</text>
+    <text x="80" y="209" text-anchor="end" dominant-baseline="middle" font-size="14" font-weight="500" fill="#64748b">LiteLLM</text>
+    <rect x="92" y="194" width="490.0" height="30" rx="5" fill="#cbd5e1"/>
+    <text x="591.0" y="209" dominant-baseline="middle" font-size="13" font-weight="600" fill="#334155">2.3 GB</text>
+  </g>
+</svg>
