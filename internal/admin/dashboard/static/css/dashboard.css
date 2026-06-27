@@ -2142,6 +2142,18 @@ td.col-price {
   width: 88px;
 }
 
+/* Default/effective summary on the left, the enable toggle on the right. */
+.vm-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vm-status-row .vm-status-toggle {
+  margin-left: auto;
+}
+
 .form-error {
   padding: 10px 12px;
   margin: 0;
@@ -2878,7 +2890,7 @@ textarea:focus {
   background: var(--bg-surface);
   color: var(--text-muted);
   white-space: nowrap;
-  max-width: 280px;
+  max-width: 420px;
   overflow: hidden;
   text-overflow: ellipsis;
 }

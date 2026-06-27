@@ -93,6 +93,52 @@ test('qualifiedModelDisplay does not duplicate an existing exact provider prefix
     );
 });
 
+test('auditModelDisplay shows requested → resolved when a redirect was applied', () => {
+    const app = loadDashboardApp();
+
+    assert.equal(
+        app.auditModelDisplay({
+            requested_model: 'smart',
+            alias_used: true,
+            provider_name: 'openai',
+            resolved_model: 'gpt-4o',
+        }),
+        'smart ⮕ openai/gpt-4o'
+    );
+});
+
+test('auditModelDisplay shows a single value when requested and resolved match', () => {
+    const app = loadDashboardApp();
+
+    assert.equal(
+        app.auditModelDisplay({
+            requested_model: 'openai/gpt-4o',
+            alias_used: true,
+            provider_name: 'openai',
+            resolved_model: 'gpt-4o',
+        }),
+        'openai/gpt-4o'
+    );
+});
+
+test('auditModelDisplay leaves direct calls unchanged without a redirect', () => {
+    const app = loadDashboardApp();
+
+    assert.equal(
+        app.auditModelDisplay({
+            requested_model: 'gpt-4o',
+            alias_used: false,
+            provider_name: 'openai',
+            resolved_model: 'gpt-4o',
+        }),
+        'gpt-4o'
+    );
+    assert.equal(
+        app.auditModelDisplay({ model: 'gpt-4o' }),
+        'gpt-4o'
+    );
+});
+
 test('formatCost uses data placeholder for missing values', () => {
     const app = loadDashboardApp();
 

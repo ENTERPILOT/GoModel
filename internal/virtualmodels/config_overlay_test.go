@@ -110,3 +110,43 @@ func TestService_ConfigOverlayOverridesStoreRow(t *testing.T) {
 		t.Fatalf("config overlay did not override store row: got %q", sel.QualifiedModel())
 	}
 }
+
+func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		entries []config.VirtualModelConfig
+	}{
+		{
+			name:    "self target",
+			entries: []config.VirtualModelConfig{{Source: "smart", Target: "smart"}},
+		},
+		{
+			name:    "unknown target",
+			entries: []config.VirtualModelConfig{{Source: "smart", Target: "openai/unknown"}},
+		},
+		{
+			name: "virtual model target",
+			entries: []config.VirtualModelConfig{
+				{Source: "smart", Target: "other"},
+				{Source: "other", Target: "openai/gpt-4o"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			svc := newBalancingService(t)
+			svc.SetConfigModels(ConfigModels(tt.entries))
+			err := svc.Refresh(context.Background())
+			if err == nil {
+				t.Fatalf("Refresh() error = nil, want validation failure")
+			}
+			if !IsValidationError(err) {
+				t.Fatalf("Refresh() error = %v, want validation error", err)
+			}
+		})
+	}
+}

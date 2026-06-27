@@ -17,6 +17,7 @@ import (
 // balanced across by strategy ("round_robin" or "cost").
 type upsertVirtualModelRequest struct {
 	Source      string                      `json:"source"`
+	OldSource   string                      `json:"old_source,omitempty"`
 	TargetModel string                      `json:"target_model,omitempty"`
 	Targets     []virtualModelTargetRequest `json:"targets,omitempty"`
 	Strategy    string                      `json:"strategy,omitempty"`
@@ -59,9 +60,11 @@ func (h *Handler) ListVirtualModels(c *echo.Context) error {
 	return c.JSON(http.StatusOK, views)
 }
 
-// UpsertVirtualModel handles PUT /admin/virtual-models.
+// UpsertVirtualModel handles PUT /admin/virtual-models. When old_source is set
+// and differs from source, the row is renamed: stored under the new source and
+// removed from the old one in a single validated operation.
 //
-// @Summary      Create or update one virtual model
+// @Summary      Create, update, or rename one virtual model
 // @Tags         admin
 // @Accept       json
 // @Produce      json
@@ -91,7 +94,13 @@ func (h *Handler) UpsertVirtualModel(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	if err := h.virtualModels.Upsert(c.Request().Context(), vm); err != nil {
+	oldSource := strings.TrimSpace(req.OldSource)
+	if oldSource != "" && oldSource != source {
+		err = h.virtualModels.Rename(c.Request().Context(), oldSource, vm)
+	} else {
+		err = h.virtualModels.Upsert(c.Request().Context(), vm)
+	}
+	if err != nil {
 		return handleError(c, virtualModelWriteError(err))
 	}
 
@@ -144,8 +153,14 @@ func (h *Handler) DeleteVirtualModel(c *echo.Context) error {
 // defaults to true, preserving the existing value when omitted.
 func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelRequest) (virtualmodels.VirtualModel, error) {
 	enabled := true
+	// Preserve the stored enable flag when the request omits it. On a rename the
+	// new source does not exist yet, so fall back to the row being renamed.
 	if existing, ok := h.virtualModels.Get(source); ok && existing != nil {
 		enabled = existing.Enabled
+	} else if old := strings.TrimSpace(req.OldSource); old != "" {
+		if existing, ok := h.virtualModels.Get(old); ok && existing != nil {
+			enabled = existing.Enabled
+		}
 	}
 	if req.Enabled != nil {
 		enabled = *req.Enabled

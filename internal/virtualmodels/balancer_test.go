@@ -202,3 +202,19 @@ func TestBalancer_WeightedIndexPlainWhenEqual(t *testing.T) {
 		}
 	}
 }
+
+func TestRoundRobin_PruneRemovesStaleCounters(t *testing.T) {
+	t.Parallel()
+	var rr roundRobin
+	rr.next("keep")
+	rr.next("gone")
+
+	rr.prune(map[string]redirectEntry{"keep": {}})
+
+	if _, ok := rr.counters.Load("keep"); !ok {
+		t.Fatalf("keep counter removed, want retained")
+	}
+	if _, ok := rr.counters.Load("gone"); ok {
+		t.Fatalf("gone counter retained, want pruned")
+	}
+}

@@ -15,6 +15,8 @@
 
             // Unified editor (replaces the old alias modal and access-override modal).
             vmFormOpen: false,
+            vmFormHelpOpen: false,
+            vmFormUserPathsHelpOpen: false,
             vmFormMode: 'create',
             vmFormError: '',
             vmSubmitting: false,
@@ -29,7 +31,7 @@
             vmForm: {
                 source: '',
                 target_model: '',
-                target_weight: '',
+                target_weight: 1,
                 targets: [],
                 strategy: 'round_robin',
                 user_paths: '',
@@ -152,7 +154,7 @@
                 return {
                     source: '',
                     target_model: '',
-                    target_weight: '',
+                    target_weight: 1,
                     targets: [],
                     strategy: 'round_robin',
                     user_paths: '',
@@ -164,16 +166,23 @@
             // ---- Load-balancing target helpers ----
 
             // qualifyTarget renders a {provider, model} target as a single selector.
+            // The model name may itself contain slashes (e.g. provider "groq" with
+            // model "openai/gpt-oss-120b"), so only skip re-qualifying when the model
+            // already carries this provider's prefix — never on the mere presence of
+            // a slash, which would wrongly drop the provider.
             qualifyTarget(target) {
                 if (!target) {
                     return '';
                 }
                 const provider = String(target.provider || '').trim();
                 const model = String(target.model || '').trim();
-                if (provider && model && !model.includes('/')) {
-                    return provider + '/' + model;
+                if (!provider || !model) {
+                    return model;
                 }
-                return model;
+                if (model === provider || model.startsWith(provider + '/')) {
+                    return model;
+                }
+                return provider + '/' + model;
             },
 
             // addVmTarget appends an empty additional-target row to the editor.
@@ -181,7 +190,7 @@
                 if (!Array.isArray(this.vmForm.targets)) {
                     this.vmForm.targets = [];
                 }
-                this.vmForm.targets.push({ model: '', weight: '' });
+                this.vmForm.targets.push({ model: '', weight: 1 });
             },
 
             // removeVmTarget drops one additional-target row.
@@ -190,6 +199,29 @@
                     return;
                 }
                 this.vmForm.targets.splice(index, 1);
+            },
+
+            // removePrimaryTarget clears the first target row. The editor still
+            // keeps the primary target in its own fields, so the next additional
+            // target (if any) is promoted into that slot to keep the list
+            // contiguous; with none left the redirect collapses toward a policy.
+            removePrimaryTarget() {
+                const rows = Array.isArray(this.vmForm.targets) ? this.vmForm.targets : [];
+                if (rows.length > 0) {
+                    const next = rows.shift();
+                    this.vmForm.target_model = next.model || '';
+                    this.vmForm.target_weight = next.weight || 1;
+                    return;
+                }
+                this.vmForm.target_model = '';
+                this.vmForm.target_weight = 1;
+            },
+
+            // vmFormHasPrimaryTarget reports whether the first target row holds a
+            // model. Its remove button is hidden until then, since clearing an
+            // already-empty primary target does nothing.
+            vmFormHasPrimaryTarget() {
+                return String(this.vmForm.target_model || '').trim() !== '';
             },
 
             // vmFormIsRedirect reports whether the editor currently describes a
@@ -201,12 +233,32 @@
                 return this.collectExtraTargets().length > 0;
             },
 
-            // vmFormShowStrategy reports whether to surface the strategy selector:
-            // only once a redirect load balances across two or more targets.
+            // vmFormShowStrategy reports whether to surface the strategy selector.
+            // The primary row is always visible, so the presence of a second target
+            // row means the editor is configuring a load balancer — the rows do not
+            // need to be filled yet for the strategy choice to be relevant.
             vmFormShowStrategy() {
-                let count = String(this.vmForm.target_model || '').trim() ? 1 : 0;
-                count += this.collectExtraTargets().length;
-                return count >= 2;
+                return Array.isArray(this.vmForm.targets) && this.vmForm.targets.length > 0;
+            },
+
+            // vmFormShowWeights reports whether per-target weight inputs are
+            // meaningful. Only round-robin honors weight; cost balancing always
+            // routes to the cheapest target, so it hides weights to avoid implying
+            // they have an effect.
+            vmFormShowWeights() {
+                return this.vmFormShowStrategy()
+                    && String(this.vmForm.strategy || '').toLowerCase() !== 'cost';
+            },
+
+            // targetEntry builds a {model, weight?} API target, attaching weight
+            // only when it parses to a positive number.
+            targetEntry(model, weightValue) {
+                const entry = { model };
+                const weight = this.parseWeight(weightValue);
+                if (weight !== null) {
+                    entry.weight = weight;
+                }
+                return entry;
             },
 
             // collectExtraTargets normalizes the additional-target rows into API
@@ -216,15 +268,9 @@
                 const targets = [];
                 for (const row of rows) {
                     const model = String(row && row.model || '').trim();
-                    if (!model) {
-                        continue;
+                    if (model) {
+                        targets.push(this.targetEntry(model, row && row.weight));
                     }
-                    const target = { model };
-                    const weight = this.parseWeight(row && row.weight);
-                    if (weight !== null) {
-                        target.weight = weight;
-                    }
-                    targets.push(target);
                 }
                 return targets;
             },
@@ -487,7 +533,8 @@
             },
 
             modelOverridesDefaultEnabled() {
-                for (const model of this.models) {
+                const models = Array.isArray(this.models) ? this.models : [];
+                for (const model of models) {
                     if (model && model.access) {
                         return model.access.default_enabled !== false;
                     }
@@ -632,7 +679,7 @@
             },
 
             rowRedirectCanRemove(row) {
-                return Boolean(row && !row.is_alias && row.masking_alias && row.masking_alias.name);
+                return Boolean(row && !row.is_alias && row.masking_alias && row.masking_alias.name && !row.masking_alias.managed);
             },
 
             rowAnchorID(row) {
@@ -693,7 +740,8 @@
             },
 
             // openVirtualModelEditAlias edits an existing redirect/alias. Source is
-            // locked (renaming happens only through create flows).
+            // editable: changing it renames the virtual model (the original source
+            // travels with the save as old_source so the backend moves the row).
             openVirtualModelEditAlias(alias) {
                 if (!alias) {
                     return;
@@ -701,22 +749,27 @@
                 this.resetVirtualModelForm();
                 this.vmFormOpen = true;
                 this.vmFormMode = 'edit';
-                this.vmFormSourceLocked = true;
+                this.vmFormSourceLocked = false;
                 this.vmFormHasExisting = true;
                 this.vmFormManaged = Boolean(alias.managed);
                 this.vmFormOriginalSource = alias.name || '';
                 this.vmFormDisplayName = alias.name || '';
+                // A redirect has a single enabled flag; show it against the
+                // process-wide default so a disabled alias reads "Effective now: no".
+                this.vmFormDefaultEnabled = this.modelOverridesDefaultEnabled();
+                this.vmFormEffectiveEnabled = alias.enabled !== false;
 
                 const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
                 let primaryModel;
-                let primaryWeight = '';
+                let primaryWeight = 1;
                 let extraTargets;
                 if (lbTargets.length > 0) {
                     primaryModel = this.qualifyTarget(lbTargets[0]);
-                    primaryWeight = lbTargets[0].weight || '';
+                    // A stored target with no explicit weight is the neutral default (1).
+                    primaryWeight = lbTargets[0].weight || 1;
                     extraTargets = lbTargets.slice(1).map((target) => ({
                         model: this.qualifyTarget(target),
-                        weight: target.weight || ''
+                        weight: target.weight || 1
                     }));
                 } else {
                     primaryModel = alias.target_provider
@@ -826,6 +879,8 @@
 
             resetVirtualModelForm() {
                 this.vmFormError = '';
+                this.vmFormHelpOpen = false;
+                this.vmFormUserPathsHelpOpen = false;
                 this.aliasNotice = '';
                 this.aliasError = '';
                 this.vmSubmitting = false;
@@ -990,7 +1045,8 @@
                 if (row.is_alias) {
                     return Boolean(row.alias && row.alias.managed);
                 }
-                return Boolean(row.access && row.access.override && row.access.override.managed);
+                return Boolean((row.access && row.access.override && row.access.override.managed)
+                    || (row.masking_alias && row.masking_alias.managed));
             },
 
             async toggleRowEnabled(row) {
@@ -1031,13 +1087,8 @@
                 // redirect never collapses it to its first target.
                 const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
                 if (lbTargets.length > 1) {
-                    payload.targets = lbTargets.map((target) => {
-                        const mapped = { model: this.qualifyTarget(target) };
-                        if (target.weight) {
-                            mapped.weight = target.weight;
-                        }
-                        return mapped;
-                    });
+                    payload.targets = lbTargets.map((target) =>
+                        this.targetEntry(this.qualifyTarget(target), target.weight));
                     payload.strategy = alias.strategy || 'round_robin';
                 } else if (lbTargets.length === 1) {
                     payload.target_model = this.qualifyTarget(lbTargets[0]);
@@ -1347,6 +1398,8 @@
                 const extraTargets = this.collectExtraTargets();
                 const isRedirect = Boolean(primaryTarget) || extraTargets.length > 0;
                 const userPaths = this.normalizeUserPaths(this.vmForm.user_paths);
+                const originalSource = String(this.vmFormOriginalSource || '').trim();
+                const isRename = this.vmFormMode === 'edit' && Boolean(originalSource) && source !== originalSource;
 
                 if (!source) {
                     this.vmFormError = 'Source is required.';
@@ -1383,6 +1436,26 @@
                             }
                         }
                     }
+                } else if (isRename) {
+                    // Renaming: the backend refuses to clobber an existing row, so block
+                    // early with a clear message instead of overwriting another virtual
+                    // model. Masking a concrete model is still a soft confirm.
+                    const existingAlias = this.findExistingAliasByName(source);
+                    const existingPolicy = existingAlias ? null : this.findModelOverrideView(source);
+                    if (existingAlias || existingPolicy) {
+                        this.vmFormError = 'A virtual model for "' + source + '" already exists. Choose a different source.';
+                        return;
+                    }
+                    if (isRedirect) {
+                        const matchingModel = this.findConcreteModelByName(source);
+                        if (matchingModel) {
+                            const modelName = this.qualifiedModelName(matchingModel) || String(matchingModel.model && matchingModel.model.id || '').trim();
+                            if (!this.confirmAction('A model named "' + modelName + '" already exists. Renaming to that name will mask the model in the list. Continue?')) {
+                                this.vmFormError = 'Choose a different source to avoid masking an existing model.';
+                                return;
+                            }
+                        }
+                    }
                 }
 
                 this.vmSubmitting = true;
@@ -1393,23 +1466,26 @@
                     description: String(this.vmForm.description || '').trim(),
                     enabled: Boolean(this.vmForm.enabled)
                 };
+                if (isRename) {
+                    // Carry the prior key so the backend moves the row instead of
+                    // leaving an orphan behind under the old source.
+                    payload.old_source = originalSource;
+                }
                 if (isRedirect) {
                     const targets = [];
                     if (primaryTarget) {
-                        const primary = { model: primaryTarget };
-                        const primaryWeight = this.parseWeight(this.vmForm.target_weight);
-                        if (primaryWeight !== null) {
-                            primary.weight = primaryWeight;
-                        }
-                        targets.push(primary);
+                        targets.push(this.targetEntry(primaryTarget, this.vmForm.target_weight));
                     }
-                    for (const target of extraTargets) {
-                        targets.push(target);
-                    }
+                    targets.push(...extraTargets);
                     if (targets.length > 1) {
                         // Multiple targets load balance; carry the chosen strategy.
-                        payload.targets = targets;
-                        payload.strategy = this.vmForm.strategy || 'round_robin';
+                        // Weight only biases round-robin, so cost balancers drop it
+                        // rather than persist a value that has no effect.
+                        const strategy = this.vmForm.strategy || 'round_robin';
+                        payload.targets = strategy === 'cost'
+                            ? targets.map((target) => ({ model: target.model }))
+                            : targets;
+                        payload.strategy = strategy;
                     } else {
                         // A single target stays a plain alias on the back-compat field.
                         payload.target_model = targets[0].model;

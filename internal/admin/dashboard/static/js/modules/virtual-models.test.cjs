@@ -339,6 +339,17 @@ test('openVirtualModelCreate keeps Source editable and seeds the target from a r
     assert.equal(module.vmForm.target_model, 'openai/gpt-4o');
 });
 
+test('opening the editor collapses the help toggles', () => {
+    const module = createAliasesModule();
+    module.vmFormHelpOpen = true;
+    module.vmFormUserPathsHelpOpen = true;
+
+    module.openVirtualModelCreate();
+
+    assert.equal(module.vmFormHelpOpen, false);
+    assert.equal(module.vmFormUserPathsHelpOpen, false);
+});
+
 test('openVirtualModelEditModel locks and prefills the Source with the selector', () => {
     const module = createAliasesModule();
     module.openVirtualModelEditModel({
@@ -363,7 +374,7 @@ test('openVirtualModelEditModel locks and prefills the Source with the selector'
     assert.equal(module.vmForm.description, 'team only');
 });
 
-test('openVirtualModelEditAlias locks and prefills the Source from the alias', () => {
+test('openVirtualModelEditAlias keeps the Source editable and prefills it from the alias', () => {
     const module = createAliasesModule();
     module.openVirtualModelEditAlias({
         name: 'smart',
@@ -376,12 +387,33 @@ test('openVirtualModelEditAlias locks and prefills the Source from the alias', (
 
     assert.equal(module.vmFormOpen, true);
     assert.equal(module.vmFormMode, 'edit');
-    assert.equal(module.vmFormSourceLocked, true);
+    // An alias name is free-form, so editing it renames the virtual model.
+    assert.equal(module.vmFormSourceLocked, false);
+    assert.equal(module.vmFormOriginalSource, 'smart');
     assert.equal(module.vmForm.source, 'smart');
     assert.equal(module.vmForm.target_model, 'openai/gpt-4o');
     assert.equal(module.vmForm.description, 'Primary chat alias');
     assert.equal(module.vmForm.user_paths, '/team/alpha');
     assert.equal(module.vmForm.enabled, true);
+});
+
+test('openVirtualModelEditAlias reflects a disabled alias in the effective summary', () => {
+    const module = createAliasesModule();
+    // Process-wide default is enabled.
+    module.models = [{ access: { default_enabled: true } }];
+
+    module.openVirtualModelEditAlias({
+        name: 'smart',
+        target_provider: 'openai',
+        target_model: 'gpt-4o',
+        enabled: false
+    });
+
+    // A disabled alias must read "Default enabled: yes · Effective now: no",
+    // not the stale "yes · yes".
+    assert.equal(module.vmForm.enabled, false);
+    assert.equal(module.vmFormDefaultEnabled, true);
+    assert.equal(module.vmFormEffectiveEnabled, false);
 });
 
 test('submitVirtualModelForm sends a redirect payload when target_model is filled', async() => {
@@ -422,6 +454,106 @@ test('submitVirtualModelForm sends a redirect payload when target_model is fille
         enabled: true,
         target_model: 'openai/gpt-4o'
     });
+});
+
+test('submitVirtualModelForm sends old_source when an alias edit renames the Source', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        },
+        window: { confirm: () => true }
+    });
+    stubRequests(module);
+    module.aliases = [];
+    module.models = [];
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+
+    module.vmFormMode = 'edit';
+    module.vmFormOriginalSource = 'smart';
+    module.vmForm = {
+        source: 'smarter',
+        target_model: 'openai/gpt-4o',
+        user_paths: '',
+        description: '',
+        enabled: true
+    };
+
+    await module.submitVirtualModelForm();
+
+    assert.equal(requests.length, 1);
+    const body = JSON.parse(requests[0].request.body);
+    assert.equal(body.source, 'smarter');
+    assert.equal(body.old_source, 'smart');
+});
+
+test('submitVirtualModelForm omits old_source when an alias edit keeps the Source', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        },
+        window: { confirm: () => true }
+    });
+    stubRequests(module);
+    module.aliases = [];
+    module.models = [];
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+
+    module.vmFormMode = 'edit';
+    module.vmFormOriginalSource = 'smart';
+    module.vmForm = {
+        source: 'smart',
+        target_model: 'openai/gpt-4o',
+        user_paths: '',
+        description: '',
+        enabled: true
+    };
+
+    await module.submitVirtualModelForm();
+
+    assert.equal(requests.length, 1);
+    const body = JSON.parse(requests[0].request.body);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, 'old_source'), false);
+});
+
+test('submitVirtualModelForm blocks a rename onto an existing virtual model', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        },
+        window: { confirm: () => true }
+    });
+    stubRequests(module);
+    module.aliases = [{ name: 'taken', enabled: true, valid: true }];
+    module.models = [];
+
+    module.vmFormMode = 'edit';
+    module.vmFormOriginalSource = 'smart';
+    module.vmForm = {
+        source: 'taken',
+        target_model: 'openai/gpt-4o',
+        user_paths: '',
+        description: '',
+        enabled: true
+    };
+
+    await module.submitVirtualModelForm();
+
+    assert.equal(requests.length, 0);
+    assert.equal(module.vmFormError, 'A virtual model for "taken" already exists. Choose a different source.');
 });
 
 test('submitVirtualModelForm names existing aliases as virtual models in overwrite confirmation', async() => {
@@ -649,6 +781,15 @@ test('buildDisplayModels combines source-backed redirects with the concrete mode
     assert.equal(nestedTargetModel.masking_alias.name, 'anthropic/claude-fable-5');
     assert.equal(module.rowVirtualBadge(nestedTargetModel), 'Redirect');
     assert.equal(module.rowRedirectCanRemove(nestedTargetModel), true);
+
+    // The masking redirect on a real-model row is editable through the alias
+    // editor with an unlocked Source, so the redirect can be renamed/repointed.
+    module.openVirtualModelEditAlias(modelBacked.masking_alias);
+    assert.equal(module.vmFormMode, 'edit');
+    assert.equal(module.vmFormSourceLocked, false);
+    assert.equal(module.vmFormOriginalSource, 'gpt-4o');
+    assert.equal(module.vmForm.source, 'gpt-4o');
+    assert.equal(module.vmForm.target_model, 'openai/gpt-4o');
 });
 
 test('removeAliasRow confirms and deletes an alias-only virtual model', async() => {
@@ -1294,7 +1435,7 @@ test('submitVirtualModelForm sends targets and strategy for load balancing', asy
         source: 'smart',
         target_model: 'openai/gpt-4o',
         targets: [{ model: 'groq/llama', weight: 2 }],
-        strategy: 'cost',
+        strategy: 'round_robin',
         user_paths: '',
         description: '',
         enabled: true
@@ -1306,6 +1447,44 @@ test('submitVirtualModelForm sends targets and strategy for load balancing', asy
     const body = JSON.parse(requests[0].request.body);
     assert.equal(Object.prototype.hasOwnProperty.call(body, 'target_model'), false);
     assert.deepEqual(body.targets, [{ model: 'openai/gpt-4o' }, { model: 'groq/llama', weight: 2 }]);
+    assert.equal(body.strategy, 'round_robin');
+});
+
+test('submitVirtualModelForm drops per-target weights for the cost strategy', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        },
+        window: { confirm: () => true }
+    });
+    stubRequests(module);
+    module.aliases = [];
+    module.models = [];
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+
+    module.vmFormMode = 'create';
+    module.vmForm = {
+        source: 'smart',
+        target_model: 'openai/gpt-4o',
+        target_weight: 1,
+        targets: [{ model: 'groq/llama', weight: 2 }],
+        strategy: 'cost',
+        user_paths: '',
+        description: '',
+        enabled: true
+    };
+
+    await module.submitVirtualModelForm();
+
+    const body = JSON.parse(requests[0].request.body);
+    // Cost routes to the cheapest target, so weights carry no meaning and are
+    // stripped rather than persisted as dead data.
+    assert.deepEqual(body.targets, [{ model: 'openai/gpt-4o' }, { model: 'groq/llama' }]);
     assert.equal(body.strategy, 'cost');
 });
 
@@ -1397,6 +1576,33 @@ test('managed virtual models are read-only in toggles and the editor', async() =
     assert.match(module.vmFormError, /managed by configuration/);
 });
 
+test('managed redirect shadowing a concrete model is read-only in table actions', () => {
+    const module = createAliasesModule();
+    module.models = [{
+        provider_name: 'openai',
+        provider_type: 'openai',
+        model: { id: 'gpt-4o', object: 'model' }
+    }];
+    module.aliases = [{
+        name: 'openai/gpt-4o',
+        targets: [{ provider: 'groq', model: 'llama' }],
+        resolved_model: 'groq/llama',
+        provider_type: 'groq',
+        enabled: true,
+        valid: true,
+        managed: true
+    }];
+    module.virtualModelsAvailable = true;
+
+    module.syncDisplayModels();
+
+    const row = module.displayModels.find((entry) => entry.display_name === 'openai/gpt-4o');
+    assert.ok(row, 'expected concrete model row');
+    assert.equal(row.is_alias, false);
+    assert.equal(module.rowIsManaged(row), true);
+    assert.equal(module.rowRedirectCanRemove(row), false);
+});
+
 test('editing a weighted redirect preserves the primary target weight', async() => {
     const requests = [];
     const module = createAliasesModule({
@@ -1436,4 +1642,144 @@ test('editing a weighted redirect preserves the primary target weight', async() 
         { model: 'groq/llama', weight: 1 }
     ]);
     assert.equal(body.strategy, 'round_robin');
+});
+
+test('vmFormHasPrimaryTarget hides the primary remove button until a model is set', () => {
+    const module = createAliasesModule();
+
+    module.vmForm = module.defaultVirtualModelForm();
+    module.vmForm.target_model = '';
+    assert.equal(module.vmFormHasPrimaryTarget(), false);
+
+    module.vmForm.target_model = '   ';
+    assert.equal(module.vmFormHasPrimaryTarget(), false);
+
+    module.vmForm.target_model = 'openai/gpt-4o';
+    assert.equal(module.vmFormHasPrimaryTarget(), true);
+});
+
+test('removePrimaryTarget promotes the next target into the primary slot', () => {
+    const module = createAliasesModule();
+
+    module.vmForm = module.defaultVirtualModelForm();
+    module.vmForm.target_model = 'openai/gpt-4o';
+    module.vmForm.target_weight = 3;
+    module.vmForm.targets = [
+        { model: 'groq/llama', weight: 2 },
+        { model: 'anthropic/claude-fable-5', weight: 1 }
+    ];
+
+    module.removePrimaryTarget();
+
+    // The first additional target moves up; the rest shift down by one.
+    assert.equal(module.vmForm.target_model, 'groq/llama');
+    assert.equal(module.vmForm.target_weight, 2);
+    assert.deepEqual(JSON.parse(JSON.stringify(module.vmForm.targets)), [
+        { model: 'anthropic/claude-fable-5', weight: 1 }
+    ]);
+});
+
+test('removePrimaryTarget clears the primary when it is the only target', () => {
+    const module = createAliasesModule();
+
+    module.vmForm = module.defaultVirtualModelForm();
+    module.vmForm.target_model = 'openai/gpt-4o';
+    module.vmForm.target_weight = 5;
+    module.vmForm.targets = [];
+
+    module.removePrimaryTarget();
+
+    // No targets left: the redirect collapses toward an access policy.
+    assert.equal(module.vmForm.target_model, '');
+    assert.equal(module.vmForm.target_weight, 1);
+    assert.equal(module.vmFormIsRedirect(), false);
+});
+
+test('target weights default to 1 for the form and for new target rows', () => {
+    const module = createAliasesModule();
+
+    assert.equal(module.defaultVirtualModelForm().target_weight, 1);
+
+    module.vmForm = module.defaultVirtualModelForm();
+    module.addVmTarget();
+    assert.deepEqual(JSON.parse(JSON.stringify(module.vmForm.targets)), [
+        { model: '', weight: 1 }
+    ]);
+});
+
+test('vmFormShowWeights hides weight inputs unless round-robin balances 2+ targets', () => {
+    const module = createAliasesModule();
+
+    // Single target: no balancing, no weights.
+    module.vmForm = { target_model: 'openai/gpt-4o', targets: [], strategy: 'round_robin' };
+    assert.equal(module.vmFormShowStrategy(), false);
+    assert.equal(module.vmFormShowWeights(), false);
+
+    // Two targets under round-robin: weights are meaningful.
+    module.vmForm = {
+        target_model: 'openai/gpt-4o',
+        targets: [{ model: 'groq/llama', weight: '' }],
+        strategy: 'round_robin'
+    };
+    assert.equal(module.vmFormShowStrategy(), true);
+    assert.equal(module.vmFormShowWeights(), true);
+
+    // Same targets under cost: the strategy selector stays, weights disappear.
+    module.vmForm.strategy = 'cost';
+    assert.equal(module.vmFormShowStrategy(), true);
+    assert.equal(module.vmFormShowWeights(), false);
+});
+
+test('vmFormShowStrategy appears as soon as a second target row exists, even if blank', () => {
+    const module = createAliasesModule();
+
+    // One additional row added via the button is still empty.
+    module.vmForm = module.defaultVirtualModelForm();
+    module.vmForm.target_model = '';
+    module.addVmTarget();
+
+    assert.equal(module.vmForm.targets.length, 1);
+    assert.equal(module.vmFormShowStrategy(), true);
+});
+
+test('editing a redirect preserves a provider prefix on a multi-slash model name', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        }
+    });
+    stubRequests(module);
+    module.aliases = [];
+    module.models = [];
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+
+    // The provider is "groq" and the model name itself contains slashes. The
+    // editor must rejoin them, not drop the provider because the model has a "/".
+    module.openVirtualModelEditAlias({
+        name: 'oss',
+        strategy: 'round_robin',
+        enabled: true,
+        targets: [
+            { provider: 'groq', model: 'openai/gpt-oss-120b' },
+            { provider: 'openrouter', model: 'openai/gpt-4o' }
+        ]
+    });
+    assert.equal(module.vmForm.target_model, 'groq/openai/gpt-oss-120b');
+    // Stored targets without an explicit weight surface the neutral default of 1.
+    assert.deepEqual(JSON.parse(JSON.stringify(module.vmForm.targets)), [
+        { model: 'openrouter/openai/gpt-4o', weight: 1 }
+    ]);
+
+    await module.submitVirtualModelForm();
+
+    const body = JSON.parse(requests[0].request.body);
+    assert.deepEqual(body.targets, [
+        { model: 'groq/openai/gpt-oss-120b', weight: 1 },
+        { model: 'openrouter/openai/gpt-4o', weight: 1 }
+    ]);
 });

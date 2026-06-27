@@ -73,7 +73,11 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := s.validateManagedRedirects(next); err != nil {
+		return err
+	}
 	s.current.Store(next)
+	s.balancer.prune(next.redirects)
 	return nil
 }
 
@@ -116,6 +120,20 @@ func (s *Service) isManagedSource(source string) bool {
 		}
 	}
 	return false
+}
+
+// validateManagedRedirects applies the admin redirect invariants to declarative
+// config rows during refresh, so invalid IaC entries fail startup loudly.
+func (s *Service) validateManagedRedirects(current snapshot) error {
+	for _, vm := range current.bySource {
+		if !vm.Managed || !vm.IsRedirect() {
+			continue
+		}
+		if err := s.validateRedirectTarget(current, vm); err != nil {
+			return fmt.Errorf("load virtual model %q: %w", vm.Source, err)
+		}
+	}
+	return nil
 }
 
 // StartBackgroundRefresh periodically reloads virtual models until stopped.
@@ -268,6 +286,81 @@ func (s *Service) Upsert(ctx context.Context, vm VirtualModel) error {
 	return nil
 }
 
+// Rename moves an existing virtual model to a new source: it stores the row
+// under the new source and removes the old one, validating and refreshing like
+// Upsert with rollback on failure. A no-op rename (old == new after
+// normalization) delegates to Upsert. The new source must be free — renaming
+// onto an existing row is rejected rather than silently overwriting it, since
+// source is the primary key on every store backend.
+func (s *Service) Rename(ctx context.Context, oldSource string, vm VirtualModel) error {
+	if s == nil {
+		return fmt.Errorf("virtual models service is required")
+	}
+	oldSource = strings.TrimSpace(oldSource)
+	if oldSource == "" {
+		return newValidationError("source is required", nil)
+	}
+
+	normalized, err := s.normalizeForUpsert(vm)
+	if err != nil {
+		return err
+	}
+	if normalized.Source == oldSource {
+		// Not actually a rename; fall back to a plain update under the same key.
+		return s.Upsert(ctx, vm)
+	}
+	if s.isManagedSource(oldSource) || s.isManagedSource(normalized.Source) || s.isManagedSource(vm.Source) {
+		return managedSourceError(normalized.Source)
+	}
+
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	current := s.snapshot()
+	previous, oldExisted := current.bySource[oldSource]
+	if !oldExisted {
+		return ErrNotFound
+	}
+	if _, taken := current.bySource[normalized.Source]; taken {
+		return newValidationError(fmt.Sprintf("virtual model %q already exists; choose a different source", normalized.Source), nil)
+	}
+	if err := s.validateRedirectTarget(current, normalized); err != nil {
+		return err
+	}
+	rows := upsertRow(removeRow(current.rows(), oldSource), normalized)
+	if _, err := buildSnapshot(rows, s.defaultEnabled); err != nil {
+		return fmt.Errorf("validate virtual models: %w", err)
+	}
+
+	if err := s.store.Upsert(ctx, normalized); err != nil {
+		return fmt.Errorf("upsert virtual model: %w", err)
+	}
+	if err := s.store.Delete(ctx, oldSource); err != nil {
+		// The new row is in but the old one survives; drop the new row so the
+		// rename leaves no duplicate behind.
+		rollbackCtx, cancel := rollbackContext()
+		defer cancel()
+		if rollbackErr := s.store.Delete(rollbackCtx, normalized.Source); rollbackErr != nil {
+			return fmt.Errorf("delete old virtual model: %w (rollback failed: %v)", err, rollbackErr)
+		}
+		return fmt.Errorf("delete old virtual model: %w", err)
+	}
+	if err := s.refreshLocked(ctx); err != nil {
+		// Restore the prior state: remove the new row and put the old one back.
+		rollbackCtx, cancel := rollbackContext()
+		defer cancel()
+		rollbackErr := s.store.Delete(rollbackCtx, normalized.Source)
+		if rollbackErr == nil {
+			rollbackErr = s.store.Upsert(rollbackCtx, previous)
+		}
+		if rollbackErr != nil {
+			return fmt.Errorf("refresh virtual models: %w (rollback failed: %v)", err, rollbackErr)
+		}
+		return fmt.Errorf("refresh virtual models: %w", err)
+	}
+	return nil
+}
+
 // Delete removes one virtual model and refreshes the in-memory snapshot.
 func (s *Service) Delete(ctx context.Context, source string) error {
 	if s == nil {
@@ -371,6 +464,16 @@ func upsertRow(rows []VirtualModel, next VirtualModel) []VirtualModel {
 		}
 	}
 	return append(rows, next.clone())
+}
+
+func removeRow(rows []VirtualModel, source string) []VirtualModel {
+	out := make([]VirtualModel, 0, len(rows))
+	for _, row := range rows {
+		if row.Source != source {
+			out = append(out, row)
+		}
+	}
+	return out
 }
 
 func rollbackContext() (context.Context, context.CancelFunc) {

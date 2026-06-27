@@ -21,6 +21,22 @@ func (r *roundRobin) next(source string) uint64 {
 	return value.(*atomic.Uint64).Add(1) - 1
 }
 
+// prune removes counters for redirect sources no longer present in the latest
+// snapshot, preventing long-lived processes from retaining deleted aliases.
+func (r *roundRobin) prune(active map[string]redirectEntry) {
+	r.counters.Range(func(key, _ any) bool {
+		source, ok := key.(string)
+		if !ok {
+			r.counters.Delete(key)
+			return true
+		}
+		if _, exists := active[source]; !exists {
+			r.counters.Delete(key)
+		}
+		return true
+	})
+}
+
 // balancedResolution chooses one concrete target for a request through entry,
 // applying its load-balancing strategy across the targets the catalog currently
 // supports. It reports false when no target is available.

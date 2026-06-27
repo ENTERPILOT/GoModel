@@ -258,6 +258,60 @@ func TestUpsertAndDeleteRedirectVirtualModel(t *testing.T) {
 	}
 }
 
+func TestUpsertVirtualModelRenamesViaOldSource(t *testing.T) {
+	h := newVMHandler(t, redirectVM("smart", "openai/gpt-4o", false))
+	e := echo.New()
+
+	body := `{"source":"smarter","old_source":"smart","target_model":"openai/gpt-4o"}`
+	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("UpsertVirtualModel(rename) error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var view virtualmodels.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode rename response: %v", err)
+	}
+	if view.Source != "smarter" || view.Kind != virtualmodels.KindRedirect {
+		t.Fatalf("view = %#v, want redirect smarter", view)
+	}
+	// The omitted enabled flag is carried over from the old row (disabled).
+	if view.Enabled {
+		t.Fatalf("rename flipped a disabled redirect to enabled: %#v", view)
+	}
+	// The old source no longer exists.
+	if _, ok := h.virtualModels.Get("smart"); ok {
+		t.Fatalf("old source still present after rename")
+	}
+}
+
+func TestUpsertVirtualModelRejectsRenameOntoExisting(t *testing.T) {
+	h := newVMHandler(t, redirectVM("smart", "openai/gpt-4o", true), redirectVM("taken", "openai/gpt-4o", true))
+	e := echo.New()
+
+	body := `{"source":"taken","old_source":"smart","target_model":"openai/gpt-4o"}`
+	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("UpsertVirtualModel(rename conflict) error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("rename conflict status = %d, want 400 body=%s", rec.Code, rec.Body.String())
+	}
+	// Both rows survive the rejected rename.
+	if _, ok := h.virtualModels.Get("smart"); !ok {
+		t.Fatalf("source smart was lost after a rejected rename")
+	}
+	if _, ok := h.virtualModels.Get("taken"); !ok {
+		t.Fatalf("source taken was lost after a rejected rename")
+	}
+}
+
 func TestUpsertPolicyVirtualModelAcceptsEmptyUserPaths(t *testing.T) {
 	h := newVMHandler(t)
 	e := echo.New()

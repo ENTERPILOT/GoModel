@@ -64,7 +64,7 @@
                             <div class="audit-entry-left">
                                 <span class="audit-status-badge" :class="statusCodeClass(entry.status_code)" x-text="entry.status_code || '-'"></span>
                             <span class="audit-method-badge" x-text="entry.method || '-'"></span>
-                            <span class="audit-provider-model mono" x-show="entry.requested_model || entry.model" x-text="entry.requested_model || entry.model"></span>
+                            <span class="audit-provider-model mono" x-show="entry.requested_model || entry.model" x-text="auditModelDisplay(entry)"></span>
                             <span class="audit-path mono" x-text="entry.path || '-'"></span>
                             </div>
                             <div class="audit-entry-right">

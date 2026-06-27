@@ -938,6 +938,24 @@ function dashboard() {
       );
     },
 
+    // auditModelDisplay renders the audit summary pill. When a redirect/alias
+    // was applied it shows "requested ⮕ resolved-provider/resolved-model"; if
+    // the resolved target matches the requested value (or no redirect applied)
+    // it shows a single value, so direct calls stay unchanged.
+    auditModelDisplay(entry) {
+      const requested = String(
+        (entry && (entry.requested_model || entry.model)) || "",
+      ).trim();
+      if (!entry || !entry.alias_used || !entry.resolved_model) {
+        return requested;
+      }
+      const resolved = this.qualifiedResolvedModelDisplay(entry);
+      if (!resolved || resolved === "-" || resolved === requested) {
+        return requested;
+      }
+      return requested + " ⮕ " + resolved;
+    },
+
     formatNumber(n) {
       if (n == null || n === undefined) return "-";
       return n.toLocaleString();

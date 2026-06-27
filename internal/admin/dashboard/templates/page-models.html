@@ -64,8 +64,17 @@
         <div class="model-editor" x-show="vmFormOpen" x-ref="virtualModelEditor" role="dialog" aria-modal="true" aria-label="Virtual model editor" @click.stop>
             <form class="form" @submit.prevent="submitVirtualModelForm()">
                 <div class="editor-header">
-                    <div>
+                    <div class="inline-help-title-row">
                         <h3 x-text="vmFormDisplayName || vmForm.source || 'Virtual model'"></h3>
+                        <button type="button"
+                                class="inline-help-toggle"
+                                :class="{ 'is-open': vmFormHelpOpen }"
+                                :aria-label="vmFormHelpOpen ? 'Hide virtual model help' : 'Show virtual model help'"
+                                :aria-expanded="vmFormHelpOpen.toString()"
+                                aria-controls="virtual-model-help-copy"
+                                @click="vmFormHelpOpen = !vmFormHelpOpen">
+                            <span class="inline-help-toggle-icon" aria-hidden="true">?</span>
+                        </button>
                     </div>
                     <button type="button" class="dialog-close-btn" aria-label="Close virtual model editor" @click="closeVirtualModelForm()">
                         {{template "x-icon"}}
@@ -76,19 +85,13 @@
                     This virtual model is defined in configuration (<code>config.yaml</code> / <code>VIRTUAL_MODELS</code>) and is read-only here. Edit your configuration to change it.
                 </p>
 
-                <div class="form-grid">
-                    <div class="form-field">
-                        <label class="form-field-label" for="virtual-model-source">Source</label>
-                        <input id="virtual-model-source" type="text" class="mono" placeholder="smart" x-model="vmForm.source" :disabled="vmFormSourceLocked || vmFormManaged" data-modal-autofocus>
-                    </div>
+                <p id="virtual-model-help-copy" class="inline-help-copy" x-show="vmFormHelpOpen" x-transition.opacity.duration.200ms>
+                    Add one <strong>target</strong> to make this a redirect/alias, or two or more to load balance across them, then pick a strategy: <code>round_robin</code> rotates across targets (weight biases the share) and <code>cost</code> always routes to the cheapest available target. Leave <strong>Targets</strong> empty to make it only an access policy on the <code>Source</code> selector. The selector uses <code>/</code> for all providers and models, <code>{provider_name}/</code> for one provider, or <code>{provider_name}/{model}</code> for one model. <code>user_paths</code> is matched against the effective request <code>user_path</code>: the managed API key <code>user_path</code> when present, otherwise the configured user path request header.
+                </p>
 
-                    <div class="form-field">
-                        <label class="form-field-label" for="virtual-model-target">Target model</label>
-                        <div class="vm-target-row">
-                            <input id="virtual-model-target" type="text" list="virtual-model-target-options" class="mono vm-target-model" placeholder="openai/gpt-4o" x-model="vmForm.target_model" :disabled="vmFormManaged">
-                            <input type="number" min="1" step="1" class="mono vm-target-weight" placeholder="weight" x-model="vmForm.target_weight" :disabled="vmFormManaged" x-show="vmFormShowStrategy()" aria-label="Primary target weight">
-                        </div>
-                    </div>
+                <div class="form-field">
+                    <label class="form-field-label" for="virtual-model-source">Source</label>
+                    <input id="virtual-model-source" type="text" class="mono" placeholder="smart" x-model="vmForm.source" :disabled="vmFormSourceLocked || vmFormManaged" data-modal-autofocus>
                 </div>
 
                 <datalist id="virtual-model-target-options">
@@ -97,54 +100,68 @@
                     </template>
                 </datalist>
 
-                <!-- Additional targets turn a redirect into a load balancer. -->
+                <!-- Every target renders the same; two or more turn the redirect into a load balancer. -->
                 <div class="form-field">
-                    <span class="form-field-label">Additional targets (load balancing)</span>
+                    <span class="form-field-label">Targets</span>
+                    <div class="vm-target-row">
+                        <input id="virtual-model-target" type="text" list="virtual-model-target-options" class="mono vm-target-model" placeholder="openai/gpt-4o" x-model="vmForm.target_model" :disabled="vmFormManaged" aria-label="Target model">
+                        <input type="number" min="1" step="1" class="mono vm-target-weight" placeholder="weight" x-model="vmForm.target_weight" :disabled="vmFormManaged" x-show="vmFormShowWeights()" :required="vmFormShowWeights()" aria-label="Target weight">
+                        <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn vm-target-remove" x-show="vmFormHasPrimaryTarget()" :disabled="vmFormManaged" @click="removePrimaryTarget()" aria-label="Remove target" title="Remove target">
+                            {{template "trash-icon"}}
+                        </button>
+                    </div>
                     <template x-for="(target, index) in vmForm.targets" :key="index">
                         <div class="vm-target-row">
-                            <input type="text" list="virtual-model-target-options" class="mono vm-target-model" placeholder="groq/llama" x-model="target.model" :disabled="vmFormManaged" aria-label="Additional target model">
-                            <input type="number" min="1" step="1" class="mono vm-target-weight" placeholder="weight" x-model="target.weight" :disabled="vmFormManaged" aria-label="Target weight">
-                            <button type="button" class="pagination-btn pagination-btn-danger-outline vm-target-remove" :disabled="vmFormManaged" @click="removeVmTarget(index)" aria-label="Remove target">Remove</button>
+                            <input type="text" list="virtual-model-target-options" class="mono vm-target-model" placeholder="groq/llama" x-model="target.model" :disabled="vmFormManaged" aria-label="Target model">
+                            <input type="number" min="1" step="1" class="mono vm-target-weight" placeholder="weight" x-model="target.weight" :disabled="vmFormManaged" x-show="vmFormShowWeights()" :required="vmFormShowWeights()" aria-label="Target weight">
+                            <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn vm-target-remove" :disabled="vmFormManaged" @click="removeVmTarget(index)" aria-label="Remove target" title="Remove target">
+                                {{template "trash-icon"}}
+                            </button>
                         </div>
                     </template>
                     <div>
                         <button type="button" class="pagination-btn pagination-btn-with-icon" :disabled="vmFormManaged" @click="addVmTarget()">
                             <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
-                            <span>Add target</span>
+                            <span>Add target (load balancing)</span>
                         </button>
                     </div>
                 </div>
 
                 <div class="form-field" x-show="vmFormShowStrategy()">
                     <label class="form-field-label" for="virtual-model-strategy">Load-balancing strategy</label>
-                    <select id="virtual-model-strategy" class="mono" x-model="vmForm.strategy" :disabled="vmFormManaged">
+                    <select id="virtual-model-strategy" class="form-select" x-model="vmForm.strategy" :disabled="vmFormManaged">
                         <option value="round_robin">Round-robin (rotate across targets; honors weights)</option>
                         <option value="cost">Lowest cost (cheapest target per request)</option>
                     </select>
                 </div>
 
-                <p class="form-hint">
-                    Fill <strong>Target model</strong> to make this a redirect/alias; leave it empty to make it an access policy on the <code>Source</code> selector. Add one or more <strong>additional targets</strong> to load balance across several models, then pick a strategy: <code>round_robin</code> rotates across targets (weight biases the share) and <code>cost</code> always routes to the cheapest available target. The selector uses <code>/</code> for all providers and models, <code>{provider_name}/</code> for one provider, or <code>{provider_name}/{model}</code> for one model. <code>user_paths</code> is matched against the effective request <code>user_path</code>: the managed API key <code>user_path</code> when present, otherwise the configured user path request header.
-                </p>
-                <p class="form-hint" x-show="vmFormMode === 'edit'" x-text="'Default enabled: ' + (vmFormDefaultEnabled ? 'yes' : 'no') + ' · Effective now: ' + (vmFormEffectiveEnabled ? 'yes' : 'no')"></p>
-
                 <div class="form-field">
-                    <label class="form-field-label" for="virtual-model-user-paths">User Paths</label>
+                    <div class="inline-help-title-row">
+                        <label class="form-field-label" for="virtual-model-user-paths">User Paths</label>
+                        <button type="button"
+                                class="inline-help-toggle"
+                                :class="{ 'is-open': vmFormUserPathsHelpOpen }"
+                                :aria-label="vmFormUserPathsHelpOpen ? 'Hide user paths help' : 'Show user paths help'"
+                                :aria-expanded="vmFormUserPathsHelpOpen.toString()"
+                                aria-controls="virtual-model-user-paths-help"
+                                @click="vmFormUserPathsHelpOpen = !vmFormUserPathsHelpOpen">
+                            <span class="inline-help-toggle-icon" aria-hidden="true">?</span>
+                        </button>
+                    </div>
+                    <p id="virtual-model-user-paths-help" class="inline-help-copy" x-show="vmFormUserPathsHelpOpen" x-transition.opacity.duration.200ms>
+                        Use <code>/</code> to allow every user path. Use a team path to restrict to that subtree, or an unused path to make the selector unavailable.
+                    </p>
                     <textarea id="virtual-model-user-paths" rows="4" class="mono" placeholder="/&#10;/team/alpha&#10;/non-existing" x-model="vmForm.user_paths" :disabled="vmFormManaged"></textarea>
                 </div>
-
-                <p class="form-hint">
-                    Use <code>/</code> to allow every user path. Use a team path to restrict to that subtree, or an unused path to make the selector unavailable.
-                </p>
 
                 <div class="form-field">
                     <label class="form-field-label" for="virtual-model-description">Description</label>
                     <textarea id="virtual-model-description" rows="3" placeholder="Optional description" x-model="vmForm.description" :disabled="vmFormManaged"></textarea>
                 </div>
 
-                <div class="form-field">
-                    <span class="form-field-label">Status</span>
-                    <div>
+                <div class="vm-status-row">
+                    <span class="form-hint vm-status-summary" x-show="vmFormMode === 'edit'" x-text="'Default enabled: ' + (vmFormDefaultEnabled ? 'yes' : 'no') + ' · Effective now: ' + (vmFormEffectiveEnabled ? 'yes' : 'no')"></span>
+                    <div class="vm-status-toggle">
                         <button type="button" class="alias-toggle"
                                 :class="{ enabled: vmForm.enabled, restricted: vmFormToggleRestricted() }"
                                 :aria-label="(vmForm.enabled ? 'Disable' : 'Enable') + ' virtual model'"

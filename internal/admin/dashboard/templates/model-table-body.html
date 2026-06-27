@@ -97,6 +97,13 @@
                                 @click="openModelPricingOverrideEdit(row)">
                                 {{template "dollar-icon"}}
                             </button>
+                            <button type="button" class="table-action-btn table-icon-btn"
+                                x-show="virtualModelsAvailable && row.masking_alias && row.masking_alias.name"
+                                :aria-label="'Edit redirect for ' + row.display_name"
+                                :title="'Edit redirect for ' + row.display_name"
+                                @click="openVirtualModelEditAlias(row.masking_alias)">
+                                {{template "edit-icon"}}
+                            </button>
                             <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
                                 x-show="virtualModelsAvailable && rowRedirectCanRemove(row)"
                                 :aria-label="rowDeletingKey === row.key ? 'Removing redirect for ' + row.display_name : 'Remove redirect for ' + row.display_name"
@@ -106,7 +113,7 @@
                                 {{template "trash-icon"}}
                             </button>
                             <button type="button" class="table-action-btn table-icon-btn"
-                                x-show="virtualModelsAvailable"
+                                x-show="virtualModelsAvailable && !row.masking_alias"
                                 :class="modelOverrideEditButtonClass(hasAccessOverride(row.access))"
                                 :aria-label="modelOverrideEditButtonLabel('model access for ' + row.display_name, hasAccessOverride(row.access))"
                                 :title="modelOverrideEditButtonLabel('model access for ' + row.display_name, hasAccessOverride(row.access))"
