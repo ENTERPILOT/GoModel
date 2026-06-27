@@ -140,13 +140,77 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 			t.Parallel()
 			svc := newBalancingService(t)
 			svc.SetConfigModels(ConfigModels(tt.entries))
-			err := svc.Refresh(context.Background())
+			if err := svc.Refresh(context.Background()); err != nil {
+				t.Fatalf("Refresh() error = %v", err)
+			}
+			// Startup mirrors the factory: Refresh builds the snapshot, then the
+			// managed-config check rejects invalid declarations.
+			err := svc.ValidateManagedConfig()
 			if err == nil {
-				t.Fatalf("Refresh() error = nil, want validation failure")
+				t.Fatalf("ValidateManagedConfig() error = nil, want validation failure")
 			}
 			if !IsValidationError(err) {
-				t.Fatalf("Refresh() error = %v, want validation error", err)
+				t.Fatalf("ValidateManagedConfig() error = %v, want validation error", err)
 			}
 		})
+	}
+}
+
+// A managed redirect target that drops out of the catalog after startup must not
+// freeze the snapshot: the validation gate runs once, so a later refresh still
+// swaps in store changes and only marks the affected redirect unavailable.
+func TestService_ManagedRedirectToleratesTransientCatalogGapAfterStartup(t *testing.T) {
+	t.Parallel()
+	supported := map[string]core.Model{
+		"openai/gpt-4o":      {ID: "openai/gpt-4o", Object: "model", OwnedBy: "openai"},
+		"openai/gpt-4o-mini": {ID: "openai/gpt-4o-mini", Object: "model", OwnedBy: "openai"},
+	}
+	store := newSQLiteVMStore(t)
+	svc, err := NewService(store, fakeCatalog{providers: []string{"openai"}, supported: supported}, true)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	ctx := context.Background()
+
+	// Startup: the managed redirect's target is supported, so validation passes.
+	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{Source: "smart", Target: "openai/gpt-4o"}}))
+	if err := svc.Refresh(ctx); err != nil {
+		t.Fatalf("startup Refresh() error = %v", err)
+	}
+	if err := svc.ValidateManagedConfig(); err != nil {
+		t.Fatalf("startup ValidateManagedConfig() error = %v", err)
+	}
+
+	// A provider catalog refresh transiently drops the managed target, while an
+	// unrelated store alias is added that a working refresh must surface.
+	delete(supported, "openai/gpt-4o")
+	if err := store.Upsert(ctx, VirtualModel{
+		Source:  "later",
+		Targets: []Target{{Provider: "openai", Model: "gpt-4o-mini"}},
+		Enabled: true,
+	}); err != nil {
+		t.Fatalf("store.Upsert(later) error = %v", err)
+	}
+
+	// The refresh must not fail despite the now-unsupported managed target.
+	if err := svc.Refresh(ctx); err != nil {
+		t.Fatalf("Refresh() after catalog gap error = %v, want nil (snapshot must not freeze)", err)
+	}
+	// The snapshot swapped: the new store alias is visible.
+	if _, ok := svc.Get("later"); !ok {
+		t.Fatalf("snapshot did not swap: alias %q missing after refresh", "later")
+	}
+	// The managed redirect is simply unavailable while its target is gone.
+	if _, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", "")); changed {
+		t.Fatalf("managed redirect resolved despite an unsupported target")
+	}
+
+	// When the target returns, the managed redirect resolves again.
+	supported["openai/gpt-4o"] = core.Model{ID: "openai/gpt-4o", Object: "model", OwnedBy: "openai"}
+	if err := svc.Refresh(ctx); err != nil {
+		t.Fatalf("Refresh() after catalog recovery error = %v", err)
+	}
+	if sel, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", "")); !changed || sel.QualifiedModel() != "openai/gpt-4o" {
+		t.Fatalf("managed redirect did not recover: changed=%v sel=%q", changed, sel.QualifiedModel())
 	}
 }

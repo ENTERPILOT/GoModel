@@ -61,8 +61,8 @@ func (s *Service) balancedResolution(entry redirectEntry) (core.ModelSelector, b
 }
 
 // weightedIndex maps a monotonic counter to a target index, honoring per-target
-// weight. With equal (or unset) weights it is a plain rotation; otherwise a
-// target with weight w claims w of every sum(weights) slots.
+// weight. When every weight is 1 (or unset) it is a plain rotation; otherwise a
+// target with weight w claims w consecutive slots of every sum(weights).
 func weightedIndex(targets []resolvedTarget, counter uint64) int {
 	total := 0
 	weighted := false
@@ -101,8 +101,8 @@ func normalizeWeight(weight float64) int {
 
 // cheapestTarget returns the supported target with the lowest per-token price.
 // Targets with no registry pricing are skipped while any priced target exists;
-// when none are priced it falls back to the first declared target so the cost
-// strategy stays deterministic. Ties keep the earlier-declared target.
+// when none are priced it falls back to the first supported target so the cost
+// strategy stays deterministic. Ties keep the earlier target in support order.
 func (s *Service) cheapestTarget(supported []resolvedTarget) resolvedTarget {
 	best := supported[0]
 	bestCost, bestPriced := s.targetCost(best)

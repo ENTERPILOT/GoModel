@@ -98,10 +98,16 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		return nil, err
 	}
 	// Declarative virtual models (config.yaml / VIRTUAL_MODELS) are layered over the
-	// store as a managed overlay before the first refresh, so an invalid declaration
-	// fails startup here rather than silently dropping.
+	// store as a managed overlay before the first refresh builds the snapshot.
 	service.SetConfigModels(ConfigModels(cfg.VirtualModels))
 	if err := service.Refresh(ctx); err != nil {
+		return nil, err
+	}
+	// Validate the managed redirects once, here at startup: an invalid declaration
+	// (self-/cross-redirect target, or a target the catalog cannot serve) fails
+	// loudly rather than silently dropping. Background refreshes deliberately skip
+	// this so a transient catalog gap cannot freeze the snapshot.
+	if err := service.ValidateManagedConfig(); err != nil {
 		return nil, err
 	}
 

@@ -73,9 +73,6 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := s.validateManagedRedirects(next); err != nil {
-		return err
-	}
 	s.current.Store(next)
 	s.balancer.prune(next.redirects)
 	return nil
@@ -83,8 +80,7 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 
 // SetConfigModels installs the declarative (config.yaml / VIRTUAL_MODELS) virtual
 // models that override store rows of the same source. Call it before the first
-// Refresh; the rows are validated when the next snapshot is built, so an invalid
-// declarative row fails startup loudly.
+// Refresh, then ValidateManagedConfig to reject invalid declarations at startup.
 func (s *Service) SetConfigModels(models []VirtualModel) {
 	cloned := make([]VirtualModel, 0, len(models))
 	for _, model := range models {
@@ -122,9 +118,15 @@ func (s *Service) isManagedSource(source string) bool {
 	return false
 }
 
-// validateManagedRedirects applies the admin redirect invariants to declarative
-// config rows during refresh, so invalid IaC entries fail startup loudly.
-func (s *Service) validateManagedRedirects(current snapshot) error {
+// ValidateManagedConfig checks that every declarative config redirect satisfies
+// the admin redirect invariants (no self- or cross-redirect target, each target
+// catalog-supported), so an invalid IaC entry fails startup loudly. Call it once
+// after the initial Refresh; the config set never changes afterward, so it is
+// not re-run on the background ticker — there a transient provider-catalog gap
+// must not freeze the snapshot, and an unavailable managed target is simply
+// skipped at resolve time like any other redirect target.
+func (s *Service) ValidateManagedConfig() error {
+	current := s.snapshot()
 	for _, vm := range current.bySource {
 		if !vm.Managed || !vm.IsRedirect() {
 			continue
@@ -269,21 +271,9 @@ func (s *Service) Upsert(ctx context.Context, vm VirtualModel) error {
 	if err := s.store.Upsert(ctx, normalized); err != nil {
 		return fmt.Errorf("upsert virtual model: %w", err)
 	}
-	if err := s.refreshLocked(ctx); err != nil {
-		rollbackCtx, cancel := rollbackContext()
-		defer cancel()
-		var rollbackErr error
-		if existed {
-			rollbackErr = s.store.Upsert(rollbackCtx, previous)
-		} else {
-			rollbackErr = s.store.Delete(rollbackCtx, normalized.Source)
-		}
-		if rollbackErr != nil {
-			return fmt.Errorf("refresh virtual models: %w (rollback failed: %v)", err, rollbackErr)
-		}
-		return fmt.Errorf("refresh virtual models: %w", err)
-	}
-	return nil
+	return s.commitRefresh(ctx, map[string]*VirtualModel{
+		normalized.Source: priorRow(previous, existed),
+	})
 }
 
 // Rename moves an existing virtual model to a new source: it stores the row
@@ -335,30 +325,23 @@ func (s *Service) Rename(ctx context.Context, oldSource string, vm VirtualModel)
 	if err := s.store.Upsert(ctx, normalized); err != nil {
 		return fmt.Errorf("upsert virtual model: %w", err)
 	}
+	// Restoring the new source means deleting it (it did not exist before); the
+	// old source is restored to its prior row.
+	prior := map[string]*VirtualModel{
+		normalized.Source: nil,
+		oldSource:         &previous,
+	}
 	if err := s.store.Delete(ctx, oldSource); err != nil {
-		// The new row is in but the old one survives; drop the new row so the
-		// rename leaves no duplicate behind.
+		// The new row is in but the old one survives; undo so the rename leaves
+		// no duplicate behind.
 		rollbackCtx, cancel := rollbackContext()
 		defer cancel()
-		if rollbackErr := s.store.Delete(rollbackCtx, normalized.Source); rollbackErr != nil {
+		if rollbackErr := s.restore(rollbackCtx, prior); rollbackErr != nil {
 			return fmt.Errorf("delete old virtual model: %w (rollback failed: %v)", err, rollbackErr)
 		}
 		return fmt.Errorf("delete old virtual model: %w", err)
 	}
-	if err := s.refreshLocked(ctx); err != nil {
-		// Restore the prior state: remove the new row and put the old one back.
-		rollbackCtx, cancel := rollbackContext()
-		defer cancel()
-		rollbackErr := s.store.Delete(rollbackCtx, normalized.Source)
-		if rollbackErr == nil {
-			rollbackErr = s.store.Upsert(rollbackCtx, previous)
-		}
-		if rollbackErr != nil {
-			return fmt.Errorf("refresh virtual models: %w (rollback failed: %v)", err, rollbackErr)
-		}
-		return fmt.Errorf("refresh virtual models: %w", err)
-	}
-	return nil
+	return s.commitRefresh(ctx, prior)
 }
 
 // Delete removes one virtual model and refreshes the in-memory snapshot.
@@ -390,15 +373,7 @@ func (s *Service) Delete(ctx context.Context, source string) error {
 		}
 		return fmt.Errorf("delete virtual model: %w", err)
 	}
-	if err := s.refreshLocked(ctx); err != nil {
-		rollbackCtx, cancel := rollbackContext()
-		defer cancel()
-		if rollbackErr := s.store.Upsert(rollbackCtx, previous); rollbackErr != nil {
-			return fmt.Errorf("refresh virtual models: %w (rollback failed: %v)", err, rollbackErr)
-		}
-		return fmt.Errorf("refresh virtual models: %w", err)
-	}
-	return nil
+	return s.commitRefresh(ctx, map[string]*VirtualModel{source: &previous})
 }
 
 func (s *Service) normalizeForUpsert(vm VirtualModel) (VirtualModel, error) {
@@ -478,6 +453,49 @@ func removeRow(rows []VirtualModel, source string) []VirtualModel {
 
 func rollbackContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 30*time.Second)
+}
+
+// commitRefresh refreshes the snapshot after a store write succeeds and restores
+// the touched rows if the refresh fails, so a failed refresh never leaves the
+// store ahead of the in-memory snapshot. prior maps each touched source to its
+// state before the write — a nil row means the source did not exist and is
+// deleted on rollback.
+func (s *Service) commitRefresh(ctx context.Context, prior map[string]*VirtualModel) error {
+	if err := s.refreshLocked(ctx); err != nil {
+		rollbackCtx, cancel := rollbackContext()
+		defer cancel()
+		if rollbackErr := s.restore(rollbackCtx, prior); rollbackErr != nil {
+			return fmt.Errorf("refresh virtual models: %w (rollback failed: %v)", err, rollbackErr)
+		}
+		return fmt.Errorf("refresh virtual models: %w", err)
+	}
+	return nil
+}
+
+// restore returns each source in prior to its captured state: re-upserting a row
+// that existed, or deleting one that did not (nil).
+func (s *Service) restore(ctx context.Context, prior map[string]*VirtualModel) error {
+	for source, row := range prior {
+		var err error
+		if row == nil {
+			err = s.store.Delete(ctx, source)
+		} else {
+			err = s.store.Upsert(ctx, *row)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// priorRow captures a row's pre-write state for restore: the row itself when it
+// existed, or nil when it did not.
+func priorRow(row VirtualModel, existed bool) *VirtualModel {
+	if !existed {
+		return nil
+	}
+	return &row
 }
 
 // Compile-time check that *Service satisfies the resolver, user-path resolver,
