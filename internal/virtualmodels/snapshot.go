@@ -9,12 +9,44 @@ import (
 	"gomodel/internal/modelselectors"
 )
 
-// redirectEntry is a redirect row plus its parsed target, precomputed at build
-// time so resolution avoids re-parsing the target on every request.
-type redirectEntry struct {
-	vm        VirtualModel
-	target    core.ModelSelector
+// resolvedTarget is one redirect destination with its selector parsed at build
+// time so resolution avoids re-parsing on every request.
+type resolvedTarget struct {
+	selector  core.ModelSelector
 	qualified string
+	weight    float64
+}
+
+// redirectEntry is a redirect row plus its parsed targets and strategy,
+// precomputed at build time so resolution avoids re-parsing on every request.
+type redirectEntry struct {
+	vm       VirtualModel
+	targets  []resolvedTarget
+	strategy string
+}
+
+// representative returns the first declared target, used where a redirect needs
+// a stable stand-in independent of catalog availability or load-balancing state.
+func (e redirectEntry) representative() (resolvedTarget, bool) {
+	if len(e.targets) == 0 {
+		return resolvedTarget{}, false
+	}
+	return e.targets[0], true
+}
+
+// supportedTargets returns the entry's targets currently backed by the catalog,
+// preserving declared order.
+func (e redirectEntry) supportedTargets(catalog Catalog) []resolvedTarget {
+	if catalog == nil {
+		return nil
+	}
+	out := make([]resolvedTarget, 0, len(e.targets))
+	for _, target := range e.targets {
+		if catalog.Supports(target.qualified) {
+			out = append(out, target)
+		}
+	}
+	return out
 }
 
 // snapshot is the immutable in-memory projection of all virtual models. It
@@ -60,14 +92,22 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 
 	for _, row := range rows {
 		if row.IsRedirect() {
-			normalized, target, err := normalizeRedirect(row)
+			normalized, selectors, err := normalizeRedirect(row)
 			if err != nil {
 				return snapshot{}, fmt.Errorf("load virtual model %q: %w", row.Source, err)
 			}
+			targets := make([]resolvedTarget, len(selectors))
+			for i, selector := range selectors {
+				targets[i] = resolvedTarget{
+					selector:  selector,
+					qualified: selector.QualifiedModel(),
+					weight:    normalized.Targets[i].Weight,
+				}
+			}
 			next.redirects[normalized.Source] = redirectEntry{
-				vm:        normalized,
-				target:    target,
-				qualified: target.QualifiedModel(),
+				vm:       normalized,
+				targets:  targets,
+				strategy: normalized.Strategy,
 			}
 			next.order = append(next.order, normalized.Source)
 			next.bySource[normalized.Source] = normalized
@@ -126,31 +166,44 @@ func (s snapshot) lookupCanonicalSource(source string) (VirtualModel, string, bo
 	return VirtualModel{}, "", false
 }
 
-// resolveRedirect returns the redirect resolution for a requested model name,
-// honoring Enabled and catalog support. When enforceUserPaths is set and the
-// redirect carries user_paths, the redirect applies only when userPath matches;
-// otherwise the request falls through to the literal name (a scoped redirect).
+// findRedirect returns the redirect entry for a requested model name when it is
+// enabled and, when enforced, the caller's user path is in scope. It performs no
+// catalog lookup or target selection, so it never advances load-balancing state.
+func (s snapshot) findRedirect(name, userPath string, enforceUserPaths bool) (redirectEntry, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return redirectEntry{}, false
+	}
+	entry, ok := s.redirects[name]
+	if !ok || !entry.vm.Enabled {
+		return redirectEntry{}, false
+	}
+	if enforceUserPaths && len(entry.vm.UserPaths) > 0 && !userPathAllowed(userPath, entry.vm.UserPaths) {
+		return redirectEntry{}, false
+	}
+	return entry, true
+}
+
+// resolveRedirect returns a stateless, representative resolution for a redirect
+// name: the first catalog-supported target. It backs validity checks and model
+// listing, which must not advance any load-balancing state. The request path uses
+// Service.balancedResolution, which applies the redirect's load-balancing
+// strategy across all available targets.
 func (s snapshot) resolveRedirect(name string, catalog Catalog, userPath string, enforceUserPaths bool) (Resolution, bool) {
 	name = strings.TrimSpace(name)
 	resolution := Resolution{
 		Requested: core.ModelSelector{Model: name},
 		Resolved:  core.ModelSelector{Model: name},
 	}
-	if name == "" {
+	entry, ok := s.findRedirect(name, userPath, enforceUserPaths)
+	if !ok {
 		return resolution, false
 	}
-
-	entry, ok := s.redirects[name]
-	if !ok || !entry.vm.Enabled {
+	supported := entry.supportedTargets(catalog)
+	if len(supported) == 0 {
 		return resolution, false
 	}
-	if enforceUserPaths && len(entry.vm.UserPaths) > 0 && !userPathAllowed(userPath, entry.vm.UserPaths) {
-		return resolution, false
-	}
-	if catalog == nil || !catalog.Supports(entry.qualified) {
-		return resolution, false
-	}
-	resolution.Resolved = entry.target
+	resolution.Resolved = supported[0].selector
 	resolution.Source = entry.vm.Source
 	return resolution, true
 }

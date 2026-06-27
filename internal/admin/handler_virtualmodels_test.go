@@ -308,6 +308,43 @@ func TestUpsertVirtualModelPreservesEnabledWhenOmitted(t *testing.T) {
 	}
 }
 
+func TestUpsertVirtualModelLoadBalanced(t *testing.T) {
+	catalog := newVMTestCatalog()
+	catalog.add("openai/gpt-4o", "openai")
+	catalog.add("groq/llama", "groq")
+	service := newVMService(t, catalog, newVMTestStore(), true)
+	h := NewHandler(nil, nil, WithVirtualModels(service))
+	e := echo.New()
+
+	body := `{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama","weight":2}]}`
+	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("UpsertVirtualModel() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+
+	var view virtualmodels.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if view.Kind != virtualmodels.KindRedirect {
+		t.Fatalf("kind = %q, want redirect", view.Kind)
+	}
+	if len(view.Targets) != 2 {
+		t.Fatalf("targets = %d, want 2 (%#v)", len(view.Targets), view.Targets)
+	}
+	if view.Strategy != virtualmodels.StrategyCost {
+		t.Fatalf("strategy = %q, want cost", view.Strategy)
+	}
+	if view.Targets[1].Weight != 2 {
+		t.Fatalf("target[1] weight = %v, want 2", view.Targets[1].Weight)
+	}
+}
+
 func TestUpsertVirtualModelReturns400OnValidationError(t *testing.T) {
 	h := newVMHandler(t)
 	e := echo.New()

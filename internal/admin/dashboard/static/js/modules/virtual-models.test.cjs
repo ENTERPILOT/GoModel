@@ -132,8 +132,11 @@ test('fetchVirtualModels parses redirect and policy Views into aliases and overr
         name: 'smart',
         target_provider: 'openai',
         target_model: 'gpt-4o',
+        targets: [{ provider: 'openai', model: 'gpt-4o' }],
+        strategy: '',
         description: 'Primary chat alias',
         enabled: true,
+        managed: false,
         valid: true,
         resolved_model: 'openai/gpt-4o',
         provider_type: 'openai',
@@ -1267,4 +1270,129 @@ test('virtual model editor surfaces nested HTTP error payloads', async() => {
 
         assert.equal(module[scenario.errorKey], scenario.message, scenario.name);
     }
+});
+
+test('submitVirtualModelForm sends targets and strategy for load balancing', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        },
+        window: { confirm: () => true }
+    });
+    stubRequests(module);
+    module.aliases = [];
+    module.models = [];
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+
+    module.vmFormMode = 'create';
+    module.vmForm = {
+        source: 'smart',
+        target_model: 'openai/gpt-4o',
+        targets: [{ model: 'groq/llama', weight: 2 }],
+        strategy: 'cost',
+        user_paths: '',
+        description: '',
+        enabled: true
+    };
+
+    await module.submitVirtualModelForm();
+
+    assert.equal(requests.length, 1);
+    const body = JSON.parse(requests[0].request.body);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, 'target_model'), false);
+    assert.deepEqual(body.targets, [{ model: 'openai/gpt-4o' }, { model: 'groq/llama', weight: 2 }]);
+    assert.equal(body.strategy, 'cost');
+});
+
+test('fetchVirtualModels maps a load-balanced redirect with targets and strategy', async() => {
+    const views = [{
+        source: 'smart',
+        kind: 'redirect',
+        targets: [
+            { provider: 'openai', model: 'gpt-4o' },
+            { provider: 'groq', model: 'llama', weight: 2 }
+        ],
+        strategy: 'round_robin',
+        enabled: true,
+        valid: true
+    }];
+    const module = createAliasesModule({
+        context: { fetch: async() => ({ ok: true, status: 200, json: async() => views }) }
+    });
+    stubRequests(module);
+    module.models = [];
+
+    await module.fetchVirtualModels();
+
+    const alias = module.aliases[0];
+    assert.equal(alias.targets.length, 2);
+    assert.equal(alias.targets[1].weight, 2);
+    assert.equal(alias.strategy, 'round_robin');
+    assert.equal(module.aliasTargetLabel(alias), '2 targets · round robin');
+});
+
+test('toggleRowEnabled round-trips every target and strategy for a load-balanced alias', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        }
+    });
+    stubRequests(module);
+    module.fetchVirtualModels = async() => {};
+
+    const row = {
+        key: 'alias:smart',
+        is_alias: true,
+        alias: {
+            name: 'smart',
+            targets: [
+                { provider: 'openai', model: 'gpt-4o' },
+                { provider: 'groq', model: 'llama', weight: 2 }
+            ],
+            strategy: 'cost',
+            enabled: true,
+            user_paths: []
+        }
+    };
+
+    await module.toggleRowEnabled(row);
+
+    assert.equal(requests.length, 1);
+    const body = JSON.parse(requests[0].request.body);
+    assert.deepEqual(body.targets, [{ model: 'openai/gpt-4o' }, { model: 'groq/llama', weight: 2 }]);
+    assert.equal(body.strategy, 'cost');
+    assert.equal(body.enabled, false);
+});
+
+test('managed virtual models are read-only in toggles and the editor', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        }
+    });
+    stubRequests(module);
+
+    const row = { key: 'alias:smart', is_alias: true, alias: { name: 'smart', managed: true, enabled: true } };
+    await module.toggleRowEnabled(row);
+    assert.equal(requests.length, 0);
+    assert.match(module.aliasNotice, /managed by configuration/);
+
+    module.vmFormManaged = true;
+    module.vmForm = { source: 'smart', target_model: 'openai/gpt-4o', targets: [], strategy: 'round_robin' };
+    await module.submitVirtualModelForm();
+    assert.equal(requests.length, 0);
+    assert.match(module.vmFormError, /managed by configuration/);
 });

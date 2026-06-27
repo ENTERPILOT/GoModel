@@ -12,13 +12,26 @@ import (
 )
 
 // upsertVirtualModelRequest is the unified admin upsert contract. Presence of
-// target_model makes the row a redirect; absence makes it an access policy.
+// target_model or targets makes the row a redirect; absence makes it an access
+// policy. A single target_model is a plain alias; multiple targets are load
+// balanced across by strategy ("round_robin" or "cost").
 type upsertVirtualModelRequest struct {
-	Source      string   `json:"source"`
-	TargetModel string   `json:"target_model,omitempty"`
-	UserPaths   []string `json:"user_paths,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Enabled     *bool    `json:"enabled,omitempty"`
+	Source      string                      `json:"source"`
+	TargetModel string                      `json:"target_model,omitempty"`
+	Targets     []virtualModelTargetRequest `json:"targets,omitempty"`
+	Strategy    string                      `json:"strategy,omitempty"`
+	UserPaths   []string                    `json:"user_paths,omitempty"`
+	Description string                      `json:"description,omitempty"`
+	Enabled     *bool                       `json:"enabled,omitempty"`
+}
+
+// virtualModelTargetRequest is one load-balancing destination. Model may be a
+// bare id (with provider set) or a "provider/model" selector. Weight biases the
+// round_robin strategy and defaults to 1.
+type virtualModelTargetRequest struct {
+	Provider string  `json:"provider,omitempty"`
+	Model    string  `json:"model"`
+	Weight   float64 `json:"weight,omitempty"`
 }
 
 type deleteVirtualModelRequest struct {
@@ -140,19 +153,52 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 
 	vm := virtualmodels.VirtualModel{
 		Source:      source,
+		Strategy:    strings.TrimSpace(req.Strategy),
 		UserPaths:   req.UserPaths,
 		Description: strings.TrimSpace(req.Description),
 		Enabled:     enabled,
 	}
 
+	targets, err := buildVirtualModelTargets(req)
+	if err != nil {
+		return virtualmodels.VirtualModel{}, err
+	}
+	vm.Targets = targets
+	return vm, nil
+}
+
+// buildVirtualModelTargets resolves the redirect targets from the request. The
+// multi-target `targets` form takes precedence; a single `target_model` is the
+// backward-compatible shorthand. An empty result makes the row an access policy.
+func buildVirtualModelTargets(req upsertVirtualModelRequest) ([]virtualmodels.Target, error) {
+	if len(req.Targets) > 0 {
+		targets := make([]virtualmodels.Target, 0, len(req.Targets))
+		for _, t := range req.Targets {
+			model := strings.TrimSpace(t.Model)
+			if model == "" {
+				continue
+			}
+			selector, err := core.ParseModelSelector(model, strings.TrimSpace(t.Provider))
+			if err != nil {
+				return nil, core.NewInvalidRequestError("invalid target model "+model+": "+err.Error(), err)
+			}
+			targets = append(targets, virtualmodels.Target{
+				Provider: selector.Provider,
+				Model:    selector.Model,
+				Weight:   t.Weight,
+			})
+		}
+		return targets, nil
+	}
+
 	if target := strings.TrimSpace(req.TargetModel); target != "" {
 		selector, err := core.ParseModelSelector(target, "")
 		if err != nil {
-			return virtualmodels.VirtualModel{}, core.NewInvalidRequestError("invalid target_model: "+err.Error(), err)
+			return nil, core.NewInvalidRequestError("invalid target_model: "+err.Error(), err)
 		}
-		vm.Targets = []virtualmodels.Target{{Provider: selector.Provider, Model: selector.Model}}
+		return []virtualmodels.Target{{Provider: selector.Provider, Model: selector.Model}}, nil
 	}
-	return vm, nil
+	return nil, nil
 }
 
 // findVirtualModelView returns the admin view for a source after an upsert by

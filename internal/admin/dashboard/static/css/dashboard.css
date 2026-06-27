@@ -2125,6 +2125,23 @@ td.col-price {
   color: var(--text-muted);
 }
 
+/* One load-balancing target row: model selector, weight, and remove button. */
+.vm-target-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.vm-target-row .vm-target-model {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.vm-target-row .vm-target-weight {
+  flex: 0 0 88px;
+  width: 88px;
+}
+
 .form-error {
   padding: 10px 12px;
   margin: 0;

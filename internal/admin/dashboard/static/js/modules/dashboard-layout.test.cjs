@@ -1103,7 +1103,7 @@ test("model category tables lazy mount only the active table body", () => {
   );
   assert.match(
     modelsBlock,
-    /<button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="vmFormHasExisting"[\s\S]*@click="deleteVirtualModel\(\)">Remove<\/button>/,
+    /<button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="vmFormHasExisting && !vmFormManaged"[\s\S]*@click="deleteVirtualModel\(\)">Remove<\/button>/,
   );
   assert.match(
     modelsBlock,

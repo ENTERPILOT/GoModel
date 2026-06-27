@@ -27,6 +27,10 @@ type Config struct {
 	Fallback   FallbackConfig   `yaml:"fallback"`
 	Workflows  WorkflowsConfig  `yaml:"workflows"`
 	Resilience ResilienceConfig `yaml:"resilience"`
+
+	// VirtualModels declares redirects, load balancers, and access policies as
+	// infrastructure-as-code. They override admin-store rows of the same source.
+	VirtualModels []VirtualModelConfig `yaml:"virtual_models"`
 }
 
 // LoadResult is returned by Load and bundles the application config with the raw
@@ -155,6 +159,9 @@ func Load() (*LoadResult, error) {
 	mergeSemanticResponseDefaults(cfg.Cache.Response.Semantic)
 
 	if err := applyEnvOverrides(cfg); err != nil {
+		return nil, err
+	}
+	if err := applyVirtualModelsEnv(cfg); err != nil {
 		return nil, err
 	}
 	applyBudgetDependencies(cfg)

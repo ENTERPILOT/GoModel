@@ -20,6 +20,24 @@ models:
   enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an access override allows one or more user paths
   configured_provider_models_mode: "fallback" # env: CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models and skips upstream /models for configured lists
 
+# Virtual models as infrastructure-as-code: redirects, load balancers, and access
+# policies. These override admin-store rows with the same source and are read-only
+# in the dashboard. The VIRTUAL_MODELS env var (a JSON array) merges over this list
+# and wins per source. Omit this section to manage virtual models only from the UI.
+# virtual_models:
+#   - source: regular # a plain alias
+#     target: anthropic/claude-sonnet-4-6
+#   - source: smart # weighted round-robin load balancer
+#     strategy: round_robin # round_robin (default) | cost
+#     targets:
+#       - { model: openai/gpt-4o, weight: 2 }
+#       - { model: anthropic/claude-sonnet-4-6 }
+#   - source: cheap # always route to the cheapest available target
+#     strategy: cost
+#     targets:
+#       - { model: openai/gpt-4o }
+#       - { model: groq/llama-3.3-70b }
+
 cache:
   model:
     refresh_interval: 3600 # how often to refresh the model registry (seconds, default: 3600)

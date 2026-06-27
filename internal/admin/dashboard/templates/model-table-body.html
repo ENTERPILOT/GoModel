@@ -44,6 +44,7 @@
                             <span class="mono font-size-md" x-text="row.display_name"></span>
                             <span class="alias-kind-badge" x-show="row.is_alias" x-text="row.kind_badge"></span>
                             <span class="alias-kind-badge" x-show="!row.is_alias && rowVirtualBadge(row)" x-text="rowVirtualBadge(row)"></span>
+                            <span class="alias-kind-badge" x-show="row.managed" title="Managed by config.yaml / VIRTUAL_MODELS">Config</span>
                         </div>
                         <div class="model-name-secondary" x-show="row.is_alias">
                             Targets <span class="mono font-size-md" x-text="row.secondary_name"></span>

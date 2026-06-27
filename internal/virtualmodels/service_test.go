@@ -137,17 +137,50 @@ func TestService_RejectsCrossKindClobber(t *testing.T) {
 	}
 }
 
-func TestService_RejectsMultiTargetRedirect(t *testing.T) {
+func TestService_AcceptsMultiTargetRedirect(t *testing.T) {
 	t.Parallel()
-	svc := newTestService(t)
+	svc := newBalancingService(t)
 	ctx := context.Background()
 
-	err := svc.Upsert(ctx, VirtualModel{
-		Source:  "fast",
-		Targets: []Target{{Provider: "openai", Model: "gpt-4o"}, {Provider: "azure", Model: "gpt-4o"}},
+	if err := svc.Upsert(ctx, VirtualModel{
+		Source:   "smart",
+		Strategy: StrategyRoundRobin,
+		Targets: []Target{
+			{Provider: "openai", Model: "gpt-4o"},
+			{Provider: "anthropic", Model: "claude"},
+		},
+		Enabled: true,
+	}); err != nil {
+		t.Fatalf("Upsert(multi-target) error = %v", err)
+	}
+
+	view, ok := svc.Get("smart")
+	if !ok {
+		t.Fatalf("Get(smart) not found after upsert")
+	}
+	if len(view.Targets) != 2 {
+		t.Fatalf("stored targets = %d, want 2", len(view.Targets))
+	}
+	if view.Strategy != StrategyRoundRobin {
+		t.Fatalf("stored strategy = %q, want %q", view.Strategy, StrategyRoundRobin)
+	}
+}
+
+func TestService_RejectsUnknownStrategy(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+
+	err := svc.Upsert(context.Background(), VirtualModel{
+		Source:   "smart",
+		Strategy: "least-latency",
+		Targets:  []Target{{Provider: "openai", Model: "gpt-4o"}},
+		Enabled:  true,
 	})
 	if err == nil {
-		t.Fatalf("Upsert(multi-target) error = nil, want rejection")
+		t.Fatalf("Upsert(unknown strategy) error = nil, want rejection")
+	}
+	if !IsValidationError(err) {
+		t.Fatalf("Upsert(unknown strategy) error = %v, want validation error", err)
 	}
 }
 

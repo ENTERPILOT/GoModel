@@ -27,8 +27,10 @@ Introduce one entity, the **virtual model**, persisted in `virtual_models` and
 keyed uniquely by `source`.
 
 - A row with `targets` is a **redirect**: `source` is a new name that rewrites
-  to a real model. One target is an alias; many targets (a future, additive
-  feature) are load balancing.
+  to a real model. One target is an alias; many targets are load balancing,
+  distributed by `strategy` (`round_robin`, honoring per-target `weight`, or
+  `cost`). This was implemented as the additive follow-up the staging enabled —
+  the `targets`, `strategy`, and `weight` columns were already persisted.
 - A row without `targets` is an **access policy**: `source` is a scoped
   selector over existing models, gated by `user_paths`.
 

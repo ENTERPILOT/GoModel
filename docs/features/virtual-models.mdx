@@ -46,6 +46,80 @@ Your app can then send:
 }
 ```
 
+## Load balance across models
+
+A redirect can point at **several** target models and spread requests across
+them. Add more than one target in the editor (**Add target**) and pick a
+**strategy**:
+
+- **Round-robin** (default) rotates requests evenly across the targets. Set a
+  per-target **weight** to bias the share — a target with weight `2` receives
+  twice the traffic of a target with weight `1`.
+- **Lowest cost** routes every request to the cheapest currently-available
+  target, ranked by the model registry's input + output per-token price. When a
+  target has no registry pricing it is skipped while a priced target exists; if
+  none are priced, the first listed target is used.
+
+Targets that the gateway cannot currently serve (unknown model, provider down)
+are skipped automatically, so a redirect keeps working as long as one target is
+available. A redirect with a single target behaves exactly like a plain alias.
+
+```json
+{
+  "model": "smart",
+  "messages": []
+}
+```
+
+For example, point `smart` at both `openai/gpt-4o` and `anthropic/claude-sonnet-4-6`
+with the round-robin strategy to split load, or at a premium and a budget model
+with the cost strategy to always take the cheaper one.
+
+## Define virtual models as code
+
+Operators who manage configuration as infrastructure-as-code can declare virtual
+models in `config.yaml` or the `VIRTUAL_MODELS` environment variable instead of
+the dashboard. Declarative entries are applied at startup, **override** any
+admin-store row with the same `source`, and are shown read-only in the dashboard
+(a **Config** badge). Edit the configuration to change them.
+
+In `config.yaml`:
+
+```yaml
+virtual_models:
+  # A plain alias.
+  - source: regular
+    target: anthropic/claude-sonnet-4-6
+
+  # A weighted round-robin load balancer.
+  - source: smart
+    strategy: round_robin
+    targets:
+      - model: openai/gpt-4o
+        weight: 2
+      - model: anthropic/claude-sonnet-4-6
+
+  # A cost-based load balancer.
+  - source: cheap
+    strategy: cost
+    targets:
+      - { model: openai/gpt-4o }
+      - { model: groq/llama-3.3-70b }
+```
+
+The same list as a single environment variable (JSON), which overrides
+`config.yaml` entries with a matching `source`:
+
+```env
+VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama-3.3-70b"}]}]
+```
+
+Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
+`strategy` (`round_robin` or `cost`), `user_paths`, `description`, and `enabled`.
+Leave the targets empty to declare an access policy on the `source` selector. An
+invalid declaration (unknown strategy, missing or self-referential target) fails
+startup with a clear error.
+
 ## Expose only redirects
 
 To hide provider models from `GET /v1/models`, set:

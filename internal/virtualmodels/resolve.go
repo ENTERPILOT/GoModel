@@ -21,8 +21,10 @@ func (s *Service) resolveRequested(requested core.RequestedModelSelector, userPa
 	if requested.ExplicitProvider {
 		return Resolution{Requested: selector, Resolved: selector}, false, nil
 	}
-	if resolution, ok := s.snapshot().resolveRedirect(requested.Model, s.catalog, userPath, enforceUserPaths); ok {
-		return resolution, true, nil
+	if entry, ok := s.snapshot().findRedirect(requested.Model, userPath, enforceUserPaths); ok {
+		if resolved, ok := s.balancedResolution(entry); ok {
+			return Resolution{Requested: selector, Resolved: resolved, Source: entry.vm.Source}, true, nil
+		}
 	}
 	return Resolution{Requested: selector, Resolved: selector}, false, nil
 }
@@ -64,7 +66,13 @@ func (s *Service) ResolveRefreshTarget(requested core.RequestedModelSelector) (c
 	if !ok || !entry.vm.Enabled {
 		return core.ModelSelector{}, false, nil
 	}
-	return entry.target, true, nil
+	// Any target's provider serves to refresh an unavailable upstream before the
+	// balanced resolution retries, so the first declared target is sufficient.
+	representative, ok := entry.representative()
+	if !ok {
+		return core.ModelSelector{}, false, nil
+	}
+	return representative.selector, true, nil
 }
 
 // Supports reports whether a redirect currently resolves to a concrete model.
@@ -112,10 +120,13 @@ func (s *Service) exposedModels(userPath string, enforceUserPaths bool, allow fu
 		if enforceUserPaths && len(entry.vm.UserPaths) > 0 && !userPathAllowed(userPath, entry.vm.UserPaths) {
 			continue
 		}
-		if allow != nil && !allow(entry.target) {
+		// Expose a load-balanced redirect when at least one of its targets is both
+		// catalog-supported and permitted, listing it with that target's metadata.
+		chosen, ok := representativeExposedTarget(entry.supportedTargets(s.catalog), allow)
+		if !ok {
 			continue
 		}
-		model, ok := s.catalog.LookupModel(entry.qualified)
+		model, ok := s.catalog.LookupModel(chosen.qualified)
 		if !ok || model == nil {
 			continue
 		}
@@ -125,4 +136,15 @@ func (s *Service) exposedModels(userPath string, enforceUserPaths bool, allow fu
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
+}
+
+// representativeExposedTarget returns the first supported target the allow filter
+// permits, used to project a redirect into a single model-list entry.
+func representativeExposedTarget(supported []resolvedTarget, allow func(core.ModelSelector) bool) (resolvedTarget, bool) {
+	for _, target := range supported {
+		if allow == nil || allow(target.selector) {
+			return target, true
+		}
+	}
+	return resolvedTarget{}, false
 }

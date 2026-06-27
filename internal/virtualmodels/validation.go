@@ -19,42 +19,60 @@ func newValidationError(message string, err error) error {
 	return validation.NewError(message, err)
 }
 
-// normalizeRedirect trims a redirect virtual model and validates the v1
-// single-target constraint, returning the normalized row and parsed target.
-func normalizeRedirect(vm VirtualModel) (VirtualModel, core.ModelSelector, error) {
+// normalizeRedirect trims and validates a redirect virtual model, returning the
+// normalized row and the parsed selector for every target. A redirect may carry
+// one target (a plain alias) or several (load balanced by Strategy).
+func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, error) {
 	vm.Source = strings.TrimSpace(vm.Source)
 	vm.Description = strings.TrimSpace(vm.Description)
-	vm.Strategy = strings.TrimSpace(vm.Strategy)
+	vm.Strategy = normalizeStrategy(vm.Strategy)
 
 	if vm.Source == "" {
-		return VirtualModel{}, core.ModelSelector{}, newValidationError("source is required", nil)
+		return VirtualModel{}, nil, newValidationError("source is required", nil)
 	}
-	if vm.Strategy != "" || len(vm.Targets) > 1 {
-		return VirtualModel{}, core.ModelSelector{}, newValidationError("multi-target redirects (load balancing) are not yet supported", nil)
+	if !validStrategy(vm.Strategy) {
+		return VirtualModel{}, nil, newValidationError(
+			fmt.Sprintf("unknown load-balancing strategy %q (use %q or %q)", vm.Strategy, StrategyRoundRobin, StrategyCost), nil)
+	}
+	if len(vm.Targets) == 0 {
+		return VirtualModel{}, nil, newValidationError("at least one target is required", nil)
 	}
 
-	target := vm.Targets[0]
-	target.Provider = strings.TrimSpace(target.Provider)
-	target.Model = strings.TrimSpace(target.Model)
-	if target.Model == "" {
-		return VirtualModel{}, core.ModelSelector{}, newValidationError("target_model is required", nil)
+	targets := make([]Target, 0, len(vm.Targets))
+	selectors := make([]core.ModelSelector, 0, len(vm.Targets))
+	seen := make(map[string]struct{}, len(vm.Targets))
+	for _, target := range vm.Targets {
+		target.Provider = strings.TrimSpace(target.Provider)
+		target.Model = strings.TrimSpace(target.Model)
+		if target.Model == "" {
+			return VirtualModel{}, nil, newValidationError("target_model is required", nil)
+		}
+		if target.Weight < 0 {
+			return VirtualModel{}, nil, newValidationError("target weight cannot be negative", nil)
+		}
+		selector, err := target.selector()
+		if err != nil {
+			return VirtualModel{}, nil, newValidationError("invalid target selector: "+err.Error(), err)
+		}
+		qualified := selector.QualifiedModel()
+		if _, dup := seen[qualified]; dup {
+			return VirtualModel{}, nil, newValidationError("duplicate target: "+qualified, nil)
+		}
+		seen[qualified] = struct{}{}
+		targets = append(targets, target)
+		selectors = append(selectors, selector)
 	}
-	vm.Targets = []Target{target}
-
-	selector, err := target.selector()
-	if err != nil {
-		return VirtualModel{}, core.ModelSelector{}, newValidationError("invalid target selector: "+err.Error(), err)
-	}
+	vm.Targets = targets
 
 	// Redirects now enforce user_paths (scoped redirects), so an invalid path
 	// must fail loudly rather than be silently dropped — dropping it would widen
 	// the redirect to every caller.
 	paths, err := normalizeUserPaths(vm.UserPaths)
 	if err != nil {
-		return VirtualModel{}, core.ModelSelector{}, err
+		return VirtualModel{}, nil, err
 	}
 	vm.UserPaths = paths
-	return vm, selector, nil
+	return vm, selectors, nil
 }
 
 // normalizePolicyInput trims a policy virtual model and normalizes its selector

@@ -72,15 +72,19 @@
                     </button>
                 </div>
 
+                <p class="form-hint" x-show="vmFormManaged" role="status">
+                    This virtual model is defined in configuration (<code>config.yaml</code> / <code>VIRTUAL_MODELS</code>) and is read-only here. Edit your configuration to change it.
+                </p>
+
                 <div class="form-grid">
                     <div class="form-field">
                         <label class="form-field-label" for="virtual-model-source">Source</label>
-                        <input id="virtual-model-source" type="text" class="mono" placeholder="smart" x-model="vmForm.source" :disabled="vmFormSourceLocked" data-modal-autofocus>
+                        <input id="virtual-model-source" type="text" class="mono" placeholder="smart" x-model="vmForm.source" :disabled="vmFormSourceLocked || vmFormManaged" data-modal-autofocus>
                     </div>
 
                     <div class="form-field">
                         <label class="form-field-label" for="virtual-model-target">Target model</label>
-                        <input id="virtual-model-target" type="text" list="virtual-model-target-options" class="mono" placeholder="openai/gpt-4o" x-model="vmForm.target_model">
+                        <input id="virtual-model-target" type="text" list="virtual-model-target-options" class="mono" placeholder="openai/gpt-4o" x-model="vmForm.target_model" :disabled="vmFormManaged">
                     </div>
                 </div>
 
@@ -90,14 +94,40 @@
                     </template>
                 </datalist>
 
+                <!-- Additional targets turn a redirect into a load balancer. -->
+                <div class="form-field">
+                    <span class="form-field-label">Additional targets (load balancing)</span>
+                    <template x-for="(target, index) in vmForm.targets" :key="index">
+                        <div class="vm-target-row">
+                            <input type="text" list="virtual-model-target-options" class="mono vm-target-model" placeholder="groq/llama" x-model="target.model" :disabled="vmFormManaged" aria-label="Additional target model">
+                            <input type="number" min="1" step="1" class="mono vm-target-weight" placeholder="weight" x-model="target.weight" :disabled="vmFormManaged" aria-label="Target weight">
+                            <button type="button" class="pagination-btn pagination-btn-danger-outline vm-target-remove" :disabled="vmFormManaged" @click="removeVmTarget(index)" aria-label="Remove target">Remove</button>
+                        </div>
+                    </template>
+                    <div>
+                        <button type="button" class="pagination-btn pagination-btn-with-icon" :disabled="vmFormManaged" @click="addVmTarget()">
+                            <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                            <span>Add target</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-field" x-show="vmFormShowStrategy()">
+                    <label class="form-field-label" for="virtual-model-strategy">Load-balancing strategy</label>
+                    <select id="virtual-model-strategy" class="mono" x-model="vmForm.strategy" :disabled="vmFormManaged">
+                        <option value="round_robin">Round-robin (rotate across targets; honors weights)</option>
+                        <option value="cost">Lowest cost (cheapest target per request)</option>
+                    </select>
+                </div>
+
                 <p class="form-hint">
-                    Fill <strong>Target model</strong> to make this a redirect/alias; leave it empty to make it an access policy on the <code>Source</code> selector. The selector uses <code>/</code> for all providers and models, <code>{provider_name}/</code> for one provider, or <code>{provider_name}/{model}</code> for one model. <code>user_paths</code> is matched against the effective request <code>user_path</code>: the managed API key <code>user_path</code> when present, otherwise the configured user path request header.
+                    Fill <strong>Target model</strong> to make this a redirect/alias; leave it empty to make it an access policy on the <code>Source</code> selector. Add one or more <strong>additional targets</strong> to load balance across several models, then pick a strategy: <code>round_robin</code> rotates across targets (weight biases the share) and <code>cost</code> always routes to the cheapest available target. The selector uses <code>/</code> for all providers and models, <code>{provider_name}/</code> for one provider, or <code>{provider_name}/{model}</code> for one model. <code>user_paths</code> is matched against the effective request <code>user_path</code>: the managed API key <code>user_path</code> when present, otherwise the configured user path request header.
                 </p>
                 <p class="form-hint" x-show="vmFormMode === 'edit'" x-text="'Default enabled: ' + (vmFormDefaultEnabled ? 'yes' : 'no') + ' · Effective now: ' + (vmFormEffectiveEnabled ? 'yes' : 'no')"></p>
 
                 <div class="form-field">
                     <label class="form-field-label" for="virtual-model-user-paths">User Paths</label>
-                    <textarea id="virtual-model-user-paths" rows="4" class="mono" placeholder="/&#10;/team/alpha&#10;/non-existing" x-model="vmForm.user_paths"></textarea>
+                    <textarea id="virtual-model-user-paths" rows="4" class="mono" placeholder="/&#10;/team/alpha&#10;/non-existing" x-model="vmForm.user_paths" :disabled="vmFormManaged"></textarea>
                 </div>
 
                 <p class="form-hint">
@@ -106,7 +136,7 @@
 
                 <div class="form-field">
                     <label class="form-field-label" for="virtual-model-description">Description</label>
-                    <textarea id="virtual-model-description" rows="3" placeholder="Optional description" x-model="vmForm.description"></textarea>
+                    <textarea id="virtual-model-description" rows="3" placeholder="Optional description" x-model="vmForm.description" :disabled="vmFormManaged"></textarea>
                 </div>
 
                 <div class="form-field">
@@ -115,7 +145,8 @@
                         <button type="button" class="alias-toggle"
                                 :class="{ enabled: vmForm.enabled, restricted: vmFormToggleRestricted() }"
                                 :aria-label="(vmForm.enabled ? 'Disable' : 'Enable') + ' virtual model'"
-                                @click="vmForm.enabled = !vmForm.enabled">
+                                :disabled="vmFormManaged"
+                                @click="!vmFormManaged && (vmForm.enabled = !vmForm.enabled)">
                             <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
                             <span x-text="vmFormToggleLabel()"></span>
                         </button>
@@ -126,8 +157,8 @@
 
                 <div class="form-actions">
                     <button type="button" class="pagination-btn" @click="closeVirtualModelForm()">Cancel</button>
-                    <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="vmFormHasExisting" :disabled="vmDeleting || vmSubmitting" @click="deleteVirtualModel()">Remove</button>
-                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon virtual-model-submit-btn" :disabled="vmSubmitting || vmDeleting">
+                    <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="vmFormHasExisting && !vmFormManaged" :disabled="vmDeleting || vmSubmitting" @click="deleteVirtualModel()">Remove</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon virtual-model-submit-btn" x-show="!vmFormManaged" :disabled="vmSubmitting || vmDeleting">
                         <i data-lucide="plus" class="form-action-icon" x-show="vmFormMode !== 'edit'" aria-hidden="true"></i>
                         <i data-lucide="save" class="form-action-icon" x-show="vmFormMode === 'edit'" aria-hidden="true"></i>
                         <span x-text="vmSubmitting ? 'Saving...' : (vmFormMode === 'edit' ? 'Save' : 'Create')"></span>

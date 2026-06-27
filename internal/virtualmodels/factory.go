@@ -97,6 +97,10 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 	if err != nil {
 		return nil, err
 	}
+	// Declarative virtual models (config.yaml / VIRTUAL_MODELS) are layered over the
+	// store as a managed overlay before the first refresh, so an invalid declaration
+	// fails startup here rather than silently dropping.
+	service.SetConfigModels(ConfigModels(cfg.VirtualModels))
 	if err := service.Refresh(ctx); err != nil {
 		return nil, err
 	}

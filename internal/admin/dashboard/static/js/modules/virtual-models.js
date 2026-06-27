@@ -25,9 +25,12 @@
             vmFormDisplayName: '',
             vmFormSourceLocked: false,
             vmFormOriginalSource: '',
+            vmFormManaged: false,
             vmForm: {
                 source: '',
                 target_model: '',
+                targets: [],
+                strategy: 'round_robin',
                 user_paths: '',
                 description: '',
                 enabled: true
@@ -101,6 +104,7 @@
                         alias,
                         access: null,
                         kind_badge: 'Virtual Model',
+                        managed: Boolean(alias.managed),
                         masking_alias: null,
                         source_model_exists: this.hasConcreteSourceModel(alias.name),
                         has_virtual_model: true,
@@ -148,10 +152,103 @@
                 return {
                     source: '',
                     target_model: '',
+                    targets: [],
+                    strategy: 'round_robin',
                     user_paths: '',
                     description: '',
                     enabled: true
                 };
+            },
+
+            // ---- Load-balancing target helpers ----
+
+            // qualifyTarget renders a {provider, model} target as a single selector.
+            qualifyTarget(target) {
+                if (!target) {
+                    return '';
+                }
+                const provider = String(target.provider || '').trim();
+                const model = String(target.model || '').trim();
+                if (provider && model && !model.includes('/')) {
+                    return provider + '/' + model;
+                }
+                return model;
+            },
+
+            // addVmTarget appends an empty additional-target row to the editor.
+            addVmTarget() {
+                if (!Array.isArray(this.vmForm.targets)) {
+                    this.vmForm.targets = [];
+                }
+                this.vmForm.targets.push({ model: '', weight: '' });
+            },
+
+            // removeVmTarget drops one additional-target row.
+            removeVmTarget(index) {
+                if (!Array.isArray(this.vmForm.targets)) {
+                    return;
+                }
+                this.vmForm.targets.splice(index, 1);
+            },
+
+            // vmFormIsRedirect reports whether the editor currently describes a
+            // redirect (a primary target or any additional target is filled).
+            vmFormIsRedirect() {
+                if (String(this.vmForm.target_model || '').trim()) {
+                    return true;
+                }
+                return this.collectExtraTargets().length > 0;
+            },
+
+            // vmFormShowStrategy reports whether to surface the strategy selector:
+            // only once a redirect load balances across two or more targets.
+            vmFormShowStrategy() {
+                let count = String(this.vmForm.target_model || '').trim() ? 1 : 0;
+                count += this.collectExtraTargets().length;
+                return count >= 2;
+            },
+
+            // collectExtraTargets normalizes the additional-target rows into API
+            // targets, dropping blanks and invalid weights.
+            collectExtraTargets() {
+                const rows = Array.isArray(this.vmForm.targets) ? this.vmForm.targets : [];
+                const targets = [];
+                for (const row of rows) {
+                    const model = String(row && row.model || '').trim();
+                    if (!model) {
+                        continue;
+                    }
+                    const target = { model };
+                    const weight = this.parseWeight(row && row.weight);
+                    if (weight !== null) {
+                        target.weight = weight;
+                    }
+                    targets.push(target);
+                }
+                return targets;
+            },
+
+            parseWeight(value) {
+                if (value === '' || value === null || value === undefined) {
+                    return null;
+                }
+                const parsed = Number(value);
+                if (!Number.isFinite(parsed) || parsed <= 0) {
+                    return null;
+                }
+                return parsed;
+            },
+
+            strategyLabel(strategy) {
+                switch (String(strategy || '').toLowerCase()) {
+                    case 'cost':
+                        return 'lowest cost';
+                    case 'round_robin':
+                    case '':
+                        return 'round robin';
+                    default:
+                        return strategy;
+                }
             },
 
             adminRequestOptions(options) {
@@ -162,13 +259,24 @@
 
             // mapRedirectView maps a redirect View into the shape the renderer needs.
             mapRedirectView(view) {
-                const target = Array.isArray(view.targets) && view.targets.length > 0 ? view.targets[0] : {};
+                const rawTargets = Array.isArray(view.targets) ? view.targets : [];
+                const target = rawTargets.length > 0 ? rawTargets[0] : {};
+                const targets = rawTargets.map((entry) => {
+                    const mapped = { provider: entry.provider || '', model: entry.model || '' };
+                    if (entry.weight) {
+                        mapped.weight = entry.weight;
+                    }
+                    return mapped;
+                });
                 return {
                     name: view.source,
                     target_provider: target.provider || '',
                     target_model: target.model || '',
+                    targets,
+                    strategy: view.strategy || '',
                     description: view.description || '',
                     enabled: view.enabled !== false,
+                    managed: Boolean(view.managed),
                     valid: Boolean(view.valid),
                     resolved_model: view.resolved_model || '',
                     provider_type: view.provider_type || '',
@@ -194,6 +302,7 @@
                             user_paths: Array.isArray(view.user_paths) ? view.user_paths : [],
                             description: view.description || '',
                             enabled: view.enabled !== false,
+                            managed: Boolean(view.managed),
                             scope_kind: view.scope_kind || ''
                         });
                     }
@@ -593,11 +702,31 @@
                 this.vmFormMode = 'edit';
                 this.vmFormSourceLocked = true;
                 this.vmFormHasExisting = true;
+                this.vmFormManaged = Boolean(alias.managed);
                 this.vmFormOriginalSource = alias.name || '';
                 this.vmFormDisplayName = alias.name || '';
+
+                const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
+                let primaryModel;
+                let extraTargets;
+                if (lbTargets.length > 0) {
+                    primaryModel = this.qualifyTarget(lbTargets[0]);
+                    extraTargets = lbTargets.slice(1).map((target) => ({
+                        model: this.qualifyTarget(target),
+                        weight: target.weight || ''
+                    }));
+                } else {
+                    primaryModel = alias.target_provider
+                        ? alias.target_provider + '/' + alias.target_model
+                        : (alias.target_model || '');
+                    extraTargets = [];
+                }
+
                 this.vmForm = {
                     source: alias.name || '',
-                    target_model: alias.target_provider ? alias.target_provider + '/' + alias.target_model : (alias.target_model || ''),
+                    target_model: primaryModel,
+                    targets: extraTargets,
+                    strategy: alias.strategy || 'round_robin',
                     user_paths: (Array.isArray(alias.user_paths) ? alias.user_paths : []).join('\n'),
                     description: alias.description || '',
                     enabled: alias.enabled !== false
@@ -630,10 +759,13 @@
                 const overrideEnabled = override ? (override.enabled !== false) : (access.effective_enabled !== false);
                 this.vmFormDefaultEnabled = access.default_enabled !== false;
                 this.vmFormEffectiveEnabled = overrideEnabled;
+                this.vmFormManaged = Boolean(override && override.managed);
                 this.vmFormDisplayName = row.access_display_name || row.display_name || selector || '';
                 this.vmForm = {
                     source: selector,
                     target_model: '',
+                    targets: [],
+                    strategy: 'round_robin',
                     user_paths: userPaths.join('\n'),
                     description: override && override.description ? override.description : '',
                     enabled: overrideEnabled
@@ -657,10 +789,13 @@
                 this.vmFormOriginalSource = selector;
                 this.vmFormDefaultEnabled = defaultEnabled;
                 this.vmFormEffectiveEnabled = override ? (override.enabled !== false) : defaultEnabled;
+                this.vmFormManaged = Boolean(override && override.managed);
                 this.vmFormDisplayName = 'All providers and models';
                 this.vmForm = {
                     source: selector,
                     target_model: '',
+                    targets: [],
+                    strategy: 'round_robin',
                     user_paths: userPaths.join('\n'),
                     description: override && override.description ? override.description : '',
                     enabled: override ? override.enabled !== false : defaultEnabled
@@ -695,6 +830,7 @@
                 this.vmFormDisplayName = '';
                 this.vmFormSourceLocked = false;
                 this.vmFormOriginalSource = '';
+                this.vmFormManaged = false;
                 this.vmForm = this.defaultVirtualModelForm();
             },
 
@@ -724,6 +860,10 @@
 
             aliasTargetLabel(alias) {
                 if (!alias) return '—';
+                const targets = Array.isArray(alias.targets) ? alias.targets : [];
+                if (targets.length > 1) {
+                    return targets.length + ' targets · ' + this.strategyLabel(alias.strategy);
+                }
                 if (alias.resolved_model) return alias.resolved_model;
                 if (alias.target_provider) return alias.target_provider + '/' + alias.target_model;
                 return alias.target_model || '—';
@@ -835,11 +975,27 @@
                 return this.vmFormToggleRestricted() ? 'Restricted' : 'Enabled';
             },
 
+            // rowIsManaged reports whether a row is backed by a config-managed virtual
+            // model, which the admin API refuses to change.
+            rowIsManaged(row) {
+                if (!row) {
+                    return false;
+                }
+                if (row.is_alias) {
+                    return Boolean(row.alias && row.alias.managed);
+                }
+                return Boolean(row.access && row.access.override && row.access.override.managed);
+            },
+
             async toggleRowEnabled(row) {
                 if (!this.virtualModelsAvailable) {
                     return;
                 }
                 if (!row || this.rowTogglingKey === row.key) {
+                    return;
+                }
+                if (this.rowIsManaged(row)) {
+                    this.aliasNotice = 'This virtual model is managed by configuration and is read-only.';
                     return;
                 }
                 if (row.is_alias) {
@@ -859,16 +1015,31 @@
                 this.aliasError = '';
                 this.aliasNotice = '';
 
-                const targetModel = alias.target_provider
-                    ? alias.target_provider + '/' + alias.target_model
-                    : alias.target_model;
                 const payload = {
                     source: alias.name,
-                    target_model: targetModel,
                     description: String(alias.description || '').trim(),
                     user_paths: Array.isArray(alias.user_paths) ? alias.user_paths : [],
                     enabled: alias.enabled === false
                 };
+                // Round-trip every target and the strategy so toggling a load-balanced
+                // redirect never collapses it to its first target.
+                const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
+                if (lbTargets.length > 1) {
+                    payload.targets = lbTargets.map((target) => {
+                        const mapped = { model: this.qualifyTarget(target) };
+                        if (target.weight) {
+                            mapped.weight = target.weight;
+                        }
+                        return mapped;
+                    });
+                    payload.strategy = alias.strategy || 'round_robin';
+                } else if (lbTargets.length === 1) {
+                    payload.target_model = this.qualifyTarget(lbTargets[0]);
+                } else {
+                    payload.target_model = alias.target_provider
+                        ? alias.target_provider + '/' + alias.target_model
+                        : alias.target_model;
+                }
 
                 try {
                     const request = this.adminRequestOptions({
@@ -1156,11 +1327,19 @@
                 return this.models.some((model) => this.modelKeys(model).has(normalizedName));
             },
 
-            // submitVirtualModelForm saves the unified editor: a filled Target model
-            // makes a redirect/alias, an empty one makes an access policy.
+            // submitVirtualModelForm saves the unified editor: a filled target makes a
+            // redirect/alias (several targets load balance by strategy), an empty one
+            // makes an access policy.
             async submitVirtualModelForm() {
+                if (this.vmFormManaged) {
+                    this.vmFormError = 'This virtual model is managed by configuration and cannot be edited here.';
+                    return;
+                }
+
                 const source = String(this.vmForm.source || '').trim();
-                const targetModel = String(this.vmForm.target_model || '').trim();
+                const primaryTarget = String(this.vmForm.target_model || '').trim();
+                const extraTargets = this.collectExtraTargets();
+                const isRedirect = Boolean(primaryTarget) || extraTargets.length > 0;
                 const userPaths = this.normalizeUserPaths(this.vmForm.user_paths);
 
                 if (!source) {
@@ -1188,7 +1367,7 @@
                             this.vmFormError = 'Choose a different source or edit the existing virtual model.';
                             return;
                         }
-                    } else if (targetModel) {
+                    } else if (isRedirect) {
                         const matchingModel = this.findConcreteModelByName(source);
                         if (matchingModel) {
                             const modelName = this.qualifiedModelName(matchingModel) || String(matchingModel.model && matchingModel.model.id || '').trim();
@@ -1208,8 +1387,22 @@
                     description: String(this.vmForm.description || '').trim(),
                     enabled: Boolean(this.vmForm.enabled)
                 };
-                if (targetModel) {
-                    payload.target_model = targetModel;
+                if (isRedirect) {
+                    const targets = [];
+                    if (primaryTarget) {
+                        targets.push({ model: primaryTarget });
+                    }
+                    for (const target of extraTargets) {
+                        targets.push(target);
+                    }
+                    if (targets.length > 1) {
+                        // Multiple targets load balance; carry the chosen strategy.
+                        payload.targets = targets;
+                        payload.strategy = this.vmForm.strategy || 'round_robin';
+                    } else {
+                        // A single target stays a plain alias on the back-compat field.
+                        payload.target_model = targets[0].model;
+                    }
                 }
 
                 try {
@@ -1238,7 +1431,7 @@
                     await Promise.all([this.fetchModels(), this.fetchVirtualModels()]);
                     this.syncDisplayModels();
                     this.closeVirtualModelForm();
-                    this.aliasNotice = targetModel ? 'Alias saved.' : 'Model access saved.';
+                    this.aliasNotice = isRedirect ? 'Alias saved.' : 'Model access saved.';
                 } catch (e) {
                     console.error('Failed to save virtual model:', e);
                     this.vmFormError = 'Failed to save virtual model.';

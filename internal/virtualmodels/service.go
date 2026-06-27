@@ -21,6 +21,12 @@ type Service struct {
 	catalog        Catalog
 	defaultEnabled bool
 
+	// configModels are virtual models supplied declaratively (config.yaml / env).
+	// They are merged over the store rows on every refresh, override store rows of
+	// the same source, and are read-only to the admin API.
+	configModels []VirtualModel
+
+	balancer  roundRobin
 	current   atomic.Value // snapshot
 	refreshMu sync.Mutex
 }
@@ -63,12 +69,53 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list virtual models: %w", err)
 	}
-	next, err := buildSnapshot(rows, s.defaultEnabled)
+	next, err := buildSnapshot(s.mergeConfigModels(rows), s.defaultEnabled)
 	if err != nil {
 		return err
 	}
 	s.current.Store(next)
 	return nil
+}
+
+// SetConfigModels installs the declarative (config.yaml / VIRTUAL_MODELS) virtual
+// models that override store rows of the same source. Call it before the first
+// Refresh; the rows are validated when the next snapshot is built, so an invalid
+// declarative row fails startup loudly.
+func (s *Service) SetConfigModels(models []VirtualModel) {
+	cloned := make([]VirtualModel, 0, len(models))
+	for _, model := range models {
+		model.Managed = true
+		cloned = append(cloned, model.clone())
+	}
+	s.configModels = cloned
+}
+
+// mergeConfigModels overlays the config-managed rows onto the store rows. A
+// managed row replaces a store row of the same source, keeping config the source
+// of truth for the entries it defines.
+func (s *Service) mergeConfigModels(stored []VirtualModel) []VirtualModel {
+	if len(s.configModels) == 0 {
+		return stored
+	}
+	merged := make([]VirtualModel, 0, len(stored)+len(s.configModels))
+	for _, row := range stored {
+		if s.isManagedSource(row.Source) {
+			continue
+		}
+		merged = append(merged, row)
+	}
+	return append(merged, s.configModels...)
+}
+
+// isManagedSource reports whether source is owned by a declarative config row.
+func (s *Service) isManagedSource(source string) bool {
+	source = strings.TrimSpace(source)
+	for _, model := range s.configModels {
+		if strings.TrimSpace(model.Source) == source {
+			return true
+		}
+	}
+	return false
 }
 
 // StartBackgroundRefresh periodically reloads virtual models until stopped.
@@ -136,21 +183,39 @@ func (s *Service) ListViews() []View {
 			UserPaths:    vm.UserPaths,
 			Description:  vm.Description,
 			Enabled:      vm.Enabled,
+			Managed:      vm.Managed,
 			CreatedAt:    vm.CreatedAt,
 			UpdatedAt:    vm.UpdatedAt,
 		}
 		if vm.IsRedirect() {
-			if selector, err := vm.targetSelector(); err == nil {
-				view.ResolvedModel = selector.QualifiedModel()
-				view.ProviderType = strings.TrimSpace(s.catalog.GetProviderType(view.ResolvedModel))
-				view.Valid = s.catalog.Supports(view.ResolvedModel)
-			}
+			view.ResolvedModel, view.ProviderType, view.Valid = s.redirectViewResolution(vm)
 		} else {
 			view.ScopeKind = string(scopeKindFor(vm.Source, vm.ProviderName, vm.Model))
 		}
 		views = append(views, view)
 	}
 	return views
+}
+
+// redirectViewResolution summarizes a redirect for the admin view: a
+// representative resolved model (the first catalog-supported target, else the
+// first declared one), its provider type, and whether any target is available.
+func (s *Service) redirectViewResolution(vm VirtualModel) (resolved, providerType string, valid bool) {
+	for _, target := range vm.Targets {
+		selector, err := target.selector()
+		if err != nil {
+			continue
+		}
+		qualified := selector.QualifiedModel()
+		if s.catalog.Supports(qualified) {
+			return qualified, strings.TrimSpace(s.catalog.GetProviderType(qualified)), true
+		}
+		if resolved == "" {
+			resolved = qualified
+			providerType = strings.TrimSpace(s.catalog.GetProviderType(qualified))
+		}
+	}
+	return resolved, providerType, valid
 }
 
 // Upsert validates and stores one virtual model, then refreshes the in-memory
@@ -163,6 +228,9 @@ func (s *Service) Upsert(ctx context.Context, vm VirtualModel) error {
 	normalized, err := s.normalizeForUpsert(vm)
 	if err != nil {
 		return err
+	}
+	if s.isManagedSource(normalized.Source) || s.isManagedSource(vm.Source) {
+		return managedSourceError(normalized.Source)
 	}
 
 	s.refreshMu.Lock()
@@ -218,6 +286,9 @@ func (s *Service) Delete(ctx context.Context, source string) error {
 	if !existed {
 		return ErrNotFound
 	}
+	if previous.Managed || s.isManagedSource(canonical) {
+		return managedSourceError(canonical)
+	}
 	source = canonical
 
 	if err := s.store.Delete(ctx, source); err != nil {
@@ -258,28 +329,38 @@ func (s *Service) ensureSourceKind(current snapshot, source string, wantRedirect
 	return crossKindError(source, wantRedirect)
 }
 
-// validateRedirectTarget enforces redirect-specific rules: a redirect cannot
-// target itself, cannot target another redirect's source, and must resolve to a
-// catalog-supported model.
+// validateRedirectTarget enforces redirect-specific rules for every target: a
+// redirect cannot target itself, cannot target another redirect's source, and
+// each target must resolve to a catalog-supported model.
 func (s *Service) validateRedirectTarget(current snapshot, vm VirtualModel) error {
 	if !vm.IsRedirect() {
 		return nil
 	}
-	target, err := vm.targetSelector()
-	if err != nil {
-		return newValidationError("invalid target selector: "+err.Error(), err)
-	}
-	qualified := target.QualifiedModel()
-	if vm.Source == qualified {
-		return newValidationError(fmt.Sprintf("alias %q cannot target itself", vm.Source), nil)
-	}
-	if existing, ok := current.redirects[qualified]; ok && existing.vm.Source != vm.Source {
-		return newValidationError(fmt.Sprintf("alias target %q refers to another alias", qualified), nil)
-	}
-	if !s.catalog.Supports(qualified) {
-		return newValidationError("target model not found: "+qualified, nil)
+	for _, target := range vm.Targets {
+		selector, err := target.selector()
+		if err != nil {
+			return newValidationError("invalid target selector: "+err.Error(), err)
+		}
+		qualified := selector.QualifiedModel()
+		if vm.Source == qualified {
+			return newValidationError(fmt.Sprintf("virtual model %q cannot target itself", vm.Source), nil)
+		}
+		if existing, ok := current.redirects[qualified]; ok && existing.vm.Source != vm.Source {
+			return newValidationError(fmt.Sprintf("target %q refers to another virtual model", qualified), nil)
+		}
+		if !s.catalog.Supports(qualified) {
+			return newValidationError("target model not found: "+qualified, nil)
+		}
 	}
 	return nil
+}
+
+// managedSourceError is returned when the admin API tries to write a virtual
+// model that is owned declaratively by config.yaml or the VIRTUAL_MODELS env var.
+func managedSourceError(source string) error {
+	return newValidationError(fmt.Sprintf(
+		"virtual model %q is managed by config.yaml or VIRTUAL_MODELS and cannot be changed from the admin API; edit your configuration instead",
+		source), nil)
 }
 
 func upsertRow(rows []VirtualModel, next VirtualModel) []VirtualModel {
