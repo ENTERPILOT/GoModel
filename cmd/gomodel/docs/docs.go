@@ -1449,7 +1449,7 @@ const docTemplate = `{
                 "tags": [
                     "admin"
                 ],
-                "summary": "Create or update one virtual model",
+                "summary": "Create, update, or rename one virtual model",
                 "parameters": [
                     {
                         "description": "Virtual model definition",
@@ -4483,11 +4483,23 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
+                "old_source": {
+                    "type": "string"
+                },
                 "source": {
+                    "type": "string"
+                },
+                "strategy": {
                     "type": "string"
                 },
                 "target_model": {
                     "type": "string"
+                },
+                "targets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admin.virtualModelTargetRequest"
+                    }
                 },
                 "user_paths": {
                     "type": "array",
@@ -4501,6 +4513,20 @@ const docTemplate = `{
             "required": [
                 "source"
             ]
+        },
+        "admin.virtualModelTargetRequest": {
+            "type": "object",
+            "properties": {
+                "model": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "weight": {
+                    "type": "number"
+                }
+            }
         },
         "anthropicapi.CountTokensResponse": {
             "type": "object",
@@ -6986,7 +7012,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "weight": {
-                    "description": "inert in v1 (load balancing)",
                     "type": "number"
                 }
             }
@@ -7005,6 +7030,9 @@ const docTemplate = `{
                 },
                 "kind": {
                     "type": "string"
+                },
+                "managed": {
+                    "type": "boolean"
                 },
                 "model": {
                     "type": "string"
@@ -7059,6 +7087,10 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
+                "managed": {
+                    "description": "Managed marks a virtual model supplied declaratively through config.yaml or\nthe VIRTUAL_MODELS env var rather than the admin store. It is an in-memory\nflag only: stores never read or write it. Managed rows override store rows\nof the same Source and are read-only to the admin API.",
+                    "type": "boolean"
+                },
                 "model": {
                     "type": "string"
                 },
@@ -7069,7 +7101,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "strategy": {
-                    "description": "inert in v1",
                     "type": "string"
                 },
                 "targets": {

@@ -75,6 +75,18 @@ For example, point `smart` at both `openai/gpt-4o` and `anthropic/claude-sonnet-
 with the round-robin strategy to split load, or at a premium and a budget model
 with the cost strategy to always take the cheaper one.
 
+## Rename or repoint a redirect
+
+Open a redirect in the dashboard and edit its **Source** to rename it. GoModel
+moves the definition to the new name in one step — the old name stops resolving,
+so update any app still sending it. Renaming onto a name that already belongs to
+another virtual model is rejected; renaming onto a concrete model name shadows
+that model (see [Shadow a model](#shadow-a-model)).
+
+Redirects that shadow a model can be edited the same way — use the model row's
+**Edit redirect** action. Virtual models declared as code keep their `source`
+fixed in configuration; rename them by editing the declaration.
+
 ## Define virtual models as code
 
 Operators who manage configuration as infrastructure-as-code can declare virtual

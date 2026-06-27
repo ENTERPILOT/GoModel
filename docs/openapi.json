@@ -1913,7 +1913,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Create or update one virtual model",
+        "summary": "Create, update, or rename one virtual model",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6578,11 +6578,23 @@
           "enabled": {
             "type": "boolean"
           },
+          "old_source": {
+            "type": "string"
+          },
           "source": {
+            "type": "string"
+          },
+          "strategy": {
             "type": "string"
           },
           "target_model": {
             "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/admin.virtualModelTargetRequest"
+            }
           },
           "user_paths": {
             "type": "array",
@@ -6596,6 +6608,20 @@
         "required": [
           "source"
         ]
+      },
+      "admin.virtualModelTargetRequest": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number"
+          }
+        }
       },
       "anthropicapi.CountTokensResponse": {
         "type": "object",
@@ -9122,7 +9148,6 @@
             "type": "string"
           },
           "weight": {
-            "description": "inert in v1 (load balancing)",
             "type": "number"
           }
         }
@@ -9141,6 +9166,9 @@
           },
           "kind": {
             "type": "string"
+          },
+          "managed": {
+            "type": "boolean"
           },
           "model": {
             "type": "string"
@@ -9195,6 +9223,10 @@
           "enabled": {
             "type": "boolean"
           },
+          "managed": {
+            "description": "Managed marks a virtual model supplied declaratively through config.yaml or\nthe VIRTUAL_MODELS env var rather than the admin store. It is an in-memory\nflag only: stores never read or write it. Managed rows override store rows\nof the same Source and are read-only to the admin API.",
+            "type": "boolean"
+          },
           "model": {
             "type": "string"
           },
@@ -9205,7 +9237,6 @@
             "type": "string"
           },
           "strategy": {
-            "description": "inert in v1",
             "type": "string"
           },
           "targets": {
