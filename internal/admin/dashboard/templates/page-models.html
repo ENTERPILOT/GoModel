@@ -84,7 +84,10 @@
 
                     <div class="form-field">
                         <label class="form-field-label" for="virtual-model-target">Target model</label>
-                        <input id="virtual-model-target" type="text" list="virtual-model-target-options" class="mono" placeholder="openai/gpt-4o" x-model="vmForm.target_model" :disabled="vmFormManaged">
+                        <div class="vm-target-row">
+                            <input id="virtual-model-target" type="text" list="virtual-model-target-options" class="mono vm-target-model" placeholder="openai/gpt-4o" x-model="vmForm.target_model" :disabled="vmFormManaged">
+                            <input type="number" min="1" step="1" class="mono vm-target-weight" placeholder="weight" x-model="vmForm.target_weight" :disabled="vmFormManaged" x-show="vmFormShowStrategy()" aria-label="Primary target weight">
+                        </div>
                     </div>
                 </div>
 

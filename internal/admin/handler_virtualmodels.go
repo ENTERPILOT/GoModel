@@ -188,6 +188,11 @@ func buildVirtualModelTargets(req upsertVirtualModelRequest) ([]virtualmodels.Ta
 				Weight:   t.Weight,
 			})
 		}
+		// A targets list with only blank entries is a malformed redirect, not an
+		// access policy — fail loudly rather than silently demoting it.
+		if len(targets) == 0 {
+			return nil, core.NewInvalidRequestError("targets must contain at least one model", nil)
+		}
 		return targets, nil
 	}
 

@@ -29,6 +29,7 @@
             vmForm: {
                 source: '',
                 target_model: '',
+                target_weight: '',
                 targets: [],
                 strategy: 'round_robin',
                 user_paths: '',
@@ -104,7 +105,6 @@
                         alias,
                         access: null,
                         kind_badge: 'Virtual Model',
-                        managed: Boolean(alias.managed),
                         masking_alias: null,
                         source_model_exists: this.hasConcreteSourceModel(alias.name),
                         has_virtual_model: true,
@@ -152,6 +152,7 @@
                 return {
                     source: '',
                     target_model: '',
+                    target_weight: '',
                     targets: [],
                     strategy: 'round_robin',
                     user_paths: '',
@@ -708,9 +709,11 @@
 
                 const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
                 let primaryModel;
+                let primaryWeight = '';
                 let extraTargets;
                 if (lbTargets.length > 0) {
                     primaryModel = this.qualifyTarget(lbTargets[0]);
+                    primaryWeight = lbTargets[0].weight || '';
                     extraTargets = lbTargets.slice(1).map((target) => ({
                         model: this.qualifyTarget(target),
                         weight: target.weight || ''
@@ -725,6 +728,7 @@
                 this.vmForm = {
                     source: alias.name || '',
                     target_model: primaryModel,
+                    target_weight: primaryWeight,
                     targets: extraTargets,
                     strategy: alias.strategy || 'round_robin',
                     user_paths: (Array.isArray(alias.user_paths) ? alias.user_paths : []).join('\n'),
@@ -764,6 +768,7 @@
                 this.vmForm = {
                     source: selector,
                     target_model: '',
+                    target_weight: '',
                     targets: [],
                     strategy: 'round_robin',
                     user_paths: userPaths.join('\n'),
@@ -794,6 +799,7 @@
                 this.vmForm = {
                     source: selector,
                     target_model: '',
+                    target_weight: '',
                     targets: [],
                     strategy: 'round_robin',
                     user_paths: userPaths.join('\n'),
@@ -1390,7 +1396,12 @@
                 if (isRedirect) {
                     const targets = [];
                     if (primaryTarget) {
-                        targets.push({ model: primaryTarget });
+                        const primary = { model: primaryTarget };
+                        const primaryWeight = this.parseWeight(this.vmForm.target_weight);
+                        if (primaryWeight !== null) {
+                            primary.weight = primaryWeight;
+                        }
+                        targets.push(primary);
                     }
                     for (const target of extraTargets) {
                         targets.push(target);

@@ -1396,3 +1396,44 @@ test('managed virtual models are read-only in toggles and the editor', async() =
     assert.equal(requests.length, 0);
     assert.match(module.vmFormError, /managed by configuration/);
 });
+
+test('editing a weighted redirect preserves the primary target weight', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        }
+    });
+    stubRequests(module);
+    module.aliases = [];
+    module.models = [];
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+
+    // Open a load-balanced alias whose FIRST target carries a weight.
+    module.openVirtualModelEditAlias({
+        name: 'smart',
+        strategy: 'round_robin',
+        enabled: true,
+        targets: [
+            { provider: 'openai', model: 'gpt-4o', weight: 3 },
+            { provider: 'groq', model: 'llama', weight: 1 }
+        ]
+    });
+    assert.equal(module.vmForm.target_model, 'openai/gpt-4o');
+    assert.equal(module.vmForm.target_weight, 3);
+
+    await module.submitVirtualModelForm();
+
+    assert.equal(requests.length, 1);
+    const body = JSON.parse(requests[0].request.body);
+    // The first target keeps weight 3 instead of being reset to the default.
+    assert.deepEqual(body.targets, [
+        { model: 'openai/gpt-4o', weight: 3 },
+        { model: 'groq/llama', weight: 1 }
+    ]);
+    assert.equal(body.strategy, 'round_robin');
+});

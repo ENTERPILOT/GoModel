@@ -345,6 +345,26 @@ func TestUpsertVirtualModelLoadBalanced(t *testing.T) {
 	}
 }
 
+func TestUpsertVirtualModelRejectsBlankTargets(t *testing.T) {
+	h := newVMHandler(t)
+	e := echo.New()
+
+	// A targets list whose only entry has an empty model must not be silently
+	// demoted to an access policy.
+	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(`{"source":"smart","targets":[{"model":"  "}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("UpsertVirtualModel() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
+	}
+	if !containsString(rec.Body.String(), "invalid_request_error") {
+		t.Fatalf("body = %s, want invalid_request_error", rec.Body.String())
+	}
+}
+
 func TestUpsertVirtualModelReturns400OnValidationError(t *testing.T) {
 	h := newVMHandler(t)
 	e := echo.New()

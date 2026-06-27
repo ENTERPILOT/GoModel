@@ -45,7 +45,7 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 		target.Provider = strings.TrimSpace(target.Provider)
 		target.Model = strings.TrimSpace(target.Model)
 		if target.Model == "" {
-			return VirtualModel{}, nil, newValidationError("target_model is required", nil)
+			return VirtualModel{}, nil, newValidationError("target model is required", nil)
 		}
 		if target.Weight < 0 {
 			return VirtualModel{}, nil, newValidationError("target weight cannot be negative", nil)
