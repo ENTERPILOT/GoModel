@@ -1531,6 +1531,10 @@
 
             // deleteVirtualModel removes the virtual model for the editor's source.
             async deleteVirtualModel() {
+                if (this.vmFormManaged) {
+                    this.vmFormError = 'This virtual model is managed by configuration and cannot be removed here.';
+                    return;
+                }
                 const source = String(this.vmForm.source || this.vmFormOriginalSource || '').trim();
                 if (!source || !this.vmFormHasExisting) {
                     return;

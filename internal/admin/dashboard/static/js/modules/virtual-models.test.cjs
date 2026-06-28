@@ -1620,8 +1620,15 @@ test('managed virtual models are read-only in toggles and the editor', async() =
     assert.match(module.aliasNotice, /managed by configuration/);
 
     module.vmFormManaged = true;
+    module.vmFormHasExisting = true;
     module.vmForm = { source: 'smart', target_model: 'openai/gpt-4o', targets: [], strategy: 'round_robin' };
     await module.submitVirtualModelForm();
+    assert.equal(requests.length, 0);
+    assert.match(module.vmFormError, /managed by configuration/);
+
+    // The delete path is guarded too, so a managed editor state never issues a DELETE.
+    module.vmFormError = '';
+    await module.deleteVirtualModel();
     assert.equal(requests.length, 0);
     assert.match(module.vmFormError, /managed by configuration/);
 });
