@@ -377,6 +377,21 @@ func (r *SQLiteReader) GetDailyUsage(ctx context.Context, params UsageQueryParam
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating daily usage rows: %w", err)
 	}
+	rows.Close()
+
+	// Second pass: fold the per-period prompt-cache split from raw_data (the
+	// GROUP BY above cannot also return per-row raw_data), reusing the same
+	// group expression so the period keys line up.
+	splitRows, err := r.db.QueryContext(ctx, `SELECT `+groupExpr+` AS period, input_tokens, provider, raw_data FROM usage`+where, queryArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query daily input segments: %w", err)
+	}
+	defer splitRows.Close()
+	splits, err := foldPeriodInputSegments(splitRows)
+	if err != nil {
+		return nil, err
+	}
+	applyDailyInputSplit(result, splits)
 
 	return result, nil
 }
@@ -452,6 +467,34 @@ func (r *SQLiteReader) GetCacheOverview(ctx context.Context, params UsageQueryPa
 	}
 
 	return overview, nil
+}
+
+// GetTokenThroughput returns the trailing window of token-volume buckets for the
+// overview live-throughput chart. Buckets are epoch-aligned; the prompt-cache
+// split is folded in Go (it lives in raw_data), mirroring the summary path.
+func (r *SQLiteReader) GetTokenThroughput(ctx context.Context, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error) {
+	acc := newThroughputAccumulator(gran, end, offset)
+	bucketSeconds, first, upper := throughputWindow(gran, end, offset)
+
+	epoch := sqliteTimestampEpochExpr()
+	conditions := []string{epoch + " >= ?", epoch + " < ?"}
+	args := []any{first, upper}
+	where := sqlutil.BuildWhereClause(conditions)
+
+	bucketExpr := fmt.Sprintf("((%s + %d) / %d) * %d - %d", epoch, offset, bucketSeconds, bucketSeconds, offset)
+	query := `SELECT ` + bucketExpr + ` AS bucket, cache_type, input_tokens, output_tokens, total_tokens, provider, raw_data
+		FROM usage` + where
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query token throughput: %w", err)
+	}
+	defer rows.Close()
+
+	if err := foldThroughput(rows, acc); err != nil {
+		return nil, err
+	}
+	return acc.result(gran), nil
 }
 
 func sqliteOffsetModifier(offsetMinutes int) string {

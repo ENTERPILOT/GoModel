@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-json"
 
@@ -347,6 +348,21 @@ func (r *PostgreSQLReader) GetDailyUsage(ctx context.Context, params UsageQueryP
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating daily usage rows: %w", err)
 	}
+	rows.Close()
+
+	// Second pass: fold the per-period prompt-cache split from raw_data, reusing
+	// the same group expression so the period keys line up.
+	splitQuery := fmt.Sprintf(`SELECT %s AS period, input_tokens, provider, raw_data FROM "usage"%s`, groupExpr, where)
+	splitRows, err := r.pool.Query(ctx, splitQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query daily input segments: %w", err)
+	}
+	defer splitRows.Close()
+	splits, err := foldPeriodInputSegments(splitRows)
+	if err != nil {
+		return nil, err
+	}
+	applyDailyInputSplit(result, splits)
 
 	return result, nil
 }
@@ -418,6 +434,33 @@ func (r *PostgreSQLReader) GetCacheOverview(ctx context.Context, params UsageQue
 	}
 
 	return overview, nil
+}
+
+// GetTokenThroughput returns the trailing window of token-volume buckets for the
+// overview live-throughput chart. Buckets are epoch-aligned; the prompt-cache
+// split is folded in Go (it lives in raw_data), mirroring the summary path.
+func (r *PostgreSQLReader) GetTokenThroughput(ctx context.Context, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error) {
+	acc := newThroughputAccumulator(gran, end, offset)
+	bucketSeconds, first, upper := throughputWindow(gran, end, offset)
+
+	conditions := []string{"timestamp >= $1", "timestamp < $2"}
+	args := []any{time.Unix(first, 0).UTC(), time.Unix(upper, 0).UTC()}
+	where := sqlutil.BuildWhereClause(conditions)
+
+	bucketExpr := fmt.Sprintf("(FLOOR((EXTRACT(EPOCH FROM timestamp) + %d) / %d) * %d - %d)::bigint", offset, bucketSeconds, bucketSeconds, offset)
+	query := fmt.Sprintf(`SELECT %s AS bucket, cache_type, input_tokens, output_tokens, total_tokens, provider, raw_data
+		FROM "usage"%s`, bucketExpr, where)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query token throughput: %w", err)
+	}
+	defer rows.Close()
+
+	if err := foldThroughput(rows, acc); err != nil {
+		return nil, err
+	}
+	return acc.result(gran), nil
 }
 
 func pgQuoteLiteral(value string) string {

@@ -581,6 +581,47 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 		return nil, fmt.Errorf("error iterating daily usage cursor: %w", err)
 	}
 
+	// Second pass: project the same period key onto each document and fold the
+	// prompt-cache split from raw_data in Go (the split is provider-specific and
+	// cannot be computed in the aggregation). Using the same $dateToString keeps
+	// the period keys aligned with the grouped result above.
+	splitPipeline := bson.A{}
+	if len(matchFilters) > 0 {
+		splitPipeline = append(splitPipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+	splitPipeline = append(splitPipeline, bson.D{{Key: "$project", Value: bson.D{
+		{Key: "period", Value: bson.D{{Key: "$dateToString", Value: bson.D{
+			{Key: "format", Value: dateFormat},
+			{Key: "date", Value: "$timestamp"},
+			{Key: "timezone", Value: usageTimeZone(params)},
+		}}}},
+		{Key: "input_tokens", Value: 1},
+		{Key: "provider", Value: 1},
+		{Key: "raw_data", Value: 1},
+	}}})
+	splitCursor, err := r.collection.Aggregate(ctx, splitPipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate daily input segments: %w", err)
+	}
+	defer splitCursor.Close(ctx)
+	splits := map[string]periodInputSplit{}
+	for splitCursor.Next(ctx) {
+		var row struct {
+			Period      string         `bson:"period"`
+			InputTokens int            `bson:"input_tokens"`
+			Provider    string         `bson:"provider"`
+			RawData     map[string]any `bson:"raw_data"`
+		}
+		if err := splitCursor.Decode(&row); err != nil {
+			return nil, fmt.Errorf("failed to decode daily input segment row: %w", err)
+		}
+		accumulatePeriodSplit(splits, row.Period, row.InputTokens, row.Provider, row.RawData)
+	}
+	if err := splitCursor.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating daily input segment cursor: %w", err)
+	}
+	applyDailyInputSplit(result, splits)
+
 	return result, nil
 }
 
@@ -706,6 +747,56 @@ func (r *MongoDBReader) GetCacheOverview(ctx context.Context, params UsageQueryP
 	}
 
 	return overview, nil
+}
+
+// GetTokenThroughput returns the trailing window of token-volume buckets for the
+// overview live-throughput chart. Documents are streamed within the window and
+// bucketed in Go (the prompt-cache split lives in raw_data), mirroring the
+// summary input-segment pass.
+func (r *MongoDBReader) GetTokenThroughput(ctx context.Context, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error) {
+	acc := newThroughputAccumulator(gran, end, offset)
+	bucketSeconds, first, upper := throughputWindow(gran, end, offset)
+
+	match := bson.D{{Key: "timestamp", Value: bson.D{
+		{Key: "$gte", Value: time.Unix(first, 0).UTC()},
+		{Key: "$lt", Value: time.Unix(upper, 0).UTC()},
+	}}}
+	projection := bson.D{
+		{Key: "timestamp", Value: 1},
+		{Key: "cache_type", Value: 1},
+		{Key: "input_tokens", Value: 1},
+		{Key: "output_tokens", Value: 1},
+		{Key: "total_tokens", Value: 1},
+		{Key: "provider", Value: 1},
+		{Key: "raw_data", Value: 1},
+	}
+
+	cursor, err := r.collection.Find(ctx, match, options.Find().SetProjection(projection))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query token throughput: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	for cursor.Next(ctx) {
+		var row struct {
+			Timestamp    time.Time      `bson:"timestamp"`
+			CacheType    string         `bson:"cache_type"`
+			InputTokens  int            `bson:"input_tokens"`
+			OutputTokens int            `bson:"output_tokens"`
+			TotalTokens  int            `bson:"total_tokens"`
+			Provider     string         `bson:"provider"`
+			RawData      map[string]any `bson:"raw_data"`
+		}
+		if err := cursor.Decode(&row); err != nil {
+			return nil, fmt.Errorf("failed to decode token throughput row: %w", err)
+		}
+		bucketStart := throughputBucketStart(row.Timestamp.Unix(), bucketSeconds, offset)
+		acc.add(bucketStart, row.CacheType, row.Provider, row.InputTokens, row.OutputTokens, row.TotalTokens, row.RawData)
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating token throughput cursor: %w", err)
+	}
+	return acc.result(gran), nil
 }
 
 func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {

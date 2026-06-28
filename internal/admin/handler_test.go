@@ -23,23 +23,26 @@ import (
 
 // mockUsageReader implements usage.UsageReader for testing.
 type mockUsageReader struct {
-	summary           *usage.UsageSummary
-	daily             []usage.DailyUsage
-	modelUsage        []usage.ModelUsage
-	userPathUsage     []usage.UserPathUsage
-	usageLog          *usage.UsageLogResult
-	usageByRequestID  map[string][]usage.UsageLogEntry
-	cacheOverview     *usage.CacheOverview
-	lastUsageLog      usage.UsageLogParams
-	lastRequestIDs    []string
-	lastCacheOverview usage.UsageQueryParams
-	summaryErr        error
-	dailyErr          error
-	modelUsageErr     error
-	userPathUsageErr  error
-	usageLogErr       error
-	usageByRequestErr error
-	cacheErr          error
+	summary            *usage.UsageSummary
+	daily              []usage.DailyUsage
+	modelUsage         []usage.ModelUsage
+	userPathUsage      []usage.UserPathUsage
+	usageLog           *usage.UsageLogResult
+	usageByRequestID   map[string][]usage.UsageLogEntry
+	cacheOverview      *usage.CacheOverview
+	throughput         *usage.TokenThroughput
+	lastUsageLog       usage.UsageLogParams
+	lastRequestIDs     []string
+	lastCacheOverview  usage.UsageQueryParams
+	lastThroughputGran usage.ThroughputGranularity
+	summaryErr         error
+	dailyErr           error
+	modelUsageErr      error
+	userPathUsageErr   error
+	usageLogErr        error
+	usageByRequestErr  error
+	cacheErr           error
+	throughputErr      error
 }
 
 type mockAuditReader struct {
@@ -115,6 +118,14 @@ func (m *mockUsageReader) GetCacheOverview(_ context.Context, params usage.Usage
 		return nil, m.cacheErr
 	}
 	return m.cacheOverview, nil
+}
+
+func (m *mockUsageReader) GetTokenThroughput(_ context.Context, gran usage.ThroughputGranularity, _ time.Time, _ int64) (*usage.TokenThroughput, error) {
+	m.lastThroughputGran = gran
+	if m.throughputErr != nil {
+		return nil, m.throughputErr
+	}
+	return m.throughput, nil
 }
 
 func (m *mockAuditReader) GetLogs(_ context.Context, params auditlog.LogQueryParams) (*auditlog.LogListResult, error) {

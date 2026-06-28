@@ -340,6 +340,50 @@ func (h *Handler) CacheOverview(c *echo.Context) error {
 	return c.JSON(http.StatusOK, overview)
 }
 
+// TokenThroughput handles GET /admin/usage/throughput.
+//
+// @Summary      Get the live token-throughput window
+// @Description  Returns a fixed, trailing window of token-volume buckets
+// @Description  (input / output / prompt-cached / locally-cached) at the
+// @Description  requested granularity, for the overview live chart.
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Param        granularity  query     string  true   "Bucket granularity: second, minute, hour, day"
+// @Success      200  {object}  usage.TokenThroughput
+// @Failure      400  {object}  core.GatewayError
+// @Failure      401  {object}  core.GatewayError
+// @Router       /admin/usage/throughput [get]
+func (h *Handler) TokenThroughput(c *echo.Context) error {
+	gran, err := usage.ParseThroughputGranularity(c.QueryParam("granularity"))
+	if err != nil {
+		return handleError(c, core.NewInvalidRequestError(err.Error(), nil))
+	}
+
+	now := time.Now().UTC()
+	// Align buckets to the dashboard's timezone so day buckets start at local
+	// midnight (matching the Daily chart), not UTC.
+	_, location := dashboardTimeZone(c)
+	if location == nil {
+		location = time.UTC
+	}
+	_, offsetSeconds := now.In(location).Zone()
+	offset := int64(offsetSeconds)
+
+	if h.usageReader == nil {
+		return c.JSON(http.StatusOK, usage.EmptyTokenThroughput(gran, now, offset))
+	}
+
+	result, err := h.usageReader.GetTokenThroughput(c.Request().Context(), gran, now, offset)
+	if err != nil {
+		return handleError(c, err)
+	}
+	if result == nil {
+		result = usage.EmptyTokenThroughput(gran, now, offset)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
 type recalculatePricingRequest struct {
 	Days         int    `json:"days,omitempty"`
 	StartDate    string `json:"start_date,omitempty"`

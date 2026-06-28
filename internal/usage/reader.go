@@ -119,14 +119,76 @@ type UserPathUsage struct {
 // Date holds the period label: YYYY-MM-DD for daily, YYYY-Www for weekly,
 // YYYY-MM for monthly, or YYYY for yearly intervals.
 type DailyUsage struct {
-	Date         string   `json:"date"`
-	Requests     int      `json:"requests"`
-	InputTokens  int64    `json:"input_tokens"`
-	OutputTokens int64    `json:"output_tokens"`
-	TotalTokens  int64    `json:"total_tokens"`
-	InputCost    *float64 `json:"input_cost"`
-	OutputCost   *float64 `json:"output_cost"`
-	TotalCost    *float64 `json:"total_cost"`
+	Date         string `json:"date"`
+	Requests     int    `json:"requests"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+	TotalTokens  int64  `json:"total_tokens"`
+	// Provider prompt-cache split of the period's input, folded per row from
+	// raw_data (same source as the summary). Zero when the storage layer does
+	// not populate them.
+	UncachedInputTokens   int64    `json:"uncached_input_tokens,omitempty"`
+	CachedInputTokens     int64    `json:"cached_input_tokens,omitempty"`
+	CacheWriteInputTokens int64    `json:"cache_write_input_tokens,omitempty"`
+	InputCost             *float64 `json:"input_cost"`
+	OutputCost            *float64 `json:"output_cost"`
+	TotalCost             *float64 `json:"total_cost"`
+}
+
+// periodInputSplit holds the provider prompt-cache split for one time period.
+type periodInputSplit struct {
+	Uncached   int64
+	Cached     int64
+	CacheWrite int64
+}
+
+// accumulatePeriodSplit folds one row's input into the split for its period,
+// reusing EntryInputSegments so every backend shares the provider-quirk logic.
+func accumulatePeriodSplit(out map[string]periodInputSplit, period string, inputTokens int, provider string, rawData map[string]any) {
+	uncached, cached, cacheWrite := EntryInputSegments(UsageLogEntry{
+		InputTokens: inputTokens,
+		Provider:    provider,
+		RawData:     rawData,
+	})
+	split := out[period]
+	split.Uncached += uncached
+	split.Cached += cached
+	split.CacheWrite += cacheWrite
+	out[period] = split
+}
+
+// foldPeriodInputSegments folds (period, input_tokens, provider, raw_data) rows
+// into the prompt-cache split per period. Shared by the SQL backends; MongoDB
+// folds its decoded documents with accumulatePeriodSplit directly.
+func foldPeriodInputSegments(rows inputSegmentRows) (map[string]periodInputSplit, error) {
+	out := map[string]periodInputSplit{}
+	for rows.Next() {
+		var period, provider string
+		var inputTokens int
+		var rawDataJSON *string
+		if err := rows.Scan(&period, &inputTokens, &provider, &rawDataJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan daily input segment row: %w", err)
+		}
+		var rawData map[string]any
+		if rawDataJSON != nil && *rawDataJSON != "" {
+			if err := json.Unmarshal([]byte(*rawDataJSON), &rawData); err != nil {
+				slog.Warn("failed to unmarshal raw_data JSON", "error", err)
+			}
+		}
+		accumulatePeriodSplit(out, period, inputTokens, provider, rawData)
+	}
+	return out, rows.Err()
+}
+
+// applyDailyInputSplit merges the per-period split onto matching daily rows.
+func applyDailyInputSplit(daily []DailyUsage, splits map[string]periodInputSplit) {
+	for i := range daily {
+		if split, ok := splits[daily[i].Date]; ok {
+			daily[i].UncachedInputTokens = split.Uncached
+			daily[i].CachedInputTokens = split.Cached
+			daily[i].CacheWriteInputTokens = split.CacheWrite
+		}
+	}
 }
 
 // UsageLogParams specifies query parameters for paginated usage log retrieval.
@@ -267,6 +329,13 @@ type UsageReader interface {
 
 	// GetCacheOverview returns cached-only aggregates for the admin dashboard.
 	GetCacheOverview(ctx context.Context, params UsageQueryParams) (*CacheOverview, error)
+
+	// GetTokenThroughput returns a fixed-width window of token-volume buckets
+	// (input/output/prompt-cached/locally-cached) ending at end, for the
+	// overview live-throughput chart. The window is global (not user-path
+	// scoped). offset is the request timezone's offset from UTC in seconds, so
+	// buckets align to local boundaries (e.g. day buckets at local midnight).
+	GetTokenThroughput(ctx context.Context, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error)
 }
 
 func displayUsageProviderName(providerName, provider string) string {

@@ -40,6 +40,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"GET /admin/usage/models",
 		"GET /admin/usage/user-paths",
 		"GET /admin/usage/log",
+		"GET /admin/usage/throughput",
 		"POST /admin/usage/recalculate-pricing",
 
 		"GET /admin/audit/log",
