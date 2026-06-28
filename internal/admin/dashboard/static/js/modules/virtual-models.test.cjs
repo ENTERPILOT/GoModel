@@ -525,6 +525,56 @@ test('submitVirtualModelForm omits old_source when an alias edit keeps the Sourc
     assert.equal(Object.prototype.hasOwnProperty.call(body, 'old_source'), false);
 });
 
+test('submitVirtualModelForm allows a case-only rename (sources are case-sensitive)', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        },
+        window: { confirm: () => true }
+    });
+    stubRequests(module);
+    // The existing alias differs only by case; the backend treats it as a
+    // distinct source, so the rename must not be blocked as a collision.
+    module.aliases = [{ name: 'Smart', enabled: true, valid: true }];
+    module.models = [];
+    module.fetchModels = async() => {};
+    module.fetchVirtualModels = async() => {};
+
+    module.vmFormMode = 'edit';
+    module.vmFormOriginalSource = 'Smart';
+    module.vmForm = {
+        source: 'smart',
+        target_model: 'openai/gpt-4o',
+        user_paths: '',
+        description: '',
+        enabled: true
+    };
+
+    await module.submitVirtualModelForm();
+
+    assert.equal(requests.length, 1);
+    const body = JSON.parse(requests[0].request.body);
+    assert.equal(body.source, 'smart');
+    assert.equal(body.old_source, 'Smart');
+});
+
+test('aliasRowCanRemove hides delete for config-managed alias rows', () => {
+    const module = createAliasesModule();
+
+    assert.equal(module.aliasRowCanRemove({
+        is_alias: true,
+        alias: { name: 'smart' }
+    }), true);
+    assert.equal(module.aliasRowCanRemove({
+        is_alias: true,
+        alias: { name: 'managed-smart', managed: true }
+    }), false);
+});
+
 test('submitVirtualModelForm blocks a rename onto an existing virtual model', async() => {
     const requests = [];
     const module = createAliasesModule({

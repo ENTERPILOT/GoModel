@@ -473,20 +473,27 @@ func (s *Service) commitRefresh(ctx context.Context, prior map[string]*VirtualMo
 }
 
 // restore returns each source in prior to its captured state: re-upserting a row
-// that existed, or deleting one that did not (nil).
+// that existed, or deleting one that did not (nil). It is best-effort — every
+// entry is attempted and the errors are joined, so one failure never leaves the
+// other touched rows unrepaired.
 func (s *Service) restore(ctx context.Context, prior map[string]*VirtualModel) error {
+	var restoreErr error
 	for source, row := range prior {
 		var err error
 		if row == nil {
-			err = s.store.Delete(ctx, source)
+			// The source did not exist before; an already-absent row is the
+			// intended end state, not a rollback failure.
+			if err = s.store.Delete(ctx, source); errors.Is(err, ErrNotFound) {
+				err = nil
+			}
 		} else {
 			err = s.store.Upsert(ctx, *row)
 		}
 		if err != nil {
-			return err
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("restore virtual model %q: %w", source, err))
 		}
 	}
-	return nil
+	return restoreErr
 }
 
 // priorRow captures a row's pre-write state for restore: the row itself when it

@@ -675,7 +675,7 @@
             },
 
             aliasRowCanRemove(row) {
-                return Boolean(row && row.is_alias && row.alias && row.alias.name);
+                return Boolean(row && row.is_alias && row.alias && row.alias.name && !row.alias.managed);
             },
 
             rowRedirectCanRemove(row) {
@@ -1439,8 +1439,10 @@
                 } else if (isRename) {
                     // Renaming: the backend refuses to clobber an existing row, so block
                     // early with a clear message instead of overwriting another virtual
-                    // model. Masking a concrete model is still a soft confirm.
-                    const existingAlias = this.findExistingAliasByName(source);
+                    // model. Match the source exactly (case-sensitive) like the backend
+                    // key, so a case-only rename (e.g. "Smart" -> "smart") is not wrongly
+                    // rejected. Masking a concrete model is still a soft confirm.
+                    const existingAlias = (this.aliases || []).find((entry) => entry && entry.name === source) || null;
                     const existingPolicy = existingAlias ? null : this.findModelOverrideView(source);
                     if (existingAlias || existingPolicy) {
                         this.vmFormError = 'A virtual model for "' + source + '" already exists. Choose a different source.';
