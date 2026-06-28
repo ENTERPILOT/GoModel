@@ -1087,9 +1087,13 @@
                 // redirect never collapses it to its first target.
                 const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
                 if (lbTargets.length > 1) {
-                    payload.targets = lbTargets.map((target) =>
-                        this.targetEntry(this.qualifyTarget(target), target.weight));
                     payload.strategy = alias.strategy || 'round_robin';
+                    // Weight only biases round-robin, so cost balancers persist
+                    // weight-less targets — same contract as the editor save path.
+                    payload.targets = payload.strategy === 'cost'
+                        ? lbTargets.map((target) => ({ model: this.qualifyTarget(target) }))
+                        : lbTargets.map((target) =>
+                            this.targetEntry(this.qualifyTarget(target), target.weight));
                 } else if (lbTargets.length === 1) {
                     payload.target_model = this.qualifyTarget(lbTargets[0]);
                 } else {

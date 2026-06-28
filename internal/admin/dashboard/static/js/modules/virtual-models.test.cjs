@@ -1597,9 +1597,47 @@ test('toggleRowEnabled round-trips every target and strategy for a load-balanced
 
     assert.equal(requests.length, 1);
     const body = JSON.parse(requests[0].request.body);
-    assert.deepEqual(body.targets, [{ model: 'openai/gpt-4o' }, { model: 'groq/llama', weight: 2 }]);
+    // Cost balancers persist weight-less targets, matching the save path, even
+    // though a stored target happened to carry a weight.
+    assert.deepEqual(body.targets, [{ model: 'openai/gpt-4o' }, { model: 'groq/llama' }]);
     assert.equal(body.strategy, 'cost');
     assert.equal(body.enabled, false);
+});
+
+test('toggleRowEnabled keeps per-target weights for a round-robin alias', async() => {
+    const requests = [];
+    const module = createAliasesModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return { ok: true, status: 200, json: async() => ({}) };
+            }
+        }
+    });
+    stubRequests(module);
+    module.fetchVirtualModels = async() => {};
+
+    const row = {
+        key: 'alias:smart',
+        is_alias: true,
+        alias: {
+            name: 'smart',
+            targets: [
+                { provider: 'openai', model: 'gpt-4o' },
+                { provider: 'groq', model: 'llama', weight: 2 }
+            ],
+            strategy: 'round_robin',
+            enabled: true,
+            user_paths: []
+        }
+    };
+
+    await module.toggleRowEnabled(row);
+
+    assert.equal(requests.length, 1);
+    const body = JSON.parse(requests[0].request.body);
+    assert.deepEqual(body.targets, [{ model: 'openai/gpt-4o' }, { model: 'groq/llama', weight: 2 }]);
+    assert.equal(body.strategy, 'round_robin');
 });
 
 test('managed virtual models are read-only in toggles and the editor', async() => {
