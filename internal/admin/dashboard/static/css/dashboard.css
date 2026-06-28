@@ -18,15 +18,22 @@
   --danger: #ef4444;
   --prompt-cache-color: #40a811;
   --prompt-cache-color-bg: color-mix(in srgb, var(--prompt-cache-color) 14%, var(--bg-surface));
-  /* Cache meter segments. Declared once as semantic aliases: --accent/--info
-     are re-themed per mode, and var() resolves lazily per element, so these
-     stay theme-correct without duplicating across the light/dark blocks. */
-  --cache-meter-uncached: var(--accent);
-  /* Two distinct greens: a deep emerald (darkened --success) for local hits,
-     lime --prompt-cache-color for provider prompt-cache reads. --success is the
-     same in both themes, so the mix stays theme-consistent. */
-  --cache-meter-local: color-mix(in srgb, var(--success) 58%, #000);
-  --cache-meter-prompt: var(--prompt-cache-color);
+  /* Cache meter segments share the live token-throughput palette (defined
+     below) so the meter and the chart read consistently: Regular is the paid
+     brown (input); local and prompt caches are the translucent blues, cheaper
+     = more transparent. */
+  --cache-meter-uncached: var(--token-input);
+  --cache-meter-local: var(--token-local);
+  --cache-meter-prompt: var(--token-prompt);
+  /* Live token throughput series, coloured by cost. Input and output are the
+     paid tokens: solid, light browns (output a shade lighter so the pair reads
+     together). Cached tokens are cheap, so they read as translucent blue —
+     prompt-cache reads (almost free) are semi-transparent; local cache hits
+     (no provider cost) are the most transparent. */
+  --token-input: #c0824a;
+  --token-output: #ddb27a;
+  --token-prompt: color-mix(in srgb, var(--info) 60%, transparent);
+  --token-local: color-mix(in srgb, var(--info) 20%, transparent);
   --sidebar-width: 240px;
   --radius: 8px;
   --chart-grid: #2a2826;
@@ -1494,6 +1501,113 @@ body.dashboard-modal-open {
 .chart-wrapper {
   position: relative;
   height: 210px;
+}
+
+/* Prompt cache rate gauge (compact half-circle in a stat card). A 180° doughnut's
+   natural box is 2:1, so the container is 2:1 and Chart.js sizes the canvas to it
+   — the semicircle fills it exactly and stays round. */
+.prompt-cache-gauge {
+  position: relative;
+  width: 120px;
+  height: 60px;
+  margin: 8px auto 0;
+  overflow: hidden;
+}
+
+.prompt-cache-gauge canvas {
+  display: block;
+}
+
+.prompt-cache-gauge-value {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 4px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+}
+
+/* Live token throughput chart */
+/* The generic .chart-container has no margin (siblings space it), but this card
+   is followed by the cache meter, which only spaces below itself — so give the
+   live card the same 28px rhythm as .cards/.cache-meter. */
+.live-tokens {
+  margin-bottom: 28px;
+}
+
+.live-tokens-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.live-tokens-subtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.live-dot.is-streaming {
+  background: var(--success);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 70%, transparent);
+  animation: live-dot-pulse 1.8s ease-out infinite;
+}
+
+@keyframes live-dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--success) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 0%, transparent);
+  }
+}
+
+.live-tokens-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-bottom: 16px;
+}
+
+.live-tokens-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.live-tokens-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.live-tokens-legend-value {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.live-tokens-empty .live-tokens-empty-text {
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 /* Alert */

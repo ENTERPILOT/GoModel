@@ -50,8 +50,11 @@ function createChartsContext() {
     const module = createChartsModule({
         Chart: FakeChart,
         document: {
-            getElementById() {
-                return canvas;
+            getElementById(id) {
+                // The prompt-cache gauge is a separate widget refreshed alongside
+                // the overview chart; the chart tests don't exercise it, so give
+                // it no canvas and it no-ops.
+                return id === 'promptCacheGauge' ? null : canvas;
             }
         }
     });

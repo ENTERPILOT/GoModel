@@ -387,7 +387,7 @@ test('cacheMeterCategories always returns all three categories at 0% when empty'
     const categories = module.cacheMeterCategories();
 
     assert.equal(categories.length, 3);
-    assert.equal(categories.map((c) => c.key).join(','), 'uncached,local,prompt');
+    assert.equal(categories.map((c) => c.key).join(','), 'uncached,prompt,local');
     assert.equal(categories.every((c) => c.pct === 0), true);
     // The bar stays empty while the legend key still renders all three.
     assert.equal(module.cacheMeterSegments().length, 0);

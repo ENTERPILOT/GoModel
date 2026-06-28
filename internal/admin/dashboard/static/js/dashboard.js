@@ -150,6 +150,7 @@ function dashboard() {
 
     // Chart
     chart: null,
+    promptCacheChart: null,
 
     // Usage page state
     usageMode: "tokens",
@@ -220,6 +221,12 @@ function dashboard() {
     _applyRoute(page, sub) {
       this.page = page;
 
+      // Live token throughput is overview-only; tear it down when navigating
+      // away so it stops consuming the SSE stream and frees its buffers.
+      if (page !== "overview" && typeof this.stopLiveTokens === "function") {
+        this.stopLiveTokens();
+      }
+
       if (page === "usage" && sub === "costs") this.usageMode = "costs";
       if (page === "usage" && sub !== "costs") this.usageMode = "tokens";
       if (page === "audit-logs") this.fetchAuditLog(true);
@@ -248,7 +255,10 @@ function dashboard() {
           this.fetchBudgetSettings();
         }
       }
-      if (page === "overview") this.renderChart();
+      if (page === "overview") {
+        this.renderChart();
+        if (typeof this.startLiveTokens === "function") this.startLiveTokens();
+      }
       if (page === "usage") this.fetchUsagePage();
       if (typeof this.renderIconsAfterUpdate === "function") {
         this.renderIconsAfterUpdate();
@@ -356,6 +366,10 @@ function dashboard() {
       this.renderChart();
       this.renderBarChart();
       this.renderUserPathChart();
+      if (typeof this.redrawLiveTokensChart === "function") {
+        // Force a rebuild so the bars pick up the new theme's colors.
+        this.redrawLiveTokensChart();
+      }
     },
 
     normalizeApiKey(value) {
@@ -1141,6 +1155,12 @@ function dashboard() {
         ? dashboardChartsModule
         : null,
       "dashboardChartsModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardLiveTokensModule === "function"
+        ? dashboardLiveTokensModule
+        : null,
+      "dashboardLiveTokensModule",
     ),
   ];
 

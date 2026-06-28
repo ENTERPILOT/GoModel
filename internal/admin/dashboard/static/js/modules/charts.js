@@ -1,54 +1,60 @@
 (function(global) {
     function dashboardChartsModule() {
         return {
-            _overviewChartConfig(colors, labels, inputData, outputData, cacheInputData, cacheOutputData) {
+            // --- Shared overview chart styling, so the line (Daily Token Usage)
+            // and bar (Live Token Throughput) charts read as one family. ---
+            _chartTickFont() {
+                return { size: 11, family: "'SF Mono', Menlo, Consolas, monospace" };
+            },
+
+            _chartTooltip(colors, callbacks) {
+                return {
+                    backgroundColor: colors.tooltipBg,
+                    borderColor: colors.tooltipBorder,
+                    borderWidth: 1,
+                    titleColor: colors.tooltipText,
+                    bodyColor: colors.tooltipText,
+                    callbacks: callbacks
+                };
+            },
+
+            // Y-axis ticks that abbreviate token counts (e.g. 1.2K, 3.4M).
+            _tokenAxisTicks(colors) {
+                return {
+                    color: colors.text,
+                    font: this._chartTickFont(),
+                    callback: (v) => this.formatTokensShort(v)
+                };
+            },
+
+            _overviewChartConfig(colors, labels, inputData, outputData, promptData, localData) {
                 const cacheEnabled = typeof this.cacheAnalyticsEnabled === 'function' && this.cacheAnalyticsEnabled();
+                const resolve = (expr) => (typeof this._resolveLiveTokenColor === 'function' ? this._resolveLiveTokenColor(expr) : expr);
+                const fade = (expr, pct) => resolve('color-mix(in srgb, ' + expr + ' ' + pct + '%, transparent)');
+                // Same palette as the live throughput chart: paid tokens (input,
+                // output) are solid browns; cached tokens are dashed blues, the
+                // free "Locally Cached" lighter than the almost-free "Prompt cached".
+                // Markerless lines (dots on hover only), matching the bar chart's
+                // clean look; values stay readable via the tooltip.
+                const line = (label, data, color, opts) => Object.assign({
+                    label: label,
+                    data: data,
+                    borderColor: color,
+                    backgroundColor: color,
+                    fill: false,
+                    tension: 0.3,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                }, opts || {});
                 const datasets = [
-                    {
-                        label: 'Input Tokens',
-                        data: inputData,
-                        borderColor: '#c2845a',
-                        backgroundColor: 'rgba(194, 132, 90, 0.1)',
-                        fill: true,
-                        tension: 0.3,
-                        pointRadius: 3,
-                        pointHoverRadius: 5
-                    },
-                    {
-                        label: 'Output Tokens',
-                        data: outputData,
-                        borderColor: '#7a9e7e',
-                        backgroundColor: 'rgba(122, 158, 126, 0.1)',
-                        fill: true,
-                        tension: 0.3,
-                        pointRadius: 3,
-                        pointHoverRadius: 5
-                    }
+                    line('Input Tokens', inputData, resolve('var(--token-input)'), { fill: true, backgroundColor: fade('var(--token-input)', 12) }),
+                    line('Output Tokens', outputData, resolve('var(--token-output)'), { fill: true, backgroundColor: fade('var(--token-output)', 12) }),
+                    line('Prompt (Input) Cached', promptData, resolve('var(--token-prompt)'), { borderDash: [6, 4] })
                 ];
                 if (cacheEnabled) {
                     datasets.push(
-                        {
-                            label: 'Local Cache Input Tokens',
-                            data: cacheInputData,
-                            borderColor: '#5f7dcf',
-                            backgroundColor: 'rgba(95, 125, 207, 0.08)',
-                            fill: false,
-                            tension: 0.3,
-                            pointRadius: 2,
-                            pointHoverRadius: 4,
-                            borderDash: [6, 4]
-                        },
-                        {
-                            label: 'Local Cache Output Tokens',
-                            data: cacheOutputData,
-                            borderColor: '#b0677b',
-                            backgroundColor: 'rgba(176, 103, 123, 0.08)',
-                            fill: false,
-                            tension: 0.3,
-                            pointRadius: 2,
-                            pointHoverRadius: 4,
-                            borderDash: [6, 4]
-                        }
+                        line('Locally Cached', localData, fade('var(--info)', 35), { borderDash: [2, 3] })
                     );
                 }
                 return {
@@ -66,36 +72,21 @@
                             legend: {
                                 labels: { color: colors.text, font: { size: 12 } }
                             },
-                            tooltip: {
-                                backgroundColor: colors.tooltipBg,
-                                borderColor: colors.tooltipBorder,
-                                borderWidth: 1,
-                                titleColor: colors.tooltipText,
-                                bodyColor: colors.tooltipText,
-                                callbacks: {
-                                    label: function(c) {
-                                        return c.dataset.label + ': ' + c.parsed.y.toLocaleString();
-                                    }
-                                }
-                            }
+                            tooltip: this._chartTooltip(colors, {
+                                label: (c) => c.dataset.label + ': ' + c.parsed.y.toLocaleString()
+                            })
                         },
                         scales: {
                             x: {
                                 grid: { color: colors.grid },
-                                ticks: { color: colors.text, font: { size: 11 }, maxTicksLimit: 10 }
+                                border: { display: false },
+                                ticks: { color: colors.text, font: this._chartTickFont(), maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }
                             },
                             y: {
                                 beginAtZero: true,
                                 grid: { color: colors.grid },
-                                ticks: {
-                                    color: colors.text,
-                                    font: { size: 11 },
-                                    callback: function(value) {
-                                        if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
-                                        if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
-                                        return value;
-                                    }
-                                }
+                                border: { display: false },
+                                ticks: this._tokenAxisTicks(colors)
                             }
                         }
                     }
@@ -186,8 +177,101 @@
                 return result;
             },
 
+            // Prompt cache rate: share of the period's provider input tokens
+            // that were served from the prompt cache. Denominator is the input
+            // "parts" (uncached + prompt-cached + cache writes), matching the
+            // cache meter's provider split.
+            promptCacheRate() {
+                const summary = this.summary || {};
+                const uncached = Math.max(0, Number(summary.uncached_input_tokens) || 0);
+                const cached = Math.max(0, Number(summary.cached_input_tokens) || 0);
+                const cacheWrite = Math.max(0, Number(summary.cache_write_input_tokens) || 0);
+                const denom = uncached + cached + cacheWrite;
+                return denom > 0 ? (cached / denom) * 100 : 0;
+            },
+
+            promptCacheRateHasData() {
+                const summary = this.summary || {};
+                const denom = (Number(summary.uncached_input_tokens) || 0) +
+                    (Number(summary.cached_input_tokens) || 0) +
+                    (Number(summary.cache_write_input_tokens) || 0);
+                return denom > 0;
+            },
+
+            promptCacheRateText() {
+                if (!this.promptCacheRateHasData()) return '—';
+                return Math.round(this.promptCacheRate()) + '%';
+            },
+
+            _promptCacheGaugeConfig(pct, fillColor, trackColor) {
+                const value = Math.max(0, Math.min(100, pct));
+                return {
+                    type: 'doughnut',
+                    data: {
+                        datasets: [{
+                            data: [value, 100 - value],
+                            backgroundColor: [fillColor, trackColor],
+                            borderWidth: 0,
+                            spacing: 0
+                        }]
+                    },
+                    options: {
+                        // Half-circle gauge, filling clockwise from the left.
+                        rotation: -90,
+                        circumference: 180,
+                        cutout: '84%',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 0 },
+                        layout: { padding: 1 },
+                        events: [],
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { enabled: false }
+                        }
+                    }
+                };
+            },
+
+            renderPromptCacheGauge(retries) {
+                if (retries === undefined) retries = 3;
+                this.$nextTick(() => {
+                    if (this.page !== 'overview') {
+                        if (this.promptCacheChart) {
+                            this.promptCacheChart.destroy();
+                            this.promptCacheChart = null;
+                        }
+                        return;
+                    }
+                    const canvas = document.getElementById('promptCacheGauge');
+                    if (!canvas) {
+                        return; // no gauge on this page — nothing to render
+                    }
+                    if (canvas.offsetWidth === 0) {
+                        if (retries > 0) {
+                            setTimeout(() => this.renderPromptCacheGauge(retries - 1), 100);
+                        }
+                        return;
+                    }
+                    const resolve = (expr) => (typeof this._resolveLiveTokenColor === 'function'
+                        ? this._resolveLiveTokenColor(expr)
+                        : expr);
+                    // Same colour as the "Prompt cached" series in the Tokens meter/chart.
+                    const fill = resolve('var(--token-prompt)');
+                    const track = resolve('var(--bg-surface-hover)');
+                    const config = this._promptCacheGaugeConfig(this.promptCacheRate(), fill, track);
+
+                    if (this.promptCacheChart) {
+                        this.promptCacheChart.destroy();
+                        this.promptCacheChart = null;
+                    }
+                    this.promptCacheChart = new Chart(canvas, config);
+                });
+            },
+
             renderChart(retries) {
                 if (retries === undefined) retries = 3;
+                this.renderPromptCacheGauge();
                 this.$nextTick(() => {
                     if (this.daily.length === 0 || this.page !== 'overview') {
                         if (this.chart) {
@@ -208,14 +292,31 @@
                     const colors = this.chartColors();
                     const filled = this.fillMissingDays(this.daily);
                     const labels = filled.map((d) => d.date);
-                    const inputData = filled.map((d) => d.input_tokens);
-                    const outputData = filled.map((d) => d.output_tokens);
+                    const num = (v) => Number(v) || 0;
+
+                    // Paid input = uncached + cache writes (prompt-cache reads are
+                    // their own series). Older rows lack the split, so fall back to
+                    // the full input column when no split is present.
+                    const inputPaid = filled.map((d) => {
+                        const split = num(d.uncached_input_tokens) + num(d.cache_write_input_tokens) + num(d.cached_input_tokens);
+                        return split > 0 ? num(d.uncached_input_tokens) + num(d.cache_write_input_tokens) : num(d.input_tokens);
+                    });
+                    const outputData = filled.map((d) => num(d.output_tokens));
+                    const promptData = filled.map((d) => num(d.cached_input_tokens));
+
                     const cacheByDate = {};
                     const cacheDaily = this.fillMissingDays(this.cacheOverview && Array.isArray(this.cacheOverview.daily) ? this.cacheOverview.daily : []);
                     cacheDaily.forEach((d) => { cacheByDate[d.date] = d; });
-                    const cacheInputData = labels.map((label) => (cacheByDate[label] && cacheByDate[label].input_tokens) || 0);
-                    const cacheOutputData = labels.map((label) => (cacheByDate[label] && cacheByDate[label].output_tokens) || 0);
-                    const config = this._overviewChartConfig(colors, labels, inputData, outputData, cacheInputData, cacheOutputData);
+                    // Local cache as a single series: input + output served from cache.
+                    const localData = labels.map((label) => {
+                        const c = cacheByDate[label];
+                        return c ? num(c.input_tokens) + num(c.output_tokens) : 0;
+                    });
+
+                    const config = this._overviewChartConfig(
+                        colors, labels,
+                        inputPaid, outputData, promptData, localData
+                    );
 
                     if (this.chart) {
                         this.chart.destroy();

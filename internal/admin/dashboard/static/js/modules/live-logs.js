@@ -133,6 +133,9 @@
                 }
                 if (type.indexOf('usage.') === 0) {
                     this.mergeLiveUsageEntry(event.data || {}, type);
+                    if (typeof this.noteLiveTokenUsage === 'function') {
+                        this.noteLiveTokenUsage(type);
+                    }
                 }
             },
 

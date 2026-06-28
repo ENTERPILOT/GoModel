@@ -118,18 +118,18 @@
                         note: cacheWrite > 0 ? 'Includes ' + this.formatNumber(cacheWrite) + ' cache-write tokens' : ''
                     },
                     {
-                        key: 'local',
-                        label: 'Locally cached',
-                        tokens: locallyCached,
-                        colorVar: '--cache-meter-local',
-                        note: 'Served from GoModel response cache'
-                    },
-                    {
                         key: 'prompt',
                         label: 'Prompt cached',
                         tokens: promptCached,
                         colorVar: '--cache-meter-prompt',
                         note: 'Provider prompt-cache reads'
+                    },
+                    {
+                        key: 'local',
+                        label: 'Locally cached',
+                        tokens: locallyCached,
+                        colorVar: '--cache-meter-local',
+                        note: 'Served from GoModel response cache'
                     }
                 ];
             },
