@@ -36,20 +36,20 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 func (s *MongoDBStore) List(ctx context.Context) ([]Rule, error) {
 	cursor, err := s.collection.Find(ctx, bson.M{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
-		return nil, fmt.Errorf("list failover rules: %w", err)
+		return nil, fmt.Errorf("list failover mappings: %w", err)
 	}
 	defer cursor.Close(ctx)
 	result := make([]Rule, 0)
 	for cursor.Next(ctx) {
 		var rule Rule
 		if err := cursor.Decode(&rule); err != nil {
-			return nil, fmt.Errorf("decode failover rule: %w", err)
+			return nil, fmt.Errorf("decode failover mapping: %w", err)
 		}
 		rule.Source = strings.TrimSpace(rule.Source)
 		result = append(result, rule.clone())
 	}
 	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("iterate failover rules: %w", err)
+		return nil, fmt.Errorf("iterate failover mappings: %w", err)
 	}
 	return result, nil
 }
@@ -61,7 +61,7 @@ func (s *MongoDBStore) Get(ctx context.Context, source string) (*Rule, error) {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("get failover rule: %w", err)
+		return nil, fmt.Errorf("get failover mapping: %w", err)
 	}
 	rule.Source = strings.TrimSpace(rule.Source)
 	return &rule, nil
@@ -71,11 +71,10 @@ func (s *MongoDBStore) Upsert(ctx context.Context, rule Rule) error {
 	stampUpsert(&rule)
 	update := bson.M{
 		"$set": bson.M{
-			"targets":        rule.Targets,
-			"description":    rule.Description,
-			"enabled":        rule.Enabled,
-			"managed_source": rule.ManagedSource,
-			"updated_at":     rule.UpdatedAt,
+			"fallback_models": rule.Targets,
+			"enabled":         rule.Enabled,
+			"managed_source":  rule.ManagedSource,
+			"updated_at":      rule.UpdatedAt,
 		},
 		"$setOnInsert": bson.M{
 			"created_at": rule.CreatedAt,
@@ -83,7 +82,7 @@ func (s *MongoDBStore) Upsert(ctx context.Context, rule Rule) error {
 	}
 	_, err := s.collection.UpdateOne(ctx, bson.M{"_id": strings.TrimSpace(rule.Source)}, update, options.UpdateOne().SetUpsert(true))
 	if err != nil {
-		return fmt.Errorf("upsert failover rule: %w", err)
+		return fmt.Errorf("upsert failover mapping: %w", err)
 	}
 	return nil
 }
@@ -91,7 +90,7 @@ func (s *MongoDBStore) Upsert(ctx context.Context, rule Rule) error {
 func (s *MongoDBStore) Delete(ctx context.Context, source string) error {
 	result, err := s.collection.DeleteOne(ctx, bson.M{"_id": strings.TrimSpace(source)})
 	if err != nil {
-		return fmt.Errorf("delete failover rule: %w", err)
+		return fmt.Errorf("delete failover mapping: %w", err)
 	}
 	if result.DeletedCount == 0 {
 		return ErrNotFound
@@ -101,7 +100,7 @@ func (s *MongoDBStore) Delete(ctx context.Context, source string) error {
 
 func (s *MongoDBStore) DeleteAll(ctx context.Context) error {
 	if _, err := s.collection.DeleteMany(ctx, bson.M{}); err != nil {
-		return fmt.Errorf("delete failover rules: %w", err)
+		return fmt.Errorf("delete failover mappings: %w", err)
 	}
 	return nil
 }

@@ -14,19 +14,18 @@ import (
 )
 
 type upsertFailoverRuleRequest struct {
-	Source      string   `json:"source"`
-	Targets     []string `json:"targets"`
-	Description string   `json:"description,omitempty"`
-	Enabled     *bool    `json:"enabled,omitempty"`
+	PrimaryModel   string   `json:"primary_model"`
+	FallbackModels []string `json:"fallback_models"`
+	Enabled        *bool    `json:"enabled,omitempty"`
 }
 
 type deleteFailoverRuleRequest struct {
-	Source string `json:"source"`
+	PrimaryModel string `json:"primary_model"`
 }
 
 // ListFailoverRules handles GET /admin/failover.
 //
-// @Summary      List failover rules
+// @Summary      List failover mappings
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
@@ -47,12 +46,12 @@ func (h *Handler) ListFailoverRules(c *echo.Context) error {
 
 // UpsertFailoverRule handles PUT /admin/failover.
 //
-// @Summary      Create or update one failover rule
+// @Summary      Create or update one failover mapping
 // @Tags         admin
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        rule  body      upsertFailoverRuleRequest  true  "Failover rule"
+// @Param        mapping  body      upsertFailoverRuleRequest  true  "Failover mapping"
 // @Success      200   {object}  failover.View
 // @Failure      400   {object}  core.GatewayError
 // @Failure      401   {object}  core.GatewayError
@@ -67,9 +66,9 @@ func (h *Handler) UpsertFailoverRule(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	source := strings.TrimSpace(req.Source)
+	source := strings.TrimSpace(req.PrimaryModel)
 	if source == "" {
-		return handleError(c, core.NewInvalidRequestError("source is required", nil))
+		return handleError(c, core.NewInvalidRequestError("primary_model is required", nil))
 	}
 	enabled := true
 	if existing, ok := h.failoverRules.Get(source); ok && existing != nil {
@@ -79,10 +78,9 @@ func (h *Handler) UpsertFailoverRule(c *echo.Context) error {
 		enabled = *req.Enabled
 	}
 	rule := failover.Rule{
-		Source:      source,
-		Targets:     req.Targets,
-		Description: strings.TrimSpace(req.Description),
-		Enabled:     enabled,
+		Source:  source,
+		Targets: req.FallbackModels,
+		Enabled: enabled,
 	}
 	if err := h.failoverRules.Upsert(c.Request().Context(), rule); err != nil {
 		return handleError(c, failoverWriteError(err))
@@ -95,12 +93,12 @@ func (h *Handler) UpsertFailoverRule(c *echo.Context) error {
 
 // DeleteFailoverRule handles DELETE /admin/failover.
 //
-// @Summary      Delete one failover rule
+// @Summary      Delete one failover mapping
 // @Tags         admin
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        request  body  deleteFailoverRuleRequest  true  "Failover source to remove"
+// @Param        request  body  deleteFailoverRuleRequest  true  "Failover primary model to remove"
 // @Success      204      "No Content"
 // @Failure      400      {object}  core.GatewayError
 // @Failure      401      {object}  core.GatewayError
@@ -121,7 +119,7 @@ func (h *Handler) DeleteFailoverRule(c *echo.Context) error {
 	case err == nil:
 		return c.NoContent(http.StatusNoContent)
 	case errors.Is(err, failover.ErrNotFound):
-		return handleError(c, core.NewNotFoundError("failover rule not found: "+source))
+		return handleError(c, core.NewNotFoundError("failover mapping not found: "+source))
 	default:
 		return handleError(c, failoverWriteError(err))
 	}
@@ -132,16 +130,16 @@ func failoverDeleteSource(c *echo.Context) (string, error) {
 	if err := c.Bind(&req); err != nil {
 		return "", core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
 	}
-	source := strings.TrimSpace(req.Source)
+	source := strings.TrimSpace(req.PrimaryModel)
 	if source == "" {
-		return "", core.NewInvalidRequestError("source is required", nil)
+		return "", core.NewInvalidRequestError("primary_model is required", nil)
 	}
 	return source, nil
 }
 
 // ResetFailoverRules handles POST /admin/failover/reset.
 //
-// @Summary      Reset dashboard-managed failover rules
+// @Summary      Reset dashboard-managed failover mappings
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
@@ -162,7 +160,7 @@ func (h *Handler) ResetFailoverRules(c *echo.Context) error {
 
 // GenerateFailoverRules handles POST /admin/failover/generate.
 //
-// @Summary      Generate failover rule suggestions
+// @Summary      Generate failover mapping suggestions
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
@@ -237,7 +235,7 @@ func (h *Handler) findFailoverView(source string) (failover.View, bool) {
 
 func failoverWriteError(err error) error {
 	if errors.Is(err, failover.ErrManaged) {
-		return core.NewInvalidRequestError("failover rule is managed by configuration and cannot be changed in the dashboard", err)
+		return core.NewInvalidRequestError("failover mapping is managed by configuration and cannot be changed in the dashboard", err)
 	}
 	return core.NewProviderError("admin", http.StatusBadGateway, err.Error(), err)
 }

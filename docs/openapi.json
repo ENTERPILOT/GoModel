@@ -886,7 +886,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "List failover rules",
+        "summary": "List failover mappings",
         "responses": {
           "200": {
             "description": "OK",
@@ -937,7 +937,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Create or update one failover rule",
+        "summary": "Create or update one failover mapping",
         "requestBody": {
           "content": {
             "application/json": {
@@ -946,7 +946,7 @@
               }
             }
           },
-          "description": "Failover rule",
+          "description": "Failover mapping",
           "required": true
         },
         "responses": {
@@ -1016,7 +1016,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Delete one failover rule",
+        "summary": "Delete one failover mapping",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1025,7 +1025,7 @@
               }
             }
           },
-          "description": "Failover source to remove",
+          "description": "Failover primary model to remove",
           "required": true
         },
         "responses": {
@@ -1100,7 +1100,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Generate failover rule suggestions",
+        "summary": "Generate failover mapping suggestions",
         "responses": {
           "200": {
             "description": "OK",
@@ -1153,7 +1153,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Reset dashboard-managed failover rules",
+        "summary": "Reset dashboard-managed failover mappings",
         "responses": {
           "200": {
             "description": "OK",
@@ -6775,7 +6775,7 @@
       "admin.deleteFailoverRuleRequest": {
         "type": "object",
         "properties": {
-          "source": {
+          "primary_model": {
             "type": "string"
           }
         }
@@ -6957,20 +6957,17 @@
       "admin.upsertFailoverRuleRequest": {
         "type": "object",
         "properties": {
-          "description": {
-            "type": "string"
-          },
           "enabled": {
             "type": "boolean"
           },
-          "source": {
-            "type": "string"
-          },
-          "targets": {
+          "fallback_models": {
             "type": "array",
             "items": {
               "type": "string"
             }
+          },
+          "primary_model": {
+            "type": "string"
           }
         }
       },
@@ -9093,11 +9090,14 @@
           "created_at": {
             "type": "string"
           },
-          "description": {
-            "type": "string"
-          },
           "enabled": {
             "type": "boolean"
+          },
+          "fallback_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "managed": {
             "type": "boolean"
@@ -9105,14 +9105,8 @@
           "managed_source": {
             "type": "string"
           },
-          "source": {
+          "primary_model": {
             "type": "string"
-          },
-          "targets": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           },
           "updated_at": {
             "type": "string"

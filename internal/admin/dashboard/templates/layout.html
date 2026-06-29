@@ -142,7 +142,7 @@
                 <form class="form" @submit.prevent="submitFailoverForm()">
                     <div class="editor-header">
                         <div>
-                            <p class="form-kicker">Failover rule</p>
+                            <p class="form-kicker">Failover mapping</p>
                             <h3 x-text="failoverForm.source || 'Failover'"></h3>
                         </div>
                         <button type="button" class="dialog-close-btn" aria-label="Close failover editor" @click="closeFailoverForm()">
@@ -151,13 +151,8 @@
                     </div>
 
                     <p class="form-hint" x-show="failoverFormManaged" role="status">
-                        This failover rule is defined in configuration and is read-only here.
+                        This failover mapping is defined in configuration and is read-only here.
                     </p>
-
-                    <div class="form-field">
-                        <label class="form-field-label" for="failover-source">Source</label>
-                        <input id="failover-source" type="text" class="mono" placeholder="openai/gpt-4o" x-model="failoverForm.source" :disabled="failoverFormMode === 'edit' || failoverFormManaged" data-modal-autofocus>
-                    </div>
 
                     <datalist id="failover-target-options">
                         <template x-for="m in models" :key="'failover-target:' + qualifiedModelName(m)">
@@ -166,13 +161,27 @@
                     </datalist>
 
                     <div class="form-field">
-                        <label class="form-field-label" for="failover-targets">Targets</label>
-                        <textarea id="failover-targets" rows="5" class="mono" placeholder="azure/gpt-4o&#10;gemini/gemini-2.5-pro" x-model="failoverForm.targets" :disabled="failoverFormManaged" list="failover-target-options"></textarea>
-                    </div>
-
-                    <div class="form-field">
-                        <label class="form-field-label" for="failover-description">Description</label>
-                        <textarea id="failover-description" rows="3" placeholder="Optional description" x-model="failoverForm.description" :disabled="failoverFormManaged"></textarea>
+                        <label class="form-field-label" for="failover-target">Fallback models</label>
+                        <div class="vm-target-list">
+                            <div class="vm-target-row">
+                                <input id="failover-target" type="text" list="failover-target-options" class="mono vm-target-model" placeholder="azure/gpt-4o" x-model="failoverForm.target_model" :disabled="failoverFormManaged" aria-label="Fallback model" data-modal-autofocus>
+                                <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn vm-target-remove" x-show="failoverForm.target_model" :disabled="failoverFormManaged" @click="removePrimaryFailoverTarget()" aria-label="Remove fallback model" title="Remove fallback model">
+                                    {{template "trash-icon"}}
+                                </button>
+                            </div>
+                            <template x-for="(target, index) in failoverForm.targets" :key="index">
+                                <div class="vm-target-row">
+                                    <input type="text" list="failover-target-options" class="mono vm-target-model" placeholder="gemini/gemini-2.5-pro" x-model="target.model" :disabled="failoverFormManaged" aria-label="Fallback model">
+                                    <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn vm-target-remove" :disabled="failoverFormManaged" @click="removeFailoverTarget(index)" aria-label="Remove fallback model" title="Remove fallback model">
+                                        {{template "trash-icon"}}
+                                    </button>
+                                </div>
+                            </template>
+                        </div>
+                        <button type="button" class="pagination-btn pagination-btn-with-icon" :disabled="failoverFormManaged" @click="addFailoverTarget()">
+                            <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                            <span>Add fallback model</span>
+                        </button>
                     </div>
 
                     <div class="vm-status-row">
@@ -180,7 +189,7 @@
                             <button type="button" class="alias-toggle"
                                     :class="{ enabled: failoverForm.enabled }"
                                     :disabled="failoverFormManaged"
-                                    :aria-label="(failoverForm.enabled ? 'Disable' : 'Enable') + ' failover rule'"
+                                    :aria-label="(failoverForm.enabled ? 'Disable' : 'Enable') + ' failover mapping'"
                                     @click="!failoverFormManaged && (failoverForm.enabled = !failoverForm.enabled)">
                                 <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
                                 <span x-text="failoverForm.enabled ? 'Enabled' : 'Disabled'"></span>

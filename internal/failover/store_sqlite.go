@@ -19,9 +19,8 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	}
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS failover_rules (
-			source TEXT PRIMARY KEY,
-			targets TEXT NOT NULL DEFAULT '[]',
-			description TEXT NOT NULL DEFAULT '',
+			primary_model TEXT PRIMARY KEY,
+			fallback_models TEXT NOT NULL DEFAULT '[]',
 			enabled INTEGER NOT NULL DEFAULT 1,
 			managed_source TEXT NOT NULL DEFAULT 'dashboard',
 			created_at INTEGER NOT NULL,
@@ -43,12 +42,12 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 
 func (s *SQLiteStore) List(ctx context.Context) ([]Rule, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT source, targets, description, enabled, managed_source, created_at, updated_at
+		SELECT primary_model, fallback_models, enabled, managed_source, created_at, updated_at
 		FROM failover_rules
-		ORDER BY source ASC
+		ORDER BY primary_model ASC
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("list failover rules: %w", err)
+		return nil, fmt.Errorf("list failover mappings: %w", err)
 	}
 	defer rows.Close()
 	return collectRules(func() (Rule, bool, error) {
@@ -62,9 +61,9 @@ func (s *SQLiteStore) List(ctx context.Context) ([]Rule, error) {
 
 func (s *SQLiteStore) Get(ctx context.Context, source string) (*Rule, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT source, targets, description, enabled, managed_source, created_at, updated_at
+		SELECT primary_model, fallback_models, enabled, managed_source, created_at, updated_at
 		FROM failover_rules
-		WHERE source = ?
+		WHERE primary_model = ?
 	`, strings.TrimSpace(source))
 	rule, err := scanSQLiteRule(row)
 	if err != nil {
@@ -78,12 +77,11 @@ func (s *SQLiteStore) Get(ctx context.Context, source string) (*Rule, error) {
 
 const sqliteUpsertRuleSQL = `
 	INSERT INTO failover_rules (
-		source, targets, description, enabled, managed_source, created_at, updated_at
+		primary_model, fallback_models, enabled, managed_source, created_at, updated_at
 	)
-	VALUES (?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT(source) DO UPDATE SET
-		targets = excluded.targets,
-		description = excluded.description,
+	VALUES (?, ?, ?, ?, ?, ?)
+	ON CONFLICT(primary_model) DO UPDATE SET
+		fallback_models = excluded.fallback_models,
 		enabled = excluded.enabled,
 		managed_source = excluded.managed_source,
 		updated_at = excluded.updated_at
@@ -98,7 +96,6 @@ func sqliteUpsertArgs(rule Rule) ([]any, error) {
 	return []any{
 		strings.TrimSpace(rule.Source),
 		targetsJSON,
-		rule.Description,
 		boolToSQLite(rule.Enabled),
 		rule.ManagedSource,
 		rule.CreatedAt.Unix(),
@@ -112,15 +109,15 @@ func (s *SQLiteStore) Upsert(ctx context.Context, rule Rule) error {
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, sqliteUpsertRuleSQL, args...); err != nil {
-		return fmt.Errorf("upsert failover rule: %w", err)
+		return fmt.Errorf("upsert failover mapping: %w", err)
 	}
 	return nil
 }
 
 func (s *SQLiteStore) Delete(ctx context.Context, source string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM failover_rules WHERE source = ?`, strings.TrimSpace(source))
+	result, err := s.db.ExecContext(ctx, `DELETE FROM failover_rules WHERE primary_model = ?`, strings.TrimSpace(source))
 	if err != nil {
-		return fmt.Errorf("delete failover rule: %w", err)
+		return fmt.Errorf("delete failover mapping: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -134,7 +131,7 @@ func (s *SQLiteStore) Delete(ctx context.Context, source string) error {
 
 func (s *SQLiteStore) DeleteAll(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM failover_rules`); err != nil {
-		return fmt.Errorf("delete failover rules: %w", err)
+		return fmt.Errorf("delete failover mappings: %w", err)
 	}
 	return nil
 }
@@ -150,7 +147,6 @@ func scanSQLiteRule(scanner interface{ Scan(dest ...any) error }) (Rule, error) 
 	if err := scanner.Scan(
 		&rule.Source,
 		&targets,
-		&rule.Description,
 		&enabled,
 		&rule.ManagedSource,
 		&createdAt,

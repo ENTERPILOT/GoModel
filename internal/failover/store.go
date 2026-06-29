@@ -9,10 +9,10 @@ import (
 	"github.com/goccy/go-json"
 )
 
-var ErrNotFound = errors.New("failover rule not found")
-var ErrManaged = errors.New("failover rule is managed by configuration")
+var ErrNotFound = errors.New("failover mapping not found")
+var ErrManaged = errors.New("failover mapping is managed by configuration")
 
-// Store defines persistence operations for dashboard-managed failover rules.
+// Store defines persistence operations for dashboard-managed failover mappings.
 type Store interface {
 	List(ctx context.Context) ([]Rule, error)
 	Get(ctx context.Context, source string) (*Rule, error)
@@ -68,7 +68,7 @@ func collectRules(next func() (Rule, bool, error), rowsErr func() error) ([]Rule
 		result = append(result, rule)
 	}
 	if err := rowsErr(); err != nil {
-		return nil, fmt.Errorf("iterate failover rules: %w", err)
+		return nil, fmt.Errorf("iterate failover mappings: %w", err)
 	}
 	return result, nil
 }

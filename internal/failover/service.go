@@ -13,7 +13,7 @@ import (
 	"gomodel/config"
 )
 
-// Service merges dashboard-managed rules with read-only config/env rules.
+// Service merges dashboard-managed mappings with read-only config/env mappings.
 type Service struct {
 	store      Store
 	configRows []Rule
@@ -81,7 +81,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 	defer s.refreshMu.Unlock()
 	rows, err := s.store.List(ctx)
 	if err != nil {
-		return fmt.Errorf("list failover rules: %w", err)
+		return fmt.Errorf("list failover mappings: %w", err)
 	}
 	s.current.Store(s.mergeConfig(rows))
 	return nil
@@ -192,7 +192,7 @@ func (s *Service) Upsert(ctx context.Context, rule Rule) error {
 func (s *Service) Delete(ctx context.Context, source string) error {
 	source = strings.TrimSpace(source)
 	if source == "" {
-		return fmt.Errorf("source is required")
+		return fmt.Errorf("primary model is required")
 	}
 	if s.isManagedSource(source) {
 		return ErrManaged
@@ -241,7 +241,7 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 			case <-ticker.C:
 				refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
 				if err := s.Refresh(refreshCtx); err != nil {
-					slog.Error("failed to refresh failover rules", "error", err)
+					slog.Error("failed to refresh failover mappings", "error", err)
 				}
 				refreshCancel()
 			}
@@ -258,13 +258,12 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 func normalizeRule(rule Rule) (Rule, error) {
 	rule.Source = strings.TrimSpace(rule.Source)
 	if rule.Source == "" {
-		return Rule{}, fmt.Errorf("source is required")
+		return Rule{}, fmt.Errorf("primary model is required")
 	}
 	rule.Targets = normalizeTargets(rule.Targets)
 	if rule.Enabled && len(rule.Targets) == 0 {
 		return Rule{}, fmt.Errorf("targets must contain at least one model")
 	}
-	rule.Description = strings.TrimSpace(rule.Description)
 	return rule, nil
 }
 

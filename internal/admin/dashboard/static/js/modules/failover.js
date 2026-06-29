@@ -14,8 +14,8 @@
             failoverFormOriginalSource: '',
             failoverForm: {
                 source: '',
-                targets: '',
-                description: '',
+                target_model: '',
+                targets: [],
                 enabled: true
             },
 
@@ -36,7 +36,7 @@
                         this.failoverRules = [];
                         return;
                     }
-                    const handled = this.handleFetchResponse(res, 'failover rules', request);
+                    const handled = this.handleFetchResponse(res, 'failover mappings', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
                     }
@@ -46,11 +46,11 @@
                         return;
                     }
                     const payload = await res.json();
-                    this.failoverRules = Array.isArray(payload) ? payload : [];
+                    this.failoverRules = this.normalizeFailoverRules(payload);
                 } catch (e) {
-                    console.error('Failed to fetch failover rules:', e);
+                    console.error('Failed to fetch failover mappings:', e);
                     this.failoverRules = [];
-                    this.failoverError = 'Unable to load failover rules.';
+                    this.failoverError = 'Unable to load failover mappings.';
                 } finally {
                     this.failoverLoading = false;
                 }
@@ -62,8 +62,8 @@
                 this.failoverFormOriginalSource = '';
                 this.failoverForm = {
                     source: '',
-                    targets: '',
-                    description: '',
+                    target_model: '',
+                    targets: [],
                     enabled: true
                 };
             },
@@ -80,20 +80,28 @@
                 this.failoverFormMode = 'edit';
                 this.failoverFormOpen = true;
                 this.failoverFormManaged = Boolean(rule.managed);
-                this.failoverFormOriginalSource = rule.source || '';
+                const source = this.failoverPrimaryModel(rule);
+                this.failoverFormOriginalSource = source;
+                const targets = this.failoverTargets(rule);
                 this.failoverForm = {
-                    source: rule.source || '',
-                    targets: (Array.isArray(rule.targets) ? rule.targets : []).join('\n'),
-                    description: rule.description || '',
+                    source,
+                    target_model: targets[0] || '',
+                    targets: targets.slice(1).map((model) => ({ model })),
                     enabled: rule.enabled !== false
                 };
                 this.focusFailoverEditor();
             },
 
+            openFailoverGenerated(rule) {
+                if (!rule) return;
+                this.openFailoverEdit(rule);
+                this.failoverFormMode = 'create';
+            },
+
             openFailoverForModel(row) {
                 if (!row || row.is_alias) return;
                 const source = this.qualifiedModelName(row);
-                const existing = this.failoverRules.find((rule) => String(rule.source || '') === source);
+                const existing = this.failoverRules.find((rule) => this.failoverPrimaryModel(rule) === source);
                 if (existing) {
                     this.openFailoverEdit(existing);
                     return;
@@ -110,17 +118,43 @@
             },
 
             failoverFormTargets() {
-                return String(this.failoverForm.targets || '')
-                    .split(/\r?\n|,/)
-                    .map((value) => value.trim())
-                    .filter(Boolean);
+                const values = [this.failoverForm.target_model];
+                const rows = Array.isArray(this.failoverForm.targets) ? this.failoverForm.targets : [];
+                rows.forEach((target) => values.push(target && target.model));
+                return values.map((value) => String(value || '').trim()).filter(Boolean);
+            },
+
+            addFailoverTarget() {
+                if (!Array.isArray(this.failoverForm.targets)) {
+                    this.failoverForm.targets = [];
+                }
+                this.failoverForm.targets.push({ model: '' });
+                this.focusFailoverEditor();
+            },
+
+            removeFailoverTarget(index) {
+                if (!Array.isArray(this.failoverForm.targets)) {
+                    this.failoverForm.targets = [];
+                    return;
+                }
+                this.failoverForm.targets.splice(index, 1);
+            },
+
+            removePrimaryFailoverTarget() {
+                const rows = Array.isArray(this.failoverForm.targets) ? this.failoverForm.targets : [];
+                if (rows.length > 0) {
+                    const next = rows.shift();
+                    this.failoverForm.target_model = next && next.model ? next.model : '';
+                    this.failoverForm.targets = rows;
+                    return;
+                }
+                this.failoverForm.target_model = '';
             },
 
             failoverRulePayload() {
                 return {
-                    source: String(this.failoverForm.source || '').trim(),
-                    targets: this.failoverFormTargets(),
-                    description: String(this.failoverForm.description || '').trim(),
+                    primary_model: String(this.failoverForm.source || '').trim(),
+                    fallback_models: this.failoverFormTargets(),
                     enabled: this.failoverForm.enabled !== false
                 };
             },
@@ -128,11 +162,11 @@
             async submitFailoverForm() {
                 if (this.failoverSaving || this.failoverFormManaged) return;
                 const payload = this.failoverRulePayload();
-                if (!payload.source) {
-                    this.failoverError = 'Source is required.';
+                if (!payload.primary_model) {
+                    this.failoverError = 'Primary model is required.';
                     return;
                 }
-                if (payload.enabled && payload.targets.length === 0) {
+                if (payload.enabled && payload.fallback_models.length === 0) {
                     this.failoverError = 'Add at least one failover target.';
                     return;
                 }
@@ -145,51 +179,51 @@
                         body: JSON.stringify(payload)
                     });
                     const res = await fetch('/admin/failover', request);
-                    const handled = this.handleFetchResponse(res, 'failover rule', request);
+                    const handled = this.handleFetchResponse(res, 'failover mapping', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
                     }
                     if (!handled) {
-                        this.failoverError = 'Failed to save failover rule.';
+                        this.failoverError = 'Failed to save failover mapping.';
                         return;
                     }
-                    this.failoverNotice = 'Failover rule saved.';
+                    this.failoverNotice = 'Failover mapping saved.';
                     this.closeFailoverForm();
                     await this.fetchFailoverRules();
                 } catch (e) {
-                    console.error('Failed to save failover rule:', e);
-                    this.failoverError = 'Failed to save failover rule.';
+                    console.error('Failed to save failover mapping:', e);
+                    this.failoverError = 'Failed to save failover mapping.';
                 } finally {
                     this.failoverSaving = false;
                 }
             },
 
             async deleteFailoverRule(rule) {
-                const source = String((rule && rule.source) || this.failoverForm.source || '').trim();
+                const source = String((rule && this.failoverPrimaryModel(rule)) || this.failoverForm.source || '').trim();
                 if (!source || this.failoverSaving) return;
-                if (!this.confirmAction('Remove failover rule for "' + source + '"?')) return;
+                if (!this.confirmAction('Remove failover mapping for "' + source + '"?')) return;
                 this.failoverSaving = true;
                 this.failoverError = '';
                 try {
                     const request = this.adminRequestOptions({
                         method: 'DELETE',
-                        body: JSON.stringify({ source })
+                        body: JSON.stringify({ primary_model: source })
                     });
                     const res = await fetch('/admin/failover', request);
-                    const handled = this.handleFetchResponse(res, 'failover rule', request);
+                    const handled = this.handleFetchResponse(res, 'failover mapping', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
                     }
                     if (!handled) {
-                        this.failoverError = 'Failed to remove failover rule.';
+                        this.failoverError = 'Failed to remove failover mapping.';
                         return;
                     }
-                    this.failoverNotice = 'Failover rule removed.';
+                    this.failoverNotice = 'Failover mapping removed.';
                     this.closeFailoverForm();
                     await this.fetchFailoverRules();
                 } catch (e) {
-                    console.error('Failed to remove failover rule:', e);
-                    this.failoverError = 'Failed to remove failover rule.';
+                    console.error('Failed to remove failover mapping:', e);
+                    this.failoverError = 'Failed to remove failover mapping.';
                 } finally {
                     this.failoverSaving = false;
                 }
@@ -200,7 +234,7 @@
                     title: 'Reset failover models',
                     titleId: 'failoverResetDialogTitle',
                     inputId: 'failover-reset-confirmation',
-                    message: 'Remove every dashboard-managed failover rule. Configuration-managed rules remain active.',
+                    message: 'Remove every dashboard-managed failover mapping. Configuration-managed mappings remain active.',
                     requiredText: 'reset',
                     confirmLabel: 'Reset Failover',
                     icon: 'rotate-ccw',
@@ -226,17 +260,17 @@
                         return;
                     }
                     if (!handled) {
-                        this.failoverError = 'Failed to reset failover rules.';
+                        this.failoverError = 'Failed to reset failover mappings.';
                         return;
                     }
                     const payload = await res.json();
-                    this.failoverRules = Array.isArray(payload) ? payload : [];
+                    this.failoverRules = this.normalizeFailoverRules(payload);
                     this.failoverGeneratedRules = [];
-                    this.failoverNotice = 'Dashboard-managed failover rules reset.';
+                    this.failoverNotice = 'Dashboard-managed failover mappings reset.';
                     this.closeTypedConfirmationDialog();
                 } catch (e) {
-                    console.error('Failed to reset failover rules:', e);
-                    this.failoverError = 'Failed to reset failover rules.';
+                    console.error('Failed to reset failover mappings:', e);
+                    this.failoverError = 'Failed to reset failover mappings.';
                 } finally {
                     this.failoverSaving = false;
                 }
@@ -256,17 +290,17 @@
                         return;
                     }
                     if (!handled) {
-                        this.failoverError = 'Failed to generate failover rules.';
+                        this.failoverError = 'Failed to generate failover mappings.';
                         return;
                     }
                     const payload = await res.json();
-                    this.failoverGeneratedRules = Array.isArray(payload) ? payload : [];
+                    this.failoverGeneratedRules = this.normalizeFailoverRules(payload);
                     this.failoverNotice = this.failoverGeneratedRules.length
-                        ? 'Generated ' + this.failoverGeneratedRules.length + ' failover rule drafts.'
+                        ? 'Generated ' + this.failoverGeneratedRules.length + ' failover mapping drafts.'
                         : 'No failover suggestions were generated.';
                 } catch (e) {
-                    console.error('Failed to generate failover rules:', e);
-                    this.failoverError = 'Failed to generate failover rules.';
+                    console.error('Failed to generate failover mappings:', e);
+                    this.failoverError = 'Failed to generate failover mappings.';
                 } finally {
                     this.failoverSaving = false;
                 }
@@ -289,9 +323,28 @@
             },
 
             failoverTargetLabel(rule) {
-                const targets = Array.isArray(rule && rule.targets) ? rule.targets : [];
+                const targets = this.failoverTargets(rule);
                 if (targets.length === 0) return '-';
                 return targets.join(', ');
+            },
+
+            failoverPrimaryModel(rule) {
+                return String((rule && (rule.primary_model || rule.source)) || '').trim();
+            },
+
+            failoverTargets(rule) {
+                if (Array.isArray(rule && rule.fallback_models)) return rule.fallback_models;
+                if (Array.isArray(rule && rule.targets)) return rule.targets;
+                return [];
+            },
+
+            normalizeFailoverRules(payload) {
+                if (!Array.isArray(payload)) return [];
+                return payload.map((rule) => ({
+                    ...rule,
+                    source: this.failoverPrimaryModel(rule),
+                    targets: this.failoverTargets(rule)
+                }));
             },
 
             failoverRuleStatus(rule) {

@@ -1,4 +1,4 @@
-// Package failover stores operator-managed manual failover rules.
+// Package failover stores operator-managed manual failover mappings.
 package failover
 
 import (
@@ -11,22 +11,20 @@ const (
 	ManagedSourceConfig    = "config"
 )
 
-// Rule is one manual failover rule for a source model selector.
+// Rule is one manual failover mapping for a primary model selector.
 type Rule struct {
-	Source        string    `json:"source" bson:"_id"`
-	Targets       []string  `json:"targets" bson:"targets"`
-	Description   string    `json:"description,omitempty" bson:"description,omitempty"`
+	Source        string    `json:"primary_model" bson:"_id"`
+	Targets       []string  `json:"fallback_models" bson:"fallback_models"`
 	Enabled       bool      `json:"enabled" bson:"enabled"`
 	ManagedSource string    `json:"managed_source" bson:"managed_source"`
 	CreatedAt     time.Time `json:"created_at" bson:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at" bson:"updated_at"`
 }
 
-// View is the admin-facing representation of one failover rule.
+// View is the admin-facing representation of one failover mapping.
 type View struct {
-	Source        string    `json:"source"`
-	Targets       []string  `json:"targets"`
-	Description   string    `json:"description,omitempty"`
+	Source        string    `json:"primary_model"`
+	Targets       []string  `json:"fallback_models"`
 	Enabled       bool      `json:"enabled"`
 	Managed       bool      `json:"managed"`
 	ManagedSource string    `json:"managed_source"`
@@ -45,7 +43,6 @@ func (r Rule) view() View {
 	return View{
 		Source:        r.Source,
 		Targets:       append([]string(nil), r.Targets...),
-		Description:   r.Description,
 		Enabled:       r.Enabled,
 		Managed:       strings.TrimSpace(r.ManagedSource) != "" && r.ManagedSource != ManagedSourceDashboard,
 		ManagedSource: r.ManagedSource,
