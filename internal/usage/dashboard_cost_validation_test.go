@@ -28,6 +28,9 @@ func TestDashboardCostAggregation_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	// Pin to one connection so every operation shares the same in-memory DB;
+	// ":memory:" gives each pooled connection its own private database.
+	db.SetMaxOpenConns(1)
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
