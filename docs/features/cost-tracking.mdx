@@ -35,7 +35,9 @@ Pricing for a model is resolved in priority order:
 
 1. Operator **overrides** set in the dashboard.
 2. **`config.yaml`** `providers.<name>.models` metadata.
-3. The **model catalog** (the `ai-model-list` registry).
+3. The **model catalog**, sourced from the [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list) registry.
+
+The catalog supplies the default pricing for most models. If a model's price looks wrong or a rate is missing (for example, a cached-input rate), check it against [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list) and contribute a correction there, or set an override for an immediate fix.
 
 ## Override pricing
 
