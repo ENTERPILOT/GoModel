@@ -216,11 +216,9 @@
             </div>
             <div class="contribution-calendar-legend">
                 <span>Less</span>
-                <div class="contribution-calendar-cell level-0"></div>
-                <div class="contribution-calendar-cell level-1"></div>
-                <div class="contribution-calendar-cell level-2"></div>
-                <div class="contribution-calendar-cell level-3"></div>
-                <div class="contribution-calendar-cell level-4"></div>
+                <template x-for="lvl in calendarLegendLevels()" :key="lvl">
+                    <div class="contribution-calendar-cell" :class="'level-' + lvl"></div>
+                </template>
                 <span>More</span>
             </div>
         </div>

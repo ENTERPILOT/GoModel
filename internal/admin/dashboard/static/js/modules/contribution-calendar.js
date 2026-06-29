@@ -1,4 +1,11 @@
 (function(global) {
+    // Number of active intensity levels (1..CALENDAR_LEVELS); level 0 means no
+    // activity. Keep in sync with the --cal-level-* ramp and .level-N rules in
+    // dashboard.css.
+    var CALENDAR_LEVELS = 10;
+    // Exponent (<1) for the intensity scale; see calendarLevel() for rationale.
+    var CALENDAR_SCALE_EXPONENT = 0.7;
+
     function dashboardContributionCalendarModule() {
         return {
             calendarData: [],
@@ -127,15 +134,30 @@
 
             calendarLevel(value, max) {
                 if (value <= 0 || max <= 0) return 0;
-                // Log scale against the busiest day: token counts span orders of
-                // magnitude, so a linear ratio collapses every quiet day to the
-                // lightest shade. Logs compress the busy days and spread the quiet
-                // ones, keeping low-volume days distinguishable.
-                var ratio = Math.log(value + 1) / Math.log(max + 1);
-                if (ratio <= 0.25) return 1;
-                if (ratio <= 0.5) return 2;
-                if (ratio <= 0.75) return 3;
-                return 4;
+                // Power scale (exponent < 1) against the busiest day. Token
+                // counts span orders of magnitude. A linear ratio collapses every
+                // quiet day to the lightest shade, while a pure log scale flattens
+                // the busy end so a 1M and a 1.5M day land on the same shade. A
+                // ~0.7 exponent sits between the two: it keeps high-volume days
+                // separated (so big days stay distinguishable) while still
+                // lifting quiet days off the lightest level. Spreading the result
+                // across CALENDAR_LEVELS buckets gives a gradual ramp instead of
+                // a handful of coarse steps.
+                var ratio = Math.pow(value / max, CALENDAR_SCALE_EXPONENT);
+                var level = Math.ceil(ratio * CALENDAR_LEVELS);
+                if (level < 1) return 1;
+                if (level > CALENDAR_LEVELS) return CALENDAR_LEVELS;
+                return level;
+            },
+
+            calendarLegendLevels() {
+                // 0 (empty) .. CALENDAR_LEVELS, matching calendarLevel()'s range
+                // and the --cal-level-* ramp so the legend always mirrors the grid.
+                var levels = [];
+                for (var i = 0; i <= CALENDAR_LEVELS; i++) {
+                    levels.push(i);
+                }
+                return levels;
             },
 
             toggleCalendarMode(mode) {
