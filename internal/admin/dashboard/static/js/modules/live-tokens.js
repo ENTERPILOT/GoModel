@@ -301,9 +301,10 @@
                             const d = new Date(ms);
                             const key = d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate();
                             if (prevKey !== null && key !== prevKey && meta.data[i - 1]) {
+                                const markerColor = colors.dayMarker || colors.text;
                                 const x = Math.round((meta.data[i - 1].x + meta.data[i].x) / 2) + 0.5;
-                                ctx.globalAlpha = 0.4;
-                                ctx.strokeStyle = colors.text;
+                                ctx.globalAlpha = 0.6;
+                                ctx.strokeStyle = markerColor;
                                 ctx.setLineDash([3, 3]);
                                 ctx.lineWidth = 1;
                                 ctx.beginPath();
@@ -311,8 +312,9 @@
                                 ctx.lineTo(x, area.bottom);
                                 ctx.stroke();
                                 ctx.setLineDash([]);
-                                ctx.globalAlpha = 0.85;
-                                ctx.fillStyle = colors.text;
+                                // Full opacity + high-contrast color so the date label stays legible.
+                                ctx.globalAlpha = 1;
+                                ctx.fillStyle = markerColor;
                                 ctx.textAlign = 'left';
                                 ctx.textBaseline = 'bottom';
                                 ctx.fillText(d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), x + 3, area.bottom - 2);

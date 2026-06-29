@@ -38,6 +38,10 @@
   --radius: 8px;
   --chart-grid: #2a2826;
   --chart-text: #9a918a;
+  /* High-contrast color for chart day-boundary markers (divider line + date
+     label) so they stand out from the muted axis text: bright on dark,
+     dark on light. */
+  --chart-day-marker: var(--text);
   --chart-tooltip-bg: #1e1d1c;
   --chart-tooltip-border: #2a2826;
   --chart-tooltip-text: #e8e0d6;
@@ -87,6 +91,7 @@
   --prompt-cache-color-bg: color-mix(in srgb, var(--prompt-cache-color) 9%, var(--bg-surface));
   --chart-grid: #e8e0d6;
   --chart-text: #7a7068;
+  --chart-day-marker: var(--text);
   --chart-tooltip-bg: #ffffff;
   --chart-tooltip-border: #e8e0d6;
   --chart-tooltip-text: #2d2519;
@@ -135,6 +140,7 @@
     --prompt-cache-color-bg: color-mix(in srgb, var(--prompt-cache-color) 9%, var(--bg-surface));
     --chart-grid: #e8e0d6;
     --chart-text: #7a7068;
+    --chart-day-marker: var(--text);
     --chart-tooltip-bg: #ffffff;
     --chart-tooltip-border: #e8e0d6;
     --chart-tooltip-text: #2d2519;

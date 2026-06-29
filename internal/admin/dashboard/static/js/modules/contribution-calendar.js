@@ -79,10 +79,10 @@
                 var todayKey = this.currentDateKey();
                 var start = this.dateKeyToDate(this.addDaysToDateKey(todayKey, -364));
 
-                // Align start to Monday (ISO week start)
-                var dayOfWeek = start.getUTCDay();
-                var diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-                start.setUTCDate(start.getUTCDate() + diff);
+                // Align start to Sunday so each week column reads top-to-bottom
+                // Sun, Mon, ..., Sat — matching the Mon/Wed/Fri day labels (GitHub style).
+                var dayOfWeek = start.getUTCDay(); // 0 = Sunday
+                start.setUTCDate(start.getUTCDate() - dayOfWeek);
 
                 var mode = this.calendarMode;
                 var days = [];
@@ -168,9 +168,9 @@
                 var todayKey = this.currentDateKey();
                 var today = this.dateKeyToDate(todayKey);
                 var start = this.dateKeyToDate(this.addDaysToDateKey(todayKey, -364));
-                var dayOfWeek = start.getUTCDay();
-                var diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-                start.setUTCDate(start.getUTCDate() + diff);
+                // Sunday-align to match buildCalendarGrid's week columns.
+                var dayOfWeek = start.getUTCDay(); // 0 = Sunday
+                start.setUTCDate(start.getUTCDate() - dayOfWeek);
 
                 var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                 var labels = [];

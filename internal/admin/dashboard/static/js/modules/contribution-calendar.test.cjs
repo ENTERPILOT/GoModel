@@ -135,6 +135,22 @@ test('buildCalendarGrid scales every day against the busiest day in the whole pe
     assert.ok(empties.every((d) => d.level === 0), 'no-usage days have level 0');
 });
 
+test('buildCalendarGrid lays out weeks Sunday-first to match the day labels', () => {
+    const m = withCalendarDates(createCalendarModule(), '2026-06-23');
+    m.calendarMode = 'tokens';
+    m.calendarData = [];
+
+    const firstWeek = m.buildCalendarGrid()[0];
+    // Day labels are [_, Mon, _, Wed, _, Fri, _], so the top row must be Sunday:
+    // row index r holds weekday r (Sun=0, Mon=1, ... Sat=6).
+    for (let row = 0; row < 7; row++) {
+        const cell = firstWeek[row];
+        assert.ok(!cell.empty, `first week row ${row} should be a real day`);
+        const weekday = new Date(cell.dateStr + 'T00:00:00Z').getUTCDay();
+        assert.equal(weekday, row, `row ${row} should be weekday ${row} (got ${cell.dateStr})`);
+    }
+});
+
 test('buildCalendarGrid applies the same power scaling to the costs view', () => {
     const m = withCalendarDates(createCalendarModule(), '2026-06-23');
     const olderKey = m.addDaysToDateKey('2026-06-23', -100);

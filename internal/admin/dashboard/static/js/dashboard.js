@@ -356,6 +356,7 @@ function dashboard() {
       return {
         grid: this.cssVar("--chart-grid"),
         text: this.cssVar("--chart-text"),
+        dayMarker: this.cssVar("--chart-day-marker"),
         tooltipBg: this.cssVar("--chart-tooltip-bg"),
         tooltipBorder: this.cssVar("--chart-tooltip-border"),
         tooltipText: this.cssVar("--chart-tooltip-text"),
