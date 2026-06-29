@@ -30,7 +30,31 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	if _, err := coll.Indexes().CreateMany(ctx, indexes); err != nil {
 		return nil, fmt.Errorf("create failover_rules indexes: %w", err)
 	}
+	if err := migrateMongoDBFailoverRules(ctx, coll); err != nil {
+		return nil, err
+	}
 	return &MongoDBStore{collection: coll}, nil
+}
+
+func migrateMongoDBFailoverRules(ctx context.Context, coll *mongo.Collection) error {
+	if _, err := coll.UpdateMany(ctx,
+		bson.M{"fallback_models": bson.M{"$exists": false}, "targets": bson.M{"$exists": true}},
+		mongo.Pipeline{
+			bson.D{{Key: "$set", Value: bson.D{{Key: "fallback_models", Value: "$targets"}}}},
+		},
+	); err != nil {
+		return fmt.Errorf("migrate failover_rules targets field: %w", err)
+	}
+	if _, err := coll.UpdateMany(ctx,
+		bson.M{"$or": bson.A{
+			bson.M{"targets": bson.M{"$exists": true}},
+			bson.M{"description": bson.M{"$exists": true}},
+		}},
+		bson.M{"$unset": bson.M{"targets": "", "description": ""}},
+	); err != nil {
+		return fmt.Errorf("remove legacy failover_rules fields: %w", err)
+	}
+	return nil
 }
 
 func (s *MongoDBStore) List(ctx context.Context) ([]Rule, error) {
