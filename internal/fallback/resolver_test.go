@@ -29,12 +29,9 @@ func TestResolverManualModeUsesConfiguredFallbacks(t *testing.T) {
 	)
 
 	resolver := NewResolver(config.FallbackConfig{
-		DefaultMode: config.FallbackModeOff,
+		Enabled: true,
 		Manual: map[string][]string{
 			"gpt-4o": []string{"azure/gpt-4o", "gemini/gemini-2.5-pro"},
-		},
-		Overrides: map[string]config.FallbackModelOverride{
-			"gpt-4o": {Mode: config.FallbackModeManual},
 		},
 	}, registry)
 
@@ -55,7 +52,7 @@ func TestResolverManualModeUsesConfiguredFallbacks(t *testing.T) {
 	}
 }
 
-func TestResolverAutoModeAppendsRankingCandidates(t *testing.T) {
+func TestResolverSuggestFallbacksReturnsRankingCandidates(t *testing.T) {
 	registry := newFakeRegistry(
 		modelInfo("gpt-4o", "openai", "openai", 1287, "gpt-4o"),
 		modelInfo("gpt-4o", "azure", "azure", 1287, "gpt-4o"),
@@ -64,29 +61,26 @@ func TestResolverAutoModeAppendsRankingCandidates(t *testing.T) {
 	)
 
 	resolver := NewResolver(config.FallbackConfig{
-		DefaultMode: config.FallbackModeAuto,
+		Enabled: true,
 		Manual: map[string][]string{
 			"gpt-4o": []string{"azure/gpt-4o"},
 		},
 	}, registry)
 
-	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+	got := resolver.SuggestFallbacks(&core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
 		ProviderType:     "openai",
 	}, core.OperationChatCompletions)
 
-	if len(got) < 3 {
-		t.Fatalf("len(got) = %d, want at least 3", len(got))
+	if len(got) < 2 {
+		t.Fatalf("len(got) = %d, want at least 2", len(got))
 	}
-	if got[0].QualifiedModel() != "azure/gpt-4o" {
-		t.Fatalf("got[0] = %q, want %q", got[0].QualifiedModel(), "azure/gpt-4o")
+	if got[0].QualifiedModel() != "gemini/gemini-2.5-pro" {
+		t.Fatalf("got[0] = %q, want %q", got[0].QualifiedModel(), "gemini/gemini-2.5-pro")
 	}
-	if got[1].QualifiedModel() != "gemini/gemini-2.5-pro" {
-		t.Fatalf("got[1] = %q, want %q", got[1].QualifiedModel(), "gemini/gemini-2.5-pro")
-	}
-	if got[2].QualifiedModel() != "anthropic/claude-sonnet-4" {
-		t.Fatalf("got[2] = %q, want %q", got[2].QualifiedModel(), "anthropic/claude-sonnet-4")
+	if got[1].QualifiedModel() != "anthropic/claude-sonnet-4" {
+		t.Fatalf("got[1] = %q, want %q", got[1].QualifiedModel(), "anthropic/claude-sonnet-4")
 	}
 }
 
@@ -97,7 +91,7 @@ func TestResolverBlankDefaultModeUsesManualFallback(t *testing.T) {
 		modelInfo("gemini-2.5-pro", "gemini", "gemini", 1290, "gemini-2.5-pro"),
 	)
 
-	resolver := NewResolver(config.FallbackConfig{}, registry)
+	resolver := NewResolver(config.FallbackConfig{Enabled: true}, registry)
 	if resolver == nil {
 		t.Fatal("NewResolver() = nil, want manual-enabled resolver")
 	}
@@ -120,12 +114,12 @@ func TestResolverOverrideOffDisablesFallbacks(t *testing.T) {
 	)
 
 	resolver := NewResolver(config.FallbackConfig{
-		DefaultMode: config.FallbackModeAuto,
+		Enabled: true,
 		Manual: map[string][]string{
 			"gpt-4o": []string{"azure/gpt-4o"},
 		},
-		Overrides: map[string]config.FallbackModelOverride{
-			"gpt-4o": {Mode: config.FallbackModeOff},
+		Disabled: map[string]bool{
+			"gpt-4o": true,
 		},
 	}, registry)
 
@@ -147,7 +141,7 @@ func TestResolverDoesNotReturnFallbacksForEmbeddings(t *testing.T) {
 	)
 
 	resolver := NewResolver(config.FallbackConfig{
-		DefaultMode: config.FallbackModeAuto,
+		Enabled: true,
 		Manual: map[string][]string{
 			"text-embedding-3-small": []string{"azure/text-embedding-3-large"},
 		},
@@ -172,14 +166,10 @@ func TestResolverPrefersProviderQualifiedOverrideForBareRequests(t *testing.T) {
 	)
 
 	resolver := NewResolver(config.FallbackConfig{
-		DefaultMode: config.FallbackModeAuto,
+		Enabled: true,
 		Manual: map[string][]string{
 			"gpt-4o":        []string{"gemini/gemini-2.5-pro"},
 			"openai/gpt-4o": []string{"azure/gpt-4o"},
-		},
-		Overrides: map[string]config.FallbackModelOverride{
-			"gpt-4o":        {Mode: config.FallbackModeOff},
-			"openai/gpt-4o": {Mode: config.FallbackModeManual},
 		},
 	}, registry)
 
@@ -204,13 +194,9 @@ func TestResolverTreatsBareModelIDsContainingSlashAsGenericKeys(t *testing.T) {
 	)
 
 	resolver := NewResolver(config.FallbackConfig{
-		DefaultMode: config.FallbackModeAuto,
+		Enabled: true,
 		Manual: map[string][]string{
 			"openrouter/meta-llama/Meta-Llama-3-70B": {"groq/meta-llama/Meta-Llama-3-70B"},
-		},
-		Overrides: map[string]config.FallbackModelOverride{
-			"meta-llama/Meta-Llama-3-70B":            {Mode: config.FallbackModeOff},
-			"openrouter/meta-llama/Meta-Llama-3-70B": {Mode: config.FallbackModeManual},
 		},
 	}, registry)
 

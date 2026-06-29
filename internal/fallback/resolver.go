@@ -27,23 +27,34 @@ type Registry interface {
 	ListModelsWithProvider() []providers.ModelWithProvider
 }
 
+// RuleProvider supplies the current effective manual failover rules.
+type RuleProvider interface {
+	Rules() map[string][]string
+	Disabled() map[string]bool
+}
+
 // Resolver computes fallback model chains for translated routes.
 type Resolver struct {
-	defaultMode config.FallbackMode
-	manual      map[string][]string
-	overrides   map[string]config.FallbackModelOverride
-	registry    Registry
+	enabled      bool
+	manual       map[string][]string
+	disabled     map[string]bool
+	ruleProvider RuleProvider
+	registry     Registry
 }
 
 // NewResolver builds a fallback resolver from config and the current model
 // inventory. Returns nil when fallback is effectively disabled.
 func NewResolver(cfg config.FallbackConfig, registry Registry) *Resolver {
+	return NewResolverWithRuleProvider(cfg, registry, nil)
+}
+
+// NewResolverWithRuleProvider builds a resolver backed by static config and an
+// optional dynamic manual-rule provider.
+func NewResolverWithRuleProvider(cfg config.FallbackConfig, registry Registry, ruleProvider RuleProvider) *Resolver {
 	if registry == nil {
 		return nil
 	}
-
-	mode := config.ResolveFallbackDefaultMode(cfg.DefaultMode)
-	if mode == config.FallbackModeOff && len(cfg.Manual) == 0 && len(cfg.Overrides) == 0 {
+	if !cfg.Enabled {
 		return nil
 	}
 
@@ -53,24 +64,27 @@ func NewResolver(cfg config.FallbackConfig, registry Registry) *Resolver {
 		manual[key] = copyModels
 	}
 
-	overrides := make(map[string]config.FallbackModelOverride, len(cfg.Overrides))
-	for key, override := range cfg.Overrides {
-		overrides[key] = override
+	disabled := make(map[string]bool, len(cfg.Disabled))
+	for key, value := range cfg.Disabled {
+		if value {
+			disabled[key] = true
+		}
 	}
 
 	return &Resolver{
-		defaultMode: mode,
-		manual:      manual,
-		overrides:   overrides,
-		registry:    registry,
+		enabled:      true,
+		manual:       manual,
+		disabled:     disabled,
+		ruleProvider: ruleProvider,
+		registry:     registry,
 	}
 }
 
 // ResolveFallbacks returns the ordered fallback chain for a resolved request.
-// Manual fallbacks preserve configured order; auto candidates are appended after
-// manual candidates when the effective mode is "auto".
+// Manual fallbacks preserve configured order. Runtime auto mode is intentionally
+// not used; generated candidates must be saved as manual rules first.
 func (r *Resolver) ResolveFallbacks(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
-	if r == nil || resolution == nil || r.registry == nil {
+	if r == nil || resolution == nil || r.registry == nil || !r.enabled {
 		return nil
 	}
 
@@ -80,20 +94,14 @@ func (r *Resolver) ResolveFallbacks(resolution *core.RequestModelResolution, op 
 	}
 
 	source := r.sourceModelInfo(resolution)
-	mode := r.modeFor(resolution, source)
-	if mode == config.FallbackModeOff {
+	if r.disabledFor(resolution, source) {
 		return nil
 	}
 
 	sourceKey := r.sourceKey(resolution, source)
 	seen := make(map[string]struct{})
 
-	result := r.manualSelectorsFor(resolution, source, sourceKey, seen)
-	if mode != config.FallbackModeAuto {
-		return result
-	}
-
-	return append(result, r.autoSelectorsFor(source, sourceKey, requiredCategory, seen)...)
+	return r.manualSelectorsFor(resolution, source, sourceKey, seen)
 }
 
 func (r *Resolver) sourceModelInfo(resolution *core.RequestModelResolution) *providers.ModelInfo {
@@ -119,16 +127,14 @@ func (r *Resolver) sourceModelInfo(resolution *core.RequestModelResolution) *pro
 	return nil
 }
 
-func (r *Resolver) modeFor(resolution *core.RequestModelResolution, source *providers.ModelInfo) config.FallbackMode {
-	mode := r.defaultMode
+func (r *Resolver) disabledFor(resolution *core.RequestModelResolution, source *providers.ModelInfo) bool {
+	disabled := r.effectiveDisabled()
 	for _, key := range r.matchKeys(resolution, source) {
-		override, ok := r.overrides[key]
-		if !ok || override.Mode == "" {
-			continue
+		if disabled[key] {
+			return true
 		}
-		return override.Mode
 	}
-	return mode
+	return false
 }
 
 func (r *Resolver) manualSelectorsFor(
@@ -137,8 +143,9 @@ func (r *Resolver) manualSelectorsFor(
 	sourceKey string,
 	seen map[string]struct{},
 ) []core.ModelSelector {
+	manual := r.effectiveManualRules()
 	for _, key := range r.matchKeys(resolution, source) {
-		models, ok := r.manual[key]
+		models, ok := manual[key]
 		if !ok {
 			continue
 		}
@@ -157,6 +164,68 @@ func (r *Resolver) manualSelectorsFor(
 		return result
 	}
 	return nil
+}
+
+// SuggestFallbacks returns ranked candidate selectors for an operator to review
+// and save as a manual rule. Suggestions are never used directly at runtime.
+func (r *Resolver) SuggestFallbacks(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
+	if r == nil || resolution == nil || r.registry == nil || !r.enabled {
+		return nil
+	}
+	requiredCategory := requiredCategoryForOperation(op)
+	if requiredCategory == core.CategoryEmbedding {
+		return nil
+	}
+	source := r.sourceModelInfo(resolution)
+	if r.disabledFor(resolution, source) {
+		return nil
+	}
+	sourceKey := r.sourceKey(resolution, source)
+	seen := make(map[string]struct{})
+	for _, selector := range r.manualSelectorsFor(resolution, source, sourceKey, seen) {
+		seen[selector.QualifiedModel()] = struct{}{}
+	}
+	return r.autoSelectorsFor(source, sourceKey, requiredCategory, seen)
+}
+
+func (r *Resolver) effectiveManualRules() map[string][]string {
+	if r.ruleProvider == nil {
+		return r.manual
+	}
+	dynamic := r.ruleProvider.Rules()
+	if len(dynamic) == 0 {
+		return r.manual
+	}
+	merged := make(map[string][]string, len(r.manual)+len(dynamic))
+	for key, models := range r.manual {
+		merged[key] = append([]string(nil), models...)
+	}
+	for key, models := range dynamic {
+		merged[key] = append([]string(nil), models...)
+	}
+	return merged
+}
+
+func (r *Resolver) effectiveDisabled() map[string]bool {
+	if r.ruleProvider == nil {
+		return r.disabled
+	}
+	dynamic := r.ruleProvider.Disabled()
+	if len(dynamic) == 0 {
+		return r.disabled
+	}
+	merged := make(map[string]bool, len(r.disabled)+len(dynamic))
+	for key, disabled := range r.disabled {
+		if disabled {
+			merged[key] = true
+		}
+	}
+	for key, disabled := range dynamic {
+		if disabled {
+			merged[key] = true
+		}
+	}
+	return merged
 }
 
 func (r *Resolver) autoSelectorsFor(

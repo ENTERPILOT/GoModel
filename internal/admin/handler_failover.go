@@ -1,0 +1,243 @@
+package admin
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/labstack/echo/v5"
+
+	"gomodel/config"
+	"gomodel/internal/core"
+	"gomodel/internal/failover"
+	fallbackresolver "gomodel/internal/fallback"
+)
+
+type upsertFailoverRuleRequest struct {
+	Source      string   `json:"source"`
+	Targets     []string `json:"targets"`
+	Description string   `json:"description,omitempty"`
+	Enabled     *bool    `json:"enabled,omitempty"`
+}
+
+type deleteFailoverRuleRequest struct {
+	Source string `json:"source"`
+}
+
+// ListFailoverRules handles GET /admin/failover.
+//
+// @Summary      List failover rules
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {array}   failover.View
+// @Failure      401  {object}  core.GatewayError
+// @Failure      503  {object}  core.GatewayError
+// @Router       /admin/failover [get]
+func (h *Handler) ListFailoverRules(c *echo.Context) error {
+	if h.failoverRules == nil {
+		return handleError(c, featureUnavailableError("failover feature is unavailable"))
+	}
+	views := h.failoverRules.ListViews()
+	if views == nil {
+		views = []failover.View{}
+	}
+	return c.JSON(http.StatusOK, views)
+}
+
+// UpsertFailoverRule handles PUT /admin/failover.
+//
+// @Summary      Create or update one failover rule
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        rule  body      upsertFailoverRuleRequest  true  "Failover rule"
+// @Success      200   {object}  failover.View
+// @Failure      400   {object}  core.GatewayError
+// @Failure      401   {object}  core.GatewayError
+// @Failure      502   {object}  core.GatewayError
+// @Failure      503   {object}  core.GatewayError
+// @Router       /admin/failover [put]
+func (h *Handler) UpsertFailoverRule(c *echo.Context) error {
+	if h.failoverRules == nil {
+		return handleError(c, featureUnavailableError("failover feature is unavailable"))
+	}
+	var req upsertFailoverRuleRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	source := strings.TrimSpace(req.Source)
+	if source == "" {
+		return handleError(c, core.NewInvalidRequestError("source is required", nil))
+	}
+	enabled := true
+	if existing, ok := h.failoverRules.Get(source); ok && existing != nil {
+		enabled = existing.Enabled
+	}
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	rule := failover.Rule{
+		Source:      source,
+		Targets:     req.Targets,
+		Description: strings.TrimSpace(req.Description),
+		Enabled:     enabled,
+	}
+	if err := h.failoverRules.Upsert(c.Request().Context(), rule); err != nil {
+		return handleError(c, failoverWriteError(err))
+	}
+	if view, ok := h.findFailoverView(source); ok {
+		return c.JSON(http.StatusOK, view)
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// DeleteFailoverRule handles DELETE /admin/failover.
+//
+// @Summary      Delete one failover rule
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        request  body  deleteFailoverRuleRequest  true  "Failover source to remove"
+// @Success      204      "No Content"
+// @Failure      400      {object}  core.GatewayError
+// @Failure      401      {object}  core.GatewayError
+// @Failure      404      {object}  core.GatewayError
+// @Failure      502      {object}  core.GatewayError
+// @Failure      503      {object}  core.GatewayError
+// @Router       /admin/failover [delete]
+func (h *Handler) DeleteFailoverRule(c *echo.Context) error {
+	if h.failoverRules == nil {
+		return handleError(c, featureUnavailableError("failover feature is unavailable"))
+	}
+	source, err := failoverDeleteSource(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+	err = h.failoverRules.Delete(c.Request().Context(), source)
+	switch {
+	case err == nil:
+		return c.NoContent(http.StatusNoContent)
+	case errors.Is(err, failover.ErrNotFound):
+		return handleError(c, core.NewNotFoundError("failover rule not found: "+source))
+	default:
+		return handleError(c, failoverWriteError(err))
+	}
+}
+
+func failoverDeleteSource(c *echo.Context) (string, error) {
+	var req deleteFailoverRuleRequest
+	if err := c.Bind(&req); err != nil {
+		return "", core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
+	}
+	source := strings.TrimSpace(req.Source)
+	if source == "" {
+		return "", core.NewInvalidRequestError("source is required", nil)
+	}
+	return source, nil
+}
+
+// ResetFailoverRules handles POST /admin/failover/reset.
+//
+// @Summary      Reset dashboard-managed failover rules
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {array}   failover.View
+// @Failure      401  {object}  core.GatewayError
+// @Failure      502  {object}  core.GatewayError
+// @Failure      503  {object}  core.GatewayError
+// @Router       /admin/failover/reset [post]
+func (h *Handler) ResetFailoverRules(c *echo.Context) error {
+	if h.failoverRules == nil {
+		return handleError(c, featureUnavailableError("failover feature is unavailable"))
+	}
+	if err := h.failoverRules.ResetDashboardRules(c.Request().Context()); err != nil {
+		return handleError(c, failoverWriteError(err))
+	}
+	return c.JSON(http.StatusOK, h.failoverRules.ListViews())
+}
+
+// GenerateFailoverRules handles POST /admin/failover/generate.
+//
+// @Summary      Generate failover rule suggestions
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {array}   failover.View
+// @Failure      401  {object}  core.GatewayError
+// @Failure      503  {object}  core.GatewayError
+// @Router       /admin/failover/generate [post]
+func (h *Handler) GenerateFailoverRules(c *echo.Context) error {
+	if h.failoverRules == nil || h.registry == nil {
+		return handleError(c, featureUnavailableError("failover feature is unavailable"))
+	}
+	resolver := fallbackresolver.NewResolverWithRuleProvider(config.FallbackConfig{Enabled: true}, h.registry, h.failoverRules)
+	if resolver == nil {
+		return c.JSON(http.StatusOK, []failover.View{})
+	}
+	suggestions := make([]failover.View, 0)
+	for _, model := range h.registry.ListModelsWithProvider() {
+		if !modelSupportsCategory(model.Model.Metadata, core.CategoryTextGeneration) {
+			continue
+		}
+		source := strings.TrimSpace(model.Selector)
+		if source == "" {
+			continue
+		}
+		resolution := &core.RequestModelResolution{
+			Requested: core.NewRequestedModelSelector(model.Model.ID, model.ProviderName),
+			ResolvedSelector: core.ModelSelector{
+				Provider: model.ProviderName,
+				Model:    model.Model.ID,
+			},
+			ProviderName: model.ProviderName,
+			ProviderType: model.ProviderType,
+		}
+		candidates := resolver.SuggestFallbacks(resolution, core.OperationChatCompletions)
+		if len(candidates) == 0 {
+			continue
+		}
+		targets := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			targets = append(targets, candidate.QualifiedModel())
+		}
+		suggestions = append(suggestions, failover.View{
+			Source:        source,
+			Targets:       targets,
+			Enabled:       true,
+			ManagedSource: failover.ManagedSourceDashboard,
+		})
+	}
+	return c.JSON(http.StatusOK, suggestions)
+}
+
+func modelSupportsCategory(meta *core.ModelMetadata, category core.ModelCategory) bool {
+	if meta == nil || len(meta.Categories) == 0 {
+		return true
+	}
+	for _, candidate := range meta.Categories {
+		if candidate == category {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) findFailoverView(source string) (failover.View, bool) {
+	for _, view := range h.failoverRules.ListViews() {
+		if view.Source == source {
+			return view, true
+		}
+	}
+	return failover.View{}, false
+}
+
+func failoverWriteError(err error) error {
+	if errors.Is(err, failover.ErrManaged) {
+		return core.NewInvalidRequestError("failover rule is managed by configuration and cannot be changed in the dashboard", err)
+	}
+	return core.NewProviderError("admin", http.StatusBadGateway, err.Error(), err)
+}

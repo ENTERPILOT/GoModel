@@ -651,7 +651,7 @@ func TestAdminWorkflowEndpoints_AreRegistered(t *testing.T) {
 func TestAdminDashboardConfigEndpoint_ReturnsHandlerResponse(t *testing.T) {
 	mock := &mockProvider{}
 	adminHandler := admin.NewHandler(nil, nil, admin.WithDashboardRuntimeConfig(admin.DashboardConfigResponse{
-		FeatureFallbackMode: "manual",
+		FailoverEnabled: "on",
 	}))
 	srv := New(mock, &Config{
 		AdminEndpointsEnabled: true,
@@ -665,15 +665,15 @@ func TestAdminDashboardConfigEndpoint_ReturnsHandlerResponse(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"FEATURE_FALLBACK_MODE":"manual"`) {
-		t.Fatalf("response body = %s, want FEATURE_FALLBACK_MODE payload", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `"FAILOVER_ENABLED":"on"`) {
+		t.Fatalf("response body = %s, want FAILOVER_ENABLED payload", rec.Body.String())
 	}
 }
 
 func TestAdminLegacyAlias_Deprecation(t *testing.T) {
 	mock := &mockProvider{}
 	adminHandler := admin.NewHandler(nil, nil, admin.WithDashboardRuntimeConfig(admin.DashboardConfigResponse{
-		FeatureFallbackMode: "manual",
+		FailoverEnabled: "on",
 	}))
 	srv := New(mock, &Config{
 		AdminEndpointsEnabled: true,

@@ -50,6 +50,12 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.PUT("/virtual-models", h.UpsertVirtualModel)
 	g.DELETE("/virtual-models", h.DeleteVirtualModel)
 
+	g.GET("/failover", h.ListFailoverRules)
+	g.PUT("/failover", h.UpsertFailoverRule)
+	g.DELETE("/failover", h.DeleteFailoverRule)
+	g.POST("/failover/reset", h.ResetFailoverRules)
+	g.POST("/failover/generate", h.GenerateFailoverRules)
+
 	g.GET("/model-pricing-overrides", h.ListModelPricingOverrides)
 	g.PUT("/model-pricing-overrides", h.UpsertModelPricingOverride)
 	g.DELETE("/model-pricing-overrides", h.DeleteModelPricingOverride)

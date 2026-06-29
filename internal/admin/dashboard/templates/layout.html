@@ -127,6 +127,80 @@
                 </form>
             </section>
         </div>
+        <div class="editor-modal-backdrop"
+             x-cloak
+             x-show="failoverFormOpen"
+             x-transition.opacity.duration.160ms
+             aria-hidden="true"></div>
+        <div class="editor-modal-shell"
+             x-cloak
+             x-show="failoverFormOpen"
+             x-transition.opacity.duration.160ms
+             @click="closeFailoverForm()"
+             @keydown.escape.window="failoverFormOpen && !authDialogOpen && closeFailoverForm()">
+            <section class="model-editor" x-show="failoverFormOpen" x-ref="failoverEditor" role="dialog" aria-modal="true" aria-label="Failover editor" @click.stop>
+                <form class="form" @submit.prevent="submitFailoverForm()">
+                    <div class="editor-header">
+                        <div>
+                            <p class="form-kicker">Failover rule</p>
+                            <h3 x-text="failoverForm.source || 'Failover'"></h3>
+                        </div>
+                        <button type="button" class="dialog-close-btn" aria-label="Close failover editor" @click="closeFailoverForm()">
+                            {{template "x-icon"}}
+                        </button>
+                    </div>
+
+                    <p class="form-hint" x-show="failoverFormManaged" role="status">
+                        This failover rule is defined in configuration and is read-only here.
+                    </p>
+
+                    <div class="form-field">
+                        <label class="form-field-label" for="failover-source">Source</label>
+                        <input id="failover-source" type="text" class="mono" placeholder="openai/gpt-4o" x-model="failoverForm.source" :disabled="failoverFormMode === 'edit' || failoverFormManaged" data-modal-autofocus>
+                    </div>
+
+                    <datalist id="failover-target-options">
+                        <template x-for="m in models" :key="'failover-target:' + qualifiedModelName(m)">
+                            <option :value="qualifiedModelName(m)" x-text="qualifiedModelName(m)"></option>
+                        </template>
+                    </datalist>
+
+                    <div class="form-field">
+                        <label class="form-field-label" for="failover-targets">Targets</label>
+                        <textarea id="failover-targets" rows="5" class="mono" placeholder="azure/gpt-4o&#10;gemini/gemini-2.5-pro" x-model="failoverForm.targets" :disabled="failoverFormManaged" list="failover-target-options"></textarea>
+                    </div>
+
+                    <div class="form-field">
+                        <label class="form-field-label" for="failover-description">Description</label>
+                        <textarea id="failover-description" rows="3" placeholder="Optional description" x-model="failoverForm.description" :disabled="failoverFormManaged"></textarea>
+                    </div>
+
+                    <div class="vm-status-row">
+                        <div class="vm-status-toggle">
+                            <button type="button" class="alias-toggle"
+                                    :class="{ enabled: failoverForm.enabled }"
+                                    :disabled="failoverFormManaged"
+                                    :aria-label="(failoverForm.enabled ? 'Disable' : 'Enable') + ' failover rule'"
+                                    @click="!failoverFormManaged && (failoverForm.enabled = !failoverForm.enabled)">
+                                <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
+                                <span x-text="failoverForm.enabled ? 'Enabled' : 'Disabled'"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <p class="form-error" x-show="failoverError" x-text="failoverError" role="alert" aria-live="assertive"></p>
+
+                    <div class="form-actions">
+                        <button type="button" class="pagination-btn" @click="closeFailoverForm()">Cancel</button>
+                        <button type="button" class="pagination-btn pagination-btn-danger-outline" x-show="failoverFormMode === 'edit' && !failoverFormManaged" :disabled="failoverSaving" @click="deleteFailoverRule()">Remove</button>
+                        <button type="submit" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" x-show="!failoverFormManaged" :disabled="failoverSaving">
+                            <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                            <span x-text="failoverSaving ? 'Saving...' : 'Save'"></span>
+                        </button>
+                    </div>
+                </form>
+            </section>
+        </div>
         {{template "typed-confirmation-dialog" .}}
     </div>
     <script src="{{assetURL "vendor/lucide.min.js"}}"></script>
@@ -140,6 +214,7 @@
     <script src="{{assetURL "js/modules/audit-list.js"}}"></script>
     <script src="{{assetURL "js/modules/live-logs.js"}}"></script>
     <script src="{{assetURL "js/modules/virtual-models.js"}}"></script>
+    <script src="{{assetURL "js/modules/failover.js"}}"></script>
     <script src="{{assetURL "js/modules/model-pricing-overrides.js"}}"></script>
     <script src="{{assetURL "js/modules/workflows.js"}}"></script>
     <script src="{{assetURL "js/modules/auth-keys.js"}}"></script>

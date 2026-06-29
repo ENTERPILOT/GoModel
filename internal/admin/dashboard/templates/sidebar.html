@@ -40,6 +40,10 @@
             <i data-lucide="workflow" class="nav-icon" aria-hidden="true"></i>
             <span>Workflows</span>
         </a>
+        <a href="{{appURL "/admin/dashboard/failover"}}" class="nav-item" :class="{ active: page === 'failover' }" title="Failover" @click.prevent="navigate('failover')">
+            <i data-lucide="shuffle" class="nav-icon" aria-hidden="true"></i>
+            <span>Failover</span>
+        </a>
         <a href="{{appURL "/admin/dashboard/guardrails"}}" class="nav-item" :class="{ active: page === 'guardrails' }" title="Guardrails (experimental)" x-show="guardrailsPageVisible()" @click.prevent="navigate('guardrails')">
             <i data-lucide="shield-check" class="nav-icon" aria-hidden="true"></i>
             <span>Guardrails (experimental)</span>

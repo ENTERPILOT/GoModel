@@ -81,7 +81,7 @@
 
 	            workflowRuntimeConfigKeys() {
 	                return [
-	                    'FEATURE_FALLBACK_MODE',
+	                    'FAILOVER_ENABLED',
 	                    'LOGGING_ENABLED',
 	                    'USAGE_ENABLED',
 	                    'BUDGETS_ENABLED',
@@ -137,13 +137,18 @@
 	                return this.workflowRuntimeBooleanFlag('GUARDRAILS_ENABLED', true);
 	            },
 
+	            workflowFailoverVisible() {
+	                return this.workflowRuntimeBooleanFlag('FAILOVER_ENABLED', true);
+	            },
+
 	            workflowFeatureCaps() {
 	                return {
 	                    cache: this.workflowCacheVisible(),
 	                    audit: this.workflowAuditVisible(),
 	                    usage: this.workflowUsageVisible(),
 	                    budget: this.workflowBudgetVisible(),
-	                    guardrails: this.workflowGuardrailsVisible()
+	                    guardrails: this.workflowGuardrailsVisible(),
+	                    fallback: this.workflowFailoverVisible()
 	                };
 	            },
 
@@ -193,13 +198,8 @@
 	                    usage,
 	                    budget: usage && features.budget && caps.budget,
 	                    guardrails: features.guardrails && caps.guardrails,
-	                    fallback: features.fallback
+	                    fallback: features.fallback && caps.fallback
 	                };
-	            },
-
-	            workflowFailoverVisible() {
-	                const mode = this.workflowRuntimeFlag('FEATURE_FALLBACK_MODE');
-	                return mode !== '' && mode !== 'off';
 	            },
 
             workflowFallbackLabel(source) {

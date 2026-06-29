@@ -208,6 +208,7 @@ function dashboard() {
         "budgets",
         "models",
         "workflows",
+        "failover",
         "audit-logs",
         "guardrails",
         "auth-keys",
@@ -246,6 +247,9 @@ function dashboard() {
       }
       if (page === "budgets" && typeof this.fetchBudgetsPage === "function") {
         this.fetchBudgetsPage();
+      }
+      if (page === "failover" && typeof this.fetchFailoverRules === "function") {
+        this.fetchFailoverRules();
       }
       if (page === "settings") {
         if (typeof this.ensureTimezoneOptions === "function") {
@@ -426,6 +430,7 @@ function dashboard() {
         (this.page === "models" &&
           (this.vmFormOpen ||
             this.modelPricingOverrideFormOpen)) ||
+        this.failoverFormOpen ||
         (this.page === "workflows" && this.workflowFormOpen) ||
         (this.page === "guardrails" && this.guardrailFormOpen) ||
         (this.page === "auth-keys" && this.authKeyFormOpen) ||
@@ -615,6 +620,9 @@ function dashboard() {
       }
       if (typeof this.fetchVirtualModels === "function") {
         requests.push(this.fetchVirtualModels());
+      }
+      if (typeof this.fetchFailoverRules === "function") {
+        requests.push(this.fetchFailoverRules());
       }
       if (typeof this.fetchModelPricingOverrides === "function") {
         requests.push(this.fetchModelPricingOverrides());
@@ -1125,6 +1133,12 @@ function dashboard() {
         ? dashboardVirtualModelsModule
         : null,
       "dashboardVirtualModelsModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardFailoverModule === "function"
+        ? dashboardFailoverModule
+        : null,
+      "dashboardFailoverModule",
     ),
     resolveModuleFactory(
       typeof dashboardModelPricingOverridesModule === "function"

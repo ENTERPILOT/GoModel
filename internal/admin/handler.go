@@ -17,6 +17,7 @@ import (
 	"gomodel/internal/authkeys"
 	"gomodel/internal/budget"
 	"gomodel/internal/core"
+	"gomodel/internal/failover"
 	"gomodel/internal/guardrails"
 	"gomodel/internal/live"
 	"gomodel/internal/pricingoverrides"
@@ -35,6 +36,7 @@ type Handler struct {
 	pricingResolver     usage.PricingResolver
 	authKeys            *authkeys.Service
 	virtualModels       *virtualmodels.Service
+	failoverRules       *failover.Service
 	pricingOverrides    *pricingoverrides.Service
 	workflows           *workflows.Service
 	budgets             *budget.Service
@@ -53,7 +55,7 @@ type Handler struct {
 type Option func(*Handler)
 
 const (
-	DashboardConfigFeatureFallbackMode  = "FEATURE_FALLBACK_MODE"
+	DashboardConfigFailoverEnabled      = "FAILOVER_ENABLED"
 	DashboardConfigLoggingEnabled       = "LOGGING_ENABLED"
 	DashboardConfigUsageEnabled         = "USAGE_ENABLED"
 	DashboardConfigBudgetsEnabled       = "BUDGETS_ENABLED"
@@ -70,7 +72,7 @@ const statusClientClosedRequest = 499
 
 // DashboardConfigResponse is the allowlisted runtime config contract exposed to the dashboard UI.
 type DashboardConfigResponse struct {
-	FeatureFallbackMode  string `json:"FEATURE_FALLBACK_MODE,omitempty"`
+	FailoverEnabled      string `json:"FAILOVER_ENABLED,omitempty"`
 	LoggingEnabled       string `json:"LOGGING_ENABLED,omitempty"`
 	UsageEnabled         string `json:"USAGE_ENABLED,omitempty"`
 	BudgetsEnabled       string `json:"BUDGETS_ENABLED,omitempty"`
@@ -178,6 +180,13 @@ func WithVirtualModels(service *virtualmodels.Service) Option {
 	}
 }
 
+// WithFailover enables failover rule administration endpoints.
+func WithFailover(service *failover.Service) Option {
+	return func(h *Handler) {
+		h.failoverRules = service
+	}
+}
+
 // WithAuthKeys enables managed auth key administration endpoints.
 func WithAuthKeys(service *authkeys.Service) Option {
 	return func(h *Handler) {
@@ -272,7 +281,7 @@ func NewHandler(reader usage.UsageReader, registry *providers.ModelRegistry, opt
 
 func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardConfigResponse {
 	return DashboardConfigResponse{
-		FeatureFallbackMode:  strings.TrimSpace(values.FeatureFallbackMode),
+		FailoverEnabled:      strings.TrimSpace(values.FailoverEnabled),
 		LoggingEnabled:       strings.TrimSpace(values.LoggingEnabled),
 		UsageEnabled:         strings.TrimSpace(values.UsageEnabled),
 		BudgetsEnabled:       strings.TrimSpace(values.BudgetsEnabled),

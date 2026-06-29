@@ -1,0 +1,121 @@
+{{define "dashboard-page-failover"}}
+<template x-if="page==='failover'">
+<div>
+    <div class="page-header">
+        <h2>Failover</h2>
+        <div class="model-count" x-show="failoverRules.length > 0">
+            <span x-text="failoverRules.length"></span> rules
+        </div>
+    </div>
+
+    {{template "auth-banner" .}}
+
+    <div class="alert alert-warning" x-show="!failoverAvailable && !authError">
+        Failover feature is unavailable.
+    </div>
+    <div class="alert alert-warning" x-show="failoverError && !authError" x-text="failoverError"></div>
+    <div class="alert alert-success" x-show="failoverNotice && !failoverError" x-text="failoverNotice"></div>
+
+    <div class="table-toolbar">
+        <div class="table-toolbar-main">
+            <div class="filter-input-wrap">
+                <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>
+                <input type="text" placeholder="Filter models..." aria-label="Filter models" x-model="modelFilter" class="filter-input">
+            </div>
+        </div>
+        <div class="table-toolbar-actions">
+            <button type="button" class="pagination-btn pagination-btn-with-icon" :disabled="failoverSaving || !failoverAvailable" @click="openFailoverResetDialog()">
+                <i data-lucide="rotate-ccw" class="form-action-icon" aria-hidden="true"></i>
+                <span>Reset all the failover models</span>
+            </button>
+            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" :disabled="failoverSaving || !failoverAvailable" @click="generateFailoverRules()">
+                <i data-lucide="wand-sparkles" class="form-action-icon" aria-hidden="true"></i>
+                <span>Generate failover models automatically</span>
+            </button>
+            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" :disabled="!failoverAvailable" @click="openFailoverCreate()">
+                <i data-lucide="plus" class="form-action-icon" aria-hidden="true"></i>
+                <span>New rule</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="loading-state" x-show="failoverLoading && !authError" role="status" aria-live="polite">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <span>Loading failover rules...</span>
+    </div>
+
+    <div class="table-wrapper" x-show="failoverRules.length > 0">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Source</th>
+                    <th>Targets</th>
+                    <th>Status</th>
+                    <th>Source</th>
+                    <th class="model-actions-header">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="rule in failoverRules" :key="rule.source">
+                    <tr>
+                        <td class="mono" x-text="rule.source"></td>
+                        <td class="mono" x-text="failoverTargetLabel(rule)"></td>
+                        <td x-text="failoverRuleStatus(rule)"></td>
+                        <td x-text="rule.managed_source || 'dashboard'"></td>
+                        <td class="model-row-actions">
+                            <div class="alias-actions-cell model-list-actions">
+                                <button type="button" class="table-action-btn table-icon-btn"
+                                    :aria-label="'Edit failover for ' + rule.source"
+                                    :title="'Edit failover for ' + rule.source"
+                                    @click="openFailoverEdit(rule)">
+                                    {{template "edit-icon"}}
+                                </button>
+                                <button type="button" class="table-action-btn table-action-btn-danger table-icon-btn"
+                                    x-show="!rule.managed"
+                                    :aria-label="'Remove failover for ' + rule.source"
+                                    :title="'Remove failover for ' + rule.source"
+                                    @click="deleteFailoverRule(rule)">
+                                    {{template "trash-icon"}}
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="table-wrapper" x-show="failoverGeneratedRules.length > 0">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Generated Source</th>
+                    <th>Generated Targets</th>
+                    <th class="model-actions-header">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="rule in failoverGeneratedRules" :key="'generated:' + rule.source">
+                    <tr>
+                        <td class="mono" x-text="rule.source"></td>
+                        <td class="mono" x-text="failoverTargetLabel(rule)"></td>
+                        <td class="model-row-actions">
+                            <button type="button" class="table-action-btn table-icon-btn"
+                                :aria-label="'Review generated failover for ' + rule.source"
+                                :title="'Review generated failover for ' + rule.source"
+                                @click="openFailoverEdit(rule)">
+                                {{template "edit-icon"}}
+                            </button>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="empty-state" x-show="!failoverLoading && failoverRules.length === 0 && failoverGeneratedRules.length === 0 && !authError">
+        <p>No failover rules configured.</p>
+    </div>
+</div>
+</template>
+{{end}}

@@ -254,7 +254,7 @@ test('workflowChart returns the shared chart contract for workflow sources', () 
 test('workflowChart masks globally disabled workflow features from persisted workflows', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
-        FEATURE_FALLBACK_MODE: 'off',
+        FAILOVER_ENABLED: 'off',
         LOGGING_ENABLED: 'off',
         USAGE_ENABLED: 'off',
         BUDGETS_ENABLED: 'off',
@@ -878,7 +878,7 @@ test('workflowActiveScopeMatch treats path-only selections as scoped', () => {
 test('buildWorkflowRequest emits provider-model payload and strips guardrails when disabled', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
-        FEATURE_FALLBACK_MODE: 'manual'
+        FAILOVER_ENABLED: 'on'
     };
     module.workflowForm = {
         scope_provider: 'openai',
@@ -1151,7 +1151,7 @@ test('openWorkflowCreate focuses the workflow editor after opening', () => {
 test('buildWorkflowRequest preserves blank guardrail steps as invalid so validation rejects them', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
-        FEATURE_FALLBACK_MODE: 'manual'
+        FAILOVER_ENABLED: 'on'
     };
     module.models = [
         { provider_type: 'openai', model: { id: 'gpt-5' } }
@@ -1244,7 +1244,7 @@ test('workflowSourceFeatures respects effective runtime features for persisted w
 test('workflowSourceFeatures masks raw workflow features by global runtime config when effective features are unavailable', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
-        FEATURE_FALLBACK_MODE: 'off',
+        FAILOVER_ENABLED: 'off',
         LOGGING_ENABLED: 'off',
         USAGE_ENABLED: 'off',
         BUDGETS_ENABLED: 'off',
@@ -1276,7 +1276,7 @@ test('workflowSourceFeatures masks raw workflow features by global runtime confi
     );
 });
 
-test('fetchWorkflowRuntimeConfig loads FEATURE_FALLBACK_MODE from the admin config endpoint', async () => {
+test('fetchWorkflowRuntimeConfig loads FAILOVER_ENABLED from the admin config endpoint', async () => {
     const module = createWorkflowsModule({
         fetch(url, options) {
             assert.equal(url, '/admin/runtime/config');
@@ -1284,7 +1284,7 @@ test('fetchWorkflowRuntimeConfig loads FEATURE_FALLBACK_MODE from the admin conf
             return Promise.resolve({
                 ok: true,
                 json: async () => ({
-                    FEATURE_FALLBACK_MODE: 'manual',
+                    FAILOVER_ENABLED: 'on',
                     LOGGING_ENABLED: 'on',
                     USAGE_ENABLED: 'off',
                     BUDGETS_ENABLED: 'on',
@@ -1305,7 +1305,7 @@ test('fetchWorkflowRuntimeConfig loads FEATURE_FALLBACK_MODE from the admin conf
     assert.equal(
         JSON.stringify(module.workflowRuntimeConfig),
         JSON.stringify({
-            FEATURE_FALLBACK_MODE: 'manual',
+            FAILOVER_ENABLED: 'on',
             LOGGING_ENABLED: 'on',
             USAGE_ENABLED: 'off',
             BUDGETS_ENABLED: 'on',
@@ -1379,7 +1379,7 @@ test('fetchWorkflowRuntimeConfig aborts hung requests and clears the timeout', a
 test('buildWorkflowRequest omits fallback for new workflows when the control is hidden', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
-        FEATURE_FALLBACK_MODE: 'off',
+        FAILOVER_ENABLED: 'off',
         LOGGING_ENABLED: 'on',
         USAGE_ENABLED: 'on',
         GUARDRAILS_ENABLED: 'off',
@@ -1416,7 +1416,7 @@ test('buildWorkflowRequest omits fallback for new workflows when the control is 
 test('buildWorkflowRequest preserves fallback state for hydrated workflows even when the control is hidden', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
-        FEATURE_FALLBACK_MODE: 'off',
+        FAILOVER_ENABLED: 'off',
         LOGGING_ENABLED: 'on',
         USAGE_ENABLED: 'on',
         GUARDRAILS_ENABLED: 'off',
@@ -1459,7 +1459,7 @@ test('buildWorkflowRequest preserves fallback state for hydrated workflows even 
 test('buildWorkflowRequest preserves hidden fallback for fresh save flows that match an active workflow', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
-        FEATURE_FALLBACK_MODE: 'off',
+        FAILOVER_ENABLED: 'off',
         LOGGING_ENABLED: 'on',
         USAGE_ENABLED: 'on',
         GUARDRAILS_ENABLED: 'off',
@@ -1518,7 +1518,7 @@ test('buildWorkflowRequest preserves hidden fallback for fresh save flows that m
 test('buildWorkflowRequest omits hidden fallback when a hydrated workflow is retargeted to a new scope', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
-        FEATURE_FALLBACK_MODE: 'off',
+        FAILOVER_ENABLED: 'off',
         LOGGING_ENABLED: 'on',
         USAGE_ENABLED: 'on',
         GUARDRAILS_ENABLED: 'off',
@@ -1560,7 +1560,7 @@ test('buildWorkflowRequest omits hidden fallback when a hydrated workflow is ret
 test('buildWorkflowRequest clamps globally disabled workflow features off even when the form has them enabled', () => {
     const module = createWorkflowsModule();
     module.workflowRuntimeConfig = {
-        FEATURE_FALLBACK_MODE: 'off',
+        FAILOVER_ENABLED: 'off',
         LOGGING_ENABLED: 'off',
         USAGE_ENABLED: 'off',
         BUDGETS_ENABLED: 'off',

@@ -114,6 +114,7 @@ func buildDefaultConfig() *Config {
 			ResponseHeaderTimeout: 600,
 		},
 		Fallback: FallbackConfig{
+			Enabled:     true,
 			DefaultMode: FallbackModeManual,
 		},
 		Workflows: WorkflowsConfig{
