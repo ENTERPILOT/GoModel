@@ -1,0 +1,74 @@
+---
+title: "Cost tracking"
+description: "How GoModel estimates request costs, where pricing comes from, how to override it, and how to recalculate stored costs."
+icon: "calculator"
+---
+
+GoModel estimates the cost of every tracked request from model pricing and shows the totals on the dashboard.
+
+<Warning>
+  These costs are **estimates**, not a billing record. GoModel computes them from
+  catalog pricing and the token counts each provider reports, which can differ
+  from a provider's own billing because of promotions, rounding, cache rules,
+  currency conversion, or plan discounts. Treat the provider's dashboard as the
+  source of truth and do not use GoModel figures for invoicing or reconciliation.
+</Warning>
+
+## How costs are estimated
+
+For each request GoModel prices:
+
+- **Input** and **output** tokens at the model's per-million-token (MTok) rates.
+- **Cached input**, **reasoning**, and **audio** tokens at their own rates when the provider reports them, so cache-heavy and reasoning-heavy traffic is priced correctly.
+
+When a provider returns an exact cost (OpenRouter credits, xAI `cost_in_usd_ticks`), GoModel uses that value instead of catalog pricing. Each row records which method was used in its `cost_source` field: `model_pricing`, `openrouter_credits`, or `xai_cost_in_usd_ticks`.
+
+<Note>
+  A cached-token discount only applies when the model's pricing includes a
+  `cached_input_per_mtok` rate. If that rate is missing from the catalog, cached
+  tokens are priced at the full input rate.
+</Note>
+
+## Where pricing comes from
+
+Pricing for a model is resolved in priority order:
+
+1. Operator **overrides** set in the dashboard.
+2. **`config.yaml`** `providers.<name>.models` metadata.
+3. The **model catalog** (the `ai-model-list` registry).
+
+## Override pricing
+
+Override pricing when the catalog price is wrong, missing, or differs from your negotiated rate. Open the **Models** page, find the model, and open its **Pricing override** editor. Set one or more price types (input, output, cached input, and so on) in USD. Saved fields override catalog and `config.yaml` pricing for that selector; unset fields keep inheriting.
+
+{/* TODO: replace this placeholder with a screenshot of the Models page showing a model's "Pricing override" action.
+     Suggested: <img src="/features/pricing-override-models.png" alt="GoModel Models page with the Pricing override action on a model row" style={{ width: "100%", maxWidth: "1280px", height: "auto" }} className="rounded-lg" /> */}
+<div style={{ border: "2px dashed #d0d0d0", borderRadius: "8px", padding: "56px 16px", textAlign: "center", color: "#999", fontStyle: "italic" }}>
+  Screenshot: Models page — opening a model's Pricing override
+</div>
+
+{/* TODO: replace this placeholder with a screenshot of the "Pricing override" editor (Selector, Price Type rows, USD Value).
+     Suggested: <img src="/features/pricing-override-editor.png" alt="GoModel Pricing override editor with input and output USD rates" style={{ width: "100%", maxWidth: "1280px", height: "auto" }} className="rounded-lg" /> */}
+<div style={{ border: "2px dashed #d0d0d0", borderRadius: "8px", padding: "56px 16px", textAlign: "center", color: "#999", fontStyle: "italic", marginTop: "16px" }}>
+  Screenshot: Pricing override editor (price type + USD value)
+</div>
+
+Overrides apply to new requests. To re-cost requests that already ran, recalculate them.
+
+## Dashboard totals
+
+- **Estimated Cost** — spend on live provider requests; cache hits are excluded.
+- **Saved Cost** — what requests served from the cache would otherwise have cost.
+
+A `---` value means the cost is unknown because no pricing was available, which is not the same as `$0`.
+
+## Recalculate stored costs
+
+Recalculating recomputes the stored cost of matching usage rows from current pricing. Use it after changing an override, or when pricing was unavailable at the time a request ran. The action is enabled by default (`USAGE_PRICING_RECALCULATION_ENABLED`); on the usage view, choose **Recalculate**, then type `recalculate` to confirm. It is scoped to the selected date range, provider or model, and user path.
+
+<Warning>
+  Recalculation **overwrites** the cost fields of every matching row. If a row's
+  model no longer resolves to any pricing, its cost is **cleared** rather than
+  left unchanged, and the result reports how many rows still lack pricing. Token
+  counts are never modified.
+</Warning>

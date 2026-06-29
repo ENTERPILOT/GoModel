@@ -55,6 +55,7 @@
                             "features/user-path",
                             "features/passthrough-api",
                             "features/budgets",
+                            "features/cost-tracking",
                             "features/cache",
                             "features/failover"
                         ]
