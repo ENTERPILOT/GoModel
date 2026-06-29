@@ -9,12 +9,18 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type postgreSQLQueryer interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // PostgreSQLReader implements Reader for PostgreSQL databases.
 type PostgreSQLReader struct {
-	pool *pgxpool.Pool
+	pool postgreSQLQueryer
 }
 
 // NewPostgreSQLReader creates a new PostgreSQL audit log reader.

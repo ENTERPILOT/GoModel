@@ -681,7 +681,13 @@ SELECT 'date_range', min(date(REPLACE(timestamp, 'T', ' '))), max(date(REPLACE(t
 SELECT 'usage_rows', count(*), coalesce(sum(total_tokens), 0) FROM usage WHERE id GLOB '${prefix}-*';
 SELECT 'audit_rows', count(*) FROM audit_logs WHERE id GLOB '${prefix}-*';
 SELECT 'budget_rows', count(*) FROM budgets WHERE source = '${prefix}';
-SELECT 'cache_mix', coalesce(cache_type, CASE WHEN json_extract(raw_data, '$.prompt_cached_tokens') IS NOT NULL OR json_extract(raw_data, '$.cached_tokens') IS NOT NULL OR json_extract(raw_data, '$.cache_read_input_tokens') IS NOT NULL THEN 'prompt-cache' ELSE 'uncached' END), count(*)
+SELECT 'cache_mix', coalesce(cache_type, CASE
+  WHEN coalesce(json_extract(raw_data, '$.prompt_cached_tokens'), 0) > 0
+    OR coalesce(json_extract(raw_data, '$.cached_tokens'), 0) > 0
+    OR coalesce(json_extract(raw_data, '$.cache_read_input_tokens'), 0) > 0
+  THEN 'prompt-cache'
+  ELSE 'uncached'
+END), count(*)
 FROM usage
 WHERE id GLOB '${prefix}-*'
 GROUP BY 2

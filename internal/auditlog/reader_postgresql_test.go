@@ -1,10 +1,15 @@
 package auditlog
 
 import (
+	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type fakePostgreSQLRow struct {
@@ -53,12 +58,74 @@ func assignScannedValue(target reflect.Value, value any) error {
 	return fmt.Errorf("cannot assign %T to %s", value, target.Type())
 }
 
-func TestScanPostgreSQLLogEntryAllowsNullErrorType(t *testing.T) {
-	now := time.Unix(1700000000, 0).UTC()
+type fakePostgreSQLQueryer struct {
+	count int
+	rows  pgx.Rows
+}
 
-	entry, err := scanPostgreSQLLogEntry(fakePostgreSQLRow{values: []any{
+func (q fakePostgreSQLQueryer) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	return fakePostgreSQLRow{values: []any{q.count}}
+}
+
+func (q fakePostgreSQLQueryer) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	if !strings.Contains(sql, "FROM audit_logs") {
+		return nil, fmt.Errorf("unexpected query: %s", sql)
+	}
+	return q.rows, nil
+}
+
+type fakePostgreSQLRows struct {
+	values []any
+	read   bool
+	closed bool
+	err    error
+}
+
+func (r *fakePostgreSQLRows) Close() {
+	r.closed = true
+}
+
+func (r *fakePostgreSQLRows) Err() error {
+	return r.err
+}
+
+func (r *fakePostgreSQLRows) CommandTag() pgconn.CommandTag {
+	return pgconn.CommandTag{}
+}
+
+func (r *fakePostgreSQLRows) FieldDescriptions() []pgconn.FieldDescription {
+	return nil
+}
+
+func (r *fakePostgreSQLRows) Next() bool {
+	if r.read {
+		r.Close()
+		return false
+	}
+	r.read = true
+	return true
+}
+
+func (r *fakePostgreSQLRows) Scan(dest ...any) error {
+	return fakePostgreSQLRow{values: r.values}.Scan(dest...)
+}
+
+func (r *fakePostgreSQLRows) Values() ([]any, error) {
+	return r.values, nil
+}
+
+func (r *fakePostgreSQLRows) RawValues() [][]byte {
+	return nil
+}
+
+func (r *fakePostgreSQLRows) Conn() *pgx.Conn {
+	return nil
+}
+
+func postgreSQLAuditLogRowValues(errorType any) []any {
+	return []any{
 		"entry-null-error-type",
-		now,
+		time.Unix(1700000000, 0).UTC(),
 		int64(1234),
 		"gpt-4o-mini",
 		"gpt-4o-mini",
@@ -76,9 +143,47 @@ func TestScanPostgreSQLLogEntryAllowsNullErrorType(t *testing.T) {
 		"/v1/chat/completions",
 		"/",
 		false,
-		nil,
+		errorType,
 		`{"user_agent":"test-agent"}`,
-	}})
+	}
+}
+
+func TestPostgreSQLReaderGetLogsAllowsNullErrorType(t *testing.T) {
+	rows := &fakePostgreSQLRows{values: postgreSQLAuditLogRowValues(nil)}
+	reader := &PostgreSQLReader{
+		pool: fakePostgreSQLQueryer{
+			count: 1,
+			rows:  rows,
+		},
+	}
+
+	result, err := reader.GetLogs(context.Background(), LogQueryParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("GetLogs failed: %v", err)
+	}
+	if result.Total != 1 {
+		t.Fatalf("Total = %d, want 1", result.Total)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("len(Entries) = %d, want 1", len(result.Entries))
+	}
+	entry := result.Entries[0]
+	if entry.ErrorType != "" {
+		t.Fatalf("ErrorType = %q, want empty", entry.ErrorType)
+	}
+	if entry.ProviderName != "primary-openai" {
+		t.Fatalf("ProviderName = %q, want primary-openai", entry.ProviderName)
+	}
+	if entry.Data == nil || entry.Data.UserAgent != "test-agent" {
+		t.Fatalf("Data = %#v, want user_agent", entry.Data)
+	}
+	if !rows.closed {
+		t.Fatal("rows were not closed")
+	}
+}
+
+func TestScanPostgreSQLLogEntryAllowsNullErrorType(t *testing.T) {
+	entry, err := scanPostgreSQLLogEntry(fakePostgreSQLRow{values: postgreSQLAuditLogRowValues(nil)})
 	if err != nil {
 		t.Fatalf("scanPostgreSQLLogEntry failed: %v", err)
 	}
