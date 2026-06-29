@@ -41,17 +41,19 @@ Pricing for a model is resolved in priority order:
 
 Override pricing when the catalog price is wrong, missing, or differs from your negotiated rate. Open the **Models** page, find the model, and open its **Pricing override** editor. Set one or more price types (input, output, cached input, and so on) in USD. Saved fields override catalog and `config.yaml` pricing for that selector; unset fields keep inheriting.
 
-{/* TODO: replace this placeholder with a screenshot of the Models page showing a model's "Pricing override" action.
-     Suggested: <img src="/features/pricing-override-models.png" alt="GoModel Models page with the Pricing override action on a model row" style={{ width: "100%", maxWidth: "1280px", height: "auto" }} className="rounded-lg" /> */}
-<div style={{ border: "2px dashed #d0d0d0", borderRadius: "8px", padding: "56px 16px", textAlign: "center", color: "#999", fontStyle: "italic" }}>
-  Screenshot: Models page — opening a model's Pricing override
-</div>
+<Frame caption="The Pricing override editor on the Models page">
+  <img
+    src="/features/pricing-override-models.png"
+    alt="GoModel Models page with the Pricing override dialog open over the registered model list"
+  />
+</Frame>
 
-{/* TODO: replace this placeholder with a screenshot of the "Pricing override" editor (Selector, Price Type rows, USD Value).
-     Suggested: <img src="/features/pricing-override-editor.png" alt="GoModel Pricing override editor with input and output USD rates" style={{ width: "100%", maxWidth: "1280px", height: "auto" }} className="rounded-lg" /> */}
-<div style={{ border: "2px dashed #d0d0d0", borderRadius: "8px", padding: "56px 16px", textAlign: "center", color: "#999", fontStyle: "italic", marginTop: "16px" }}>
-  Screenshot: Pricing override editor (price type + USD value)
-</div>
+<Frame caption="Set a price type and USD value; saved fields override catalog and config.yaml pricing for the selector">
+  <img
+    src="/features/pricing-override-editor.png"
+    alt="GoModel Pricing override editor showing the selector, an Input dollars-per-MTok price type, and its USD value"
+  />
+</Frame>
 
 Overrides apply to new requests. To re-cost requests that already ran, recalculate them.
 
