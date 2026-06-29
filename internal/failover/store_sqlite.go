@@ -29,6 +29,9 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	`); err != nil {
 		return nil, fmt.Errorf("failed to create failover_rules table: %w", err)
 	}
+	if err := migrateSQLiteFailoverRules(db); err != nil {
+		return nil, err
+	}
 	for _, stmt := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_failover_rules_enabled ON failover_rules(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_failover_rules_updated_at ON failover_rules(updated_at DESC)`,
@@ -38,6 +41,114 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 		}
 	}
 	return &SQLiteStore{db: db}, nil
+}
+
+func migrateSQLiteFailoverRules(db *sql.DB) error {
+	columns, err := sqliteFailoverRuleColumns(db)
+	if err != nil {
+		return err
+	}
+	if len(columns) == 0 {
+		return nil
+	}
+	needsMigration := columns["source"] || columns["targets"] || columns["description"]
+	if !needsMigration {
+		return nil
+	}
+	primaryExpr := "primary_model"
+	if !columns["primary_model"] {
+		primaryExpr = "source"
+	}
+	targetsExpr := "fallback_models"
+	if !columns["fallback_models"] {
+		targetsExpr = "targets"
+	}
+	enabledExpr := "1"
+	if columns["enabled"] {
+		enabledExpr = "enabled"
+	}
+	managedSourceExpr := "'dashboard'"
+	if columns["managed_source"] {
+		managedSourceExpr = "managed_source"
+	}
+	createdAtExpr := "strftime('%s', 'now')"
+	if columns["created_at"] {
+		createdAtExpr = "created_at"
+	}
+	updatedAtExpr := "strftime('%s', 'now')"
+	if columns["updated_at"] {
+		updatedAtExpr = "updated_at"
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin failover_rules migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`
+		CREATE TABLE failover_rules_migrated (
+			primary_model TEXT PRIMARY KEY,
+			fallback_models TEXT NOT NULL DEFAULT '[]',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			managed_source TEXT NOT NULL DEFAULT 'dashboard',
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("create migrated failover_rules table: %w", err)
+	}
+	insertSQL := fmt.Sprintf(`
+		INSERT OR REPLACE INTO failover_rules_migrated (
+			primary_model, fallback_models, enabled, managed_source, created_at, updated_at
+		)
+		SELECT
+			%s,
+			%s,
+			%s,
+			%s,
+			%s,
+			%s
+		FROM failover_rules
+		WHERE TRIM(COALESCE(%s, '')) <> ''
+	`, primaryExpr, targetsExpr, enabledExpr, managedSourceExpr, createdAtExpr, updatedAtExpr, primaryExpr)
+	if _, err := tx.Exec(insertSQL); err != nil {
+		return fmt.Errorf("copy failover_rules rows into migrated table: %w", err)
+	}
+	for _, stmt := range []string{
+		`DROP TABLE failover_rules`,
+		`ALTER TABLE failover_rules_migrated RENAME TO failover_rules`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("replace failover_rules table: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit failover_rules migration: %w", err)
+	}
+	return nil
+}
+
+func sqliteFailoverRuleColumns(db *sql.DB) (map[string]bool, error) {
+	rows, err := db.Query(`PRAGMA table_info('failover_rules')`)
+	if err != nil {
+		return nil, fmt.Errorf("inspect failover_rules columns: %w", err)
+	}
+	defer rows.Close()
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return nil, fmt.Errorf("scan failover_rules column: %w", err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate failover_rules columns: %w", err)
+	}
+	return columns, nil
 }
 
 func (s *SQLiteStore) List(ctx context.Context) ([]Rule, error) {

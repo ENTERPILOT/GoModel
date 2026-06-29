@@ -34,6 +34,37 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	`); err != nil {
 		return nil, fmt.Errorf("failed to create failover_rules table: %w", err)
 	}
+	if _, err := pool.Exec(ctx, `
+		DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_name = 'failover_rules' AND column_name = 'source'
+			) AND NOT EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_name = 'failover_rules' AND column_name = 'primary_model'
+			) THEN
+				ALTER TABLE failover_rules RENAME COLUMN source TO primary_model;
+			END IF;
+			IF EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_name = 'failover_rules' AND column_name = 'targets'
+			) AND NOT EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_name = 'failover_rules' AND column_name = 'fallback_models'
+			) THEN
+				ALTER TABLE failover_rules RENAME COLUMN targets TO fallback_models;
+			END IF;
+			IF EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_name = 'failover_rules' AND column_name = 'description'
+			) THEN
+				ALTER TABLE failover_rules DROP COLUMN description;
+			END IF;
+		END $$;
+	`); err != nil {
+		return nil, fmt.Errorf("failed to migrate failover_rules table: %w", err)
+	}
 	for _, stmt := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_failover_rules_enabled ON failover_rules(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_failover_rules_updated_at ON failover_rules(updated_at DESC)`,
