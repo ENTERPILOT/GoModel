@@ -279,7 +279,7 @@ func TestSQLiteStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 	}
 }
 
-func TestSQLiteReader_AllowsNullWorkflowVersionID(t *testing.T) {
+func TestSQLiteReader_AllowsNullWorkflowVersionIDAndErrorType(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()
 
@@ -310,7 +310,7 @@ func TestSQLiteReader_AllowsNullWorkflowVersionID(t *testing.T) {
 		"POST",
 		"/v1/chat/completions",
 		0,
-		"",
+		nil,
 		nil,
 	); err != nil {
 		t.Fatalf("failed to insert audit log row: %v", err)
@@ -332,6 +332,9 @@ func TestSQLiteReader_AllowsNullWorkflowVersionID(t *testing.T) {
 	if entry.WorkflowVersionID != "" {
 		t.Fatalf("WorkflowVersionID = %q, want empty", entry.WorkflowVersionID)
 	}
+	if entry.ErrorType != "" {
+		t.Fatalf("ErrorType = %q, want empty", entry.ErrorType)
+	}
 
 	logs, err := reader.GetLogs(context.Background(), LogQueryParams{Limit: 10})
 	if err != nil {
@@ -342,6 +345,9 @@ func TestSQLiteReader_AllowsNullWorkflowVersionID(t *testing.T) {
 	}
 	if logs.Entries[0].WorkflowVersionID != "" {
 		t.Fatalf("list WorkflowVersionID = %q, want empty", logs.Entries[0].WorkflowVersionID)
+	}
+	if logs.Entries[0].ErrorType != "" {
+		t.Fatalf("list ErrorType = %q, want empty", logs.Entries[0].ErrorType)
 	}
 }
 

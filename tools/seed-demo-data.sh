@@ -84,8 +84,9 @@ mkdir -p "$(dirname "$db_path")"
 sqlite3 "$db_path" "PRAGMA journal_mode = WAL;" >/dev/null
 
 sqlite3 "$db_path" <<SQL
-PRAGMA synchronous = NORMAL;
+.bail on
 .timeout 10000
+PRAGMA synchronous = NORMAL;
 
 CREATE TABLE IF NOT EXISTS usage (
   id TEXT PRIMARY KEY,
@@ -166,8 +167,8 @@ CREATE INDEX IF NOT EXISTS idx_budgets_period_seconds ON budgets(period_seconds)
 
 BEGIN IMMEDIATE;
 
-DELETE FROM audit_logs WHERE id LIKE '${prefix}-%';
-DELETE FROM usage WHERE id LIKE '${prefix}-%';
+DELETE FROM audit_logs WHERE id GLOB '${prefix}-*';
+DELETE FROM usage WHERE id GLOB '${prefix}-*';
 DELETE FROM budgets WHERE source = '${prefix}';
 
 DROP TABLE IF EXISTS temp.demo_days;
@@ -380,13 +381,16 @@ SELECT
     ELSE json_object('demo_seed', 1, 'cache_story', 'uncached provider request')
   END AS raw_data,
   round((CASE
-    WHEN cache_type IS NOT NULL THEN input_tokens * input_price * 0.00000025
+    WHEN cache_type IS NOT NULL THEN 0
     WHEN prompt_cache_hit = 1 THEN ((input_tokens - prompt_cached_tokens) * input_price + prompt_cached_tokens * input_price * 0.25) / 1000000.0
     ELSE input_tokens * input_price / 1000000.0
   END), 8) AS input_cost,
-  round(output_tokens * output_price / 1000000.0, 8) AS output_cost,
+  round(CASE
+    WHEN cache_type IS NOT NULL THEN 0
+    ELSE output_tokens * output_price / 1000000.0
+  END, 8) AS output_cost,
   round((CASE
-    WHEN cache_type IS NOT NULL THEN (input_tokens * input_price * 0.00000025) + (output_tokens * output_price / 1000000.0)
+    WHEN cache_type IS NOT NULL THEN 0
     WHEN prompt_cache_hit = 1 THEN (((input_tokens - prompt_cached_tokens) * input_price + prompt_cached_tokens * input_price * 0.25) / 1000000.0) + (output_tokens * output_price / 1000000.0)
     ELSE (input_tokens * input_price / 1000000.0) + (output_tokens * output_price / 1000000.0)
   END), 8) AS total_cost,
@@ -673,21 +677,21 @@ ON CONFLICT(key) DO UPDATE SET
 COMMIT;
 
 SELECT 'seed_prefix', '${prefix}';
-SELECT 'date_range', min(date(REPLACE(timestamp, 'T', ' '))), max(date(REPLACE(timestamp, 'T', ' '))) FROM usage WHERE id LIKE '${prefix}-%';
-SELECT 'usage_rows', count(*), coalesce(sum(total_tokens), 0) FROM usage WHERE id LIKE '${prefix}-%';
-SELECT 'audit_rows', count(*) FROM audit_logs WHERE id LIKE '${prefix}-%';
+SELECT 'date_range', min(date(REPLACE(timestamp, 'T', ' '))), max(date(REPLACE(timestamp, 'T', ' '))) FROM usage WHERE id GLOB '${prefix}-*';
+SELECT 'usage_rows', count(*), coalesce(sum(total_tokens), 0) FROM usage WHERE id GLOB '${prefix}-*';
+SELECT 'audit_rows', count(*) FROM audit_logs WHERE id GLOB '${prefix}-*';
 SELECT 'budget_rows', count(*) FROM budgets WHERE source = '${prefix}';
 SELECT 'cache_mix', coalesce(cache_type, CASE WHEN json_extract(raw_data, '$.prompt_cached_tokens') IS NOT NULL OR json_extract(raw_data, '$.cached_tokens') IS NOT NULL OR json_extract(raw_data, '$.cache_read_input_tokens') IS NOT NULL THEN 'prompt-cache' ELSE 'uncached' END), count(*)
 FROM usage
-WHERE id LIKE '${prefix}-%'
+WHERE id GLOB '${prefix}-*'
 GROUP BY 2
 ORDER BY 2;
-SELECT 'user_paths', count(DISTINCT user_path) FROM usage WHERE id LIKE '${prefix}-%';
+SELECT 'user_paths', count(DISTINCT user_path) FROM usage WHERE id GLOB '${prefix}-*';
 SELECT 'daily_requests_min_max', min(rows), max(rows), round(avg(rows), 1)
 FROM (
   SELECT date(REPLACE(timestamp, 'T', ' ')) AS day, count(*) AS rows
   FROM usage
-  WHERE id LIKE '${prefix}-%'
+  WHERE id GLOB '${prefix}-*'
   GROUP BY day
 );
 SQL
