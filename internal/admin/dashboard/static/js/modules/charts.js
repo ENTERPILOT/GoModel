@@ -47,14 +47,18 @@
                     pointRadius: 0,
                     pointHoverRadius: 4
                 }, opts || {});
+                // Stacked area: each series sits on top of the one below, so the
+                // band's top edge is the per-unit total (Input + Output + Prompt
+                // cached + Locally cached). The bottom series fills to the axis
+                // ('origin'); the rest fill down to the previous dataset ('-1').
                 const datasets = [
-                    line('Input Tokens', inputData, resolve('var(--token-input)'), { fill: true, backgroundColor: fade('var(--token-input)', 12) }),
-                    line('Output Tokens', outputData, resolve('var(--token-output)'), { fill: true, backgroundColor: fade('var(--token-output)', 12) }),
-                    line('Prompt (Input) Cached', promptData, resolve('var(--token-prompt)'), { borderDash: [6, 4] })
+                    line('Input Tokens', inputData, resolve('var(--token-input)'), { fill: 'origin' }),
+                    line('Output Tokens', outputData, resolve('var(--token-output)'), { fill: '-1' }),
+                    line('Prompt (Input) Cached', promptData, resolve('var(--token-prompt)'), { fill: '-1', borderDash: [6, 4] })
                 ];
                 if (cacheEnabled) {
                     datasets.push(
-                        line('Locally Cached', localData, fade('var(--info)', 35), { borderDash: [2, 3] })
+                        line('Locally Cached', localData, fade('var(--info)', 35), { fill: '-1', borderDash: [2, 3] })
                     );
                 }
                 return {
@@ -73,16 +77,23 @@
                                 labels: { color: colors.text, font: { size: 12 } }
                             },
                             tooltip: this._chartTooltip(colors, {
-                                label: (c) => c.dataset.label + ': ' + c.parsed.y.toLocaleString()
+                                label: (c) => c.dataset.label + ': ' + c.parsed.y.toLocaleString(),
+                                footer: (items) => {
+                                    let total = 0;
+                                    items.forEach((it) => { total += Number(it.parsed.y) || 0; });
+                                    return 'Total: ' + total.toLocaleString();
+                                }
                             })
                         },
                         scales: {
                             x: {
+                                stacked: true,
                                 grid: { color: colors.grid },
                                 border: { display: false },
                                 ticks: { color: colors.text, font: this._chartTickFont(), maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }
                             },
                             y: {
+                                stacked: true,
                                 beginAtZero: true,
                                 grid: { color: colors.grid },
                                 border: { display: false },
