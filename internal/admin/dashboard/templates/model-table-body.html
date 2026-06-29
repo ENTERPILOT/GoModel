@@ -99,10 +99,11 @@
                             </button>
                             <button type="button" class="table-action-btn table-icon-btn"
                                 x-show="failoverAvailable && failoverEnabled()"
-                                :aria-label="'Edit failover for ' + row.display_name"
-                                :title="'Edit failover for ' + row.display_name"
+                                :class="failoverButtonClass(row)"
+                                :aria-label="failoverButtonLabel(row)"
+                                :title="failoverButtonLabel(row)"
                                 @click="openFailoverForModel(row)">
-                                {{template "shuffle-icon"}}
+                                {{template "failover-icon"}}
                             </button>
                             <button type="button" class="table-action-btn table-icon-btn"
                                 x-show="virtualModelsAvailable && row.masking_alias && row.masking_alias.name"

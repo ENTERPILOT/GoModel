@@ -338,6 +338,28 @@
                 return [];
             },
 
+            findFailoverMapping(source) {
+                const primary = String(source || '').trim();
+                if (!primary) return null;
+                return this.failoverRules.find((rule) => this.failoverPrimaryModel(rule) === primary) || null;
+            },
+
+            hasActiveFailoverMapping(row) {
+                if (!row || row.is_alias) return false;
+                const mapping = this.findFailoverMapping(this.qualifiedModelName(row));
+                return Boolean(mapping && mapping.enabled !== false && this.failoverTargets(mapping).length > 0);
+            },
+
+            failoverButtonClass(row) {
+                return this.hasActiveFailoverMapping(row) ? 'table-action-btn-failover-active' : '';
+            },
+
+            failoverButtonLabel(row) {
+                const label = row && row.display_name ? row.display_name : 'model';
+                const base = 'Edit failover for ' + label;
+                return this.hasActiveFailoverMapping(row) ? base + ' (active)' : base;
+            },
+
             normalizeFailoverRules(payload) {
                 if (!Array.isArray(payload)) return [];
                 return payload.map((rule) => ({
