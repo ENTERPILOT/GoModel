@@ -60,13 +60,26 @@ type tokenCostMapping struct {
 var openAICompatibleTokenCostMappings = []tokenCostMapping{
 	{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+	// DeepSeek reports cache hits as a top-level usage.prompt_cache_hit_tokens
+	// field instead of the nested prompt_tokens_details.cached_tokens, and the
+	// hit count is already part of prompt_tokens (prompt_tokens = hit + miss).
+	// Treat it as a cached-input alias; the miss count needs no rate (the base
+	// input rate already covers it) and is listed in informationalFields.
+	{rawDataKey: "prompt_cache_hit_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "prompt_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
 	{rawDataKey: "completion_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 }
 
-// providerMappings defines the per-provider RawData key to pricing field mappings.
+// providerMappings defines the per-provider RawData key to pricing field
+// mappings. Providers not listed here fall back to
+// openAICompatibleTokenCostMappings (see tokenCostMappingsForProvider): every
+// other registered provider type (xiaomi, deepseek, zai, minimax, bailian,
+// oracle, azure, vllm, ollama, opencode_go, …) speaks the OpenAI usage schema,
+// so its cached/reasoning/audio token breakdowns must be priced the same way.
+// Only providers whose usage schema differs (anthropic, gemini) or that report
+// extra token types (xai) need an explicit entry.
 var providerMappings = map[string][]tokenCostMapping{
 	"openai":     openAICompatibleTokenCostMappings,
 	"openrouter": openAICompatibleTokenCostMappings,
@@ -105,6 +118,9 @@ var providerMappings = map[string][]tokenCostMapping{
 // input/output counts. They never need separate pricing and should not trigger
 // "unmapped token field" caveats.
 var informationalFields = map[string]struct{}{
+	// DeepSeek's cache-miss count: the non-cached remainder of prompt_tokens,
+	// already priced at the base input rate (see prompt_cache_hit_tokens above).
+	"prompt_cache_miss_tokens":              {},
 	"prompt_text_tokens":                    {},
 	"completion_text_tokens":                {},
 	"prompt_image_tokens":                   {},
@@ -149,47 +165,45 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 	// rawData keys map to the same pricing field (e.g. cached_tokens and prompt_cached_tokens
 	// both map to CachedInputPerMtok).
 	appliedFields := make(map[*float64]bool)
-	if mappings, ok := providerMappings[providerType]; ok {
-		for _, m := range mappings {
-			count := extractInt(rawData, m.rawDataKey)
-			if count == 0 {
-				continue
-			}
-			mappedKeys[m.rawDataKey] = true
+	for _, m := range tokenCostMappingsForProvider(providerType) {
+		count := extractInt(rawData, m.rawDataKey)
+		if count == 0 {
+			continue
+		}
+		mappedKeys[m.rawDataKey] = true
 
-			rate := m.pricingField(pricing)
-			if rate == nil {
-				continue // Base rate covers this token type; no adjustment needed
-			}
+		rate := m.pricingField(pricing)
+		if rate == nil {
+			continue // Base rate covers this token type; no adjustment needed
+		}
 
-			if appliedFields[rate] {
-				continue // Already applied via a different rawData key for the same pricing field
-			}
-			appliedFields[rate] = true
+		if appliedFields[rate] {
+			continue // Already applied via a different rawData key for the same pricing field
+		}
+		appliedFields[rate] = true
 
-			effectiveRate := *rate
-			if m.includedInBase && m.unit == unitPerMtok {
-				if baseRate := baseRateForSide(pricing, m.side); baseRate != nil {
-					effectiveRate -= *baseRate
-				}
+		effectiveRate := *rate
+		if m.includedInBase && m.unit == unitPerMtok {
+			if baseRate := baseRateForSide(pricing, m.side); baseRate != nil {
+				effectiveRate -= *baseRate
 			}
+		}
 
-			var cost float64
-			switch m.unit {
-			case unitPerMtok:
-				cost = float64(count) * effectiveRate / 1_000_000
-			case unitPerItem:
-				cost = float64(count) * effectiveRate
-			}
+		var cost float64
+		switch m.unit {
+		case unitPerMtok:
+			cost = float64(count) * effectiveRate / 1_000_000
+		case unitPerItem:
+			cost = float64(count) * effectiveRate
+		}
 
-			switch m.side {
-			case sideInput:
-				inputCost += cost
-				hasInput = true
-			case sideOutput:
-				outputCost += cost
-				hasOutput = true
-			}
+		switch m.side {
+		case sideInput:
+			inputCost += cost
+			hasInput = true
+		case sideOutput:
+			outputCost += cost
+			hasOutput = true
 		}
 	}
 
@@ -355,6 +369,19 @@ func tierLimitTokens(tier core.ModelPricingTier) (float64, bool) {
 		return *tier.UpToMtok * 1_000_000, true
 	}
 	return 0, false
+}
+
+// tokenCostMappingsForProvider returns the token-cost mappings for a provider
+// type, defaulting to the OpenAI-compatible mappings for the many providers
+// that speak the OpenAI usage schema but are not listed in providerMappings.
+// Without this default their cached/reasoning token breakdowns would be billed
+// at the full input/output rate (see issue #435: Xiaomi cached tokens
+// over-charged ~4x for cache-heavy workloads).
+func tokenCostMappingsForProvider(providerType string) []tokenCostMapping {
+	if mappings, ok := providerMappings[providerType]; ok {
+		return mappings
+	}
+	return openAICompatibleTokenCostMappings
 }
 
 func baseRateForSide(pricing *core.ModelPricing, side costSide) *float64 {

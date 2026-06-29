@@ -712,6 +712,72 @@ func TestCalculateGranularCost_OutputOnlyPricing(t *testing.T) {
 	assertCostNear(t, "TotalCost", result.TotalCost, 7.5)
 }
 
+// TestCalculateGranularCost_OpenAICompatibleProvidersDefaultMappings is a
+// regression test for issue #435. Providers that speak the OpenAI usage schema
+// but are not explicitly listed in providerMappings (xiaomi, deepseek, zai,
+// minimax, bailian, oracle, azure, vllm, ollama, opencode_go) must still apply
+// the cached-input discount instead of billing cached tokens at the full input
+// rate. Previously these providers produced a much higher cost than "openai"
+// for the same response, over-charging cache-heavy workloads.
+func TestCalculateGranularCost_OpenAICompatibleProvidersDefaultMappings(t *testing.T) {
+	pricing := &core.ModelPricing{
+		Currency:           "USD",
+		InputPerMtok:       floatPtr(0.435),
+		OutputPerMtok:      floatPtr(0.87),
+		CachedInputPerMtok: floatPtr(0.0036),
+	}
+	// Cache-heavy workload: 1M input (900k cached), 200k output.
+	rawData := map[string]any{"prompt_cached_tokens": 900_000}
+
+	want := CalculateGranularCost(1_000_000, 200_000, rawData, "openai", pricing)
+	if want.TotalCost == nil {
+		t.Fatal("expected a total cost for the openai baseline")
+	}
+
+	for _, provider := range []string{
+		"xiaomi", "deepseek", "zai", "minimax", "bailian",
+		"oracle", "azure", "vllm", "ollama", "opencode_go",
+	} {
+		got := CalculateGranularCost(1_000_000, 200_000, rawData, provider, pricing)
+		assertCostNear(t, provider+" InputCost", got.InputCost, *want.InputCost)
+		assertCostNear(t, provider+" OutputCost", got.OutputCost, *want.OutputCost)
+		assertCostNear(t, provider+" TotalCost", got.TotalCost, *want.TotalCost)
+		if got.Caveat != "" {
+			t.Fatalf("%s: expected no caveat, got %q", provider, got.Caveat)
+		}
+	}
+}
+
+// TestCalculateGranularCost_DeepSeekTopLevelCacheFields is a regression test for
+// issue #435. DeepSeek does not use the nested prompt_tokens_details.cached_tokens
+// field; it reports top-level prompt_cache_hit_tokens / prompt_cache_miss_tokens,
+// where prompt_tokens == hit + miss. The cache-hit portion must be priced at the
+// cached-input rate, the miss portion is informational, and neither should raise
+// an "unmapped token field" caveat.
+func TestCalculateGranularCost_DeepSeekTopLevelCacheFields(t *testing.T) {
+	pricing := &core.ModelPricing{
+		Currency:           "USD",
+		InputPerMtok:       floatPtr(0.21),
+		OutputPerMtok:      floatPtr(0.79),
+		CachedInputPerMtok: floatPtr(0.021), // DeepSeek cache-hit ≈ 0.1x input
+	}
+	// prompt_tokens = 1_000_000 = 900k hit + 100k miss; 200k output.
+	rawData := map[string]any{
+		"prompt_cache_hit_tokens":  900_000,
+		"prompt_cache_miss_tokens": 100_000,
+	}
+	result := CalculateGranularCost(1_000_000, 200_000, rawData, "deepseek", pricing)
+
+	// Input: 1M * 0.21/1M + 900k * (0.021-0.21)/1M = 0.21 - 0.1701 = 0.0399
+	assertCostNear(t, "InputCost", result.InputCost, 0.0399)
+	// Output: 200k * 0.79/1M = 0.158
+	assertCostNear(t, "OutputCost", result.OutputCost, 0.158)
+	assertCostNear(t, "TotalCost", result.TotalCost, 0.1979)
+	if result.Caveat != "" {
+		t.Fatalf("expected no caveat, got %q", result.Caveat)
+	}
+}
+
 func assertCostNear(t *testing.T, name string, got *float64, want float64) {
 	t.Helper()
 	if got == nil {
