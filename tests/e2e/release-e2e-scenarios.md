@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 117 end-to-end curl scenarios for release validation.
+This file contains 132 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -46,6 +46,15 @@ Stateful note:
 - `S115`-`S117` exercise the realtime voice websocket endpoint with curl
   upgrade handshakes across OpenAI, xAI, and Bailian; they are self-contained
   and can be rerun in any order
+- `S118`-`S125` exercise load-balanced virtual models (round-robin, weighted,
+  cost, rename, negatives); each creates `$QA_SUFFIX`-scoped sources and deletes
+  them, so they are self-contained and rerunnable in any order
+- `S126`-`S132` exercise token throughput and cache analytics; they are
+  read-mostly (`S128`/`S132` add a little usage/cache traffic) and self-contained
+- IaC virtual-models behavior (declarative `VIRTUAL_MODELS`/`config.yaml`,
+  managed read-only, env-over-YAML, startup validation) needs gateways launched
+  with custom config, so it is covered by a standalone script rather than this
+  running-stack matrix
 - For stateful partial reruns, prefer a contiguous range that includes the
   prerequisite setup scenarios, or rerun with the same `--qa-suffix` and
   `--keep-artifacts`
@@ -2386,4 +2395,343 @@ assert_realtime_websocket_upgrade \
   "$BODY_FILE" \
   "$REQUEST_ID" \
   "$STDERR_FILE"
+```
+
+## 14. Load-balanced virtual models
+
+These scenarios exercise multi-target redirects (#433) on the main SQLite
+gateway. Each scenario creates its own virtual models with a `$QA_SUFFIX`-scoped
+source and deletes them at the end, so they are self-contained and rerunnable in
+any order. Targets are cheap, distinctly-attributable models so the resolved
+`provider`/`model` reveals which target served each request.
+
+### S118 Create and inspect a round-robin redirect
+
+Creates a two-target round-robin redirect and verifies the admin view shape.
+
+```bash
+SRC="qa-lb-rr-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/llama-3.1-8b-instant\"}],\"description\":\"qa lb rr\"}" \
+  | jq -e --arg s "$SRC" '
+      .source == $s and .kind == "redirect" and .strategy == "round_robin"
+      and (.targets | length) == 2
+      and .targets[0].model == "gpt-4.1-nano" and .targets[1].model == "llama-3.1-8b-instant"
+      and .enabled == true
+    ' >/dev/null
+curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' -d "{\"source\":\"$SRC\"}" >/dev/null
+```
+
+### S119 Round-robin spreads requests across targets
+
+Sends several requests through a round-robin redirect and confirms both target
+providers serve traffic. Equal-weight, two-target round-robin alternates, so six
+requests resolve to each provider three times.
+
+```bash
+SRC="qa-lb-rrd-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/llama-3.1-8b-instant\"}]}" >/dev/null
+for M in openai/gpt-4.1-nano groq/llama-3.1-8b-instant; do
+  curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}" >/dev/null
+done
+PROVIDERS=""
+for _ in $(seq 1 6); do
+  P=$(curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$SRC\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5,\"temperature\":0}" | jq -r '.provider')
+  PROVIDERS="$PROVIDERS $P"
+done
+echo "providers:$PROVIDERS"
+grep -q openai <<<"$PROVIDERS"
+grep -q groq <<<"$PROVIDERS"
+curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' -d "{\"source\":\"$SRC\"}" >/dev/null
+```
+
+### S120 Weighted round-robin honors per-target weight
+
+A target with weight 2 receives twice the share of a weight-1 target. Nine
+requests split 6:3 in favor of the weighted target.
+
+```bash
+SRC="qa-lb-w-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$SRC\",\"strategy\":\"round_robin\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\",\"weight\":2},{\"model\":\"groq/llama-3.1-8b-instant\",\"weight\":1}]}" >/dev/null
+for M in openai/gpt-4.1-nano groq/llama-3.1-8b-instant; do
+  curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}" >/dev/null
+done
+OPENAI=0; GROQ=0
+for _ in $(seq 1 9); do
+  P=$(curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$SRC\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5,\"temperature\":0}" | jq -r '.provider')
+  [ "$P" = openai ] && OPENAI=$((OPENAI+1)); [ "$P" = groq ] && GROQ=$((GROQ+1))
+done
+echo "openai=$OPENAI groq=$GROQ"
+[ "$OPENAI" -gt "$GROQ" ]
+curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' -d "{\"source\":\"$SRC\"}" >/dev/null
+```
+
+### S121 Cost strategy routes to the cheapest target
+
+The cost strategy always resolves to the cheapest catalog-priced target. With
+`openai/gpt-4.1` (input+output 10/Mtok) and `openai/gpt-4.1-nano` (0.5/Mtok),
+every request resolves to the nano model.
+
+```bash
+SRC="qa-lb-cost-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$SRC\",\"strategy\":\"cost\",\"targets\":[{\"model\":\"openai/gpt-4.1\"},{\"model\":\"openai/gpt-4.1-nano\"}]}" >/dev/null
+for _ in $(seq 1 3); do
+  curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$SRC\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5,\"temperature\":0}" \
+    | jq -e '.model | test("nano")' >/dev/null
+done
+curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' -d "{\"source\":\"$SRC\"}" >/dev/null
+```
+
+### S122 Rename a redirect via `old_source`
+
+Renames a redirect to a new source. The new name resolves, the old name is
+removed from the listing and no longer resolves as a redirect.
+
+```bash
+OLD="qa-lb-ren-$QA_SUFFIX"
+NEW="qa-lb-ren2-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$OLD\",\"target_model\":\"openai/gpt-4.1-nano\"}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NEW\",\"old_source\":\"$OLD\",\"target_model\":\"openai/gpt-4.1-nano\"}" \
+  | jq -e --arg s "$NEW" '.source == $s and .kind == "redirect"' >/dev/null
+curl -fsS "$BASE_URL/admin/virtual-models" \
+  | jq -e --arg n "$NEW" --arg o "$OLD" 'any(.[]; .source == $n) and (all(.[]; .source != $o))' >/dev/null
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$NEW\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}" \
+  | jq -e '.provider == "openai"' >/dev/null
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s122.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s122.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$OLD\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}"
+grep -Eiq '^HTTP/.* 404 ' "$HEADERS_FILE"
+jq -e '.error.code == "model_not_found"' "$BODY_FILE" >/dev/null
+curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' -d "{\"source\":\"$NEW\"}" >/dev/null
+```
+
+### S123 Unknown load-balancing strategy is rejected (negative)
+
+A redirect with an unsupported strategy is rejected before storage.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s123.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s123.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' \
+  -d "{\"source\":\"qa-lb-bad-$QA_SUFFIX\",\"strategy\":\"weighted\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"groq/llama-3.1-8b-instant\"}]}"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("strategy"))' "$BODY_FILE" >/dev/null
+```
+
+### S124 Unknown target model is rejected (negative)
+
+Every redirect target must resolve to a catalog-supported model at write time.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s124.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s124.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' \
+  -d "{\"source\":\"qa-lb-bad2-$QA_SUFFIX\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"openai/this-model-xyz-404\"}]}"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("not found"))' "$BODY_FILE" >/dev/null
+```
+
+### S125 Rename of a non-existent source fails without creating it (negative)
+
+Renaming from an `old_source` that does not exist fails and does not create the
+new source. NOTE: the current status code is `502 provider_error` ("virtual
+model not found"); `DELETE` returns `404` for the same condition, so this is a
+known status-code inconsistency in the rename path. This scenario asserts the
+durable invariant (request fails, new source not created) rather than pinning
+the exact code.
+
+```bash
+NEW="qa-lb-rmiss-$QA_SUFFIX"
+HTTP=$(curl -sS -o "$QA_RUN_DIR/s125.body" -w '%{http_code}' -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NEW\",\"old_source\":\"qa-lb-missing-$QA_SUFFIX\",\"target_model\":\"openai/gpt-4.1-nano\"}")
+sed -n '1,20p' "$QA_RUN_DIR/s125.body"
+[ "$HTTP" -ge 400 ]
+curl -fsS "$BASE_URL/admin/virtual-models" | jq -e --arg n "$NEW" 'all(.[]; .source != $n)' >/dev/null
+```
+
+## 15. Token throughput and cache analytics
+
+These scenarios exercise the overview live-throughput chart endpoint (#434) and
+the cache-split usage analytics (#428). Throughput and `cache_mode` run on the
+main gateway; cache overview and locally-cached accounting use the auth/cache
+gateway where the exact response cache is enabled.
+
+### S126 Token throughput window shape across granularities
+
+Each granularity returns a fixed, zero-fillable window with the four token
+series the live chart stacks.
+
+```bash
+check_throughput() {
+  local gran="$1" bucket_seconds="$2" count="$3"
+  curl -fsS "$BASE_URL/admin/usage/throughput?granularity=$gran" \
+    | jq -e --arg g "$gran" --argjson bs "$bucket_seconds" --argjson n "$count" '
+        .granularity == $g and .bucket_seconds == $bs and (.buckets | length) == $n
+        and all(.buckets[];
+          (.start | type == "string")
+          and (.input_tokens | type == "number")
+          and (.output_tokens | type == "number")
+          and (.prompt_cached_tokens | type == "number")
+          and (.locally_cached_tokens | type == "number"))
+      ' >/dev/null
+}
+check_throughput second 1 60
+check_throughput minute 60 60
+check_throughput hour 3600 24
+check_throughput day 86400 30
+```
+
+### S127 Token throughput rejects a missing or invalid granularity (negative)
+
+Granularity is required and must be one of second/minute/hour/day.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s127.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s127.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/admin/usage/throughput"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.type == "invalid_request_error"' "$BODY_FILE" >/dev/null
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/admin/usage/throughput?granularity=fortnight"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.type == "invalid_request_error"' "$BODY_FILE" >/dev/null
+```
+
+### S128 Token throughput reflects live traffic
+
+A fresh chat request increases the token volume in the current minute buckets,
+confirming the chart reads live from the usage store.
+
+```bash
+last2() {
+  curl -fsS "$BASE_URL/admin/usage/throughput?granularity=minute" \
+    | jq '[.buckets[-2,-1] | (.input_tokens + .output_tokens + .prompt_cached_tokens)] | add'
+}
+BEFORE=$(last2)
+RID="qa-throughput-$QA_SUFFIX"
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Say hello in ten words."}],"max_tokens":40}' >/dev/null
+for _ in $(seq 1 15); do
+  if curl -fsS "$BASE_URL/admin/usage/log?search=$RID&limit=3" \
+    | jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r and (.total_tokens // 0) > 0)' >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+sleep 1
+AFTER=$(last2)
+echo "before=$BEFORE after=$AFTER"
+[ "$AFTER" -gt "$BEFORE" ]
+```
+
+### S129 Usage summary honors `cache_mode`
+
+The summary accepts `uncached`, `cached`, and `all`; `all` is at least as large
+as `uncached`, and an unrecognized value is tolerated (normalized to uncached,
+not rejected — Postel's law).
+
+```bash
+for MODE in uncached cached all; do
+  curl -fsS "$BASE_URL/admin/usage/summary?cache_mode=$MODE&days=30" \
+    | jq -e '(.total_requests | type == "number") and (.total_tokens | type == "number")' >/dev/null
+done
+UNCACHED=$(curl -fsS "$BASE_URL/admin/usage/summary?cache_mode=uncached&days=30" | jq '.total_tokens')
+ALL=$(curl -fsS "$BASE_URL/admin/usage/summary?cache_mode=all&days=30" | jq '.total_tokens')
+[ "$ALL" -ge "$UNCACHED" ]
+curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/admin/usage/summary?cache_mode=bogus&days=30" \
+  | jq -R -e '. == "200"' >/dev/null
+```
+
+### S130 Cache overview is unavailable when caching is off
+
+On the main gateway the response cache is disabled, so the cache overview
+reports the feature as unavailable.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s130.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s130.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/admin/cache/overview"
+grep -Eiq '^HTTP/.* 503 ' "$HEADERS_FILE"
+jq -e '.error.code == "feature_unavailable"' "$BODY_FILE" >/dev/null
+```
+
+### S131 Cache overview is served when caching is on
+
+On the auth/cache gateway the exact response cache is enabled, so the overview
+returns a valid summary and daily series. The endpoint requires authentication.
+
+```bash
+curl -fsS "$AUTH_BASE_URL/admin/cache/overview" -H "$ADMIN_AUTH_HEADER" \
+  | jq -e '
+      (.summary.total_hits | type == "number")
+      and (.summary.total_tokens | type == "number")
+      and (.daily | type == "array")
+    ' >/dev/null
+curl -sS -o /dev/null -w '%{http_code}' "$AUTH_BASE_URL/admin/cache/overview" \
+  | jq -R -e '. == "401"' >/dev/null
+```
+
+### S132 Locally-cached tokens are accounted from exact cache hits
+
+A repeated identical request hits the exact response cache (`X-Cache: HIT
+(exact)`). The hit is counted in the cache overview and surfaces as
+`locally_cached_tokens` in the throughput window.
+
+```bash
+UP="/team/cache/throughput/$QA_SUFFIX"
+PROMPT="Reply with exactly QA_LOCAL_CACHE_${QA_SUFFIX//[^[:alnum:]]/_}"
+BODY="{\"model\":\"openai/gpt-4.1-nano\",\"messages\":[{\"role\":\"user\",\"content\":\"$PROMPT\"}],\"max_tokens\":32,\"temperature\":0}"
+HITS_BEFORE=$(curl -fsS "$AUTH_BASE_URL/admin/cache/overview" -H "$ADMIN_AUTH_HEADER" | jq '.summary.total_hits // 0')
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s132.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s132.body.XXXXXX")
+curl -fsS -D "$HEADERS_FILE" -o "$BODY_FILE" "$AUTH_BASE_URL/v1/chat/completions" \
+  -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: qa-localcache-$QA_SUFFIX-1" -H "X-GoModel-User-Path: $UP" -d "$BODY"
+if grep -Eiq '^X-Cache:' "$HEADERS_FILE"; then
+  echo "error: cache warm request unexpectedly returned an X-Cache header" >&2
+  exit 1
+fi
+curl -fsS -D "$HEADERS_FILE" -o "$BODY_FILE" "$AUTH_BASE_URL/v1/chat/completions" \
+  -H "$ADMIN_AUTH_HEADER" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: qa-localcache-$QA_SUFFIX-2" -H "X-GoModel-User-Path: $UP" -d "$BODY"
+grep -Eiq '^X-Cache: HIT \(exact\)' "$HEADERS_FILE"
+for _ in $(seq 1 15); do
+  if curl -fsS "$AUTH_BASE_URL/admin/usage/log?cache_mode=cached&search=qa-localcache-$QA_SUFFIX-2&limit=3" -H "$ADMIN_AUTH_HEADER" \
+    | jq -e 'any(.entries[]?; (.total_tokens // 0) > 0)' >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+HITS_AFTER=$(curl -fsS "$AUTH_BASE_URL/admin/cache/overview" -H "$ADMIN_AUTH_HEADER" | jq '.summary.total_hits // 0')
+echo "cache hits before=$HITS_BEFORE after=$HITS_AFTER"
+[ "$HITS_AFTER" -gt "$HITS_BEFORE" ]
+curl -fsS "$AUTH_BASE_URL/admin/usage/throughput?granularity=minute" -H "$ADMIN_AUTH_HEADER" \
+  | jq -e '([.buckets[].locally_cached_tokens] | add) > 0' >/dev/null
 ```
