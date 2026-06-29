@@ -88,3 +88,59 @@ func TestSQLiteReaderGetDailyUsage_FoldsPromptCacheSplitPerPeriod(t *testing.T) 
 		t.Errorf("day2 split = {uncached:%d cached:%d}, want {50 150}", d2.UncachedInputTokens, d2.CachedInputTokens)
 	}
 }
+
+// Under a non-default cache mode (all), local-cache rows are included in the
+// period totals but must NOT pollute the provider prompt-cache split.
+func TestSQLiteReaderGetDailyUsage_SplitExcludesLocalCacheUnderAllMode(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite database: %v", err)
+	}
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create sqlite store: %v", err)
+	}
+
+	ctx := context.Background()
+	day := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	if err := store.WriteBatch(ctx, []*UsageEntry{
+		{
+			ID: "p1", RequestID: "r1", Timestamp: day, Model: "gpt-5", Provider: "openai",
+			Endpoint: "/v1/chat/completions", InputTokens: 100, OutputTokens: 40, TotalTokens: 140,
+			RawData: map[string]any{"cached_tokens": 30}, // uncached 70 + cached 30
+		},
+		{
+			ID: "c1", RequestID: "r2", Timestamp: day, Model: "gpt-5", Provider: "openai",
+			Endpoint: "/v1/chat/completions", CacheType: CacheTypeExact, InputTokens: 12, OutputTokens: 8, TotalTokens: 20,
+		},
+	}); err != nil {
+		t.Fatalf("failed to seed usage entries: %v", err)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create sqlite reader: %v", err)
+	}
+	daily, err := reader.GetDailyUsage(ctx, UsageQueryParams{
+		StartDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC),
+		EndDate:   time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC),
+		Interval:  "daily",
+		CacheMode: CacheModeAll,
+	})
+	if err != nil {
+		t.Fatalf("GetDailyUsage returned error: %v", err)
+	}
+	if len(daily) != 1 {
+		t.Fatalf("got %d periods, want 1", len(daily))
+	}
+	d := daily[0]
+	if d.InputTokens != 112 {
+		t.Errorf("InputTokens = %d, want 112 (provider + local row counted under all mode)", d.InputTokens)
+	}
+	if d.UncachedInputTokens != 70 || d.CachedInputTokens != 30 || d.CacheWriteInputTokens != 0 {
+		t.Errorf("split = {uncached:%d cached:%d write:%d}, want {70 30 0} (local-cache row excluded from split)",
+			d.UncachedInputTokens, d.CachedInputTokens, d.CacheWriteInputTokens)
+	}
+}

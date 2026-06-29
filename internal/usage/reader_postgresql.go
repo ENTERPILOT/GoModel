@@ -352,7 +352,7 @@ func (r *PostgreSQLReader) GetDailyUsage(ctx context.Context, params UsageQueryP
 
 	// Second pass: fold the per-period prompt-cache split from raw_data, reusing
 	// the same group expression so the period keys line up.
-	splitQuery := fmt.Sprintf(`SELECT %s AS period, input_tokens, provider, raw_data FROM "usage"%s`, groupExpr, where)
+	splitQuery := fmt.Sprintf(`SELECT %s AS period, cache_type, input_tokens, provider, raw_data FROM "usage"%s`, groupExpr, where)
 	splitRows, err := r.pool.Query(ctx, splitQuery, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query daily input segments: %w", err)

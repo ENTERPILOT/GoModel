@@ -595,6 +595,7 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 			{Key: "date", Value: "$timestamp"},
 			{Key: "timezone", Value: usageTimeZone(params)},
 		}}}},
+		{Key: "cache_type", Value: 1},
 		{Key: "input_tokens", Value: 1},
 		{Key: "provider", Value: 1},
 		{Key: "raw_data", Value: 1},
@@ -608,12 +609,17 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 	for splitCursor.Next(ctx) {
 		var row struct {
 			Period      string         `bson:"period"`
+			CacheType   string         `bson:"cache_type"`
 			InputTokens int            `bson:"input_tokens"`
 			Provider    string         `bson:"provider"`
 			RawData     map[string]any `bson:"raw_data"`
 		}
 		if err := splitCursor.Decode(&row); err != nil {
 			return nil, fmt.Errorf("failed to decode daily input segment row: %w", err)
+		}
+		// Skip local-cache hits: they are not provider input.
+		if isLocalCacheType(&row.CacheType) {
+			continue
 		}
 		accumulatePeriodSplit(splits, row.Period, row.InputTokens, row.Provider, row.RawData)
 	}

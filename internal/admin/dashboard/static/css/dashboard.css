@@ -1566,6 +1566,12 @@ body.dashboard-modal-open {
   animation: live-dot-pulse 1.8s ease-out infinite;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .live-dot.is-streaming {
+    animation: none;
+  }
+}
+
 @keyframes live-dot-pulse {
   0% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 55%, transparent);

@@ -164,10 +164,15 @@ func foldPeriodInputSegments(rows inputSegmentRows) (map[string]periodInputSplit
 	out := map[string]periodInputSplit{}
 	for rows.Next() {
 		var period, provider string
+		var cacheType, rawDataJSON *string
 		var inputTokens int
-		var rawDataJSON *string
-		if err := rows.Scan(&period, &inputTokens, &provider, &rawDataJSON); err != nil {
+		if err := rows.Scan(&period, &cacheType, &inputTokens, &provider, &rawDataJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan daily input segment row: %w", err)
+		}
+		// The split describes provider input; local-cache hits aren't provider
+		// requests, so skip them regardless of the query's cache mode.
+		if isLocalCacheType(cacheType) {
+			continue
 		}
 		var rawData map[string]any
 		if rawDataJSON != nil && *rawDataJSON != "" {
@@ -178,6 +183,20 @@ func foldPeriodInputSegments(rows inputSegmentRows) (map[string]periodInputSplit
 		accumulatePeriodSplit(out, period, inputTokens, provider, rawData)
 	}
 	return out, rows.Err()
+}
+
+// isLocalCacheType reports whether a usage row was served from GoModel's local
+// response cache (cache_type set), and so is not provider input.
+func isLocalCacheType(cacheType *string) bool {
+	if cacheType == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(*cacheType)) {
+	case CacheTypeExact, CacheTypeSemantic:
+		return true
+	default:
+		return false
+	}
 }
 
 // applyDailyInputSplit merges the per-period split onto matching daily rows.

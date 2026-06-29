@@ -109,6 +109,16 @@
                 return this.formatTokensShort(Math.max(0, Math.round(this.liveTokensSummary[metric] || 0)));
             },
 
+            // Text equivalent of the chart for screen readers (the canvas itself
+            // is opaque to assistive tech).
+            liveTokensChartAriaLabel() {
+                return 'Live token throughput, ' + this.liveTokensWindowLabel().toLowerCase() + '. ' +
+                    'Input ' + this.liveTokensLegendValue('input') + ', ' +
+                    'output ' + this.liveTokensLegendValue('output') + ', ' +
+                    'prompt cached ' + this.liveTokensLegendValue('prompt') + ', ' +
+                    'locally cached ' + this.liveTokensLegendValue('local') + ' tokens.';
+            },
+
             setLiveTokensGranularity(value) {
                 if (!GRANULARITIES[value] || value === this.liveTokensGranularity) {
                     return;
@@ -194,8 +204,9 @@
                     return;
                 }
                 inFlight = true;
+                const requested = this.liveTokensGranularity;
                 try {
-                    const cfg = GRANULARITIES[this.liveTokensGranularity] || GRANULARITIES.minutes;
+                    const cfg = GRANULARITIES[requested] || GRANULARITIES.minutes;
                     const options = typeof this.requestOptions === 'function' ? this.requestOptions() : { headers: this.headers() };
                     const res = await fetch(liveTokensPath('/admin/usage/throughput?granularity=' + cfg.apiName), options);
                     const handled = this.handleFetchResponse(res, 'token throughput', options);
@@ -206,6 +217,12 @@
                         return;
                     }
                     const payload = await res.json();
+                    // The granularity changed while this request was in flight, so
+                    // its buckets no longer match the selected window — discard them
+                    // (a fresh fetch is issued in finally).
+                    if (this.liveTokensGranularity !== requested) {
+                        return;
+                    }
                     buckets = payload && Array.isArray(payload.buckets) ? payload.buckets : [];
                     this.renderLiveTokensChart();
                 } catch (e) {
@@ -215,6 +232,11 @@
                     console.error('Failed to fetch token throughput:', e);
                 } finally {
                     inFlight = false;
+                    // A granularity change during the fetch was swallowed by the
+                    // in-flight guard; fetch the now-selected granularity.
+                    if (this.liveTokensActive && this.page === 'overview' && this.liveTokensGranularity !== requested) {
+                        this.fetchLiveTokens();
+                    }
                 }
             },
 

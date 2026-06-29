@@ -382,7 +382,7 @@ func (r *SQLiteReader) GetDailyUsage(ctx context.Context, params UsageQueryParam
 	// Second pass: fold the per-period prompt-cache split from raw_data (the
 	// GROUP BY above cannot also return per-row raw_data), reusing the same
 	// group expression so the period keys line up.
-	splitRows, err := r.db.QueryContext(ctx, `SELECT `+groupExpr+` AS period, input_tokens, provider, raw_data FROM usage`+where, queryArgs...)
+	splitRows, err := r.db.QueryContext(ctx, `SELECT `+groupExpr+` AS period, cache_type, input_tokens, provider, raw_data FROM usage`+where, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query daily input segments: %w", err)
 	}

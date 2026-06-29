@@ -46,7 +46,7 @@
             </div>
         </div>
         <div class="chart-wrapper">
-            <canvas id="liveTokensChart"></canvas>
+            <canvas id="liveTokensChart" role="img" :aria-label="liveTokensChartAriaLabel()"></canvas>
             <div class="chart-empty-overlay live-tokens-empty" x-show="!liveTokensHasData()">
                 <span class="live-tokens-empty-text">Waiting for live requests…</span>
             </div>

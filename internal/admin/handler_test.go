@@ -23,26 +23,28 @@ import (
 
 // mockUsageReader implements usage.UsageReader for testing.
 type mockUsageReader struct {
-	summary            *usage.UsageSummary
-	daily              []usage.DailyUsage
-	modelUsage         []usage.ModelUsage
-	userPathUsage      []usage.UserPathUsage
-	usageLog           *usage.UsageLogResult
-	usageByRequestID   map[string][]usage.UsageLogEntry
-	cacheOverview      *usage.CacheOverview
-	throughput         *usage.TokenThroughput
-	lastUsageLog       usage.UsageLogParams
-	lastRequestIDs     []string
-	lastCacheOverview  usage.UsageQueryParams
-	lastThroughputGran usage.ThroughputGranularity
-	summaryErr         error
-	dailyErr           error
-	modelUsageErr      error
-	userPathUsageErr   error
-	usageLogErr        error
-	usageByRequestErr  error
-	cacheErr           error
-	throughputErr      error
+	summary              *usage.UsageSummary
+	daily                []usage.DailyUsage
+	modelUsage           []usage.ModelUsage
+	userPathUsage        []usage.UserPathUsage
+	usageLog             *usage.UsageLogResult
+	usageByRequestID     map[string][]usage.UsageLogEntry
+	cacheOverview        *usage.CacheOverview
+	throughput           *usage.TokenThroughput
+	lastUsageLog         usage.UsageLogParams
+	lastRequestIDs       []string
+	lastCacheOverview    usage.UsageQueryParams
+	lastThroughputGran   usage.ThroughputGranularity
+	lastThroughputEnd    time.Time
+	lastThroughputOffset int64
+	summaryErr           error
+	dailyErr             error
+	modelUsageErr        error
+	userPathUsageErr     error
+	usageLogErr          error
+	usageByRequestErr    error
+	cacheErr             error
+	throughputErr        error
 }
 
 type mockAuditReader struct {
@@ -120,8 +122,10 @@ func (m *mockUsageReader) GetCacheOverview(_ context.Context, params usage.Usage
 	return m.cacheOverview, nil
 }
 
-func (m *mockUsageReader) GetTokenThroughput(_ context.Context, gran usage.ThroughputGranularity, _ time.Time, _ int64) (*usage.TokenThroughput, error) {
+func (m *mockUsageReader) GetTokenThroughput(_ context.Context, gran usage.ThroughputGranularity, end time.Time, offset int64) (*usage.TokenThroughput, error) {
 	m.lastThroughputGran = gran
+	m.lastThroughputEnd = end
+	m.lastThroughputOffset = offset
 	if m.throughputErr != nil {
 		return nil, m.throughputErr
 	}
@@ -2980,5 +2984,148 @@ var _ = func() usage.UsageQueryParams {
 		StartDate: time.Time{},
 		EndDate:   time.Time{},
 		Interval:  "daily",
+	}
+}
+
+// --- TokenThroughput handler tests ---
+
+func TestTokenThroughput_InvalidGranularity(t *testing.T) {
+	h := NewHandler(&mockUsageReader{}, nil)
+	c, rec := newHandlerContext("/admin/usage/throughput?granularity=weekly")
+	if err := h.TokenThroughput(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+	if !containsString(rec.Body.String(), "granularity") {
+		t.Errorf("expected granularity message, got: %s", rec.Body.String())
+	}
+}
+
+func TestTokenThroughput_MissingGranularity(t *testing.T) {
+	h := NewHandler(&mockUsageReader{}, nil)
+	c, rec := newHandlerContext("/admin/usage/throughput")
+	if err := h.TokenThroughput(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestTokenThroughput_NilReaderReturnsEmptyWindow(t *testing.T) {
+	h := NewHandler(nil, nil)
+	c, rec := newHandlerContext("/admin/usage/throughput?granularity=minute")
+	if err := h.TokenThroughput(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	var tp usage.TokenThroughput
+	if err := json.Unmarshal(rec.Body.Bytes(), &tp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if tp.Granularity != "minute" || tp.BucketSeconds != 60 {
+		t.Errorf("got granularity=%q bucket_seconds=%d, want minute/60", tp.Granularity, tp.BucketSeconds)
+	}
+	if len(tp.Buckets) != 60 {
+		t.Errorf("got %d buckets, want 60 (zero-filled window)", len(tp.Buckets))
+	}
+	for i, b := range tp.Buckets {
+		if b.InputTokens+b.OutputTokens+b.PromptCachedTokens+b.LocallyCachedTokens != 0 {
+			t.Errorf("bucket %d should be zero, got %+v", i, b)
+		}
+	}
+}
+
+func TestTokenThroughput_SuccessForwardsArgs(t *testing.T) {
+	reader := &mockUsageReader{
+		throughput: &usage.TokenThroughput{
+			Granularity:   "minute",
+			BucketSeconds: 60,
+			Buckets: []usage.ThroughputBucket{
+				{InputTokens: 70, OutputTokens: 40, PromptCachedTokens: 30, LocallyCachedTokens: 5},
+			},
+		},
+	}
+	h := NewHandler(reader, nil)
+	c, rec := newHandlerContext("/admin/usage/throughput?granularity=minute")
+	before := time.Now().UTC()
+	if err := h.TokenThroughput(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	var tp usage.TokenThroughput
+	if err := json.Unmarshal(rec.Body.Bytes(), &tp); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(tp.Buckets) != 1 || tp.Buckets[0].PromptCachedTokens != 30 {
+		t.Errorf("unexpected throughput body: %+v", tp)
+	}
+	// The handler forwards the parsed granularity, ~now, and a UTC offset by default.
+	if reader.lastThroughputGran.Name != "minute" {
+		t.Errorf("forwarded granularity = %q, want minute", reader.lastThroughputGran.Name)
+	}
+	if reader.lastThroughputOffset != 0 {
+		t.Errorf("forwarded offset = %d, want 0 (default UTC)", reader.lastThroughputOffset)
+	}
+	if reader.lastThroughputEnd.Before(before) || reader.lastThroughputEnd.After(time.Now().UTC().Add(time.Second)) {
+		t.Errorf("forwarded end = %v, want ~now", reader.lastThroughputEnd)
+	}
+}
+
+func TestTokenThroughput_ForwardsTimezoneOffset(t *testing.T) {
+	reader := &mockUsageReader{throughput: &usage.TokenThroughput{Granularity: "day", BucketSeconds: 86400}}
+	h := NewHandler(reader, nil)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage/throughput?granularity=day", nil)
+	req.Header.Set("X-GoModel-Timezone", "Asia/Kolkata") // UTC+5:30, no DST
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.TokenThroughput(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if reader.lastThroughputOffset != int64(5*3600+30*60) {
+		t.Errorf("forwarded offset = %d, want 19800 (Asia/Kolkata)", reader.lastThroughputOffset)
+	}
+}
+
+func TestTokenThroughput_GatewayError(t *testing.T) {
+	reader := &mockUsageReader{
+		throughputErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
+	}
+	h := NewHandler(reader, nil)
+	c, rec := newHandlerContext("/admin/usage/throughput?granularity=hour")
+	if err := h.TokenThroughput(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", rec.Code)
+	}
+}
+
+func TestTokenThroughput_GenericError(t *testing.T) {
+	reader := &mockUsageReader{
+		throughputErr: errors.New("database connection lost"),
+	}
+	h := NewHandler(reader, nil)
+	c, rec := newHandlerContext("/admin/usage/throughput?granularity=day")
+	if err := h.TokenThroughput(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", rec.Code)
+	}
+	if containsString(rec.Body.String(), "database connection lost") {
+		t.Errorf("original error message should be hidden, got: %s", rec.Body.String())
 	}
 }
