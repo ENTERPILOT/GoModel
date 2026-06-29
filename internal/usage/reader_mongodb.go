@@ -758,7 +758,8 @@ func (r *MongoDBReader) GetCacheOverview(ctx context.Context, params UsageQueryP
 // GetTokenThroughput returns the trailing window of token-volume buckets for the
 // overview live-throughput chart. Documents are streamed within the window and
 // bucketed in Go (the prompt-cache split lives in raw_data), mirroring the
-// summary input-segment pass.
+// summary input-segment pass. See foldThroughput in throughput.go for why this
+// streams-and-folds rather than grouping in the database (and TODO(perf) there).
 func (r *MongoDBReader) GetTokenThroughput(ctx context.Context, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error) {
 	acc := newThroughputAccumulator(gran, end, offset)
 	bucketSeconds, first, upper := throughputWindow(gran, end, offset)

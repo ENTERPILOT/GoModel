@@ -61,6 +61,12 @@ type TokenThroughput struct {
 // offset is the timezone's offset from UTC (seconds east of UTC) so buckets
 // align to local boundaries — notably the "day" buckets start at local midnight,
 // matching the Daily Token Usage chart instead of UTC midnight.
+//
+// TODO(tz): offset is the dashboard timezone's offset at `end` only (a single
+// fixed value), so day/hour buckets that straddle a DST transition within the
+// window can be an hour off. Acceptable for a live preview; the proper fix is to
+// thread the *time.Location through GetTokenThroughput and bucket per the
+// store's own zone (the perf TODO on foldThroughput would enable this for free).
 func throughputWindow(gran ThroughputGranularity, end time.Time, offset int64) (bucketSeconds, first, upper int64) {
 	bucketSeconds = int64(gran.BucketSize / time.Second)
 	if bucketSeconds <= 0 {
@@ -149,6 +155,22 @@ func EmptyTokenThroughput(gran ThroughputGranularity, end time.Time, offset int6
 // columns, in order: bucket-start unix seconds, cache_type, input_tokens,
 // output_tokens, total_tokens, provider, raw_data. The cursor is the same
 // minimal interface used for the summary fold (inputSegmentRows).
+//
+// Why stream-and-fold instead of GROUP BY: the Input/Prompt-cached series come
+// from the provider prompt-cache split, derived per row from raw_data via
+// EntryInputSegments — the single source of truth for the provider-specific
+// quirks (field coalescing, Anthropic additive accounting). That split is
+// per-row non-linear (max/min/branch), so it can't be reconstructed from
+// per-bucket sums, and we deliberately don't reimplement it in SQL across three
+// backends. The query is bounded to the window by the timestamp index, matching
+// the GetSummary / GetDailyUsage fold passes.
+//
+// TODO(perf): the overview polls this endpoint, so the coarse (hour/day) windows
+// re-scan many rows per refresh. The scalable fix is to persist the
+// uncached/cached/cache-write split as columns at write time (computed once via
+// EntryInputSegments); summary, daily and throughput could then GROUP BY in SQL
+// instead of streaming, and day/hour buckets could use the store's own timezone
+// (see throughputWindow's TODO(tz)).
 func foldThroughput(rows inputSegmentRows, acc *throughputAccumulator) error {
 	for rows.Next() {
 		var bucketStart int64
