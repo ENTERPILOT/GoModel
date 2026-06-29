@@ -111,6 +111,9 @@ func TestService_ConfigOverlayOverridesStoreRow(t *testing.T) {
 	}
 }
 
+// Only STRUCTURAL problems (catalog-independent) abort startup. Catalog
+// availability is checked at resolve time, not here — see
+// TestService_ManagedRedirectToleratesColdCatalogAtStartup.
 func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -120,10 +123,6 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 		{
 			name:    "self target",
 			entries: []config.VirtualModelConfig{{Source: "smart", Target: "smart"}},
-		},
-		{
-			name:    "unknown target",
-			entries: []config.VirtualModelConfig{{Source: "smart", Target: "openai/unknown"}},
 		},
 		{
 			name: "virtual model target",
@@ -153,6 +152,58 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 				t.Fatalf("ValidateManagedConfig() error = %v, want validation error", err)
 			}
 		})
+	}
+}
+
+// A managed redirect declared against a model the catalog cannot serve YET — a
+// cold catalog, because the provider model list loads asynchronously after
+// startup — must NOT abort startup. ValidateManagedConfig checks structure only;
+// the redirect simply starts unavailable and begins resolving once the catalog
+// warms, exactly like the resolve path skips any unavailable target. Regression
+// test for the cold-catalog startup-abort bug.
+func TestService_ManagedRedirectToleratesColdCatalogAtStartup(t *testing.T) {
+	t.Parallel()
+	supported := map[string]core.Model{} // cold: no provider models loaded yet
+	store := newSQLiteVMStore(t)
+	svc, err := NewService(store, fakeCatalog{providers: []string{"openai"}, supported: supported}, true)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	ctx := context.Background()
+
+	// Startup against a cold catalog must succeed for a structurally-valid target.
+	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{Source: "smart", Target: "openai/gpt-4o"}}))
+	if err := svc.Refresh(ctx); err != nil {
+		t.Fatalf("startup Refresh() error = %v", err)
+	}
+	if err := svc.ValidateManagedConfig(); err != nil {
+		t.Fatalf("ValidateManagedConfig() on a cold catalog error = %v, want nil", err)
+	}
+	// While the catalog is cold the redirect is simply unavailable, not fatal.
+	if _, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", "")); changed {
+		t.Fatalf("redirect resolved before its target was in the catalog")
+	}
+
+	// Once the async model load warms the catalog, the same redirect resolves —
+	// supportedTargets consults the live catalog at resolve time, no refresh needed.
+	supported["openai/gpt-4o"] = core.Model{ID: "openai/gpt-4o", Object: "model", OwnedBy: "openai"}
+	if sel, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", "")); !changed || sel.QualifiedModel() != "openai/gpt-4o" {
+		t.Fatalf("redirect did not resolve after catalog warm: changed=%v sel=%q", changed, sel.QualifiedModel())
+	}
+}
+
+// The admin write path keeps the catalog-availability check: it runs against a
+// warm catalog, so a target the catalog cannot serve is a caller mistake.
+func TestService_UpsertRejectsUnsupportedTarget(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	err := svc.Upsert(context.Background(), VirtualModel{
+		Source:  "smart",
+		Targets: []Target{{Provider: "openai", Model: "unknown"}},
+		Enabled: true,
+	})
+	if err == nil || !IsValidationError(err) {
+		t.Fatalf("Upsert(unsupported target) error = %v, want validation rejection", err)
 	}
 }
 

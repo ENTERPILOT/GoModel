@@ -119,19 +119,24 @@ func (s *Service) isManagedSource(source string) bool {
 }
 
 // ValidateManagedConfig checks that every declarative config redirect satisfies
-// the admin redirect invariants (no self- or cross-redirect target, each target
-// catalog-supported), so an invalid IaC entry fails startup loudly. Call it once
-// after the initial Refresh; the config set never changes afterward, so it is
-// not re-run on the background ticker — there a transient provider-catalog gap
-// must not freeze the snapshot, and an unavailable managed target is simply
-// skipped at resolve time like any other redirect target.
+// the STRUCTURAL redirect invariants (valid selector, no self- or cross-redirect
+// target), so a malformed IaC entry fails startup loudly. Call it once after the
+// initial Refresh.
+//
+// It deliberately does NOT require targets to be catalog-supported: the provider
+// model catalog loads asynchronously and may still be warming when this runs, and
+// an unavailable target is skipped at resolve time like any other redirect target
+// (the background ticker also skips this gate so a transient provider-catalog gap
+// cannot freeze the snapshot). Gating startup on availability would abort an
+// otherwise-valid declaration on a cold cache or a momentarily-unreachable
+// provider — availability is runtime state, not a property of the declaration.
 func (s *Service) ValidateManagedConfig() error {
 	current := s.snapshot()
 	for _, vm := range current.bySource {
 		if !vm.Managed || !vm.IsRedirect() {
 			continue
 		}
-		if err := s.validateRedirectTarget(current, vm); err != nil {
+		if err := validateRedirectStructure(current, vm); err != nil {
 			return fmt.Errorf("load virtual model %q: %w", vm.Source, err)
 		}
 	}
@@ -397,10 +402,27 @@ func (s *Service) ensureSourceKind(current snapshot, source string, wantRedirect
 	return crossKindError(source, wantRedirect)
 }
 
-// validateRedirectTarget enforces redirect-specific rules for every target: a
-// redirect cannot target itself, cannot target another redirect's source, and
-// each target must resolve to a catalog-supported model.
+// validateRedirectTarget enforces redirect rules for an admin write: the
+// structural invariants plus a catalog-availability check. The admin API runs
+// against a warm catalog, so a target it cannot serve is a caller mistake worth
+// rejecting up front. Startup config validation uses validateRedirectStructure
+// alone, because the catalog may not be warm yet (see ValidateManagedConfig).
 func (s *Service) validateRedirectTarget(current snapshot, vm VirtualModel) error {
+	if err := validateRedirectStructure(current, vm); err != nil {
+		return err
+	}
+	if missing, ok := s.firstUnsupportedTarget(vm); ok {
+		return newValidationError("target model not found: "+missing, nil)
+	}
+	return nil
+}
+
+// validateRedirectStructure enforces the catalog-INDEPENDENT redirect invariants:
+// each target must parse, a redirect cannot target itself, and it cannot target
+// another redirect's source. These are pure properties of the declaration and the
+// redirect graph, so they hold whether or not the provider catalog is warm —
+// making them safe to enforce at startup, before async model loading completes.
+func validateRedirectStructure(current snapshot, vm VirtualModel) error {
 	if !vm.IsRedirect() {
 		return nil
 	}
@@ -416,11 +438,25 @@ func (s *Service) validateRedirectTarget(current snapshot, vm VirtualModel) erro
 		if existing, ok := current.redirects[qualified]; ok && existing.vm.Source != vm.Source {
 			return newValidationError(fmt.Sprintf("target %q refers to another virtual model", qualified), nil)
 		}
-		if !s.catalog.Supports(qualified) {
-			return newValidationError("target model not found: "+qualified, nil)
-		}
 	}
 	return nil
+}
+
+// firstUnsupportedTarget reports the first target the catalog cannot currently
+// serve, if any. Availability is transient — it depends on async model loading
+// and provider health — and is already handled at resolve time by skipping
+// unavailable targets, so it gates the admin write path only, never startup.
+func (s *Service) firstUnsupportedTarget(vm VirtualModel) (string, bool) {
+	for _, target := range vm.Targets {
+		selector, err := target.selector()
+		if err != nil {
+			continue // selector parse errors are reported by validateRedirectStructure
+		}
+		if qualified := selector.QualifiedModel(); !s.catalog.Supports(qualified) {
+			return qualified, true
+		}
+	}
+	return "", false
 }
 
 // managedSourceError is returned when the admin API tries to write a virtual
