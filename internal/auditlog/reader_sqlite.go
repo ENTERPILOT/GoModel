@@ -113,9 +113,10 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 		var authKeyID sql.NullString
 		var authMethod sql.NullString
 		var userPath sql.NullString
+		var errorType sql.NullString
 
 		if err := rows.Scan(&e.ID, &ts, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &aliasUsedInt, &workflowVersionID, &cacheType, &e.StatusCode,
-			&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &streamInt, &e.ErrorType, &dataJSON); err != nil {
+			&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &streamInt, &errorType, &dataJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 		}
 
@@ -141,6 +142,9 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 		}
 		if userPath.Valid {
 			e.UserPath = userPath.String
+		}
+		if errorType.Valid {
+			e.ErrorType = errorType.String
 		}
 
 		if dataJSON != nil && *dataJSON != "" {
@@ -343,9 +347,10 @@ func scanSQLiteLogEntry(rows *sql.Rows) (*LogEntry, error) {
 	var authKeyID sql.NullString
 	var authMethod sql.NullString
 	var userPath sql.NullString
+	var errorType sql.NullString
 
 	if err := rows.Scan(&e.ID, &ts, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &aliasUsedInt, &workflowVersionID, &cacheType, &e.StatusCode,
-		&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &streamInt, &e.ErrorType, &dataJSON); err != nil {
+		&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &streamInt, &errorType, &dataJSON); err != nil {
 		return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 	}
 
@@ -371,6 +376,9 @@ func scanSQLiteLogEntry(rows *sql.Rows) (*LogEntry, error) {
 	}
 	if userPath.Valid {
 		e.UserPath = userPath.String
+	}
+	if errorType.Valid {
+		e.ErrorType = errorType.String
 	}
 
 	if dataJSON != nil && *dataJSON != "" {

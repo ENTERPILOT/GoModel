@@ -1,4 +1,4 @@
-.PHONY: all build run clean tidy test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix record-api swagger docs-openapi install-tools perf-check perf-bench infra image
+.PHONY: all build run clean tidy test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data
 
 all: build
 
@@ -41,6 +41,11 @@ infra:
 # Docker Compose: full stack (GoModel + Prometheus; builds app image when needed)
 image:
 	docker compose --profile app up -d
+
+# Seed rolling demo usage/audit data into SQLite.
+# Usage: SQLITE_PATH=data/gomodel.db make seed-demo-data
+seed-demo-data:
+	bash tools/seed-demo-data.sh
 
 # Run unit tests only
 test:
