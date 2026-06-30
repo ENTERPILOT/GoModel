@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 )
@@ -262,7 +263,14 @@ func truncateAttemptErrorMessage(message string) string {
 	if len(message) <= maxAttemptErrorMessageLength {
 		return message
 	}
-	return message[:maxAttemptErrorMessageLength]
+	// Back the cut off the byte limit to the nearest rune boundary so a
+	// multi-byte rune (common in non-ASCII provider errors) is never split into
+	// invalid UTF-8, which would be mangled when JSON-marshaled for storage.
+	cut := maxAttemptErrorMessageLength
+	for cut > 0 && !utf8.RuneStart(message[cut]) {
+		cut--
+	}
+	return message[:cut]
 }
 
 func normalizeCacheType(value string) string {

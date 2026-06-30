@@ -17,10 +17,42 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/andybalholm/brotli"
 	"github.com/labstack/echo/v5"
 )
+
+func TestTruncateAttemptErrorMessage(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{"short ascii", "boom"},
+		{"exactly at limit", strings.Repeat("a", maxAttemptErrorMessageLength)},
+		{"long ascii", strings.Repeat("a", maxAttemptErrorMessageLength+50)},
+		// A 3-byte rune (✓) straddling the byte limit must not be split.
+		{"multibyte straddling limit", strings.Repeat("a", maxAttemptErrorMessageLength-1) + strings.Repeat("✓", 10)},
+		{"all multibyte", strings.Repeat("界", maxAttemptErrorMessageLength)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateAttemptErrorMessage(tt.in)
+			if len(got) > maxAttemptErrorMessageLength {
+				t.Fatalf("len(got) = %d, want <= %d", len(got), maxAttemptErrorMessageLength)
+			}
+			if !utf8.ValidString(got) {
+				t.Fatalf("result is not valid UTF-8: %q", got)
+			}
+			if len(tt.in) <= maxAttemptErrorMessageLength && got != tt.in {
+				t.Fatalf("short input mutated: got %q, want %q", got, tt.in)
+			}
+			if !strings.HasPrefix(tt.in, got) {
+				t.Fatalf("result is not a prefix of the input")
+			}
+		})
+	}
+}
 
 func TestRedactHeaders(t *testing.T) {
 	tests := []struct {

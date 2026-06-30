@@ -189,6 +189,9 @@ func (r *PostgreSQLReader) queryLogEntryWithAttempts(ctx context.Context, query,
 	}
 	defer rows.Close()
 	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("failed to read audit log row: %w", err)
+		}
 		return nil, nil
 	}
 	entry, err := scanPostgreSQLLogEntry(rows)

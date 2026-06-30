@@ -79,6 +79,42 @@ func TestEnrichEntryWithWorkflow_PreservesExecutedFailoverRoute(t *testing.T) {
 	}
 }
 
+func TestEnrichEntryWithWorkflow_FailoverSnapshotDoesNotSuppressMissingRouteFields(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	// A failover snapshot exists, but the executed route only populated the
+	// resolved model — provider/provider_name came back empty. The snapshot
+	// alone must not suppress the remaining fields; the workflow's planned
+	// values should fill the gaps instead of leaving them blank.
+	entry := &LogEntry{
+		ID:            "failover-partial-route",
+		ResolvedModel: "openai/gpt-5.5",
+		Data:          &LogData{Failover: &FailoverSnapshot{TargetModel: "openai/gpt-5.5"}},
+	}
+	c.Set(string(LogEntryKey), entry)
+
+	EnrichEntryWithWorkflow(c, &core.Workflow{
+		ProviderType: "anthropic",
+		Resolution: &core.RequestModelResolution{
+			ResolvedSelector: core.ModelSelector{Provider: "anthropic", Model: "claude-fable-5"},
+			ProviderName:     "anthropic",
+		},
+	})
+
+	if got := entry.ResolvedModel; got != "openai/gpt-5.5" {
+		t.Fatalf("ResolvedModel = %q, want openai/gpt-5.5 (recorded route must win)", got)
+	}
+	if got := entry.Provider; got != "anthropic" {
+		t.Fatalf("Provider = %q, want anthropic (workflow fills the empty field)", got)
+	}
+	if got := entry.ProviderName; got != "anthropic" {
+		t.Fatalf("ProviderName = %q, want anthropic (workflow fills the empty field)", got)
+	}
+}
+
 func TestMiddlewarePublishesStartedEventWithRedactedRequestHeaders(t *testing.T) {
 	logger := &captureLiveLogger{
 		cfg: Config{

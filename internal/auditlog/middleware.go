@@ -215,10 +215,16 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 	// When a runtime failover already recorded the actual executed route
 	// (resolved_model/provider, via EnrichEntryWithResolvedRoute), the workflow
 	// here only carries the planned primary resolution — so it must not clobber
-	// the real route the request ended up taking.
-	executedRouteRecorded := entry.Data != nil && entry.Data.Failover != nil
+	// the real route the request ended up taking. A failover snapshot alone is
+	// not proof a given route field was populated, so gate each field on its own
+	// concrete value: if the executed route left a field empty, fall back to the
+	// workflow's planned value instead of leaving it blank.
+	failoverRecorded := entry.Data != nil && entry.Data.Failover != nil
+	executedResolvedModel := failoverRecorded && strings.TrimSpace(entry.ResolvedModel) != ""
+	executedProvider := failoverRecorded && strings.TrimSpace(entry.Provider) != ""
+	executedProviderName := failoverRecorded && strings.TrimSpace(entry.ProviderName) != ""
 
-	if resolvedModel := resolvedModelForAuditLog(workflow); resolvedModel != "" && !executedRouteRecorded {
+	if resolvedModel := resolvedModelForAuditLog(workflow); resolvedModel != "" && !executedResolvedModel {
 		entry.ResolvedModel = resolvedModel
 	}
 	if workflow.Mode == core.ExecutionModePassthrough && workflow.Passthrough != nil {
@@ -226,7 +232,7 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 			entry.RequestedModel = model
 		}
 	}
-	if !executedRouteRecorded {
+	if !executedProvider {
 		if providerType := strings.TrimSpace(workflow.ProviderType); providerType != "" {
 			entry.Provider = providerType
 		} else if workflow.Resolution != nil && strings.TrimSpace(workflow.Resolution.ProviderType) != "" {
@@ -234,7 +240,7 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 		}
 	}
 	if workflow.Resolution != nil {
-		if providerName := strings.TrimSpace(workflow.Resolution.ProviderName); providerName != "" && !executedRouteRecorded {
+		if providerName := strings.TrimSpace(workflow.Resolution.ProviderName); providerName != "" && !executedProviderName {
 			entry.ProviderName = providerName
 		}
 		entry.AliasUsed = workflow.Resolution.AliasApplied
