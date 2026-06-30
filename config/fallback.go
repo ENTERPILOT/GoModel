@@ -41,11 +41,6 @@ func ResolveFallbackDefaultMode(mode FallbackMode) FallbackMode {
 	return mode
 }
 
-// FallbackModelOverride holds legacy per-model mode overrides.
-type FallbackModelOverride struct {
-	Mode FallbackMode `yaml:"mode" json:"mode"`
-}
-
 // FallbackConfig holds translated-route model fallback policy.
 type FallbackConfig struct {
 	// Enabled controls failover globally. It defaults to true; configured rules
@@ -65,10 +60,6 @@ type FallbackConfig struct {
 
 	// RulesJSON defines manual failover rules inline from env.
 	RulesJSON string `yaml:"rules_json" env:"FAILOVER_RULES_JSON"`
-
-	// Overrides is a deprecated compatibility map. Only mode: off is respected,
-	// as a per-model failover disable; manual/auto no longer affect behavior.
-	Overrides map[string]FallbackModelOverride `yaml:"overrides"`
 
 	// DisabledModels disables failover for matching source selectors.
 	DisabledModels []string `yaml:"disabled_models" env:"FAILOVER_DISABLED_MODELS"`
@@ -90,22 +81,6 @@ func loadFallbackConfig(cfg *FallbackConfig) error {
 	}
 
 	cfg.DefaultMode = ResolveFallbackDefaultMode(cfg.DefaultMode)
-
-	if len(cfg.Overrides) > 0 {
-		normalized := make(map[string]FallbackModelOverride, len(cfg.Overrides))
-		for key, override := range cfg.Overrides {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				return fmt.Errorf("fallback.overrides: model key cannot be empty")
-			}
-			if _, exists := normalized[key]; exists {
-				return fmt.Errorf("fallback.overrides: duplicate model key after trimming: %q", key)
-			}
-			override.Mode = normalizeFallbackMode(override.Mode)
-			normalized[key] = override
-		}
-		cfg.Overrides = normalized
-	}
 
 	manual := make(map[string][]string)
 	if err := mergeFallbackRules(manual, cfg.Rules, "fallback.rules"); err != nil {
@@ -242,11 +217,6 @@ func fallbackDisabledModels(cfg *FallbackConfig) (map[string]bool, error) {
 		model = strings.TrimSpace(model)
 		if model != "" {
 			disabled[model] = true
-		}
-	}
-	for key, override := range cfg.Overrides {
-		if normalizeFallbackMode(override.Mode) == FallbackModeOff {
-			disabled[key] = true
 		}
 	}
 	if raw := strings.TrimSpace(cfg.DisabledModelsJSON); raw != "" {

@@ -660,8 +660,11 @@ func TestLoad_FallbackManualRules(t *testing.T) {
 		yamlCfg := yamlConfig{}
 		yamlCfg.Fallback.DefaultMode = "auto"
 		yamlCfg.Fallback.ManualRulesPath = manualRulesPath
+		// A legacy fallback.overrides block (removed feature) must still load
+		// without error and must no longer affect behavior — even mode: off no
+		// longer disables failover. Operators migrate to disabled_models.
 		yamlCfg.Fallback.Overrides = map[string]map[string]string{
-			"gpt-4o": {"mode": "manual"},
+			"gpt-4o": {"mode": "off"},
 		}
 
 		yamlData, err := yaml.Marshal(yamlCfg)
@@ -681,8 +684,8 @@ func TestLoad_FallbackManualRules(t *testing.T) {
 		if cfg.Fallback.DefaultMode != FallbackModeAuto {
 			t.Fatalf("Fallback.DefaultMode = %q, want %q", cfg.Fallback.DefaultMode, FallbackModeAuto)
 		}
-		if cfg.Fallback.Overrides["gpt-4o"].Mode != FallbackModeManual {
-			t.Fatalf("Fallback.Overrides[gpt-4o].Mode = %q, want %q", cfg.Fallback.Overrides["gpt-4o"].Mode, FallbackModeManual)
+		if cfg.Fallback.Disabled["gpt-4o"] {
+			t.Fatal("legacy fallback.overrides mode:off must no longer disable failover")
 		}
 		got := cfg.Fallback.Manual["gpt-4o"]
 		want := []string{"azure/gpt-4o", "gemini/gemini-2.5-pro"}
@@ -780,15 +783,18 @@ fallback:
 	})
 }
 
-func TestLoad_ManualFallbackOverrideAllowsMissingManualRulesPath(t *testing.T) {
+func TestLoad_LegacyFallbackOverridesAreIgnored(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
+		// The removed fallback.overrides block must still load without error
+		// (yaml ignores the unknown key) and must have no effect: even mode: off
+		// no longer disables failover. Operators migrate to disabled_models.
 		yaml := `
 fallback:
   overrides:
     "gpt-4o":
-      mode: manual
+      mode: "off"
 `
 		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
 			t.Fatalf("Failed to write config.yaml: %v", err)
@@ -798,37 +804,11 @@ fallback:
 		if err != nil {
 			t.Fatalf("Load() failed: %v", err)
 		}
-		if result.Config.Fallback.Overrides["gpt-4o"].Mode != FallbackModeManual {
-			t.Fatalf("Fallback.Overrides[gpt-4o].Mode = %q, want %q", result.Config.Fallback.Overrides["gpt-4o"].Mode, FallbackModeManual)
+		if result.Config.Fallback.Disabled["gpt-4o"] {
+			t.Fatal("legacy fallback.overrides mode:off must no longer disable failover")
 		}
 		if result.Config.Fallback.Manual != nil {
 			t.Fatalf("Fallback.Manual = %v, want nil", result.Config.Fallback.Manual)
-		}
-	})
-}
-
-func TestLoad_FallbackOverrideDuplicateKeyAfterTrim(t *testing.T) {
-	clearAllConfigEnvVars(t)
-
-	withTempDir(t, func(dir string) {
-		yaml := `
-fallback:
-  overrides:
-    "gpt-4o":
-      mode: manual
-    " gpt-4o ":
-      mode: auto
-`
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		_, err := Load()
-		if err == nil {
-			t.Fatal("expected Load() to fail for duplicate fallback override keys after trimming")
-		}
-		if !strings.Contains(err.Error(), `fallback.overrides: duplicate model key after trimming: "gpt-4o"`) {
-			t.Fatalf("Load() error = %v, want duplicate trimmed override key error", err)
 		}
 	})
 }
