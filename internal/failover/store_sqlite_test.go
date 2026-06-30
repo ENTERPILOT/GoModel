@@ -3,11 +3,150 @@ package failover
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+func newSQLiteStoreForTest(t *testing.T) *SQLiteStore {
+	t.Helper()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore() error = %v", err)
+	}
+	return store
+}
+
+func TestSQLiteStoreCRUDRoundTrip(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := newSQLiteStoreForTest(t)
+
+	// Insert: untrimmed source is trimmed; targets and metadata round-trip.
+	insert := Rule{
+		Source:        "  openai/gpt-5  ",
+		Targets:       []string{"openrouter/openai/gpt-5", "anthropic/claude-fable-5"},
+		Enabled:       true,
+		ManagedSource: ManagedSourceDashboard,
+		CreatedAt:     time.Unix(1000, 0).UTC(),
+	}
+	if err := store.Upsert(ctx, insert); err != nil {
+		t.Fatalf("Upsert(insert) error = %v", err)
+	}
+
+	got, err := store.Get(ctx, "openai/gpt-5")
+	if err != nil || got == nil {
+		t.Fatalf("Get() after insert = %+v, %v; want the inserted rule", got, err)
+	}
+	if got.Source != "openai/gpt-5" {
+		t.Fatalf("Get().Source = %q, want trimmed openai/gpt-5", got.Source)
+	}
+	if !reflect.DeepEqual(got.Targets, insert.Targets) {
+		t.Fatalf("Get().Targets = %v, want %v", got.Targets, insert.Targets)
+	}
+	if !got.Enabled || got.ManagedSource != ManagedSourceDashboard {
+		t.Fatalf("Get() metadata = enabled:%v managed:%q, want enabled:true dashboard", got.Enabled, got.ManagedSource)
+	}
+	if got.CreatedAt.Unix() != 1000 {
+		t.Fatalf("Get().CreatedAt = %d, want 1000 (preserved)", got.CreatedAt.Unix())
+	}
+	if got.UpdatedAt.IsZero() {
+		t.Fatalf("Get().UpdatedAt is zero; stampUpsert should set it")
+	}
+
+	// Update via ON CONFLICT: targets/enabled change, created_at is preserved even
+	// though the caller passes a different value, while updated_at advances.
+	update := Rule{
+		Source:        "openai/gpt-5",
+		Targets:       []string{"groq/llama-3.3-70b-versatile"},
+		Enabled:       false,
+		ManagedSource: ManagedSourceDashboard,
+		CreatedAt:     time.Unix(5000, 0).UTC(),
+	}
+	if err := store.Upsert(ctx, update); err != nil {
+		t.Fatalf("Upsert(update) error = %v", err)
+	}
+	got, err = store.Get(ctx, "openai/gpt-5")
+	if err != nil || got == nil {
+		t.Fatalf("Get() after update = %+v, %v", got, err)
+	}
+	if got.Enabled {
+		t.Fatalf("Get().Enabled = true after disabling; enabled=false must round-trip")
+	}
+	if !reflect.DeepEqual(got.Targets, []string{"groq/llama-3.3-70b-versatile"}) {
+		t.Fatalf("Get().Targets = %v, want updated single target", got.Targets)
+	}
+	if got.CreatedAt.Unix() != 1000 {
+		t.Fatalf("Get().CreatedAt = %d after update, want 1000 (ON CONFLICT must not touch created_at)", got.CreatedAt.Unix())
+	}
+
+	// A second rule lets us assert List ordering by primary_model ASC.
+	if err := store.Upsert(ctx, Rule{Source: "anthropic/claude-opus-4-8", Targets: []string{"openai/gpt-5"}, Enabled: true, ManagedSource: ManagedSourceDashboard}); err != nil {
+		t.Fatalf("Upsert(second) error = %v", err)
+	}
+	rules, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(rules) != 2 {
+		t.Fatalf("List() returned %d rules, want 2", len(rules))
+	}
+	if rules[0].Source != "anthropic/claude-opus-4-8" || rules[1].Source != "openai/gpt-5" {
+		t.Fatalf("List() order = [%q,%q], want sorted ascending", rules[0].Source, rules[1].Source)
+	}
+
+	// Get for an unknown source returns ErrNotFound.
+	if _, err := store.Get(ctx, "does/not-exist"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get(unknown) error = %v, want ErrNotFound", err)
+	}
+
+	// Delete removes an existing rule; deleting again reports ErrNotFound.
+	if err := store.Delete(ctx, "openai/gpt-5"); err != nil {
+		t.Fatalf("Delete(existing) error = %v", err)
+	}
+	if err := store.Delete(ctx, "openai/gpt-5"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Delete(missing) error = %v, want ErrNotFound", err)
+	}
+
+	// DeleteAll clears the remaining rows.
+	if err := store.DeleteAll(ctx); err != nil {
+		t.Fatalf("DeleteAll() error = %v", err)
+	}
+	rules, err = store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() after DeleteAll error = %v", err)
+	}
+	if len(rules) != 0 {
+		t.Fatalf("List() after DeleteAll returned %d rules, want 0", len(rules))
+	}
+}
+
+func TestSQLiteStoreUpsertNilTargetsRoundTrip(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := newSQLiteStoreForTest(t)
+
+	// A rule with no targets must persist as an empty list and read back as nil
+	// (decodeTargets collapses "[]" to nil) rather than erroring on NULL.
+	if err := store.Upsert(ctx, Rule{Source: "openai/gpt-5", ManagedSource: ManagedSourceDashboard}); err != nil {
+		t.Fatalf("Upsert(nil targets) error = %v", err)
+	}
+	got, err := store.Get(ctx, "openai/gpt-5")
+	if err != nil || got == nil {
+		t.Fatalf("Get() = %+v, %v", got, err)
+	}
+	if got.Targets != nil {
+		t.Fatalf("Get().Targets = %v, want nil for an empty target list", got.Targets)
+	}
+}
 
 func TestSQLiteStoreMigratesLegacyFailoverRulesSchema(t *testing.T) {
 	t.Parallel()

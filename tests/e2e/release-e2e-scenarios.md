@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 132 end-to-end curl scenarios for release validation.
+This file contains 141 end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -51,6 +51,11 @@ Stateful note:
   them, so they are self-contained and rerunnable in any order
 - `S126`-`S132` exercise token throughput and cache analytics; they are
   read-mostly (`S128`/`S132` add a little usage/cache traffic) and self-contained
+- `S133`-`S141` exercise manual failover management (admin CRUD, suggestion
+  generation, reset, validation negatives, and auth gating); each positive
+  scenario creates `$QA_SUFFIX`-scoped dashboard mappings and deletes them, and
+  `S137` calls reset (which clears all dashboard-managed failover mappings), so
+  they are self-contained and rerunnable in any order
 - IaC virtual-models behavior (declarative `VIRTUAL_MODELS`/`config.yaml`,
   managed read-only, env-over-YAML, startup validation) needs gateways launched
   with custom config, so it is covered by a standalone script rather than this
@@ -2733,4 +2738,193 @@ echo "cache hits before=$HITS_BEFORE after=$HITS_AFTER"
 [ "$HITS_AFTER" -gt "$HITS_BEFORE" ]
 curl -fsS "$AUTH_BASE_URL/admin/usage/throughput?granularity=minute" -H "$ADMIN_AUTH_HEADER" \
   | jq -e '([.buckets[].locally_cached_tokens] | add) > 0' >/dev/null
+```
+
+## 19. Manual failover management
+
+These scenarios exercise the dashboard-managed manual failover mappings (#444)
+on the main SQLite gateway. Failover management is enabled by default, so the
+admin endpoints (`GET/PUT/DELETE /admin/failover`,
+`POST /admin/failover/generate`, `POST /admin/failover/reset`) are live. The
+upsert path does not validate that the primary or target selectors exist in the
+catalog, so each scenario uses `$QA_SUFFIX`-scoped synthetic sources and deletes
+them at the end, making them self-contained and rerunnable in any order.
+
+### S133 Create and inspect a failover mapping
+
+Creates a two-target dashboard mapping and verifies the admin view shape.
+
+```bash
+SRC="qa-fo-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/failover" \
+  -H 'Content-Type: application/json' \
+  -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[\"groq/llama-3.1-8b-instant\",\"gemini/gemini-2.5-flash-lite\"]}" \
+  | jq -e --arg s "$SRC" '
+      .primary_model == $s
+      and (.fallback_models | length) == 2
+      and .fallback_models[0] == "groq/llama-3.1-8b-instant"
+      and .fallback_models[1] == "gemini/gemini-2.5-flash-lite"
+      and .enabled == true
+      and .managed == false
+      and .managed_source == "dashboard"
+    ' >/dev/null
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s133.headers.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o /dev/null -X DELETE "$BASE_URL/admin/failover" \
+  -H 'Content-Type: application/json' -d "{\"primary_model\":\"$SRC\"}"
+sed -n '1,20p' "$HEADERS_FILE"
+grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"
+```
+
+### S134 Failover mapping is listed and updatable
+
+Creates a mapping, confirms it appears in the listing, then updates its targets
+and toggles it disabled, confirming the change is persisted.
+
+```bash
+SRC="qa-fo-upd-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/failover" -H 'Content-Type: application/json' \
+  -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[\"groq/llama-3.1-8b-instant\"]}" >/dev/null
+curl -fsS "$BASE_URL/admin/failover" \
+  | jq -e --arg s "$SRC" 'any(.[]; .primary_model == $s and .enabled == true and (.fallback_models | index("groq/llama-3.1-8b-instant")))' >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/failover" -H 'Content-Type: application/json' \
+  -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[\"openai/gpt-4.1-mini\",\"xai/grok-4.3\"],\"enabled\":false}" \
+  | jq -e --arg s "$SRC" '
+      .primary_model == $s
+      and (.fallback_models | length) == 2
+      and .fallback_models[0] == "openai/gpt-4.1-mini"
+      and .enabled == false
+    ' >/dev/null
+curl -fsS "$BASE_URL/admin/failover" \
+  | jq -e --arg s "$SRC" 'any(.[]; .primary_model == $s and .enabled == false)' >/dev/null
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s134.headers.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o /dev/null -X DELETE "$BASE_URL/admin/failover" \
+  -H 'Content-Type: application/json' -d "{\"primary_model\":\"$SRC\"}"
+grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"
+```
+
+### S135 Disable a primary with an empty target list
+
+A disabled mapping is allowed to omit targets, which records the primary as a
+failover-disabled source rather than rejecting the request.
+
+```bash
+SRC="qa-fo-dis-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/failover" -H 'Content-Type: application/json' \
+  -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[],\"enabled\":false}" \
+  | jq -e --arg s "$SRC" '
+      .primary_model == $s
+      and .enabled == false
+      and ((.fallback_models // []) | length) == 0
+    ' >/dev/null
+curl -fsS "$BASE_URL/admin/failover" \
+  | jq -e --arg s "$SRC" 'any(.[]; .primary_model == $s and .enabled == false)' >/dev/null
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s135.headers.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o /dev/null -X DELETE "$BASE_URL/admin/failover" \
+  -H 'Content-Type: application/json' -d "{\"primary_model\":\"$SRC\"}"
+grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"
+```
+
+### S136 Generate failover suggestions
+
+The generate endpoint proposes dashboard mappings from the live model catalog.
+Suggestions are computed, not persisted, so this scenario is read-only.
+
+```bash
+GEN_FILE="$QA_RUN_DIR/s136.generate.json"
+curl -fsS -X POST "$BASE_URL/admin/failover/generate" > "$GEN_FILE"
+jq 'length' "$GEN_FILE"
+jq -e '
+    type == "array"
+    and length >= 1
+    and all(.[];
+      (.primary_model | type == "string" and length > 0)
+      and (.fallback_models | type == "array" and length >= 1)
+      and .managed_source == "dashboard")
+  ' "$GEN_FILE" >/dev/null
+```
+
+### S137 Reset clears dashboard-managed mappings
+
+Reset removes every dashboard-managed failover mapping. The scenario seeds two
+mappings, confirms they are present, resets, and confirms both are gone.
+
+```bash
+SRC1="qa-fo-rst1-$QA_SUFFIX"
+SRC2="qa-fo-rst2-$QA_SUFFIX"
+for S in "$SRC1" "$SRC2"; do
+  curl -fsS -X PUT "$BASE_URL/admin/failover" -H 'Content-Type: application/json' \
+    -d "{\"primary_model\":\"$S\",\"fallback_models\":[\"groq/llama-3.1-8b-instant\"]}" >/dev/null
+done
+curl -fsS "$BASE_URL/admin/failover" \
+  | jq -e --arg a "$SRC1" --arg b "$SRC2" 'any(.[]; .primary_model == $a) and any(.[]; .primary_model == $b)' >/dev/null
+curl -fsS -X POST "$BASE_URL/admin/failover/reset" \
+  | jq -e 'type == "array"' >/dev/null
+curl -fsS "$BASE_URL/admin/failover" \
+  | jq -e --arg a "$SRC1" --arg b "$SRC2" 'all(.[]; .primary_model != $a) and all(.[]; .primary_model != $b)' >/dev/null
+```
+
+### S138 Missing `primary_model` is rejected (negative)
+
+Upserting without a `primary_model` is rejected before storage.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s138.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s138.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/failover" \
+  -H 'Content-Type: application/json' \
+  -d '{"fallback_models":["groq/llama-3.1-8b-instant"]}'
+sed -n '1,20p' "$HEADERS_FILE"
+jq '.' "$BODY_FILE"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("primary_model"))' "$BODY_FILE" >/dev/null
+```
+
+### S139 Enabled mapping with no targets is rejected (negative)
+
+An enabled mapping must list at least one target. NOTE: the current status code
+is `502 provider_error` ("targets must contain at least one model"); a missing
+`primary_model` on the same endpoint returns `400`, so this is a known
+status-code inconsistency in the failover validation path. This scenario asserts
+the durable invariant (the request is rejected with that message) and pins the
+current code.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s139.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s139.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/failover" \
+  -H 'Content-Type: application/json' \
+  -d "{\"primary_model\":\"qa-fo-empty-$QA_SUFFIX\",\"fallback_models\":[]}"
+sed -n '1,20p' "$HEADERS_FILE"
+jq '.' "$BODY_FILE"
+grep -Eiq '^HTTP/.* 502 ' "$HEADERS_FILE"
+jq -e '.error.type == "provider_error" and (.error.message | test("at least one"))' "$BODY_FILE" >/dev/null
+```
+
+### S140 Delete a non-existent mapping is not found (negative)
+
+Deleting an unknown primary returns a `404` rather than succeeding silently.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s140.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s140.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X DELETE "$BASE_URL/admin/failover" \
+  -H 'Content-Type: application/json' \
+  -d "{\"primary_model\":\"qa-fo-missing-$QA_SUFFIX\"}"
+sed -n '1,20p' "$HEADERS_FILE"
+jq '.' "$BODY_FILE"
+grep -Eiq '^HTTP/.* 404 ' "$HEADERS_FILE"
+jq -e '.error.type == "not_found_error" and (.error.message | test("not found"))' "$BODY_FILE" >/dev/null
+```
+
+### S141 Failover admin requires authentication
+
+On the auth-enabled gateway the failover admin endpoints are gated behind the
+master key: an unauthenticated read is rejected with `401`, while the same read
+with the admin bearer succeeds and returns the mapping array.
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}' "$AUTH_BASE_URL/admin/failover" \
+  | jq -R -e '. == "401"' >/dev/null
+curl -fsS "$AUTH_BASE_URL/admin/failover" -H "$ADMIN_AUTH_HEADER" \
+  | jq -e 'type == "array"' >/dev/null
 ```

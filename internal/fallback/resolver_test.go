@@ -223,6 +223,73 @@ func TestSameFamily_IgnoresSurroundingWhitespace(t *testing.T) {
 	}
 }
 
+type fakeRuleProvider struct {
+	rules    map[string][]string
+	disabled map[string]bool
+}
+
+func (p *fakeRuleProvider) Rules() map[string][]string { return p.rules }
+func (p *fakeRuleProvider) Disabled() map[string]bool  { return p.disabled }
+
+// Dynamic rules from a RuleProvider win per-key over static config rules, which
+// is the runtime path the failover service uses (admin edits override YAML).
+func TestResolverDynamicRuleProviderOverridesStaticRules(t *testing.T) {
+	registry := newFakeRegistry(
+		modelInfo("gpt-4o", "openai", "openai", 1287, "gpt-4o"),
+		modelInfo("gpt-4o", "azure", "azure", 1287, "gpt-4o"),
+		modelInfo("gemini-2.5-pro", "gemini", "gemini", 1290, "gemini-2.5-pro"),
+	)
+
+	resolver := NewResolverWithRuleProvider(config.FallbackConfig{
+		Enabled: true,
+		Manual:  map[string][]string{"gpt-4o": {"azure/gpt-4o"}},
+	}, registry, &fakeRuleProvider{
+		rules: map[string][]string{
+			"gpt-4o": {"gemini/gemini-2.5-pro", "azure/gpt-4o"},
+		},
+	})
+
+	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
+		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
+		ProviderType:     "openai",
+	}, core.OperationChatCompletions)
+
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2 (dynamic rule wins)", len(got))
+	}
+	if got[0].QualifiedModel() != "gemini/gemini-2.5-pro" || got[1].QualifiedModel() != "azure/gpt-4o" {
+		t.Fatalf("got = [%q,%q], want dynamic targets [gemini/gemini-2.5-pro, azure/gpt-4o]",
+			got[0].QualifiedModel(), got[1].QualifiedModel())
+	}
+}
+
+// A dynamic disabled entry suppresses fallback even when a static manual rule
+// exists for the same model.
+func TestResolverDynamicDisabledSuppressesStaticRule(t *testing.T) {
+	registry := newFakeRegistry(
+		modelInfo("gpt-4o", "openai", "openai", 1287, "gpt-4o"),
+		modelInfo("gpt-4o", "azure", "azure", 1287, "gpt-4o"),
+	)
+
+	resolver := NewResolverWithRuleProvider(config.FallbackConfig{
+		Enabled: true,
+		Manual:  map[string][]string{"gpt-4o": {"azure/gpt-4o"}},
+	}, registry, &fakeRuleProvider{
+		disabled: map[string]bool{"gpt-4o": true},
+	})
+
+	got := resolver.ResolveFallbacks(&core.RequestModelResolution{
+		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
+		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
+		ProviderType:     "openai",
+	}, core.OperationChatCompletions)
+
+	if len(got) != 0 {
+		t.Fatalf("len(got) = %d, want 0 (dynamic disabled suppresses fallback)", len(got))
+	}
+}
+
 func newFakeRegistry(infos ...*providers.ModelInfo) *fakeRegistry {
 	registry := &fakeRegistry{
 		byKey:  make(map[string]*providers.ModelInfo),
