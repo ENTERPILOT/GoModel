@@ -31,7 +31,10 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.10
+          # v2.12+ ships a staticcheck that understands Go 1.26 control flow.
+          # v2.10's staticcheck mis-analyzed `if x == nil { t.Fatal() }` guards
+          # under GO_VERSION 1.26.4 and emitted false-positive SA5011 warnings.
+          version: v2.12
           # Temporary workaround: config verification fetches the remote JSON schema and
           # intermittently times out in CI before lint runs. Re-enable by 2026-04-01 once
           # the schema fetch is reliable again; track in this PR/branch discussion.
