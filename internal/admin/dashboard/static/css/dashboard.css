@@ -3224,7 +3224,6 @@ textarea:focus {
   flex-wrap: wrap;
   gap: 2px;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 12px;
 }
 
 .audit-pane-tab {
@@ -3232,9 +3231,11 @@ textarea:focus {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
+  border-bottom-color: transparent;
   border-radius: 6px 6px 0 0;
   margin-bottom: -1px;
+  margin-right: 12px;
   background: transparent;
   color: var(--text-muted);
   font-family: inherit;
@@ -3434,7 +3435,8 @@ textarea:focus {
 
 .audit-pane {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
   background: var(--bg);
   min-width: 0;
   padding: 12px;
