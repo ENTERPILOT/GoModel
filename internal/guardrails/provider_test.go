@@ -1230,7 +1230,7 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled(t *testing.T) {
 	pipeline := NewPipeline()
 	g, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
 	pipeline.Add(g, 0)
-	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{EnableForBatchProcessing: true})
 
 	req := &core.BatchRequest{
 		Endpoint: "/v1/chat/completions",
@@ -1271,7 +1271,7 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_InputFile(t *testing
 	pipeline := NewPipeline()
 	gr, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
 	pipeline.Add(gr, 0)
-	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{EnableForBatchProcessing: true})
 
 	_, err := guarded.CreateBatch(context.Background(), "mock", &core.BatchRequest{
 		InputFileID: "file_source",
@@ -1307,7 +1307,7 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_InputFileCleansUpOnF
 	pipeline := NewPipeline()
 	gr, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
 	pipeline.Add(gr, 0)
-	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{EnableForBatchProcessing: true})
 
 	_, err := guarded.CreateBatch(context.Background(), "mock", &core.BatchRequest{
 		InputFileID: "file_source",
@@ -1326,7 +1326,7 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_SkipsEmbeddingsItems
 	pipeline := NewPipeline()
 	g, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
 	pipeline.Add(g, 0)
-	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{EnableForBatchProcessing: true})
 
 	req := &core.BatchRequest{
 		Endpoint: "/v1/embeddings",
@@ -1356,7 +1356,7 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_TextOnlyContentArray
 	pipeline := NewPipeline()
 	g, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
 	pipeline.Add(g, 0)
-	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{EnableForBatchProcessing: true})
 
 	req := &core.BatchRequest{
 		Endpoint: "/v1/chat/completions",
@@ -1409,7 +1409,7 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_RewritesStructuredTe
 			return out, nil
 		},
 	}, 0)
-	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{EnableForBatchProcessing: true})
 
 	req := &core.BatchRequest{
 		Endpoint: "/v1/chat/completions",
@@ -1481,7 +1481,7 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_PreservesOpaqueChatF
 	pipeline := NewPipeline()
 	g, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "guardrail system")
 	pipeline.Add(g, 0)
-	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{EnableForBatchProcessing: true})
 
 	req := &core.BatchRequest{
 		Endpoint: "/v1/chat/completions",
@@ -1559,7 +1559,7 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_RewritesChatContentW
 			return out, nil
 		},
 	}, 0)
-	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{EnableForBatchProcessing: true})
 
 	req := &core.BatchRequest{
 		Endpoint: "/v1/chat/completions",
@@ -1613,7 +1613,7 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_PreservesOpaqueRespo
 	pipeline := NewPipeline()
 	g, _ := NewSystemPromptGuardrail("test", SystemPromptOverride, "guardrail instructions")
 	pipeline.Add(g, 0)
-	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{EnableForBatchProcessing: true})
 
 	req := &core.BatchRequest{
 		Endpoint: "/v1/responses",
@@ -1686,7 +1686,7 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_RewritesResponsesInp
 	}
 	pipeline.Add(g, 0)
 
-	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{EnableForBatchProcessing: true})
 	req := &core.BatchRequest{
 		Endpoint: "/v1/responses",
 		Requests: []core.BatchRequestItem{
@@ -1735,7 +1735,7 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_NormalizesFullURLRes
 	pipeline := NewPipeline()
 	g, _ := NewSystemPromptGuardrail("test", SystemPromptOverride, "guardrail instructions")
 	pipeline.Add(g, 0)
-	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{EnableForBatchProcessing: true})
 
 	req := &core.BatchRequest{
 		Endpoint: "/v1/chat/completions",
@@ -1774,7 +1774,7 @@ func TestGuardedProvider_CreateBatch_BatchGuardrailsEnabled_PreservesSystemMessa
 	pipeline := NewPipeline()
 	g, _ := NewSystemPromptGuardrail("test", SystemPromptDecorator, "prefix")
 	pipeline.Add(g, 0)
-	guarded := NewGuardedProviderWithOptions(inner, pipeline, Options{EnableForBatchProcessing: true})
+	guarded := NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{EnableForBatchProcessing: true})
 
 	req := &core.BatchRequest{
 		Endpoint: "/v1/chat/completions",

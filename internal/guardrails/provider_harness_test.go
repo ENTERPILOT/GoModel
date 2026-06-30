@@ -19,19 +19,19 @@ import (
 type GuardedProvider struct {
 	inner    core.RoutableProvider
 	pipeline *Pipeline
-	options  Options
+	options  GuardedProviderOptions
 }
 
-// Options mirrors the batch-processing toggle exercised by the tests.
-type Options struct {
+// GuardedProviderOptions mirrors the batch-processing toggle exercised by the tests.
+type GuardedProviderOptions struct {
 	EnableForBatchProcessing bool
 }
 
 func NewGuardedProvider(inner core.RoutableProvider, pipeline *Pipeline) *GuardedProvider {
-	return NewGuardedProviderWithOptions(inner, pipeline, Options{})
+	return NewGuardedProviderWithOptions(inner, pipeline, GuardedProviderOptions{})
 }
 
-func NewGuardedProviderWithOptions(inner core.RoutableProvider, pipeline *Pipeline, options Options) *GuardedProvider {
+func NewGuardedProviderWithOptions(inner core.RoutableProvider, pipeline *Pipeline, options GuardedProviderOptions) *GuardedProvider {
 	return &GuardedProvider{inner: inner, pipeline: pipeline, options: options}
 }
 

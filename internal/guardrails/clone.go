@@ -46,6 +46,11 @@ func cloneMessageContent(content any) any {
 	default:
 		parts, ok := core.NormalizeContentParts(content)
 		if !ok {
+			// Unrecognized content shapes cannot be deep-copied generically, so
+			// they are returned as-is. Guardrails replace whole content values
+			// rather than mutating them in place, so sharing the reference is
+			// safe; chat content is normalized to nil/string/[]ContentPart
+			// before reaching here, making this branch defensive.
 			return value
 		}
 		return cloneContentParts(parts)
