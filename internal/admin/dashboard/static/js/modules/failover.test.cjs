@@ -47,3 +47,25 @@ test('failover action button marks rows with enabled fallback mappings active', 
     assert.equal(module.hasActiveFailoverMapping({ ...row, selector: 'openai/gpt-4.1' }), false);
     assert.equal(module.hasActiveFailoverMapping({ ...row, is_alias: true }), false);
 });
+
+test('fetchFailoverRules skips admin endpoint when failover is globally disabled', async() => {
+    const module = createFailoverModule();
+    module.failoverRules = [{ primary_model: 'openai/gpt-4o', fallback_models: ['anthropic/claude-3-5-sonnet'] }];
+    module.failoverGeneratedRules = [{ primary_model: 'openai/gpt-4.1', fallback_models: ['anthropic/claude-3-haiku'] }];
+    module.failoverError = 'stale error';
+    module.failoverLoading = true;
+    module.workflowRuntimeBooleanFlag = () => false;
+    module.adminRequestOptions = () => {
+        throw new Error('admin endpoint should not be called');
+    };
+
+    await module.fetchFailoverRules();
+
+    assert.equal(module.failoverAvailable, false);
+    assert.equal(module.failoverLoading, false);
+    assert.equal(module.failoverError, '');
+    assert.equal(Array.isArray(module.failoverRules), true);
+    assert.equal(module.failoverRules.length, 0);
+    assert.equal(Array.isArray(module.failoverGeneratedRules), true);
+    assert.equal(module.failoverGeneratedRules.length, 0);
+});

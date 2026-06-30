@@ -87,15 +87,21 @@ func NewWithSharedStorage(ctx context.Context, cfg *config.Config, shared storag
 	if err := service.Refresh(ctx); err != nil {
 		return nil, err
 	}
-	refreshInterval := time.Duration(cfg.Cache.Model.RefreshInterval) * time.Second
-	if refreshInterval <= 0 {
-		refreshInterval = time.Hour
-	}
+	interval := refreshInterval(cfg)
 	return &Result{
 		Service:     service,
 		Store:       store,
-		stopRefresh: service.StartBackgroundRefresh(refreshInterval),
+		stopRefresh: service.StartBackgroundRefresh(interval),
 	}, nil
+}
+
+func refreshInterval(cfg *config.Config) time.Duration {
+	// Failover mappings are runtime routing policy, so they refresh on the same
+	// cadence as workflows and pricing overrides rather than the model cache.
+	if cfg != nil && cfg.Workflows.RefreshInterval > 0 {
+		return cfg.Workflows.RefreshInterval
+	}
+	return time.Minute
 }
 
 func createStore(ctx context.Context, store storage.Storage) (Store, error) {

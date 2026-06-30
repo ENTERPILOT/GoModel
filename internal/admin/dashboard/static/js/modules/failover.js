@@ -26,6 +26,14 @@
             },
 
             async fetchFailoverRules() {
+                if (!this.failoverEnabled()) {
+                    this.failoverAvailable = false;
+                    this.failoverRules = [];
+                    this.failoverGeneratedRules = [];
+                    this.failoverError = '';
+                    this.failoverLoading = false;
+                    return;
+                }
                 this.failoverLoading = true;
                 this.failoverError = '';
                 try {

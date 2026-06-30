@@ -43,14 +43,14 @@
             <div class="settings-refresh-actions">
                 <button type="button"
                         class="pagination-btn pagination-btn-with-icon"
-                        :disabled="failoverSaving || !failoverAvailable"
+                        :disabled="failoverSaving || !failoverAvailable || !failoverEnabled()"
                         @click="openFailoverResetDialog()">
                     <i data-lucide="rotate-ccw" class="form-action-icon" aria-hidden="true"></i>
                     <span>Reset all the failover models</span>
                 </button>
                 <button type="button"
                         class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
-                        :disabled="failoverSaving || !failoverAvailable"
+                        :disabled="failoverSaving || !failoverAvailable || !failoverEnabled()"
                         @click="generateFailoverRules(); navigate('failover')">
                     <i data-lucide="wand-sparkles" class="form-action-icon" aria-hidden="true"></i>
                     <span>Generate failover models automatically</span>

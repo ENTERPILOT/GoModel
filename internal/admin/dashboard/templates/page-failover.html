@@ -24,11 +24,11 @@
             </div>
         </div>
         <div class="table-toolbar-actions">
-            <button type="button" class="pagination-btn pagination-btn-with-icon" :disabled="failoverSaving || !failoverAvailable" @click="openFailoverResetDialog()">
+            <button type="button" class="pagination-btn pagination-btn-with-icon" :disabled="failoverSaving || !failoverAvailable || !failoverEnabled()" @click="openFailoverResetDialog()">
                 <i data-lucide="rotate-ccw" class="form-action-icon" aria-hidden="true"></i>
                 <span>Reset all the failover models</span>
             </button>
-            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" :disabled="failoverSaving || !failoverAvailable" @click="generateFailoverRules()">
+            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon" :disabled="failoverSaving || !failoverAvailable || !failoverEnabled()" @click="generateFailoverRules()">
                 <i data-lucide="wand-sparkles" class="form-action-icon" aria-hidden="true"></i>
                 <span>Generate failover models automatically</span>
             </button>

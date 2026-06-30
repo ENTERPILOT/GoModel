@@ -34,8 +34,8 @@ type deleteFailoverRuleRequest struct {
 // @Failure      503  {object}  core.GatewayError
 // @Router       /admin/failover [get]
 func (h *Handler) ListFailoverRules(c *echo.Context) error {
-	if h.failoverRules == nil {
-		return handleError(c, featureUnavailableError("failover feature is unavailable"))
+	if err := h.failoverFeatureUnavailable(); err != nil {
+		return handleError(c, err)
 	}
 	views := h.failoverRules.ListViews()
 	if views == nil {
@@ -59,8 +59,8 @@ func (h *Handler) ListFailoverRules(c *echo.Context) error {
 // @Failure      503   {object}  core.GatewayError
 // @Router       /admin/failover [put]
 func (h *Handler) UpsertFailoverRule(c *echo.Context) error {
-	if h.failoverRules == nil {
-		return handleError(c, featureUnavailableError("failover feature is unavailable"))
+	if err := h.failoverFeatureUnavailable(); err != nil {
+		return handleError(c, err)
 	}
 	var req upsertFailoverRuleRequest
 	if err := c.Bind(&req); err != nil {
@@ -107,8 +107,8 @@ func (h *Handler) UpsertFailoverRule(c *echo.Context) error {
 // @Failure      503      {object}  core.GatewayError
 // @Router       /admin/failover [delete]
 func (h *Handler) DeleteFailoverRule(c *echo.Context) error {
-	if h.failoverRules == nil {
-		return handleError(c, featureUnavailableError("failover feature is unavailable"))
+	if err := h.failoverFeatureUnavailable(); err != nil {
+		return handleError(c, err)
 	}
 	source, err := failoverDeleteSource(c)
 	if err != nil {
@@ -149,8 +149,8 @@ func failoverDeleteSource(c *echo.Context) (string, error) {
 // @Failure      503  {object}  core.GatewayError
 // @Router       /admin/failover/reset [post]
 func (h *Handler) ResetFailoverRules(c *echo.Context) error {
-	if h.failoverRules == nil {
-		return handleError(c, featureUnavailableError("failover feature is unavailable"))
+	if err := h.failoverFeatureUnavailable(); err != nil {
+		return handleError(c, err)
 	}
 	if err := h.failoverRules.ResetDashboardRules(c.Request().Context()); err != nil {
 		return handleError(c, failoverWriteError(err))
@@ -169,7 +169,10 @@ func (h *Handler) ResetFailoverRules(c *echo.Context) error {
 // @Failure      503  {object}  core.GatewayError
 // @Router       /admin/failover/generate [post]
 func (h *Handler) GenerateFailoverRules(c *echo.Context) error {
-	if h.failoverRules == nil || h.registry == nil {
+	if err := h.failoverFeatureUnavailable(); err != nil {
+		return handleError(c, err)
+	}
+	if h.registry == nil {
 		return handleError(c, featureUnavailableError("failover feature is unavailable"))
 	}
 	resolver := fallbackresolver.NewResolverWithRuleProvider(config.FallbackConfig{Enabled: true}, h.registry, h.failoverRules)
@@ -231,6 +234,22 @@ func (h *Handler) findFailoverView(source string) (failover.View, bool) {
 		}
 	}
 	return failover.View{}, false
+}
+
+func (h *Handler) failoverFeatureUnavailable() error {
+	if h.failoverRules == nil || dashboardFlagDisabled(h.runtimeConfig.FailoverEnabled) {
+		return featureUnavailableError("failover feature is unavailable")
+	}
+	return nil
+}
+
+func dashboardFlagDisabled(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "off", "false", "0":
+		return true
+	default:
+		return false
+	}
 }
 
 func failoverWriteError(err error) error {
