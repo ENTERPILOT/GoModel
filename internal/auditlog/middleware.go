@@ -211,7 +211,14 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 	if requestedModel := workflow.RequestedQualifiedModel(); requestedModel != "" {
 		entry.RequestedModel = requestedModel
 	}
-	if resolvedModel := resolvedModelForAuditLog(workflow); resolvedModel != "" {
+
+	// When a runtime failover already recorded the actual executed route
+	// (resolved_model/provider, via EnrichEntryWithResolvedRoute), the workflow
+	// here only carries the planned primary resolution — so it must not clobber
+	// the real route the request ended up taking.
+	executedRouteRecorded := entry.Data != nil && entry.Data.Failover != nil
+
+	if resolvedModel := resolvedModelForAuditLog(workflow); resolvedModel != "" && !executedRouteRecorded {
 		entry.ResolvedModel = resolvedModel
 	}
 	if workflow.Mode == core.ExecutionModePassthrough && workflow.Passthrough != nil {
@@ -219,13 +226,15 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 			entry.RequestedModel = model
 		}
 	}
-	if providerType := strings.TrimSpace(workflow.ProviderType); providerType != "" {
-		entry.Provider = providerType
-	} else if workflow.Resolution != nil && strings.TrimSpace(workflow.Resolution.ProviderType) != "" {
-		entry.Provider = strings.TrimSpace(workflow.Resolution.ProviderType)
+	if !executedRouteRecorded {
+		if providerType := strings.TrimSpace(workflow.ProviderType); providerType != "" {
+			entry.Provider = providerType
+		} else if workflow.Resolution != nil && strings.TrimSpace(workflow.Resolution.ProviderType) != "" {
+			entry.Provider = strings.TrimSpace(workflow.Resolution.ProviderType)
+		}
 	}
 	if workflow.Resolution != nil {
-		if providerName := strings.TrimSpace(workflow.Resolution.ProviderName); providerName != "" {
+		if providerName := strings.TrimSpace(workflow.Resolution.ProviderName); providerName != "" && !executedRouteRecorded {
 			entry.ProviderName = providerName
 		}
 		entry.AliasUsed = workflow.Resolution.AliasApplied

@@ -958,22 +958,38 @@ function dashboard() {
       );
     },
 
-    // auditModelDisplay renders the audit summary pill. When a redirect/alias
-    // was applied it shows "requested ⮕ resolved-provider/resolved-model"; if
-    // the resolved target matches the requested value (or no redirect applied)
-    // it shows a single value, so direct calls stay unchanged.
+    // auditModelDisplay renders the audit summary pill. When the request was
+    // redirected — a runtime failover or a redirect/alias — it shows
+    // "requested ⮕ target"; otherwise a single value, so direct calls stay
+    // unchanged.
     auditModelDisplay(entry) {
       const requested = String(
         (entry && (entry.requested_model || entry.model)) || "",
       ).trim();
-      if (!entry || !entry.alias_used || !entry.resolved_model) {
+      if (!entry) {
         return requested;
       }
-      const resolved = this.qualifiedResolvedModelDisplay(entry);
-      if (!resolved || resolved === "-" || resolved === requested) {
-        return requested;
+
+      // A runtime failover redirected to a different provider/model. The
+      // configured target is recorded in data.failover even though
+      // resolved_model can still reflect the (planned) primary route.
+      const failoverTarget = String(
+        (entry.data && entry.data.failover && entry.data.failover.target_model) ||
+          "",
+      ).trim();
+      if (failoverTarget && failoverTarget !== requested) {
+        return requested + " ⮕ " + failoverTarget;
       }
-      return requested + " ⮕ " + resolved;
+
+      // A redirect/alias resolved to a different provider/model.
+      if (entry.alias_used && entry.resolved_model) {
+        const resolved = this.qualifiedResolvedModelDisplay(entry);
+        if (resolved && resolved !== "-" && resolved !== requested) {
+          return requested + " ⮕ " + resolved;
+        }
+      }
+
+      return requested;
     },
 
     formatNumber(n) {

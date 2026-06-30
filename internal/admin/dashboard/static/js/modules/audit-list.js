@@ -372,8 +372,14 @@
                     .sort((a, b) => a.seq - b.seq);
             },
 
-            auditHasMultipleAttempts(entry) {
-                return this.auditAttempts(entry).length > 1;
+            // auditUsesPerAttemptResponses reports whether responses should be
+            // split into one tab per attempt — when a failover/retry happened
+            // (more than one attempt) or any attempt failed (e.g. a failed
+            // primary while failover is still in flight) — instead of a single
+            // combined Response tab.
+            auditUsesPerAttemptResponses(entry) {
+                const attempts = this.auditAttempts(entry);
+                return attempts.length > 1 || attempts.some((attempt) => !(attempt && attempt.success));
             },
 
             auditAttemptClass(attempt) {
@@ -495,13 +501,17 @@
                 const errorMessage = this.auditAttemptErrorMessage(attempt);
                 const hasBody = body != null && body !== '';
                 const kind = this.auditAttemptKind(attempt);
+                // With only one response tab the seq/type/status chips are just
+                // noise (it's the whole response); show them only to tell apart
+                // multiple attempt tabs.
+                const single = this.auditAttempts(entry).length <= 1;
 
                 return {
                     title: 'Response',
                     direction: 'response',
-                    seq: Number(attempt && attempt.seq || 0),
-                    kind: kind === 'attempt' ? '' : kind,
-                    statusCode: this.auditAttemptStatusCode(attempt),
+                    seq: single ? 0 : Number(attempt && attempt.seq || 0),
+                    kind: single ? '' : (kind === 'attempt' ? '' : kind),
+                    statusCode: single ? null : this.auditAttemptStatusCode(attempt),
                     layout: 'split',
                     entry,
                     copyHeaders: headers,
@@ -521,11 +531,11 @@
 
             // auditPanes returns the ordered Request/Response panes that back the
             // tab strip: the request, then either the single response or one pane
-            // per provider attempt (failover). Each entry pairs a stable tab id
-            // with the pane object the audit-pane template renders.
+            // per provider attempt (failover/failed). Each entry pairs a stable
+            // tab id with the pane object the audit-pane template renders.
             auditPanes(entry) {
                 const panes = [{ id: 'request', pane: this.auditRequestPane(entry) }];
-                if (this.auditHasMultipleAttempts(entry)) {
+                if (this.auditUsesPerAttemptResponses(entry)) {
                     this.auditAttempts(entry).forEach((attempt) => {
                         panes.push({
                             id: 'response-' + Number(attempt && attempt.seq || 0),
@@ -542,7 +552,7 @@
             // (successful) response, falling back to the last attempt when none
             // succeeded, and to the single response otherwise.
             auditDefaultPaneTab(entry) {
-                if (!this.auditHasMultipleAttempts(entry)) return 'response';
+                if (!this.auditUsesPerAttemptResponses(entry)) return 'response';
                 const attempts = this.auditAttempts(entry);
                 let target = null;
                 attempts.forEach((attempt) => {
