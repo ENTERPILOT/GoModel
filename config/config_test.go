@@ -790,13 +790,13 @@ func TestLoad_LegacyFallbackOverridesAreIgnored(t *testing.T) {
 		// The removed fallback.overrides block must still load without error
 		// (yaml ignores the unknown key) and must have no effect: even mode: off
 		// no longer disables failover. Operators migrate to disabled_models.
-		yaml := `
+		yamlData := `
 fallback:
   overrides:
     "gpt-4o":
       mode: "off"
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
 			t.Fatalf("Failed to write config.yaml: %v", err)
 		}
 
