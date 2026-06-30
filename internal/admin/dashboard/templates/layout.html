@@ -246,6 +246,13 @@
                     <span>Generating failover drafts...</span>
                 </div>
 
+                <div class="alert alert-success failover-draft-alert"
+                     role="status"
+                     aria-live="polite"
+                     aria-atomic="true"
+                     x-show="!failoverGenerating && failoverNotice && !failoverError"
+                     x-text="failoverNotice"></div>
+
                 <div class="failover-draft-toolbar" x-show="!failoverGenerating && failoverGeneratedRules.length > 0">
                     <div class="filter-input-wrap">
                         <i data-lucide="search" class="filter-input-icon" aria-hidden="true"></i>

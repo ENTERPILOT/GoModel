@@ -318,12 +318,12 @@
                 try {
                     const request = this.adminRequestOptions({ method: 'POST' });
                     const res = await fetch('/admin/failover/reset', request);
-                    const handled = this.handleFetchResponse(res, 'failover reset', request);
+                    const handled = this.handleFetchResponse(res, 'failover removal', request);
                     if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
                         return;
                     }
                     if (!handled) {
-                        this.failoverError = 'Failed to reset failover mappings.';
+                        this.failoverError = 'Failed to remove failover mappings.';
                         return;
                     }
                     const payload = await res.json();
@@ -335,8 +335,8 @@
                     this.failoverNotice = 'Dashboard-managed failover mappings removed.';
                     this.closeTypedConfirmationDialog();
                 } catch (e) {
-                    console.error('Failed to reset failover mappings:', e);
-                    this.failoverError = 'Failed to reset failover mappings.';
+                    console.error('Failed to remove failover mappings:', e);
+                    this.failoverError = 'Failed to remove failover mappings.';
                 } finally {
                     this.failoverSaving = false;
                 }

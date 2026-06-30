@@ -1333,6 +1333,14 @@ test("settings failover actions generate before remove and use destructive remov
     /<h3>Failover<\/h3>[\s\S]*@click="generateFailoverRules\(\)"[\s\S]*Generate failover models automatically[\s\S]*pagination-btn-danger-outline[\s\S]*@click="openFailoverResetDialog\(\)"[\s\S]*Remove all the failover models/,
   );
   assert.doesNotMatch(indexTemplate, /Reset all the failover models/);
+  assert.match(
+    indexTemplate,
+    /class="alert alert-success settings-refresh-alert"[\s\S]*x-show="failoverNotice && !failoverError"[\s\S]*x-text="failoverNotice"/,
+  );
+  assert.match(
+    indexTemplate,
+    /class="alert alert-warning settings-refresh-alert"[\s\S]*x-show="failoverError"[\s\S]*x-text="failoverError"/,
+  );
 });
 
 test("failover drafts modal exposes filtering selection summary and bulk toggle", () => {
@@ -1342,6 +1350,10 @@ test("failover drafts modal exposes filtering selection summary and bulk toggle"
   assert.match(
     shellTemplate,
     /class="failover-draft-counter"[\s\S]*x-text="failoverDraftCountLabel\(\)"/,
+  );
+  assert.match(
+    shellTemplate,
+    /class="alert alert-success failover-draft-alert"[\s\S]*x-show="!failoverGenerating && failoverNotice && !failoverError"[\s\S]*x-text="failoverNotice"/,
   );
   assert.match(
     shellTemplate,
@@ -1358,6 +1370,9 @@ test("failover drafts modal exposes filtering selection summary and bulk toggle"
 
   const listRule = readCSSRule(css, ".failover-draft-list");
   assert.match(listRule, /overflow-y:\s*auto/);
+
+  const alertRule = readCSSRule(css, ".failover-draft-alert");
+  assert.match(alertRule, /margin:\s*0/);
 });
 
 test("usage and audit pages reuse a shared pagination template", () => {

@@ -2466,6 +2466,10 @@ textarea:focus {
   flex: 0 0 auto;
 }
 
+.failover-draft-alert {
+  margin: 0;
+}
+
 .failover-draft-list {
   display: flex;
   flex-direction: column;
