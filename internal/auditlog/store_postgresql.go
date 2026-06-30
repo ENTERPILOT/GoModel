@@ -79,6 +79,29 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 	if err != nil {
 		return nil, fmt.Errorf("failed to create audit_logs table: %w", err)
 	}
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS audit_log_attempts (
+			id BIGSERIAL PRIMARY KEY,
+			audit_log_id UUID NOT NULL REFERENCES audit_logs(id) ON DELETE CASCADE,
+			seq INTEGER NOT NULL,
+			kind TEXT NOT NULL,
+			provider_type TEXT,
+			provider_name TEXT,
+			model TEXT,
+			status_code INTEGER DEFAULT 0,
+			success BOOLEAN DEFAULT FALSE,
+			error_type TEXT,
+			error_code TEXT,
+			error_message TEXT,
+			response_body TEXT,
+			response_headers TEXT,
+			started_at TIMESTAMPTZ,
+			duration_ns BIGINT DEFAULT 0,
+			UNIQUE(audit_log_id, seq)
+		)
+	`); err != nil {
+		return nil, fmt.Errorf("failed to create audit_log_attempts table: %w", err)
+	}
 
 	if err := renamePostgreSQLAuditColumn(ctx, pool, "audit_logs", "model", "requested_model"); err != nil {
 		return nil, fmt.Errorf("failed to rename audit_logs.model to requested_model: %w", err)
@@ -94,6 +117,8 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS auth_key_id TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS auth_method TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_path TEXT",
+		"ALTER TABLE audit_log_attempts ADD COLUMN IF NOT EXISTS response_body TEXT",
+		"ALTER TABLE audit_log_attempts ADD COLUMN IF NOT EXISTS response_headers TEXT",
 	}
 	for _, migration := range migrations {
 		if _, err := pool.Exec(ctx, migration); err != nil {
@@ -119,6 +144,9 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"CREATE INDEX IF NOT EXISTS idx_audit_response_id ON audit_logs ((data->'response_body'->>'id'))",
 		"CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id ON audit_logs ((data->'request_body'->>'previous_response_id'))",
 		"CREATE INDEX IF NOT EXISTS idx_audit_data_gin ON audit_logs USING GIN (data)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_attempts_log_seq ON audit_log_attempts(audit_log_id, seq)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_attempts_provider ON audit_log_attempts(provider_type)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_attempts_started_at ON audit_log_attempts(started_at)",
 	}
 	for _, idx := range indexes {
 		if _, err := pool.Exec(ctx, idx); err != nil {
@@ -190,6 +218,47 @@ func writeAuditLogInsertChunks(ctx context.Context, exec auditLogBatchExecutor, 
 		query, args := buildAuditLogInsert(entries[start:end])
 		if _, err := exec.Exec(ctx, query, args...); err != nil {
 			return fmt.Errorf("batch chunk [%d:%d): %w", start, end, err)
+		}
+		if err := writePostgreSQLAuditAttempts(ctx, exec, entries[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writePostgreSQLAuditAttempts(ctx context.Context, exec auditLogBatchExecutor, entries []*LogEntry) error {
+	for _, entry := range entries {
+		for _, attempt := range auditAttempts(entry) {
+			var startedAt any
+			if !attempt.StartedAt.IsZero() {
+				startedAt = attempt.StartedAt.UTC()
+			}
+			if _, err := exec.Exec(ctx, `
+				INSERT INTO audit_log_attempts (
+					audit_log_id, seq, kind, provider_type, provider_name, model,
+					status_code, success, error_type, error_code, error_message,
+					response_body, response_headers, started_at, duration_ns
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+				ON CONFLICT (audit_log_id, seq) DO NOTHING
+			`,
+				entry.ID,
+				attempt.Seq,
+				attempt.Kind,
+				attempt.ProviderType,
+				attempt.ProviderName,
+				attempt.Model,
+				attempt.StatusCode,
+				attempt.Success,
+				attempt.ErrorType,
+				attempt.ErrorCode,
+				attempt.ErrorMessage,
+				marshalAttemptColumn(attempt.ResponseBody),
+				marshalAttemptColumn(attempt.ResponseHeaders),
+				startedAt,
+				attempt.DurationNs,
+			); err != nil {
+				return fmt.Errorf("failed to insert audit log attempt for %s seq %d: %w", entry.ID, attempt.Seq, err)
+			}
 		}
 	}
 	return nil
@@ -310,6 +379,11 @@ func (s *PostgreSQLStore) cleanup() {
 	defer cancel()
 
 	cutoff := time.Now().AddDate(0, 0, -s.retentionDays)
+
+	if _, err := s.pool.Exec(ctx, "DELETE FROM audit_log_attempts WHERE audit_log_id IN (SELECT id FROM audit_logs WHERE timestamp < $1)", cutoff); err != nil {
+		slog.Error("failed to cleanup old audit log attempts", "error", err)
+		return
+	}
 
 	result, err := s.pool.Exec(ctx, "DELETE FROM audit_logs WHERE timestamp < $1", cutoff)
 	if err != nil {

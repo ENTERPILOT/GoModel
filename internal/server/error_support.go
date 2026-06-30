@@ -21,6 +21,7 @@ func handleError(c *echo.Context, err error) error {
 		gatewayErr = core.NewProviderError("", http.StatusInternalServerError, "an unexpected error occurred", err)
 	}
 	logHandledError(c, gatewayErr)
+	enrichAuditEntryWithProviderAttempts(c)
 	auditlog.EnrichEntryWithError(c, string(gatewayErr.Type), gatewayErr.Message, gatewayErrorCode(gatewayErr))
 	applyErrorResponseHeaders(c, err)
 	return writeGatewayError(c, gatewayErr)

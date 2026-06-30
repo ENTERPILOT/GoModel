@@ -66,6 +66,30 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create audit_logs table: %w", err)
 	}
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS audit_log_attempts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			audit_log_id TEXT NOT NULL,
+			seq INTEGER NOT NULL,
+			kind TEXT NOT NULL,
+			provider_type TEXT,
+			provider_name TEXT,
+			model TEXT,
+			status_code INTEGER DEFAULT 0,
+			success INTEGER DEFAULT 0,
+			error_type TEXT,
+			error_code TEXT,
+			error_message TEXT,
+			response_body TEXT,
+			response_headers TEXT,
+			started_at DATETIME,
+			duration_ns INTEGER DEFAULT 0,
+			UNIQUE(audit_log_id, seq),
+			FOREIGN KEY(audit_log_id) REFERENCES audit_logs(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return nil, fmt.Errorf("failed to create audit_log_attempts table: %w", err)
+	}
 
 	if err := renameSQLiteAuditColumn(db, sqliteAuditLogTable, "model", "requested_model"); err != nil {
 		return nil, fmt.Errorf("failed to rename audit_logs.model to requested_model: %w", err)
@@ -81,6 +105,8 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 		"ALTER TABLE audit_logs ADD COLUMN auth_key_id TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN auth_method TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN user_path TEXT",
+		"ALTER TABLE audit_log_attempts ADD COLUMN response_body TEXT",
+		"ALTER TABLE audit_log_attempts ADD COLUMN response_headers TEXT",
 	}
 	for _, migration := range migrations {
 		if _, err := db.Exec(migration); err != nil {
@@ -107,6 +133,9 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 		"CREATE INDEX IF NOT EXISTS idx_audit_error_type ON audit_logs(error_type)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_response_id ON audit_logs(json_extract(data, '$.response_body.id'))",
 		"CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id ON audit_logs(json_extract(data, '$.request_body.previous_response_id'))",
+		"CREATE INDEX IF NOT EXISTS idx_audit_attempts_log_seq ON audit_log_attempts(audit_log_id, seq)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_attempts_provider ON audit_log_attempts(provider_type)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_attempts_started_at ON audit_log_attempts(started_at)",
 	}
 	for _, idx := range indexes {
 		if _, err := db.Exec(idx); err != nil {
@@ -206,8 +235,56 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 		if err != nil {
 			return fmt.Errorf("failed to insert audit logs batch %d: %w", i/maxEntriesPerBatch, err)
 		}
+		if err := s.writeAttempts(ctx, chunk); err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+func (s *SQLiteStore) writeAttempts(ctx context.Context, entries []*LogEntry) error {
+	for _, entry := range entries {
+		attempts := auditAttempts(entry)
+		if len(attempts) == 0 {
+			continue
+		}
+		for _, attempt := range attempts {
+			successInt := 0
+			if attempt.Success {
+				successInt = 1
+			}
+			var startedAt any
+			if !attempt.StartedAt.IsZero() {
+				startedAt = attempt.StartedAt.UTC().Format(time.RFC3339Nano)
+			}
+			if _, err := s.db.ExecContext(ctx, `
+				INSERT OR IGNORE INTO audit_log_attempts (
+					audit_log_id, seq, kind, provider_type, provider_name, model,
+					status_code, success, error_type, error_code, error_message,
+					response_body, response_headers, started_at, duration_ns
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`,
+				entry.ID,
+				attempt.Seq,
+				attempt.Kind,
+				attempt.ProviderType,
+				attempt.ProviderName,
+				attempt.Model,
+				attempt.StatusCode,
+				successInt,
+				attempt.ErrorType,
+				attempt.ErrorCode,
+				attempt.ErrorMessage,
+				marshalAttemptColumn(attempt.ResponseBody),
+				marshalAttemptColumn(attempt.ResponseHeaders),
+				startedAt,
+				attempt.DurationNs,
+			); err != nil {
+				return fmt.Errorf("failed to insert audit log attempt for %s seq %d: %w", entry.ID, attempt.Seq, err)
+			}
+		}
+	}
 	return nil
 }
 
@@ -235,6 +312,11 @@ func (s *SQLiteStore) cleanup() {
 	}
 
 	cutoff := time.Now().AddDate(0, 0, -s.retentionDays).UTC().Format(time.RFC3339)
+
+	if _, err := s.db.Exec("DELETE FROM audit_log_attempts WHERE audit_log_id IN (SELECT id FROM audit_logs WHERE timestamp < ?)", cutoff); err != nil {
+		slog.Error("failed to cleanup old audit log attempts", "error", err)
+		return
+	}
 
 	result, err := s.db.Exec("DELETE FROM audit_logs WHERE timestamp < ?", cutoff)
 	if err != nil {

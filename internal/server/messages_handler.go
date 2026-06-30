@@ -124,6 +124,7 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 	if err != nil {
 		return handleError(c, err)
 	}
+	enrichAuditEntryWithProviderAttempts(c)
 	if result.Meta.UsedFallback {
 		markRequestFallbackUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)

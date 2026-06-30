@@ -373,8 +373,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			name:      "gateway_chat_completion_hot_path",
 			bench:     BenchmarkGatewayHotPathChatCompletion,
-			maxAllocs: 111, // baseline 105
-			maxBytes:  14080, // baseline ~13.2 KB
+			maxAllocs: 111,   // baseline 110
+			maxBytes:  14784, // baseline ~13.8 KB (incl. per-attempt response body/header capture fields)
 		},
 		{
 			// Production-shaped path: request resolves through a real Router +
@@ -384,19 +384,19 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// full catalog several times per request) would blow these limits.
 			name:      "gateway_chat_completion_hot_path_routed",
 			bench:     BenchmarkGatewayHotPathChatCompletionRouted,
-			maxAllocs: 136, // baseline 129
+			maxAllocs: 136,   // baseline 129
 			maxBytes:  15104, // baseline ~13.9 KB
 		},
 		{
 			name:      "openai_responses_stream_converter",
 			bench:     BenchmarkOpenAIResponsesStreamConverter,
-			maxAllocs: 213, // baseline 202
+			maxAllocs: 213,   // baseline 202
 			maxBytes:  21120, // baseline ~19.6 KB
 		},
 		{
 			name:      "shared_stream_audit_and_usage_observers",
 			bench:     BenchmarkSharedStreamingAuditAndUsageObservers,
-			maxAllocs: 167, // baseline 159
+			maxAllocs: 167,      // baseline 159
 			maxBytes:  9 * 1024, // baseline ~8.9 KB; already tight
 		},
 	}

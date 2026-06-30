@@ -76,6 +76,7 @@ func sanitizeLogData(data *LogData) *LogData {
 	clean := *data
 	clean.RequestHeaders = RedactHeaders(data.RequestHeaders)
 	clean.ResponseHeaders = RedactHeaders(data.ResponseHeaders)
+	clean.Attempts = normalizeAttemptSnapshots(data.Attempts)
 	return &clean
 }
 

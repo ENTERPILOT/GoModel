@@ -170,6 +170,21 @@ func TestChatCompletion_FallsBackToAlternateModel(t *testing.T) {
 	if got := entry.Data.Failover.TargetModel; got != "azure/gpt-4o" {
 		t.Fatalf("failover target = %q, want %q", got, "azure/gpt-4o")
 	}
+	if got := len(entry.Data.Attempts); got != 2 {
+		t.Fatalf("audit attempts = %d, want 2: %#v", got, entry.Data.Attempts)
+	}
+	if entry.Data.Attempts[0].Kind != auditlog.AttemptKindPrimary || entry.Data.Attempts[0].Success {
+		t.Fatalf("primary audit attempt = %#v, want failed primary", entry.Data.Attempts[0])
+	}
+	if entry.Data.Attempts[0].StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("primary attempt status = %d, want %d", entry.Data.Attempts[0].StatusCode, http.StatusServiceUnavailable)
+	}
+	if entry.Data.Attempts[1].Kind != auditlog.AttemptKindFailover || !entry.Data.Attempts[1].Success {
+		t.Fatalf("failover audit attempt = %#v, want successful failover", entry.Data.Attempts[1])
+	}
+	if entry.Data.Attempts[1].Model != "azure/gpt-4o" {
+		t.Fatalf("failover attempt model = %q, want azure/gpt-4o", entry.Data.Attempts[1].Model)
+	}
 }
 
 func TestChatCompletion_DoesNotFallbackOnNonAvailabilityError(t *testing.T) {

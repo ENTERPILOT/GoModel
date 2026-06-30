@@ -279,6 +279,104 @@ func TestSQLiteStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_WriteBatch_PersistsProviderAttempts(t *testing.T) {
+	db := createTestDB(t)
+	db.SetMaxOpenConns(1)
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	entry := &LogEntry{
+		ID:             "attempt-entry",
+		Timestamp:      time.Now(),
+		RequestedModel: "anthropic/claude-fable-5",
+		ResolvedModel:  "openai/gpt-5.5",
+		Provider:       "openai",
+		StatusCode:     200,
+		Data: &LogData{
+			Failover: &FailoverSnapshot{TargetModel: "openai/gpt-5.5"},
+			Attempts: []AttemptSnapshot{
+				{
+					Seq:          1,
+					Kind:         AttemptKindPrimary,
+					ProviderType: "anthropic",
+					Model:        "anthropic/claude-fable-5",
+					StatusCode:   404,
+					ErrorType:    "not_found_error",
+					ErrorCode:    "model_not_found",
+					ErrorMessage: "model is not available",
+					ResponseBody: map[string]any{
+						"error": map[string]any{"message": "model is not available", "code": "model_not_found"},
+					},
+					ResponseHeaders: map[string]string{"X-Request-Id": "req-123", "Retry-After": "30"},
+				},
+				{
+					Seq:          2,
+					Kind:         AttemptKindFailover,
+					ProviderType: "openai",
+					Model:        "openai/gpt-5.5",
+					StatusCode:   200,
+					Success:      true,
+				},
+			},
+		},
+	}
+
+	if err := store.WriteBatch(ctx, []*LogEntry{entry}); err != nil {
+		t.Fatalf("WriteBatch failed: %v", err)
+	}
+
+	var attemptRows int
+	if err := db.QueryRow("SELECT COUNT(*) FROM audit_log_attempts WHERE audit_log_id = ?", entry.ID).Scan(&attemptRows); err != nil {
+		t.Fatalf("count audit_log_attempts failed: %v", err)
+	}
+	if attemptRows != 2 {
+		t.Fatalf("attempt rows = %d, want 2", attemptRows)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create reader: %v", err)
+	}
+	got, err := reader.GetLogByID(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("GetLogByID failed: %v", err)
+	}
+	if got == nil || got.Data == nil {
+		t.Fatalf("entry data = %#v, want populated", got)
+	}
+	if len(got.Data.Attempts) != 2 {
+		t.Fatalf("hydrated attempts = %#v, want 2", got.Data.Attempts)
+	}
+	if got.Data.Attempts[0].Kind != AttemptKindPrimary || got.Data.Attempts[0].StatusCode != 404 {
+		t.Fatalf("primary attempt = %#v, want failed 404 primary", got.Data.Attempts[0])
+	}
+	if got.Data.Attempts[1].Kind != AttemptKindFailover || !got.Data.Attempts[1].Success {
+		t.Fatalf("failover attempt = %#v, want successful failover", got.Data.Attempts[1])
+	}
+
+	primary := got.Data.Attempts[0]
+	body, ok := primary.ResponseBody.(map[string]any)
+	if !ok {
+		t.Fatalf("primary response body type = %T, want map", primary.ResponseBody)
+	}
+	errObj, ok := body["error"].(map[string]any)
+	if !ok || errObj["code"] != "model_not_found" {
+		t.Fatalf("primary response body = %#v, want nested provider error", primary.ResponseBody)
+	}
+	if primary.ResponseHeaders["X-Request-Id"] != "req-123" || primary.ResponseHeaders["Retry-After"] != "30" {
+		t.Fatalf("primary response headers = %#v, want captured upstream headers", primary.ResponseHeaders)
+	}
+	if got.Data.Attempts[1].ResponseBody != nil || got.Data.Attempts[1].ResponseHeaders != nil {
+		t.Fatalf("successful attempt should not carry a captured error body/headers: %#v", got.Data.Attempts[1])
+	}
+}
+
 func TestSQLiteReader_AllowsNullWorkflowVersionIDAndErrorType(t *testing.T) {
 	db := createTestDB(t)
 	defer db.Close()

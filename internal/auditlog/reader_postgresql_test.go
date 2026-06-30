@@ -68,6 +68,9 @@ func (q fakePostgreSQLQueryer) QueryRow(_ context.Context, _ string, _ ...any) p
 }
 
 func (q fakePostgreSQLQueryer) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "FROM audit_log_attempts") {
+		return &fakePostgreSQLRows{read: true}, nil
+	}
 	if !strings.Contains(sql, "FROM audit_logs") {
 		return nil, fmt.Errorf("unexpected query: %s", sql)
 	}

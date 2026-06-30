@@ -36,6 +36,27 @@ type GatewayError struct {
 	Code       *string   `json:"code" extensions:"x-nullable"`
 	// Original error for debugging (not exposed to clients)
 	Err error `json:"-"`
+	// ResponseBody and ResponseHeaders carry the raw upstream error response so
+	// failed provider attempts can be audited. Never serialized to API clients.
+	ResponseBody    []byte      `json:"-"`
+	ResponseHeaders http.Header `json:"-"`
+}
+
+// maxGatewayErrorBodyBytes caps the raw upstream error body retained for audit.
+const maxGatewayErrorBodyBytes = 64 * 1024
+
+// captureGatewayErrorBody returns a bounded copy of an upstream error body so
+// the original buffer is not retained and large bodies cannot bloat memory.
+func captureGatewayErrorBody(body []byte) []byte {
+	if len(body) == 0 {
+		return nil
+	}
+	if len(body) > maxGatewayErrorBodyBytes {
+		body = body[:maxGatewayErrorBodyBytes]
+	}
+	out := make([]byte, len(body))
+	copy(out, body)
+	return out
 }
 
 // OpenAIErrorEnvelope documents the public OpenAI-compatible error response.
@@ -240,6 +261,7 @@ func ParseProviderError(provider string, statusCode int, body []byte, originalEr
 	if errorResponse.Code != "" {
 		gatewayErr = gatewayErr.WithCode(errorResponse.Code)
 	}
+	gatewayErr.ResponseBody = captureGatewayErrorBody(body)
 
 	return gatewayErr
 }

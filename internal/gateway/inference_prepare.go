@@ -73,6 +73,7 @@ func prepareTranslated[Req any, Prepared any](
 	if !spec.valid(req) {
 		return zero, core.NewInvalidRequestError(spec.requiredMessage, nil)
 	}
+	ctx = WithAttemptRecorder(ctx)
 	model, provider := spec.selector(req)
 	ctx, req, workflow, err := prepareTranslatedRequest(o, ctx, req, meta, model, provider, spec.patch(o), spec.valid, spec.patchNilMessage)
 	if err != nil {

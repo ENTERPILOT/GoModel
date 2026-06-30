@@ -120,6 +120,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	if err != nil {
 		return handleError(c, err)
 	}
+	enrichAuditEntryWithProviderAttempts(c)
 	if result.Meta.UsedFallback {
 		markRequestFallbackUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
@@ -281,6 +282,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	if err != nil {
 		return handleError(c, err)
 	}
+	enrichAuditEntryWithProviderAttempts(c)
 	if result.Meta.UsedFallback {
 		markRequestFallbackUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
@@ -493,6 +495,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 ) error {
 	auditlog.MarkEntryAsStreaming(c, true)
 	auditlog.EnrichEntryWithStream(c, true)
+	enrichAuditEntryWithProviderAttempts(c)
 	auditlog.EnrichEntryWithFailover(c, failoverModel)
 	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, model, providerName), provider, providerName)
 

@@ -171,9 +171,25 @@ type Response struct {
 	StatusCode int
 	// ContentType is the upstream response Content-Type header, preserved so
 	// callers can describe the bytes actually returned (e.g. audio formats).
-	// Only this header is surfaced; the full upstream header set is not exposed.
 	ContentType string
-	Body        []byte
+	// Header carries the upstream response headers. It is used to audit failed
+	// provider attempts; it is not relayed to API clients.
+	Header http.Header
+	Body   []byte
+}
+
+// attachResponseHeaders records the upstream response headers on a provider
+// GatewayError so failed attempts can be audited. It is a no-op for other
+// error types or a nil header set.
+func attachResponseHeaders(err error, header http.Header) error {
+	if header == nil {
+		return err
+	}
+	var gatewayErr *core.GatewayError
+	if errors.As(err, &gatewayErr) && gatewayErr != nil {
+		gatewayErr.ResponseHeaders = header.Clone()
+	}
+	return err
 }
 
 type requestScope struct {
@@ -390,7 +406,7 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 
 		// Check for retryable status codes
 		if c.isRetryable(resp.StatusCode) {
-			lastErr = core.ParseProviderError(c.config.ProviderName, resp.StatusCode, resp.Body, nil)
+			lastErr = attachResponseHeaders(core.ParseProviderError(c.config.ProviderName, resp.StatusCode, resp.Body, nil), resp.Header)
 			lastStatusCode = resp.StatusCode
 			lastErrFromTransport = false
 			if scope.halfOpenProbe {
@@ -402,7 +418,7 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 
 		// Non-retryable error
 		if resp.StatusCode != http.StatusOK {
-			parsedErr := core.ParseProviderError(c.config.ProviderName, resp.StatusCode, resp.Body, nil)
+			parsedErr := attachResponseHeaders(core.ParseProviderError(c.config.ProviderName, resp.StatusCode, resp.Body, nil), resp.Header)
 			c.completeScope(scope, resp.StatusCode, parsedErr, nil)
 			return nil, parsedErr
 		}
@@ -453,7 +469,7 @@ func (c *Client) DoStream(ctx context.Context, req Request) (io.ReadCloser, erro
 		}
 		_ = resp.Body.Close()
 
-		providerErr := core.ParseProviderError(c.config.ProviderName, resp.StatusCode, respBody, nil)
+		providerErr := attachResponseHeaders(core.ParseProviderError(c.config.ProviderName, resp.StatusCode, respBody, nil), resp.Header)
 		c.completeScope(scope, resp.StatusCode, providerErr, nil)
 		return nil, providerErr
 	}
@@ -622,6 +638,7 @@ func (c *Client) doRequest(ctx context.Context, req Request) (*Response, error) 
 	return &Response{
 		StatusCode:  resp.StatusCode,
 		ContentType: resp.Header.Get("Content-Type"),
+		Header:      resp.Header,
 		Body:        body,
 	}, nil
 }

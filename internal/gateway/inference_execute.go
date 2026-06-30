@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"gomodel/internal/core"
 	"gomodel/internal/usage"
@@ -394,13 +395,16 @@ func streamTranslatedProviderRequest[Req any](
 	cloneForSelector func(Req, core.ModelSelector) Req,
 	call func(context.Context, Req) (io.ReadCloser, error),
 ) (io.ReadCloser, string, string, string, string, bool, error) {
+	started := time.Now()
 	stream, err := call(ctx, req)
 	if err == nil && stream != nil {
+		recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, currentSelectorForWorkflow(workflow, model, provider), started, nil))
 		return stream, providerType, providerName, usageModel, "", false, nil
 	}
 	if err == nil {
 		err = emptyProviderStreamError(providerType)
 	}
+	recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, currentSelectorForWorkflow(workflow, model, provider), started, err))
 
 	stream, resolvedProviderType, resolvedProviderName, resolvedUsageModel, failoverModel, err := tryFallbackStream(ctx, o, workflow, model, provider, err,
 		func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error) {

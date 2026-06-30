@@ -360,6 +360,208 @@
                 return findNestedAuditErrorMessage(data.response_body, 0);
             },
 
+            auditAttempts(entry) {
+                const attempts = entry && entry.data && Array.isArray(entry.data.attempts)
+                    ? entry.data.attempts
+                    : [];
+                return attempts
+                    .map((attempt, index) => ({
+                        ...attempt,
+                        seq: Number(attempt && attempt.seq || index + 1)
+                    }))
+                    .sort((a, b) => a.seq - b.seq);
+            },
+
+            auditHasMultipleAttempts(entry) {
+                return this.auditAttempts(entry).length > 1;
+            },
+
+            auditAttemptClass(attempt) {
+                return {
+                    'audit-attempt-success': !!(attempt && attempt.success),
+                    'audit-attempt-error': !(attempt && attempt.success)
+                };
+            },
+
+            auditAttemptStatus(attempt) {
+                if (!attempt) return '-';
+                const status = attempt.status_code || attempt.status;
+                if (status) return String(status);
+                return attempt.success ? 'ok' : 'error';
+            },
+
+            auditAttemptKind(attempt) {
+                const kind = String(attempt && attempt.kind || '').trim();
+                return kind || 'attempt';
+            },
+
+            auditAttemptProvider(attempt) {
+                if (!attempt) return '-';
+                const name = String(attempt.provider_name || '').trim();
+                const type = String(attempt.provider_type || attempt.provider || '').trim();
+                if (name && type && name !== type) return name + ' (' + type + ')';
+                return name || type || '-';
+            },
+
+            auditAttemptModel(attempt) {
+                return String(attempt && attempt.model || '').trim() || '-';
+            },
+
+            // auditAttemptTrack returns the attempt list when it is worth
+            // surfacing on the collapsed summary row: a retry/failover happened
+            // (more than one attempt) or any single attempt failed. A lone
+            // successful attempt is the common case and needs no indicator.
+            auditAttemptTrack(entry) {
+                const attempts = this.auditAttempts(entry);
+                if (attempts.length > 1) return attempts;
+                if (attempts.some((attempt) => !(attempt && attempt.success))) return attempts;
+                return [];
+            },
+
+            auditHasAttemptTrack(entry) {
+                return this.auditAttemptTrack(entry).length > 0;
+            },
+
+            auditAttemptTrackCount(entry) {
+                return this.auditAttempts(entry).length + '×';
+            },
+
+            auditAttemptTrackTitle(entry) {
+                const attempts = this.auditAttempts(entry);
+                const failed = attempts.filter((attempt) => !(attempt && attempt.success)).length;
+                const noun = attempts.length === 1 ? 'attempt' : 'attempts';
+                const base = attempts.length + ' provider ' + noun;
+                return failed > 0 ? base + ' · ' + failed + ' failed' : base;
+            },
+
+            auditAttemptSegmentTitle(attempt) {
+                if (!attempt) return '';
+                const parts = ['#' + Number(attempt.seq || 0)];
+                const kind = this.auditAttemptKind(attempt);
+                if (kind && kind !== 'attempt') parts.push(kind);
+                parts.push(this.auditAttemptStatus(attempt));
+                const provider = this.auditAttemptProvider(attempt);
+                if (provider && provider !== '-') parts.push(provider);
+                const model = this.auditAttemptModel(attempt);
+                if (model && model !== '-') parts.push(model);
+                parts.push(attempt.success ? 'succeeded' : 'failed');
+                return parts.join(' · ');
+            },
+
+            // auditAttemptBody resolves the response payload for one attempt.
+            // A failed attempt carries the upstream error body in error_message;
+            // the successful attempt's body is the final captured response_body.
+            // auditAttemptBody is the captured raw upstream response body only:
+            // the final response for the successful attempt, or the provider's
+            // raw error body for a failed one. The normalized error message is
+            // surfaced separately (see auditAttemptErrorMessage), not as a body.
+            auditAttemptBody(entry, attempt) {
+                if (!attempt) return null;
+                if (attempt.success) {
+                    const data = entry && entry.data ? entry.data : null;
+                    return data && data.response_body != null ? data.response_body : null;
+                }
+                return attempt.response_body != null && attempt.response_body !== '' ? attempt.response_body : null;
+            },
+
+            auditAttemptErrorMessage(attempt) {
+                if (!attempt || attempt.success) return '';
+                const message = String(attempt.error_message || '').trim();
+                const code = String(attempt.error_code || '').trim();
+                const type = String(attempt.error_type || '').trim();
+                if (message && code) return code + ': ' + message;
+                return message || code || type || 'Provider attempt failed';
+            },
+
+            auditAttemptHeaders(entry, attempt) {
+                if (!attempt) return null;
+                if (attempt.success) {
+                    const data = entry && entry.data ? entry.data : null;
+                    return data ? data.response_headers : null;
+                }
+                return attempt.response_headers || null;
+            },
+
+            auditAttemptStatusCode(attempt) {
+                const code = Number(attempt && attempt.status_code);
+                return Number.isFinite(code) && code > 0 ? code : null;
+            },
+
+            auditAttemptResponsePane(entry, attempt) {
+                const success = !!(attempt && attempt.success);
+                const data = entry && entry.data ? entry.data : null;
+                const body = this.auditAttemptBody(entry, attempt);
+                const headers = this.auditAttemptHeaders(entry, attempt);
+                const errorMessage = this.auditAttemptErrorMessage(attempt);
+                const hasBody = body != null && body !== '';
+                const kind = this.auditAttemptKind(attempt);
+
+                return {
+                    title: 'Response',
+                    direction: 'response',
+                    seq: Number(attempt && attempt.seq || 0),
+                    kind: kind === 'attempt' ? '' : kind,
+                    statusCode: this.auditAttemptStatusCode(attempt),
+                    layout: 'split',
+                    entry,
+                    copyHeaders: headers,
+                    copyBody: body,
+                    showErrorMessage: !!errorMessage,
+                    errorMessage,
+                    showHeaders: !!headers,
+                    headers,
+                    showBody: hasBody,
+                    body,
+                    showEmpty: !errorMessage && !hasBody && !headers,
+                    emptyMessage: 'No response was captured for this attempt.',
+                    showTooLarge: !!(success && data && data.response_body_too_big_to_handle),
+                    tooLargeMessage: 'Response body was too large to capture.'
+                };
+            },
+
+            // auditPanes returns the ordered Request/Response panes that back the
+            // tab strip: the request, then either the single response or one pane
+            // per provider attempt (failover). Each entry pairs a stable tab id
+            // with the pane object the audit-pane template renders.
+            auditPanes(entry) {
+                const panes = [{ id: 'request', pane: this.auditRequestPane(entry) }];
+                if (this.auditHasMultipleAttempts(entry)) {
+                    this.auditAttempts(entry).forEach((attempt) => {
+                        panes.push({
+                            id: 'response-' + Number(attempt && attempt.seq || 0),
+                            pane: this.auditAttemptResponsePane(entry, attempt)
+                        });
+                    });
+                } else {
+                    panes.push({ id: 'response', pane: this.auditResponsePane(entry) });
+                }
+                return panes;
+            },
+
+            // auditDefaultPaneTab selects the tab shown first: the last valid
+            // (successful) response, falling back to the last attempt when none
+            // succeeded, and to the single response otherwise.
+            auditDefaultPaneTab(entry) {
+                if (!this.auditHasMultipleAttempts(entry)) return 'response';
+                const attempts = this.auditAttempts(entry);
+                let target = null;
+                attempts.forEach((attempt) => {
+                    if (attempt && attempt.success) target = attempt;
+                });
+                if (!target) target = attempts[attempts.length - 1];
+                return target ? 'response-' + Number(target.seq || 0) : 'request';
+            },
+
+            // auditEffectiveTab resolves the active tab id, falling back to the
+            // default when nothing is selected yet or the selection no longer
+            // exists (e.g. a live entry gained attempts after the first render).
+            auditEffectiveTab(active, entry) {
+                if (active && this.auditPanes(entry).some((p) => p.id === active)) {
+                    return active;
+                }
+                return this.auditDefaultPaneTab(entry);
+            },
+
             formatJSON(v) {
                 if (v == null || v === undefined || v === '') return 'Not captured';
 
@@ -387,6 +589,8 @@
 
                 return {
                     title: 'Request',
+                    direction: 'request',
+                    layout: 'split',
                     entry,
                     copyHeaders: data && data.request_headers,
                     copyBody: data && data.request_body,
@@ -411,6 +615,8 @@
 
                 return {
                     title: 'Response',
+                    direction: 'response',
+                    layout: 'split',
                     entry,
                     copyHeaders: data && data.response_headers,
                     copyBody: data && data.response_body,

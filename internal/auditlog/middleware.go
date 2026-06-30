@@ -563,10 +563,47 @@ func EnrichEntryWithFailover(c *echo.Context, targetModel string) {
 	publishLiveAuditUpdate(c, entry)
 }
 
+// EnrichEntryWithAttempts attaches provider attempt summaries to the live
+// audit entry. The attempt list belongs to the logical request, not to separate
+// top-level audit rows.
+func EnrichEntryWithAttempts(c *echo.Context, attempts []AttemptSnapshot) {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return
+	}
+
+	entry, ok := entryVal.(*LogEntry)
+	if !ok || entry == nil {
+		return
+	}
+
+	enrichEntryWithAttempts(entry, gateAttemptCaptureFromContext(c, attempts))
+	publishLiveAuditUpdate(c, entry)
+}
+
+// gateAttemptCaptureFromContext strips per-attempt response bodies/headers that
+// the request's audit config did not opt into. When the config cannot be
+// resolved, opt-in-only captures are dropped rather than persisted.
+func gateAttemptCaptureFromContext(c *echo.Context, attempts []AttemptSnapshot) []AttemptSnapshot {
+	if c == nil || len(attempts) == 0 {
+		return attempts
+	}
+	if logger, ok := c.Get(string(LogEntryLivePublisherKey)).(LoggerInterface); ok && logger != nil {
+		return GateAttemptCapture(attempts, logger.Config())
+	}
+	return GateAttemptCapture(attempts, Config{})
+}
+
 // EnrichLogEntryWithFailover attaches failover redirect metadata directly to an
 // existing audit log entry.
 func EnrichLogEntryWithFailover(entry *LogEntry, targetModel string) {
 	enrichEntryWithFailover(entry, targetModel)
+}
+
+// EnrichLogEntryWithAttempts attaches provider attempt summaries directly to an
+// existing audit log entry.
+func EnrichLogEntryWithAttempts(entry *LogEntry, attempts []AttemptSnapshot) {
+	enrichEntryWithAttempts(entry, attempts)
 }
 
 func enrichEntryWithResolvedRoute(entry *LogEntry, resolvedModel, providerType, providerName string) {
@@ -597,6 +634,17 @@ func enrichEntryWithFailover(entry *LogEntry, targetModel string) {
 	ensureLogData(entry).Failover = &FailoverSnapshot{
 		TargetModel: targetModel,
 	}
+}
+
+func enrichEntryWithAttempts(entry *LogEntry, attempts []AttemptSnapshot) {
+	if entry == nil {
+		return
+	}
+	normalized := normalizeAttemptSnapshots(attempts)
+	if len(normalized) == 0 {
+		return
+	}
+	ensureLogData(entry).Attempts = normalized
 }
 
 // EnrichEntryWithCacheType attaches cache-hit metadata to the live audit entry.
