@@ -19,6 +19,33 @@ const (
 
 type attemptRecorderKey struct{}
 
+type attemptObserverKey struct{}
+
+// AttemptObserver is invoked after a failed provider attempt is recorded, so the
+// audit/live layer can surface it before the overall request finishes (e.g. a
+// failed primary while failover is still in flight).
+type AttemptObserver func()
+
+// WithAttemptObserver registers an observer notified after each failed attempt.
+// It is independent of (and additive to) the attempt recorder.
+func WithAttemptObserver(ctx context.Context, observe AttemptObserver) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if observe == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, attemptObserverKey{}, observe)
+}
+
+func attemptObserverFromContext(ctx context.Context) AttemptObserver {
+	if ctx == nil {
+		return nil
+	}
+	observe, _ := ctx.Value(attemptObserverKey{}).(AttemptObserver)
+	return observe
+}
+
 // ProviderAttempt describes one external provider call made while serving a
 // logical request. It is intentionally storage-agnostic; server/audit layers
 // decide how to persist it.
@@ -98,11 +125,20 @@ func recordProviderAttempt(ctx context.Context, attempt ProviderAttempt) {
 	attempt.ErrorMessage = strings.TrimSpace(attempt.ErrorMessage)
 
 	recorder.mu.Lock()
-	defer recorder.mu.Unlock()
 	if attempt.Seq <= 0 {
 		attempt.Seq = len(recorder.attempts) + 1
 	}
 	recorder.attempts = append(recorder.attempts, attempt)
+	recorder.mu.Unlock()
+
+	// Surface failures live as they happen (a failed primary/attempt before
+	// failover completes). Successful attempts take the normal end-of-request
+	// path, so the hot path stays free of extra live publishes.
+	if !attempt.Success {
+		if observe := attemptObserverFromContext(ctx); observe != nil {
+			observe()
+		}
+	}
 }
 
 func normalizeProviderAttemptKind(kind string) string {

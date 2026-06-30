@@ -90,6 +90,7 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 }
 
 func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core.ChatRequest, workflow *core.Workflow) error {
+	s.observeLiveProviderAttempts(c, workflow)
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
