@@ -461,7 +461,7 @@ func (o *InferenceOrchestrator) streamResponsesProviderCall(ctx context.Context,
 }
 
 func emptyProviderResponseError(providerType string) *core.GatewayError {
-	return core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty response", nil)
+	return core.NewEmptyProviderResponseError(providerType)
 }
 
 func emptyProviderStreamError(providerType string) *core.GatewayError {

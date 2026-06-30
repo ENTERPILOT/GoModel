@@ -914,59 +914,47 @@ func (r *Router) providerTypes() []string {
 	return result
 }
 
-// NativeFileProviderTypes returns the registered provider types that support
-// native file operations. This inventory is independent of the public model
-// catalog whenever the underlying lookup can expose provider types directly.
-func (r *Router) NativeFileProviderTypes() []string {
+// providerTypesSupporting returns the registered provider types whose backing
+// provider satisfies the given capability check. The inventory is independent of
+// the public model catalog whenever the underlying lookup can expose provider
+// types directly.
+func (r *Router) providerTypesSupporting(supports func(core.Provider) bool) []string {
 	providerTypes := r.providerTypes()
 	result := make([]string, 0, len(providerTypes))
 	for _, providerType := range providerTypes {
 		provider := r.providerByTypeRegistry(providerType)
-		if provider == nil {
-			continue
+		if provider != nil && supports(provider) {
+			result = append(result, providerType)
 		}
-		if _, ok := provider.(core.NativeFileProvider); !ok {
-			continue
-		}
-		result = append(result, providerType)
 	}
 	return result
+}
+
+// NativeFileProviderTypes returns the registered provider types that support
+// native file operations.
+func (r *Router) NativeFileProviderTypes() []string {
+	return r.providerTypesSupporting(func(p core.Provider) bool {
+		_, ok := p.(core.NativeFileProvider)
+		return ok
+	})
 }
 
 // NativeBatchProviderTypes returns the registered provider types that support
 // native batch operations.
 func (r *Router) NativeBatchProviderTypes() []string {
-	providerTypes := r.providerTypes()
-	result := make([]string, 0, len(providerTypes))
-	for _, providerType := range providerTypes {
-		provider := r.providerByTypeRegistry(providerType)
-		if provider == nil {
-			continue
-		}
-		if _, ok := provider.(core.NativeBatchProvider); !ok {
-			continue
-		}
-		result = append(result, providerType)
-	}
-	return result
+	return r.providerTypesSupporting(func(p core.Provider) bool {
+		_, ok := p.(core.NativeBatchProvider)
+		return ok
+	})
 }
 
 // NativeResponseProviderTypes returns the registered provider types that
 // support native Responses lifecycle operations.
 func (r *Router) NativeResponseProviderTypes() []string {
-	providerTypes := r.providerTypes()
-	result := make([]string, 0, len(providerTypes))
-	for _, providerType := range providerTypes {
-		provider := r.providerByTypeRegistry(providerType)
-		if provider == nil {
-			continue
-		}
-		if _, ok := provider.(core.NativeResponseLifecycleProvider); !ok {
-			continue
-		}
-		result = append(result, providerType)
-	}
-	return result
+	return r.providerTypesSupporting(func(p core.Provider) bool {
+		_, ok := p.(core.NativeResponseLifecycleProvider)
+		return ok
+	})
 }
 
 // Passthrough routes an opaque provider-native request by provider type.

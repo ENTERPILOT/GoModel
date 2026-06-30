@@ -1,6 +1,7 @@
 package guardrails
 
 import (
+	"maps"
 	"reflect"
 	"strings"
 
@@ -631,12 +632,5 @@ func cloneResponsesInterfacePart(part any) any {
 // intentionally shared; callers are expected to either preserve them as-is or
 // replace whole top-level values instead of mutating nested structures in place.
 func cloneStringAnyMap(src map[string]any) map[string]any {
-	if src == nil {
-		return nil
-	}
-	cloned := make(map[string]any, len(src))
-	for key, value := range src {
-		cloned[key] = value
-	}
-	return cloned
+	return maps.Clone(src)
 }

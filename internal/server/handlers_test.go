@@ -1884,7 +1884,7 @@ func TestChatCompletion_UsesExplicitTranslatedRequestPatcher(t *testing.T) {
 		},
 	}
 
-	patcher := guardrails.NewRequestPatcher(pipeline)
+	patcher := guardrails.NewWorkflowRequestPatcher(staticPipelineResolver{pipeline: pipeline})
 
 	e := echo.New()
 	handler := newHandler(inner, nil, nil, nil, nil, nil, nil, patcher)
@@ -1956,7 +1956,7 @@ func TestBatches_UsesExplicitGuardrailBatchPreparer(t *testing.T) {
 			RequestCounts: core.BatchRequestCounts{Total: 1},
 		},
 	}
-	batchPreparer := guardrails.NewBatchPreparer(mock, pipeline)
+	batchPreparer := guardrails.NewWorkflowBatchPreparer(mock, staticPipelineResolver{pipeline: pipeline})
 
 	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
@@ -7330,4 +7330,13 @@ func TestIsNativeBatchResultsPending(t *testing.T) {
 	if pending, _ := gateway.IsNativeBatchResultsPending(context.Background(), provider, "anthropic", "provider-batch-1", anthropicErr); pending {
 		t.Fatal("expected terminal anthropic batch not to be treated as pending")
 	}
+}
+
+// staticPipelineResolver returns a fixed guardrails pipeline regardless of
+// context, letting tests drive the production WorkflowRequestPatcher /
+// WorkflowBatchPreparer with an explicit pipeline.
+type staticPipelineResolver struct{ pipeline *guardrails.Pipeline }
+
+func (s staticPipelineResolver) PipelineForContext(context.Context) *guardrails.Pipeline {
+	return s.pipeline
 }

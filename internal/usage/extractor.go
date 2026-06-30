@@ -132,12 +132,7 @@ func applyUsageCosts(entry *UsageEntry, provider, endpoint string, pricing ...*c
 // cloneRawData creates a shallow copy of the raw data map to prevent races
 // when the original map might be mutated after the entry is enqueued.
 func cloneRawData(src map[string]any) map[string]any {
-	if src == nil {
-		return nil
-	}
-	dst := make(map[string]any, len(src))
-	maps.Copy(dst, src)
-	return dst
+	return maps.Clone(src)
 }
 
 // ExtractFromResponsesResponse extracts usage data from a ResponsesResponse.

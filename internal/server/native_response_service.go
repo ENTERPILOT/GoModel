@@ -58,7 +58,7 @@ func (s *nativeResponseService) GetResponse(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if resp == nil {
-		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty response", nil))
+		return handleError(c, core.NewEmptyProviderResponseError(providerType))
 	}
 	auditResponseEntry(c, providerType)
 	return c.JSON(http.StatusOK, resp)
@@ -90,7 +90,7 @@ func (s *nativeResponseService) ListResponseInputItems(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if resp == nil {
-		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty response", nil))
+		return handleError(c, core.NewEmptyProviderResponseError(providerType))
 	}
 	if resp.Object == "" {
 		resp.Object = "list"
@@ -120,7 +120,7 @@ func (s *nativeResponseService) CancelResponse(c *echo.Context) error {
 			return handleError(c, err)
 		}
 		if resp == nil {
-			return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty response", nil))
+			return handleError(c, core.NewEmptyProviderResponseError(providerType))
 		}
 		normalizeCanceledResponse(resp, id, providerType)
 		stored.Response = resp
@@ -139,7 +139,7 @@ func (s *nativeResponseService) CancelResponse(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if resp == nil {
-		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty response", nil))
+		return handleError(c, core.NewEmptyProviderResponseError(providerType))
 	}
 	normalizeCanceledResponse(resp, id, providerType)
 	auditResponseEntry(c, providerType)
@@ -185,7 +185,7 @@ func (s *nativeResponseService) DeleteResponse(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if resp == nil {
-		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty response", nil))
+		return handleError(c, core.NewEmptyProviderResponseError(providerType))
 	}
 	if resp.ID == "" {
 		resp.ID = id
@@ -219,7 +219,7 @@ func (s *nativeResponseService) CountResponseInputTokens(c *echo.Context) error 
 		return handleError(c, err)
 	}
 	if resp == nil {
-		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty response", nil))
+		return handleError(c, core.NewEmptyProviderResponseError(providerType))
 	}
 	if resp.Object == "" {
 		resp.Object = "response.input_tokens"
@@ -249,7 +249,7 @@ func (s *nativeResponseService) CompactResponse(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if resp == nil {
-		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty response", nil))
+		return handleError(c, core.NewEmptyProviderResponseError(providerType))
 	}
 	if resp.Object == "" {
 		resp.Object = "response.compaction"

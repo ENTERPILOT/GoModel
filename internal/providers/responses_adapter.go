@@ -315,12 +315,7 @@ func normalizeResponsesToolChoiceForChat(choice any) any {
 }
 
 func cloneStringAnyMap(src map[string]any) map[string]any {
-	if src == nil {
-		return nil
-	}
-	dst := make(map[string]any, len(src))
-	maps.Copy(dst, src)
-	return dst
+	return maps.Clone(src)
 }
 
 // ResponsesViaChat implements the Responses API by converting to/from Chat format.

@@ -706,10 +706,6 @@ func anthropicImageSource(raw, mediaTypeHint string) (*anthropicContentSource, e
 
 		meta := raw[len("data:"):comma]
 		tokens := strings.Split(meta, ";")
-		if len(tokens) == 0 {
-			return nil, core.NewInvalidRequestError("anthropic image data URL is missing a media type", nil)
-		}
-
 		mediaType := strings.TrimSpace(tokens[0])
 		if mediaType == "" {
 			mediaType = strings.TrimSpace(mediaTypeHint)

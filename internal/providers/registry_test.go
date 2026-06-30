@@ -2019,3 +2019,25 @@ func TestListPublicModels_HidesAudioOnlyModelsFromProvidersWithoutAudioSupport(t
 		}
 	}
 }
+
+// TestProviderByTypeAndNameTrimConfiguredValues verifies that configured provider
+// names and types are normalized at registration so lookups succeed even when the
+// configured value arrives padded with whitespace (e.g. from YAML or env vars).
+func TestProviderByTypeAndNameTrimConfiguredValues(t *testing.T) {
+	registry := NewModelRegistry()
+	mock := &registryMockProvider{name: "padded"}
+	registry.RegisterProviderWithNameAndType(mock, "  padded-name  ", "  openai  ")
+
+	if got := registry.ProviderByType("openai"); got != mock {
+		t.Fatalf("ProviderByType(openai) = %v, want the registered provider", got)
+	}
+	if got := registry.ProviderByName("padded-name"); got != mock {
+		t.Fatalf("ProviderByName(padded-name) = %v, want the registered provider", got)
+	}
+	if got := registry.GetProviderTypeForName("padded-name"); got != "openai" {
+		t.Fatalf("GetProviderTypeForName(padded-name) = %q, want %q", got, "openai")
+	}
+	if got := registry.GetProviderNameForType("openai"); got != "padded-name" {
+		t.Fatalf("GetProviderNameForType(openai) = %q, want %q", got, "padded-name")
+	}
+}

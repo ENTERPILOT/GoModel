@@ -131,6 +131,11 @@ func NewProviderError(provider string, statusCode int, message string, err error
 	}
 }
 
+// NewEmptyProviderResponseError reports that a provider returned no response body (502).
+func NewEmptyProviderResponseError(provider string) *GatewayError {
+	return NewProviderError(provider, http.StatusBadGateway, "provider returned empty response", nil)
+}
+
 // NewRateLimitError creates a new rate limit error (429)
 func NewRateLimitError(provider string, message string) *GatewayError {
 	return &GatewayError{

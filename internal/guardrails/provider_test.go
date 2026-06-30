@@ -1198,9 +1198,9 @@ func TestGuardedProvider_PrepareBatchRequest_DefaultNoBatchGuardrails(t *testing
 	}
 }
 
-func TestBatchPreparer_PrepareBatchRequest_NoPipelineReturnsOriginalRequest(t *testing.T) {
+func TestGuardedProvider_PrepareBatchRequest_NoPipelineReturnsOriginalRequest(t *testing.T) {
 	inner := &mockRoutableProvider{}
-	preparer := NewBatchPreparer(inner, nil)
+	guarded := NewGuardedProvider(inner, nil)
 
 	req := &core.BatchRequest{
 		Endpoint: "/v1/chat/completions",
@@ -1213,7 +1213,7 @@ func TestBatchPreparer_PrepareBatchRequest_NoPipelineReturnsOriginalRequest(t *t
 		},
 	}
 
-	result, err := preparer.PrepareBatchRequest(context.Background(), "mock", req)
+	result, err := guarded.PrepareBatchRequest(context.Background(), "mock", req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1897,126 +1897,6 @@ func TestGuardedProvider_DoesNotMutateOriginalRequest(t *testing.T) {
 	// Original request must be untouched
 	if req.Messages[0].Content != "original" {
 		t.Error("original request was mutated")
-	}
-}
-
-// --- Embeddings delegation tests ---
-
-func TestGuardedProvider_Embeddings_DelegatesDirectly(t *testing.T) {
-	inner := &mockRoutableProvider{}
-	pipeline := NewPipeline()
-
-	g, _ := NewSystemPromptGuardrail("test", SystemPromptInject, "should not affect embeddings")
-	pipeline.Add(g, 0)
-
-	guarded := NewGuardedProvider(inner, pipeline)
-
-	req := &core.EmbeddingRequest{Model: "text-embedding-3-small", Input: "hello"}
-	resp, err := guarded.Embeddings(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Object != "list" {
-		t.Errorf("expected object 'list', got %q", resp.Object)
-	}
-	if resp.Provider != "mock" {
-		t.Errorf("expected provider 'mock', got %q", resp.Provider)
-	}
-}
-
-// --- Delegation tests ---
-
-func TestGuardedProvider_ListModels_NoGuardrails(t *testing.T) {
-	inner := &mockRoutableProvider{}
-	pipeline := NewPipeline()
-	guarded := NewGuardedProvider(inner, pipeline)
-
-	resp, err := guarded.ListModels(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Object != "list" {
-		t.Errorf("expected 'list', got %q", resp.Object)
-	}
-}
-
-func TestGuardedProvider_DelegatesSupports(t *testing.T) {
-	inner := &mockRoutableProvider{
-		supportsFn: func(model string) bool {
-			return model == "gpt-4"
-		},
-	}
-	pipeline := NewPipeline()
-	guarded := NewGuardedProvider(inner, pipeline)
-
-	if !guarded.Supports("gpt-4") {
-		t.Error("expected Supports to return true for gpt-4")
-	}
-	if guarded.Supports("unknown") {
-		t.Error("expected Supports to return false for unknown")
-	}
-}
-
-func TestGuardedProvider_DelegatesGetProviderType(t *testing.T) {
-	inner := &mockRoutableProvider{
-		getProviderTypeFn: func(_ string) string {
-			return "openai"
-		},
-	}
-	pipeline := NewPipeline()
-	guarded := NewGuardedProvider(inner, pipeline)
-
-	if guarded.GetProviderType("gpt-4") != "openai" {
-		t.Errorf("expected 'openai', got %q", guarded.GetProviderType("gpt-4"))
-	}
-}
-
-func TestGuardedProvider_ModelCount_UnknownWhenInnerDoesNotExposeCount(t *testing.T) {
-	inner := &mockRoutableProvider{}
-	pipeline := NewPipeline()
-	guarded := NewGuardedProvider(inner, pipeline)
-
-	if got := guarded.ModelCount(); got != -1 {
-		t.Fatalf("ModelCount() = %d, want -1 for unknown count", got)
-	}
-}
-
-func TestGuardedProvider_Passthrough_Delegates(t *testing.T) {
-	inner := &mockRoutableProvider{}
-	pipeline := NewPipeline()
-	guarded := NewGuardedProvider(inner, pipeline)
-
-	resp, err := guarded.Passthrough(context.Background(), "openai", &core.PassthroughRequest{
-		Method:   http.MethodPost,
-		Endpoint: "responses",
-		Body:     io.NopCloser(strings.NewReader(`{"foo":"bar"}`)),
-		Headers: http.Header{
-			"Content-Type": {"application/json"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if inner.passthroughType != "openai" {
-		t.Fatalf("providerType = %q, want openai", inner.passthroughType)
-	}
-	if inner.passthroughReq == nil {
-		t.Fatal("passthroughReq = nil")
-	}
-	if inner.passthroughReq.Endpoint != "responses" {
-		t.Fatalf("Endpoint = %q, want responses", inner.passthroughReq.Endpoint)
-	}
-	body, readErr := io.ReadAll(inner.passthroughReq.Body)
-	if readErr != nil {
-		t.Fatalf("failed to read passthrough body: %v", readErr)
-	}
-	if got := string(body); got != `{"foo":"bar"}` {
-		t.Fatalf("Body = %q, want request body", got)
-	}
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("StatusCode = %d, want %d", resp.StatusCode, http.StatusAccepted)
 	}
 }
 

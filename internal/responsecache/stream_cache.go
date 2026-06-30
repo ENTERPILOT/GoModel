@@ -2,6 +2,7 @@ package responsecache
 
 import (
 	"bytes"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -260,14 +261,7 @@ func toJSONMap(value any) (map[string]any, error) {
 }
 
 func cloneJSONMap(src map[string]any) map[string]any {
-	if src == nil {
-		return nil
-	}
-	dst := make(map[string]any, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
-	return dst
+	return maps.Clone(src)
 }
 
 func jsonNumberToInt(value any) (int, bool) {

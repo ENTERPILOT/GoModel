@@ -267,6 +267,7 @@ func (r *ModelRegistry) RegisterProviderWithNameAndType(provider core.Provider, 
 	defer r.mu.Unlock()
 
 	providerName = strings.TrimSpace(providerName)
+	providerType = strings.TrimSpace(providerType)
 	if providerName == "" {
 		if providerType != "" {
 			providerName = providerType
