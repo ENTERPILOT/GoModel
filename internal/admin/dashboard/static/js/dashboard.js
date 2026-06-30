@@ -208,7 +208,6 @@ function dashboard() {
         "budgets",
         "models",
         "workflows",
-        "failover",
         "audit-logs",
         "guardrails",
         "auth-keys",
@@ -247,9 +246,6 @@ function dashboard() {
       }
       if (page === "budgets" && typeof this.fetchBudgetsPage === "function") {
         this.fetchBudgetsPage();
-      }
-      if (page === "failover" && typeof this.fetchFailoverRules === "function") {
-        this.fetchFailoverRules();
       }
       if (page === "settings") {
         if (typeof this.ensureTimezoneOptions === "function") {
@@ -431,6 +427,7 @@ function dashboard() {
           (this.vmFormOpen ||
             this.modelPricingOverrideFormOpen)) ||
         this.failoverFormOpen ||
+        this.failoverDraftsOpen ||
         (this.page === "workflows" && this.workflowFormOpen) ||
         (this.page === "guardrails" && this.guardrailFormOpen) ||
         (this.page === "auth-keys" && this.authKeyFormOpen) ||

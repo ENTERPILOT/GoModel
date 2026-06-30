@@ -9,6 +9,9 @@
             failoverError: '',
             failoverNotice: '',
             failoverGeneratedRules: [],
+            failoverDraftsOpen: false,
+            failoverDraftSelections: {},
+            failoverDraftSaving: false,
             failoverFormOpen: false,
             failoverFormMode: 'create',
             failoverFormManaged: false,
@@ -31,6 +34,8 @@
                     this.failoverAvailable = false;
                     this.failoverRules = [];
                     this.failoverGeneratedRules = [];
+                    this.failoverDraftSelections = {};
+                    this.failoverDraftsOpen = false;
                     this.failoverError = '';
                     this.failoverLoading = false;
                     return;
@@ -101,12 +106,6 @@
                 this.focusFailoverEditor();
             },
 
-            openFailoverGenerated(rule) {
-                if (!rule) return;
-                this.openFailoverEdit(rule);
-                this.failoverFormMode = 'create';
-            },
-
             openFailoverForModel(row) {
                 if (!row || row.is_alias) return;
                 const source = this.qualifiedModelName(row);
@@ -124,6 +123,11 @@
 
             closeFailoverForm() {
                 this.failoverFormOpen = false;
+            },
+
+            closeFailoverDraftsModal() {
+                if (this.failoverDraftSaving) return;
+                this.failoverDraftsOpen = false;
             },
 
             failoverFormTargets() {
@@ -323,6 +327,8 @@
                     const payload = await res.json();
                     this.failoverRules = this.normalizeFailoverRules(payload);
                     this.failoverGeneratedRules = [];
+                    this.failoverDraftSelections = {};
+                    this.failoverDraftsOpen = false;
                     this.failoverNotice = 'Dashboard-managed failover mappings reset.';
                     this.closeTypedConfirmationDialog();
                 } catch (e) {
@@ -334,11 +340,13 @@
             },
 
             async generateFailoverRules() {
-                if (this.failoverSaving) return;
-                this.failoverSaving = true;
+                if (this.failoverGenerating || this.failoverDraftSaving) return;
+                this.failoverGenerating = true;
                 this.failoverError = '';
                 this.failoverNotice = '';
                 this.failoverGeneratedRules = [];
+                this.failoverDraftSelections = {};
+                this.failoverDraftsOpen = true;
                 try {
                     const request = this.adminRequestOptions({ method: 'POST' });
                     const res = await fetch('/admin/failover/generate', request);
@@ -352,6 +360,7 @@
                     }
                     const payload = await res.json();
                     this.failoverGeneratedRules = this.normalizeFailoverRules(payload);
+                    this.selectAllFailoverDrafts(this.failoverGeneratedRules);
                     this.failoverNotice = this.failoverGeneratedRules.length
                         ? 'Generated ' + this.failoverGeneratedRules.length + ' failover mapping drafts.'
                         : 'No failover suggestions were generated.';
@@ -359,7 +368,93 @@
                     console.error('Failed to generate failover mappings:', e);
                     this.failoverError = 'Failed to generate failover mappings.';
                 } finally {
-                    this.failoverSaving = false;
+                    this.failoverGenerating = false;
+                    if (typeof this.renderIconsAfterUpdate === 'function') {
+                        this.renderIconsAfterUpdate();
+                    }
+                }
+            },
+
+            failoverDraftKey(rule) {
+                return this.failoverPrimaryModel(rule);
+            },
+
+            selectAllFailoverDrafts(rules) {
+                const selections = {};
+                (Array.isArray(rules) ? rules : []).forEach((rule) => {
+                    const key = this.failoverDraftKey(rule);
+                    if (key) selections[key] = true;
+                });
+                this.failoverDraftSelections = selections;
+            },
+
+            failoverDraftSelected(rule) {
+                const key = this.failoverDraftKey(rule);
+                return Boolean(key && this.failoverDraftSelections[key]);
+            },
+
+            setFailoverDraftSelected(rule, selected) {
+                const key = this.failoverDraftKey(rule);
+                if (!key) return;
+                this.failoverDraftSelections = {
+                    ...this.failoverDraftSelections,
+                    [key]: Boolean(selected)
+                };
+            },
+
+            selectedFailoverDrafts() {
+                return this.failoverGeneratedRules.filter((rule) => this.failoverDraftSelected(rule));
+            },
+
+            failoverDraftPayload(rule) {
+                return {
+                    primary_model: this.failoverPrimaryModel(rule),
+                    fallback_models: this.failoverTargets(rule).map((model) => String(model || '').trim()).filter(Boolean),
+                    enabled: rule && rule.enabled !== false
+                };
+            },
+
+            async saveSelectedFailoverDrafts() {
+                if (this.failoverDraftSaving || this.failoverGenerating) return;
+                const drafts = this.selectedFailoverDrafts();
+                if (drafts.length === 0) {
+                    this.failoverError = 'Select at least one failover draft.';
+                    return;
+                }
+                this.failoverDraftSaving = true;
+                this.failoverError = '';
+                this.failoverNotice = '';
+                try {
+                    for (const draft of drafts) {
+                        const payload = this.failoverDraftPayload(draft);
+                        if (!payload.primary_model || payload.fallback_models.length === 0) {
+                            this.failoverError = 'Generated failover draft is missing model data.';
+                            return;
+                        }
+                        const request = this.adminRequestOptions({
+                            method: 'PUT',
+                            body: JSON.stringify(payload)
+                        });
+                        const res = await fetch('/admin/failover', request);
+                        const handled = this.handleFetchResponse(res, 'failover mapping', request);
+                        if (typeof this.isStaleAuthFetchResult === 'function' && this.isStaleAuthFetchResult(handled)) {
+                            return;
+                        }
+                        if (!handled) {
+                            this.failoverError = 'Failed to save failover mapping.';
+                            return;
+                        }
+                    }
+                    this.failoverNotice = 'Saved ' + drafts.length + ' failover mapping' + (drafts.length === 1 ? '.' : 's.');
+                    this.failoverDraftsOpen = false;
+                    this.failoverGeneratedRules = [];
+                    this.failoverDraftSelections = {};
+                    await this.fetchFailoverRules();
+                } catch (e) {
+                    console.error('Failed to save generated failover mappings:', e);
+                    this.failoverError = 'Failed to save failover mappings.';
+                } finally {
+                    this.failoverDraftSaving = false;
                 }
             },
 

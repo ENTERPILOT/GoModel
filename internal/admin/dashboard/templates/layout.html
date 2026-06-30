@@ -216,6 +216,66 @@
                 </form>
             </section>
         </div>
+        <div class="editor-modal-backdrop"
+             x-cloak
+             x-show="failoverDraftsOpen"
+             x-transition.opacity.duration.160ms
+             aria-hidden="true"></div>
+        <div class="editor-modal-shell"
+             x-cloak
+             x-show="failoverDraftsOpen"
+             x-transition.opacity.duration.160ms
+             @click="closeFailoverDraftsModal()"
+             @keydown.escape.window="failoverDraftsOpen && !authDialogOpen && closeFailoverDraftsModal()">
+            <section class="model-editor failover-drafts-editor" x-show="failoverDraftsOpen" role="dialog" aria-modal="true" aria-label="Generated failover drafts" @click.stop>
+                <div class="editor-header">
+                    <div>
+                        <p class="form-kicker">Generated drafts</p>
+                        <h3>Failover models</h3>
+                    </div>
+                    <button type="button" class="dialog-close-btn" aria-label="Close failover drafts" :disabled="failoverDraftSaving" @click="closeFailoverDraftsModal()">
+                        {{template "x-icon"}}
+                    </button>
+                </div>
+
+                <div class="loading-state failover-drafts-loading" x-show="failoverGenerating" role="status" aria-live="polite">
+                    <div class="loading-spinner"></div>
+                    <span>Generating failover drafts...</span>
+                </div>
+
+                <div class="failover-draft-list" x-show="!failoverGenerating && failoverGeneratedRules.length > 0" role="list">
+                    <template x-for="rule in failoverGeneratedRules" :key="'failover-draft:' + failoverPrimaryModel(rule)">
+                        <label class="failover-draft-row" role="listitem">
+                            <input type="checkbox"
+                                   :checked="failoverDraftSelected(rule)"
+                                   :disabled="failoverDraftSaving"
+                                   @change="setFailoverDraftSelected(rule, $event.target.checked)"
+                                   :aria-label="'Select failover draft for ' + failoverPrimaryModel(rule)">
+                            <span class="failover-draft-copy">
+                                <span class="mono failover-draft-source" x-text="failoverPrimaryModel(rule)"></span>
+                                <span class="mono failover-draft-targets" x-text="failoverTargetLabel(rule)"></span>
+                            </span>
+                        </label>
+                    </template>
+                </div>
+
+                <p class="form-hint failover-drafts-empty" x-show="!failoverGenerating && failoverGeneratedRules.length === 0 && !failoverError">
+                    No failover suggestions were generated.
+                </p>
+                <p class="form-error" x-show="failoverError" x-text="failoverError" role="alert" aria-live="assertive"></p>
+
+                <div class="form-actions failover-draft-actions">
+                    <button type="button" class="pagination-btn" :disabled="failoverDraftSaving" @click="closeFailoverDraftsModal()">Cancel</button>
+                    <button type="button"
+                            class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+                            :disabled="failoverGenerating || failoverDraftSaving || selectedFailoverDrafts().length === 0"
+                            @click="saveSelectedFailoverDrafts()">
+                        <i data-lucide="save" class="form-action-icon" aria-hidden="true"></i>
+                        <span x-text="failoverDraftSaving ? 'Saving...' : 'Save selected'"></span>
+                    </button>
+                </div>
+            </section>
+        </div>
         {{template "typed-confirmation-dialog" .}}
     </div>
     <script src="{{assetURL "vendor/lucide.min.js"}}"></script>

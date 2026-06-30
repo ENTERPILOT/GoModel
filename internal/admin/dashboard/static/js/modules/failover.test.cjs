@@ -104,3 +104,96 @@ test('generateFailoverForForm requests suggestions for the modal primary model',
     assert.equal(module.failoverForm.targets[0].model, 'gemini/gemini-2.5-pro');
     assert.equal(module.failoverGenerating, false);
 });
+
+test('generateFailoverRules opens a preselected draft modal', async() => {
+    const requests = [];
+    const module = createFailoverModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async() => [
+                        {
+                            primary_model: 'openai/gpt-4o',
+                            fallback_models: ['anthropic/claude-3-5-sonnet'],
+                            enabled: true
+                        },
+                        {
+                            primary_model: 'openai/gpt-4.1',
+                            fallback_models: ['gemini/gemini-2.5-pro'],
+                            enabled: true
+                        }
+                    ]
+                };
+            }
+        }
+    });
+    module.adminRequestOptions = (options) => ({ ...(options || {}), headers: {} });
+    module.handleFetchResponse = () => true;
+    module.renderIconsAfterUpdate = () => {};
+
+    await module.generateFailoverRules();
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/admin/failover/generate');
+    assert.equal(requests[0].request.method, 'POST');
+    assert.equal(module.failoverDraftsOpen, true);
+    assert.equal(module.failoverGeneratedRules.length, 2);
+    assert.equal(module.failoverDraftSelected(module.failoverGeneratedRules[0]), true);
+    assert.equal(module.failoverDraftSelected(module.failoverGeneratedRules[1]), true);
+    assert.equal(module.failoverGenerating, false);
+});
+
+test('saveSelectedFailoverDrafts saves selected drafts only', async() => {
+    const requests = [];
+    let refreshed = false;
+    const module = createFailoverModule({
+        context: {
+            fetch: async(url, request) => {
+                requests.push({ url, request });
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async() => ({})
+                };
+            }
+        }
+    });
+    module.adminRequestOptions = (options) => ({ ...(options || {}), headers: {} });
+    module.handleFetchResponse = () => true;
+    module.fetchFailoverRules = async() => {
+        refreshed = true;
+    };
+    module.failoverDraftsOpen = true;
+    module.failoverGeneratedRules = [
+        {
+            primary_model: 'openai/gpt-4o',
+            fallback_models: ['anthropic/claude-3-5-sonnet'],
+            enabled: true
+        },
+        {
+            primary_model: 'openai/gpt-4.1',
+            fallback_models: ['gemini/gemini-2.5-pro'],
+            enabled: true
+        }
+    ];
+    module.selectAllFailoverDrafts(module.failoverGeneratedRules);
+    module.setFailoverDraftSelected(module.failoverGeneratedRules[1], false);
+
+    await module.saveSelectedFailoverDrafts();
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/admin/failover');
+    assert.equal(requests[0].request.method, 'PUT');
+    assert.deepEqual(JSON.parse(requests[0].request.body), {
+        primary_model: 'openai/gpt-4o',
+        fallback_models: ['anthropic/claude-3-5-sonnet'],
+        enabled: true
+    });
+    assert.equal(refreshed, true);
+    assert.equal(module.failoverDraftsOpen, false);
+    assert.equal(module.failoverGeneratedRules.length, 0);
+    assert.equal(Object.keys(module.failoverDraftSelections).length, 0);
+});

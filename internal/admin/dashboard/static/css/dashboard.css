@@ -2423,6 +2423,74 @@ textarea:focus {
   margin-top: 10px;
 }
 
+.failover-drafts-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.failover-drafts-loading {
+  min-height: 96px;
+}
+
+.failover-draft-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(52vh, 430px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.failover-draft-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.failover-draft-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: var(--bg-surface-hover);
+}
+
+.failover-draft-row input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+}
+
+.failover-draft-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.failover-draft-source,
+.failover-draft-targets {
+  overflow-wrap: anywhere;
+}
+
+.failover-draft-targets {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.failover-drafts-empty {
+  min-height: 96px;
+  display: flex;
+  align-items: center;
+}
+
+.failover-draft-actions {
+  margin-top: 0;
+}
+
 .model-row-actions {
   text-align: right;
   width: 170px;
